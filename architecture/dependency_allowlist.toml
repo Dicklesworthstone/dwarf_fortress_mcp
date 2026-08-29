@@ -7,11 +7,48 @@ unsafe_code = "forbid"
 [classes]
 standard_library = ["core", "alloc", "std"]
 owned_runtime_prefixes = ["asupersync"]
+# ADR-013: the MCP presentation plane is the owned fastmcp_rust sibling.
+owned_mcp_prefixes = ["fastmcp"]
 owned_franken_prefixes = ["franken", "fsqlite", "ffs", "fnx", "fgdb"]
 fundamental_external = ["serde", "serde_json"]
 
 [phase_zero]
+# Non-owned, explicitly admitted direct dependencies. Empty by design: the
+# presentation plane is owned (fastmcp_rust), and serialization stays in
+# fundamental_external.
 external_runtime_dependencies = []
+
+[mcp_transport]
+# The single admitted MCP framework; any second MCP crate is a policy failure
+# (ADR-013). The pin is an exact upstream revision so dogfooding is explicit:
+# bumping the pin is the mechanism for taking upstream fixes, and every pin
+# bump ships with a conformance note in docs/DOGFOODING_FASTMCP.md.
+crate = "fastmcp-rust"
+repository = "https://github.com/Dicklesworthstone/fastmcp_rust"
+pin = "bd41e69070f5604d6dbb24185dcabaef591a01e1"
+profile = "modern-only-mcp-2026-07-28"
+required_features = ["tasks"]
+forbidden_features = [
+  "legacy-2024-11-05",
+  "websocket-experimental",
+  "apps",
+  "proxy",
+  "proxy-legacy",
+  "proxy-tasks",
+  "enterprise-auth",
+  "oauth-client-credentials",
+  "builtin-auth-server",
+  "redis-tasks",
+  "jwt-resource-auth",
+  "testing-lab",
+]
+
+[admitted]
+# Non-owned packages tolerated inside Cargo.lock as transitive closure of the
+# owned MCP plane and the fundamental serialization crates. Direct
+# declarations never pass through this list; the checker polices manifests,
+# and this list polices the resolved graph.
+lock_packages = []
 
 [prohibited]
 crates = [
