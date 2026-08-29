@@ -1,0 +1,40 @@
+[workspace]
+members = [
+    "crates/dfmcp-core",
+    "crates/dfmcp-world",
+    "crates/dfmcp-intent",
+    "crates/dfmcp-adapter",
+    "crates/dfmcp-lab",
+    "crates/dwarf-fortress-mcp",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+authors = ["Jeffrey Emanuel"]
+repository = "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
+homepage = "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
+keywords = ["dwarf-fortress", "mcp", "agents", "dfhack", "rust"]
+categories = ["development-tools", "games"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.release-with-symbols]
+inherits = "release"
+debug = "line-tables-only"
+strip = false

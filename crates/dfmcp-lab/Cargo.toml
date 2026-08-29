@@ -1,0 +1,16 @@
+[package]
+name = "dfmcp-lab"
+description = "Deterministic in-memory adapter and replay laboratory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dfmcp-core = { path = "../dfmcp-core" }
+dfmcp-world = { path = "../dfmcp-world" }
+dfmcp-intent = { path = "../dfmcp-intent" }
+dfmcp-adapter = { path = "../dfmcp-adapter" }
+
+[lints]
+workspace = true

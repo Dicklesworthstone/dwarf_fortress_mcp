@@ -1,0 +1,2313 @@
+{
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "pause_set"
+            },
+            "paused": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "paused"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "area": {
+              "$ref": "#/$defs/MapCuboid"
+            },
+            "kind": {
+              "const": "designate_dig"
+            },
+            "mode": {
+              "enum": [
+                "mine",
+                "channel",
+                "up_stair",
+                "down_stair",
+                "up_down_stair",
+                "ramp",
+                "remove_construction"
+              ],
+              "type": "string"
+            },
+            "priority": {
+              "maximum": 7,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "area",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "building_type": {
+              "pattern": "^[a-z][a-z0-9_]{0,95}$",
+              "type": "string"
+            },
+            "footprint": {
+              "$ref": "#/$defs/MapCuboid"
+            },
+            "kind": {
+              "const": "construct_building"
+            },
+            "material_selector": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "orientation": {
+              "enum": [
+                "north",
+                "east",
+                "south",
+                "west",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "building_type",
+            "footprint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "labor_set"
+            },
+            "labor": {
+              "pattern": "^[a-z][a-z0-9_]{0,95}$",
+              "type": "string"
+            },
+            "units": {
+              "items": {
+                "$ref": "#/$defs/TypedId"
+              },
+              "maxItems": 5000,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "units",
+            "labor",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "amount": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "conditions": {
+              "items": {
+                "$ref": "#/$defs/Predicate"
+              },
+              "maxItems": 128,
+              "minItems": 0,
+              "type": "array"
+            },
+            "job_type": {
+              "pattern": "^[a-z][a-z0-9_]{0,95}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "work_order_create"
+            },
+            "material_selector": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "job_type",
+            "amount"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "filter": {
+              "additionalProperties": {
+                "$ref": "#/$defs/Value"
+              },
+              "maxProperties": 2048,
+              "type": "object"
+            },
+            "kind": {
+              "const": "stockpile_configure"
+            },
+            "links": {
+              "items": {
+                "$ref": "#/$defs/TypedId"
+              },
+              "maxItems": 1024,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "stockpile_id": {
+              "$ref": "#/$defs/TypedId"
+            }
+          },
+          "required": [
+            "kind",
+            "stockpile_id",
+            "filter"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "squad_assign"
+            },
+            "position": {
+              "maximum": 1000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "squad_id": {
+              "$ref": "#/$defs/TypedId"
+            },
+            "unit_id": {
+              "$ref": "#/$defs/TypedId"
+            }
+          },
+          "required": [
+            "kind",
+            "squad_id",
+            "position",
+            "unit_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "burrow_id": {
+              "$ref": "#/$defs/TypedId"
+            },
+            "kind": {
+              "const": "burrow_membership_set"
+            },
+            "mode": {
+              "enum": [
+                "replace",
+                "add",
+                "remove"
+              ],
+              "type": "string"
+            },
+            "units": {
+              "items": {
+                "$ref": "#/$defs/TypedId"
+              },
+              "maxItems": 10000,
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "burrow_id",
+            "units",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "pattern": "^[a-z][a-z0-9_.]{0,127}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "standing_order_set"
+            },
+            "value": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "extension": {
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "extension_invoke"
+            },
+            "payload": {
+              "$ref": "#/$defs/Value"
+            },
+            "version": {
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "extension",
+            "version",
+            "payload"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Anchor": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "$ref": "#/$defs/Cursor"
+        },
+        "fortress_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "game_tick": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_hash": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "fortress_id",
+        "cursor",
+        "state_hash"
+      ],
+      "type": "object"
+    },
+    "AreaTerrainPredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "cuboid": {
+          "$ref": "#/$defs/MapCuboid"
+        },
+        "terrain": {
+          "enum": [
+            "wall",
+            "open_floor",
+            "open_space",
+            "ramp",
+            "stair_up",
+            "stair_down",
+            "stair_up_down",
+            "fortification",
+            "tree",
+            "water",
+            "magma",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "cuboid",
+        "terrain"
+      ],
+      "type": "object"
+    },
+    "CancelInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "compensation_policy": {
+          "enum": [
+            "none",
+            "registered_safe",
+            "require_explicit_plan"
+          ],
+          "type": "string"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "reason": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "target": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "target",
+        "reason",
+        "compensation_policy",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "CapabilityGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at_game_tick": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "observe",
+            "query",
+            "plan",
+            "designate",
+            "construct",
+            "configure_labor",
+            "configure_production",
+            "configure_logistics",
+            "configure_military",
+            "control_clock",
+            "checkpoint",
+            "restore",
+            "extension",
+            "diagnostic_raw",
+            "doctor",
+            "repair_plan",
+            "repair_apply",
+            "admin"
+          ],
+          "type": "string"
+        },
+        "max_risk": {
+          "$ref": "#/$defs/RiskTier"
+        },
+        "remaining_uses": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/$defs/CapabilityScope"
+        }
+      },
+      "required": [
+        "kind",
+        "scope",
+        "max_risk"
+      ],
+      "type": "object"
+    },
+    "CapabilityScope": {
+      "additionalProperties": false,
+      "properties": {
+        "action_families": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_.]{0,95}$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "areas": {
+          "items": {
+            "$ref": "#/$defs/MapCuboid"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array"
+        },
+        "entity_ids": {
+          "items": {
+            "$ref": "#/$defs/TypedId"
+          },
+          "maxItems": 10000,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "entity_kinds": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "pattern": "^[a-z][A-Za-z0-9_.]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 1024,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fortress_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TypedId"
+            },
+            {
+              "const": "current"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CheckpointInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "label": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._ -]+$",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "retention": {
+          "enum": [
+            "ephemeral",
+            "session",
+            "manual",
+            "release_evidence"
+          ],
+          "type": "string"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "label",
+        "reason",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "CommitInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "confirmation_seal": {
+          "maxLength": 4096,
+          "minLength": 16,
+          "type": "string"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/Digest"
+        },
+        "plan_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "plan_id",
+        "plan_digest",
+        "idempotency_key",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "Compensation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "postconditions": {
+          "items": {
+            "$ref": "#/$defs/Predicate"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "preconditions": {
+          "items": {
+            "$ref": "#/$defs/Predicate"
+          },
+          "maxItems": 128,
+          "minItems": 0,
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "postconditions"
+      ],
+      "type": "object"
+    },
+    "Constraint": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "max_risk": {
+              "$ref": "#/$defs/RiskTier"
+            }
+          },
+          "required": [
+            "max_risk"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exclude_area": {
+              "$ref": "#/$defs/MapCuboid"
+            }
+          },
+          "required": [
+            "exclude_area"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "require_checkpoint": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "require_checkpoint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "deadline_game_tick": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "deadline_game_tick"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "protect_entity": {
+              "$ref": "#/$defs/TypedId"
+            }
+          },
+          "required": [
+            "protect_entity"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "preserve_resource_floor": {
+              "additionalProperties": false,
+              "properties": {
+                "minimum": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "resource": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "resource",
+                "minimum"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "preserve_resource_floor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "max_material_cost": {
+              "maximum": 1000000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "max_material_cost"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "no_hidden_cheats": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "no_hidden_cheats"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Cursor": {
+      "additionalProperties": false,
+      "properties": {
+        "epoch": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "epoch",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "DesignationPredicate": {
+      "additionalProperties": false,
+      "properties": {
+        "area": {
+          "$ref": "#/$defs/MapCuboid"
+        },
+        "mode": {
+          "enum": [
+            "mine",
+            "channel",
+            "up_stair",
+            "down_stair",
+            "up_down_stair",
+            "ramp",
+            "remove_construction",
+            "chop",
+            "gather"
+          ],
+          "type": "string"
+        },
+        "present": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "area",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "Digest": {
+      "maxLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "DoctorInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "checks": {
+          "items": {
+            "enum": [
+              "all",
+              "protocol",
+              "bridge",
+              "compatibility",
+              "world_integrity",
+              "ledger",
+              "checkpoints",
+              "obligations",
+              "leases",
+              "replay"
+            ],
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "repair": {
+          "const": false,
+          "type": "boolean"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "checks",
+        "session_id",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "version_mismatch",
+            "session_not_found",
+            "fortress_not_loaded",
+            "adapter_unavailable",
+            "cursor_gap",
+            "stale_anchor",
+            "invalid_request",
+            "invalid_intent",
+            "invalid_plan",
+            "capability_denied",
+            "risk_ceiling_exceeded",
+            "budget_exceeded",
+            "preconditions_failed",
+            "conflict",
+            "lease_denied",
+            "checkpoint_required",
+            "adapter_rejected",
+            "adapter_failure",
+            "effect_indeterminate",
+            "verification_timeout",
+            "cancellation_requested",
+            "cancellation_incomplete",
+            "restore_required",
+            "corrupt_ledger",
+            "compatibility_unknown",
+            "internal_invariant_violation"
+          ],
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Value"
+          },
+          "maxProperties": 128,
+          "type": "object"
+        },
+        "message": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "reconciliation_key": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "kind": {
+          "enum": [
+            "observation",
+            "adapter_receipt",
+            "postcondition",
+            "checkpoint",
+            "ledger",
+            "compatibility_probe",
+            "replay",
+            "explanation",
+            "operator_confirmation"
+          ],
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "digest",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "ExplainInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "depth": {
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "questions": {
+          "items": {
+            "enum": [
+              "why",
+              "why_not",
+              "authority",
+              "risk",
+              "state_transition",
+              "evidence",
+              "blockers",
+              "reconciliation"
+            ],
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TypedId"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "targets",
+        "questions",
+        "session_id",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "FieldComparison": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "pattern": "^[a-z][A-Za-z0-9_.]{0,127}$",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "contains",
+            "exists"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Value"
+        }
+      },
+      "required": [
+        "field",
+        "op"
+      ],
+      "type": "object"
+    },
+    "Intent": {
+      "additionalProperties": false,
+      "properties": {
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/Constraint"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "requested_actions": {
+          "items": {
+            "$ref": "#/$defs/RequestedAction"
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "terminal_condition": {
+          "$ref": "#/$defs/Predicate"
+        }
+      },
+      "required": [
+        "id",
+        "summary",
+        "terminal_condition",
+        "requested_actions"
+      ],
+      "type": "object"
+    },
+    "InterestSet": {
+      "additionalProperties": false,
+      "properties": {
+        "areas": {
+          "items": {
+            "$ref": "#/$defs/MapCuboid"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array"
+        },
+        "entity_kinds": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "event_kinds": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,95}$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fields": {
+          "items": {
+            "pattern": "^[a-z][A-Za-z0-9_.]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 1024,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "operations": {
+          "enum": [
+            "none",
+            "owned",
+            "all_visible"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "MapCoord": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "maximum": 1000000,
+          "minimum": -1000000,
+          "type": "integer"
+        },
+        "y": {
+          "maximum": 1000000,
+          "minimum": -1000000,
+          "type": "integer"
+        },
+        "z": {
+          "maximum": 1000000,
+          "minimum": -1000000,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "object"
+    },
+    "MapCuboid": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "$ref": "#/$defs/MapCoord"
+        },
+        "min": {
+          "$ref": "#/$defs/MapCoord"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "Obligation": {
+      "additionalProperties": false,
+      "properties": {
+        "blocked": {
+          "$ref": "#/$defs/Predicate"
+        },
+        "deadline_game_tick": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deadline_wall_millis": {
+          "maximum": 86400000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "failure": {
+          "$ref": "#/$defs/Predicate"
+        },
+        "poll_interval_ticks": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "progress_query": {
+          "$ref": "#/$defs/Query"
+        },
+        "stable_for_observations": {
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "terminal": {
+          "$ref": "#/$defs/Predicate"
+        }
+      },
+      "required": [
+        "terminal",
+        "deadline_game_tick",
+        "poll_interval_ticks",
+        "stable_for_observations"
+      ],
+      "type": "object"
+    },
+    "ObserveInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "continuation": {
+          "maxLength": 8192,
+          "minLength": 16,
+          "type": "string"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "interest": {
+          "$ref": "#/$defs/InterestSet"
+        },
+        "projection": {
+          "enum": [
+            "heartbeat",
+            "summary",
+            "operational",
+            "full",
+            "custom"
+          ],
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "since": {
+          "$ref": "#/$defs/Cursor"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "projection",
+        "session_id",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "OpenSessionInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "fortress": {
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "selector"
+              ]
+            },
+            {
+              "required": [
+                "fortress_id"
+              ]
+            }
+          ],
+          "properties": {
+            "fortress_id": {
+              "$ref": "#/$defs/TypedId"
+            },
+            "selector": {
+              "enum": [
+                "currently_loaded"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "observation_profile": {
+          "enum": [
+            "minimal",
+            "operations",
+            "complete",
+            "custom"
+          ],
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "requested_capabilities": {
+          "items": {
+            "$ref": "#/$defs/CapabilityGrant"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "type": "array"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "fortress",
+        "requested_capabilities",
+        "observation_profile",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "PlanInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "intent": {
+          "$ref": "#/$defs/Intent"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "intent",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "Predicate": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/$defs/Predicate"
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/$defs/Predicate"
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/Predicate"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "paused": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "paused"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_exists": {
+              "$ref": "#/$defs/TypedId"
+            }
+          },
+          "required": [
+            "entity_exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entity_kind": {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "$ref": "#/$defs/TypedId"
+                },
+                "kind": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entity_id",
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "entity_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fact": {
+              "$ref": "#/$defs/FieldComparison"
+            }
+          },
+          "required": [
+            "fact"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "edge_exists": {
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "$ref": "#/$defs/TypedId"
+                },
+                "kind": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                "to": {
+                  "$ref": "#/$defs/TypedId"
+                }
+              },
+              "required": [
+                "from",
+                "kind",
+                "to"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "edge_exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "area_terrain_is": {
+              "$ref": "#/$defs/AreaTerrainPredicate"
+            }
+          },
+          "required": [
+            "area_terrain_is"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "area_has_magma": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "area_has_magma"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "area_has_cave_in": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "area_has_cave_in"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "designation_matches": {
+              "$ref": "#/$defs/DesignationPredicate"
+            }
+          },
+          "required": [
+            "designation_matches"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "game_tick_at_least": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "game_tick_at_least"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Query": {
+      "additionalProperties": false,
+      "properties": {
+        "explain": {
+          "default": false,
+          "type": "boolean"
+        },
+        "from": {
+          "$ref": "#/$defs/QuerySource"
+        },
+        "limit": {
+          "maximum": 100000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "maximum": 1000000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "order_by": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "direction": {
+                "enum": [
+                  "asc",
+                  "desc"
+                ],
+                "type": "string"
+              },
+              "field": {
+                "pattern": "^(id|revision|kind|[a-z][A-Za-z0-9_.]{0,127})$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "field",
+              "direction"
+            ],
+            "type": "object"
+          },
+          "maxItems": 16,
+          "minItems": 0,
+          "type": "array"
+        },
+        "select": {
+          "items": {
+            "pattern": "^(id|revision|kind|[a-z][A-Za-z0-9_.]{0,127})$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "where": {
+          "$ref": "#/$defs/Predicate"
+        }
+      },
+      "required": [
+        "from",
+        "select",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "QueryInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "max_output_tokens": {
+          "maximum": 1000000,
+          "minimum": 64,
+          "type": "integer"
+        },
+        "query": {
+          "$ref": "#/$defs/Query"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "query",
+        "session_id",
+        "expected_anchor"
+      ],
+      "type": "object"
+    },
+    "QuerySource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RequestedAction": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "compensation": {
+          "$ref": "#/$defs/Compensation"
+        },
+        "depends_on": {
+          "items": {
+            "maximum": 9999,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 10000,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "obligation": {
+          "$ref": "#/$defs/Obligation"
+        },
+        "postconditions": {
+          "items": {
+            "$ref": "#/$defs/Predicate"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "type": "array"
+        },
+        "preconditions": {
+          "items": {
+            "$ref": "#/$defs/Predicate"
+          },
+          "maxItems": 128,
+          "minItems": 0,
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "postconditions"
+      ],
+      "type": "object"
+    },
+    "ResponseEnvelope": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "ok"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "error",
+                  "indeterminate"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "continuation": {
+          "maxLength": 8192,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 10000,
+          "minItems": 0,
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "ok",
+            "error",
+            "cancelled",
+            "indeterminate"
+          ],
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "result": {
+          "$ref": "#/$defs/Value"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 1024,
+          "minItems": 0,
+          "type": "array"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "outcome",
+        "evidence",
+        "warnings",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "RestoreInput": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "checkpoint_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "discard_uncheckpointed_changes": {
+          "type": "boolean"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "expected_checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "checkpoint_id",
+        "expected_checkpoint_digest",
+        "discard_uncheckpointed_changes",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "RiskTier": {
+      "enum": [
+        "read_only",
+        "reversible",
+        "guarded",
+        "irreversible"
+      ],
+      "type": "string"
+    },
+    "ToolCall": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/OpenSessionInput"
+            },
+            "tool": {
+              "const": "fortress.open_session"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/ObserveInput"
+            },
+            "tool": {
+              "const": "fortress.observe"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/QueryInput"
+            },
+            "tool": {
+              "const": "fortress.query"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/PlanInput"
+            },
+            "tool": {
+              "const": "fortress.plan"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/CommitInput"
+            },
+            "tool": {
+              "const": "fortress.commit"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/WaitInput"
+            },
+            "tool": {
+              "const": "fortress.wait"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/CancelInput"
+            },
+            "tool": {
+              "const": "fortress.cancel"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/CheckpointInput"
+            },
+            "tool": {
+              "const": "fortress.checkpoint"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/RestoreInput"
+            },
+            "tool": {
+              "const": "fortress.restore"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/ExplainInput"
+            },
+            "tool": {
+              "const": "fortress.explain"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "$ref": "#/$defs/DoctorInput"
+            },
+            "tool": {
+              "const": "fortress.doctor"
+            }
+          },
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TypedId": {
+      "maxLength": 225,
+      "pattern": "^[a-z][a-z0-9_]{0,31}:[A-Za-z0-9._:-]{1,192}$",
+      "type": "string"
+    },
+    "Value": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "maxLength": 65536,
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "maxItems": 10000,
+          "minItems": 0,
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/Value"
+          },
+          "maxProperties": 10000,
+          "type": "object"
+        }
+      ]
+    },
+    "WaitInput": {
+      "additionalProperties": false,
+      "properties": {
+        "advance_clock": {
+          "additionalProperties": false,
+          "properties": {
+            "max_ticks": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "mode": {
+              "enum": [
+                "never",
+                "when_safe",
+                "always_with_lease"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        "budget": {
+          "$ref": "#/$defs/WorkBudget"
+        },
+        "dfmcp_version": {
+          "enum": [
+            "0.1"
+          ],
+          "type": "string"
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "request_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "session_id": {
+          "$ref": "#/$defs/TypedId"
+        },
+        "stop_when": {
+          "items": {
+            "enum": [
+              "terminal",
+              "blocked_changed",
+              "progress_changed",
+              "high_severity_event",
+              "budget_exhausted"
+            ],
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TypedId"
+          },
+          "maxItems": 1024,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "dfmcp_version",
+        "request_id",
+        "targets",
+        "stop_when",
+        "session_id",
+        "expected_anchor",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "WorkBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "game_ticks": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_actions": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1024,
+          "type": "integer"
+        },
+        "max_entities": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "maximum": 1000000,
+          "minimum": 64,
+          "type": "integer"
+        },
+        "max_query_depth": {
+          "maximum": 64,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "wall_millis": {
+          "maximum": 300000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "wall_millis",
+        "game_ticks",
+        "max_entities",
+        "max_bytes",
+        "max_output_tokens",
+        "max_actions"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/dfmcp.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Design-stage JSON contract for the dfmcp/0 semantic control plane.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ToolCall"
+    },
+    {
+      "$ref": "#/$defs/ResponseEnvelope"
+    }
+  ],
+  "title": "dwarf_fortress_mcp protocol contract"
+}

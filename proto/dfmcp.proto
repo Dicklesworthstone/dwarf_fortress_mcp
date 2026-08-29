@@ -1,0 +1,813 @@
+syntax = "proto3";
+
+package dfmcp.bridge.v1;
+
+option optimize_for = SPEED;
+
+// The bridge is an out-of-process, versioned, typed boundary around DFHack. It is deliberately
+// narrower than DFHack's Lua and command surfaces. The Rust coordinator must never send arbitrary
+// command strings, Lua, memory writes, or filesystem paths through this protocol.
+service DfmcpBridge {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ProbeCompatibility(ProbeCompatibilityRequest) returns (ProbeCompatibilityResponse);
+  rpc ReadSnapshot(ReadSnapshotRequest) returns (ReadSnapshotResponse);
+  rpc ReadDelta(ReadDeltaRequest) returns (ReadDeltaResponse);
+  rpc PrepareMutation(PrepareMutationRequest) returns (PrepareMutationResponse);
+  rpc CommitMutation(CommitMutationRequest) returns (OperationReceipt);
+  rpc LookupOperation(LookupOperationRequest) returns (OperationReceipt);
+  rpc CancelOperation(CancelOperationRequest) returns (OperationReceipt);
+  rpc CreateCheckpoint(CreateCheckpointRequest) returns (CheckpointReceipt);
+  rpc RestoreCheckpoint(RestoreCheckpointRequest) returns (RestoreReceipt);
+}
+
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+message Digest {
+  // Exactly 32 bytes containing SHA-256 output.
+  bytes sha256 = 1;
+}
+
+message ObservationCursor {
+  uint64 epoch = 1;
+  uint64 sequence = 2;
+}
+
+message StateAnchor {
+  FortressId fortress_id = 1;
+  ObservationCursor cursor = 2;
+  uint64 game_tick = 3;
+  Digest state_hash = 4;
+}
+
+message FortressId {
+  string world_identity = 1;
+  int64 site_id = 2;
+  uint64 generation = 3;
+}
+
+message EntityId {
+  string domain = 1;
+  sint64 local_id = 2;
+  uint64 generation = 3;
+}
+
+message EdgeId {
+  string domain = 1;
+  uint64 local_id = 2;
+  uint64 generation = 3;
+}
+
+message MapCoord {
+  sint32 x = 1;
+  sint32 y = 2;
+  sint32 z = 3;
+}
+
+message MapCuboid {
+  MapCoord min = 1;
+  MapCoord max = 2;
+}
+
+message WorkBudget {
+  uint64 wall_millis = 1;
+  uint64 game_ticks = 2;
+  uint64 max_entities = 3;
+  uint64 max_bytes = 4;
+  uint64 max_actions = 5;
+  uint32 max_depth = 6;
+}
+
+message HandshakeRequest {
+  string client_instance_id = 1;
+  repeated ProtocolVersion supported_versions = 2;
+  repeated string requested_features = 3;
+  uint64 max_frame_bytes = 4;
+  bytes nonce = 5;
+}
+
+message HandshakeResponse {
+  string bridge_instance_id = 1;
+  ProtocolVersion selected_version = 2;
+  repeated string enabled_features = 3;
+  CompatibilityMode compatibility_mode = 4;
+  CompatibilityIdentity identity = 5;
+  Digest schema_digest = 6;
+  bytes nonce_binding = 7;
+  repeated string warnings = 8;
+}
+
+message CompatibilityIdentity {
+  string dwarf_fortress_version = 1;
+  string dwarf_fortress_build = 2;
+  string dfhack_version = 3;
+  string dfhack_commit = 4;
+  string bridge_version = 5;
+  string bridge_build = 6;
+  string platform = 7;
+  string architecture = 8;
+  Digest manifest_digest = 9;
+}
+
+enum CompatibilityMode {
+  COMPATIBILITY_MODE_UNSPECIFIED = 0;
+  COMPATIBILITY_MODE_VERIFIED_READ_WRITE = 1;
+  COMPATIBILITY_MODE_VERIFIED_READ_ONLY = 2;
+  COMPATIBILITY_MODE_DIAGNOSTIC = 3;
+  COMPATIBILITY_MODE_UNSUPPORTED = 4;
+}
+
+message HealthRequest {
+  string client_instance_id = 1;
+}
+
+message HealthResponse {
+  HealthStatus status = 1;
+  string bridge_instance_id = 2;
+  bool fortress_loaded = 3;
+  bool game_thread_responsive = 4;
+  StateAnchor current_anchor = 5;
+  CompatibilityMode compatibility_mode = 6;
+  repeated string degraded_features = 7;
+  repeated BridgeError recent_errors = 8;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_READ_ONLY = 3;
+  HEALTH_STATUS_UNAVAILABLE = 4;
+}
+
+message ProbeCompatibilityRequest {
+  repeated string probe_ids = 1;
+  WorkBudget budget = 2;
+  bool allow_read_only_game_thread_probes = 3;
+}
+
+message ProbeCompatibilityResponse {
+  CompatibilityIdentity identity = 1;
+  repeated ProbeResult results = 2;
+  CompatibilityMode resulting_mode = 3;
+  Digest result_digest = 4;
+}
+
+message ProbeResult {
+  string probe_id = 1;
+  ProbeStatus status = 2;
+  string summary = 3;
+  Digest evidence_digest = 4;
+}
+
+enum ProbeStatus {
+  PROBE_STATUS_UNSPECIFIED = 0;
+  PROBE_STATUS_PASS = 1;
+  PROBE_STATUS_FAIL = 2;
+  PROBE_STATUS_UNAVAILABLE = 3;
+  PROBE_STATUS_INDETERMINATE = 4;
+}
+
+enum ReadGroup {
+  READ_GROUP_UNSPECIFIED = 0;
+  READ_GROUP_FORTRESS = 1;
+  READ_GROUP_MAP = 2;
+  READ_GROUP_UNITS = 3;
+  READ_GROUP_JOBS = 4;
+  READ_GROUP_BUILDINGS = 5;
+  READ_GROUP_ITEMS = 6;
+  READ_GROUP_WORK_ORDERS = 7;
+  READ_GROUP_STOCKPILES = 8;
+  READ_GROUP_MILITARY = 9;
+  READ_GROUP_BURROWS = 10;
+  READ_GROUP_POLICIES = 11;
+  READ_GROUP_EVENTS = 12;
+  READ_GROUP_OPERATIONS = 13;
+}
+
+message InterestSet {
+  repeated ReadGroup groups = 1;
+  repeated string entity_domains = 2;
+  repeated string fields = 3;
+  repeated string event_kinds = 4;
+  repeated MapCuboid areas = 5;
+  bool include_owned_operations = 6;
+}
+
+message ReadSnapshotRequest {
+  FortressId fortress_id = 1;
+  InterestSet interest = 2;
+  WorkBudget budget = 3;
+  string continuation = 4;
+}
+
+message ReadSnapshotResponse {
+  WorldFrame frame = 1;
+  bool truncated = 2;
+  string continuation = 3;
+  Digest frame_digest = 4;
+  repeated BridgeEvidence evidence = 5;
+}
+
+message ReadDeltaRequest {
+  StateAnchor base_anchor = 1;
+  InterestSet interest = 2;
+  WorkBudget budget = 3;
+  string continuation = 4;
+}
+
+message ReadDeltaResponse {
+  StateDelta delta = 1;
+  bool truncated = 2;
+  string continuation = 3;
+  Digest frame_digest = 4;
+  repeated BridgeEvidence evidence = 5;
+}
+
+message WorldFrame {
+  StateAnchor anchor = 1;
+  bool paused = 2;
+  repeated EntityRecord entities = 3;
+  repeated EdgeRecord edges = 4;
+  repeated MapChunk chunks = 5;
+  repeated EventRecord events = 6;
+  repeated OperationRecord operations = 7;
+  repeated MissingReadGroup missing_groups = 8;
+}
+
+message StateDelta {
+  StateAnchor base_anchor = 1;
+  StateAnchor target_anchor = 2;
+  bool paused = 3;
+  bool paused_changed = 4;
+  repeated DeltaOperation operations = 5;
+  repeated EventRecord events = 6;
+  repeated MissingReadGroup missing_groups = 7;
+}
+
+message MissingReadGroup {
+  ReadGroup group = 1;
+  MissingReason reason = 2;
+  string detail = 3;
+}
+
+enum MissingReason {
+  MISSING_REASON_UNSPECIFIED = 0;
+  MISSING_REASON_NOT_REQUESTED = 1;
+  MISSING_REASON_UNSUPPORTED = 2;
+  MISSING_REASON_BUDGET = 3;
+  MISSING_REASON_INACCESSIBLE = 4;
+  MISSING_REASON_TRANSIENT = 5;
+  MISSING_REASON_REDACTED = 6;
+}
+
+message DeltaOperation {
+  oneof operation {
+    EntityRecord upsert_entity = 1;
+    EntityId delete_entity = 2;
+    EdgeRecord upsert_edge = 3;
+    EdgeId delete_edge = 4;
+    MapChunk upsert_chunk = 5;
+    ChunkKey delete_chunk = 6;
+    OperationRecord upsert_operation = 7;
+  }
+}
+
+message EntityRecord {
+  EntityId id = 1;
+  string kind = 2;
+  uint64 revision = 3;
+  repeated Fact fields = 4;
+  Digest content_digest = 5;
+}
+
+message EdgeRecord {
+  EdgeId id = 1;
+  string kind = 2;
+  EntityId from = 3;
+  EntityId to = 4;
+  uint64 revision = 5;
+  repeated Fact fields = 6;
+  Digest content_digest = 7;
+  bool external_target = 8;
+}
+
+message Fact {
+  string field = 1;
+  FieldPresence presence = 2;
+  Value value = 3;
+  Provenance provenance = 4;
+}
+
+enum FieldPresence {
+  FIELD_PRESENCE_UNSPECIFIED = 0;
+  FIELD_PRESENCE_KNOWN = 1;
+  FIELD_PRESENCE_NULL = 2;
+  FIELD_PRESENCE_ABSENT = 3;
+  FIELD_PRESENCE_UNKNOWN = 4;
+  FIELD_PRESENCE_UNSUPPORTED = 5;
+  FIELD_PRESENCE_OMITTED = 6;
+  FIELD_PRESENCE_REDACTED = 7;
+  FIELD_PRESENCE_STALE = 8;
+}
+
+message Provenance {
+  string source_group = 1;
+  string source_field = 2;
+  uint64 observed_game_tick = 3;
+  ProbeStatus compatibility_status = 4;
+  Digest source_digest = 5;
+  repeated EntityId derived_from_entities = 6;
+  repeated string derivation_steps = 7;
+}
+
+message Value {
+  oneof kind {
+    NullValue null_value = 1;
+    bool bool_value = 2;
+    sint64 signed_value = 3;
+    uint64 unsigned_value = 4;
+    double double_value = 5;
+    string string_value = 6;
+    bytes bytes_value = 7;
+    ValueList list_value = 8;
+    ValueMap map_value = 9;
+    EntityId entity_id_value = 10;
+    MapCoord map_coord_value = 11;
+  }
+}
+
+enum NullValue {
+  NULL_VALUE_UNSPECIFIED = 0;
+  NULL_VALUE = 1;
+}
+
+message ValueList {
+  repeated Value values = 1;
+}
+
+message ValueMap {
+  map<string, Value> entries = 1;
+}
+
+message ChunkKey {
+  sint32 block_x = 1;
+  sint32 block_y = 2;
+  sint32 z = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+}
+
+message MapChunk {
+  ChunkKey key = 1;
+  uint64 revision = 2;
+  // Canonical run-length terrain encoding defined by the negotiated bridge schema.
+  bytes terrain_rle = 3;
+  // Canonical sparse overlays; unknown overlay kinds fail mutation probes closed.
+  repeated SparseOverlay overlays = 4;
+  Digest content_digest = 5;
+}
+
+message SparseOverlay {
+  uint32 tile_offset = 1;
+  string kind = 2;
+  Value value = 3;
+}
+
+message EventRecord {
+  string event_id = 1;
+  string kind = 2;
+  uint64 game_tick = 3;
+  uint64 sequence_hint = 4;
+  repeated Fact fields = 5;
+  Digest content_digest = 6;
+}
+
+message AuthorityEnvelope {
+  string session_id = 1;
+  string request_id = 2;
+  Digest grant_set_digest = 3;
+  Digest scope_digest = 4;
+  MutationRisk maximum_risk = 5;
+  uint64 expires_at_game_tick = 6;
+  repeated LeaseFence leases = 7;
+  bytes opaque_authority_proof = 8;
+}
+
+message LeaseFence {
+  string lease_domain = 1;
+  string lease_id = 2;
+  uint64 fencing_token = 3;
+  Digest scope_digest = 4;
+}
+
+enum MutationRisk {
+  MUTATION_RISK_UNSPECIFIED = 0;
+  MUTATION_RISK_READ_ONLY = 1;
+  MUTATION_RISK_REVERSIBLE = 2;
+  MUTATION_RISK_GUARDED = 3;
+  MUTATION_RISK_IRREVERSIBLE = 4;
+}
+
+message PrepareMutationRequest {
+  StateAnchor expected_anchor = 1;
+  string plan_id = 2;
+  Digest plan_digest = 3;
+  AuthorityEnvelope authority = 4;
+  repeated PreparedAction actions = 5;
+  WorkBudget budget = 6;
+  CheckpointRequirement checkpoint_requirement = 7;
+}
+
+message PrepareMutationResponse {
+  PrepareStatus status = 1;
+  string prepare_token = 2;
+  string bridge_instance_id = 3;
+  StateAnchor accepted_anchor = 4;
+  Digest accepted_plan_digest = 5;
+  repeated PreparedActionReceipt actions = 6;
+  repeated BridgeError errors = 7;
+  uint64 expires_at_game_tick = 8;
+  Digest response_digest = 9;
+}
+
+enum PrepareStatus {
+  PREPARE_STATUS_UNSPECIFIED = 0;
+  PREPARE_STATUS_ACCEPTED = 1;
+  PREPARE_STATUS_REJECTED = 2;
+  PREPARE_STATUS_STALE = 3;
+  PREPARE_STATUS_READ_ONLY = 4;
+}
+
+message CheckpointRequirement {
+  bool required = 1;
+  string checkpoint_id = 2;
+  Digest checkpoint_digest = 3;
+}
+
+message PreparedAction {
+  uint32 step_id = 1;
+  Digest action_digest = 2;
+  Digest idempotency_key = 3;
+  MutationRisk risk = 4;
+  repeated Predicate preconditions = 5;
+  repeated Predicate immediate_postconditions = 6;
+  oneof action {
+    PauseSet pause_set = 20;
+    DesignateDig designate_dig = 21;
+    ConstructBuilding construct_building = 22;
+    LaborSet labor_set = 23;
+    WorkOrderCreate work_order_create = 24;
+    StockpileConfigure stockpile_configure = 25;
+    SquadAssign squad_assign = 26;
+    BurrowMembershipSet burrow_membership_set = 27;
+    StandingOrderSet standing_order_set = 28;
+  }
+}
+
+message PreparedActionReceipt {
+  uint32 step_id = 1;
+  bool accepted = 2;
+  Digest normalized_action_digest = 3;
+  MutationRisk classified_risk = 4;
+  repeated string required_probe_ids = 5;
+  repeated BridgeError errors = 6;
+}
+
+message PauseSet {
+  bool paused = 1;
+}
+
+message DesignateDig {
+  MapCuboid area = 1;
+  DigMode mode = 2;
+  uint32 priority = 3;
+}
+
+enum DigMode {
+  DIG_MODE_UNSPECIFIED = 0;
+  DIG_MODE_MINE = 1;
+  DIG_MODE_CHANNEL = 2;
+  DIG_MODE_UP_STAIR = 3;
+  DIG_MODE_DOWN_STAIR = 4;
+  DIG_MODE_UP_DOWN_STAIR = 5;
+  DIG_MODE_RAMP = 6;
+  DIG_MODE_REMOVE_CONSTRUCTION = 7;
+}
+
+message ConstructBuilding {
+  string building_type = 1;
+  MapCuboid footprint = 2;
+  MaterialSelector material = 3;
+  Orientation orientation = 4;
+}
+
+message MaterialSelector {
+  repeated string allowed_material_tokens = 1;
+  repeated string denied_material_tokens = 2;
+  uint32 maximum_items = 3;
+  bool permit_artifacts = 4;
+}
+
+enum Orientation {
+  ORIENTATION_UNSPECIFIED = 0;
+  ORIENTATION_NONE = 1;
+  ORIENTATION_NORTH = 2;
+  ORIENTATION_EAST = 3;
+  ORIENTATION_SOUTH = 4;
+  ORIENTATION_WEST = 5;
+}
+
+message LaborSet {
+  repeated EntityId units = 1;
+  string labor = 2;
+  bool enabled = 3;
+}
+
+message WorkOrderCreate {
+  string job_type = 1;
+  uint32 amount = 2;
+  MaterialSelector material = 3;
+  repeated Predicate conditions = 4;
+}
+
+message StockpileConfigure {
+  EntityId stockpile = 1;
+  repeated StockpileFilter filters = 2;
+  repeated EntityId linked_workshops = 3;
+}
+
+message StockpileFilter {
+  string namespace = 1;
+  string token = 2;
+  bool enabled = 3;
+}
+
+message SquadAssign {
+  EntityId squad = 1;
+  uint32 position = 2;
+  EntityId unit = 3;
+}
+
+message BurrowMembershipSet {
+  EntityId burrow = 1;
+  repeated EntityId units = 2;
+  SetMode mode = 3;
+}
+
+enum SetMode {
+  SET_MODE_UNSPECIFIED = 0;
+  SET_MODE_REPLACE = 1;
+  SET_MODE_ADD = 2;
+  SET_MODE_REMOVE = 3;
+}
+
+message StandingOrderSet {
+  string key = 1;
+  Value value = 2;
+}
+
+message Predicate {
+  oneof predicate {
+    PredicateAll all = 1;
+    PredicateAny any = 2;
+    PredicateNot not = 3;
+    PausedPredicate paused = 4;
+    EntityExistsPredicate entity_exists = 5;
+    FactPredicate fact = 6;
+    EdgeExistsPredicate edge_exists = 7;
+    AreaTerrainPredicate area_terrain = 8;
+    DesignationPredicate designation = 9;
+    GameTickPredicate game_tick = 10;
+  }
+}
+
+message PredicateAll {
+  repeated Predicate predicates = 1;
+}
+
+message PredicateAny {
+  repeated Predicate predicates = 1;
+}
+
+message PredicateNot {
+  Predicate predicate = 1;
+}
+
+message PausedPredicate {
+  bool expected = 1;
+}
+
+message EntityExistsPredicate {
+  EntityId entity = 1;
+  bool expected = 2;
+}
+
+message FactPredicate {
+  EntityId entity = 1;
+  string field = 2;
+  CompareOperator operator = 3;
+  Value value = 4;
+}
+
+enum CompareOperator {
+  COMPARE_OPERATOR_UNSPECIFIED = 0;
+  COMPARE_OPERATOR_EQUAL = 1;
+  COMPARE_OPERATOR_NOT_EQUAL = 2;
+  COMPARE_OPERATOR_LESS = 3;
+  COMPARE_OPERATOR_LESS_OR_EQUAL = 4;
+  COMPARE_OPERATOR_GREATER = 5;
+  COMPARE_OPERATOR_GREATER_OR_EQUAL = 6;
+  COMPARE_OPERATOR_CONTAINS = 7;
+  COMPARE_OPERATOR_EXISTS = 8;
+}
+
+message EdgeExistsPredicate {
+  EntityId from = 1;
+  string kind = 2;
+  EntityId to = 3;
+  bool expected = 4;
+}
+
+message AreaTerrainPredicate {
+  MapCuboid area = 1;
+  string terrain = 2;
+  bool all_tiles = 3;
+}
+
+message DesignationPredicate {
+  MapCuboid area = 1;
+  DigMode mode = 2;
+  bool present = 3;
+}
+
+message GameTickPredicate {
+  uint64 at_least = 1;
+}
+
+message CommitMutationRequest {
+  string prepare_token = 1;
+  string plan_id = 2;
+  Digest plan_digest = 3;
+  Digest commit_idempotency_key = 4;
+  AuthorityEnvelope authority = 5;
+  StateAnchor expected_anchor = 6;
+  WorkBudget budget = 7;
+}
+
+message LookupOperationRequest {
+  oneof identity {
+    string operation_id = 1;
+    Digest commit_idempotency_key = 2;
+  }
+}
+
+message CancelOperationRequest {
+  string operation_id = 1;
+  string reason = 2;
+  AuthorityEnvelope authority = 3;
+  WorkBudget budget = 4;
+}
+
+message OperationReceipt {
+  string operation_id = 1;
+  Digest commit_idempotency_key = 2;
+  string bridge_instance_id = 3;
+  OperationState state = 4;
+  StateAnchor dispatch_anchor = 5;
+  StateAnchor observed_anchor = 6;
+  repeated ActionReceipt actions = 7;
+  repeated BridgeEvidence evidence = 8;
+  repeated BridgeError errors = 9;
+  Digest receipt_digest = 10;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PREPARED = 1;
+  OPERATION_STATE_DISPATCHING = 2;
+  OPERATION_STATE_APPLIED = 3;
+  OPERATION_STATE_CANCEL_REQUESTED = 4;
+  OPERATION_STATE_CANCELLED = 5;
+  OPERATION_STATE_REJECTED = 6;
+  OPERATION_STATE_FAILED = 7;
+  OPERATION_STATE_INDETERMINATE = 8;
+}
+
+message OperationRecord {
+  string operation_id = 1;
+  Digest commit_idempotency_key = 2;
+  OperationState state = 3;
+  uint64 first_seen_game_tick = 4;
+  uint64 last_updated_game_tick = 5;
+  Digest receipt_digest = 6;
+}
+
+message ActionReceipt {
+  uint32 step_id = 1;
+  Digest action_digest = 2;
+  ActionApplyState state = 3;
+  string adapter_reference = 4;
+  repeated BridgeEvidence evidence = 5;
+  repeated BridgeError errors = 6;
+}
+
+enum ActionApplyState {
+  ACTION_APPLY_STATE_UNSPECIFIED = 0;
+  ACTION_APPLY_STATE_NOT_STARTED = 1;
+  ACTION_APPLY_STATE_APPLIED = 2;
+  ACTION_APPLY_STATE_REJECTED = 3;
+  ACTION_APPLY_STATE_FAILED = 4;
+  ACTION_APPLY_STATE_CANCELLED = 5;
+  ACTION_APPLY_STATE_INDETERMINATE = 6;
+}
+
+message CreateCheckpointRequest {
+  StateAnchor expected_anchor = 1;
+  string checkpoint_id = 2;
+  string label = 3;
+  AuthorityEnvelope authority = 4;
+  WorkBudget budget = 5;
+}
+
+message CheckpointReceipt {
+  string checkpoint_id = 1;
+  CheckpointState state = 2;
+  StateAnchor source_anchor = 3;
+  Digest manifest_digest = 4;
+  Digest content_digest = 5;
+  bool durable = 6;
+  repeated BridgeEvidence evidence = 7;
+  repeated BridgeError errors = 8;
+}
+
+enum CheckpointState {
+  CHECKPOINT_STATE_UNSPECIFIED = 0;
+  CHECKPOINT_STATE_CREATING = 1;
+  CHECKPOINT_STATE_SEALED = 2;
+  CHECKPOINT_STATE_FAILED = 3;
+  CHECKPOINT_STATE_INDETERMINATE = 4;
+}
+
+message RestoreCheckpointRequest {
+  string checkpoint_id = 1;
+  Digest expected_content_digest = 2;
+  StateAnchor expected_current_anchor = 3;
+  AuthorityEnvelope authority = 4;
+  WorkBudget budget = 5;
+}
+
+message RestoreReceipt {
+  string checkpoint_id = 1;
+  RestoreState state = 2;
+  StateAnchor prior_anchor = 3;
+  StateAnchor restored_anchor = 4;
+  repeated BridgeEvidence evidence = 5;
+  repeated BridgeError errors = 6;
+}
+
+enum RestoreState {
+  RESTORE_STATE_UNSPECIFIED = 0;
+  RESTORE_STATE_PREPARING = 1;
+  RESTORE_STATE_RESTORED_NEW_EPOCH = 2;
+  RESTORE_STATE_FAILED = 3;
+  RESTORE_STATE_INDETERMINATE = 4;
+}
+
+message BridgeEvidence {
+  string evidence_id = 1;
+  string kind = 2;
+  StateAnchor anchor = 3;
+  Digest digest = 4;
+  string summary = 5;
+}
+
+message BridgeError {
+  BridgeErrorCode code = 1;
+  string message = 2;
+  bool retryable = 3;
+  map<string, string> details = 4;
+}
+
+enum BridgeErrorCode {
+  BRIDGE_ERROR_CODE_UNSPECIFIED = 0;
+  BRIDGE_ERROR_CODE_VERSION_MISMATCH = 1;
+  BRIDGE_ERROR_CODE_FORTRESS_NOT_LOADED = 2;
+  BRIDGE_ERROR_CODE_STALE_ANCHOR = 3;
+  BRIDGE_ERROR_CODE_INVALID_REQUEST = 4;
+  BRIDGE_ERROR_CODE_CAPABILITY_DENIED = 5;
+  BRIDGE_ERROR_CODE_RISK_EXCEEDED = 6;
+  BRIDGE_ERROR_CODE_BUDGET_EXCEEDED = 7;
+  BRIDGE_ERROR_CODE_PRECONDITION_FAILED = 8;
+  BRIDGE_ERROR_CODE_FENCE_STALE = 9;
+  BRIDGE_ERROR_CODE_CHECKPOINT_REQUIRED = 10;
+  BRIDGE_ERROR_CODE_UNSUPPORTED_ACTION = 11;
+  BRIDGE_ERROR_CODE_COMPATIBILITY_UNKNOWN = 12;
+  BRIDGE_ERROR_CODE_GAME_THREAD_FAILURE = 13;
+  BRIDGE_ERROR_CODE_EFFECT_INDETERMINATE = 14;
+  BRIDGE_ERROR_CODE_INTERNAL_INVARIANT = 15;
+}

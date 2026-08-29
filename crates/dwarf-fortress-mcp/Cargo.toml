@@ -1,0 +1,21 @@
+[package]
+name = "dwarf-fortress-mcp"
+description = "Agent-native semantic control plane for Dwarf Fortress"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "dwarf-fortress-mcp"
+path = "src/main.rs"
+
+[dependencies]
+dfmcp-core = { path = "../dfmcp-core" }
+dfmcp-world = { path = "../dfmcp-world" }
+dfmcp-intent = { path = "../dfmcp-intent" }
+dfmcp-adapter = { path = "../dfmcp-adapter" }
+dfmcp-lab = { path = "../dfmcp-lab" }
+
+[lints]
+workspace = true

@@ -1,0 +1,73 @@
+tool_name: dwarf-fortress-mcp
+repo: Dicklesworthstone/dwarf_fortress_mcp
+local_path: /data/projects/dwarf_fortress_mcp
+language: rust
+binary_name: dwarf-fortress-mcp
+build_cmd: cargo build --locked --release --bin dwarf-fortress-mcp
+build_profile: release
+main_package: dwarf-fortress-mcp
+
+targets:
+  - linux/amd64
+  - linux/arm64
+  - darwin/arm64
+  - darwin/amd64
+  - windows/amd64
+
+workflow: .github/workflows/release.yml
+
+act_job_map:
+  linux/amd64: build-linux-amd64
+  linux/arm64: build-linux-arm64
+  darwin/arm64: null
+  darwin/amd64: null
+  windows/amd64: null
+
+checks:
+  - ./scripts/qualify_local.sh
+
+artifact_naming: "${name}-${version}-${target_triple}"
+
+target_triples:
+  linux/amd64: x86_64-unknown-linux-gnu
+  linux/arm64: aarch64-unknown-linux-gnu
+  darwin/arm64: aarch64-apple-darwin
+  darwin/amd64: x86_64-apple-darwin
+  windows/amd64: x86_64-pc-windows-msvc
+
+archive_format:
+  linux: tar.gz
+  darwin: tar.gz
+  windows: zip
+
+include_files:
+  - README.md
+  - LICENSE
+  - COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md
+  - IMPLEMENTATION_STATUS.md
+  - docs/COMPATIBILITY.md
+
+release_contract:
+  checksum_sidecar: sha256
+  exact_primary_assets:
+    linux/amd64: dwarf-fortress-mcp-x86_64-unknown-linux-gnu
+    linux/arm64: dwarf-fortress-mcp-aarch64-unknown-linux-gnu
+    darwin/arm64: dwarf-fortress-mcp-aarch64-apple-darwin
+    darwin/amd64: dwarf-fortress-mcp-x86_64-apple-darwin
+    windows/amd64: dwarf-fortress-mcp-x86_64-pc-windows-msvc.exe
+  exact_additional_assets:
+    - dwarf-fortress-mcp.spdx.json
+    - SHA256SUMS.txt
+    - qualification-manifest.json
+    - source.tar.gz
+
+env:
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+# When owned sibling crates become live dependencies, strict releases must pin
+# every clean source revision here. Example:
+# sibling_crates:
+#   - local_path: /data/projects/asupersync
+#     relative_path: asupersync
+#     revision: "0123456789abcdef0123456789abcdef01234567"

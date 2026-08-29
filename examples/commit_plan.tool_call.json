@@ -1,0 +1,29 @@
+{
+  "arguments": {
+    "budget": {
+      "game_ticks": 1200,
+      "max_actions": 64,
+      "max_bytes": 4194304,
+      "max_entities": 2000,
+      "max_output_tokens": 1500,
+      "wall_millis": 2000
+    },
+    "confirmation_seal": "seal:operator-policy-bound-to-exact-plan",
+    "dfmcp_version": "0.1",
+    "expected_anchor": {
+      "cursor": {
+        "epoch": 4,
+        "sequence": 20817
+      },
+      "fortress_id": "fortress:world-44:site-17",
+      "game_tick": 9120480,
+      "state_hash": "sha256:bb7f8f778f3c5481d53426d42f04384c3d271a496364547cb0d1811b9a069d44"
+    },
+    "idempotency_key": "sha256:69fdd6276a37f5e42af7f0405a21703b605543d088242983ac425fa848b38906",
+    "plan_digest": "sha256:64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525",
+    "plan_id": "plan:6eb15b0000000000000000000000000000",
+    "request_id": "request:00000000000000000000000000000005",
+    "session_id": "session:01J6KJ7JD0A4T7R61A4P3H0X9F"
+  },
+  "tool": "fortress.commit"
+}

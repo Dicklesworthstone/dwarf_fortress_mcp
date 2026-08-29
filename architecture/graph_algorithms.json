@@ -1,0 +1,134 @@
+{
+  "schema": "dfmcp.graph-algorithms.v1",
+  "rules": {
+    "default_tie_break": "stable_entity_identity_ascending",
+    "random_seed_required": true,
+    "advisory_algorithms_cannot_authorize_effects": true
+  },
+  "algorithms": [
+    {
+      "id": "GA-CONNECT",
+      "family": "connectivity",
+      "uses": [
+        "walkability",
+        "hauling",
+        "evacuation"
+      ],
+      "exactness": "exact",
+      "tie_break": "stable_entity_identity_ascending",
+      "refresh": "affected-region or rebuild"
+    },
+    {
+      "id": "GA-ARTICULATION",
+      "family": "articulation_and_bridges",
+      "uses": [
+        "single points of failure",
+        "redundancy"
+      ],
+      "exactness": "exact",
+      "tie_break": "stable_entity_identity_ascending",
+      "refresh": "recompute affected component"
+    },
+    {
+      "id": "GA-SCC",
+      "family": "strong_components",
+      "uses": [
+        "dependency cycles",
+        "deadlock diagnosis"
+      ],
+      "exactness": "exact",
+      "tie_break": "minimum_member_identity",
+      "refresh": "delta candidate plus rebuild"
+    },
+    {
+      "id": "GA-DOM",
+      "family": "dominators",
+      "uses": [
+        "unavoidable bottlenecks",
+        "critical infrastructure"
+      ],
+      "exactness": "exact",
+      "tie_break": "stable_entity_identity_ascending",
+      "refresh": "recompute rooted projection"
+    },
+    {
+      "id": "GA-SP",
+      "family": "shortest_paths",
+      "uses": [
+        "routing",
+        "fallback paths"
+      ],
+      "exactness": "exact_or_bounded",
+      "tie_break": "cost_then_insertion_sequence_then_identity",
+      "refresh": "query-time pinned snapshot"
+    },
+    {
+      "id": "GA-FLOW",
+      "family": "max_flow_min_cut",
+      "uses": [
+        "capacity",
+        "defensive cuts",
+        "fluid and hauling analysis"
+      ],
+      "exactness": "exact",
+      "tie_break": "stable_edge_key",
+      "refresh": "query-time pinned snapshot"
+    },
+    {
+      "id": "GA-MCF",
+      "family": "min_cost_flow",
+      "uses": [
+        "resource allocation",
+        "hauling plans"
+      ],
+      "exactness": "exact",
+      "tie_break": "cost_then_stable_edge_key",
+      "refresh": "query-time pinned snapshot"
+    },
+    {
+      "id": "GA-MATCH",
+      "family": "matching",
+      "uses": [
+        "labor",
+        "beds",
+        "squads",
+        "workshops"
+      ],
+      "exactness": "exact_or_declared_approximate",
+      "tie_break": "objective_then_stable_pair",
+      "refresh": "query-time pinned snapshot"
+    },
+    {
+      "id": "GA-DAG",
+      "family": "topological_and_critical_path",
+      "uses": [
+        "plan scheduling",
+        "obligation bottlenecks"
+      ],
+      "exactness": "exact",
+      "tie_break": "plan_step_ordinal",
+      "refresh": "incremental plan graph"
+    },
+    {
+      "id": "GA-CENTRAL",
+      "family": "centrality",
+      "uses": [
+        "attention ranking only"
+      ],
+      "exactness": "exact_or_declared_approximate",
+      "tie_break": "score_then_identity",
+      "refresh": "background derived generation"
+    },
+    {
+      "id": "GA-TEMPORAL",
+      "family": "temporal_reachability",
+      "uses": [
+        "causal explanation",
+        "historical validity"
+      ],
+      "exactness": "exact_within_retention",
+      "tie_break": "time_then_identity",
+      "refresh": "capsule incremental"
+    }
+  ]
+}

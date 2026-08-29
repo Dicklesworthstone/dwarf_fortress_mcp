@@ -1,0 +1,455 @@
+use dfmcp_core::{
+    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, EventId, FortressId, GameTick,
+    ObservationCursor, Result,
+};
+
+use crate::{ChunkCoord, EdgeRecord, EntityRecord, MapChunk, WorldEvent, WorldSnapshot};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorldChange {
+    UpsertEntity(EntityRecord),
+    RemoveEntity {
+        id: EntityId,
+        expected_generation: u32,
+        expected_revision: u64,
+    },
+    UpsertEdge(EdgeRecord),
+    RemoveEdge {
+        id: EdgeId,
+        expected_revision: u64,
+    },
+    UpsertMapChunk(MapChunk),
+    RemoveMapChunk {
+        coord: ChunkCoord,
+        expected_revision: u64,
+    },
+    AppendEvent(WorldEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateDelta {
+    pub fortress_id: FortressId,
+    pub base_cursor: ObservationCursor,
+    pub target_cursor: ObservationCursor,
+    pub base_hash: Digest32,
+    pub target_hash: Digest32,
+    pub target_tick: GameTick,
+    pub changes: Vec<WorldChange>,
+    pub truncated: bool,
+    pub continuation: Option<String>,
+}
+
+pub fn build_delta(
+    base: &WorldSnapshot,
+    target_cursor: ObservationCursor,
+    target_tick: GameTick,
+    changes: Vec<WorldChange>,
+) -> Result<StateDelta> {
+    validate_cursor_transition(base.cursor, target_cursor)?;
+    if target_tick < base.tick {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "delta target tick must not precede the base tick",
+        ));
+    }
+    if !base.hash_is_valid() {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "base snapshot state hash is invalid",
+        ));
+    }
+    let mut candidate = base.clone();
+    candidate.cursor = target_cursor;
+    candidate.tick = target_tick;
+    apply_changes(&mut candidate, &changes)?;
+    candidate.refresh_hash();
+    Ok(StateDelta {
+        fortress_id: base.fortress_id,
+        base_cursor: base.cursor,
+        target_cursor,
+        base_hash: base.state_hash,
+        target_hash: candidate.state_hash,
+        target_tick,
+        changes,
+        truncated: false,
+        continuation: None,
+    })
+}
+
+pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnapshot> {
+    if !base.hash_is_valid() {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "base snapshot state hash is invalid",
+        ));
+    }
+    if delta.truncated || delta.continuation.is_some() {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "a partial delta cannot be applied as a complete state transition",
+        )
+        .retryable(true));
+    }
+    if delta.fortress_id != base.fortress_id {
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "delta belongs to a different fortress",
+        ));
+    }
+    if delta.base_cursor != base.cursor || delta.base_hash != base.state_hash {
+        return Err(
+            DfmcpError::new(ErrorCode::CursorGap, "delta base anchor does not match snapshot")
+                .retryable(true)
+                .with_detail("expected_cursor", format!("{:?}", base.cursor))
+                .with_detail("received_cursor", format!("{:?}", delta.base_cursor)),
+        );
+    }
+    validate_cursor_transition(base.cursor, delta.target_cursor)?;
+    if delta.target_tick < base.tick {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "delta target tick must not precede the base tick",
+        ));
+    }
+    let mut candidate = base.clone();
+    candidate.cursor = delta.target_cursor;
+    candidate.tick = delta.target_tick;
+    apply_changes(&mut candidate, &delta.changes)?;
+    candidate.refresh_hash();
+    if candidate.state_hash != delta.target_hash {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "delta target hash does not match the reconstructed state",
+        )
+        .with_detail("computed", candidate.state_hash.to_string())
+        .with_detail("declared", delta.target_hash.to_string()));
+    }
+    Ok(candidate)
+}
+
+fn validate_cursor_transition(
+    base: ObservationCursor,
+    target: ObservationCursor,
+) -> Result<()> {
+    if target.epoch != base.epoch {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "epoch changes require a full snapshot rather than a delta",
+        )
+        .retryable(true));
+    }
+    if target.sequence <= base.sequence {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "delta target cursor must advance beyond the base cursor",
+        ));
+    }
+    Ok(())
+}
+
+fn apply_changes(snapshot: &mut WorldSnapshot, changes: &[WorldChange]) -> Result<()> {
+    for change in changes {
+        match change {
+            WorldChange::UpsertEntity(incoming) => {
+                validate_entity_upsert(snapshot, incoming)?;
+                snapshot.graph.entities.insert(incoming.id, incoming.clone());
+            }
+            WorldChange::RemoveEntity {
+                id,
+                expected_generation,
+                expected_revision,
+            } => {
+                let existing = snapshot.graph.entities.get(id).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        format!("entity {id} does not exist for removal"),
+                    )
+                })?;
+                if existing.generation != *expected_generation
+                    || existing.revision != *expected_revision
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        format!("entity {id} revision changed before removal"),
+                    ));
+                }
+                snapshot.graph.entities.remove(id);
+            }
+            WorldChange::UpsertEdge(incoming) => {
+                validate_edge_upsert(snapshot, incoming)?;
+                snapshot.graph.edges.insert(incoming.id, incoming.clone());
+            }
+            WorldChange::RemoveEdge {
+                id,
+                expected_revision,
+            } => {
+                let existing = snapshot.graph.edges.get(id).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        format!("edge {id} does not exist for removal"),
+                    )
+                })?;
+                if existing.revision != *expected_revision {
+                    return Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        format!("edge {id} revision changed before removal"),
+                    ));
+                }
+                snapshot.graph.edges.remove(id);
+            }
+            WorldChange::UpsertMapChunk(incoming) => {
+                validate_chunk(incoming)?;
+                if let Some(existing) = snapshot.graph.chunks.get(&incoming.coord) {
+                    if incoming.revision < existing.revision {
+                        return Err(DfmcpError::new(
+                            ErrorCode::StaleAnchor,
+                            "map chunk revision regressed",
+                        ));
+                    }
+                    if incoming.revision == existing.revision && incoming != existing {
+                        return Err(DfmcpError::new(
+                            ErrorCode::Conflict,
+                            "same map chunk revision carries different content",
+                        ));
+                    }
+                }
+                snapshot
+                    .graph
+                    .chunks
+                    .insert(incoming.coord, incoming.clone());
+            }
+            WorldChange::RemoveMapChunk {
+                coord,
+                expected_revision,
+            } => {
+                let existing = snapshot.graph.chunks.get(coord).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        "map chunk does not exist for removal",
+                    )
+                })?;
+                if existing.revision != *expected_revision {
+                    return Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        "map chunk revision changed before removal",
+                    ));
+                }
+                snapshot.graph.chunks.remove(coord);
+            }
+            WorldChange::AppendEvent(incoming) => {
+                if let Some(existing) = snapshot.graph.events.get(&incoming.id) {
+                    if existing != incoming {
+                        return Err(DfmcpError::new(
+                            ErrorCode::Conflict,
+                            "event identifier was reused with different content",
+                        ));
+                    }
+                } else {
+                    snapshot.graph.events.insert(incoming.id, incoming.clone());
+                }
+            }
+        }
+    }
+    validate_graph(snapshot)
+}
+
+fn validate_entity_upsert(snapshot: &WorldSnapshot, incoming: &EntityRecord) -> Result<()> {
+    if incoming.id == EntityId::NIL {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "entity identifier zero is reserved",
+        ));
+    }
+    if let Some(existing) = snapshot.graph.entities.get(&incoming.id) {
+        if incoming.generation < existing.generation {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                format!("entity {} generation regressed", incoming.id),
+            ));
+        }
+        if incoming.generation == existing.generation && incoming.revision < existing.revision {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                format!("entity {} revision regressed", incoming.id),
+            ));
+        }
+        if incoming.generation == existing.generation
+            && incoming.revision == existing.revision
+            && incoming != existing
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "entity {} has different content at the same generation and revision",
+                    incoming.id
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_edge_upsert(snapshot: &WorldSnapshot, incoming: &EdgeRecord) -> Result<()> {
+    if incoming.id == EdgeId::NIL {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "edge identifier zero is reserved",
+        ));
+    }
+    if let Some(existing) = snapshot.graph.edges.get(&incoming.id) {
+        if incoming.revision < existing.revision {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                format!("edge {} revision regressed", incoming.id),
+            ));
+        }
+        if incoming.revision == existing.revision && incoming != existing {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                format!("edge {} changed without a revision advance", incoming.id),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_chunk(chunk: &MapChunk) -> Result<()> {
+    if chunk.width == 0 || chunk.height == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "map chunk dimensions must be nonzero",
+        ));
+    }
+    if chunk.encoded_tile_count() != Some(chunk.tile_count()) {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "map chunk terrain runs do not cover exactly the declared tile count",
+        ));
+    }
+    if chunk
+        .sparse_overlays
+        .keys()
+        .any(|offset| *offset >= chunk.tile_count())
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "map chunk sparse overlay offset is out of bounds",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_graph(snapshot: &WorldSnapshot) -> Result<()> {
+    for edge in snapshot.graph.edges.values() {
+        if !snapshot.graph.entities.contains_key(&edge.from)
+            || !snapshot.graph.entities.contains_key(&edge.to)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                format!("edge {} refers to a missing endpoint", edge.id),
+            ));
+        }
+    }
+    for (id, event) in &snapshot.graph.events {
+        if *id == EventId::NIL {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "event identifier zero is reserved",
+            ));
+        }
+        if event.id != *id {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "event map key does not match event identifier",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use dfmcp_core::{
+        Digest32, DfmcpError, EntityId, FortressId, GameTick, ObservationCursor,
+    };
+
+    use super::{apply_delta, build_delta, WorldChange};
+    use crate::{
+        EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot,
+    };
+
+    fn unit(revision: u64, stress: i64) -> EntityRecord {
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            "stress".to_owned(),
+            Fact {
+                value: Value::I64(stress),
+                observed_at: GameTick(revision),
+                source: FactSource::Replay,
+                source_digest: Digest32::ZERO,
+            },
+        );
+        EntityRecord {
+            id: EntityId::new(1),
+            generation: 1,
+            revision,
+            kind: EntityKind::Unit,
+            label: "Urist".to_owned(),
+            fields,
+        }
+    }
+
+    fn base() -> WorldSnapshot {
+        let mut graph = WorldGraph::default();
+        graph.entities.insert(EntityId::new(1), unit(1, 10));
+        WorldSnapshot::new(
+            FortressId::new(7),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            graph,
+        )
+    }
+
+    #[test]
+    fn delta_round_trip_preserves_declared_hash() -> Result<(), DfmcpError> {
+        let base = base();
+        let delta = build_delta(
+            &base,
+            base.cursor.next(),
+            GameTick(2),
+            vec![WorldChange::UpsertEntity(unit(2, 30))],
+        )?;
+        let target = apply_delta(&base, &delta)?;
+        assert_eq!(target.state_hash, delta.target_hash);
+        assert_eq!(
+            target
+                .graph
+                .entities
+                .get(&EntityId::new(1))
+                .and_then(|entity| entity.fields.get("stress"))
+                .map(|fact| &fact.value),
+            Some(&Value::I64(30))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stale_base_is_not_silently_bridged() -> Result<(), DfmcpError> {
+        let base = base();
+        let delta = build_delta(
+            &base,
+            base.cursor.next(),
+            GameTick(2),
+            vec![WorldChange::UpsertEntity(unit(2, 30))],
+        )?;
+        let mut altered = base.clone();
+        altered.tick = GameTick(9);
+        altered.refresh_hash();
+        let result = apply_delta(&altered, &delta);
+        assert!(result.is_err());
+        Ok(())
+    }
+}

@@ -1,0 +1,46 @@
+# Local execution specification — Q3 platform qualification on controlled
+# self-hosted machines. The same clean source must pass the shared qualification
+# ladder on every supported host; cross-platform semantic digests must agree
+# where platform-independent, and expected binary differences are named.
+name: portability
+
+on:
+  workflow_dispatch:
+
+jobs:
+  platform-qualification:
+    name: qualify ${{ matrix.target }} (self-hosted)
+    runs-on: ${{ matrix.hosts }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            hosts: [self-hosted, linux, amd64]
+          - target: aarch64-unknown-linux-gnu
+            hosts: [self-hosted, linux, arm64]
+          - target: aarch64-apple-darwin
+            hosts: [self-hosted, macos, arm64]
+          - target: x86_64-apple-darwin
+            hosts: [self-hosted, macos, amd64]
+          - target: x86_64-pc-windows-msvc
+            hosts: [self-hosted, windows, amd64]
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@v4
+
+      - name: Qualify this host against the shared specification
+        shell: bash
+        run: ./scripts/qualify_local.sh
+
+      - name: Build the release binary
+        shell: bash
+        run: cargo build --locked --release --bin dwarf-fortress-mcp
+
+      - name: Record target receipt
+        shell: bash
+        run: |
+          mkdir -p target/qualification
+          sha256sum target/release/dwarf-fortress-mcp* \
+            > "target/qualification/target-receipt-${{ matrix.target }}.txt" || true
+          echo "Binary digest recorded for ${{ matrix.target }}"

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -t 1 ]]; then
+  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
+else
+  BLUE=''; GREEN=''; YELLOW=''; RED=''; RESET=''
+fi
+info() { printf '%b==>%b %s\n' "$BLUE" "$RESET" "$*"; }
+ok() { printf '%bOK%b  %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '%bWARN%b %s\n' "$YELLOW" "$RESET" "$*"; }
+die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
+
+command -v python3 >/dev/null 2>&1 || die "python3 is required"
+command -v git >/dev/null 2>&1 || die "git is required"
+
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+COMMIT="$(git rev-parse HEAD)"
+DIRTY=false
+if [[ -n "$(git status --porcelain=v1)" ]]; then DIRTY=true; fi
+if [[ "$DIRTY" == true && "${DFMCP_ALLOW_DIRTY:-0}" != 1 ]]; then
+  die "release qualification requires a clean worktree (set DFMCP_ALLOW_DIRTY=1 only for development evidence)"
+fi
+
+RUN_ID="${DFMCP_QUALIFICATION_RUN_ID:-${STARTED_AT//[:]/-}-${COMMIT:0:12}}"
+OUT_DIR="${DFMCP_QUALIFICATION_DIR:-$ROOT/target/qualification/$RUN_ID}"
+mkdir -p "$OUT_DIR"
+GATES_FILE="$OUT_DIR/gates.tsv"
+: > "$GATES_FILE"
+
+record() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$GATES_FILE"; }
+run_gate() {
+  local gate="$1"; shift
+  info "$gate"
+  if "$@"; then
+    record "$gate" passed ""
+    ok "$gate"
+  else
+    local status=$?
+    record "$gate" failed "exit=$status"
+    return "$status"
+  fi
+}
+
+write_receipt() {
+  local final_status="$1"
+  local finished_at
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  STARTED_AT="$STARTED_AT" FINISHED_AT="$finished_at" COMMIT="$COMMIT" DIRTY="$DIRTY" \
+  FINAL_STATUS="$final_status" GATES_FILE="$GATES_FILE" OUT_DIR="$OUT_DIR" python3 - <<'PY'
+from __future__ import annotations
+import hashlib, json, os, platform, subprocess
+from pathlib import Path
+root=Path.cwd()
+def digest(path: Path) -> str | None:
+    if not path.is_file(): return None
+    h=hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda:f.read(1024*1024), b''): h.update(chunk)
+    return h.hexdigest()
+def command_output(args: list[str]) -> str | None:
+    try: return subprocess.run(args,check=True,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout.strip()
+    except Exception: return None
+gates=[]
+for line in Path(os.environ['GATES_FILE']).read_text().splitlines():
+    name,state,detail=(line.split('\t',2)+['',''])[:3]
+    gates.append({'name':name,'state':state,'detail':detail or None})
+receipt={
+ 'schema':'dfmcp.qualification-receipt.v1',
+ 'status':os.environ['FINAL_STATUS'],
+ 'started_at':os.environ['STARTED_AT'],
+ 'finished_at':os.environ['FINISHED_AT'],
+ 'source':{'commit':os.environ['COMMIT'],'dirty':os.environ['DIRTY']=='true'},
+ 'host':{'system':platform.system(),'release':platform.release(),'machine':platform.machine(),'python':platform.python_version()},
+ 'toolchain':{'rustc_vv':command_output(['rustc','-vV']),'cargo':command_output(['cargo','--version'])},
+ 'digests':{
+   'Cargo.lock':digest(root/'Cargo.lock'),
+   'dependency_allowlist':digest(root/'architecture/dependency_allowlist.toml'),
+   'franken_imports':digest(root/'architecture/franken_imports.json'),
+   'publication_primitives':digest(root/'architecture/publication_primitives.json'),
+   'graph_algorithms':digest(root/'architecture/graph_algorithms.json')
+ },
+ 'gates':gates
+}
+out=Path(os.environ['OUT_DIR'])/'qualification-receipt.json'
+out.write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+print(out)
+PY
+}
+trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>&1 || true; fi' EXIT
+
+run_gate static-contracts python3 scripts/validate_repo.py
+run_gate dependency-policy python3 scripts/check_dependency_policy.py
+run_gate shell-syntax bash -n scripts/bootstrap_github_repo.sh scripts/create_source_bundle.sh scripts/verify.sh scripts/qualify_local.sh
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  if [[ "${DFMCP_STATIC_ONLY:-0}" == 1 ]]; then
+    record rust-toolchain skipped "cargo/rustc unavailable; DFMCP_STATIC_ONLY=1"
+    warn "Rust gates explicitly skipped; this receipt is not release-admissible"
+    write_receipt static-only
+    trap - EXIT
+    exit 0
+  fi
+  die "latest nightly cargo/rustc are required (DFMCP_STATIC_ONLY=1 creates non-release static evidence only)"
+fi
+
+run_gate cargo-metadata cargo metadata --locked --offline --format-version 1
+run_gate rustfmt cargo fmt --all -- --check
+run_gate clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+run_gate tests cargo test --locked --workspace --all-targets --all-features
+run_gate release-tests cargo test --locked --release --workspace --all-targets --all-features
+run_gate rustdoc env RUSTDOCFLAGS=-Dwarnings cargo doc --locked --workspace --all-features --no-deps
+run_gate contract cargo run --locked --quiet --bin dwarf-fortress-mcp -- contract
+run_gate doctor cargo run --locked --quiet --bin dwarf-fortress-mcp -- doctor
+run_gate demo cargo run --locked --quiet --bin dwarf-fortress-mcp -- demo
+
+write_receipt passed
+trap - EXIT
+ok "Local qualification complete: $OUT_DIR/qualification-receipt.json"

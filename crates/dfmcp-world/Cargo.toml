@@ -1,0 +1,13 @@
+[package]
+name = "dfmcp-world"
+description = "Canonical typed world graph, spatial chunks, predicates, and state deltas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dfmcp-core = { path = "../dfmcp-core" }
+
+[lints]
+workspace = true

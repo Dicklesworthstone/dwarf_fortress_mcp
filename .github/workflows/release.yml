@@ -1,0 +1,99 @@
+# Local execution specification — executed by `doodlestein_self_releaser` (dsr)
+# or `act` on controlled self-hosted machines. GitHub-hosted runners are not
+# part of the release trust model: authoritative evidence is the DSR manifest
+# plus qualification receipts, never a green workflow badge.
+#
+# Per-target job names must stay aligned with the `act_job_map` in
+# release/dsr/dwarf_fortress_mcp.yaml.example.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Annotated version tag to release (for example v0.0.1)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-amd64:
+    name: build linux/amd64 (self-hosted)
+    runs-on: [self-hosted, linux, amd64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - run: ./scripts/qualify_local.sh
+        shell: bash
+      - run: cargo build --locked --release --bin dwarf-fortress-mcp
+        shell: bash
+
+  build-linux-arm64:
+    name: build linux/arm64 (self-hosted)
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - run: ./scripts/qualify_local.sh
+        shell: bash
+      - run: cargo build --locked --release --bin dwarf-fortress-mcp
+        shell: bash
+
+  build-darwin-arm64:
+    name: build darwin/arm64 (self-hosted)
+    runs-on: [self-hosted, macos, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - run: ./scripts/qualify_local.sh
+        shell: bash
+      - run: cargo build --locked --release --bin dwarf-fortress-mcp
+        shell: bash
+
+  build-darwin-amd64:
+    name: build darwin/amd64 (self-hosted)
+    runs-on: [self-hosted, macos, amd64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - run: ./scripts/qualify_local.sh
+        shell: bash
+      - run: cargo build --locked --release --bin dwarf-fortress-mcp
+        shell: bash
+
+  build-windows-amd64:
+    name: build windows/amd64 (self-hosted)
+    runs-on: [self-hosted, windows, amd64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - run: ./scripts/qualify_local.sh
+        shell: bash
+      - run: cargo build --locked --release --bin dwarf-fortress-mcp
+        shell: bash
+
+  seal:
+    name: seal release manifest (self-hosted release operator)
+    needs:
+      - build-linux-amd64
+      - build-linux-arm64
+      - build-darwin-arm64
+      - build-darwin-amd64
+      - build-windows-amd64
+    runs-on: [self-hosted, release-operator]
+    steps:
+      - name: Fail-closed DSR admission and publication
+        shell: bash
+        run: |
+          echo "The release operator seals the exact asset contract (binaries, .sha256"
+          echo "sidecars, SPDX SBOM, SHA256SUMS.txt, source archive, qualification"
+          echo "manifest and receipts, compatibility matrix) via doodlestein_self_releaser:"
+          echo "  dsr release dwarf-fortress-mcp --tag \"${{ inputs.tag }}\""
+          echo "Admission is fail-closed: dirty worktree, missing target receipts,"
+          echo "asset drift, or a skipped gate blocks publication."

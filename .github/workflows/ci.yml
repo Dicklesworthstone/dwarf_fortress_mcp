@@ -1,0 +1,24 @@
+# Local execution specification — NOT a GitHub-hosted CI service.
+# Repository policy: workflow YAML exists so `act`, `doodlestein_self_releaser`,
+# and controlled self-hosted machines can execute the identical specification
+# locally. A GitHub-hosted runner result is never release evidence.
+name: ci
+
+on:
+  workflow_dispatch:
+
+jobs:
+  qualify:
+    name: qualify (self-hosted)
+    runs-on: [self-hosted, linux, nightly-rust]
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@v4
+
+      - name: Run the normative qualification ladder (Q0 static contracts + Q1 Rust gates)
+        shell: bash
+        run: ./scripts/qualify_local.sh
+
+      - name: Report qualification receipt location
+        shell: bash
+        run: echo "Receipts are written to target/qualification/<run-id>/qualification-receipt.json"

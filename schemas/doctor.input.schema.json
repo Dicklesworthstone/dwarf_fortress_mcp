@@ -1,0 +1,10 @@
+{
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/doctor.input.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "$ref": "./dfmcp.schema.json#/$defs/DoctorInput"
+    }
+  ],
+  "title": "fortress.doctor input"
+}

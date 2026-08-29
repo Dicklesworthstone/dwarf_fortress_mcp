@@ -1,0 +1,77 @@
+{
+  "schema": "dfmcp.publication-primitives.v1",
+  "primitives": [
+    {
+      "id": "PUB-OBS",
+      "subject": "world observation",
+      "reserve": "successor anchor",
+      "materialize": "capsule and version rows",
+      "publish": "world root",
+      "abort": "tombstone reservation",
+      "recovery": "replay materialized children or discard"
+    },
+    {
+      "id": "PUB-PLAN",
+      "subject": "prepared plan",
+      "reserve": "plan identity and witness epoch",
+      "materialize": "steps, witnesses, risk and budget",
+      "publish": "prepare token",
+      "abort": "expire token",
+      "recovery": "recompile from intent"
+    },
+    {
+      "id": "PUB-EFFECT",
+      "subject": "effect dispatch",
+      "reserve": "idempotency and effect identity",
+      "materialize": "dispatch-attempt record",
+      "publish": "bridge ticket",
+      "abort": "only before attempted dispatch",
+      "recovery": "lookup and reconcile"
+    },
+    {
+      "id": "PUB-CHECKPOINT",
+      "subject": "checkpoint",
+      "reserve": "checkpoint generation",
+      "materialize": "save objects and manifest",
+      "publish": "checkpoint root",
+      "abort": "quarantine staged objects",
+      "recovery": "verify closure or discard"
+    },
+    {
+      "id": "PUB-GRAPH",
+      "subject": "graph projection",
+      "reserve": "projection generation",
+      "materialize": "adjacency and index runs",
+      "publish": "projection root",
+      "abort": "drop builder",
+      "recovery": "rebuild from capsule high-water mark"
+    },
+    {
+      "id": "PUB-SEARCH",
+      "subject": "search generation",
+      "reserve": "generation and corpus root",
+      "materialize": "segments and recall metadata",
+      "publish": "active generation root",
+      "abort": "retain previous generation",
+      "recovery": "verify and reactivate or rebuild"
+    },
+    {
+      "id": "PUB-EVIDENCE",
+      "subject": "evidence bundle",
+      "reserve": "bundle identity",
+      "materialize": "receipts, logs, manifests, reports",
+      "publish": "sealed bundle root",
+      "abort": "retain private staging",
+      "recovery": "reconstruct from immutable records"
+    },
+    {
+      "id": "PUB-COMPAT",
+      "subject": "compatibility profile",
+      "reserve": "DF/DFHack/bridge tuple",
+      "materialize": "probe transcript and schema checks",
+      "publish": "profile epoch",
+      "abort": "degraded read-only",
+      "recovery": "probe again"
+    }
+  ]
+}

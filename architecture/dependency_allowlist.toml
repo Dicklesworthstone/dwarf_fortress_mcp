@@ -1,0 +1,28 @@
+schema = "dfmcp.dependency-allowlist.v1"
+policy = "closed-universe"
+toolchain = "nightly"
+edition = "2024"
+unsafe_code = "forbid"
+
+[classes]
+standard_library = ["core", "alloc", "std"]
+owned_runtime_prefixes = ["asupersync"]
+owned_franken_prefixes = ["franken", "fsqlite", "ffs", "fnx", "fgdb"]
+fundamental_external = ["serde", "serde_json"]
+
+[phase_zero]
+external_runtime_dependencies = []
+
+[prohibited]
+crates = [
+  "tokio", "async-std", "smol", "rayon", "petgraph", "rusqlite", "sqlx",
+  "diesel", "rocksdb", "lmdb", "reqwest", "hyper", "axum", "tonic",
+  "tower", "prost", "tantivy", "hnsw", "memmap2", "arc-swap"
+]
+
+[requirements]
+adr_for_new_exception = true
+exact_features_required = true
+build_script_audit_required = true
+unsafe_audit_required = true
+deterministic_lab_audit_required = true

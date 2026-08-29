@@ -1,0 +1,42 @@
+{
+  "arguments": {
+    "budget": {
+      "game_ticks": 1200,
+      "max_actions": 64,
+      "max_bytes": 4194304,
+      "max_entities": 2000,
+      "max_output_tokens": 1500,
+      "wall_millis": 2000
+    },
+    "dfmcp_version": "0.1",
+    "fortress": {
+      "selector": "currently_loaded"
+    },
+    "observation_profile": "operations",
+    "request_id": "request:00000000000000000000000000000001",
+    "requested_capabilities": [
+      {
+        "kind": "observe",
+        "max_risk": "read_only",
+        "scope": {
+          "fortress_id": "current"
+        }
+      },
+      {
+        "kind": "query",
+        "max_risk": "read_only",
+        "scope": {
+          "fortress_id": "current"
+        }
+      },
+      {
+        "kind": "plan",
+        "max_risk": "read_only",
+        "scope": {
+          "fortress_id": "current"
+        }
+      }
+    ]
+  },
+  "tool": "fortress.open_session"
+}

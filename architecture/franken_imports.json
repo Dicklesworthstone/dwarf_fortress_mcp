@@ -1,0 +1,390 @@
+{
+  "schema": "dfmcp.franken-imports.v1",
+  "policy": "Every imported mechanism requires a semantic owner, reference model, failure boundary, replacement prohibition, and admission evidence.",
+  "projects": [
+    {
+      "project": "asupersync",
+      "role": "exclusive runtime and verified transfer substrate",
+      "imports": [
+        {
+          "id": "AS-REGION",
+          "mechanism": "region-owned structured concurrency",
+          "owner": "runtime",
+          "invariant": "session close implies owned work quiescence",
+          "reference": "explicit single-threaded region tree",
+          "admission": [
+            "cancel at every yield",
+            "no orphan work",
+            "deterministic close receipt"
+          ]
+        },
+        {
+          "id": "AS-CX",
+          "mechanism": "context-carried authority, deadlines, and multidimensional budgets",
+          "owner": "policy",
+          "invariant": "authority and budgets narrow monotonically",
+          "reference": "immutable operation context",
+          "admission": [
+            "static read-only interfaces",
+            "runtime mask tests",
+            "budget exhaustion tests"
+          ]
+        },
+        {
+          "id": "AS-CANCEL",
+          "mechanism": "request, drain, compensate, finalize with progress certificates",
+          "owner": "runtime",
+          "invariant": "terminal cancellation never hides a possible external effect",
+          "reference": "finite-state drain model",
+          "admission": [
+            "potential descent campaigns",
+            "rebound detection",
+            "indeterminate outcome tests"
+          ]
+        },
+        {
+          "id": "AS-ATP",
+          "mechanism": "verified content-addressed object DAG transfer",
+          "owner": "transfer",
+          "invariant": "a root is published only after verified graph closure",
+          "reference": "single-path local object copier",
+          "admission": [
+            "multi-path race",
+            "resume journal",
+            "corruption and RaptorQ reconstruction"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "frankensqlite",
+      "role": "MVCC and semantic concurrency doctrine",
+      "imports": [
+        {
+          "id": "FSQ-MVCC",
+          "mechanism": "multi-version semantic snapshots",
+          "owner": "world-ledger",
+          "invariant": "one query observes one complete anchor",
+          "reference": "ordered immutable snapshot chain",
+          "admission": [
+            "snapshot/delta equivalence",
+            "long-reader GC",
+            "restore epoch"
+          ]
+        },
+        {
+          "id": "FSQ-WITNESS",
+          "mechanism": "hierarchical no-false-negative read/write witnesses",
+          "owner": "intent",
+          "invariant": "refinement exhaustion may reject safe work but may not admit conflict",
+          "reference": "exact sets and masks",
+          "admission": [
+            "phantom corpus",
+            "coarse/fine differential",
+            "VOI budget exhaustion"
+          ]
+        },
+        {
+          "id": "FSQ-REBASE",
+          "mechanism": "deterministic semantic rebase and merge certificates",
+          "owner": "intent",
+          "invariant": "raw bytes and last-writer-wins never merge plans",
+          "reference": "full intent recompilation",
+          "admission": [
+            "normal-form replay",
+            "commutativity registry",
+            "conflict explanations"
+          ]
+        },
+        {
+          "id": "FSQ-COMBINE",
+          "mechanism": "brief deterministic commit combining",
+          "owner": "ledger",
+          "invariant": "expensive or reentrant work runs after queue lock release",
+          "reference": "single-threaded sequencer",
+          "admission": [
+            "fairness",
+            "reentrancy",
+            "crash at publication boundaries"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "frankenfs",
+      "role": "checkpoint custody, coherent publication, and evidence",
+      "imports": [
+        {
+          "id": "FFS-PUBLISH",
+          "mechanism": "stage, verify, root-last multi-artifact publication",
+          "owner": "evidence",
+          "invariant": "published roots never name incomplete children",
+          "reference": "copy-and-rename publisher",
+          "admission": [
+            "crash matrix",
+            "disk full",
+            "rollback and stale root"
+          ]
+        },
+        {
+          "id": "FFS-FENCE",
+          "mechanism": "lease incarnation and generation fencing",
+          "owner": "checkpoint",
+          "invariant": "stale workers cannot publish over newer ownership",
+          "reference": "single-owner generation counter",
+          "admission": [
+            "restart race",
+            "remote monotonicity",
+            "rewrite rejection"
+          ]
+        },
+        {
+          "id": "FFS-AB",
+          "mechanism": "same-binary semantic A/B receipts",
+          "owner": "performance",
+          "invariant": "timing never precedes output-equivalence proof",
+          "reference": "A/A harness",
+          "admission": [
+            "null distribution",
+            "digest equality",
+            "phase-specific receipts"
+          ]
+        },
+        {
+          "id": "FFS-REPAIR",
+          "mechanism": "doctor, sealed repair plan, revalidate, apply",
+          "owner": "operations",
+          "invariant": "repair cannot apply after basis-root drift",
+          "reference": "read-only doctor",
+          "admission": [
+            "stale plan refusal",
+            "retrievability audit",
+            "independent reconstruction"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "frankensearch",
+      "role": "progressive agent cognition and immutable retrieval generations",
+      "imports": [
+        {
+          "id": "FSE-GEN",
+          "mechanism": "verify then atomically activate immutable generation",
+          "owner": "query",
+          "invariant": "a request never mixes search generations",
+          "reference": "full-scan lexical oracle",
+          "admission": [
+            "activation rollback",
+            "continuity checks",
+            "stale invalidation"
+          ]
+        },
+        {
+          "id": "FSE-PROGRESS",
+          "mechanism": "budgeted coarse-to-fine retrieval",
+          "owner": "query",
+          "invariant": "early termination reports completeness honestly",
+          "reference": "deterministic exact filter",
+          "admission": [
+            "token ceilings",
+            "continuation replay",
+            "score ledger"
+          ]
+        },
+        {
+          "id": "FSE-ADAPT",
+          "mechanism": "clamped workload-class adaptive policy",
+          "owner": "policy",
+          "invariant": "adaptation cannot weaken safety or evidence requirements",
+          "reference": "fixed baseline policy",
+          "admission": [
+            "minimum samples",
+            "circuit breaker",
+            "policy epoch replay"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "franken_markdown",
+      "role": "span-exact knowledge and bounded agent protocol",
+      "imports": [
+        {
+          "id": "FMD-SPAN",
+          "mechanism": "typed arena with exact source spans",
+          "owner": "knowledge",
+          "invariant": "every derived claim can name source bytes and generation",
+          "reference": "whole-document parser",
+          "admission": [
+            "round trip",
+            "incremental/full equivalence",
+            "taint preservation"
+          ]
+        },
+        {
+          "id": "FMD-MCP",
+          "mechanism": "direct bounded JSON-RPC/MCP implementation",
+          "owner": "protocol",
+          "invariant": "attacker-controlled size and depth are always bounded",
+          "reference": "strict request decoder",
+          "admission": [
+            "depth/size corpus",
+            "cancellation mapping",
+            "conformance transcript"
+          ]
+        },
+        {
+          "id": "FMD-SIBLING",
+          "mechanism": "all-or-nothing sibling output publication",
+          "owner": "evidence",
+          "invariant": "human and machine outputs describe the same generation",
+          "reference": "single-output writer",
+          "admission": [
+            "identity preflight",
+            "rollback",
+            "collision tests"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "frankengraphdb",
+      "role": "one-version-universe graph and incremental-query architecture",
+      "imports": [
+        {
+          "id": "FGD-VERSION",
+          "mechanism": "one capsule stream for history, projections, subscriptions, and branches",
+          "owner": "world-ledger",
+          "invariant": "every derived high-water mark traces to canonical capsules",
+          "reference": "append-only capsule iterator",
+          "admission": [
+            "projection replay",
+            "branch isolation",
+            "high-water continuity"
+          ]
+        },
+        {
+          "id": "FGD-STRATA",
+          "mechanism": "inline, delta-block, and sealed-run adjacency temperatures",
+          "owner": "graph",
+          "invariant": "representation changes do not change graph semantics or order",
+          "reference": "ordered map graph",
+          "admission": [
+            "root differential",
+            "compaction readers",
+            "workload benefit"
+          ]
+        },
+        {
+          "id": "FGD-FACTOR",
+          "mechanism": "factorized and worst-case-aware graph query execution",
+          "owner": "query",
+          "invariant": "operators preserve canonical result semantics without explosive materialization",
+          "reference": "naive enumerator",
+          "admission": [
+            "differential corpus",
+            "memory bound",
+            "operation witness"
+          ]
+        },
+        {
+          "id": "FGD-BRANCH",
+          "mechanism": "O(1) logical branch per agent over immutable state",
+          "owner": "planning",
+          "invariant": "hypothetical state cannot bypass live recompilation",
+          "reference": "copied snapshot branch",
+          "admission": [
+            "isolation",
+            "merge-to-intent only",
+            "capability scope"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "franken_networkx",
+      "role": "algorithm inventory and canonical graph semantics",
+      "imports": [
+        {
+          "id": "FNX-CGSE",
+          "mechanism": "closed tie-break policies and decision-path witnesses",
+          "owner": "graph",
+          "invariant": "same graph, anchor, policy, and seed gives byte-identical result",
+          "reference": "stable ordered implementation",
+          "admission": [
+            "tie fixtures",
+            "decision digest replay",
+            "hash-order adversaries"
+          ]
+        },
+        {
+          "id": "FNX-ALGO",
+          "mechanism": "differentially tested graph algorithms",
+          "owner": "graph",
+          "invariant": "algorithm behavior, failure, and ordering are contract",
+          "reference": "simple project implementation",
+          "admission": [
+            "adversarial graphs",
+            "complexity counters",
+            "budget cancellation"
+          ]
+        },
+        {
+          "id": "FNX-VIEW",
+          "mechanism": "O(1) immutable snapshot views",
+          "owner": "graph",
+          "invariant": "shared views retain their exact generation and never alias a mutable builder",
+          "reference": "deep-copy snapshot",
+          "admission": [
+            "stale view",
+            "generation retention",
+            "copy-wall measurement"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "doodlestein_self_releaser",
+      "role": "local qualification and release evidence authority",
+      "imports": [
+        {
+          "id": "DSR-SPEC",
+          "mechanism": "workflow YAML as a locally executable build specification",
+          "owner": "release",
+          "invariant": "hosted runner status is never required for qualification or publication",
+          "reference": "direct local qualification script",
+          "admission": [
+            "self-hosted Linux/macOS/Windows execution",
+            "same source identity",
+            "receipt equivalence"
+          ]
+        },
+        {
+          "id": "DSR-SNAPSHOT",
+          "mechanism": "clean source snapshot with exact sibling revisions",
+          "owner": "release",
+          "invariant": "every artifact traces to one clean source and owned-dependency closure",
+          "reference": "git archive plus manifest",
+          "admission": [
+            "dirty-tree refusal",
+            "offline locked resolution",
+            "sibling revision verification"
+          ]
+        },
+        {
+          "id": "DSR-ASSET",
+          "mechanism": "exact multi-platform asset contract with checksums, signatures, SBOM, and qualification receipt",
+          "owner": "release",
+          "invariant": "partial target success never produces an authoritative release manifest",
+          "reference": "single-target local package",
+          "admission": [
+            "resume incomplete targets only",
+            "download-and-verify drill",
+            "exact-name and digest validation"
+          ]
+        }
+      ]
+    }
+  ]
+}

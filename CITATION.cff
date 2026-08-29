@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "Please cite this project when using its architecture, protocols, or benchmark designs."
+title: "dwarf_fortress_mcp: A Semantic, Transactional, Replayable Control Plane for Agentic Dwarf Fortress"
+type: software
+authors:
+  - family-names: Emanuel
+    given-names: Jeffrey
+repository-code: "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
+license: MIT
+version: 0.0.1
+date-released: 2026-08-29
+abstract: >-
+  A design-first, safe-Rust architecture and executable contract scaffold for economical,
+  reliable, capability-scoped agent control of Dwarf Fortress through a versioned DFHack bridge,
+  canonical semantic state, hash-anchored deltas, immutable plans, bounded obligations,
+  evidence-backed verification, deterministic replay, and crash-safe recovery.
+keywords:
+  - Dwarf Fortress
+  - Model Context Protocol
+  - autonomous agents
+  - DFHack
+  - deterministic systems
+  - transactional control

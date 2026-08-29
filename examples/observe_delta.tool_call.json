@@ -1,0 +1,51 @@
+{
+  "arguments": {
+    "budget": {
+      "game_ticks": 0,
+      "max_actions": 1,
+      "max_bytes": 1048576,
+      "max_entities": 500,
+      "max_output_tokens": 500,
+      "wall_millis": 1000
+    },
+    "dfmcp_version": "0.1",
+    "expected_anchor": {
+      "cursor": {
+        "epoch": 4,
+        "sequence": 20817
+      },
+      "fortress_id": "fortress:world-44:site-17",
+      "game_tick": 9120480,
+      "state_hash": "sha256:bb7f8f778f3c5481d53426d42f04384c3d271a496364547cb0d1811b9a069d44"
+    },
+    "interest": {
+      "entity_kinds": [
+        "unit",
+        "job",
+        "work_order",
+        "building"
+      ],
+      "event_kinds": [
+        "threat_detected",
+        "job_changed",
+        "announcement"
+      ],
+      "fields": [
+        "state",
+        "blocked_by",
+        "stress",
+        "health",
+        "criticality"
+      ],
+      "operations": "owned"
+    },
+    "projection": "summary",
+    "request_id": "request:00000000000000000000000000000002",
+    "session_id": "session:01J6KJ7JD0A4T7R61A4P3H0X9F",
+    "since": {
+      "epoch": 4,
+      "sequence": 20817
+    }
+  },
+  "tool": "fortress.observe"
+}
