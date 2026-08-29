@@ -31,6 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "contract" => print_contract(),
         "doctor" => doctor()?,
         "demo" => demo()?,
+        "serve" => dfmcp_mcp::run_stdio(),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
         }
@@ -51,12 +52,14 @@ COMMANDS:
     contract    Print the frozen phase-zero narrow-waist contract
     doctor      Exercise the deterministic laboratory adapter
     demo        Prepare and commit a verified semantic pause-state action
+    serve       Run the MCP 2026-07-28 modern-only stdio server (fastmcp_rust)
     version     Print version information
     help        Print this help
 
 STATUS:
-    This binary is an executable contract scaffold. Live MCP transport and
-    DFHack integration are intentionally not claimed in phase zero.
+    Executable contract scaffold plus a laboratory MCP transport. The stdio
+    server runs the owned fastmcp_rust sibling pinned to MCP 2026-07-28,
+    modern-only. Live DFHack integration is not claimed.
 ",
         version = env!("CARGO_PKG_VERSION")
     );
@@ -70,6 +73,7 @@ fn print_contract() {
     println!(
         "\
 protocol: dfmcp/0
+transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust sibling
 tools:
   - fortress.open_session
   - fortress.observe

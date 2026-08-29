@@ -6,6 +6,7 @@ members = [
     "crates/dfmcp-adapter",
     "crates/dfmcp-lab",
     "crates/dwarf-fortress-mcp",
+    "crates/dfmcp-mcp",
 ]
 resolver = "2"
 
@@ -19,6 +20,15 @@ homepage = "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
 keywords = ["dwarf-fortress", "mcp", "agents", "dfhack", "rust"]
 categories = ["development-tools", "games"]
 
+[workspace.dependencies]
+# ADR-013: the MCP presentation plane is the owned fastmcp_rust sibling,
+# pinned to an exact upstream revision for dogfooding. Modern-only MCP
+# 2026-07-28: default features off (no legacy-2024-11-05 graph), Tasks on.
+fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "bd41e69070f5604d6dbb24185dcabaef591a01e1", default-features = false, features = ["tasks"] }
+# Fundamental serialization (ADR-012 admits these; exact pins mirror the
+# fastmcp_rust workspace to avoid duplicate major versions).
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
