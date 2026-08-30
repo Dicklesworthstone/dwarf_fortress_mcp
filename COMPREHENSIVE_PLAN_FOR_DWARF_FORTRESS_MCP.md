@@ -5215,3 +5215,38 @@ This part is accepted when: the stdio laboratory slice compiles and passes the w
 the pinned revision; the policy checker rejects any non-conforming profile mechanically; the
 first upstream defect cycle (issue, fix, pin bump, conformance note) is complete; and session-
 scoped authority plus the Tasks binding land under WP-13 gates 2 and 3.
+
+---
+
+# Part XXIII — Agent campaign memory plane (owned Eidetic Engine sibling)
+
+## 23.1 Revision authority
+
+This 2026-08-30 revision adopts the owned `eidetic_engine_cli` sibling (`ee`) as the recommended
+campaign-memory layer for fortress stewardship (docs/EIDETIC_MEMORY.md). It adds no crate
+dependency, no schema, and no transport surface: `ee` operates entirely outside the canonical
+plane, invoked by agent harnesses.
+
+## 23.2 Doctrine
+
+The canonical model is deliberately distinct from agent memory, which may be stale or speculative
+(Part V). `ee` implements that memory layer under one inviolable rule: memory is advisory context;
+it is never canonical state, never authority, and loses to any live observation on conflict.
+Memories carry provenance pointers INTO canonical anchors and evidence digests; canonical evidence
+never cites memory. The doctrine alignment is exact — ee's "evidence before promotion", "indexes
+are derived assets", and "no silent memory mutation" mirror this project's derived-cognition and
+evidence rules.
+
+## 23.3 Workflow and scope
+
+Per-fortress ee workspace; session start via `ee resume`/`ee pack`; session end via
+`ee remember` of decisions, outcomes, and anti-patterns with anchor/evidence provenance;
+`ee preflight` as advisory risk lookup only. Multi-agent shared memory (`ee team`) is gated on
+WP-15 multi-agent authority. dfmcp artifacts (doctor bundles, obligation outcomes, qualification
+receipts) are the intended curation inputs; an export-template work item is tracked as a bead.
+
+## 23.4 Acceptance
+
+Doctrine document present; campaign workflow beads tracked; canonical-plane isolation preserved
+(no dependency, no schema, no authority path). Rollback is deletion of the doctrine document and
+beads.

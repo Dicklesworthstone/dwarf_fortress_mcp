@@ -34,6 +34,11 @@ This is the compact engineering map. The comprehensive plan and machine registri
 
 The cognition plane has no path to effect dispatch. The effect plane cannot redefine canonical identity or success.
 
+Outside the three planes sits **agent campaign memory** (the owned `eidetic_engine_cli` sibling,
+`docs/EIDETIC_MEMORY.md`): advisory, speculative context for the humans/agents operating the
+fortress. It has no path into canonical state or authority — memory cites anchors and evidence
+digests; it is never cited by them.
+
 ## One version universe
 
 The append unit is an immutable observation capsule. The ordered capsule stream drives current state, history, graph/search updates, subscriptions, branches, replay, checkpoint cutoffs, replicas, and evidence references. Every derived generation publishes its source high-water mark.

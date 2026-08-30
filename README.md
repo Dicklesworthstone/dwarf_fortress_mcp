@@ -365,6 +365,20 @@ Tiered configuration targets:
 | 3 | Windows + Dwarf Fortress (Classic or Premium) + DFHack | Supported |
 | Best effort | macOS via Wine/Whisky/CrossOver + DFHack | Explicitly best effort; not a supported target |
 
+---
+
+## Agent memory layer (Eidetic Engine)
+
+Campaign stewardship is multi-session by nature, and agents that forget re-dig the same aquifer.
+The recommended campaign-memory layer is the owned sibling
+[`eidetic_engine_cli`](https://github.com/Dicklesworthstone/eidetic_engine_cli) (`ee`: durable,
+local-first, explainable memory — Rust 2024, asupersync runtime). It lives **outside** the
+canonical plane: memories are advisory context with provenance pointers into anchors and evidence
+digests, never state, never authority, and they lose to any live `fortress.observe` on conflict.
+Session start: `ee resume` / `ee pack`; session end: `ee remember` of decisions, outcomes, and
+anti-patterns with anchor references. Doctrine and worked examples:
+[`docs/EIDETIC_MEMORY.md`](docs/EIDETIC_MEMORY.md).
+
 ## Multi-agent operation
 
 Several agents may observe and plan against the same fortress. Safe concurrency uses two
@@ -592,6 +606,7 @@ Start with:
 - [`MCP_SURFACE.md`](MCP_SURFACE.md)
 - [`docs/FASTMCP_INTEGRATION.md`](docs/FASTMCP_INTEGRATION.md)
 - [`docs/DOGFOODING_FASTMCP.md`](docs/DOGFOODING_FASTMCP.md)
+- [`docs/EIDETIC_MEMORY.md`](docs/EIDETIC_MEMORY.md)
 - [`ROADMAP.md`](ROADMAP.md)
 - [`SECURITY.md`](SECURITY.md)
 

@@ -158,3 +158,11 @@ credited and license boundaries preserved.
   (ADR-013, `docs/FASTMCP_INTEGRATION.md`); upstream defects are tracked per
   `docs/DOGFOODING_FASTMCP.md`.
 - MCP 2026-07-28 specification: <https://modelcontextprotocol.io/specification/2026-07-28>
+
+## Owned agent-memory sibling: eidetic_engine_cli
+
+- Source: <https://github.com/Dicklesworthstone/eidetic_engine_cli>
+- Adopted as the recommended agent-side campaign memory layer (`ee`), outside the canonical plane
+  and outside the workspace dependency universe (doctrine: docs/EIDETIC_MEMORY.md, Part XXIII).
+- Its "evidence before promotion", "derived indexes", and "no silent memory mutation" doctrines
+  informed the memory-plane integration rules.
