@@ -6,3 +6,6 @@
 
 # Editor/backup artifacts
 **/*.rs.bk
+
+# bv (beads viewer) local config and caches
+.bv/
