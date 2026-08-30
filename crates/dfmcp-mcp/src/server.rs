@@ -54,7 +54,8 @@ static LAB: LazyLock<Mutex<LabState>> = LazyLock::new(|| {
 fn lab() -> MutexGuard<'static, LabState> {
     // The guarded state stays internally consistent even if a caller panics
     // while holding the lock; never turn poisoning into a missed unlock.
-    LAB.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LAB.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn next_request_id(state: &mut LabState) -> u128 {
@@ -124,7 +125,7 @@ fn snapshot_json(snapshot: &WorldSnapshot) -> serde_json::Value {
     json!({
         "ok": true,
         "fortress_id": format!("{}", snapshot.fortress_id),
-        "game_tick": format!("{}", snapshot.tick),
+        "game_tick": snapshot.tick.0,
         "cursor": {
             "epoch": snapshot.cursor.epoch,
             "sequence": snapshot.cursor.sequence,
@@ -140,7 +141,9 @@ fn snapshot_json(snapshot: &WorldSnapshot) -> serde_json::Value {
 
 /// Open a laboratory fortress session: seed the deterministic adapter,
 /// health-check it, and return the initial anchor with granted capabilities.
-#[tool(description = "Open a fortress session against the deterministic laboratory adapter. Returns the initial anchor and the capabilities granted to this session.")]
+#[tool(
+    description = "Open a fortress session against the deterministic laboratory adapter. Returns the initial anchor and the capabilities granted to this session."
+)]
 fn fortress_open_session(_ctx: &McpContext, paused: bool) -> String {
     let mut state = lab();
     let mut adapter = MemoryAdapter::new(seed_snapshot(paused));
@@ -156,7 +159,7 @@ fn fortress_open_session(_ctx: &McpContext, paused: bool) -> String {
                 "granted_capabilities": [
                     "observe", "query", "plan", "control_clock", "checkpoint", "restore",
                 ],
-                "anchor": anchor_json(adapter.snapshot().anchor()),
+                "anchor": anchor_json(&adapter.snapshot().anchor()),
                 "paused": adapter.snapshot().paused,
             });
             state.adapter = Some(adapter);
@@ -173,11 +176,13 @@ fn fortress_open_session(_ctx: &McpContext, paused: bool) -> String {
 // ============================================================================
 
 /// Return the current bounded snapshot projection at the live anchor.
-#[tool(description = "Observe the current fortress state: anchor, game tick, pause state, and canonical state hash. Bounded summary projection over the laboratory adapter.")]
+#[tool(
+    description = "Observe the current fortress state: anchor, game tick, pause state, and canonical state hash. Bounded summary projection over the laboratory adapter."
+)]
 fn fortress_observe(_ctx: &McpContext) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);
-    let Some(adapter) = state.adapter.as_ref() else {
+    let Some(adapter) = state.adapter.as_mut() else {
         return error_payload(
             "fortress.observe",
             "no open session; call fortress_open_session first",
@@ -200,7 +205,9 @@ fn fortress_observe(_ctx: &McpContext) -> String {
 
 /// Bounded structured query. The laboratory slice supports `mode = "summary"`;
 /// full DfQL execution is WP-04 and is rejected with a stable message here.
-#[tool(description = "Run a bounded query against the fortress state. The laboratory slice supports mode=\"summary\" only; full DfQL arrives with WP-04.")]
+#[tool(
+    description = "Run a bounded query against the fortress state. The laboratory slice supports mode=\"summary\" only; full DfQL arrives with WP-04."
+)]
 fn fortress_query(_ctx: &McpContext, mode: String) -> String {
     if mode != "summary" {
         return error_payload(
@@ -208,7 +215,7 @@ fn fortress_query(_ctx: &McpContext, mode: String) -> String {
             "only mode=\"summary\" is supported by the laboratory slice; full DfQL is WP-04",
         );
     }
-    let mut state = lab();
+    let state = lab();
     let Some(adapter) = state.adapter.as_ref() else {
         return error_payload(
             "fortress.query",
@@ -228,7 +235,9 @@ fn fortress_query(_ctx: &McpContext, mode: String) -> String {
 /// Compile a pause/resume intent into a sealed, inspectable plan. The
 /// laboratory registry registers exactly one semantic action family
 /// (clock pause/resume); broader registries extend schemas, not tools.
-#[tool(description = "Compile an intent into an immutable, inspectable plan without effects. Returns the plan id, digest, and terminal condition. The laboratory registry supports the clock pause/resume action family.")]
+#[tool(
+    description = "Compile an intent into an immutable, inspectable plan without effects. Returns the plan id, digest, and terminal condition. The laboratory registry supports the clock pause/resume action family."
+)]
 fn fortress_plan(_ctx: &McpContext, summary: String, paused_target: bool) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);
@@ -285,11 +294,16 @@ fn fortress_plan(_ctx: &McpContext, summary: String, paused_target: bool) -> Str
 
 /// Revalidate and idempotently commit the pending prepared plan. Requires the
 /// exact plan digest; returns per-action receipts and the post-commit anchor.
-#[tool(description = "Commit the pending prepared plan: prepare/revalidate, dispatch, observe, and verify. Requires the exact plan digest returned by fortress_plan.")]
+#[tool(
+    description = "Commit the pending prepared plan: prepare/revalidate, dispatch, observe, and verify. Requires the exact plan digest returned by fortress_plan."
+)]
 fn fortress_commit(_ctx: &McpContext, plan_digest: String) -> String {
     let mut state = lab();
     let Some(pending) = state.pending.take() else {
-        return error_payload("fortress.commit", "no pending plan; call fortress_plan first");
+        return error_payload(
+            "fortress.commit",
+            "no pending plan; call fortress_plan first",
+        );
     };
     if pending.digest != plan_digest {
         return error_payload(
@@ -352,7 +366,9 @@ fn fortress_commit(_ctx: &McpContext, plan_digest: String) -> String {
 // ============================================================================
 
 /// Poll the most recent committed action and return its current state.
-#[tool(description = "Poll the most recent committed action. Returns the action receipt state from the laboratory adapter's bounded obligation machinery.")]
+#[tool(
+    description = "Poll the most recent committed action. Returns the action receipt state from the laboratory adapter's bounded obligation machinery."
+)]
 fn fortress_wait(_ctx: &McpContext) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);
@@ -388,7 +404,9 @@ fn fortress_wait(_ctx: &McpContext) -> String {
 
 /// Request, drain, and finalize cancellation of the most recent action with
 /// authorized compensation. Cancellation never deletes records.
-#[tool(description = "Cancel the most recent committed action: request, drain, compensate when authorized, and finalize. Returns the final cancellation receipt.")]
+#[tool(
+    description = "Cancel the most recent committed action: request, drain, compensate when authorized, and finalize. Returns the final cancellation receipt."
+)]
 fn fortress_cancel(_ctx: &McpContext) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);
@@ -426,7 +444,9 @@ fn fortress_cancel(_ctx: &McpContext) -> String {
 // ============================================================================
 
 /// Create a content-addressed, labeled recovery point.
-#[tool(description = "Create a labeled checkpoint: a content-addressed recovery point with an evidence record.")]
+#[tool(
+    description = "Create a labeled checkpoint: a content-addressed recovery point with an evidence record."
+)]
 fn fortress_checkpoint(_ctx: &McpContext, label: String) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);
@@ -457,7 +477,9 @@ fn fortress_checkpoint(_ctx: &McpContext, label: String) -> String {
 
 /// Restore a checkpoint into a new observation epoch, invalidating stale
 /// plans and action handles.
-#[tool(description = "Restore a checkpoint by id. Creates a new observation epoch; stale plans and action handles are invalidated.")]
+#[tool(
+    description = "Restore a checkpoint by id. Creates a new observation epoch; stale plans and action handles are invalidated."
+)]
 fn fortress_restore(_ctx: &McpContext, checkpoint_id: String) -> String {
     let parsed = match checkpoint_id.parse::<u128>() {
         Ok(value) => value,
@@ -500,7 +522,9 @@ fn fortress_restore(_ctx: &McpContext, checkpoint_id: String) -> String {
 // ============================================================================
 
 /// Explain recent state transitions from the immutable laboratory transcript.
-#[tool(description = "Explain what happened: return the most recent laboratory transcript events as evidence-backed rationale for the current state.")]
+#[tool(
+    description = "Explain what happened: return the most recent laboratory transcript events as evidence-backed rationale for the current state."
+)]
 fn fortress_explain(_ctx: &McpContext) -> String {
     let state = lab();
     let Some(adapter) = state.adapter.as_ref() else {
@@ -529,7 +553,9 @@ fn fortress_explain(_ctx: &McpContext) -> String {
 // ============================================================================
 
 /// Diagnose adapter health, compatibility identity, and the live anchor.
-#[tool(description = "Diagnose the control plane: adapter health, compatibility identity, fortress load state, and the current anchor.")]
+#[tool(
+    description = "Diagnose the control plane: adapter health, compatibility identity, fortress load state, and the current anchor."
+)]
 fn fortress_doctor(_ctx: &McpContext) -> String {
     let mut state = lab();
     let rid = next_request_id(&mut state);

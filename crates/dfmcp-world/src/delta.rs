@@ -97,12 +97,13 @@ pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnap
         ));
     }
     if delta.base_cursor != base.cursor || delta.base_hash != base.state_hash {
-        return Err(
-            DfmcpError::new(ErrorCode::CursorGap, "delta base anchor does not match snapshot")
-                .retryable(true)
-                .with_detail("expected_cursor", format!("{:?}", base.cursor))
-                .with_detail("received_cursor", format!("{:?}", delta.base_cursor)),
-        );
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "delta base anchor does not match snapshot",
+        )
+        .retryable(true)
+        .with_detail("expected_cursor", format!("{:?}", base.cursor))
+        .with_detail("received_cursor", format!("{:?}", delta.base_cursor)));
     }
     validate_cursor_transition(base.cursor, delta.target_cursor)?;
     if delta.target_tick < base.tick {
@@ -127,10 +128,7 @@ pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnap
     Ok(candidate)
 }
 
-fn validate_cursor_transition(
-    base: ObservationCursor,
-    target: ObservationCursor,
-) -> Result<()> {
+fn validate_cursor_transition(base: ObservationCursor, target: ObservationCursor) -> Result<()> {
     if target.epoch != base.epoch {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,
@@ -152,7 +150,10 @@ fn apply_changes(snapshot: &mut WorldSnapshot, changes: &[WorldChange]) -> Resul
         match change {
             WorldChange::UpsertEntity(incoming) => {
                 validate_entity_upsert(snapshot, incoming)?;
-                snapshot.graph.entities.insert(incoming.id, incoming.clone());
+                snapshot
+                    .graph
+                    .entities
+                    .insert(incoming.id, incoming.clone());
             }
             WorldChange::RemoveEntity {
                 id,
@@ -371,14 +372,10 @@ fn validate_graph(snapshot: &WorldSnapshot) -> Result<()> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use dfmcp_core::{
-        Digest32, DfmcpError, EntityId, FortressId, GameTick, ObservationCursor,
-    };
+    use dfmcp_core::{DfmcpError, Digest32, EntityId, FortressId, GameTick, ObservationCursor};
 
-    use super::{apply_delta, build_delta, WorldChange};
-    use crate::{
-        EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot,
-    };
+    use super::{WorldChange, apply_delta, build_delta};
+    use crate::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
 
     fn unit(revision: u64, stress: i64) -> EntityRecord {
         let mut fields = BTreeMap::new();

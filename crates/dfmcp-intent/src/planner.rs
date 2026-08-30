@@ -4,7 +4,7 @@ use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, GameTick, MapCuboid, OperationContext,
     Result, RiskTier, StepId,
 };
-use dfmcp_world::{evaluate, Predicate, WorldSnapshot};
+use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
 use crate::{Action, Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan, RequestedAction};
 
@@ -56,8 +56,7 @@ impl StaticPlanner {
         }
         if context.anchor != snapshot.anchor() || intent.anchor != snapshot.anchor() {
             return Err(
-                DfmcpError::new(ErrorCode::StaleAnchor, "planning anchor is stale")
-                    .retryable(true),
+                DfmcpError::new(ErrorCode::StaleAnchor, "planning anchor is stale").retryable(true),
             );
         }
         context.authorize(Capability::Plan, RiskTier::ReadOnly, &[], None)?;
@@ -97,13 +96,13 @@ impl StaticPlanner {
                 format!("intent exceeds the effective plan step limit {step_limit}"),
             ));
         }
-        if let Some(deadline) = intent.deadline() {
-            if deadline < snapshot.tick {
-                return Err(DfmcpError::new(
-                    ErrorCode::InvalidIntent,
-                    "intent deadline is already in the past",
-                ));
-            }
+        if let Some(deadline) = intent.deadline()
+            && deadline < snapshot.tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "intent deadline is already in the past",
+            ));
         }
 
         let max_allowed_risk = intent.max_risk();
@@ -157,8 +156,8 @@ impl StaticPlanner {
             .map(|step| step.risk)
             .max()
             .unwrap_or(RiskTier::ReadOnly);
-        let requires_checkpoint = intent.requires_checkpoint()
-            || max_risk >= self.policy.require_checkpoint_at_or_above;
+        let requires_checkpoint =
+            intent.requires_checkpoint() || max_risk >= self.policy.require_checkpoint_at_or_above;
         if requires_checkpoint {
             required_capabilities.insert(Capability::Checkpoint);
         }
@@ -187,15 +186,15 @@ fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
         .compensation
         .as_ref()
         .map(Action::normalized)
-        .or_else(|| match &action {
+        .or(match &action {
             Action::Pause { paused } => Some(Action::Pause { paused: !*paused }),
             _ => None,
         });
     let mut postconditions = requested.postconditions.clone();
-    if postconditions.is_empty() {
-        if let Action::Pause { paused } = &action {
-            postconditions.push(Predicate::Paused(*paused));
-        }
+    if postconditions.is_empty()
+        && let Action::Pause { paused } = &action
+    {
+        postconditions.push(Predicate::Paused(*paused));
     }
     RequestedAction {
         action,
@@ -224,11 +223,7 @@ fn normalize_obligation(obligation: &ObligationSpec) -> ObligationSpec {
     }
 }
 
-fn validate_action(
-    action: &Action,
-    policy: &PlanPolicy,
-    context: &OperationContext,
-) -> Result<()> {
+fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationContext) -> Result<()> {
     let scope = action.scope();
     if scope.entity_ids.len() > policy.max_entities_per_action as usize
         || scope.entity_ids.len() > context.budget.max_entities as usize
@@ -238,7 +233,7 @@ fn validate_action(
             "action entity scope exceeds an explicit limit",
         ));
     }
-    if scope.entity_ids.iter().any(|id| *id == EntityId::NIL) {
+    if scope.entity_ids.contains(&EntityId::NIL) {
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
             "action scope contains reserved entity identifier zero",
@@ -345,10 +340,7 @@ fn validate_action(
     Ok(())
 }
 
-fn validate_tokens<'a>(
-    values: impl Iterator<Item = &'a String>,
-    max_bytes: usize,
-) -> Result<()> {
+fn validate_tokens<'a>(values: impl Iterator<Item = &'a String>, max_bytes: usize) -> Result<()> {
     for value in values {
         validate_string(value, max_bytes, "token")?;
     }
@@ -434,13 +426,13 @@ fn validate_requested(
     if let Some(obligation) = &requested.obligation {
         validate_obligation(index, obligation, current_tick)?;
     }
-    if let Some(compensation) = &requested.compensation {
-        if compensation.risk() == RiskTier::Irreversible {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidIntent,
-                format!("compensation for action {index} is irreversible"),
-            ));
-        }
+    if let Some(compensation) = &requested.compensation
+        && compensation.risk() == RiskTier::Irreversible
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidIntent,
+            format!("compensation for action {index} is irreversible"),
+        ));
     }
     Ok(())
 }
@@ -518,9 +510,7 @@ fn validate_plan(plan: &PreparedPlan, policy: &PlanPolicy) -> Result<()> {
                 "prepared plan step identifiers are not contiguous",
             ));
         }
-        if step.risk != step.action.risk()
-            || step.required_capability != step.action.capability()
-        {
+        if step.risk != step.action.risk() || step.required_capability != step.action.capability() {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
                 "prepared plan action metadata disagrees with the action",

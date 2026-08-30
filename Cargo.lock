@@ -819,7 +819,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-client"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "asupersync",
  "dirs",
@@ -836,7 +836,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-console"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "fastmcp-core",
  "fastmcp-protocol",
@@ -854,7 +854,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-core"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "asupersync",
  "getrandom 0.4.3",
@@ -870,7 +870,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-derive"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "fastmcp-protocol",
  "proc-macro-crate",
@@ -882,7 +882,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-protocol"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "base64",
  "fastmcp-core",
@@ -894,7 +894,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-rust"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "asupersync",
  "fastmcp-client",
@@ -911,7 +911,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-server"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "asupersync",
  "base64",
@@ -933,7 +933,7 @@ dependencies = [
 [[package]]
 name = "fastmcp-transport"
 version = "0.7.1"
-source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=bd41e69070f5604d6dbb24185dcabaef591a01e1#bd41e69070f5604d6dbb24185dcabaef591a01e1"
+source = "git+https://github.com/Dicklesworthstone/fastmcp_rust?rev=6481d49a6f9282f8161015323283fb7764dcf2f7#6481d49a6f9282f8161015323283fb7764dcf2f7"
 dependencies = [
  "asupersync",
  "fastmcp-core",

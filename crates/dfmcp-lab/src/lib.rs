@@ -14,7 +14,7 @@ use dfmcp_core::{
     StepId,
 };
 use dfmcp_intent::{Action, PlanStep, PreparedPlan};
-use dfmcp_world::{evaluate, execute_query, WorldSnapshot};
+use dfmcp_world::{WorldSnapshot, evaluate, execute_query};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabEvent {
@@ -142,12 +142,11 @@ impl MemoryAdapter {
         Ok(())
     }
 
-    fn authorize_step(
-        &self,
-        step: &PlanStep,
-        context: &OperationContext,
-    ) -> Result<()> {
-        if !self.identity.capabilities.contains(&step.required_capability)
+    fn authorize_step(&self, step: &PlanStep, context: &OperationContext) -> Result<()> {
+        if !self
+            .identity
+            .capabilities
+            .contains(&step.required_capability)
             || !action_is_supported(&step.action)
         {
             return Err(DfmcpError::new(
@@ -213,8 +212,7 @@ impl MemoryAdapter {
             EvidenceKind::Checkpoint,
             &format!("laboratory checkpoint {label}"),
         );
-        self.transcript
-            .push(LabEvent::Checkpointed(checkpoint_id));
+        self.transcript.push(LabEvent::Checkpointed(checkpoint_id));
         CheckpointReceipt {
             checkpoint_id,
             label: label.to_owned(),
@@ -314,13 +312,11 @@ impl MemoryAdapter {
         ) && dependencies_verified
         {
             if let Some(obligation) = &step.obligation {
-                if obligation
+                let failure_triggered = obligation
                     .failure
                     .as_ref()
-                    .is_some_and(|predicate| evaluate(&self.snapshot, predicate))
-                {
-                    state = CommitState::Failed;
-                } else if self.snapshot.tick > obligation.deadline_tick {
+                    .is_some_and(|predicate| evaluate(&self.snapshot, predicate));
+                if failure_triggered || self.snapshot.tick > obligation.deadline_tick {
                     state = CommitState::Failed;
                 } else if evaluate(&self.snapshot, &obligation.terminal)
                     && step
@@ -430,10 +426,11 @@ impl GameAdapter for MemoryAdapter {
                 ObservationPayload::Snapshot(self.snapshot.clone())
             }
             Some(_) => {
-                return Err(
-                    DfmcpError::new(ErrorCode::CursorGap, "observation cursor is not resumable")
-                        .retryable(true),
-                );
+                return Err(DfmcpError::new(
+                    ErrorCode::CursorGap,
+                    "observation cursor is not resumable",
+                )
+                .retryable(true));
             }
         };
         self.transcript
@@ -480,11 +477,7 @@ impl GameAdapter for MemoryAdapter {
                 "query output-token budget is invalid",
             ));
         }
-        let result = execute_query(
-            &self.snapshot,
-            &request.query,
-            context.budget.max_entities,
-        )?;
+        let result = execute_query(&self.snapshot, &request.query, context.budget.max_entities)?;
         let rows = result
             .entities
             .into_iter()
@@ -505,7 +498,9 @@ impl GameAdapter for MemoryAdapter {
             matched: result.matched,
             truncated: result.truncated,
             continuation: None,
-            score_ledger: vec!["ordered deterministic world query; no relevance scoring".to_owned()],
+            score_ledger: vec![
+                "ordered deterministic world query; no relevance scoring".to_owned(),
+            ],
         })
     }
 
@@ -596,7 +591,10 @@ impl GameAdapter for MemoryAdapter {
         self.check_anchor(context.anchor)?;
         plan.validate_structure()?;
         let stored_plan = self.plans.get(&plan.id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidPlan, "plan was not prepared by this adapter")
+            DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "plan was not prepared by this adapter",
+            )
         })?;
         if stored_plan != plan {
             return Err(DfmcpError::new(
@@ -614,7 +612,10 @@ impl GameAdapter for MemoryAdapter {
             ));
         }
         let stored_receipt = self.prepared.get(&plan.id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidPlan, "plan is missing its prepare receipt")
+            DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "plan is missing its prepare receipt",
+            )
         })?;
         if stored_receipt != prepared
             || prepared.plan_id != plan.id
@@ -719,27 +720,27 @@ impl GameAdapter for MemoryAdapter {
         if mode == CancelMode::EmergencyPauseAndDrain {
             context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)?;
         }
-        if mode == CancelMode::CompensateReversible {
-            if let Some(compensation) = &action.step.compensation {
-                if !action_is_supported(compensation)
-                    || !self
-                        .identity
-                        .capabilities
-                        .contains(&compensation.capability())
-                {
-                    return Err(DfmcpError::new(
-                        ErrorCode::AdapterRejected,
-                        "laboratory adapter cannot execute the compensation action",
-                    ));
-                }
-                let compensation_scope = compensation.scope();
-                context.authorize(
-                    compensation.capability(),
-                    compensation.risk(),
-                    &compensation_scope.entity_ids,
-                    compensation_scope.map_area,
-                )?;
+        if mode == CancelMode::CompensateReversible
+            && let Some(compensation) = &action.step.compensation
+        {
+            if !action_is_supported(compensation)
+                || !self
+                    .identity
+                    .capabilities
+                    .contains(&compensation.capability())
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::AdapterRejected,
+                    "laboratory adapter cannot execute the compensation action",
+                ));
             }
+            let compensation_scope = compensation.scope();
+            context.authorize(
+                compensation.capability(),
+                compensation.risk(),
+                &compensation_scope.entity_ids,
+                compensation_scope.map_area,
+            )?;
         }
 
         let state = if action.receipt.state.is_terminal() {
@@ -765,12 +766,7 @@ impl GameAdapter for MemoryAdapter {
         } else {
             "action was already terminal when cancellation was requested"
         };
-        self.stored_action_receipt(
-            action_id,
-            state,
-            EvidenceKind::AdapterReceipt,
-            message,
-        )?;
+        self.stored_action_receipt(action_id, state, EvidenceKind::AdapterReceipt, message)?;
         self.transcript
             .push(LabEvent::CancelRequested(action_id, mode));
         Ok(CancelReceipt {
@@ -854,12 +850,7 @@ impl GameAdapter for MemoryAdapter {
         if let Some(stored) = self.actions.get_mut(&action_id) {
             stored.cancel_mode = None;
         }
-        self.stored_action_receipt(
-            action_id,
-            state,
-            EvidenceKind::Postcondition,
-            message,
-        )?;
+        self.stored_action_receipt(action_id, state, EvidenceKind::Postcondition, message)?;
         self.transcript
             .push(LabEvent::CancelFinalized(action_id, state));
         Ok(CancelReceipt {
@@ -876,11 +867,7 @@ impl GameAdapter for MemoryAdapter {
         })
     }
 
-    fn checkpoint(
-        &mut self,
-        label: &str,
-        context: &OperationContext,
-    ) -> Result<CheckpointReceipt> {
+    fn checkpoint(&mut self, label: &str, context: &OperationContext) -> Result<CheckpointReceipt> {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
         if label.is_empty() || label.len() > 256 {
@@ -1184,10 +1171,7 @@ mod tests {
             true,
             WorldGraph::default(),
         );
-        let area = MapCuboid::new(
-            MapCoord { x: 1, y: 1, z: 0 },
-            MapCoord { x: 2, y: 2, z: 0 },
-        )?;
+        let area = MapCuboid::new(MapCoord { x: 1, y: 1, z: 0 }, MapCoord { x: 2, y: 2, z: 0 })?;
         let intent = Intent {
             id: IntentId::new(9),
             anchor: snapshot.anchor(),
@@ -1218,7 +1202,12 @@ mod tests {
         let error = adapter
             .prepare(&plan, &prepare_context)
             .err()
-            .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "unsupported plan was accepted"))?;
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "unsupported plan was accepted",
+                )
+            })?;
         assert_eq!(error.code, ErrorCode::AdapterRejected);
         Ok(())
     }
@@ -1257,7 +1246,12 @@ mod tests {
         let error = adapter
             .commit(&mutated, &prepared, &commit_context)
             .err()
-            .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "mutated plan was committed"))?;
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "mutated plan was committed",
+                )
+            })?;
         assert_eq!(error.code, ErrorCode::InvalidPlan);
         assert!(adapter.snapshot().paused);
         Ok(())
@@ -1300,13 +1294,21 @@ mod tests {
         let restore_context = context(adapter.snapshot(), 5);
         let restored = adapter.restore(checkpoint.checkpoint_id, &restore_context)?;
         assert_eq!(restored.content_digest, checkpoint.content_digest);
-        assert_eq!(adapter.snapshot().cursor.epoch, prior_epoch.saturating_add(1));
+        assert_eq!(
+            adapter.snapshot().cursor.epoch,
+            prior_epoch.saturating_add(1)
+        );
         assert!(adapter.snapshot().paused);
         let poll_context = context(adapter.snapshot(), 6);
         let error = adapter
             .poll_action(action_id, &poll_context)
             .err()
-            .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "pre-restore action handle remained valid"))?;
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "pre-restore action handle remained valid",
+                )
+            })?;
         assert_eq!(error.code, ErrorCode::InvalidRequest);
         Ok(())
     }

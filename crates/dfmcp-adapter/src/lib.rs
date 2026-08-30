@@ -7,9 +7,7 @@ use dfmcp_core::{
     MapCuboid, ObservationCursor, OperationContext, PlanId, Result, StateAnchor, StepId,
 };
 use dfmcp_intent::PreparedPlan;
-use dfmcp_world::{
-    EntityKind, StateDelta, WorldEventKind, WorldQuery, WorldSnapshot,
-};
+use dfmcp_world::{EntityKind, StateDelta, WorldEventKind, WorldQuery, WorldSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CompatibilityLevel {
@@ -240,11 +238,7 @@ pub trait GameAdapter {
         context: &OperationContext,
     ) -> Result<CancelReceipt>;
 
-    fn checkpoint(
-        &mut self,
-        label: &str,
-        context: &OperationContext,
-    ) -> Result<CheckpointReceipt>;
+    fn checkpoint(&mut self, label: &str, context: &OperationContext) -> Result<CheckpointReceipt>;
 
     fn restore(
         &mut self,

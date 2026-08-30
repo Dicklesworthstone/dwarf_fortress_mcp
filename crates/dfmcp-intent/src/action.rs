@@ -178,9 +178,7 @@ impl Action {
                     map_area: None,
                 }
             }
-            Self::SetBurrowMembership {
-                units, burrow, ..
-            } => {
+            Self::SetBurrowMembership { units, burrow, .. } => {
                 let mut entity_ids = units.clone();
                 entity_ids.push(*burrow);
                 entity_ids.sort_unstable();

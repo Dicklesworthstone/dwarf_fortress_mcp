@@ -37,7 +37,6 @@ pub enum Predicate {
     Not(Box<Predicate>),
 }
 
-
 impl Predicate {
     #[must_use]
     pub fn normalized(&self) -> Self {
@@ -129,7 +128,6 @@ impl Predicate {
     }
 }
 
-
 fn encoded_bytes(predicate: &Predicate) -> Vec<u8> {
     let mut output = Vec::new();
     predicate.encode(&mut output);
@@ -153,7 +151,11 @@ fn normalize_variadic(predicates: &[Predicate], all: bool) -> Predicate {
     normalized.sort_by_key(encoded_bytes);
     normalized.dedup();
     if normalized.is_empty() {
-        return if all { Predicate::True } else { Predicate::False };
+        return if all {
+            Predicate::True
+        } else {
+            Predicate::False
+        };
     }
     if normalized.len() == 1 {
         return normalized.remove(0);
@@ -187,14 +189,16 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
             .get(entity_id)
             .and_then(|entity| entity.fields.get(field))
             .is_some_and(|fact| compare(&fact.value, *op, value)),
-        Predicate::EdgeExists { edge_id, kind } => snapshot
-            .graph
-            .edges
-            .get(edge_id)
-            .is_some_and(|edge| match kind.as_ref() {
-                Some(expected) => &edge.kind == expected,
-                None => true,
-            }),
+        Predicate::EdgeExists { edge_id, kind } => {
+            snapshot
+                .graph
+                .edges
+                .get(edge_id)
+                .is_some_and(|edge| match kind.as_ref() {
+                    Some(expected) => &edge.kind == expected,
+                    None => true,
+                })
+        }
         Predicate::Paused(expected) => snapshot.paused == *expected,
         Predicate::All(predicates) => predicates
             .iter()
@@ -257,9 +261,7 @@ impl WorldQuery {
         if self.limit == 0 || self.limit > hard_limit {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "query limit must be between 1 and the negotiated hard limit {hard_limit}"
-                ),
+                format!("query limit must be between 1 and the negotiated hard limit {hard_limit}"),
             ));
         }
         Ok(())
@@ -294,7 +296,7 @@ pub fn execute_query(
     match query.order {
         QueryOrder::EntityIdAscending => entities.sort_by_key(|entity| entity.id),
         QueryOrder::EntityIdDescending => {
-            entities.sort_by(|left, right| right.id.cmp(&left.id));
+            entities.sort_by_key(|entity| std::cmp::Reverse(entity.id));
         }
         QueryOrder::RevisionDescending => {
             entities.sort_by(|left, right| {
@@ -306,7 +308,9 @@ pub fn execute_query(
         }
         QueryOrder::LabelAscending => {
             entities.sort_by(|left, right| {
-                left.label.cmp(&right.label).then_with(|| left.id.cmp(&right.id))
+                left.label
+                    .cmp(&right.label)
+                    .then_with(|| left.id.cmp(&right.id))
             });
         }
     }
@@ -362,7 +366,7 @@ mod tests {
 
     use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, ObservationCursor};
 
-    use super::{execute_query, CompareOp, Predicate, QueryOrder, WorldQuery};
+    use super::{CompareOp, Predicate, QueryOrder, WorldQuery, execute_query};
     use crate::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
 
     fn snapshot() -> WorldSnapshot {

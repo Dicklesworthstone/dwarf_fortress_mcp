@@ -305,10 +305,11 @@ impl OperationContext {
         map_area: Option<MapCuboid>,
     ) -> Result<()> {
         if self.cancellation_requested {
-            return Err(
-                DfmcpError::new(ErrorCode::CancellationRequested, "operation is cancelled")
-                    .retryable(false),
-            );
+            return Err(DfmcpError::new(
+                ErrorCode::CancellationRequested,
+                "operation is cancelled",
+            )
+            .retryable(false));
         }
         self.budget.validate()?;
         if self.grants.iter().any(|grant| {
@@ -403,26 +404,16 @@ mod tests {
 
     #[test]
     fn cuboid_scope_is_inclusive() -> crate::Result<()> {
-        let outer = MapCuboid::new(
-            MapCoord { x: 0, y: 0, z: 0 },
-            MapCoord { x: 9, y: 9, z: 2 },
-        )?;
-        let inner = MapCuboid::new(
-            MapCoord { x: 1, y: 1, z: 0 },
-            MapCoord { x: 8, y: 8, z: 1 },
-        )?;
+        let outer = MapCuboid::new(MapCoord { x: 0, y: 0, z: 0 }, MapCoord { x: 9, y: 9, z: 2 })?;
+        let inner = MapCuboid::new(MapCoord { x: 1, y: 1, z: 0 }, MapCoord { x: 8, y: 8, z: 1 })?;
         assert!(outer.contains_cuboid(inner));
         assert_eq!(outer.tile_count(), Some(300));
         Ok(())
     }
 
-
     #[test]
     fn restricted_scope_rejects_an_unscoped_request() -> crate::Result<()> {
-        let area = MapCuboid::new(
-            MapCoord { x: 0, y: 0, z: 0 },
-            MapCoord { x: 9, y: 9, z: 0 },
-        )?;
+        let area = MapCuboid::new(MapCoord { x: 0, y: 0, z: 0 }, MapCoord { x: 9, y: 9, z: 0 })?;
         let mut scope = CapabilityScope {
             fortress_id: Some(FortressId::new(7)),
             map_area: Some(area),
@@ -431,11 +422,7 @@ mod tests {
         scope.entity_ids.insert(EntityId::new(11));
         assert!(!scope.permits(FortressId::new(7), &[], None));
         assert!(!scope.permits(FortressId::new(7), &[EntityId::new(11)], None));
-        assert!(scope.permits(
-            FortressId::new(7),
-            &[EntityId::new(11)],
-            Some(area),
-        ));
+        assert!(scope.permits(FortressId::new(7), &[EntityId::new(11)], Some(area),));
         Ok(())
     }
 

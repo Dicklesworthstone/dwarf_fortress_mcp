@@ -122,6 +122,7 @@ pub struct PreparedPlan {
 
 impl PreparedPlan {
     #[must_use]
+    #[allow(clippy::too_many_arguments)] // sealed-plan constructor mirrors the frozen plan shape
     pub fn from_parts(
         intent_id: IntentId,
         anchor: StateAnchor,
@@ -297,27 +298,24 @@ impl PreparedPlan {
                     "temporal action lacks a bounded obligation",
                 ));
             }
-            if let Some(obligation) = &step.obligation {
-                if obligation.deadline_tick <= self.anchor.tick
+            if let Some(obligation) = &step.obligation
+                && (obligation.deadline_tick <= self.anchor.tick
                     || obligation.poll_interval_ticks == 0
                     || obligation.stable_for_observations == 0
                     || obligation.terminal != obligation.terminal.normalized()
                     || obligation
                         .failure
                         .as_ref()
-                        .is_some_and(|failure| failure != &failure.normalized())
-                {
-                    return Err(DfmcpError::new(
-                        ErrorCode::InvalidPlan,
-                        "plan obligation is unbounded or noncanonical",
-                    ));
-                }
-            }
-            if step
-                .compensation
-                .as_ref()
-                .is_some_and(|action| action != &action.normalized() || action.risk() == RiskTier::Irreversible)
+                        .is_some_and(|failure| failure != &failure.normalized()))
             {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidPlan,
+                    "plan obligation is unbounded or noncanonical",
+                ));
+            }
+            if step.compensation.as_ref().is_some_and(|action| {
+                action != &action.normalized() || action.risk() == RiskTier::Irreversible
+            }) {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidPlan,
                     "plan compensation is noncanonical or irreversible",
@@ -340,7 +338,9 @@ impl PreparedPlan {
 }
 
 fn predicates_are_canonical(predicates: &[Predicate]) -> bool {
-    predicates.iter().all(|predicate| predicate == &predicate.normalized())
+    predicates
+        .iter()
+        .all(|predicate| predicate == &predicate.normalized())
         && predicates
             .windows(2)
             .all(|pair| pair[0].canonical_bytes() < pair[1].canonical_bytes())
