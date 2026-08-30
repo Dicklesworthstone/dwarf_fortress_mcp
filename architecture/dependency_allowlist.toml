@@ -24,8 +24,7 @@ external_runtime_dependencies = []
 # bumping the pin is the mechanism for taking upstream fixes, and every pin
 # bump ships with a conformance note in docs/DOGFOODING_FASTMCP.md.
 crate = "fastmcp-rust"
-repository = "https://github.com/Dicklesworthstone/fastmcp_rust"
-pin = "bd41e69070f5604d6dbb24185dcabaef591a01e1"
+pin = "6481d49a6f9282f8161015323283fb7764dcf2f7"
 profile = "modern-only-mcp-2026-07-28"
 required_features = ["tasks"]
 forbidden_features = [

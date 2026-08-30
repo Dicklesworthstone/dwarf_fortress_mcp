@@ -53,6 +53,7 @@ which upstream regression forced it.
 | Date | Pin (`fastmcp_rust` rev) | dfmcp consume revision | Upstream issues closed by the bump | Notes |
 |---|---|---|---|---|
 | 2026-08-29 | `bd41e69070f5604d6dbb24185dcabaef591a01e1` (main @ adoption) | v0.0.1 initial integration | — | modern-only profile (`default-features = false`, `tasks`); first stdio laboratory slice |
+| 2026-08-29 | `6481d49a6f9282f8161015323283fb7764dcf2f7` (main: fixes #59, #60) | v0.0.1 first integration | #59, #60 | modern-only profile compiles end to end (transport + facade + tasks); #61 (feature-less server build) open upstream, does not affect the admitted profile |
 
 ## Conformance status
 
