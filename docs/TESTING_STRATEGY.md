@@ -1,4 +1,8 @@
 # Testing Strategy
+> Transport note (ADR-013): the MCP wire is exercised through the pinned `fastmcp_rust`
+> modern-only plane. Transport conformance (TEST-023) and dogfooding discipline (TEST-024) are
+> registry families; protocol defects are fixed upstream and consumed as recorded pin bumps
+> (`docs/DOGFOODING_FASTMCP.md`), never masked here.
 
 ## Principle
 

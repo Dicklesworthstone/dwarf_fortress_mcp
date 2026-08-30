@@ -150,3 +150,11 @@ credited and license boundaries preserved.
 - Negative evidence can falsify a claim but cannot positively certify readiness.
 - Derived indexes and graph projections cannot become authoritative over game observations.
 - Every live mutation guarantee requires disposable-fort evidence for named versions.
+
+## Owned MCP sibling: fastmcp_rust
+
+- Source: <https://github.com/Dicklesworthstone/fastmcp_rust>
+- Consumed as the MCP presentation plane, modern-only MCP 2026-07-28, exact-revision pinned
+  (ADR-013, `docs/FASTMCP_INTEGRATION.md`); upstream defects are tracked per
+  `docs/DOGFOODING_FASTMCP.md`.
+- MCP 2026-07-28 specification: <https://modelcontextprotocol.io/specification/2026-07-28>

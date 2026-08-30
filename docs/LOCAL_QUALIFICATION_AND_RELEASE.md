@@ -70,6 +70,11 @@ Against each supported DF/DFHack pair:
 
 Only earned gates appear in the release status. Q1 success must never be phrased as live-game verification.
 
+Protocol conformance is a separate, transport-independent rung (WP-21): the MCP 2026-07-28
+conformance suite runs against the pinned `fastmcp_rust` revision on every pin bump, and results
+are recorded in `docs/DOGFOODING_FASTMCP.md`. MCP conformance evidence never implies live-game
+verification.
+
 ## 3. Qualification receipt
 
 `scripts/qualify_local.sh` writes a machine-readable receipt containing:

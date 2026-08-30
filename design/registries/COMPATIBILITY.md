@@ -9,7 +9,9 @@ A session records:
 - Dwarf Fortress distribution and exact version/build identity;
 - DFHack exact version/commit and ABI/protocol identifiers;
 - bridge plugin protocol and schema digest;
-- MCP negotiated protocol version and transport;
+- MCP negotiated protocol version and transport: **2026-07-28, modern-only**; the
+  `legacy-2024-11-05` graph is never enabled, and `dfmcp/0` semantic negotiation remains
+  authoritative above MCP negotiation (ADR-013);
 - `dwarf_fortress_mcp` build and registry digests;
 - operating system/architecture where behavior is relevant;
 - successful, failed, and unavailable semantic probes.

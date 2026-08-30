@@ -27,6 +27,8 @@ seeds/schedules, and artifacts.
 | TEST-020 | prompt/taint security | hostile names, descriptions, imported knowledge, tool arguments |
 | TEST-021 | deterministic replay | equal outputs across schedules/platforms for recorded transcript |
 | TEST-022 | performance budgets | token/latency/memory envelopes with regression gates |
+| TEST-023 | transport conformance | MCP 2026-07-28 conformance suite on the pinned fastmcp_rust revision; proof that the legacy-2024-11-05 graph is absent from the build |
+| TEST-024 | dogfooding discipline | every transport workaround carries an upstream issue link; every pin bump carries a conformance note and gate rerun |
 
 ## Release gate minimum
 

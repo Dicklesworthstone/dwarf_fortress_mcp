@@ -1,6 +1,9 @@
 # MCP Surface
 
-The public surface is intentionally smaller than the internal action and query registries.
+The public surface is intentionally smaller than the internal action and query registries. The
+wire is **MCP 2026-07-28, modern-only**, carried by the owned `fastmcp_rust` sibling at an exact
+pinned revision (ADR-013, `docs/FASTMCP_INTEGRATION.md`); the `legacy-2024-11-05` graph is never
+compiled, and `dfmcp/0` semantic negotiation remains authoritative above MCP negotiation.
 
 ## Versioning
 
@@ -144,5 +147,6 @@ drill-down resources.
 
 ## Schemas
 
-The prospective schemas in `schemas/` are phase-zero design artifacts. They freeze naming and
-bounds but are not yet a claim of transport implementation.
+The schemas in `schemas/` freeze the naming and bounds of the logical surface. They are transport-
+independent: the MCP wire layer renders the dotted tool names with underscores, and the modern-era
+request routing is provided by the pinned `fastmcp-rust` facade rather than by this repository.

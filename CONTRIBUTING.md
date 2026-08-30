@@ -19,9 +19,10 @@ that closes the work.
 ## Dependency changes
 
 The dependency universe is closed. A new crate is not justified by convenience or popularity.
-Any proposed dependency must either be an owned `asupersync`/Franken-suite crate or pass a
-separate architecture decision that proves it is fundamental, deterministic under the lab,
-compatible with safe Rust, and materially better than an owned implementation. Update
+Any proposed dependency must either be an owned `asupersync`/Franken-suite crate, the owned
+`fastmcp_rust` MCP plane within its admitted modern-only profile (ADR-013), or pass a separate
+architecture decision that proves it is fundamental, deterministic under the lab, compatible with
+safe Rust, and materially better than an owned implementation. Update
 `architecture/dependency_allowlist.toml` and its evidence, not merely `Cargo.toml`.
 
 ## Design changes

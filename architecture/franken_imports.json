@@ -385,6 +385,46 @@
           ]
         }
       ]
+    },
+    {
+      "project": "fastmcp_rust",
+      "role": "owned MCP 2026-07-28 modern-only presentation plane: transport, sessions, tasks",
+      "imports": [
+        {
+          "id": "FM-SERVER",
+          "mechanism": "modern-only ServerBuilder stdio server exposing the frozen 11-tool fortress.* waist",
+          "owner": "presentation",
+          "invariant": "transport adds no authority and never bypasses prepare/revalidate/commit/observe/prove",
+          "reference": "crates/dfmcp-mcp (ADR-013)",
+          "admission": [
+            "default-features = false (no legacy-2024-11-05 graph)",
+            "tasks feature enabled; auth/JOSE/OAuth/WebSocket/proxy features forbidden",
+            "exact upstream revision pin; bump requires a conformance note"
+          ]
+        },
+        {
+          "id": "FM-TASKS",
+          "mechanism": "application-owned MCP Tasks store via ServerBuilder::final_tasks",
+          "owner": "obligations",
+          "invariant": "bounded-obligation semantics (terminal/failure predicates, drain, compensation) stay in dfmcp",
+          "reference": "WP-13 gate 3 and WP-21",
+          "admission": [
+            "the dfmcp obligation engine is the store; MCP tasks are a projection",
+            "cancel remains request/drain/compensate/finalize, never record deletion"
+          ]
+        },
+        {
+          "id": "FM-CX",
+          "mechanism": "caller-owned asupersync Cx contexts at every handler boundary",
+          "owner": "runtime",
+          "invariant": "one exclusive runtime; no ambient authority; cancellation at every yield",
+          "reference": "asupersync ledger entry",
+          "admission": [
+            "no second runtime anywhere in the resolved graph",
+            "deterministic laboratory compatibility preserved"
+          ]
+        }
+      ]
     }
   ]
 }

@@ -9,14 +9,22 @@ A crate is forbidden unless it belongs to one of these classes:
 1. `core`, `alloc`, or `std`;
 2. an owned `asupersync` crate;
 3. an owned Franken-suite crate with an admitted semantic contract;
-4. a tiny fundamental serialization/data-format crate explicitly listed in the allowlist;
-5. a build-only tool whose output is reproducible, checked in where appropriate, and absent from the runtime trust domain.
+4. the owned `fastmcp_rust` MCP presentation plane, consumed only by `dfmcp-mcp`, pinned to an
+   exact upstream revision, and built modern-only (ADR-013);
+5. a tiny fundamental serialization/data-format crate explicitly listed in the allowlist;
+6. a build-only tool whose output is reproducible, checked in where appropriate, and absent from
+   the runtime trust domain.
 
-The current phase-zero workspace intentionally has only path dependencies among its own crates.
+The semantic crates (`dfmcp-core`, `dfmcp-world`, `dfmcp-intent`, `dfmcp-adapter`, `dfmcp-lab`)
+keep only path dependencies among themselves. The presentation crate `dfmcp-mcp` additionally
+consumes the owned `fastmcp-rust` sibling and the fundamental serialization crates, under the
+machine-checked constraints of `architecture/dependency_allowlist.toml` and ADR-013.
 
 ## 2. Fundamental exceptions
 
-The initial prospective exceptions are `serde` and `serde_json`, with default features minimized. They are not automatically added; the direct MCP/protocol implementation must first demonstrate that using them is preferable to fleet-owned equivalents. Any additional exception requires an ADR containing:
+The admitted fundamental exceptions are `serde` and `serde_json` (consumed by `dfmcp-mcp` for
+tool arguments and responses), with exact pinned versions shared with the fastmcp_rust workspace.
+Any additional exception requires an ADR containing:
 
 - exact need and rejected owned alternatives;
 - feature-level dependency graph;
@@ -26,15 +34,15 @@ The initial prospective exceptions are `serde` and `serde_json`, with default fe
 - deterministic-lab implications;
 - removal plan if the Franken equivalent becomes available.
 
-## 3. Explicitly prohibited convenience dependencies
-
 Without a constitutional amendment, the runtime may not depend on:
 
 - Tokio, async-std, smol, Rayon, crossbeam executors, or hidden thread pools;
 - petgraph, graph-tool bindings, NetworkX/Python, or opaque graph engines;
 - rusqlite, sqlx, Diesel, RocksDB, LMDB, SQLite C FFI, or external databases;
 - reqwest, hyper, axum, tonic, tower, gRPC frameworks, or general web stacks;
-- prost/codegen as an excuse for an unbounded wire surface;
+- prost/codegen as an excuse for an unbounded wire surface in this project's own code (prost may
+  appear in `Cargo.lock` only as an admitted asupersync-internal transitive; see
+  `[admitted].lock_exceptions` in the allowlist);
 - Tantivy, Lucene, HNSW libraries, vector databases, or external search services;
 - mmap wrappers or native libraries that introduce unsafe/FFI into the core process;
 - dynamic plugin loading;

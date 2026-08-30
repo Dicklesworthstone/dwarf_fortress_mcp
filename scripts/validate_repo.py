@@ -240,6 +240,7 @@ def validate_repository() -> None:
         "Cargo.toml", "Cargo.lock", "LICENSE", "proto/dfmcp.proto", "schemas/dfmcp.schema.json",
         "design/registries/INVARIANTS.md", "scripts/verify.sh", "scripts/qualify_local.sh",
         "scripts/check_dependency_policy.py", ".github/workflows/ci.yml", ".github/workflows/release.yml",
+        "crates/dfmcp-mcp/Cargo.toml", "docs/FASTMCP_INTEGRATION.md", "docs/DOGFOODING_FASTMCP.md",
         "FRANKENSTACK_DEEP_DIVE.md", "docs/WORLD_STATE_MVCC.md",
         "docs/FORTRESS_GRAPH_ALGORITHMS.md", "docs/ATP_STATE_AND_EVIDENCE_PLANE.md",
         "docs/DEPENDENCY_POLICY.md", "docs/LOCAL_QUALIFICATION_AND_RELEASE.md",
@@ -264,9 +265,24 @@ def validate_repository() -> None:
     check(lock.get("version") == 4, "Cargo.lock must use format version 4")
     locked_packages = {entry.get("name") for entry in lock.get("package", []) if isinstance(entry, dict)}
     expected_locked_packages = {
-        "dfmcp-core", "dfmcp-world", "dfmcp-intent", "dfmcp-adapter", "dfmcp-lab", "dwarf-fortress-mcp"
+        "dfmcp-core", "dfmcp-world", "dfmcp-intent", "dfmcp-adapter", "dfmcp-lab", "dfmcp-mcp",
+        "dwarf-fortress-mcp",
     }
-    check(locked_packages == expected_locked_packages, "Cargo.lock package closure differs from the workspace")
+    check(
+        expected_locked_packages <= locked_packages,
+        "Cargo.lock is missing one or more workspace member packages",
+    )
+    policy_document = tomllib.loads(read("architecture/dependency_allowlist.toml"))
+    prohibited_packages = {
+        str(name).replace("_", "-").lower()
+        for name in policy_document.get("prohibited", {}).get("crates", [])
+    }
+    lock_exceptions = {
+        str(name).replace("_", "-").lower()
+        for name in policy_document.get("admitted", {}).get("lock_exceptions", [])
+    }
+    offenders = sorted((locked_packages & prohibited_packages) - lock_exceptions)
+    check(not offenders, f"prohibited crates in Cargo.lock without a lock exception: {offenders}")
 
     root_manifest = parsed_toml.get(ROOT / "Cargo.toml", {})
     workspace = root_manifest.get("workspace", {})
@@ -278,14 +294,64 @@ def validate_repository() -> None:
     components = set(toolchain.get("components", []))
     check({"clippy", "rustfmt", "rust-src", "llvm-tools-preview"} <= components, "nightly toolchain components are incomplete")
     members = workspace.get("members", [])
-    check(len(members) == 6, f"expected six workspace members, got {len(members)}")
+    check(len(members) == 7, f"expected seven workspace members, got {len(members)}")
     for member in members:
         check((ROOT / member / "Cargo.toml").is_file(), f"workspace member missing Cargo.toml: {member}")
+    owned_prefixes = tuple(
+        str(prefix).replace("_", "-").lower()
+        for key in ("owned_runtime_prefixes", "owned_mcp_prefixes", "owned_franken_prefixes")
+        for prefix in policy_document.get("classes", {}).get(key, [])
+    )
+    admitted_direct = {
+        str(name).replace("_", "-").lower()
+        for name in policy_document.get("classes", {}).get("fundamental_external", [])
+    } | {
+        str(name).replace("_", "-").lower()
+        for name in policy_document.get("phase_zero", {}).get("external_runtime_dependencies", [])
+    }
+
+    def dependency_package(name: str, specification: Any) -> str:
+        if isinstance(specification, dict) and isinstance(specification.get("package"), str):
+            return specification["package"].replace("_", "-").lower()
+        return name.replace("_", "-").lower()
+
     for path, manifest in parsed_toml.items():
         for table_name in ("dependencies", "dev-dependencies", "build-dependencies"):
             for name, specification in manifest.get(table_name, {}).items():
+                if isinstance(specification, dict) and specification.get("workspace") is True:
+                    continue
+                package = dependency_package(name, specification)
                 is_local = isinstance(specification, dict) and "path" in specification
-                check(is_local, f"phase-zero manifest {path.relative_to(ROOT)} has external dependency {name}")
+                is_owned = package.startswith(owned_prefixes)
+                is_admitted = package in admitted_direct
+                check(
+                    is_local or is_owned or is_admitted,
+                    f"manifest {path.relative_to(ROOT)} declares dependency outside the closed universe: {name}",
+                )
+
+    transport = policy_document.get("mcp_transport", {})
+    transport_spec = root_manifest.get("workspace", {}).get("dependencies", {}).get("fastmcp-rust")
+    check(isinstance(transport_spec, dict), "workspace must declare the fastmcp-rust transport inline")
+    if isinstance(transport_spec, dict):
+        check(
+            transport_spec.get("git") == transport.get("repository")
+            and transport_spec.get("rev") == transport.get("pin"),
+            "fastmcp-rust must pin the admitted owned repository revision",
+        )
+        check(
+            transport_spec.get("default-features", True) is False,
+            "fastmcp-rust must build modern-only: default-features = false",
+        )
+        transport_features = {str(feature) for feature in transport_spec.get("features", [])}
+        check(
+            "legacy-2024-11-05" not in transport_features,
+            "fastmcp-rust must never enable the legacy-2024-11-05 graph",
+        )
+        required_features = {str(feature) for feature in transport.get("required_features", [])}
+        check(
+            required_features <= transport_features,
+            f"fastmcp-rust is missing required modern features: {sorted(required_features - transport_features)}",
+        )
 
     rust_files = sorted(ROOT.glob("crates/**/*.rs"))
     check(bool(rust_files), "no Rust source files found")

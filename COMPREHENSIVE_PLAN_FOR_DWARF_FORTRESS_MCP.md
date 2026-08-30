@@ -5147,3 +5147,71 @@ whole fortress every turn, or wrapping every mutation in ceremony. It obtains co
 semantic witnesses, speed from immutable sharing and tiered projections, economy from progressive
 cognition and deltas, durability from content-addressed generations and repair, and honesty from
 explicit indeterminate states and evidence gates.
+
+---
+
+# Part XXII — Owned MCP transport adoption (fastmcp_rust, MCP 2026-07-28)
+
+## 22.1 Revision authority
+
+This 2026-08-29 revision adopts the owned `fastmcp_rust` sibling as the MCP presentation plane
+(ADR-013). It amends Part XI (MCP protocol surface) and Part XVIII (work packages) and does not
+alter the fifty invariants of Part III: the transport adds no authority, cannot bypass
+prepare/revalidate/commit/observe/prove, and cannot redefine canonical identity or success.
+
+## 22.2 Decision and scope
+
+JSON-RPC framing, stdio/HTTP transports, session lifecycle, era negotiation, and cancellation
+routing are commodity plumbing with large adversarial surface and near-zero overlap with this
+project's thesis. The plane is borrowed from the owned sibling; the semantics stay here.
+
+- `dfmcp-mcp` is the only crate permitted to depend on `fastmcp-rust`.
+- `dfmcp-mcp` is presentation-only: no fastmcp type crosses the intent, world, or adapter seams.
+- The plane is replaceable: if the sibling violates the ADR-013 counterexamples, the seam reverts
+  to a hand-rolled transport without touching any other crate.
+
+## 22.3 The admitted profile
+
+Machine-enforced by `architecture/dependency_allowlist.toml` (`[mcp_transport]`,
+`[admitted].lock_exceptions`) and checked by `scripts/check_dependency_policy.py` and
+`scripts/validate_repo.py`:
+
+- crate `fastmcp-rust`, exact upstream revision pin;
+- `default-features = false` (the `legacy-2024-11-05` graph is never compiled);
+- feature `tasks` enabled; auth/JOSE/OAuth/WebSocket/proxy features forbidden;
+- `prost` admitted solely as an asupersync-internal transitive (lock exception).
+
+## 22.4 Obligations as MCP Tasks
+
+The bounded-obligation engine (Part VIII) remains the sole authority for temporal work. The
+modern Tasks surface (`tasks/get|update|cancel`) is a projection: `ServerBuilder::final_tasks`
+receives an application-owned store backed by the obligation engine, so drain progress,
+stability requirements, failure predicates, and compensation policy keep their dfmcp semantics.
+Cancellation remains request/drain/compensate/finalize and never means record deletion.
+
+## 22.5 Dogfooding and the upstream loop
+
+Adopting the modern-only profile is a deliberate conformance commitment for MCP 2026-07-28:
+this project is the hammer that finds fastmcp_rust's spec and feature-gating defects.
+Defects are filed upstream per `docs/DOGFOODING_FASTMCP.md`, fixed upstream, and consumed here
+as recorded pin bumps with conformance notes. dfmcp-side workarounds for transport defects are
+prohibited unless annotated with the upstream issue and listed in the pin-history table.
+
+The first cycle already validated the loop: with the modern-only profile, `fastmcp-server` at the
+adoption pin failed to compile because `legacy_adapter_response_async` used `Legacy2024*` types
+outside their `#[cfg(any(feature = "legacy-2024-11-05", test))]` gate — invisible to any
+default-features build, caught immediately by this project's profile.
+
+## 22.6 Work-package deltas
+
+- WP-13 (MCP server) is built on the pinned fastmcp_rust plane: gate 1 is the stdio laboratory
+  slice; gate 2 is session-scoped capability negotiation; gate 3 is the Tasks/obligation binding.
+- New WP-21 (MCP conformance and dogfooding): conformance suite on the pinned revision, the
+  upstream issue loop, and the pin-bump ledger, evidenced by TEST-023 and TEST-024.
+
+## 22.7 Acceptance
+
+This part is accepted when: the stdio laboratory slice compiles and passes the workspace gates on
+the pinned revision; the policy checker rejects any non-conforming profile mechanically; the
+first upstream defect cycle (issue, fix, pin bump, conformance note) is complete; and session-
+scoped authority plus the Tasks binding land under WP-13 gates 2 and 3.

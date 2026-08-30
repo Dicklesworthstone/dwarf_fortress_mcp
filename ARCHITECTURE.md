@@ -133,18 +133,27 @@ The first implementation for every semantic subsystem is deliberately simple and
 
 ## Dependency policy
 
-The universe is `core`/`alloc`/`std`, `asupersync`, admitted Franken crates, and rare fundamental exceptions named in the machine allowlist. There is no second async runtime, external graph engine, SQL client, C SQLite, web framework, RPC framework, or search engine in the production trust domain.
+The universe is `core`/`alloc`/`std`, `asupersync`, admitted Franken crates, the owned
+`fastmcp_rust` MCP plane (modern-only MCP 2026-07-28, pinned; ADR-013), and rare fundamental
+exceptions named in the machine allowlist. There is no second async runtime, external graph
+engine, SQL client, C SQLite, web framework, RPC framework, non-owned MCP framework, or search
+engine in the production trust domain.
 
 ## Current and target crate graphs
 
-The six-crate phase-zero scaffold remains executable and intentionally small:
+The seven-crate scaffold plus the pinned transport:
 
 ```text
 dfmcp-core → dfmcp-world → dfmcp-intent → dfmcp-adapter → dfmcp-lab
-      └──────────────────────────────────────────────→ dwarf-fortress-mcp
+      └────────────────────────────────────────────→ dwarf-fortress-mcp
+dfmcp-world → dfmcp-mcp → dwarf-fortress-mcp
+dfmcp-mcp → fastmcp-rust (owned sibling, modern-only MCP 2026-07-28, pinned rev)
 ```
 
-The target decomposition is specified in Part XXI of the comprehensive plan. A crate is split only to establish a dependency, trust, or verification boundary.
+`dfmcp-mcp` is presentation-only and replaceable; the target decomposition is specified in
+Part XXI of the comprehensive plan, and the transport contract in
+`docs/FASTMCP_INTEGRATION.md`. A crate is split only to establish a dependency, trust, or
+verification boundary.
 
 ## Non-bypassability
 

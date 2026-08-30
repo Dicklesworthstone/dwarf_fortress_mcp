@@ -14,6 +14,8 @@
 10. run startup doctor;
 11. admit read-only sessions;
 12. enable mutation families whose compatibility gates pass.
+13. start the agent-session transport when expected: `dwarf-fortress-mcp serve` runs the pinned
+    fastmcp_rust stdio server (MCP 2026-07-28, modern-only; ADR-013);
 
 Critical uncertainty starts safe mode.
 

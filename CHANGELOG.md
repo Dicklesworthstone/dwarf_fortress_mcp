@@ -6,6 +6,15 @@ versions describe design and compatibility milestones rather than production rea
 ## [Unreleased]
 
 ### Added
+- Adopted the owned `fastmcp_rust` sibling as the MCP presentation plane (ADR-013): modern-only
+  MCP 2026-07-28, `default-features = false` with `tasks`, pinned to an exact upstream revision
+  for dogfooding; upstream defects return via gh issues (`docs/DOGFOODING_FASTMCP.md`).
+- New `dfmcp-mcp` crate exposing the frozen 11-tool `fortress.*` waist over stdio through
+  `fastmcp-rust`, backed by the deterministic laboratory adapter
+  (`cargo run -p dwarf-fortress-mcp -- serve`).
+- Machine-enforced transport policy: `[mcp_transport]` profile and lock-exception screening in
+  `architecture/dependency_allowlist.toml`, checked by `scripts/check_dependency_policy.py` and
+  `scripts/validate_repo.py`.
 
 - Deep source-level audit of asupersync, FrankenSQLite, FrankenFS, FrankenSearch,
   FrankenMarkdown, FrankenGraphDB, FrankenNetworkX, and Doodlestein Self-Releaser.

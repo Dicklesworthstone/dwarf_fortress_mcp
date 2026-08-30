@@ -44,11 +44,14 @@ forbidden_features = [
 ]
 
 [admitted]
-# Non-owned packages tolerated inside Cargo.lock as transitive closure of the
-# owned MCP plane and the fundamental serialization crates. Direct
-# declarations never pass through this list; the checker polices manifests,
-# and this list polices the resolved graph.
-lock_packages = []
+# Non-owned packages tolerated inside Cargo.lock despite the prohibited list.
+# Each exception names the owned path that pulls it and must never appear as
+# a direct declaration in any workspace manifest.
+#
+# prost: transitive of asupersync v0.4.9 (owned runtime; internal OTLP
+# evidence mapping). The dfmcp trust domain never references prost; the
+# DFHack bridge protocol remains a design artifact in proto/dfmcp.proto.
+lock_exceptions = ["prost"]
 
 [prohibited]
 crates = [

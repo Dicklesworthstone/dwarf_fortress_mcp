@@ -6,6 +6,10 @@
 
 **Bridge** — out-of-process DFHack-side service connecting canonical protocol to game APIs.
 
+**Transport plane** — the MCP presentation layer (`dfmcp-mcp` over the pinned
+  `fastmcp_rust` sibling): framing, sessions, and wire protocol only. It carries no
+  authority and never crosses the intent, world, or adapter seams.
+
 **Canonical state** — versioned normalized semantic truth used for planning and proof.
 
 **Capability** — explicit authority over an operation class and bounded scope.

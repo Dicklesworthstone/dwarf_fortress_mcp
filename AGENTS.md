@@ -22,15 +22,23 @@ must be planned, witnessed, authorized, committed, observed, and proved.
 8. `docs/ATP_STATE_AND_EVIDENCE_PLANE.md`
 9. `docs/DEPENDENCY_POLICY.md`
 10. `MCP_SURFACE.md`
-11. relevant machine registries under `architecture/` and `design/registries/`
+11. `docs/FASTMCP_INTEGRATION.md`
+12. `docs/DOGFOODING_FASTMCP.md`
+13. relevant machine registries under `architecture/` and `design/registries/`
 
 ## Constitutional engineering rules
 
 - Rust 2024 on the latest nightly toolchain.
 - Safe Rust throughout the Rust workspace: `unsafe_code = "forbid"`.
-- The dependency universe is closed. Use `asupersync`, owned Franken-suite crates, and only the
-  explicitly admitted fundamental crates. Do not introduce Tokio, async-std, petgraph, rusqlite,
-  reqwest, axum, tonic, prost, a generic MCP framework, or another hidden runtime.
+- The dependency universe is closed. Use `asupersync`, owned Franken-suite crates, the owned
+  `fastmcp_rust` MCP plane (modern-only MCP 2026-07-28, exact-revision pinned; ADR-013), and only
+  the explicitly admitted fundamental crates. Do not introduce Tokio, async-std, petgraph,
+  rusqlite, reqwest, axum, tonic, prost, any non-owned MCP framework, or another hidden runtime.
+  The transport adds no authority: no fastmcp type crosses the intent, world, or adapter seams.
+- MCP is 2026-07-28, modern-only, forever. Never enable the `legacy-2024-11-05` graph. Transport
+  defects are filed upstream against `Dicklesworthstone/fastmcp_rust` and fixed here only by
+  recorded pin bumps with conformance notes (`docs/DOGFOODING_FASTMCP.md`); masking them
+  dfmcp-side is a bug in this repository.
 - `asupersync` is the sole asynchronous runtime, structured-concurrency substrate, cancellation
   model, deterministic laboratory, and ATP foundation.
 - No detached task, thread, watcher, cache maintainer, bridge request, checkpoint writer, or

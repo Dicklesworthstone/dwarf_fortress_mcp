@@ -1,7 +1,10 @@
 # MCP Examples
 
-These examples show intended semantics. Exact MCP framing may change during implementation; the
-`dfmcp` objects are the design target.
+These examples show intended semantics of the logical `dfmcp` objects, which remain the design
+target. Wire framing is no longer open: it is MCP 2026-07-28, modern-only, carried by the pinned
+`fastmcp_rust` plane (ADR-013); MCP tool names render the logical dots as underscores
+(`fortress.plan` → `fortress_plan`). Run the laboratory server with
+`cargo run -p dwarf-fortress-mcp -- serve`.
 
 ## 1. Open a read-only session
 

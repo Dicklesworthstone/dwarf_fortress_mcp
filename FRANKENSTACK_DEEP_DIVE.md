@@ -4,6 +4,12 @@
 **Revision:** 2
 **Date:** 2026-08-29
 
+
+> Transport note (2026-08-29): the MCP presentation plane has since been adopted from the owned
+> [`fastmcp_rust`](https://github.com/Dicklesworthstone/fastmcp_rust) sibling (ADR-013,
+> `docs/FASTMCP_INTEGRATION.md`). The analysis below remains the design input for the semantic
+> substrate; it predates and does not cover the transport decision.
+
 This document records the second-pass repository investigation that followed the initial architecture. It is intentionally narrower and deeper than a feature survey. For every sibling project it asks five questions:
 
 1. Which mechanism is genuinely load-bearing for Dwarf Fortress control?

@@ -6,11 +6,60 @@ import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Iterable
-
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "architecture/dependency_allowlist.toml"
 OWNED_GIT_PREFIX = "https://github.com/Dicklesworthstone/"
 FULL_GIT_REVISION = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def dependency_spec(specification: Any, workspace_deps: dict[str, Any], declared_name: str) -> Any:
+    if isinstance(specification, dict) and specification.get("workspace") is True:
+        return workspace_deps.get(declared_name, specification)
+    return specification
+
+
+def check_transport_policy(policy: dict[str, Any], workspace_deps: dict[str, Any]) -> list[str]:
+    transport = policy.get("mcp_transport", {})
+    crate = normalized(str(transport.get("crate", "")))
+    failures: list[str] = []
+    if not crate:
+        return failures
+    pin = str(transport.get("pin", ""))
+    repository = str(transport.get("repository", ""))
+    required = {str(feature) for feature in transport.get("required_features", [])}
+    forbidden = {str(feature) for feature in transport.get("forbidden_features", [])}
+    found = False
+    manifests = [ROOT / "Cargo.toml", *sorted((ROOT / "crates").glob("*/Cargo.toml"))]
+    for manifest_path in manifests:
+        manifest = load_toml(manifest_path)
+        for table_name, table in dependency_tables(manifest):
+            for declared_name, specification in table.items():
+                if normalized(dependency_name(specification, declared_name)) != crate:
+                    continue
+                found = True
+                location = f"{manifest_path.relative_to(ROOT)} [{table_name}]"
+                spec = dependency_spec(specification, workspace_deps, declared_name)
+                if not isinstance(spec, dict):
+                    failures.append(f"{location}: {crate} must be declared with an inline table")
+                    continue
+                if "workspace" in spec:
+                    continue
+                if spec.get("git") != repository:
+                    failures.append(f"{location}: {crate} must pin the owned repository {repository}")
+                if spec.get("rev") != pin:
+                    failures.append(f"{location}: {crate} must pin the admitted revision {pin}")
+                if spec.get("default-features", True) is not False:
+                    failures.append(f"{location}: {crate} must set default-features = false (modern-only)")
+                features = {str(feature) for feature in spec.get("features", [])}
+                missing = required - features
+                if missing:
+                    failures.append(f"{location}: {crate} is missing required features {sorted(missing)}")
+                enabled = features & forbidden
+                if enabled:
+                    failures.append(f"{location}: {crate} enables forbidden features {sorted(enabled)}")
+    if not found:
+        failures.append(f"the admitted MCP transport crate {crate} is not declared anywhere")
+    return failures
 
 
 def load_toml(path: Path) -> dict[str, Any]:
@@ -47,8 +96,15 @@ def main() -> int:
     classes = policy["classes"]
     phase_zero = {normalized(x) for x in policy["phase_zero"]["external_runtime_dependencies"]}
     fundamental = {normalized(x) for x in classes["fundamental_external"]}
-    prefixes = tuple(normalized(x) for x in classes["owned_runtime_prefixes"] + classes["owned_franken_prefixes"])
+    classes["owned_mcp_prefixes"] = classes.get("owned_mcp_prefixes", [])
+    prefixes = tuple(
+        normalized(x)
+        for x in classes["owned_runtime_prefixes"]
+        + classes["owned_mcp_prefixes"]
+        + classes["owned_franken_prefixes"]
+    )
     prohibited = {normalized(x) for x in policy["prohibited"]["crates"]}
+    lock_exceptions = {normalized(x) for x in policy.get("admitted", {}).get("lock_exceptions", [])}
     failures: list[str] = []
     checked = 0
 
@@ -108,6 +164,19 @@ def main() -> int:
                     continue
                 if package not in phase_zero and package not in fundamental:
                     failures.append(f"{location}: dependency {package_name} is outside the closed universe")
+
+    workspace_deps_table = load_toml(ROOT / "Cargo.toml").get("workspace", {}).get("dependencies", {})
+    failures.extend(check_transport_policy(policy, workspace_deps_table))
+
+    lock = tomllib.loads((ROOT / "Cargo.lock").read_text(encoding="utf-8"))
+    locked_names = {
+        normalized(str(entry.get("name")))
+        for entry in lock.get("package", [])
+        if isinstance(entry, dict) and "name" in entry
+    }
+    for name in sorted(locked_names & prohibited):
+        if name not in lock_exceptions:
+            failures.append(f"prohibited crate {name} appears in Cargo.lock and is not a lock exception")
 
     root_manifest = load_toml(ROOT / "Cargo.toml")
     edition = root_manifest.get("workspace", {}).get("package", {}).get("edition")

@@ -36,6 +36,17 @@ authoritative capsule/MVCC/effect/evidence plane
 
 It is the exclusive runtime, not an optional accelerator. Every task is region-owned; every blocking/effectful operation carries `Cx`; authority and budgets narrow monotonically; cancellation drains with progress evidence; the same code runs under deterministic virtual time. ATP moves immutable verified object graphs, never live mutation authority.
 
+## fastmcp_rust
+
+The MCP presentation plane is borrowed from the owned sibling: modern-only MCP 2026-07-28,
+pinned to an exact revision, `default-features = false` with `tasks` (ADR-013). The transport
+contributes framing, session lifecycle, era negotiation, cancellation routing, and pagination —
+nothing else. It may never redefine canonical identity, success, or authority: capability grants
+come from `dfmcp-core`, plans stay sealed in `dfmcp-intent`, and no fastmcp type crosses the
+adapter seam. The dogfooding contract in `docs/DOGFOODING_FASTMCP.md` returns every protocol
+defect upstream via gh issues and advances the pin only through recorded conformance notes.
+Rollback is a crate deletion.
+
 ## FrankenSQLite
 
 The project imports semantic MVCC rather than merely SQL storage. World reads pin immutable anchors. Plans carry positive, negative, aggregate, spatial, relation, and epoch witnesses. Coarse witnesses are no-false-negative; fine refinement only improves concurrency. Rebase recompiles intent, and accepted merges carry canonical proof certificates. Commit combining is brief and deterministic.
@@ -50,7 +61,10 @@ One request pins one immutable generation. Retrieval progresses from exact filte
 
 ## FrankenMarkdown
 
-Knowledge preserves exact bytes, spans, transformation lineage, and taint. Parser and protocol structures are nonrecursive/bounded. Human report, citation map, index, and diagnostics publish coherently. A direct local MCP implementation avoids a general web stack and second runtime.
+Knowledge preserves exact bytes, spans, transformation lineage, and taint. Parser and protocol
+structures are nonrecursive/bounded. Human report, citation map, index, and diagnostics publish
+coherently. The earlier plan for a bespoke direct MCP implementation was superseded by the owned
+`fastmcp_rust` plane (ADR-013), which already avoids a general web stack and a second runtime.
 
 ## FrankenGraphDB
 

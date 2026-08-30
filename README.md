@@ -3,13 +3,15 @@
 **A semantic, transactional, replayable control plane that lets autonomous agents operate
 Dwarf Fortress as a long-lived civilization rather than click through it as a brittle user.**
 
-> Status: **deep architecture lock and executable contract scaffold (Phase 0B)**. The
-> repository does not yet contain a production MCP transport or live DFHack adapter. The current
-> revision freezes the deeper substrate: multi-version world state, witnessed semantic
-> transactions, canonical graph decisions, root-last immutable publication, ATP-backed
-> state/evidence movement, a closed Franken dependency universe, and local-only qualification.
-> See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) before interpreting any target-state
-> prose as implemented behavior.
+> Status: **owned MCP transport laboratory on the deep architecture lock (Phase 0C)**. The MCP
+> plane is the owned [`fastmcp_rust`](https://github.com/Dicklesworthstone/fastmcp_rust) sibling —
+> modern-only **MCP 2026-07-28**, pinned to an exact upstream revision and dogfooded upstream —
+> exposing the frozen 11-tool `fortress.*` waist over stdio against the deterministic laboratory.
+> The substrate commitments stand: multi-version world state, witnessed semantic transactions,
+> canonical graph decisions, root-last immutable publication, ATP-backed state/evidence movement,
+> a closed dependency universe, and local-only qualification. There is still no live DFHack
+> adapter. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) before interpreting any
+> target-state prose as implemented behavior.
 
 The originating observation was simple: Dwarf Fortress is almost the ideal environment for
 long-horizon agents, yet there was no efficient MCP server through which Codex, Claude Code, or
@@ -434,11 +436,13 @@ first-class failure with the earliest mismatching anchor, field, or effect.
 
 ## Repository state
 
-The phase-zero Rust crates currently have no external runtime dependencies. The target system is
-safe Rust 2024 on the latest nightly toolchain with a **closed dependency universe**: `asupersync`,
-owned Franken-suite crates, and only explicitly admitted fundamental serialization crates. The
-policy rejects alternative runtimes, generic graph/database/web stacks, native FFI, and hidden
-background executors. The workspace contains:
+The semantic crates have no external runtime dependencies; the presentation crate adds the pinned
+owned MCP sibling and admitted fundamentals. The system is safe Rust 2024 on the latest nightly
+toolchain with a **closed dependency universe**: `asupersync`, owned Franken-suite crates, the
+owned `fastmcp_rust` MCP plane (modern-only, pinned; ADR-013), and explicitly admitted
+fundamental serialization crates. The policy rejects alternative runtimes, non-owned MCP
+frameworks, generic graph/database/web stacks, native FFI, and hidden background executors. The
+workspace contains:
 
 - `dfmcp-core`: IDs, hashes, anchors, capabilities, budgets, evidence, errors, and outcomes;
 - `dfmcp-world`: typed graph, spatial chunks, canonical hashing, queries, and strict deltas;
@@ -446,7 +450,9 @@ background executors. The workspace contains:
 - `dfmcp-adapter`: the out-of-process game adapter contract;
 - `dfmcp-lab`: deterministic in-memory adapter with exact plan matching, commit-time
   revalidation, idempotent pause effects, authorized compensation, and epoch-safe restore;
-- `dwarf-fortress-mcp`: a small executable contract/doctor/demo binary.
+- `dfmcp-mcp`: the MCP 2026-07-28 presentation plane — the frozen 11-tool waist over stdio via
+  the pinned `fastmcp-rust` facade, backed by the laboratory adapter;
+- `dwarf-fortress-mcp`: the executable contract/doctor/demo/serve binary.
 
 The scaffold exists to make architectural claims executable early. It is not a disguised mock
 presented as a finished integration.
@@ -458,6 +464,7 @@ cargo test --locked --workspace
 cargo run --locked -p dwarf-fortress-mcp -- contract
 cargo run --locked -p dwarf-fortress-mcp -- doctor
 cargo run --locked -p dwarf-fortress-mcp -- demo
+cargo run --locked -p dwarf-fortress-mcp -- serve   # MCP 2026-07-28 modern-only stdio server (laboratory)
 ```
 
 ### Qualify the repository locally
@@ -583,6 +590,8 @@ Start with:
 - [`docs/PERFORMANCE_ENGINEERING.md`](docs/PERFORMANCE_ENGINEERING.md)
 - [`docs/LOCAL_QUALIFICATION_AND_RELEASE.md`](docs/LOCAL_QUALIFICATION_AND_RELEASE.md)
 - [`MCP_SURFACE.md`](MCP_SURFACE.md)
+- [`docs/FASTMCP_INTEGRATION.md`](docs/FASTMCP_INTEGRATION.md)
+- [`docs/DOGFOODING_FASTMCP.md`](docs/DOGFOODING_FASTMCP.md)
 - [`ROADMAP.md`](ROADMAP.md)
 - [`SECURITY.md`](SECURITY.md)
 

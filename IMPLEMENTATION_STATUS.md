@@ -4,7 +4,10 @@ This file is the authoritative antidote to accidental overclaiming.
 
 ## Current phase
 
-**Phase 0B: deep architecture lock, executable contracts, and deterministic scaffold.**
+**Phase 0C: owned MCP transport laboratory on the deep architecture lock.** Phase 0B
+(deep architecture lock, executable contracts, deterministic scaffold) is retained as the
+foundation; Phase 0C adopts the owned `fastmcp_rust` sibling as the MCP presentation plane
+(ADR-013) and lands the first stdio server against the deterministic laboratory.
 
 The August 29, 2026 deep-design revision substantially strengthens the target architecture. It
 adds a closed Franken dependency universe, multi-version world-state semantics, positive and
@@ -13,12 +16,17 @@ semantics, immutable generation publication, ATP-backed state/evidence movement,
 qualification and release contract. Those are design commitments and machine-readable contracts;
 they are not claims that the live substrate has already been implemented.
 
-The repository currently contains a safe-Rust workspace whose phase-zero crates have no external
-runtime dependencies. The target implementation is Rust 2024 on the latest nightly toolchain and
-may depend only on `asupersync`, owned Franken-suite crates, and explicitly admitted fundamental
-serialization crates. The allowlist and rejection rules live in
-`architecture/dependency_allowlist.toml` and are checked by
-`scripts/check_dependency_policy.py`.
+The MCP plane is `fastmcp-rust`, pinned to an exact upstream revision, built modern-only
+(MCP 2026-07-28: `default-features = false`, `tasks` on, no legacy graph). The pin is a
+dogfooding contract: defects are filed upstream and land here as recorded pin bumps
+(`docs/DOGFOODING_FASTMCP.md`).
+
+The semantic crates (`dfmcp-core`, `dfmcp-world`, `dfmcp-intent`, `dfmcp-adapter`, `dfmcp-lab`)
+remain dependency-free apart from path edges among themselves. The presentation crate
+`dfmcp-mcp` adds the pinned `fastmcp-rust` sibling and the admitted fundamental serialization
+crates. The closed universe, the transport profile, and lock exceptions live in
+`architecture/dependency_allowlist.toml` and are checked by `scripts/check_dependency_policy.py`
+and `scripts/validate_repo.py`.
 
 | Area | Present now | Not yet present |
 |---|---|---|
@@ -28,7 +36,7 @@ serialization crates. The allowlist and rejection rules live in
 | Intent | semantic action types, constraints, normalization, sealed plans, pre/postconditions, temporal obligations, risk/capability summaries | recipe planner, predicted diffs, witnessed read/write sets, deterministic semantic rebase and merge engine |
 | Adapter | version/compatibility identity and observation/query/prepare/commit/poll/cancel/checkpoint/restore trait | bounded bridge transport and live DFHack implementation |
 | Lab | deterministic in-memory snapshot, exact-plan preparation, commit-time reauthorization and precondition checks, idempotent pause-state commit, bounded polling, authorized compensation, checkpoint/restore epoch invalidation, transcript | asupersync Lab integration, virtual scheduler, schedule exploration, crash/fault campaigns, reference fortress emulator |
-| MCP | prospective 11-tool schemas, examples, and protocol bounds | production MCP server lifecycle, stdio framing, Streamable HTTP, session transport |
+| MCP | laboratory stdio server (`dfmcp-mcp`) exposing the frozen 11-tool `fortress.*` waist through the pinned `fastmcp-rust` facade, modern-only profile enforced by the policy checker; prospective schemas, examples, and protocol bounds | session-scoped capability negotiation, Streamable HTTP, the MCP Tasks/obligation binding, and MCP 2026-07-28 conformance evidence; there is still no production MCP server for real games |
 | Persistence | world-MVCC, effect-journal, publication, recovery, and history design | FrankenSQLite-backed canonical ledger and verified recovery path |
 | Filesystem | checkpoint/evidence/repair design | FrankenFS-backed checkpoint and artifact publication implementation |
 | Search/docs | progressive cognition, immutable generation, exact-span provenance, and bounded query design | FrankenSearch and FrankenMarkdown adapters |
@@ -51,7 +59,7 @@ The executable scaffold is intended to:
 
 It is not intended to:
 
-- speak MCP on stdio or HTTP;
+- control a real fortress (the laboratory stdio server is the transport floor, not live-game control);
 - connect to DFHack;
 - load or mutate a real fortress;
 - provide durable MVCC, crash recovery, graph analytics, hybrid retrieval, or ATP replication;

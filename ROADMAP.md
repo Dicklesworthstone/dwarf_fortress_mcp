@@ -25,9 +25,24 @@ Progress is gate-based. Dates are intentionally absent: evidence matters more th
 - [x] root-last publication registry;
 - [x] local/self-hosted qualification and DSR release specification;
 - [ ] run and repair all nightly Rust gates on a machine with the toolchain;
+- [x] adopt the owned `fastmcp_rust` sibling as the MCP plane, modern-only MCP 2026-07-28, pinned
+  for dogfooding (ADR-013), with a laboratory stdio server exposing the 11-tool waist;
 - [ ] freeze registry v0 after public review.
 
 Exit: `GATE-010` plus `SUBSTRATE-G1` design acceptance.
+
+## Phase 0C — Owned MCP transport (laboratory)
+
+- [x] `dfmcp-mcp` crate: all eleven `fortress.*` tools over stdio via `fastmcp-rust` on
+  `MemoryAdapter` (open/observe/plan/commit/wait/cancel/checkpoint/restore/explain/doctor);
+- [x] machine-enforced modern-only profile (no `legacy-2024-11-05` graph; `tasks` on; exact rev pin);
+- [ ] session-scoped capability negotiation replacing process-local laboratory state;
+- [ ] MCP Tasks store backed by the bounded-obligation engine (`ServerBuilder::final_tasks`);
+- [ ] MCP 2026-07-28 conformance evidence recorded in `docs/DOGFOODING_FASTMCP.md` (WP-21);
+- [ ] first upstream defect loop completed end to end (file → fix → pin bump → conformance note).
+
+Exit: `WP-13` gate closure plus the first completed upstream fix cycle.
+
 
 ## Phase 1 — Reference version universe
 
@@ -66,8 +81,8 @@ Exit: `SUBSTRATE-G2` and `SUBSTRATE-G3`.
 Exit: `GATE-020` and `GATE-030`.
 
 ## Phase 4 — MCP read and cognition plane
-
-- direct bounded stdio MCP lifecycle;
+- stdio and Streamable HTTP lifecycles through the pinned `fastmcp_rust` modern-only plane
+  (stdio laboratory slice already landed in Phase 0C);
 - open session, observe, query, explain, and doctor;
 - interest sets, continuations, and output budgets;
 - read-only capability delegation;
@@ -171,7 +186,8 @@ Exit: `GATE-110` and `SUBSTRATE-G6`.
 4. implement deterministic rebase certificates;
 5. introduce `asupersync` regions/Cx/lab with no second runtime;
 6. implement read-only bridge handshake and bounded pause/tick/identity observation;
-7. expose MCP open/observe/doctor over stdio;
+7. expose MCP open/observe/doctor over stdio through the pinned fastmcp_rust modern-only server
+   (laboratory slice landed; session-scoped authority next);
 8. implement traversal and plan-DAG reference graphs with canonical tie-breaks;
 9. add shadow pause plan;
 10. add live idempotent pause commit with lookup/observe/prove;

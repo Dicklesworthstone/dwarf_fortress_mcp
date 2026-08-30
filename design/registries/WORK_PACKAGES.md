@@ -18,7 +18,7 @@ only when code, tests, docs, schemas, and negative evidence all pass its accepta
 | WP-10 | DFHack mutation bridge | WP-06, WP-08, WP-09 | typed prepare/commit/lookup/cancel | fault-injected reconciliation suite |
 | WP-11 | durable ledger | WP-06 | FrankenSQLite-backed WAL/state | crash-point matrix |
 | WP-12 | checkpoint/restore | WP-09, WP-11 | sealed save snapshots and epoch reset | bit-rot/kill/restore suite |
-| WP-13 | MCP server | WP-03, WP-04, WP-06, WP-07 | 11-tool narrow waist over stdio | protocol conformance and token budgets |
+| WP-13 | MCP server | WP-03, WP-04, WP-06, WP-07 | 11-tool narrow waist over the pinned fastmcp_rust modern-only plane (stdio; then HTTP) | MCP 2026-07-28 conformance and token budgets |
 | WP-14 | HTTP/session mode | WP-13 | Streamable HTTP, auth, reconnect | duplicate/disconnect/load tests |
 | WP-15 | leases/delegation | WP-07, WP-11, WP-13 | scoped multi-agent coordination | DPOR conflict/fencing tests |
 | WP-16 | FrankenSearch attention | WP-03, WP-04, WP-11 | evidence-ranked attention and memory | deterministic relevance ledger |
@@ -26,6 +26,7 @@ only when code, tests, docs, schemas, and negative evidence all pass its accepta
 | WP-18 | asupersync production runtime | WP-07, WP-10, WP-13 | structured effects/regions/lab | cancellation and replay gate |
 | WP-19 | FrankenFS checkpoint backend | WP-12 | clone-aware manifests/doctor/repair | filesystem fault matrix |
 | WP-20 | operations and packaging | all required | releases, doctor, bundles, support matrix | full release gate |
+| WP-21 | MCP conformance and dogfooding | WP-13 | conformance suite on the pinned revision; upstream issue loop; pin-bump ledger | TEST-023/TEST-024 evidence recorded in docs/DOGFOODING_FASTMCP.md |
 
 ## Critical path
 
