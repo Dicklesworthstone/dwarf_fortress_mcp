@@ -15,6 +15,9 @@ versions describe design and compatibility milestones rather than production rea
 - Machine-enforced transport policy: `[mcp_transport]` profile and lock-exception screening in
   `architecture/dependency_allowlist.toml`, checked by `scripts/check_dependency_policy.py` and
   `scripts/validate_repo.py`.
+- Adopted the owned `eidetic_engine_cli` sibling (`ee`) as the agent campaign memory layer
+  (Part XXIII): advisory-only, outside the canonical plane and the dependency universe;
+  doctrine and workflow in `docs/EIDETIC_MEMORY.md`.
 
 - Deep source-level audit of asupersync, FrankenSQLite, FrankenFS, FrankenSearch,
   FrankenMarkdown, FrankenGraphDB, FrankenNetworkX, and Doodlestein Self-Releaser.

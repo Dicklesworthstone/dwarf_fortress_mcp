@@ -33,6 +33,7 @@ struct LabState {
     adapter: Option<MemoryAdapter>,
     pending: Option<PendingPlan>,
     last_action: Option<ActionId>,
+    last_commit: Option<(String, String)>,
     next_request_id: u128,
 }
 
@@ -47,6 +48,7 @@ static LAB: LazyLock<Mutex<LabState>> = LazyLock::new(|| {
         adapter: None,
         pending: None,
         last_action: None,
+        last_commit: None,
         next_request_id: 0,
     })
 });
@@ -165,6 +167,7 @@ fn fortress_open_session(_ctx: &McpContext, paused: bool) -> String {
             state.adapter = Some(adapter);
             state.pending = None;
             state.last_action = None;
+            state.last_commit = None;
             payload.to_string()
         }
         Err(error) => error_payload("fortress.open_session", &error.to_string()),
@@ -299,11 +302,22 @@ fn fortress_plan(_ctx: &McpContext, summary: String, paused_target: bool) -> Str
 )]
 fn fortress_commit(_ctx: &McpContext, plan_digest: String) -> String {
     let mut state = lab();
-    let Some(pending) = state.pending.take() else {
-        return error_payload(
-            "fortress.commit",
-            "no pending plan; call fortress_plan first",
-        );
+    let pending = match state.pending.take() {
+        Some(pending) => pending,
+        None => {
+            // ADR-006 idempotency: a duplicate commit with the same digest
+            // returns the prior receipt verbatim instead of erroring or
+            // reapplying effects.
+            if let Some((digest, payload)) = &state.last_commit
+                && digest == &plan_digest
+            {
+                return payload.clone();
+            }
+            return error_payload(
+                "fortress.commit",
+                "no pending plan; call fortress_plan first",
+            );
+        }
     };
     if pending.digest != plan_digest {
         return error_payload(
@@ -343,8 +357,10 @@ fn fortress_commit(_ctx: &McpContext, plan_digest: String) -> String {
                         "observed_anchor": anchor_json(&receipt.observed_anchor),
                         "paused": paused,
                     });
+                    let payload_text = payload.to_string();
+                    state.last_commit = Some((plan_digest.clone(), payload_text.clone()));
                     state.adapter = Some(adapter);
-                    payload.to_string()
+                    payload_text
                 }
                 Err(error) => {
                     state.adapter = Some(adapter);
