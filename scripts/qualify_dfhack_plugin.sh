@@ -29,7 +29,8 @@ Environment:
 The script never installs into a live Dwarf Fortress/DFHack tree. It creates a detached git
 worktree at an exact DFHack commit, stages bridge/dfhack-plugin under DFHack's documented
 plugins/external/ seam, registers it with add_subdirectory(dfmcp_bridge), builds only the plugin
-target, fingerprints the output, and writes a machine-readable receipt.
+target, fingerprints the output, and writes a machine-readable receipt. The receipt also binds
+the exact bridge-authentication and R2-R5 acceptance contracts that later live evidence must use.
 EOF
 }
 
@@ -45,7 +46,10 @@ done
 git -C "$DFHACK_SOURCE" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
   die "DFHack source must be a git worktree"
 
+python3 scripts/check_repository_integrity.py
 python3 scripts/check_dfhack_bridge.py
+python3 scripts/check_bridge_auth_order.py
+python3 scripts/check_live_acceptance_contract.py
 
 DFMCP_COMMIT="$(git rev-parse HEAD)"
 DFMCP_DIRTY=false
@@ -238,6 +242,7 @@ receipt={
     'symbols_inventory':os.environ['SYMBOLS_STATUS'],
   },
   'source_digests':{
+    'repository_integrity_checker':digest(root/'scripts/check_repository_integrity.py'),
     'registry':digest(root/'architecture/dfhack_read_bridge_v1.json'),
     'cmake':digest(root/'bridge/dfhack-plugin/CMakeLists.txt'),
     'proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
@@ -246,6 +251,10 @@ receipt={
     'capsule':digest(root/'crates/dfmcp-adapter/src/live_observation.rs'),
     'page_driver':digest(root/'crates/dfmcp-adapter/src/live_session.rs'),
     'static_checker':digest(root/'scripts/check_dfhack_bridge.py'),
+    'auth_order_checker':digest(root/'scripts/check_bridge_auth_order.py'),
+    'acceptance_contract':digest(root/'architecture/live_read_acceptance_v1.json'),
+    'acceptance_contract_checker':digest(root/'scripts/check_live_acceptance_contract.py'),
+    'acceptance_verifier':digest(root/'scripts/verify_live_read_acceptance.py'),
     'external_registration':digest(Path(os.environ['EXTERNAL_CMAKE'])),
   },
   'logs':{
@@ -261,6 +270,8 @@ receipt={
     'token rejection matrix',
     'read determinism against a disposable fortress',
     'pagination-invariant live capsule identity against a running game',
+    'restart and partial-publication fencing against a running game',
+    'cold-agent live orientation',
     'compatibility outside the exact built DFHack revision',
   ],
 }
