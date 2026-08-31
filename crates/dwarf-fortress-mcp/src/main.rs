@@ -7,9 +7,9 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
-    BridgeCredentials, DfHackRpcClient, GameAdapter, HealthStatus, MAX_CAPSULE_CITIZENS,
-    MAX_CITIZENS_PER_PAGE, derive_live_fortress_id, project_live_capsule,
-    read_complete_observation_bounded,
+    BridgeCredentials, DfHackRpcClient, FencedLiveSource, GameAdapter, HealthStatus,
+    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, derive_live_fortress_id,
+    project_live_capsule, read_complete_observation_bounded,
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick, IntentId,
@@ -170,14 +170,15 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
-    let mut client = DfHackRpcClient::negotiate(
+    let client = DfHackRpcClient::negotiate(
         stream,
         credentials,
         "dwarf-fortress-mcp-cli",
         env!("CARGO_PKG_VERSION"),
     )?;
+    let mut source = FencedLiveSource::new(client)?;
     let capsule = read_complete_observation_bounded(
-        &mut client,
+        &mut source,
         page_size,
         true,
         max_citizens,
@@ -260,6 +261,7 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
             "omitted_domains": omitted_domains,
         },
     });
+    let client = source.into_inner();
     let _stream = client.close()?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
