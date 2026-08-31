@@ -160,6 +160,8 @@ pub struct ContinuationToken {
     pub offset: u32,
 }
 
+pub(crate) const MAX_CONTINUATION_TOKEN_BYTES: usize = 128;
+
 impl ContinuationToken {
     #[must_use]
     pub fn new(fortress_id: FortressId, cursor: ObservationCursor, offset: u32) -> Self {
@@ -182,6 +184,12 @@ impl ContinuationToken {
     }
 
     pub fn decode(token: &str) -> Result<Self> {
+        if token.len() > MAX_CONTINUATION_TOKEN_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "continuation token exceeds its explicit byte bound",
+            ));
+        }
         let parts: Vec<&str> = token.split(':').collect();
         if parts.len() != 5 || parts[0] != "cont" {
             return Err(DfmcpError::new(

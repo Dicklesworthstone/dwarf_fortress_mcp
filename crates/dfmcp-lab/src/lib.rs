@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use dfmcp_adapter::{
     ActionReceipt, AdapterHealth, AdapterIdentity, CancelMode, CancelReceipt, CheckpointReceipt,
@@ -20,7 +20,13 @@ pub use chaos::{
     ChaosHarness, ChaosScenario, DeterminismCertificate, DeterministicRng, FaultInjectionPolicy,
 };
 
-use dfmcp_world::{WorldGraph, WorldSnapshot, evaluate, execute_query};
+use dfmcp_world::{WorldGraph, WorldSnapshot, evaluate, execute_bounded_query};
+
+const MAX_LAB_PREPARED_PLANS: usize = 4_096;
+const MAX_LAB_ACTIONS: usize = 16_384;
+const MAX_LAB_CHECKPOINTS: usize = 1_024;
+const MAX_LAB_COMMITS: usize = 4_096;
+const MAX_LAB_TRANSCRIPT_EVENTS: usize = 65_536;
 
 /// Managed simulated laboratory session hosting a `MemoryAdapter`.
 #[derive(Clone, Debug)]
@@ -91,7 +97,8 @@ pub struct MemoryAdapter {
     action_by_step: BTreeMap<(PlanId, StepId), ActionId>,
     checkpoints: BTreeMap<CheckpointId, WorldSnapshot>,
     commits: BTreeMap<PlanId, CommitReceipt>,
-    transcript: Vec<LabEvent>,
+    transcript: VecDeque<LabEvent>,
+    transcript_truncated: bool,
     nonce: u128,
 }
 
@@ -127,7 +134,8 @@ impl MemoryAdapter {
             action_by_step: BTreeMap::new(),
             checkpoints: BTreeMap::new(),
             commits: BTreeMap::new(),
-            transcript: Vec::new(),
+            transcript: VecDeque::new(),
+            transcript_truncated: false,
             nonce: 1,
         }
     }
@@ -138,8 +146,21 @@ impl MemoryAdapter {
     }
 
     #[must_use]
-    pub fn transcript(&self) -> &[LabEvent] {
+    pub fn transcript(&self) -> &VecDeque<LabEvent> {
         &self.transcript
+    }
+
+    #[must_use]
+    pub const fn transcript_truncated(&self) -> bool {
+        self.transcript_truncated
+    }
+
+    fn record_event(&mut self, event: LabEvent) {
+        if self.transcript.len() >= MAX_LAB_TRANSCRIPT_EVENTS {
+            self.transcript.pop_front();
+            self.transcript_truncated = true;
+        }
+        self.transcript.push_back(event);
     }
 
     pub fn inject_snapshot(&mut self, snapshot: WorldSnapshot) -> Result<()> {
@@ -156,8 +177,7 @@ impl MemoryAdapter {
             ));
         }
         self.snapshot = snapshot;
-        self.transcript
-            .push(LabEvent::SnapshotInjected(self.snapshot.anchor()));
+        self.record_event(LabEvent::SnapshotInjected(self.snapshot.anchor()));
         Ok(())
     }
 
@@ -177,8 +197,7 @@ impl MemoryAdapter {
         self.snapshot.tick = next_tick;
         self.snapshot.cursor = next_cursor;
         self.snapshot.refresh_hash();
-        self.transcript
-            .push(LabEvent::TickAdvanced(self.snapshot.tick));
+        self.record_event(LabEvent::TickAdvanced(self.snapshot.tick));
         Ok(())
     }
 
@@ -259,6 +278,12 @@ impl MemoryAdapter {
     }
 
     fn internal_checkpoint(&mut self, label: &str) -> Result<CheckpointReceipt> {
+        if self.checkpoints.len() >= MAX_LAB_CHECKPOINTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory checkpoint store reached its explicit bound",
+            ));
+        }
         let nonce = self.next_nonce()?;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"dfmcp-lab-checkpoint-v1");
@@ -279,7 +304,7 @@ impl MemoryAdapter {
             EvidenceKind::Checkpoint,
             &format!("laboratory checkpoint {label}"),
         );
-        self.transcript.push(LabEvent::Checkpointed(checkpoint_id));
+        self.record_event(LabEvent::Checkpointed(checkpoint_id));
         Ok(CheckpointReceipt {
             checkpoint_id,
             label: label.to_owned(),
@@ -307,6 +332,14 @@ impl MemoryAdapter {
         step: &PlanStep,
         action_id: ActionId,
     ) -> Result<ActionReceipt> {
+        if self.actions.contains_key(&action_id)
+            || self.action_by_step.contains_key(&(plan_id, step.id))
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "derived laboratory action identity collided with existing state",
+            ));
+        }
         let state = if self.dependencies_verified(plan_id, step) {
             apply_action(&mut self.snapshot, &step.action)?;
             if step
@@ -435,8 +468,7 @@ impl MemoryAdapter {
             action.receipt = receipt.clone();
             action.stable_observations = stable_observations;
         }
-        self.transcript
-            .push(LabEvent::ActionPolled(action_id, state));
+        self.record_event(LabEvent::ActionPolled(action_id, state));
         Ok(receipt)
     }
 }
@@ -487,6 +519,38 @@ impl GameAdapter for MemoryAdapter {
                 "laboratory adapter has no outstanding observation continuation",
             ));
         }
+        let returns_snapshot = match request.since {
+            None => true,
+            Some(cursor) => {
+                cursor != self.snapshot.cursor
+                    && cursor.epoch == self.snapshot.cursor.epoch
+                    && cursor.sequence < self.snapshot.cursor.sequence
+            }
+        };
+        if returns_snapshot {
+            let entity_count = u32::try_from(self.snapshot.graph.entities.len()).map_err(|_| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "laboratory snapshot entity count cannot be represented",
+                )
+            })?;
+            let snapshot_bytes =
+                u64::try_from(self.snapshot.canonical_bytes().len()).map_err(|_| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "laboratory snapshot byte count cannot be represented",
+                    )
+                })?;
+            if entity_count > request.max_entities
+                || snapshot_bytes > request.max_bytes
+                || snapshot_bytes > u64::from(request.max_output_tokens)
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "full laboratory snapshot exceeds the requested entity, byte, or conservative output-token bound",
+                ));
+            }
+        }
         let payload = match request.since {
             None => ObservationPayload::Snapshot(self.snapshot.clone()),
             Some(cursor) if cursor == self.snapshot.cursor => {
@@ -506,8 +570,7 @@ impl GameAdapter for MemoryAdapter {
                 .retryable(true));
             }
         };
-        self.transcript
-            .push(LabEvent::Observed(self.snapshot.anchor()));
+        self.record_event(LabEvent::Observed(self.snapshot.anchor()));
         Ok(ObservationFrame {
             payload,
             evidence: vec![evidence(
@@ -536,12 +599,6 @@ impl GameAdapter for MemoryAdapter {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         self.check_anchor(context.anchor)?;
         self.check_anchor(request.anchor)?;
-        if request.continuation.is_some() {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "laboratory adapter has no outstanding query continuation",
-            ));
-        }
         if request.max_output_tokens == 0
             || request.max_output_tokens > context.budget.max_output_tokens
         {
@@ -550,7 +607,41 @@ impl GameAdapter for MemoryAdapter {
                 "query output-token budget is invalid",
             ));
         }
-        let result = execute_query(&self.snapshot, &request.query, context.budget.max_entities)?;
+        if self.snapshot.graph.entities.len() > context.budget.max_entities as usize {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query would scan more entities than its operation budget permits",
+            ));
+        }
+        let mut query = request.query.clone();
+        if let (Some(outer), Some(inner)) = (&request.continuation, &query.continuation)
+            && outer != inner
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "query continuation fields disagree",
+            ));
+        }
+        query.continuation = request
+            .continuation
+            .clone()
+            .or_else(|| query.continuation.clone());
+        let byte_limit_u64 = context
+            .budget
+            .max_bytes
+            .min(u64::from(request.max_output_tokens));
+        let byte_limit = usize::try_from(byte_limit_u64).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query byte budget cannot be represented on this platform",
+            )
+        })?;
+        let result = execute_bounded_query(
+            &self.snapshot,
+            &query,
+            context.budget.max_entities,
+            Some(byte_limit),
+        )?;
         let rows = result
             .entities
             .into_iter()
@@ -570,7 +661,7 @@ impl GameAdapter for MemoryAdapter {
             rows,
             matched: result.matched,
             truncated: result.truncated,
-            continuation: None,
+            continuation: result.continuation,
             score_ledger: vec![
                 "ordered deterministic world query; no relevance scoring".to_owned(),
             ],
@@ -632,6 +723,14 @@ impl GameAdapter for MemoryAdapter {
                 "stored plan is missing its prepare receipt",
             ));
         }
+        if self.plans.len() >= MAX_LAB_PREPARED_PLANS
+            || self.prepared.len() >= MAX_LAB_PREPARED_PLANS
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory prepared-plan store reached its explicit bound",
+            ));
+        }
         let nonce = self.next_nonce()?;
         let mut token = Vec::new();
         token.extend_from_slice(b"dfmcp-lab-prepare-v1");
@@ -651,7 +750,7 @@ impl GameAdapter for MemoryAdapter {
         };
         self.prepared.insert(plan.id, receipt.clone());
         self.plans.insert(plan.id, plan.clone());
-        self.transcript.push(LabEvent::Prepared(plan.id));
+        self.record_event(LabEvent::Prepared(plan.id));
         Ok(receipt)
     }
 
@@ -661,7 +760,6 @@ impl GameAdapter for MemoryAdapter {
         prepared: &PrepareReceipt,
         context: &OperationContext,
     ) -> Result<CommitReceipt> {
-        self.check_anchor(context.anchor)?;
         plan.validate_structure()?;
         let stored_plan = self.plans.get(&plan.id).ok_or_else(|| {
             DfmcpError::new(
@@ -675,6 +773,22 @@ impl GameAdapter for MemoryAdapter {
                 "commit plan does not exactly match the prepared plan",
             ));
         }
+        if plan.steps.len() > context.budget.max_actions as usize {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "plan exceeds the commit action budget",
+            ));
+        }
+        for step in &plan.steps {
+            self.authorize_step(step, context)?;
+        }
+        if plan.requires_checkpoint {
+            context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
+        }
+
+        // Authorization is deliberately rechecked before idempotent replay.
+        // A stable idempotency key is not a bearer token for a prior caller's
+        // authority, while an expired plan still retains its stable receipt.
         if let Some(existing) = self.commits.get(&plan.id) {
             if existing.plan_digest == plan.digest {
                 return Ok(existing.clone());
@@ -684,6 +798,7 @@ impl GameAdapter for MemoryAdapter {
                 "plan identifier was reused with a different digest",
             ));
         }
+        self.check_anchor(context.anchor)?;
         let stored_receipt = self.prepared.get(&plan.id).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::InvalidPlan,
@@ -709,15 +824,7 @@ impl GameAdapter for MemoryAdapter {
                 "prepared plan expired before commit",
             ));
         }
-        if plan.steps.len() > context.budget.max_actions as usize {
-            return Err(DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "plan exceeds the commit action budget",
-            ));
-        }
-
         for step in &plan.steps {
-            self.authorize_step(step, context)?;
             if !step
                 .preconditions
                 .iter()
@@ -729,35 +836,59 @@ impl GameAdapter for MemoryAdapter {
                 ));
             }
         }
-        if plan.requires_checkpoint {
-            context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
+        let new_action_count = self
+            .actions
+            .len()
+            .checked_add(plan.steps.len())
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "laboratory action count overflowed",
+                )
+            })?;
+        if new_action_count > MAX_LAB_ACTIONS || self.commits.len() >= MAX_LAB_COMMITS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory action or commit store reached its explicit bound",
+            ));
+        }
+        if plan.requires_checkpoint && self.checkpoints.len() >= MAX_LAB_CHECKPOINTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory checkpoint store reached its explicit bound",
+            ));
         }
 
-        let checkpoint = if plan.requires_checkpoint {
-            Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id))?)
-        } else {
-            None
-        };
-        let mut actions = Vec::with_capacity(plan.steps.len());
-        for step in &plan.steps {
-            let action_id = derived_action_id(plan.id, step.id);
-            if let Some(existing) = self.actions.get(&action_id) {
-                actions.push(existing.receipt.clone());
+        // The memory laboratory uses a clone as its transaction shadow. Any
+        // action, cursor, checkpoint, or journal failure restores every field.
+        let prior_state = self.clone();
+        let result = (|| {
+            let checkpoint = if plan.requires_checkpoint {
+                Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id))?)
             } else {
+                None
+            };
+            let mut actions = Vec::with_capacity(plan.steps.len());
+            for step in &plan.steps {
+                let action_id = derived_action_id(plan.id, step.id);
                 actions.push(self.dispatch_step(plan.id, step, action_id)?);
             }
+            self.record_event(LabEvent::Committed(plan.id));
+            let receipt = CommitReceipt {
+                plan_id: plan.id,
+                plan_digest: plan.digest,
+                actions,
+                checkpoint,
+                observed_anchor: self.snapshot.anchor(),
+                warnings: Vec::new(),
+            };
+            self.commits.insert(plan.id, receipt.clone());
+            Ok(receipt)
+        })();
+        if result.is_err() {
+            *self = prior_state;
         }
-        self.transcript.push(LabEvent::Committed(plan.id));
-        let receipt = CommitReceipt {
-            plan_id: plan.id,
-            plan_digest: plan.digest,
-            actions,
-            checkpoint,
-            observed_anchor: self.snapshot.anchor(),
-            warnings: Vec::new(),
-        };
-        self.commits.insert(plan.id, receipt.clone());
-        Ok(receipt)
+        result
     }
 
     fn poll_action(
@@ -816,15 +947,30 @@ impl GameAdapter for MemoryAdapter {
             )?;
         }
 
-        let state = if action.receipt.state.is_terminal() {
-            action.receipt.state
-        } else {
-            CommitState::CancelRequested
-        };
-        if state == CommitState::CancelRequested
-            && mode == CancelMode::EmergencyPauseAndDrain
-            && !self.snapshot.paused
-        {
+        match action.receipt.state {
+            CommitState::CancelRequested => {
+                if action.cancel_mode == Some(mode) {
+                    return Ok(replayed_cancel_receipt(action_id, &action));
+                }
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "cancellation was already requested with a different mode",
+                ));
+            }
+            CommitState::Cancelled | CommitState::Compensated => {
+                return Ok(replayed_cancel_receipt(action_id, &action));
+            }
+            state if state.is_terminal() => {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "cannot cancel an action that already reached a terminal state",
+                ));
+            }
+            _ => {}
+        }
+
+        let state = CommitState::CancelRequested;
+        if mode == CancelMode::EmergencyPauseAndDrain && !self.snapshot.paused {
             apply_action(&mut self.snapshot, &Action::Pause { paused: true })?;
         }
         if let Some(stored) = self.actions.get_mut(&action_id) {
@@ -834,14 +980,9 @@ impl GameAdapter for MemoryAdapter {
                 None
             };
         }
-        let message = if state == CommitState::CancelRequested {
-            "cancellation request recorded; drain remains pending"
-        } else {
-            "action was already terminal when cancellation was requested"
-        };
+        let message = "cancellation request recorded; drain remains pending";
         self.stored_action_receipt(action_id, state, EvidenceKind::AdapterReceipt, message)?;
-        self.transcript
-            .push(LabEvent::CancelRequested(action_id, mode));
+        self.record_event(LabEvent::CancelRequested(action_id, mode));
         Ok(CancelReceipt {
             action_id,
             state,
@@ -877,7 +1018,16 @@ impl GameAdapter for MemoryAdapter {
         )?;
 
         let mut state = action.receipt.state;
-        if state != CommitState::CancelRequested && !state.is_terminal() {
+        if matches!(state, CommitState::Cancelled | CommitState::Compensated) {
+            return Ok(replayed_cancel_receipt(action_id, &action));
+        }
+        if state.is_terminal() {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "cannot finalize cancellation for an action that completed independently",
+            ));
+        }
+        if state != CommitState::CancelRequested {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
                 "cancellation must be requested before it can be finalized",
@@ -924,8 +1074,7 @@ impl GameAdapter for MemoryAdapter {
             stored.cancel_mode = None;
         }
         self.stored_action_receipt(action_id, state, EvidenceKind::Postcondition, message)?;
-        self.transcript
-            .push(LabEvent::CancelFinalized(action_id, state));
+        self.record_event(LabEvent::CancelFinalized(action_id, state));
         Ok(CancelReceipt {
             action_id,
             state,
@@ -991,7 +1140,7 @@ impl GameAdapter for MemoryAdapter {
         self.actions.clear();
         self.action_by_step.clear();
         self.commits.clear();
-        self.transcript.push(LabEvent::Restored(checkpoint_id));
+        self.record_event(LabEvent::Restored(checkpoint_id));
         Ok(RestoreReceipt {
             checkpoint_id,
             prior_anchor,
@@ -1008,6 +1157,18 @@ impl GameAdapter for MemoryAdapter {
 
 fn action_is_supported(action: &Action) -> bool {
     matches!(action, Action::Pause { .. })
+}
+
+fn replayed_cancel_receipt(action_id: ActionId, action: &LabAction) -> CancelReceipt {
+    CancelReceipt {
+        action_id,
+        state: action.receipt.state,
+        observed_anchor: action.receipt.observed_anchor,
+        compensation_action: (action.receipt.state == CommitState::Compensated)
+            .then(|| derived_compensation_id(action_id)),
+        evidence: action.receipt.evidence.clone(),
+        message: action.receipt.message.clone(),
+    }
 }
 
 fn apply_action(snapshot: &mut WorldSnapshot, action: &Action) -> Result<()> {

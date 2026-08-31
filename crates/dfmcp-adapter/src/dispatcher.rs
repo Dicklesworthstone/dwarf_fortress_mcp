@@ -17,6 +17,7 @@ use dfmcp_world::{WorldSnapshot, evaluate};
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
 
 const MAX_EFFECT_JOURNAL_RECORDS: usize = 65_536;
+const MAX_EFFECT_ERROR_BYTES: usize = 4_096;
 
 /// Record in the process-local effect-journal laboratory.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,6 +121,12 @@ impl EffectJournal {
 
     /// Mark an in-flight mutation as indeterminate due to bridge timeout or disconnect.
     pub fn mark_indeterminate(&mut self, idempotency_key: &str, error_msg: String) -> Result<()> {
+        if error_msg.len() > MAX_EFFECT_ERROR_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "effect-journal error message exceeds its explicit byte bound",
+            ));
+        }
         let record = self.records.get_mut(idempotency_key).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::InvalidPlan,
@@ -173,6 +180,7 @@ impl MutationDispatcher {
         context: &OperationContext,
     ) -> Result<PrepareReceipt> {
         plan.validate_structure()?;
+        validate_dispatch_support(plan, context)?;
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -198,12 +206,6 @@ impl MutationDispatcher {
             ));
         }
         for step in &plan.steps {
-            if !matches!(step.action, Action::Pause { .. }) {
-                return Err(DfmcpError::new(
-                    ErrorCode::AdapterRejected,
-                    "in-memory dispatcher supports only the pause action",
-                ));
-            }
             let scope = step.action.scope();
             context.authorize(
                 step.required_capability,
@@ -251,12 +253,7 @@ impl MutationDispatcher {
         context: &OperationContext,
     ) -> Result<CommitReceipt> {
         plan.validate_structure()?;
-        if !snapshot.hash_is_valid() || context.anchor != snapshot.anchor() {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "commit snapshot or operation context anchor is invalid",
-            ));
-        }
+        validate_dispatch_support(plan, context)?;
         // Reauthorization happens even for an idempotent receipt replay. A
         // caller who knows a digest but lacks the session's grants gains no
         // read or mutation authority from the journal.
@@ -270,6 +267,11 @@ impl MutationDispatcher {
             )?;
         }
 
+        // Idempotency check comes before anchor validation: a verified
+        // commit already mutated the snapshot, so the caller's context
+        // anchor legitimately trails the post-commit snapshot anchor.
+        // Returning the cached receipt is safe because the effect was
+        // already applied and the caller proved authority above.
         let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
         if let Some(existing) = self.journal.lookup(&idempotency_key) {
             if existing.plan_id != plan.id || existing.plan_digest != plan.digest {
@@ -292,6 +294,15 @@ impl MutationDispatcher {
                     "previous commit attempt is not safely retryable until it is reconciled",
                 ));
             }
+        }
+
+        // Anchor validation applies only to fresh commits: the snapshot
+        // must be internally consistent and match the caller's anchor.
+        if !snapshot.hash_is_valid() || context.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "commit snapshot or operation context anchor is invalid",
+            ));
         }
         if snapshot.tick > plan.expires_at_tick {
             return Err(DfmcpError::new(
@@ -466,6 +477,32 @@ fn derived_action_id(plan_id: PlanId, step_id: dfmcp_core::StepId) -> ActionId {
     bytes.extend_from_slice(&step_id.get().to_be_bytes());
     let derived = Digest32::of_bytes(&bytes).first_u128();
     ActionId::new(if derived == 0 { 1 } else { derived })
+}
+
+fn validate_dispatch_support(plan: &PreparedPlan, context: &OperationContext) -> Result<()> {
+    if plan.steps.len() > context.budget.max_actions as usize {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "plan exceeds the in-memory dispatcher action budget",
+        ));
+    }
+    if plan.requires_checkpoint {
+        return Err(DfmcpError::new(
+            ErrorCode::AdapterRejected,
+            "in-memory dispatcher has no checkpoint implementation",
+        ));
+    }
+    if plan
+        .steps
+        .iter()
+        .any(|step| !matches!(step.action, Action::Pause { .. }) || step.obligation.is_some())
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::AdapterRejected,
+            "in-memory dispatcher supports only immediate pause actions without obligations",
+        ));
+    }
+    Ok(())
 }
 
 fn adapter_token(

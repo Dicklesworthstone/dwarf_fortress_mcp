@@ -4,6 +4,13 @@ use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
 
 use crate::{EdgeKind, EntityKind, EntityRecord, Value, WorldSnapshot};
 
+const MAX_QUERY_KINDS: usize = 64;
+const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
+const MAX_QUERY_PREDICATE_NODES: usize = 4_096;
+const MAX_QUERY_FIELD_BYTES: usize = 256;
+const MAX_QUERY_KIND_BYTES: usize = 128;
+const MAX_QUERY_SCAN_ENTITIES: usize = 1_000_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CompareOp {
     Eq,
@@ -43,15 +50,13 @@ impl Predicate {
     #[must_use]
     pub fn depth(&self) -> usize {
         match self {
-            Self::All(children) | Self::Any(children) => {
-                children
-                    .iter()
-                    .map(Predicate::depth)
-                    .max()
-                    .map_or(0, |depth| depth)
-                    + 1
-            }
-            Self::Not(inner) => inner.depth() + 1,
+            Self::All(children) | Self::Any(children) => children
+                .iter()
+                .map(Predicate::depth)
+                .max()
+                .map_or(0, |depth| depth)
+                .saturating_add(1),
+            Self::Not(inner) => inner.depth().saturating_add(1),
             _ => 1,
         }
     }
@@ -60,9 +65,11 @@ impl Predicate {
     pub fn complexity(&self) -> usize {
         match self {
             Self::All(children) | Self::Any(children) => {
-                1 + children.iter().map(Predicate::complexity).sum::<usize>()
+                children.iter().fold(1usize, |complexity, child| {
+                    complexity.saturating_add(child.complexity())
+                })
             }
-            Self::Not(inner) => 1 + inner.complexity(),
+            Self::Not(inner) => 1usize.saturating_add(inner.complexity()),
             _ => 1,
         }
     }
@@ -321,6 +328,28 @@ impl WorldQuery {
                 format!("query limit must be between 1 and the negotiated hard limit {hard_limit}"),
             ));
         }
+        if self.kinds.len() > MAX_QUERY_KINDS
+            || self
+                .kinds
+                .iter()
+                .any(|kind| kind.as_str().len() > MAX_QUERY_KIND_BYTES)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query kind selector exceeds its explicit bound",
+            ));
+        }
+        if let Some(continuation) = &self.continuation
+            && continuation.len() > crate::delta::MAX_CONTINUATION_TOKEN_BYTES
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query continuation token exceeds its explicit byte bound",
+            ));
+        }
+        if let Some(predicate) = &self.predicate {
+            validate_predicate_shape(predicate)?;
+        }
         Ok(())
     }
 
@@ -342,6 +371,53 @@ impl WorldQuery {
             estimated_total_cost: total,
         }
     }
+}
+
+fn validate_predicate_shape(root: &Predicate) -> Result<()> {
+    let mut pending = vec![(root, 1usize)];
+    let mut nodes = 0usize;
+    while let Some((predicate, depth)) = pending.pop() {
+        nodes = nodes.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query predicate node count overflowed",
+            )
+        })?;
+        if depth > MAX_QUERY_PREDICATE_DEPTH || nodes > MAX_QUERY_PREDICATE_NODES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query predicate exceeds its explicit depth or node bound",
+            ));
+        }
+        match predicate {
+            Predicate::All(children) | Predicate::Any(children) => {
+                let child_depth = depth.checked_add(1).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query predicate depth overflowed",
+                    )
+                })?;
+                pending.extend(children.iter().map(|child| (child, child_depth)));
+            }
+            Predicate::Not(child) => {
+                let child_depth = depth.checked_add(1).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query predicate depth overflowed",
+                    )
+                })?;
+                pending.push((child, child_depth));
+            }
+            Predicate::FieldCompare { field, .. } if field.len() > MAX_QUERY_FIELD_BYTES => {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "query field name exceeds its explicit byte bound",
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -367,6 +443,12 @@ pub fn execute_bounded_query(
     byte_limit: Option<usize>,
 ) -> Result<QueryResult> {
     query.validate(hard_limit)?;
+    if snapshot.graph.entities.len() > MAX_QUERY_SCAN_ENTITIES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query snapshot exceeds the implementation scan safety bound",
+        ));
+    }
 
     let offset = if let Some(ref cont) = query.continuation {
         let token = crate::ContinuationToken::decode(cont)?;
@@ -376,7 +458,12 @@ pub fn execute_bounded_query(
                 "continuation token anchor does not match target snapshot",
             ));
         }
-        token.offset as usize
+        usize::try_from(token.offset).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "query continuation offset cannot be represented on this platform",
+            )
+        })?
     } else {
         0
     };
@@ -393,7 +480,12 @@ pub fn execute_bounded_query(
         .cloned()
         .collect();
 
-    let matched = entities.len() as u64;
+    let matched = u64::try_from(entities.len()).map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "query match count cannot be represented",
+        )
+    })?;
 
     match query.order {
         QueryOrder::EntityIdAscending => entities.sort_by_key(|entity| entity.id),
@@ -417,6 +509,12 @@ pub fn execute_bounded_query(
         }
     }
 
+    if offset > entities.len() {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "query continuation offset is beyond the deterministic result set",
+        ));
+    }
     let remaining = if offset < entities.len() {
         &entities[offset..]
     } else {
@@ -434,28 +532,47 @@ pub fn execute_bounded_query(
             break;
         }
         let entity_bytes = entity.canonical_bytes().len();
+        let next_bytes = current_bytes.checked_add(entity_bytes).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query output byte count overflowed",
+            )
+        })?;
         if let Some(max_bytes) = byte_limit
-            && current_bytes + entity_bytes > max_bytes
-            && !selected.is_empty()
+            && next_bytes > max_bytes
         {
+            if selected.is_empty() {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "one query row exceeds the negotiated output byte bound",
+                ));
+            }
             truncated = true;
             break;
         }
-        current_bytes += entity_bytes;
+        current_bytes = next_bytes;
         selected.push(entity.clone());
     }
 
-    if offset + selected.len() < entities.len() {
+    let consumed = offset.checked_add(selected.len()).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query continuation offset overflowed",
+        )
+    })?;
+    if consumed < entities.len() {
         truncated = true;
     }
 
     let next_continuation = if truncated {
-        let next_offset = offset + selected.len();
-        let token = crate::ContinuationToken::new(
-            snapshot.fortress_id,
-            snapshot.cursor,
-            next_offset as u32,
-        );
+        let next_offset = u32::try_from(consumed).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query continuation offset exceeds the wire representation",
+            )
+        })?;
+        let token =
+            crate::ContinuationToken::new(snapshot.fortress_id, snapshot.cursor, next_offset);
         Some(token.encode())
     } else {
         None
@@ -509,9 +626,11 @@ fn evaluate_for_candidate(
 mod tests {
     use std::collections::BTreeMap;
 
-    use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, ObservationCursor};
+    use dfmcp_core::{Digest32, EntityId, ErrorCode, FortressId, GameTick, ObservationCursor};
 
-    use super::{CompareOp, Predicate, QueryOrder, WorldQuery, execute_query};
+    use super::{
+        CompareOp, Predicate, QueryOrder, WorldQuery, execute_bounded_query, execute_query,
+    };
     use crate::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
 
     fn snapshot() -> WorldSnapshot {
@@ -582,5 +701,32 @@ mod tests {
         ]);
         assert_eq!(left.canonical_bytes(), right.canonical_bytes());
         assert_eq!(left.normalized(), right.normalized());
+    }
+
+    #[test]
+    fn byte_bound_never_returns_an_oversized_first_row() {
+        let query = WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: None,
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: None,
+        };
+        let result = execute_bounded_query(&snapshot(), &query, 100, Some(1));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn continuation_past_result_set_is_a_cursor_gap() {
+        let query = WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: None,
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: Some("cont:1:0:0:3".to_owned()),
+        };
+        let error = execute_query(&snapshot(), &query, 100)
+            .expect_err("offset beyond the two-row result must fail");
+        assert_eq!(error.code, ErrorCode::CursorGap);
     }
 }

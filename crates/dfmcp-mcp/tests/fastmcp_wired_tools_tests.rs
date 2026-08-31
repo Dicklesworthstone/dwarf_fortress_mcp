@@ -53,6 +53,17 @@ fn laboratory_tools_execute_supported_pause_flow()
         .ok_or("plan_digest missing")?
         .to_owned();
 
+    let wrong_digest = if digest == "0".repeat(64) {
+        "1".repeat(64)
+    } else {
+        "0".repeat(64)
+    };
+    let rejected: Value =
+        serde_json::from_str(&fortress_commit(Some(session_id.clone()), wrong_digest))?;
+    assert_eq!(rejected["ok"], false);
+    assert_eq!(rejected["error"]["code"], "conflict");
+
+    // A mismatched digest must not consume the pending sealed plan.
     let commit: Value = serde_json::from_str(&fortress_commit(Some(session_id.clone()), digest))?;
     assert_eq!(commit["ok"], true);
 

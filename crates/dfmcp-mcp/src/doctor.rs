@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! Doctor Diagnostics, Health Probes & Live Telemetry Inspector.
+//! Doctor diagnostics for the executable process-local laboratory.
 //!
-//! WP-MCP-03: Gathers deep diagnostic telemetry (sessions, leases, obligations,
-//! adapter status, IPC throughput, WAL size) and produces structured health audits.
+//! The report accepts adapter and IPC observations from its caller. It does not
+//! imply that a live DFHack bridge, durable ledger, lease service, or obligation
+//! registry is present.
 
 use dfmcp_adapter::{AdapterHealth, HealthStatus, IpcTelemetry};
 
@@ -55,10 +56,9 @@ impl DoctorInspector {
                 )
             }
             None => {
-                findings.push(
-                    "no live adapter connected (running in pure simulation lab mode)".to_owned(),
-                );
-                (true, "simulation lab".to_owned())
+                is_healthy = false;
+                findings.push("no adapter health observation was supplied".to_owned());
+                (false, "adapter health unavailable".to_owned())
             }
         };
 
@@ -73,11 +73,12 @@ impl DoctorInspector {
         }
 
         if active_sessions_count == 0 {
+            is_healthy = false;
             findings.push("no active client sessions open".to_owned());
         }
 
         DoctorDiagnosticReport {
-            server_version: "0.1.0".to_owned(),
+            server_version: env!("CARGO_PKG_VERSION").to_owned(),
             active_sessions_count,
             is_adapter_healthy,
             adapter_details,
@@ -95,13 +96,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_doctor_inspector_health_audit() {
+    fn missing_adapter_health_is_degraded() {
         let inspector = DoctorInspector;
         let report = inspector.generate_report(1, None, None, 2, 0);
 
-        assert_eq!(report.server_version, "0.1.0");
+        assert_eq!(report.server_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(report.active_sessions_count, 1);
-        assert!(report.is_healthy);
+        assert!(!report.is_healthy);
+        assert!(!report.is_adapter_healthy);
         assert_eq!(report.active_leases_count, 2);
+    }
+
+    #[test]
+    fn no_active_sessions_is_degraded_even_with_no_other_findings() {
+        let report = DoctorInspector.generate_report(0, None, None, 0, 0);
+        assert!(!report.is_healthy);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.contains("no active client sessions"))
+        );
     }
 }

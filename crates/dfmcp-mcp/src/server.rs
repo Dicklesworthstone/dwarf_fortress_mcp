@@ -1,6 +1,8 @@
 //! Modern-only (MCP 2026-07-28) stdio server for the fortress narrow waist.
 //!
-//! WP-13 gate 2 — session-scoped capability negotiation: per-session state and
+//! This executable contract currently exposes a process-local deterministic
+//! laboratory, not a live Dwarf Fortress or durable service. Session-scoped
+//! capability negotiation provides per-session state and
 //! negotiated grants replace the previous process-local laboratory state.
 //! Transport identity grants nothing; every capability comes from the
 //! `CapabilityGrant`s negotiated in `fortress_open_session`.
@@ -21,6 +23,7 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use crate::doctor::DoctorInspector;
 use dfmcp_adapter::{
     CancelMode, GameAdapter, InterestSet, ObservationPayload, ObservationRequest, Projection,
+    QueryRequest,
 };
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
@@ -30,7 +33,7 @@ use dfmcp_core::{
 use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{EdgeKind, Predicate, WorldGraph, WorldSnapshot};
+use dfmcp_world::{EdgeKind, Predicate, QueryOrder, WorldGraph, WorldQuery, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -81,6 +84,15 @@ static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LabSession>>>>> =
 static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1));
 
 const MAX_LAB_SESSIONS: usize = 1_024;
+const MAX_CAPABILITY_REQUESTS: usize = 32;
+const MAX_CAPABILITY_NAME_BYTES: usize = 64;
+const MAX_RISK_NAME_BYTES: usize = 32;
+const MAX_FORTRESS_SELECTOR_BYTES: usize = 20;
+const MAX_SUMMARY_BYTES: usize = 4_096;
+const MAX_LABEL_BYTES: usize = 256;
+const MAX_MODE_BYTES: usize = 64;
+const U128_HEX_ID_BYTES: usize = 32;
+const DIGEST_HEX_BYTES: usize = 64;
 
 fn sessions() -> MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LabSession>>>> {
     match SESSIONS.lock() {
@@ -111,10 +123,16 @@ fn next_session_counter() -> Result<u128> {
 }
 
 fn parse_session_id_arg(value: &str) -> Result<SessionId> {
-    let parsed: u128 = value.parse().map_err(|_| {
+    if value.len() != U128_HEX_ID_BYTES || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "session_id must be the 32-character hexadecimal identifier returned by fortress_open_session",
+        ));
+    }
+    let parsed = u128::from_str_radix(value, 16).map_err(|_| {
         DfmcpError::new(
             ErrorCode::InvalidRequest,
-            "session_id must be a u128 decimal string returned by fortress_open_session",
+            "session_id is not a valid hexadecimal u128 identifier",
         )
     })?;
     if parsed == 0 {
@@ -141,25 +159,10 @@ fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>>
         let parsed = parse_session_id_arg(&id_str)?;
         lookup_session(parsed)
     } else {
-        let guard = sessions();
-        if guard.len() == 1 {
-            guard.values().next().cloned().ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::SessionNotFound,
-                    "no open session; call fortress_open_session first",
-                )
-            })
-        } else if guard.is_empty() {
-            Err(DfmcpError::new(
-                ErrorCode::SessionNotFound,
-                "no open session; call fortress_open_session first",
-            ))
-        } else {
-            Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "multiple open sessions exist; specify session_id",
-            ))
-        }
+        Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "session_id is required; call fortress_open_session first and pass its returned identifier",
+        ))
     }
 }
 
@@ -214,11 +217,43 @@ fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
 }
 
 fn error_payload(operation: &str, message: &str) -> String {
+    coded_error_payload(operation, ErrorCode::InvalidRequest, message)
+}
+
+fn coded_error_payload(operation: &str, code: ErrorCode, message: &str) -> String {
     json!({
         "ok": false,
-        "error": {"operation": operation, "message": message},
+        "error": {
+            "operation": operation,
+            "code": code.as_str(),
+            "message": message,
+            "retryable": false,
+            "details": [],
+        },
     })
     .to_string()
+}
+
+fn dfmcp_error_payload(operation: &str, error: &DfmcpError) -> String {
+    json!({
+        "ok": false,
+        "error": {
+            "operation": operation,
+            "code": error.code.as_str(),
+            "message": error.message,
+            "retryable": error.retryable,
+            "details": error.details,
+        },
+    })
+    .to_string()
+}
+
+fn mutex_poisoned_payload(operation: &str) -> String {
+    coded_error_payload(
+        operation,
+        ErrorCode::InternalInvariantViolation,
+        "session mutex was poisoned; the session cannot be used safely",
+    )
 }
 
 fn snapshot_json(snapshot: &WorldSnapshot) -> serde_json::Value {
@@ -259,9 +294,21 @@ fn negotiate_grants(
 }
 
 fn parse_capability_request(requested: &[(String, String)]) -> Result<Vec<NegotiatedCapability>> {
+    if requested.len() > MAX_CAPABILITY_REQUESTS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "requested capability count exceeds the explicit session bound",
+        ));
+    }
     let mut out = Vec::with_capacity(requested.len());
     let mut seen: BTreeSet<Capability> = BTreeSet::new();
     for (cap_str, risk_str) in requested {
+        if cap_str.len() > MAX_CAPABILITY_NAME_BYTES || risk_str.len() > MAX_RISK_NAME_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "capability or risk name exceeds its explicit byte bound",
+            ));
+        }
         let capability = match cap_str.as_str() {
             "observe" => Capability::Observe,
             "query" => Capability::Query,
@@ -356,6 +403,13 @@ pub fn fortress_open_session(
 ) -> String {
     let paused = paused.map_or(true, |value| value);
     let selector_str = fortress_selector.map_or_else(|| "1".to_owned(), |value| value);
+    if selector_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
+        return coded_error_payload(
+            "fortress.open_session",
+            ErrorCode::BudgetExceeded,
+            "fortress_selector exceeds the maximum decimal u64 length",
+        );
+    }
     let parsed_fortress: Result<FortressId> = match selector_str.parse::<u64>() {
         Ok(value) => Ok(FortressId::new(value)),
         Err(_) => Err(DfmcpError::new(
@@ -371,7 +425,7 @@ pub fn fortress_open_session(
                 "fortress_selector zero is reserved",
             );
         }
-        Err(error) => return error_payload("fortress.open_session", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
 
     let default_caps = vec![
@@ -387,7 +441,7 @@ pub fn fortress_open_session(
         requested_capabilities.map_or_else(|| default_caps, |capabilities| capabilities);
     let requested_caps = match parse_capability_request(&requested_caps_raw) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.open_session", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
 
     let budget = WorkBudget {
@@ -410,7 +464,7 @@ pub fn fortress_open_session(
             .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions, |value| value),
     };
     if let Err(error) = budget.validate() {
-        return error_payload("fortress.open_session", &error.to_string());
+        return dfmcp_error_payload("fortress.open_session", &error);
     }
 
     let grants = negotiate_grants(fortress_id, &requested_caps);
@@ -428,7 +482,7 @@ pub fn fortress_open_session(
     let identity = probe_session.adapter.identity();
     let session_counter = match next_session_counter() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.open_session", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
     let session_id = SessionId::new(session_counter);
     let snapshot_anchor = probe_session.adapter.snapshot().anchor();
@@ -459,14 +513,16 @@ pub fn fortress_open_session(
     {
         let mut registry = sessions();
         if registry.len() >= MAX_LAB_SESSIONS {
-            return error_payload(
+            return coded_error_payload(
                 "fortress.open_session",
+                ErrorCode::BudgetExceeded,
                 "process-local laboratory reached its explicit session bound",
             );
         }
         if registry.contains_key(&session_id) {
-            return error_payload(
+            return coded_error_payload(
                 "fortress.open_session",
+                ErrorCode::InternalInvariantViolation,
                 "fresh session identifier unexpectedly collided with an existing session",
             );
         }
@@ -519,15 +575,15 @@ pub fn fortress_open_session(
 pub fn fortress_observe(session_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.observe", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.observe", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.observe", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.observe"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.observe", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.observe", &error),
     };
     let request = ObservationRequest {
         since: None,
@@ -547,12 +603,13 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                 payload["evidence_count"] = json!(frame.evidence.len());
                 payload.to_string()
             }
-            ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => error_payload(
+            ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => coded_error_payload(
                 "fortress.observe",
+                ErrorCode::InternalInvariantViolation,
                 "full laboratory observation unexpectedly returned a non-snapshot payload",
             ),
         },
-        Err(error) => error_payload("fortress.observe", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.observe", &error),
     }
 }
 
@@ -566,6 +623,13 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
+    if mode.len() > MAX_MODE_BYTES {
+        return coded_error_payload(
+            "fortress.query",
+            ErrorCode::BudgetExceeded,
+            "query mode exceeds its explicit byte bound",
+        );
+    }
     if mode != "summary" {
         return error_payload(
             "fortress.query",
@@ -574,24 +638,41 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
     }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.query", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.query", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.query", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.query"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.query", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.query", &error),
     };
-    if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
-        return error_payload("fortress.query", &error.to_string());
+    let request = QueryRequest {
+        anchor: ctx.anchor,
+        query: WorldQuery {
+            kinds: Vec::new(),
+            predicate: None,
+            order: QueryOrder::EntityIdAscending,
+            limit: guard.budget.max_entities,
+            continuation: None,
+        },
+        max_output_tokens: guard.budget.max_output_tokens,
+        continuation: None,
+    };
+    match guard.adapter.query(&request, &ctx) {
+        Ok(response) => {
+            let snapshot = guard.adapter.snapshot();
+            let mut payload = snapshot_json(snapshot);
+            payload["matched"] = json!(response.matched);
+            payload["returned"] = json!(response.rows.len());
+            payload["truncated"] = json!(response.truncated);
+            payload["continuation"] = json!(response.continuation);
+            payload["session_id"] = json!(format!("{}", guard.session_id));
+            payload.to_string()
+        }
+        Err(error) => dfmcp_error_payload("fortress.query", &error),
     }
-    let snapshot = guard.adapter.snapshot();
-    let mut payload = snapshot_json(snapshot);
-    payload["matched"] = json!(0);
-    payload["session_id"] = json!(format!("{}", guard.session_id));
-    payload.to_string()
 }
 
 // ============================================================================
@@ -607,17 +688,25 @@ pub fn fortress_plan(
     summary: Option<String>,
     paused_target: Option<bool>,
 ) -> String {
+    let summary = summary.map_or_else(|| "unpause the simulation".to_owned(), |value| value);
+    if summary.len() > MAX_SUMMARY_BYTES {
+        return coded_error_payload(
+            "fortress.plan",
+            ErrorCode::BudgetExceeded,
+            "plan summary exceeds its explicit byte bound",
+        );
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.plan", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.plan", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.plan"),
     };
     let (rid, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.plan", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
     };
     let snapshot = guard.adapter.snapshot();
 
@@ -625,7 +714,7 @@ pub fn fortress_plan(
     let intent = Intent {
         id: IntentId::new(rid),
         anchor: snapshot.anchor(),
-        summary: summary.map_or_else(|| "unpause the simulation".to_owned(), |value| value),
+        summary,
         terminal_condition: Predicate::Paused(paused_target),
         constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
         requested_actions: vec![RequestedAction {
@@ -659,7 +748,7 @@ pub fn fortress_plan(
             });
             payload.to_string()
         }
-        Err(error) => error_payload("fortress.plan", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.plan", &error),
     }
 }
 
@@ -673,13 +762,22 @@ pub fn fortress_plan(
     description = "Commit the pending prepared plan for the open session: prepare/revalidate, dispatch, observe, and verify. Requires the exact plan digest returned by fortress_plan."
 )]
 pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> String {
+    if plan_digest.len() != DIGEST_HEX_BYTES
+        || !plan_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return coded_error_payload(
+            "fortress.commit",
+            ErrorCode::InvalidRequest,
+            "plan_digest must be the 64-character hexadecimal digest returned by fortress_plan",
+        );
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.commit", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.commit", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.commit", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.commit"),
     };
 
     let pending = match guard.pending.take() {
@@ -693,15 +791,18 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             {
                 return payload.clone();
             }
-            return error_payload(
+            return coded_error_payload(
                 "fortress.commit",
+                ErrorCode::InvalidPlan,
                 "no pending plan; call fortress_plan first",
             );
         }
     };
     if pending.digest != plan_digest {
-        return error_payload(
+        guard.pending = Some(pending);
+        return coded_error_payload(
             "fortress.commit",
+            ErrorCode::Conflict,
             "plan digest does not match the pending prepared plan; plans are sealed over their digest",
         );
     }
@@ -709,7 +810,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
         Ok(value) => value,
         Err(error) => {
             guard.pending = Some(pending);
-            return error_payload("fortress.commit", &error.to_string());
+            return dfmcp_error_payload("fortress.commit", &error);
         }
     };
     match guard.adapter.prepare(&pending.plan, &prepare_ctx) {
@@ -718,7 +819,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                 Ok(value) => value,
                 Err(error) => {
                     guard.pending = Some(pending);
-                    return error_payload("fortress.commit", &error.to_string());
+                    return dfmcp_error_payload("fortress.commit", &error);
                 }
             };
             match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
@@ -745,13 +846,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                 }
                 Err(error) => {
                     guard.pending = Some(pending);
-                    error_payload("fortress.commit", &error.to_string())
+                    dfmcp_error_payload("fortress.commit", &error)
                 }
             }
         }
         Err(error) => {
             guard.pending = Some(pending);
-            error_payload("fortress.commit", &error.to_string())
+            dfmcp_error_payload("fortress.commit", &error)
         }
     }
 }
@@ -767,21 +868,22 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
 pub fn fortress_wait(session_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.wait", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.wait", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.wait"),
     };
     let Some(action_id) = guard.last_action else {
-        return error_payload(
+        return coded_error_payload(
             "fortress.wait",
+            ErrorCode::Conflict,
             "no committed action yet; call fortress_commit first",
         );
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.wait", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
     match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
         Ok(task) => json!({
@@ -795,7 +897,7 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
             "observed_anchor": anchor_json(&ctx.anchor),
         })
         .to_string(),
-        Err(error) => error_payload("fortress.wait", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.wait", &error),
     }
 }
 
@@ -809,17 +911,28 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
     description = "Cancel the most recent committed action in this session: request, drain, compensate when authorized, and finalize."
 )]
 pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> String {
+    if mode
+        .as_ref()
+        .is_some_and(|value| value.len() > MAX_MODE_BYTES)
+    {
+        return coded_error_payload(
+            "fortress.cancel",
+            ErrorCode::BudgetExceeded,
+            "cancellation mode exceeds its explicit byte bound",
+        );
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.cancel", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.cancel", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.cancel"),
     };
     let Some(action_id) = guard.last_action else {
-        return error_payload(
+        return coded_error_payload(
             "fortress.cancel",
+            ErrorCode::Conflict,
             "no committed action to cancel; call fortress_commit first",
         );
     };
@@ -836,10 +949,15 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.cancel", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
     };
     match guard.adapter.request_cancel(action_id, cancel_mode, &ctx) {
-        Ok(request) => match guard.adapter.finalize_cancel(action_id, &ctx) {
+        Ok(request) => {
+            let (_, finalize_ctx) = match next_context(&mut guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+            };
+            match guard.adapter.finalize_cancel(action_id, &finalize_ctx) {
             Ok(finalized) => json!({
                 "ok": true,
                 "session_id": format!("{}", guard.session_id),
@@ -849,9 +967,10 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
                 "note": "cancellation is request/drain/compensate/finalize; records are never deleted",
             })
             .to_string(),
-            Err(error) => error_payload("fortress.cancel", &error.to_string()),
-        },
-        Err(error) => error_payload("fortress.cancel", &error.to_string()),
+            Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+            }
+        }
+        Err(error) => dfmcp_error_payload("fortress.cancel", &error),
     }
 }
 
@@ -866,16 +985,23 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
 pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
     };
     let label = label.map_or_else(|| "manual".to_owned(), |value| value);
+    if label.len() > MAX_LABEL_BYTES {
+        return coded_error_payload(
+            "fortress.checkpoint",
+            ErrorCode::BudgetExceeded,
+            "checkpoint label exceeds its explicit byte bound",
+        );
+    }
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.checkpoint"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
     };
     match guard.adapter.checkpoint(&label, &ctx) {
         Ok(receipt) => json!({
@@ -888,7 +1014,7 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
             "anchor": anchor_json(&receipt.anchor),
         })
         .to_string(),
-        Err(error) => error_payload("fortress.checkpoint", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.checkpoint", &error),
     }
 }
 
@@ -902,26 +1028,37 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
     description = "Restore a checkpoint by id into the open session. Creates a new observation epoch; stale plans and action handles are invalidated."
 )]
 pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> String {
-    let parsed_checkpoint = match checkpoint_id.parse::<u128>() {
+    if checkpoint_id.len() != U128_HEX_ID_BYTES
+        || !checkpoint_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return error_payload(
+            "fortress.restore",
+            "checkpoint_id must be the 32-character hexadecimal identifier returned by fortress_checkpoint",
+        );
+    }
+    let parsed_checkpoint = match u128::from_str_radix(&checkpoint_id, 16) {
         Ok(value) => value,
         Err(_) => {
             return error_payload(
                 "fortress.restore",
-                "checkpoint_id must be a u128 decimal string",
+                "checkpoint_id is not a valid hexadecimal u128 identifier",
             );
         }
     };
+    if parsed_checkpoint == 0 {
+        return error_payload("fortress.restore", "checkpoint_id zero is reserved");
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.restore", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.restore", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.restore", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.restore"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.restore", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.restore", &error),
     };
     match guard
         .adapter
@@ -942,7 +1079,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
             })
             .to_string()
         }
-        Err(error) => error_payload("fortress.restore", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.restore", &error),
     }
 }
 
@@ -957,28 +1094,38 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
 pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.explain", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.explain", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.explain", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.explain"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.explain", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.explain", &error),
     };
     if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
-        return error_payload("fortress.explain", &error.to_string());
+        return dfmcp_error_payload("fortress.explain", &error);
     }
     let snapshot = guard.adapter.snapshot();
 
     if let Some(ent_str) = entity_id {
+        if ent_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
+            return coded_error_payload(
+                "fortress.explain",
+                ErrorCode::BudgetExceeded,
+                "entity_id exceeds the maximum decimal u64 length",
+            );
+        }
         let parsed_id: Result<EntityId> = ent_str.parse::<u64>().map(EntityId::new).map_err(|_| {
             DfmcpError::new(ErrorCode::InvalidRequest, "entity_id must be a decimal u64")
         });
         let target_id = match parsed_id {
-            Ok(id) => id,
-            Err(err) => return error_payload("fortress.explain", &err.to_string()),
+            Ok(id) if id != EntityId::NIL => id,
+            Ok(_) => {
+                return error_payload("fortress.explain", "entity_id zero is reserved");
+            }
+            Err(error) => return dfmcp_error_payload("fortress.explain", &error),
         };
 
         let deps = get_transitive_dependencies(&snapshot.graph, target_id, EdgeKind::Requires);
@@ -997,14 +1144,16 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
     } else {
         let events = guard.adapter.transcript();
         let start = events.len().saturating_sub(16);
-        let recent: Vec<String> = events[start..]
+        let recent: Vec<String> = events
             .iter()
+            .skip(start)
             .map(|event| format!("{event:?}"))
             .collect();
         json!({
             "ok": true,
             "session_id": format!("{}", guard.session_id),
             "transcript_len": events.len(),
+            "transcript_truncated": guard.adapter.transcript_truncated(),
             "recent_events": recent,
             "note": "process-local laboratory transcript only; no durable evidence bundle is implemented",
         })
@@ -1023,15 +1172,15 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
 pub fn fortress_doctor(session_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.doctor", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
     };
     let mut guard = match session.lock() {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.doctor", &error.to_string()),
+        Err(_) => return mutex_poisoned_payload("fortress.doctor"),
     };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
-        Err(error) => return error_payload("fortress.doctor", &error.to_string()),
+        Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
     };
     let health_res = guard.adapter.health(&ctx);
 
@@ -1053,7 +1202,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
             "current_anchor": health.current_anchor.as_ref().map(anchor_json),
         })
         .to_string(),
-        Err(error) => error_payload("fortress.doctor", &error.to_string()),
+        Err(error) => dfmcp_error_payload("fortress.doctor", &error),
     }
 }
 
@@ -1197,18 +1346,42 @@ mod tests {
     }
 
     #[test]
-    fn parse_session_id_arg_round_trips_u128() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let raw = "12345";
-        let parsed = parse_session_id_arg(raw)?;
-        assert_eq!(parsed.get(), 12345u128);
+    fn parse_session_id_arg_round_trips_display_form()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let original = SessionId::new(0xabcde);
+        let parsed = parse_session_id_arg(&original.to_string())?;
+        assert_eq!(parsed, original);
         Ok(())
     }
 
     #[test]
-    fn parse_session_id_arg_rejects_non_decimal() {
+    fn parse_session_id_arg_rejects_non_hex_or_noncanonical_input() {
         let result = parse_session_id_arg("not-a-number");
         assert!(result.is_err());
+        assert!(parse_session_id_arg("12345").is_err());
+        assert!(parse_session_id_arg("00000000000000000000000000000000").is_err());
+    }
+
+    #[test]
+    fn missing_session_id_is_never_inferred_from_registry_state() {
+        match resolve_session(None) {
+            Ok(_) => panic!("missing authority handle must be rejected"),
+            Err(error) => assert_eq!(error.code, ErrorCode::InvalidRequest),
+        }
+    }
+
+    #[test]
+    fn structured_errors_preserve_code_retryability_and_details()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let error = DfmcpError::new(ErrorCode::CursorGap, "refresh required")
+            .retryable(true)
+            .with_detail("epoch", "7");
+        let payload: serde_json::Value =
+            serde_json::from_str(&dfmcp_error_payload("fortress.observe", &error))?;
+        assert_eq!(payload["error"]["code"], "cursor_gap");
+        assert_eq!(payload["error"]["retryable"], true);
+        assert_eq!(payload["error"]["details"][0][0], "epoch");
+        Ok(())
     }
 
     #[test]

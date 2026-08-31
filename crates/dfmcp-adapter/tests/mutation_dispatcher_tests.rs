@@ -165,7 +165,7 @@ fn test_indeterminate_state_blocks_blind_retry() -> Result<()> {
         .journal_mut()
         .mark_indeterminate(&idempotency_key, "bridge socket timeout".to_owned())?;
 
-    // Attempting commit must now fail with InternalInvariantViolation (reconciliation required)
+    // Attempting commit must now fail explicitly until reconciliation completes.
     let result = dispatcher.commit_mutation(&plan, &prepare_receipt, &mut snapshot, &ctx);
     assert!(result.is_err());
     let err = match result {
@@ -177,7 +177,7 @@ fn test_indeterminate_state_blocks_blind_retry() -> Result<()> {
             ));
         }
     };
-    assert_eq!(err.code, ErrorCode::InternalInvariantViolation);
+    assert_eq!(err.code, ErrorCode::EffectIndeterminate);
 
     Ok(())
 }
