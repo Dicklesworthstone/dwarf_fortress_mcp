@@ -21,12 +21,12 @@ use dfmcp_intent::PreparedPlan;
 use dfmcp_world::execute_bounded_query;
 
 use crate::{
-    ActionReceipt, AdapterHealth, AdapterIdentity, CancelMode, CancelReceipt, CheckpointReceipt,
-    CommitReceipt, CompatibilityLevel, GameAdapter, HealthStatus, InterestSet,
+    ActionReceipt, AdapterHealth, AdapterIdentity, BridgeManifest, CancelMode, CancelReceipt,
+    CheckpointReceipt, CommitReceipt, CompatibilityLevel, GameAdapter, HealthStatus,
     LiveObservationCapsule, LiveObservationSource, LiveWorldProjection, MAX_CAPSULE_CITIZENS,
     MAX_CITIZENS_PER_PAGE, ObservationFrame, ObservationPayload, ObservationRequest,
     PrepareReceipt, Projection, QueryRequest, QueryResponse, QueryRow, RestoreReceipt,
-    read_complete_observation_bounded, project_live_capsule,
+    project_live_capsule, read_complete_observation_bounded,
 };
 
 const LIVE_ADAPTER_SCHEMA: &[u8] = b"dfmcp-live-read-adapter-v1";
@@ -95,6 +95,31 @@ struct RefreshOutcome {
     current_anchor: StateAnchor,
     changed: bool,
     reset: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionIdentity {
+    site_id: i32,
+    world_folder: String,
+    world_name: String,
+    bridge_version: String,
+    dfhack_version: String,
+    df_version: String,
+    supported_methods: BTreeSet<String>,
+}
+
+impl SessionIdentity {
+    fn from_capsule(capsule: &LiveObservationCapsule) -> Self {
+        Self {
+            site_id: capsule.site_id,
+            world_folder: capsule.world_folder.clone(),
+            world_name: capsule.world_name.clone(),
+            bridge_version: capsule.bridge.bridge_version.clone(),
+            dfhack_version: capsule.bridge.dfhack_version.clone(),
+            df_version: capsule.bridge.df_version.clone(),
+            supported_methods: capsule.bridge.supported_methods.clone(),
+        }
+    }
 }
 
 pub struct LiveReadAdapter<T> {
@@ -179,10 +204,7 @@ impl<T: LiveObservationSource> LiveReadAdapter<T> {
     }
 
     fn read_capsule(&mut self, max_citizens: u32) -> Result<LiveObservationCapsule> {
-        let page_size = self
-            .config
-            .page_size
-            .min(max_citizens.max(1));
+        let page_size = self.config.page_size.min(max_citizens.max(1));
         read_complete_observation_bounded(
             &mut self.source,
             page_size,
@@ -280,28 +302,40 @@ impl<T: LiveObservationSource> LiveReadAdapter<T> {
                 ),
             ));
         }
+        ensure_snapshot_budget(request, self.current_projection_required()?)?;
         Ok(max_citizens)
     }
 
-    fn refresh(&mut self, max_citizens: u32) -> Result<RefreshOutcome> {
-        let prior_projection = self.current_projection_required()?.clone();
-        let prior_capsule = self.current_capsule_required()?.clone();
-        let prior_anchor = prior_projection.snapshot.anchor();
+    fn refresh(
+        &mut self,
+        max_citizens: u32,
+        request: &ObservationRequest,
+    ) -> Result<RefreshOutcome> {
+        let (prior_anchor, prior_tick) = {
+            let projection = self.current_projection_required()?;
+            (projection.snapshot.anchor(), projection.snapshot.tick)
+        };
+        let (prior_digest, prior_bridge_generation, prior_identity) = {
+            let capsule = self.current_capsule_required()?;
+            (
+                capsule.content_digest,
+                capsule.bridge.bridge_generation,
+                SessionIdentity::from_capsule(capsule),
+            )
+        };
         let capsule = self.read_capsule(max_citizens)?;
 
-        ensure_same_session_identity(&prior_capsule, &capsule)?;
-        let prior_tick = prior_projection.snapshot.tick;
+        ensure_same_session_identity(&prior_identity, &capsule)?;
         let next_tick = crate::DwarfFortressClock {
             year: capsule.current_year,
             year_tick: capsule.current_year_tick,
         }
         .absolute_tick()?;
-        let bridge_reset =
-            capsule.bridge.bridge_generation != prior_capsule.bridge.bridge_generation;
+        let bridge_reset = capsule.bridge.bridge_generation != prior_bridge_generation;
         let clock_regression = next_tick < prior_tick;
         let reset = bridge_reset || clock_regression;
 
-        if !reset && capsule.content_digest == prior_capsule.content_digest {
+        if !reset && capsule.content_digest == prior_digest {
             return Ok(RefreshOutcome {
                 prior_anchor,
                 current_anchor: prior_anchor,
@@ -310,31 +344,40 @@ impl<T: LiveObservationSource> LiveReadAdapter<T> {
             });
         }
 
-        if reset {
-            self.epoch = self.epoch.checked_add(1).ok_or_else(|| {
-                error(
-                    ErrorCode::CursorGap,
-                    "live observation epoch space is exhausted",
-                )
-            })?;
-            self.sequence = 0;
+        let (candidate_epoch, candidate_sequence) = if reset {
+            (
+                self.epoch.checked_add(1).ok_or_else(|| {
+                    error(
+                        ErrorCode::CursorGap,
+                        "live observation epoch space is exhausted",
+                    )
+                })?,
+                0,
+            )
         } else {
-            self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
-                error(
-                    ErrorCode::CursorGap,
-                    "live observation sequence space is exhausted",
-                )
-            })?;
-        }
+            (
+                self.epoch,
+                self.sequence.checked_add(1).ok_or_else(|| {
+                    error(
+                        ErrorCode::CursorGap,
+                        "live observation sequence space is exhausted",
+                    )
+                })?,
+            )
+        };
         let projection = project_live_capsule(
             &capsule,
             self.config.fortress_id,
             ObservationCursor {
-                epoch: self.epoch,
-                sequence: self.sequence,
+                epoch: candidate_epoch,
+                sequence: candidate_sequence,
             },
         )?;
+        ensure_snapshot_budget(request, &projection)?;
         let current_anchor = projection.snapshot.anchor();
+
+        self.epoch = candidate_epoch;
+        self.sequence = candidate_sequence;
         self.identity = adapter_identity(&capsule.bridge);
         self.last_capsule = Some(capsule);
         self.current = Some(projection);
@@ -345,36 +388,34 @@ impl<T: LiveObservationSource> LiveReadAdapter<T> {
             reset,
         })
     }
-
-    fn ensure_snapshot_budget(
-        &self,
-        request: &ObservationRequest,
-        projection: &LiveWorldProjection,
-    ) -> Result<()> {
-        let entity_count = u32::try_from(projection.snapshot.graph.entities.len()).map_err(|_| {
-            error(
-                ErrorCode::BudgetExceeded,
-                "live snapshot entity count cannot be represented",
-            )
-        })?;
-        let snapshot_bytes =
-            u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
-                error(
-                    ErrorCode::BudgetExceeded,
-                    "live snapshot byte count cannot be represented",
-                )
-            })?;
-        if entity_count > request.max_entities || snapshot_bytes > request.max_bytes {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "canonical live snapshot exceeds the requested entity or byte bound",
-            ));
-        }
-        Ok(())
-    }
 }
 
-fn adapter_identity(manifest: &crate::BridgeManifest) -> AdapterIdentity {
+fn ensure_snapshot_budget(
+    request: &ObservationRequest,
+    projection: &LiveWorldProjection,
+) -> Result<()> {
+    let entity_count = u32::try_from(projection.snapshot.graph.entities.len()).map_err(|_| {
+        error(
+            ErrorCode::BudgetExceeded,
+            "live snapshot entity count cannot be represented",
+        )
+    })?;
+    let snapshot_bytes = u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
+        error(
+            ErrorCode::BudgetExceeded,
+            "live snapshot byte count cannot be represented",
+        )
+    })?;
+    if entity_count > request.max_entities || snapshot_bytes > request.max_bytes {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "canonical live snapshot exceeds the requested entity or byte bound",
+        ));
+    }
+    Ok(())
+}
+
+fn adapter_identity(manifest: &BridgeManifest) -> AdapterIdentity {
     AdapterIdentity {
         name: "dfmcp-dfhack-live-read".to_owned(),
         adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -396,7 +437,7 @@ fn adapter_identity(manifest: &crate::BridgeManifest) -> AdapterIdentity {
 }
 
 fn ensure_same_session_identity(
-    prior: &LiveObservationCapsule,
+    prior: &SessionIdentity,
     next: &LiveObservationCapsule,
 ) -> Result<()> {
     if prior.site_id != next.site_id
@@ -408,10 +449,10 @@ fn ensure_same_session_identity(
             "live source switched world or fortress identity; open a new session",
         ));
     }
-    if prior.bridge.bridge_version != next.bridge.bridge_version
-        || prior.bridge.dfhack_version != next.bridge.dfhack_version
-        || prior.bridge.df_version != next.bridge.df_version
-        || prior.bridge.supported_methods != next.bridge.supported_methods
+    if prior.bridge_version != next.bridge.bridge_version
+        || prior.dfhack_version != next.bridge.dfhack_version
+        || prior.df_version != next.bridge.df_version
+        || prior.supported_methods != next.bridge.supported_methods
     {
         return Err(error(
             ErrorCode::VersionMismatch,
@@ -491,11 +532,16 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         self.check_context_anchor(context)?;
         let max_citizens = self.validate_observation_request(request, context)?;
-        let outcome = self.refresh(max_citizens)?;
+        let outcome = self.refresh(max_citizens, request)?;
         let projection = self.current_projection_required()?;
-        self.ensure_snapshot_budget(request, projection)?;
         let capsule = self.current_capsule_required()?;
         let current_anchor = projection.snapshot.anchor();
+        if outcome.current_anchor != current_anchor {
+            return Err(error(
+                ErrorCode::InternalInvariantViolation,
+                "live refresh outcome does not match the published adapter anchor",
+            ));
+        }
 
         let (payload, mut warnings) = match request.since {
             None => (ObservationPayload::Snapshot(projection.snapshot.clone()), Vec::new()),
@@ -706,7 +752,7 @@ mod tests {
     use dfmcp_world::{QueryOrder, WorldQuery};
 
     use super::*;
-    use crate::{BridgeManifest, CitizenRecord, ObservationPage};
+    use crate::{CitizenRecord, InterestSet, ObservationPage};
 
     #[derive(Clone)]
     struct ScriptedSource {
@@ -950,7 +996,7 @@ mod tests {
     }
 
     #[test]
-    fn world_identity_switch_fails_closed() -> Result<()> {
+    fn world_identity_switch_fails_closed_without_advancing_anchor() -> Result<()> {
         let mut switched = page(42, 12_346, &[0]);
         switched.world_folder = "region2".to_owned();
         let mut adapter = LiveReadAdapter::new(
@@ -966,6 +1012,25 @@ mod tests {
                 )
                 .is_err()
         );
+        assert_eq!(adapter.current_anchor(), Some(prior));
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_over_budget_does_not_advance_anchor() -> Result<()> {
+        let mut adapter = LiveReadAdapter::new(
+            source(
+                42,
+                vec![page(42, 12_345, &[0]), page(42, 12_346, &[0, 1])],
+            ),
+            config(),
+        )?;
+        let prior = adapter.bootstrap()?.snapshot.anchor();
+        let mut request = observation_request(Some(prior.cursor));
+        request.max_bytes = 1;
+        let mut operation = context(prior, Capability::Observe);
+        operation.budget.max_bytes = 1;
+        assert!(adapter.observe(&request, &operation).is_err());
         assert_eq!(adapter.current_anchor(), Some(prior));
         Ok(())
     }
