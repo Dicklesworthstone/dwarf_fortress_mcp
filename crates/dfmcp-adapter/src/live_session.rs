@@ -98,7 +98,7 @@ pub fn read_complete_observation_bounded<T: LiveObservationSource>(
             "DFHack handshake does not report a loaded fortress-mode world",
         ));
     }
-    let mut assembler = ObservationAssembler::new(manifest);
+    let mut assembler = ObservationAssembler::with_names(manifest, include_names);
     let rounded_pages = if max_citizens == 0 {
         0
     } else {
@@ -248,13 +248,36 @@ mod tests {
         }
     }
 
+    fn page_without_names(
+        offset: u32,
+        total: u32,
+        ids: &[i32],
+        complete: bool,
+    ) -> ObservationPage {
+        let mut page = page(offset, total, ids, complete);
+        for citizen in &mut page.citizens {
+            citizen.name.clear();
+        }
+        page
+    }
+
     #[test]
     fn drives_multiple_pages_to_one_complete_capsule() -> Result<()> {
         let mut source = source(vec![page(0, 3, &[1, 2], false), page(2, 3, &[3], true)]);
         let capsule = read_complete_observation(&mut source, 2, true)?;
         assert!(capsule.citizen_coverage.proves_complete_roster());
+        assert!(capsule.names_included);
         assert_eq!(capsule.citizens.len(), 3);
         assert_eq!(source.calls, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn requested_name_omission_is_preserved_in_the_capsule() -> Result<()> {
+        let mut source = source(vec![page_without_names(0, 1, &[1], true)]);
+        let capsule = read_complete_observation(&mut source, 1, false)?;
+        assert!(!capsule.names_included);
+        assert!(capsule.citizens[0].name.is_empty());
         Ok(())
     }
 
