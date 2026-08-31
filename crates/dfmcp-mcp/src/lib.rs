@@ -6,17 +6,24 @@
 //! (the `fastmcp-rust` facade) and runs it as a modern-only MCP 2026-07-28
 //! server. The plane is deliberately thin: every semantic decision is
 //! delegated to `dfmcp-core`, `dfmcp-world`, `dfmcp-intent`, `dfmcp-adapter`,
-//! and `dfmcp-lab`. This crate adds transport and session framing, and
-//! nothing else. It must never become an authority: no tool here may bypass
-//! plan sealing, commit-time revalidation, idempotency, or evidence checks
-//! (ADR-013, `docs/FASTMCP_INTEGRATION.md`).
+//! and `dfmcp-lab`. This crate adds transport, session framing, and the
+//! authority-free canonical Agent Turn Packet projection. It must never become
+//! an authority: no tool here may bypass plan sealing, commit-time
+//! revalidation, idempotency, or evidence checks (ADR-013,
+//! `docs/FASTMCP_INTEGRATION.md`).
 
+pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
 pub mod server;
 pub mod tasks;
 
+pub use agent_turn::{
+    AGENT_TURN_SCHEMA, AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile,
+    RecoveryClass, empty_active_work, empty_budget, empty_coverage, recommendation,
+    recovery_guidance, uncertainty,
+};
 pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
 pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
 pub use http_transport::{
