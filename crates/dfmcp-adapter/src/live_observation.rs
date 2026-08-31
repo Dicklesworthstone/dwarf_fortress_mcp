@@ -10,12 +10,12 @@
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, sha256};
 
-use crate::{BridgeManifest, CitizenRecord, ObservationPage};
 use crate::dfhack_rpc::{
     MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
 };
+use crate::{BridgeManifest, CitizenRecord, ObservationPage};
 
-const CAPSULE_DOMAIN: &[u8] = b"dfmcp.live-observation-capsule.v1\0";
+const CAPSULE_DOMAIN: &[u8] = b"dfmcp.live-observation-capsule.v2\0";
 pub const MAX_CAPSULE_CITIZENS: usize = 100_000;
 pub const MAX_CANONICAL_CAPSULE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -57,6 +57,10 @@ pub struct LiveObservationCapsule {
     pub world_name: String,
     pub world_folder: String,
     pub site_id: i32,
+    /// Whether citizen names were requested and therefore observed. An empty
+    /// string with this flag set is an observed empty/unnamed value; an empty
+    /// string with this flag clear is an explicit omission placeholder.
+    pub names_included: bool,
     pub citizen_coverage: CitizenCoverage,
     pub citizens: Vec<CitizenRecord>,
     pub canonical_bytes: Vec<u8>,
@@ -104,6 +108,12 @@ impl LiveObservationCapsule {
         for citizen in &self.citizens {
             validate_string_bound(&citizen.name, "citizen name", MAX_UNIT_NAME_BYTES)?;
             validate_string_bound(&citizen.race, "citizen race", MAX_RACE_NAME_BYTES)?;
+            if !self.names_included && !citizen.name.is_empty() {
+                return Err(error(
+                    ErrorCode::CorruptLedger,
+                    "name-omitted live capsule contains an observed citizen name",
+                ));
+            }
         }
         for pair in self.citizens.windows(2) {
             if pair[0].unit_id >= pair[1].unit_id {
@@ -123,7 +133,12 @@ impl LiveObservationCapsule {
             site_id: self.site_id,
             total: self.citizen_coverage.total,
         };
-        let recomputed = canonical_bytes(&self.bridge, &summary, &self.citizens)?;
+        let recomputed = canonical_bytes(
+            &self.bridge,
+            &summary,
+            self.names_included,
+            &self.citizens,
+        )?;
         if recomputed != self.canonical_bytes {
             return Err(error(
                 ErrorCode::CorruptLedger,
@@ -174,16 +189,25 @@ impl SummaryIdentity {
 #[derive(Clone, Debug)]
 pub struct ObservationAssembler {
     bridge: BridgeManifest,
+    names_included: bool,
     summary: Option<SummaryIdentity>,
     citizens: Vec<CitizenRecord>,
     complete: bool,
 }
 
 impl ObservationAssembler {
+    /// Construct an assembler for the full-name projection retained by the
+    /// original API. Call [`Self::with_names`] when the projection is explicit.
     #[must_use]
     pub fn new(bridge: BridgeManifest) -> Self {
+        Self::with_names(bridge, true)
+    }
+
+    #[must_use]
+    pub fn with_names(bridge: BridgeManifest, names_included: bool) -> Self {
         Self {
             bridge,
+            names_included,
             summary: None,
             citizens: Vec::new(),
             complete: false,
@@ -227,6 +251,12 @@ impl ObservationAssembler {
             return Err(error(
                 ErrorCode::StaleAnchor,
                 "handshake world posture no longer matches the observation request",
+            ));
+        }
+        if !self.names_included && page.citizens.iter().any(|citizen| !citizen.name.is_empty()) {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "name-omitted observation page contains citizen names",
             ));
         }
         let expected_offset = self.next_offset()?;
@@ -329,7 +359,12 @@ impl ObservationAssembler {
             ));
         }
 
-        let canonical_bytes = canonical_bytes(&self.bridge, &summary, &self.citizens)?;
+        let canonical_bytes = canonical_bytes(
+            &self.bridge,
+            &summary,
+            self.names_included,
+            &self.citizens,
+        )?;
         if canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
             return Err(error(
                 ErrorCode::BudgetExceeded,
@@ -345,6 +380,7 @@ impl ObservationAssembler {
             world_name: summary.world_name,
             world_folder: summary.world_folder,
             site_id: summary.site_id,
+            names_included: self.names_included,
             citizen_coverage: CitizenCoverage {
                 offset: 0,
                 returned,
@@ -399,6 +435,7 @@ fn push_string(output: &mut Vec<u8>, value: &str) -> Result<()> {
 fn canonical_bytes(
     bridge: &BridgeManifest,
     summary: &SummaryIdentity,
+    names_included: bool,
     citizens: &[CitizenRecord],
 ) -> Result<Vec<u8>> {
     let mut output = Vec::new();
@@ -422,6 +459,7 @@ fn canonical_bytes(
         push_string(&mut output, method)?;
     }
 
+    push_bool(&mut output, names_included);
     push_bool(&mut output, summary.paused);
     push_u32(&mut output, summary.current_year);
     push_u32(&mut output, summary.current_year_tick);
@@ -511,6 +549,19 @@ mod tests {
         }
     }
 
+    fn page_without_names(
+        offset: u32,
+        total: u32,
+        ids: &[i32],
+        complete: bool,
+    ) -> ObservationPage {
+        let mut page = page(offset, total, ids, complete);
+        for citizen in &mut page.citizens {
+            citizen.name.clear();
+        }
+        page
+    }
+
     #[test]
     fn pagination_does_not_change_capsule_identity() -> Result<()> {
         let mut one_page = ObservationAssembler::new(manifest());
@@ -527,6 +578,29 @@ mod tests {
         assert_eq!(one.canonical_bytes, many.canonical_bytes);
         assert_eq!(one.citizens, many.citizens);
         Ok(())
+    }
+
+    #[test]
+    fn name_projection_is_part_of_capsule_identity() -> Result<()> {
+        let mut included = ObservationAssembler::with_names(manifest(), true);
+        included.push_page(page_without_names(0, 1, &[1], true))?;
+        let included = included.finalize()?;
+
+        let mut omitted = ObservationAssembler::with_names(manifest(), false);
+        omitted.push_page(page_without_names(0, 1, &[1], true))?;
+        let omitted = omitted.finalize()?;
+
+        assert!(included.names_included);
+        assert!(!omitted.names_included);
+        assert_ne!(included.content_digest, omitted.content_digest);
+        assert_ne!(included.canonical_bytes, omitted.canonical_bytes);
+        Ok(())
+    }
+
+    #[test]
+    fn name_omitted_assembler_rejects_observed_names() {
+        let mut assembler = ObservationAssembler::with_names(manifest(), false);
+        assert!(assembler.push_page(page(0, 1, &[1], true)).is_err());
     }
 
     #[test]
