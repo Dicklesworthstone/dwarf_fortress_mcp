@@ -18,6 +18,8 @@ use crate::{
     derive_live_fortress_id, read_complete_observation_bounded,
 };
 
+pub const DEFAULT_MAX_LIVE_CITIZENS: u32 = 100_000;
+
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
 }
@@ -73,7 +75,7 @@ impl Default for LiveReadBootstrapConfig {
     fn default() -> Self {
         Self {
             page_size: MAX_CITIZENS_PER_PAGE,
-            max_citizens: u32::try_from(MAX_CAPSULE_CITIZENS).unwrap_or(u32::MAX),
+            max_citizens: DEFAULT_MAX_LIVE_CITIZENS,
             include_names: true,
             initial_epoch: 0,
         }
@@ -237,11 +239,12 @@ pub fn bootstrap_live_read_adapter<T: LiveObservationSource>(
             initial_epoch: config.initial_epoch,
         },
     )?;
-    let projection = adapter.bootstrap()?;
-    if adapter
+    let projection_fortress_id = adapter.bootstrap()?.snapshot.fortress_id;
+    let digest_preserved = adapter
         .last_capsule()
-        .is_none_or(|capsule| capsule.content_digest != source_digest)
-        || projection.snapshot.fortress_id != fortress_id
+        .is_some_and(|capsule| capsule.content_digest == source_digest);
+    if !digest_preserved
+        || projection_fortress_id != fortress_id
         || adapter.source().has_primed_capsule()
     {
         return Err(error(
@@ -262,7 +265,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::{CitizenRecord, GameAdapter, InterestSet, ObservationPayload, ObservationRequest, Projection};
+    use crate::{
+        CitizenRecord, GameAdapter, InterestSet, ObservationPayload, ObservationRequest,
+        Projection,
+    };
 
     #[derive(Clone)]
     struct ScriptedSource {
@@ -339,7 +345,7 @@ mod tests {
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_count_total: u32::try_from(ids.len()).unwrap_or(u32::MAX),
+            citizen_count_total: u32::try_from(ids.len()).map_or(u32::MAX, |value| value),
             citizen_offset: 0,
             complete: true,
             citizens: ids.iter().copied().map(citizen).collect(),
