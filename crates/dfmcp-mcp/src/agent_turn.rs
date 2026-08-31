@@ -11,121 +11,10 @@
 //! authority. See `docs/AGENT_OPERATING_MODEL.md` and
 //! `architecture/agent_turn_contract.json`.
 
+pub use dfmcp_core::{AgentPhase, ContinuityStatus, ObservationProfile, RecoveryClass};
 use serde_json::{Value, json};
 
 pub const AGENT_TURN_SCHEMA: &str = "dfmcp.agent_turn/1";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AgentPhase {
-    Bootstrap,
-    Orient,
-    Inspect,
-    Formulate,
-    Propose,
-    Compare,
-    Commit,
-    Verify,
-    Learn,
-    Handoff,
-    Reconcile,
-}
-
-impl AgentPhase {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Bootstrap => "bootstrap",
-            Self::Orient => "orient",
-            Self::Inspect => "inspect",
-            Self::Formulate => "formulate",
-            Self::Propose => "propose",
-            Self::Compare => "compare",
-            Self::Commit => "commit",
-            Self::Verify => "verify",
-            Self::Learn => "learn",
-            Self::Handoff => "handoff",
-            Self::Reconcile => "reconcile",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContinuityStatus {
-    Bootstrap,
-    Continuous,
-    Heartbeat,
-    Partial,
-    Gap,
-    Reset,
-    Stale,
-    Indeterminate,
-}
-
-impl ContinuityStatus {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Bootstrap => "bootstrap",
-            Self::Continuous => "continuous",
-            Self::Heartbeat => "heartbeat",
-            Self::Partial => "partial",
-            Self::Gap => "gap",
-            Self::Reset => "reset",
-            Self::Stale => "stale",
-            Self::Indeterminate => "indeterminate",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ObservationProfile {
-    Pulse,
-    Briefing,
-    Tactical,
-    Forensic,
-    Custom,
-}
-
-impl ObservationProfile {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pulse => "pulse",
-            Self::Briefing => "briefing",
-            Self::Tactical => "tactical",
-            Self::Forensic => "forensic",
-            Self::Custom => "custom",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecoveryClass {
-    NeverUnchanged,
-    SafeReadRetry,
-    RefreshAndRetry,
-    RebaseRequired,
-    Backoff,
-    ReconciliationRequired,
-    ConfirmationRequired,
-    OperatorActionRequired,
-}
-
-impl RecoveryClass {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::NeverUnchanged => "never_unchanged",
-            Self::SafeReadRetry => "safe_read_retry",
-            Self::RefreshAndRetry => "refresh_and_retry",
-            Self::RebaseRequired => "rebase_required",
-            Self::Backoff => "backoff",
-            Self::ReconciliationRequired => "reconciliation_required",
-            Self::ConfirmationRequired => "confirmation_required",
-            Self::OperatorActionRequired => "operator_action_required",
-        }
-    }
-}
 
 /// Builder for the common agent-facing turn packet.
 ///
@@ -138,6 +27,7 @@ pub struct AgentTurnBuilder {
     operation: String,
     phase: AgentPhase,
     session_id: Option<String>,
+    turn_id: Option<String>,
     request_id: Option<String>,
     anchor: Option<Value>,
     continuity_status: ContinuityStatus,
@@ -164,6 +54,7 @@ impl AgentTurnBuilder {
             operation: operation.into(),
             phase,
             session_id: None,
+            turn_id: None,
             request_id: None,
             anchor: None,
             continuity_status: ContinuityStatus::Bootstrap,
@@ -187,6 +78,18 @@ impl AgentTurnBuilder {
     #[must_use]
     pub fn session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Set the presentation-turn identity.
+    ///
+    /// This is distinct from the authority-bearing semantic `request_id`. A
+    /// presentation facade may know its own turn sequence while the underlying
+    /// semantic handler has not yet projected its request identity. It must
+    /// leave `request_id` absent rather than aliasing the two.
+    #[must_use]
+    pub fn turn_id(mut self, turn_id: impl Into<String>) -> Self {
+        self.turn_id = Some(turn_id.into());
         self
     }
 
@@ -290,6 +193,7 @@ impl AgentTurnBuilder {
             "operation": self.operation,
             "phase": self.phase.as_str(),
             "session_id": self.session_id,
+            "turn_id": self.turn_id,
             "request_id": self.request_id,
             "anchor": self.anchor,
             "continuity": {
@@ -377,6 +281,7 @@ pub fn empty_budget() -> Value {
 }
 
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn recommendation(
     recommendation_id: impl Into<String>,
     tool: impl Into<String>,
@@ -465,6 +370,7 @@ mod tests {
             "operation",
             "phase",
             "session_id",
+            "turn_id",
             "request_id",
             "anchor",
             "continuity",
@@ -485,11 +391,20 @@ mod tests {
     }
 
     #[test]
+    fn presentation_turn_and_semantic_request_are_not_aliased() {
+        let turn = AgentTurnBuilder::new("fortress.observe", AgentPhase::Orient)
+            .turn_id("presentation-turn-7")
+            .build();
+        assert_eq!(turn["turn_id"], "presentation-turn-7");
+        assert!(turn["request_id"].is_null());
+    }
+
+    #[test]
     fn turn_serialization_is_byte_stable_for_identical_input() {
         let build = || {
             AgentTurnBuilder::new("fortress.open_session", AgentPhase::Bootstrap)
                 .session_id("00000000000000000000000000000001")
-                .request_id("1")
+                .turn_id("presentation-turn-1")
                 .profile(ObservationProfile::Briefing)
                 .recommendations(vec![recommendation(
                     "inspect-summary",
