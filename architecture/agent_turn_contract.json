@@ -99,9 +99,11 @@
     "operation",
     "phase",
     "session_id",
+    "turn_id",
     "request_id",
     "anchor",
     "continuity",
+    "profile",
     "briefing",
     "changes",
     "attention",
@@ -113,6 +115,11 @@
     "budget",
     "references"
   ],
+  "identity_rules": {
+    "turn_id": "Identity of the authority-free presentation turn. It may be projected before the semantic request identity is available.",
+    "request_id": "Identity of the authority-bearing semantic operation. It must be null rather than inferred or aliased when the semantic layer has not exposed it.",
+    "aliasing_forbidden": true
+  },
   "recommendation_order": [
     "continuity_or_indeterminate_hazard",
     "imminent_irreversible_loss",
@@ -171,6 +178,10 @@
     {
       "id": "AGENT-INV-012",
       "statement": "A handoff packet is sufficient to resume safely without reconstructing the full transcript."
+    },
+    {
+      "id": "AGENT-INV-013",
+      "statement": "Presentation turn identity and authority-bearing semantic request identity are distinct and must never be silently aliased."
     }
   ],
   "authority_rules": {
