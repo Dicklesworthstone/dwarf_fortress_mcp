@@ -20,4 +20,5 @@ pub use obligation::{
     BoundedObligation, DrainProgressCertificate, ObligationRuntime, ObligationStatus,
 };
 pub use plan::{Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan, RequestedAction};
+pub(crate) use plan::derive_step_idempotency_key;
 pub use planner::{PlanPolicy, StaticPlanner};
