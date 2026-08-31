@@ -7,8 +7,8 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
-    BridgeCredentials, DfHackRpcClient, GameAdapter, HealthStatus, LiveObservationCapsule,
-    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, project_live_capsule,
+    BridgeCredentials, DfHackRpcClient, GameAdapter, HealthStatus, MAX_CAPSULE_CITIZENS,
+    MAX_CITIZENS_PER_PAGE, derive_live_fortress_id, project_live_capsule,
     read_complete_observation_bounded,
 };
 use dfmcp_core::{
@@ -67,8 +67,12 @@ COMMANDS:
 
 BRIDGE ENVIRONMENT:
     DFMCP_BRIDGE_TOKEN          Required 32..256-byte shared loopback secret
-    DFMCP_BRIDGE_PAGE_SIZE      Citizen page size, 1..4096 (default 256)
+    DFMCP_BRIDGE_PAGE_SIZE      Citizen page size, 1..4096 (default 4096)
     DFMCP_BRIDGE_MAX_CITIZENS   Complete-roster ceiling, 0..100000 (default 100000)
+
+    The maximum page size is the safe default because one DFHack RPC is an
+    internally suspended read. Multipage V1 reads are accepted only while the
+    fortress remains paused on every page.
 
 STATUS:
     The default MCP server remains the deterministic laboratory. The bridge
@@ -147,7 +151,7 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
     })?;
     let page_size = bounded_env_u32(
         "DFMCP_BRIDGE_PAGE_SIZE",
-        256,
+        MAX_CITIZENS_PER_PAGE,
         1,
         MAX_CITIZENS_PER_PAGE,
     )?;
@@ -178,7 +182,7 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
         true,
         max_citizens,
     )?;
-    let fortress_id = derive_fortress_id(&capsule);
+    let fortress_id = derive_live_fortress_id(&capsule)?;
     let projection = project_live_capsule(
         &capsule,
         fortress_id,
@@ -234,11 +238,14 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
             "citizens": capsule.citizen_coverage.total,
         },
         "capsule": {
+            "schema": "dfmcp.live-observation-capsule.v2",
             "digest": capsule.content_digest.to_string(),
             "canonical_bytes": capsule.canonical_bytes.len(),
             "complete": capsule.citizen_coverage.proves_complete_roster(),
+            "names_included": capsule.names_included,
         },
         "snapshot": {
+            "projection_schema": projection.receipt.schema(),
             "anchor": {
                 "epoch": projection.snapshot.cursor.epoch,
                 "sequence": projection.snapshot.cursor.sequence,
@@ -267,20 +274,6 @@ fn bridge_nonce(address: SocketAddr) -> Result<Vec<u8>, Box<dyn Error>> {
     bytes.extend_from_slice(address.to_string().as_bytes());
     bytes.extend_from_slice(env!("CARGO_PKG_VERSION").as_bytes());
     Ok(Digest32::of_bytes(&bytes).as_bytes().to_vec())
-}
-
-fn derive_fortress_id(capsule: &LiveObservationCapsule) -> FortressId {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"dfmcp-live-fortress-id-v1\0");
-    bytes.extend_from_slice(capsule.world_folder.as_bytes());
-    bytes.push(0);
-    bytes.extend_from_slice(&capsule.site_id.to_be_bytes());
-    let digest = Digest32::of_bytes(&bytes);
-    let source = digest.as_bytes();
-    let raw = u64::from_be_bytes([
-        source[0], source[1], source[2], source[3], source[4], source[5], source[6], source[7],
-    ]) | 1;
-    FortressId::new(raw)
 }
 
 fn bounded_env_u32(
@@ -416,9 +409,11 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_env_u32, derive_fortress_id, doctor, parse_bridge_target};
-    use dfmcp_adapter::{BridgeManifest, CitizenCoverage, LiveObservationCapsule};
-    use dfmcp_core::{Digest32, FortressId};
+    use super::{bounded_env_u32, doctor, parse_bridge_target};
+    use dfmcp_adapter::{
+        BridgeManifest, ObservationAssembler, ObservationPage, derive_live_fortress_id,
+    };
+    use dfmcp_core::FortressId;
     use std::collections::BTreeSet;
 
     #[test]
@@ -436,40 +431,42 @@ mod tests {
     }
 
     #[test]
-    fn fortress_identity_is_stable_and_nonzero() {
-        let capsule = LiveObservationCapsule {
-            bridge: BridgeManifest {
-                bridge_version: "0.1.0".to_owned(),
-                dfhack_version: "0.51.11-r1".to_owned(),
-                df_version: "0.51.11".to_owned(),
-                world_loaded: true,
-                fortress_mode: true,
-                bridge_generation: 1,
-                supported_methods: BTreeSet::from([
-                    "Handshake".to_owned(),
-                    "ReadObservation".to_owned(),
-                ]),
-            },
+    fn cli_uses_the_canonical_nonzero_fortress_identity() -> Result<(), Box<dyn Error>> {
+        let manifest = BridgeManifest {
+            bridge_version: "0.1.0".to_owned(),
+            dfhack_version: "0.51.11-r1".to_owned(),
+            df_version: "0.51.11".to_owned(),
+            world_loaded: true,
+            fortress_mode: true,
+            bridge_generation: 1,
+            supported_methods: BTreeSet::from([
+                "Handshake".to_owned(),
+                "ReadObservation".to_owned(),
+            ]),
+        };
+        let page = ObservationPage {
+            bridge_generation: 1,
+            world_loaded: true,
+            fortress_mode: true,
             paused: true,
             current_year: 105,
             current_year_tick: 1,
             world_name: "Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_coverage: CitizenCoverage {
-                offset: 0,
-                returned: 0,
-                total: 0,
-                complete: true,
-            },
+            citizen_count_total: 0,
+            citizen_offset: 0,
+            complete: true,
             citizens: Vec::new(),
-            canonical_bytes: Vec::new(),
-            content_digest: Digest32::ZERO,
         };
-        let first = derive_fortress_id(&capsule);
-        let second = derive_fortress_id(&capsule);
+        let mut assembler = ObservationAssembler::new(manifest);
+        assembler.push_page(page)?;
+        let capsule = assembler.finalize()?;
+        let first = derive_live_fortress_id(&capsule)?;
+        let second = derive_live_fortress_id(&capsule)?;
         assert_eq!(first, second);
         assert_ne!(first, FortressId::NIL);
+        Ok(())
     }
 
     #[test]
