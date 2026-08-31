@@ -23,12 +23,13 @@ Environment:
   DFMCP_DFHACK_REF             DFHack revision to build (default: source checkout HEAD)
   DFMCP_DFHACK_QUAL_DIR        Receipt/artifact root (default: target/dfhack-qualification/<run>)
   DFMCP_DFHACK_BUILD_JOBS      Parallel build jobs (default: detected CPU count or 2)
-  DFMCP_DFHACK_SKIP_SUBMODULES Set to 1 only when the isolated worktree already has every dependency
+  DFMCP_DFHACK_SKIP_SUBMODULES Set to 1 only when every dependency is already usable
   DFMCP_DFHACK_KEEP_WORKTREE   Set to 1 to preserve the isolated worktree after the run
 
 The script never installs into a live Dwarf Fortress/DFHack tree. It creates a detached git
-worktree at an exact DFHack commit, copies only bridge/dfhack-plugin into plugins/dfmcp_bridge,
-builds the single plugin target, fingerprints the output, and writes a machine-readable receipt.
+worktree at an exact DFHack commit, stages bridge/dfhack-plugin under DFHack's documented
+plugins/external/ seam, registers it with add_subdirectory(dfmcp_bridge), builds only the plugin
+target, fingerprints the output, and writes a machine-readable receipt.
 EOF
 }
 
@@ -61,11 +62,14 @@ OUT_DIR="${DFMCP_DFHACK_QUAL_DIR:-$ROOT/target/dfhack-qualification/$RUN_ID}"
 WORKTREE="$OUT_DIR/dfhack-worktree"
 BUILD_DIR="$OUT_DIR/build"
 LOG_DIR="$OUT_DIR/logs"
-PLUGIN_DST="$WORKTREE/plugins/dfmcp_bridge"
+EXTERNAL_DIR="$WORKTREE/plugins/external"
+PLUGIN_DST="$EXTERNAL_DIR/dfmcp_bridge"
+EXTERNAL_CMAKE="$EXTERNAL_DIR/CMakeLists.txt"
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
 cleanup() {
   local status=$?
+  trap - EXIT
   if [[ "${DFMCP_DFHACK_KEEP_WORKTREE:-0}" != 1 && -d "$WORKTREE" ]]; then
     git -C "$DFHACK_SOURCE" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
   elif [[ -d "$WORKTREE" ]]; then
@@ -87,20 +91,40 @@ else
   warn "Submodule initialization explicitly skipped"
 fi
 
-info "Staging dfmcp_bridge into the isolated DFHack source tree"
-[[ ! -e "$PLUGIN_DST" ]] || die "isolated DFHack tree already contains plugins/dfmcp_bridge"
+info "Registering dfmcp_bridge through DFHack's external-plugin seam"
+mkdir -p "$EXTERNAL_DIR"
+[[ ! -e "$PLUGIN_DST" ]] || die "isolated DFHack tree already contains external/dfmcp_bridge"
 mkdir -p "$PLUGIN_DST"
 cp -R "$ROOT/bridge/dfhack-plugin/." "$PLUGIN_DST/"
+if [[ -e "$EXTERNAL_CMAKE" ]]; then
+  if grep -Eq '^[[:space:]]*add_subdirectory\([[:space:]]*dfmcp_bridge[[:space:]]*\)[[:space:]]*$' "$EXTERNAL_CMAKE"; then
+    die "isolated DFHack external registry already contains dfmcp_bridge"
+  fi
+  printf '\n# Injected by dwarf_fortress_mcp native qualification.\nadd_subdirectory(dfmcp_bridge)\n' \
+    >> "$EXTERNAL_CMAKE"
+else
+  cat > "$EXTERNAL_CMAKE" <<'EOF'
+# Generated in an isolated DFHack worktree by dwarf_fortress_mcp qualification.
+add_subdirectory(dfmcp_bridge)
+EOF
+fi
+
+grep -Eq '^[[:space:]]*add_subdirectory\([[:space:]]*dfmcp_bridge[[:space:]]*\)[[:space:]]*$' \
+  "$EXTERNAL_CMAKE" || die "dfmcp_bridge was not registered in external/CMakeLists.txt"
 
 JOBS="${DFMCP_DFHACK_BUILD_JOBS:-}"
 if [[ -z "$JOBS" ]]; then
-  if command -v nproc >/dev/null 2>&1; then JOBS="$(nproc)";
-  elif command -v sysctl >/dev/null 2>&1; then JOBS="$(sysctl -n hw.ncpu 2>/dev/null || printf 2)";
-  else JOBS=2; fi
+  if command -v nproc >/dev/null 2>&1; then
+    JOBS="$(nproc)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    JOBS="$(sysctl -n hw.ncpu 2>/dev/null || printf 2)"
+  else
+    JOBS=2
+  fi
 fi
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "DFMCP_DFHACK_BUILD_JOBS must be a positive integer"
 
-info "Configuring DFHack plugin build"
+info "Configuring the isolated DFHack plugin build"
 cmake -S "$WORKTREE" -B "$BUILD_DIR" \
   -DBUILD_PLUGINS=ON \
   -DBUILD_DOCS=OFF \
@@ -128,29 +152,37 @@ PLUGIN_BINARY="${CANDIDATES[0]}"
 if command -v sha256sum >/dev/null 2>&1; then
   PLUGIN_SHA256="$(sha256sum "$PLUGIN_BINARY" | awk '{print $1}')"
 else
+  command -v shasum >/dev/null 2>&1 || die "sha256sum or shasum is required"
   PLUGIN_SHA256="$(shasum -a 256 "$PLUGIN_BINARY" | awk '{print $1}')"
 fi
 PLUGIN_SIZE="$(wc -c < "$PLUGIN_BINARY" | tr -d '[:space:]')"
 
 STRINGS_LOG="$LOG_DIR/plugin-strings.txt"
+STRINGS_STATUS=skipped
 if command -v strings >/dev/null 2>&1; then
   strings "$PLUGIN_BINARY" | LC_ALL=C sort -u > "$STRINGS_LOG"
-  for required in Handshake ReadObservation; do
-    grep -Fqx "$required" "$STRINGS_LOG" || die "plugin binary lacks required RPC symbol string: $required"
+  for required in Handshake ReadObservation dfmcp_bridge; do
+    grep -Fq "$required" "$STRINGS_LOG" || \
+      die "plugin binary lacks required bridge marker: $required"
   done
-  for forbidden in RunCommand RunLua ApplyEffect Teleport DigCommand SetPauseState; do
-    if grep -Fq "$forbidden" "$STRINGS_LOG"; then
-      die "plugin binary contains forbidden mutation/command marker: $forbidden"
-    fi
-  done
+  if grep -Eq 'dfmcp\.bridge\.v1\.(Pause|Resume|Dig|Teleport|RunCommand|RunLua|Mutate|ApplyEffect)' \
+    "$STRINGS_LOG"; then
+    die "plugin binary contains a forbidden dfmcp mutation descriptor"
+  fi
+  STRINGS_STATUS=passed
 else
   warn "strings is unavailable; binary string inventory is recorded as skipped"
   : > "$STRINGS_LOG"
 fi
 
 SYMBOLS_LOG="$LOG_DIR/plugin-symbols.txt"
+SYMBOLS_STATUS=skipped
 if command -v nm >/dev/null 2>&1; then
-  nm -a "$PLUGIN_BINARY" > "$SYMBOLS_LOG" 2>&1 || warn "nm could not inspect the plugin binary"
+  if nm -a "$PLUGIN_BINARY" > "$SYMBOLS_LOG" 2>&1; then
+    SYMBOLS_STATUS=passed
+  else
+    warn "nm could not inspect the plugin binary"
+  fi
 else
   warn "nm is unavailable; symbol inventory is recorded as skipped"
   : > "$SYMBOLS_LOG"
@@ -161,7 +193,8 @@ RECEIPT="$OUT_DIR/dfhack-plugin-qualification.json"
 STARTED_AT="$STARTED_AT" FINISHED_AT="$FINISHED_AT" DFMCP_COMMIT="$DFMCP_COMMIT" \
 DFMCP_DIRTY="$DFMCP_DIRTY" DFHACK_COMMIT="$DFHACK_COMMIT" PLUGIN_BINARY="$PLUGIN_BINARY" \
 PLUGIN_SHA256="$PLUGIN_SHA256" PLUGIN_SIZE="$PLUGIN_SIZE" OUT_DIR="$OUT_DIR" \
-python3 - <<'PY'
+STRINGS_STATUS="$STRINGS_STATUS" SYMBOLS_STATUS="$SYMBOLS_STATUS" \
+EXTERNAL_CMAKE="$EXTERNAL_CMAKE" python3 - <<'PY'
 from __future__ import annotations
 import hashlib, json, os, platform, subprocess
 from pathlib import Path
@@ -198,18 +231,26 @@ receipt={
     'path':os.environ['PLUGIN_BINARY'],
     'bytes':int(os.environ['PLUGIN_SIZE']),
     'sha256':os.environ['PLUGIN_SHA256'],
+    'registration':'plugins/external/CMakeLists.txt:add_subdirectory(dfmcp_bridge)',
     'rpc_methods':['Handshake','ReadObservation'],
     'mutation_rpc_methods':[],
+    'strings_inventory':os.environ['STRINGS_STATUS'],
+    'symbols_inventory':os.environ['SYMBOLS_STATUS'],
   },
   'source_digests':{
     'registry':digest(root/'architecture/dfhack_read_bridge_v1.json'),
     'cmake':digest(root/'bridge/dfhack-plugin/CMakeLists.txt'),
     'proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
     'cpp':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
-    'rust_client':digest(root/'crates/dfmcp-adapter/src/dfhack_rpc.rs'),
+    'rust_wire':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
     'capsule':digest(root/'crates/dfmcp-adapter/src/live_observation.rs'),
+    'page_driver':digest(root/'crates/dfmcp-adapter/src/live_session.rs'),
+    'static_checker':digest(root/'scripts/check_dfhack_bridge.py'),
+    'external_registration':digest(Path(os.environ['EXTERNAL_CMAKE'])),
   },
   'logs':{
+    'worktree':str(out/'logs/worktree.log'),
+    'submodules':str(out/'logs/submodules.log'),
     'configure':str(out/'logs/configure.log'),
     'build':str(out/'logs/build.log'),
     'symbols':str(out/'logs/plugin-symbols.txt'),
@@ -219,7 +260,7 @@ receipt={
     'successful handshake against a running DFHack process',
     'token rejection matrix',
     'read determinism against a disposable fortress',
-    'pagination-invariant live capsule identity',
+    'pagination-invariant live capsule identity against a running game',
     'compatibility outside the exact built DFHack revision',
   ],
 }
