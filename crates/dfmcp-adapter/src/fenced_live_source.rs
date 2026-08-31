@@ -20,6 +20,21 @@ fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
 }
 
+fn bounded_utf8_prefix(value: &str, maximum: usize) -> String {
+    if value.len() <= maximum {
+        return value.to_owned();
+    }
+    let mut boundary = 0usize;
+    for (index, character) in value.char_indices() {
+        let next = index.saturating_add(character.len_utf8());
+        if next > maximum {
+            break;
+        }
+        boundary = next;
+    }
+    value[..boundary].to_owned()
+}
+
 pub struct FencedLiveSource<T> {
     source: T,
     manifest: BridgeManifest,
@@ -58,18 +73,10 @@ impl<T: LiveObservationSource> FencedLiveSource<T> {
 
     fn record_failure(&mut self, failure: &DfmcpError) {
         let rendered = format!("{}: {}", failure.code.as_str(), failure.message);
-        let boundary = rendered
-            .char_indices()
-            .map(|(index, _)| index)
-            .take_while(|index| *index <= MAX_POISON_REASON_BYTES)
-            .last()
-            .unwrap_or(0);
-        let reason = if rendered.len() <= MAX_POISON_REASON_BYTES {
-            rendered
-        } else {
-            rendered[..boundary].to_owned()
-        };
-        self.poisoned_reason = Some(reason);
+        self.poisoned_reason = Some(bounded_utf8_prefix(
+            &rendered,
+            MAX_POISON_REASON_BYTES,
+        ));
     }
 }
 
@@ -220,5 +227,13 @@ mod tests {
         assert!(!source.is_poisoned());
         assert_eq!(source.source().calls, 2);
         Ok(())
+    }
+
+    #[test]
+    fn poison_reason_truncation_preserves_utf8() {
+        let value = "é".repeat(MAX_POISON_REASON_BYTES);
+        let bounded = bounded_utf8_prefix(&value, MAX_POISON_REASON_BYTES);
+        assert!(bounded.len() <= MAX_POISON_REASON_BYTES);
+        assert!(bounded.is_char_boundary(bounded.len()));
     }
 }
