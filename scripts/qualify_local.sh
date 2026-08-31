@@ -89,8 +89,16 @@ receipt={
    'dfhack_bridge_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
    'dfhack_bridge_plugin':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
    'dfhack_wire_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
+   'live_connection_admission':digest(root/'crates/dfmcp-adapter/src/live_connect.rs'),
+   'live_source_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source.rs'),
+   'live_fortress_identity':digest(root/'crates/dfmcp-adapter/src/live_identity.rs'),
    'live_observation_capsule':digest(root/'crates/dfmcp-adapter/src/live_observation.rs'),
    'live_observation_driver':digest(root/'crates/dfmcp-adapter/src/live_session.rs'),
+   'live_adapter_bootstrap':digest(root/'crates/dfmcp-adapter/src/live_bootstrap.rs'),
+   'live_world_projection':digest(root/'crates/dfmcp-adapter/src/live_projection.rs'),
+   'live_read_adapter':digest(root/'crates/dfmcp-adapter/src/live_adapter.rs'),
+   'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
+   'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -106,11 +114,13 @@ trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>
 run_gate static-contracts python3 scripts/validate_repo.py
 run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
+run_gate live-mcp-contract python3 scripts/check_live_mcp.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_live_mcp.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
