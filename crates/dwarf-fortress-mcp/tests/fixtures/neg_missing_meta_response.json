@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Request does not match the connection's negotiated MCP protocol era",
+    "data": {
+      "supported": ["2026-07-28", "2024-11-05"]
+    }
+  },
+  "id": 2
+}

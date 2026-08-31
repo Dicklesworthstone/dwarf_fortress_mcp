@@ -327,6 +327,36 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
     Ok(())
 }
 
+/// Assert that a JSON-RPC error response matches the exact era-refusal
+/// shape emitted by the fastmcp_rust v0.8.0 `StdioEraClassifier`: code
+/// `-32600` (Invalid Request), fixed message, and a `supported` array
+/// that advertises both protocol eras.
+fn assert_era_refusal(resp: &Value, expected_id: u64) {
+    assert_eq!(resp["jsonrpc"], "2.0", "envelope must be JSON-RPC 2.0");
+    assert_eq!(resp["id"], expected_id, "response id must echo request id");
+    let error = &resp["error"];
+    assert!(error.is_object(), "expected error object, got {resp}");
+    assert_eq!(
+        error["code"], -32600,
+        "era refusal must use JSON-RPC Invalid Request code (-32600)"
+    );
+    assert_eq!(
+        error["message"], "Request does not match the connection's negotiated MCP protocol era",
+        "era refusal message must match the fastmcp_rust v0.8.0 wire text"
+    );
+    let is_array = error["data"]["supported"].is_array();
+    let supported = if let Some(supported) = error["data"]["supported"].as_array() {
+        supported
+    } else {
+        assert!(is_array, "error.data.supported must be an array");
+        return;
+    };
+    assert!(
+        supported.iter().any(|v| v.as_str() == Some("2026-07-28")),
+        "supported array must include 2026-07-28"
+    );
+}
+
 #[test]
 fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Error>> {
     // Negative 1: Mixed era markers on initialize — both `protocolVersion`
@@ -335,80 +365,34 @@ fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Erro
     // `StdioEraClassifier`.
     {
         let mut client = StdioClient::spawn()?;
-        let mixed_req = json!({
-            "jsonrpc": "2.0",
-            "id": 100,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientCapabilities": {}
-                },
-                "capabilities": {},
-                "clientInfo": { "name": "test-client", "version": "1.0" }
-            }
-        });
+        let mixed_req: Value =
+            serde_json::from_str(include_str!("fixtures/neg_mixed_era_request.json"))?;
         let mixed_resp = client.send(&mixed_req)?;
-        assert_eq!(mixed_resp["jsonrpc"], "2.0");
-        assert_eq!(mixed_resp["id"], 100);
-        assert!(
-            mixed_resp["error"].is_object(),
-            "should return error for mixed era markers, got {mixed_resp}"
-        );
+        assert_era_refusal(&mixed_resp, 100);
     }
 
     // Negative 2: Bare legacy initialize without modern marker — the
     // legacy era is refused because the server is modern-only.
     {
         let mut client = StdioClient::spawn()?;
-        let bare_req = json!({
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": { "name": "test-client", "version": "1.0" }
-            }
-        });
+        let bare_req: Value =
+            serde_json::from_str(include_str!("fixtures/neg_bare_initialize_request.json"))?;
         let bare_resp = client.send(&bare_req)?;
-        assert_eq!(bare_resp["jsonrpc"], "2.0");
-        assert_eq!(bare_resp["id"], 101);
-        assert!(
-            bare_resp["error"].is_object(),
-            "should return era refusal error for bare legacy initialize, got {bare_resp}"
-        );
+        assert_era_refusal(&bare_resp, 101);
     }
 
     // Negative 3: Once modern era is established, a request missing the
     // modern `_meta` marker must be rejected as `CrossEraTraffic`.
     {
         let mut client = StdioClient::spawn()?;
-        let discover_req = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "server/discover",
-            "params": { "_meta": modern_meta() }
-        });
+        let discover_req: Value =
+            serde_json::from_str(include_str!("fixtures/01_discover_request.json"))?;
         let _ = client.send(&discover_req)?;
 
-        let missing_meta_req = json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "fortress_observe",
-                "arguments": {}
-            }
-        });
+        let missing_meta_req: Value =
+            serde_json::from_str(include_str!("fixtures/neg_missing_meta_request.json"))?;
         let missing_meta_resp = client.send(&missing_meta_req)?;
-        assert_eq!(missing_meta_resp["jsonrpc"], "2.0");
-        assert_eq!(missing_meta_resp["id"], 2);
-        assert!(
-            missing_meta_resp["error"].is_object(),
-            "should return error for missing _meta, got {missing_meta_resp}"
-        );
+        assert_era_refusal(&missing_meta_resp, 2);
     }
     Ok(())
 }

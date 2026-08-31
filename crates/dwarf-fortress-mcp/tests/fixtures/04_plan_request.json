@@ -5,10 +5,17 @@
   "params": {
     "_meta": {
       "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-      "io.modelcontextprotocol/clientCapabilities": {}
+      "io.modelcontextprotocol/clientCapabilities": {
+        "tools": { "listChanged": true }
+      },
+      "io.modelcontextprotocol/clientInfo": {
+        "name": "dfmcp-modern-handshake-golden",
+        "version": "0.0.1"
+      }
     },
     "name": "fortress_plan",
     "arguments": {
+      "session_id": "<SESSION_ID_FROM_OPEN_SESSION>",
       "summary": "unpause the simulation",
       "paused_target": false
     }

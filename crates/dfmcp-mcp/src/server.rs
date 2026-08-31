@@ -64,8 +64,8 @@ struct LabSession {
     pending: Option<PendingPlan>,
     /// Most recent committed action id (for wait/cancel).
     last_action: Option<ActionId>,
-    /// (plan_digest, payload) for idempotent re-commit (per ADR-006).
-    last_commit: Option<(String, String)>,
+    /// Bounded plan-digest to payload map for idempotent re-commit (ADR-006).
+    commit_receipts: BTreeMap<String, String>,
 }
 
 /// A plan sealed by `fortress_plan` and awaiting `fortress_commit`.
@@ -84,6 +84,7 @@ static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LabSession>>>>> =
 static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1));
 
 const MAX_LAB_SESSIONS: usize = 1_024;
+const MAX_LAB_COMMIT_RECEIPTS: usize = 4_096;
 const MAX_CAPABILITY_REQUESTS: usize = 32;
 const MAX_CAPABILITY_NAME_BYTES: usize = 64;
 const MAX_RISK_NAME_BYTES: usize = 32;
@@ -477,7 +478,7 @@ pub fn fortress_open_session(
         adapter: MemoryAdapter::new(seed_snapshot(fortress_id, paused)),
         pending: None,
         last_action: None,
-        last_commit: None,
+        commit_receipts: BTreeMap::new(),
     };
     let identity = probe_session.adapter.identity();
     let session_counter = match next_session_counter() {
@@ -497,7 +498,7 @@ pub fn fortress_open_session(
         adapter,
         pending: _,
         last_action: _,
-        last_commit: _,
+        commit_receipts: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -508,7 +509,7 @@ pub fn fortress_open_session(
         adapter,
         pending: None,
         last_action: None,
-        last_commit: None,
+        commit_receipts: BTreeMap::new(),
     }));
     {
         let mut registry = sessions();
@@ -786,10 +787,20 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             // ADR-006 idempotency: a duplicate commit with the same digest
             // returns the prior receipt verbatim instead of erroring or
             // reapplying effects.
-            if let Some((digest, payload)) = &guard.last_commit
-                && digest == &plan_digest
-            {
-                return payload.clone();
+            if let Some(payload) = guard.commit_receipts.get(&plan_digest).cloned() {
+                let (_, replay_context) = match next_context(&mut guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+                };
+                if let Err(error) = replay_context.authorize(
+                    Capability::ControlClock,
+                    RiskTier::Reversible,
+                    &[],
+                    None,
+                ) {
+                    return dfmcp_error_payload("fortress.commit", &error);
+                }
+                return payload;
             }
             return coded_error_payload(
                 "fortress.commit",
@@ -804,6 +815,16 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             "fortress.commit",
             ErrorCode::Conflict,
             "plan digest does not match the pending prepared plan; plans are sealed over their digest",
+        );
+    }
+    if !guard.commit_receipts.contains_key(&plan_digest)
+        && guard.commit_receipts.len() >= MAX_LAB_COMMIT_RECEIPTS
+    {
+        guard.pending = Some(pending);
+        return coded_error_payload(
+            "fortress.commit",
+            ErrorCode::BudgetExceeded,
+            "session commit-receipt store reached its explicit bound",
         );
     }
     let (_, prepare_ctx) = match next_context(&mut guard) {
@@ -841,7 +862,9 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         "paused": paused,
                     });
                     let payload_text = payload.to_string();
-                    guard.last_commit = Some((plan_digest.clone(), payload_text.clone()));
+                    guard
+                        .commit_receipts
+                        .insert(plan_digest.clone(), payload_text.clone());
                     payload_text
                 }
                 Err(error) => {
@@ -1067,7 +1090,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(receipt) => {
             guard.pending = None;
             guard.last_action = None;
-            guard.last_commit = None;
+            guard.commit_receipts.clear();
             json!({
                 "ok": true,
                 "session_id": format!("{}", guard.session_id),
@@ -1364,8 +1387,10 @@ mod tests {
 
     #[test]
     fn missing_session_id_is_never_inferred_from_registry_state() {
-        match resolve_session(None) {
-            Ok(_) => panic!("missing authority handle must be rejected"),
+        let result = resolve_session(None);
+        let is_ok = result.is_ok();
+        match result {
+            Ok(_) => assert!(!is_ok, "missing authority handle must be rejected"),
             Err(error) => assert_eq!(error.code, ErrorCode::InvalidRequest),
         }
     }

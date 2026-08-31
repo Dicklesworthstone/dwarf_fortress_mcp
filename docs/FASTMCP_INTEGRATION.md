@@ -95,15 +95,34 @@ modern-only. Every request must supply modern era markers in `params._meta`:
 {
   "_meta": {
     "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-    "io.modelcontextprotocol/clientCapabilities": {}
+    "io.modelcontextprotocol/clientCapabilities": {
+      "tools": { "listChanged": true }
+    },
+    "io.modelcontextprotocol/clientInfo": {
+      "name": "your-client-name",
+      "version": "0.0.1"
+    }
   }
 }
 ```
 
+> **Note (v0.8.0 pin):** The `clientInfo` field is required. On the current fastmcp_rust
+> v0.8.0 pin, omitting `clientInfo` from `_meta` causes `server/discover` to silently fail
+> (no JSON-RPC response is emitted). This finding is recorded in `docs/DOGFOODING_FASTMCP.md`
+> and pending upstream filing.
+
+> **Known limitation (v0.8.0 pin):** After a successful `server/discover`, follow-up
+> `tools/list` and subsequent requests are not dispatched by the current fastmcp_rust v0.8.0
+> stdio pump. The golden lifecycle test
+> (`test_modern_handshake_full_lifecycle_and_plan_commit`) is `#[ignore]`d until a pin bump
+> resolves this. Negative era-refusal tests pass. The in-process tool-level coverage in
+> `crates/dfmcp-mcp/tests/fastmcp_wired_tools_tests.rs` exercises the full session lifecycle
+> without the stdio transport.
+
 #### Step 1: Discover Server
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}}}}
 ```
 
 Expected response (modern MCP 2026-07-28 — `result.protocolVersion` / `result.serverInfo` are
@@ -137,25 +156,25 @@ NOT emitted in modern-only mode; the era is conveyed through `supportedVersions`
 #### Step 2: List Available Narrow-Waist Tools
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}}}}
 ```
 
 #### Step 3: Open Session
 
 ```json
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_open_session","arguments":{"paused":true}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}},"name":"fortress_open_session","arguments":{"paused":true}}}
 ```
 
 #### Step 4: Compile Intent into a Sealed Plan
 
 ```json
-{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_plan","arguments":{"summary":"unpause the simulation","paused_target":false}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}},"name":"fortress_plan","arguments":{"session_id":"<SESSION_ID_FROM_STEP_3>","summary":"unpause the simulation","paused_target":false}}}
 ```
 
 #### Step 5: Revalidate and Commit Plan by Digest
 
 ```json
-{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_commit","arguments":{"plan_digest":"<DIGEST_FROM_STEP_4>"}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}},"name":"fortress_commit","arguments":{"session_id":"<SESSION_ID_FROM_STEP_3>","plan_digest":"<DIGEST_FROM_STEP_4>"}}}
 ```
 
 ## 5. Gates

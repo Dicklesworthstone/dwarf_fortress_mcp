@@ -5,7 +5,13 @@
   "params": {
     "_meta": {
       "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-      "io.modelcontextprotocol/clientCapabilities": {}
+      "io.modelcontextprotocol/clientCapabilities": {
+        "tools": { "listChanged": true }
+      },
+      "io.modelcontextprotocol/clientInfo": {
+        "name": "dfmcp-modern-handshake-golden",
+        "version": "0.0.1"
+      }
     }
   }
 }
