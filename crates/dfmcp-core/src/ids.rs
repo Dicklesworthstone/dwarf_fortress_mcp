@@ -78,6 +78,7 @@ id_u128!(EdgeId);
 id_u128!(EventId);
 id_u128!(ObjectiveId);
 id_u128!(AttentionId);
+id_u128!(AffordanceId);
 id_u128!(RecommendationId);
 id_u128!(SurpriseId);
 id_u128!(MemoryId);
