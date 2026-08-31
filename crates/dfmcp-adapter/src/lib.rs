@@ -15,6 +15,7 @@ pub mod dispatcher;
 pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
+pub mod live_identity;
 pub mod live_observation;
 pub mod live_projection;
 pub mod live_session;
@@ -38,6 +39,7 @@ pub use ipc::{
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
+pub use live_identity::derive_live_fortress_id;
 pub use live_observation::{
     CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
     MAX_CAPSULE_CITIZENS, ObservationAssembler,
