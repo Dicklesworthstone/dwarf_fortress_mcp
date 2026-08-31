@@ -99,6 +99,7 @@ receipt={
    'live_read_adapter':digest(root/'crates/dfmcp-adapter/src/live_adapter.rs'),
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
+   'live_read_stack_checker':digest(root/'scripts/check_live_read_stack.py'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -115,12 +116,14 @@ run_gate static-contracts python3 scripts/validate_repo.py
 run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
 run_gate live-mcp-contract python3 scripts/check_live_mcp.py
+run_gate compiled-live-read-stack-contract python3 scripts/check_live_read_stack.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_mcp.py \
+  scripts/check_live_read_stack.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
