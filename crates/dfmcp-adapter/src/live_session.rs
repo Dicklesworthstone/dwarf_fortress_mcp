@@ -76,12 +76,11 @@ pub fn read_complete_observation<T: LiveObservationSource>(
     })?;
     let maximum_pages = hard_total
         .saturating_add(page_size.saturating_sub(1))
-        .checked_div(page_size)
-        .unwrap_or(hard_total)
+        .saturating_div(page_size)
         .saturating_add(1);
 
     for _ in 0..maximum_pages {
-        let offset = assembler.next_offset();
+        let offset = assembler.next_offset()?;
         let page = source.read_observation_page(offset, page_size, include_names)?;
         if page.citizen_count_total > hard_total {
             return Err(error(
@@ -231,5 +230,18 @@ mod tests {
             index: 0,
         };
         assert!(read_complete_observation(&mut source, 0, true).is_err());
+    }
+
+    #[test]
+    fn zero_citizen_fortress_finishes_in_one_empty_page() -> Result<()> {
+        let mut source = FakeSource {
+            manifest: manifest(),
+            pages: vec![page(0, 0, &[], true)],
+            index: 0,
+        };
+        let capsule = read_complete_observation(&mut source, 64, true)?;
+        assert!(capsule.citizen_coverage.proves_complete_roster());
+        assert!(capsule.citizens.is_empty());
+        Ok(())
     }
 }
