@@ -8,6 +8,8 @@ pub mod dfhack_rpc;
 pub mod dispatcher;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
+pub mod live_observation;
+pub mod live_session;
 pub mod transceiver;
 
 pub use delta_scanner::{
@@ -25,6 +27,11 @@ pub use ipc::{
     FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
     IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
 };
+pub use live_observation::{
+    CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
+    MAX_CAPSULE_CITIZENS, ObservationAssembler,
+};
+pub use live_session::{LiveObservationSource, read_complete_observation};
 pub use transceiver::{IpcTransceiver, TransceiverConfig};
 
 use dfmcp_core::{
