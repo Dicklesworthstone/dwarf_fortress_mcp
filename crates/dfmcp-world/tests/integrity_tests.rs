@@ -330,7 +330,7 @@ fn test_003_presence_algebra_and_provenance() {
     };
 
     // Test each presence variant
-    let presences = vec![
+    let presences = [
         FactPresence::Known(Value::Text("Active".to_owned())),
         FactPresence::Absent,
         FactPresence::Unknown("Unexplored tile".to_owned()),

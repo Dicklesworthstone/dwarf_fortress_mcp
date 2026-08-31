@@ -8,7 +8,9 @@ use dfmcp_core::{
     IntentId, MapCoord, MapCuboid, ObservationCursor, OperationContext, RequestId, Result,
     RiskTier, SessionId, WorkBudget,
 };
-use dfmcp_intent::{Action, Constraint, DigMode, Intent, RequestedAction, StaticPlanner};
+use dfmcp_intent::{
+    Action, Constraint, DigMode, Intent, ObligationSpec, RequestedAction, StaticPlanner,
+};
 use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 
 fn sample_snapshot() -> WorldSnapshot {
@@ -88,7 +90,13 @@ fn test_dispatcher_all_actions_dispatch_and_journal() -> Result<()> {
             preconditions: Vec::new(),
             postconditions: vec![Predicate::Paused(false)],
             compensation: None,
-            obligation: None,
+            obligation: Some(ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(200),
+                poll_interval_ticks: 10,
+                stable_for_observations: 1,
+            }),
             depends_on: Vec::new(),
         },
         RequestedAction {

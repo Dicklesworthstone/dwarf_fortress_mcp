@@ -157,6 +157,6 @@ fn test_sparse_overlay_vs_dense_representation_equivalence() {
     assert_eq!(dense_grid.len(), 16);
     assert_eq!(dense_grid[5].0, 1);
     assert_eq!(dense_grid[5].1.get("liquid_depth"), Some(&Value::U64(7)));
-    assert_eq!(dense_grid[0].1.is_empty(), true);
-    assert_eq!(dense_grid[15].1.is_empty(), true);
+    assert!(dense_grid[0].1.is_empty());
+    assert!(dense_grid[15].1.is_empty());
 }

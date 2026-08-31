@@ -279,6 +279,7 @@ fn parse_capability_request(requested: &[(String, String)]) -> Result<Vec<Negoti
 #[tool(
     description = "Open a fortress session against the deterministic laboratory adapter. Negotiates a per-session capability set and budget, then returns a session_id for all subsequent tool calls. Transport identity grants nothing; every authority comes from the negotiated grants."
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
     paused: Option<bool>,
     fortress_selector: Option<String>,

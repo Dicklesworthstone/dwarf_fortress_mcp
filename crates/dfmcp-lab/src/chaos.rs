@@ -109,13 +109,13 @@ impl ChaosHarness {
 
             // Check for crash faults
             for fault in &scenario.faults {
-                if let FaultInjectionPolicy::CrashAtTick(crash_tick) = fault {
-                    if current_tick == *crash_tick {
-                        return Err(DfmcpError::new(
-                            ErrorCode::AdapterUnavailable,
-                            format!("simulated chaos bridge crash at tick {}", crash_tick.0),
-                        ));
-                    }
+                if let FaultInjectionPolicy::CrashAtTick(crash_tick) = fault
+                    && current_tick == *crash_tick
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::AdapterUnavailable,
+                        format!("simulated chaos bridge crash at tick {}", crash_tick.0),
+                    ));
                 }
             }
 

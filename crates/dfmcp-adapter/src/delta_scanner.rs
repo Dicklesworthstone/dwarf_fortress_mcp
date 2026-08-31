@@ -154,7 +154,7 @@ impl EventRingBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             events: VecDeque::with_capacity(capacity.min(MAX_EVENT_BUFFER_CAPACITY)),
-            capacity: capacity.max(1).min(MAX_EVENT_BUFFER_CAPACITY),
+            capacity: capacity.clamp(1, MAX_EVENT_BUFFER_CAPACITY),
             shed_events_count: 0,
         }
     }
@@ -362,12 +362,12 @@ mod tests {
         };
 
         // First pass: add e1
-        let changes1 = tracker.process_entities(&[e1.clone()]);
+        let changes1 = tracker.process_entities(std::slice::from_ref(&e1));
         assert_eq!(changes1.len(), 1);
         assert!(matches!(changes1[0], WorldChange::UpsertEntity(_)));
 
         // Second pass: unchanged e1 produces no changes
-        let changes2 = tracker.process_entities(&[e1.clone()]);
+        let changes2 = tracker.process_entities(std::slice::from_ref(&e1));
         assert_eq!(changes2.len(), 0);
 
         // Third pass: modified revision produces upsert

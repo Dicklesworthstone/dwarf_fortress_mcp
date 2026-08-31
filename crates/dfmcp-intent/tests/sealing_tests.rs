@@ -130,7 +130,7 @@ fn test_covered_field_mutation_invalidates_plan_digest() -> Result<(), Box<dyn s
 
     // 12. Mutate step action
     let mut mutated = original.clone();
-    mutated.steps[0].action = Action::Pause { paused: true };
+    mutated.steps[0].action = Action::Pause { paused: false };
     assert!(!mutated.digest_is_valid());
     assert!(mutated.validate_structure().is_err());
 

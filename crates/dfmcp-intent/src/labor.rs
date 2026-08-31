@@ -92,18 +92,14 @@ mod tests {
 
         let actions = allocator.optimize_roster(&[dwarf]);
         assert_eq!(actions.len(), 1);
-        if let Action::SetLabor {
-            units,
-            labor,
-            enabled,
-        } = &actions[0]
-        {
-            assert_eq!(units, &vec![EntityId::new(1)]);
-            assert_eq!(labor, "MINING");
-            assert!(!enabled);
-        } else {
-            assert!(false, "unexpected action");
-        }
+        assert!(matches!(
+            &actions[0],
+            Action::SetLabor {
+                units,
+                labor,
+                enabled: false,
+            } if units == &vec![EntityId::new(1)] && labor == "MINING"
+        ));
     }
 
     #[test]
@@ -121,11 +117,13 @@ mod tests {
 
         let actions = allocator.optimize_roster(&[dwarf]);
         assert_eq!(actions.len(), 1);
-        if let Action::SetLabor { labor, enabled, .. } = &actions[0] {
-            assert_eq!(labor, "WEAPONSMITHING");
-            assert!(enabled);
-        } else {
-            assert!(false, "unexpected action");
-        }
+        assert!(matches!(
+            &actions[0],
+            Action::SetLabor {
+                labor,
+                enabled: true,
+                ..
+            } if labor == "WEAPONSMITHING"
+        ));
     }
 }

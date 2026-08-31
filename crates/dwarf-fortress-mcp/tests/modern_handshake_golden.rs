@@ -143,7 +143,9 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
         ]
     );
 
-    // 3. Open session (paused = true). lab adapter seed.
+    // 3. Open session (paused = true). lab adapter seed. Returns a session_id
+    //    that all subsequent calls must echo back via the `session_id`
+    //    argument (WP-13 gate 2 — session-scoped capability negotiation).
     let open_session_req = json!({
         "jsonrpc": "2.0",
         "id": 3,
@@ -163,8 +165,16 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
     assert_eq!(open_data["ok"], true);
     assert_eq!(open_data["adapter"], "dfmcp-memory-lab");
     assert_eq!(open_data["paused"], true);
+    let session_id = open_data["session_id"]
+        .as_str()
+        .ok_or("session_id string missing from open_session response")?
+        .to_owned();
+    assert!(
+        !session_id.is_empty(),
+        "session_id must be a non-empty u128 hex string"
+    );
 
-    // 4. Observe — bounded summary projection.
+    // 4. Observe — bounded summary projection, scoped to the session.
     let observe_req = json!({
         "jsonrpc": "2.0",
         "id": 4,
@@ -172,7 +182,7 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
         "params": {
             "_meta": modern_meta(),
             "name": "fortress_observe",
-            "arguments": {}
+            "arguments": { "session_id": session_id.clone() }
         }
     });
     let observe_resp = client.send(&observe_req)?;
