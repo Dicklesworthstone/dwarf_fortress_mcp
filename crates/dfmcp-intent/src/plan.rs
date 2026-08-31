@@ -211,6 +211,22 @@ impl PreparedPlanBuilder {
     }
 }
 
+#[must_use]
+pub(crate) fn derive_step_idempotency_key(
+    intent_id: IntentId,
+    anchor: StateAnchor,
+    step_id: StepId,
+    action: &Action,
+) -> String {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"dfmcp-step-idempotency-v1");
+    bytes.extend_from_slice(&intent_id.get().to_be_bytes());
+    bytes.extend_from_slice(&step_id.get().to_be_bytes());
+    bytes.extend_from_slice(anchor.state_hash.as_bytes());
+    action.encode(&mut bytes);
+    Digest32::of_bytes(&bytes).to_hex()
+}
+
 impl PreparedPlan {
     #[must_use]
     pub fn builder(
@@ -300,7 +316,7 @@ impl PreparedPlan {
         }
         if self.steps.is_empty()
             || self.steps.len() > MAX_PLAN_STEPS
-            || self.expires_at_tick < self.anchor.tick
+            || self.expires_at_tick <= self.anchor.tick
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
@@ -366,12 +382,20 @@ impl PreparedPlan {
                 ));
             }
             if step.postconditions.is_empty()
+                || step
+                    .postconditions
+                    .iter()
+                    .all(|predicate| matches!(predicate, Predicate::True))
+                || step
+                    .postconditions
+                    .iter()
+                    .any(|predicate| matches!(predicate, Predicate::False))
                 || !predicates_are_canonical(&step.preconditions)
                 || !predicates_are_canonical(&step.postconditions)
             {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidPlan,
-                    "plan step predicates are empty or noncanonical",
+                    "plan step postconditions are trivial, impossible, empty, or noncanonical",
                 ));
             }
             if step.depends_on.windows(2).any(|pair| pair[0] >= pair[1])
@@ -385,10 +409,12 @@ impl PreparedPlan {
                     "plan dependency graph is not strictly ordered and acyclic",
                 ));
             }
-            if Digest32::from_hex(&step.idempotency_key).is_none() {
+            let expected_key =
+                derive_step_idempotency_key(self.intent_id, self.anchor, step.id, &step.action);
+            if step.idempotency_key != expected_key {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidPlan,
-                    "plan step idempotency key is not a SHA-256 digest",
+                    "plan step idempotency key is not the deterministic key for its intent, anchor, step, and action",
                 ));
             }
             if step.action.naturally_temporal() && step.obligation.is_none() {
@@ -401,23 +427,26 @@ impl PreparedPlan {
                 && (obligation.deadline_tick <= self.anchor.tick
                     || obligation.poll_interval_ticks == 0
                     || obligation.stable_for_observations == 0
+                    || matches!(obligation.terminal, Predicate::True | Predicate::False)
                     || obligation.terminal != obligation.terminal.normalized()
-                    || obligation
-                        .failure
-                        .as_ref()
-                        .is_some_and(|failure| failure != &failure.normalized()))
+                    || obligation.failure.as_ref().is_some_and(|failure| {
+                        matches!(failure, Predicate::True | Predicate::False)
+                            || failure != &failure.normalized()
+                    }))
             {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidPlan,
-                    "plan obligation is unbounded or noncanonical",
+                    "plan obligation is trivial, impossible, unbounded, or noncanonical",
                 ));
             }
             if step.compensation.as_ref().is_some_and(|action| {
-                action != &action.normalized() || action.risk() == RiskTier::Irreversible
+                action != &action.normalized()
+                    || action.risk() == RiskTier::Irreversible
+                    || action.risk() > self.max_risk
             }) {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidPlan,
-                    "plan compensation is noncanonical or irreversible",
+                    "plan compensation is noncanonical, irreversible, or above the plan risk ceiling",
                 ));
             }
             capabilities.insert(step.required_capability);
@@ -527,45 +556,104 @@ fn put_str(output: &mut Vec<u8>, value: &str) {
 mod tests {
     use std::collections::BTreeSet;
 
-    use dfmcp_core::{Capability, FortressId, GameTick, IntentId, ObservationCursor, RiskTier};
+    use dfmcp_core::{
+        Capability, FortressId, GameTick, IntentId, ObservationCursor, RiskTier, StepId,
+    };
     use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 
-    use super::PreparedPlan;
+    use super::{PlanStep, PreparedPlan, derive_step_idempotency_key};
+    use crate::Action;
 
-    #[test]
-    fn builder_produces_consistent_digest_and_id() {
-        let snapshot = WorldSnapshot::new(
+    fn snapshot() -> WorldSnapshot {
+        WorldSnapshot::new(
             FortressId::new(42),
             GameTick(100),
             ObservationCursor::ORIGIN,
             true,
             WorldGraph::default(),
-        );
-        let mut capabilities = BTreeSet::new();
-        capabilities.insert(Capability::Observe);
-        capabilities.insert(Capability::ControlClock);
+        )
+    }
 
-        let plan = PreparedPlan::builder(
-            IntentId::new(99),
+    fn valid_plan() -> PreparedPlan {
+        let snapshot = snapshot();
+        let intent_id = IntentId::new(99);
+        let action = Action::Pause { paused: false };
+        let step = PlanStep {
+            id: StepId::ZERO,
+            action: action.clone(),
+            preconditions: vec![Predicate::Paused(true)],
+            postconditions: vec![Predicate::Paused(false)],
+            compensation: Some(Action::Pause { paused: true }),
+            obligation: None,
+            depends_on: Vec::new(),
+            risk: RiskTier::Reversible,
+            required_capability: Capability::ControlClock,
+            idempotency_key: derive_step_idempotency_key(
+                intent_id,
+                snapshot.anchor(),
+                StepId::ZERO,
+                &action,
+            ),
+        };
+        PreparedPlan::builder(
+            intent_id,
             snapshot.anchor(),
             "test unpause plan",
             Predicate::Paused(false),
         )
+        .steps(vec![step])
         .max_risk(RiskTier::Reversible)
-        .required_capabilities(capabilities.clone())
+        .required_capabilities(BTreeSet::from([Capability::ControlClock]))
         .requires_checkpoint(false)
         .expires_at_tick(GameTick(200))
-        .build();
+        .build()
+    }
 
+    fn reseal(plan: &mut PreparedPlan) {
+        plan.digest = plan.compute_digest();
+        plan.id = plan.expected_id();
+    }
+
+    #[test]
+    fn builder_produces_consistent_digest_and_id() {
+        let plan = valid_plan();
         assert_eq!(plan.intent_id, IntentId::new(99));
         assert_eq!(plan.summary, "test unpause plan");
         assert_eq!(plan.terminal_condition, Predicate::Paused(false));
         assert_eq!(plan.max_risk, RiskTier::Reversible);
-        assert_eq!(plan.required_capabilities, capabilities);
+        assert_eq!(
+            plan.required_capabilities,
+            BTreeSet::from([Capability::ControlClock])
+        );
         assert_eq!(plan.expires_at_tick, GameTick(200));
         assert!(!plan.requires_checkpoint);
         assert_eq!(plan.digest, plan.compute_digest());
         assert_ne!(plan.digest, dfmcp_core::Digest32::ZERO);
         assert_ne!(plan.id, dfmcp_core::PlanId::NIL);
+        assert!(plan.validate_structure().is_ok());
+    }
+
+    #[test]
+    fn arbitrary_digest_shaped_idempotency_key_is_rejected() {
+        let mut plan = valid_plan();
+        plan.steps[0].idempotency_key = dfmcp_core::Digest32::of_bytes(b"arbitrary").to_hex();
+        reseal(&mut plan);
+        assert!(plan.validate_structure().is_err());
+    }
+
+    #[test]
+    fn true_only_postcondition_is_rejected_even_after_resealing() {
+        let mut plan = valid_plan();
+        plan.steps[0].postconditions = vec![Predicate::True];
+        reseal(&mut plan);
+        assert!(plan.validate_structure().is_err());
+    }
+
+    #[test]
+    fn plan_expiring_at_its_anchor_tick_is_rejected() {
+        let mut plan = valid_plan();
+        plan.expires_at_tick = plan.anchor.tick;
+        reseal(&mut plan);
+        assert!(plan.validate_structure().is_err());
     }
 }
