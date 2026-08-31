@@ -213,12 +213,12 @@ fn fact_provenance(
 mod tests {
     use std::collections::BTreeSet;
 
-    use dfmcp_core::{FortressId, GameTick, ObservationCursor};
+    use dfmcp_core::{FortressId, ObservationCursor};
 
     use super::*;
     use crate::{
-        BridgeManifest, CitizenRecord, LiveProjectionContext, ObservationAssembler,
-        ObservationPage, project_live_observation,
+        BridgeManifest, CitizenRecord, ObservationAssembler, ObservationPage,
+        project_live_capsule,
     };
 
     fn fixture() -> Result<(LiveObservationCapsule, WorldSnapshot)> {
@@ -268,18 +268,15 @@ mod tests {
             }],
         })?;
         let capsule = assembler.finalize()?;
-        let snapshot = project_live_observation(
+        let snapshot = project_live_capsule(
             &capsule,
-            LiveProjectionContext {
-                fortress_id: FortressId::new(77),
-                cursor: ObservationCursor {
-                    epoch: 3,
-                    sequence: 9,
-                },
-                observed_at: GameTick::new(9120031),
-                expected_site_id: Some(7),
+            FortressId::new(77),
+            ObservationCursor {
+                epoch: 3,
+                sequence: 9,
             },
-        )?;
+        )?
+        .snapshot;
         Ok((capsule, snapshot))
     }
 
