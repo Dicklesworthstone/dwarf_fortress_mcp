@@ -548,15 +548,11 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
             Some(cursor) if cursor == current_anchor.cursor => {
                 (ObservationPayload::Heartbeat(current_anchor), Vec::new())
             }
-            Some(cursor)
-                if cursor == outcome.prior_anchor.cursor
-                    || (cursor.epoch == current_anchor.cursor.epoch
-                        && cursor.sequence < current_anchor.cursor.sequence) =>
-            {
+            Some(cursor) if cursor == outcome.prior_anchor.cursor => {
                 let warning = if outcome.reset {
                     "observation epoch changed; returned a full canonical snapshot"
                 } else {
-                    "delta history is not admitted for live bridge V1; returned a full snapshot"
+                    "semantic state advanced from the exact requested basis; returned a full snapshot"
                 };
                 (
                     ObservationPayload::Snapshot(projection.snapshot.clone()),
@@ -566,7 +562,7 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
             Some(_) => {
                 return Err(error(
                     ErrorCode::CursorGap,
-                    "requested live observation cursor is not resumable",
+                    "requested live observation cursor is not the exact current or prior basis",
                 )
                 .retryable(true));
             }
@@ -829,7 +825,7 @@ mod tests {
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_count_total: u32::try_from(ids.len()).unwrap_or(u32::MAX),
+            citizen_count_total: u32::try_from(ids.len()).map_or(u32::MAX, |value| value),
             citizen_offset: 0,
             complete: true,
             citizens: ids.iter().copied().map(citizen).collect(),
@@ -947,6 +943,49 @@ mod tests {
         assert_eq!(snapshot.cursor.epoch, prior.cursor.epoch);
         assert_eq!(snapshot.cursor.sequence, prior.cursor.sequence + 1);
         assert_eq!(snapshot.graph.entities.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn older_same_epoch_cursor_is_rejected_as_a_gap() -> Result<()> {
+        let changed = page(42, 12_346, &[0, 1]);
+        let mut adapter = LiveReadAdapter::new(
+            source(
+                42,
+                vec![
+                    page(42, 12_345, &[0]),
+                    changed.clone(),
+                    changed,
+                ],
+            ),
+            config(),
+        )?;
+        let basis = adapter.bootstrap()?.snapshot.anchor();
+        let first = adapter.observe(
+            &observation_request(Some(basis.cursor)),
+            &context(basis, Capability::Observe),
+        )?;
+        let ObservationPayload::Snapshot(snapshot) = first.payload else {
+            return Err(error(
+                ErrorCode::InternalInvariantViolation,
+                "changed live read did not return a snapshot",
+            ));
+        };
+        let current = snapshot.anchor();
+        let failure = adapter
+            .observe(
+                &observation_request(Some(basis.cursor)),
+                &context(current, Capability::Observe),
+            )
+            .err()
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "older same-epoch cursor was silently bridged",
+                )
+            })?;
+        assert_eq!(failure.code, ErrorCode::CursorGap);
+        assert_eq!(adapter.current_anchor(), Some(current));
         Ok(())
     }
 
