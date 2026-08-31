@@ -128,6 +128,13 @@ impl AttentionEngine {
             }
         }
 
+        signals.sort_by(|a, b| {
+            b.severity_score
+                .cmp(&a.severity_score)
+                .then_with(|| a.kind.cmp(&b.kind))
+                .then_with(|| a.subject.cmp(&b.subject))
+        });
+
         let mut completeness = CompletenessStatus::Complete;
         if signals.len() > max_signals {
             signals.truncate(max_signals);

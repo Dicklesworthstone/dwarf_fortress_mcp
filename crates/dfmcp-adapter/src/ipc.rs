@@ -351,7 +351,7 @@ pub enum IpcConnectionState {
 }
 
 /// Reconnection policy manager enforcing exponential backoff with jitter bounds.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReconnectionPolicy {
     pub initial_backoff_millis: u64,
     pub max_backoff_millis: u64,

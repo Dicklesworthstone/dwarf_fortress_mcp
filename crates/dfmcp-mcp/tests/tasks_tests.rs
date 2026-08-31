@@ -25,19 +25,28 @@ fn sample_snapshot(paused: bool) -> WorldSnapshot {
 }
 
 fn sample_context(anchor: StateAnchor) -> OperationContext {
-    let grant = CapabilityGrant {
-        capability: Capability::ControlClock,
-        scope: CapabilityScope::default(),
-        max_risk: RiskTier::Reversible,
-        expires_at_tick: None,
-        remaining_uses: None,
-    };
+    let grants = vec![
+        CapabilityGrant {
+            capability: Capability::Observe,
+            scope: CapabilityScope::default(),
+            max_risk: RiskTier::ReadOnly,
+            expires_at_tick: None,
+            remaining_uses: None,
+        },
+        CapabilityGrant {
+            capability: Capability::ControlClock,
+            scope: CapabilityScope::default(),
+            max_risk: RiskTier::Reversible,
+            expires_at_tick: None,
+            remaining_uses: None,
+        },
+    ];
     OperationContext {
         session_id: SessionId::new(1),
         request_id: RequestId::new(1),
         anchor,
         budget: WorkBudget::CONSERVATIVE_DEFAULT,
-        grants: vec![grant],
+        grants,
         cancellation_requested: false,
     }
 }
@@ -89,8 +98,10 @@ fn test_tasks_projection_and_lifecycle_mapping() -> Result<(), Box<dyn Error>> {
     let commit_receipt = adapter.commit(&plan, &prep_receipt, &ctx)?;
     let action_id = commit_receipt.actions[0].action_id;
 
+    let post_ctx = sample_context(commit_receipt.observed_anchor);
+
     // 1. Project action task: should map Verified commit state to Completed task status
-    let task = project_action_task(&mut adapter, action_id, &ctx)?;
+    let task = project_action_task(&mut adapter, action_id, &post_ctx)?;
     assert_eq!(task.action_id, action_id);
     assert_eq!(task.status, McpTaskStatus::Completed);
     assert_eq!(task.commit_state, CommitState::Verified);
@@ -101,7 +112,7 @@ fn test_tasks_projection_and_lifecycle_mapping() -> Result<(), Box<dyn Error>> {
         &mut adapter,
         action_id,
         CancelMode::CompensateReversible,
-        &ctx,
+        &post_ctx,
     ) else {
         return Err("expected error canceling verified action".into());
     };

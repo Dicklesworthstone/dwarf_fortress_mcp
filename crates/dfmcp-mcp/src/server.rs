@@ -143,9 +143,9 @@ fn next_request_id(session: &mut LabSession) -> u128 {
     session.next_request_id
 }
 
-fn seed_snapshot(paused: bool) -> WorldSnapshot {
+fn seed_snapshot(fortress_id: FortressId, paused: bool) -> WorldSnapshot {
     WorldSnapshot::new(
-        FortressId::new(1),
+        fortress_id,
         GameTick(1),
         ObservationCursor::ORIGIN,
         paused,
@@ -341,7 +341,7 @@ pub fn fortress_open_session(
         grants: grants.clone(),
         budget,
         next_request_id: 0,
-        adapter: MemoryAdapter::new(seed_snapshot(paused)),
+        adapter: MemoryAdapter::new(seed_snapshot(fortress_id, paused)),
         pending: None,
         last_action: None,
         last_commit: None,
@@ -938,13 +938,13 @@ mod tests {
 
     #[test]
     fn seed_snapshot_carries_requested_pause_state() {
-        assert!(seed_snapshot(true).paused);
-        assert!(!seed_snapshot(false).paused);
+        assert!(seed_snapshot(FortressId::new(1), true).paused);
+        assert!(!seed_snapshot(FortressId::new(1), false).paused);
     }
 
     #[test]
     fn seed_snapshot_is_origin_anchored() {
-        let snapshot = seed_snapshot(true);
+        let snapshot = seed_snapshot(FortressId::new(1), true);
         assert_eq!(snapshot.cursor.epoch, 0);
         assert!(snapshot.hash_is_valid());
     }

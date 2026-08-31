@@ -43,7 +43,7 @@ fn test_canonical_map_chunk_golden_vector() {
     assert_eq!(chunk.encoded_tile_count(), Some(16));
 
     let hash = chunk.compute_hash();
-    let expected_hex = "5fb378d1b0242e77b5b2501c2d92cc070fa8e2a9894e232f6a67b141f3fcc65d";
+    let expected_hex = "49657aec75f40151984b878392e7030d828a4e8cc5f7b5bfe02eb69fe87674c3";
     assert_eq!(
         hash.to_hex(),
         expected_hex,
@@ -109,7 +109,7 @@ fn test_canonical_entity_and_edge_golden_vector() {
         graph,
     );
 
-    let expected_hex = "c91df53905617a082f2849c36883d98796cea7eae7ac5d1b93d2d594df77efbb";
+    let expected_hex = "1fff5bbb6091c942e73eb970d9a11d1940902a1b375469975a325b2c5f8cc7de";
     assert_eq!(
         snapshot.state_hash.to_hex(),
         expected_hex,

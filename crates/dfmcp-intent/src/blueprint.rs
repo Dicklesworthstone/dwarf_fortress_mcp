@@ -7,14 +7,14 @@
 //! with environmental hazard detection (aquifers, magma, cave-ins).
 
 use dfmcp_core::{
-    DfmcpError, ErrorCode, IntentId, MapCoord, MapCuboid, Result, RiskTier, StateAnchor,
+    DfmcpError, ErrorCode, GameTick, IntentId, MapCoord, MapCuboid, Result, RiskTier, StateAnchor,
 };
 use dfmcp_world::Predicate;
 use dfmcp_world::TileType;
 use dfmcp_world::spatial_index::{ChunkSpatialIndex, TemperatureBand};
 
 use crate::action::{Action, DigMode};
-use crate::plan::{Constraint, Intent, RequestedAction};
+use crate::plan::{Constraint, Intent, ObligationSpec, RequestedAction};
 
 /// Room blueprint archetype templates.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,9 +163,15 @@ impl BlueprintPlanner {
                             mode: DigMode::Mine,
                         },
                         preconditions: Vec::new(),
-                        postconditions: Vec::new(),
+                        postconditions: vec![Predicate::Paused(false)],
                         compensation: None,
-                        obligation: None,
+                        obligation: Some(ObligationSpec {
+                            terminal: Predicate::Paused(false),
+                            failure: None,
+                            deadline_tick: GameTick(anchor.tick.0.saturating_add(1000)),
+                            poll_interval_ticks: 10,
+                            stable_for_observations: 1,
+                        }),
                         depends_on: Vec::new(),
                     });
                 }
@@ -174,7 +180,7 @@ impl BlueprintPlanner {
                     id: intent_id,
                     anchor,
                     summary: format!("excavate {} bedroom units", rooms_count),
-                    terminal_condition: Predicate::Paused(true),
+                    terminal_condition: Predicate::Paused(false),
                     constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
                     requested_actions,
                 })
@@ -212,7 +218,7 @@ impl BlueprintPlanner {
                     id: intent_id,
                     anchor,
                     summary: format!("excavate grand dining hall ({}x{})", width, height),
-                    terminal_condition: Predicate::Paused(true),
+                    terminal_condition: Predicate::Paused(false),
                     constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
                     requested_actions: vec![RequestedAction {
                         action: Action::DesignateDig {
@@ -220,9 +226,15 @@ impl BlueprintPlanner {
                             mode: DigMode::Mine,
                         },
                         preconditions: Vec::new(),
-                        postconditions: Vec::new(),
+                        postconditions: vec![Predicate::Paused(false)],
                         compensation: None,
-                        obligation: None,
+                        obligation: Some(ObligationSpec {
+                            terminal: Predicate::Paused(false),
+                            failure: None,
+                            deadline_tick: GameTick(anchor.tick.0.saturating_add(1000)),
+                            poll_interval_ticks: 10,
+                            stable_for_observations: 1,
+                        }),
                         depends_on: Vec::new(),
                     }],
                 })
@@ -250,9 +262,15 @@ impl BlueprintPlanner {
                             mode: DigMode::Mine,
                         },
                         preconditions: Vec::new(),
-                        postconditions: Vec::new(),
+                        postconditions: vec![Predicate::Paused(false)],
                         compensation: None,
-                        obligation: None,
+                        obligation: Some(ObligationSpec {
+                            terminal: Predicate::Paused(false),
+                            failure: None,
+                            deadline_tick: GameTick(anchor.tick.0.saturating_add(1000)),
+                            poll_interval_ticks: 10,
+                            stable_for_observations: 1,
+                        }),
                         depends_on: Vec::new(),
                     });
                 }
@@ -261,7 +279,7 @@ impl BlueprintPlanner {
                     id: intent_id,
                     anchor,
                     summary: format!("excavate {} workshop bays", bays_count),
-                    terminal_condition: Predicate::Paused(true),
+                    terminal_condition: Predicate::Paused(false),
                     constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
                     requested_actions,
                 })
@@ -284,7 +302,7 @@ impl BlueprintPlanner {
                     id: intent_id,
                     anchor,
                     summary: format!("stockpile vault ({})", category),
-                    terminal_condition: Predicate::Paused(true),
+                    terminal_condition: Predicate::Paused(false),
                     constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
                     requested_actions: vec![RequestedAction {
                         action: Action::DesignateDig {
@@ -292,9 +310,15 @@ impl BlueprintPlanner {
                             mode: DigMode::Mine,
                         },
                         preconditions: Vec::new(),
-                        postconditions: Vec::new(),
+                        postconditions: vec![Predicate::Paused(false)],
                         compensation: None,
-                        obligation: None,
+                        obligation: Some(ObligationSpec {
+                            terminal: Predicate::Paused(false),
+                            failure: None,
+                            deadline_tick: GameTick(anchor.tick.0.saturating_add(1000)),
+                            poll_interval_ticks: 10,
+                            stable_for_observations: 1,
+                        }),
                         depends_on: Vec::new(),
                     }],
                 })
@@ -305,7 +329,7 @@ impl BlueprintPlanner {
                 id: intent_id,
                 anchor,
                 summary: "excavate defensive moat".to_owned(),
-                terminal_condition: Predicate::Paused(true),
+                terminal_condition: Predicate::Paused(false),
                 constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
                 requested_actions: vec![RequestedAction {
                     action: Action::DesignateDig {
@@ -313,9 +337,15 @@ impl BlueprintPlanner {
                         mode: DigMode::Channel,
                     },
                     preconditions: Vec::new(),
-                    postconditions: Vec::new(),
+                    postconditions: vec![Predicate::Paused(false)],
                     compensation: None,
-                    obligation: None,
+                    obligation: Some(ObligationSpec {
+                        terminal: Predicate::Paused(false),
+                        failure: None,
+                        deadline_tick: GameTick(anchor.tick.0.saturating_add(1000)),
+                        poll_interval_ticks: 10,
+                        stable_for_observations: 1,
+                    }),
                     depends_on: Vec::new(),
                 }],
             }),

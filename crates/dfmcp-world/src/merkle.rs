@@ -58,7 +58,7 @@ impl MerkleStateTree {
         let mut entity_bytes = Vec::new();
 
         for (id, entity) in &snapshot.graph.entities {
-            let leaf_hash = Digest32::of_bytes(format!("{:?}", entity).as_bytes());
+            let leaf_hash = Digest32::of_bytes(&entity.canonical_bytes());
             entity_leaf_hashes.insert(*id, leaf_hash);
             entity_bytes.extend_from_slice(leaf_hash.as_bytes());
         }
@@ -67,7 +67,9 @@ impl MerkleStateTree {
         // 2. Edges Merkle Sub-tree
         let mut edge_bytes = Vec::new();
         for edge in snapshot.graph.edges.values() {
-            let leaf_hash = Digest32::of_bytes(format!("{:?}", edge).as_bytes());
+            let mut buf = Vec::new();
+            edge.encode(&mut buf);
+            let leaf_hash = Digest32::of_bytes(&buf);
             edge_bytes.extend_from_slice(leaf_hash.as_bytes());
         }
         let edges_root = Digest32::of_bytes(&edge_bytes);
@@ -75,15 +77,19 @@ impl MerkleStateTree {
         // 3. Chunks Merkle Sub-tree
         let mut chunk_bytes = Vec::new();
         for chunk in snapshot.graph.chunks.values() {
-            let leaf_hash = Digest32::of_bytes(format!("{:?}", chunk).as_bytes());
+            let mut buf = Vec::new();
+            chunk.encode(&mut buf);
+            let leaf_hash = Digest32::of_bytes(&buf);
             chunk_bytes.extend_from_slice(leaf_hash.as_bytes());
         }
         let chunks_root = Digest32::of_bytes(&chunk_bytes);
 
         // 4. Events Merkle Sub-tree
         let mut event_bytes = Vec::new();
-        for event in &snapshot.graph.events {
-            let leaf_hash = Digest32::of_bytes(format!("{:?}", event).as_bytes());
+        for event in snapshot.graph.events.values() {
+            let mut buf = Vec::new();
+            event.encode(&mut buf);
+            let leaf_hash = Digest32::of_bytes(&buf);
             event_bytes.extend_from_slice(leaf_hash.as_bytes());
         }
         let events_root = Digest32::of_bytes(&event_bytes);

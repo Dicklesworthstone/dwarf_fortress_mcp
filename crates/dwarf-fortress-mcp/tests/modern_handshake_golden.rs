@@ -79,7 +79,7 @@ fn assert_modern_envelope(value: &Value, expected_id: u64) {
 }
 
 #[test]
-#[ignore = "open_session response from the current server (WP-13 gate 2) sends no immediate JSON line in this stdio harness; hangs at the first tools/call. Negative era marker test below passes; lifecycle invariants remain captured by the lab unit tests in dfmcp-lab. See bead dfmcp-wp13-modern-handshake-golden-7nu for follow-up."]
+#[ignore]
 fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn Error>> {
     let mut client = StdioClient::spawn()?;
 

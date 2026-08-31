@@ -32,7 +32,17 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
 
     let target_cursor = base_cursor.next();
     let mut target_snapshot = make_sample_snapshot(105, target_cursor);
-    target_snapshot.paused = true;
+    target_snapshot.graph.entities.insert(
+        EntityId::new(1),
+        EntityRecord {
+            id: EntityId::new(1),
+            generation: 1,
+            revision: 1,
+            kind: EntityKind::Unit,
+            label: "Urist Recovered".to_owned(),
+            fields: BTreeMap::new(),
+        },
+    );
     target_snapshot.refresh_hash();
 
     let delta = diff_snapshots(&base_snapshot, &target_snapshot)?;
