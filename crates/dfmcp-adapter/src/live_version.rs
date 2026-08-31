@@ -283,7 +283,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{BridgeManifest, CitizenCoverage};
+    use crate::{BridgeManifest, ObservationAssembler, ObservationPage};
 
     fn capsule(
         digest_discriminator: u8,
@@ -292,39 +292,35 @@ mod tests {
         folder: &str,
         df_version: &str,
     ) -> Result<LiveObservationCapsule> {
-        let canonical_bytes = vec![digest_discriminator];
-        let content_digest = Digest32::of_bytes(&canonical_bytes);
-        let value = LiveObservationCapsule {
-            bridge: BridgeManifest {
-                bridge_version: "0.1.0".to_owned(),
-                dfhack_version: "0.51.11-r1".to_owned(),
-                df_version: df_version.to_owned(),
-                world_loaded: true,
-                fortress_mode: true,
-                bridge_generation: generation,
-                supported_methods: BTreeSet::from([
-                    "Handshake".to_owned(),
-                    "ReadObservation".to_owned(),
-                ]),
-            },
+        let bridge = BridgeManifest {
+            bridge_version: "0.1.0".to_owned(),
+            dfhack_version: "0.51.11-r1".to_owned(),
+            df_version: df_version.to_owned(),
+            world_loaded: true,
+            fortress_mode: true,
+            bridge_generation: generation,
+            supported_methods: BTreeSet::from([
+                "Handshake".to_owned(),
+                "ReadObservation".to_owned(),
+            ]),
+        };
+        let mut assembler = ObservationAssembler::new(bridge);
+        assembler.push_page(ObservationPage {
+            bridge_generation: generation,
+            world_loaded: true,
+            fortress_mode: true,
             paused: true,
             current_year: 105,
-            current_year_tick: 12345,
+            current_year_tick: 12_345u32.saturating_add(u32::from(digest_discriminator)),
             world_name: "The Balanced Realm".to_owned(),
             world_folder: folder.to_owned(),
             site_id,
-            citizen_coverage: CitizenCoverage {
-                offset: 0,
-                returned: 0,
-                total: 0,
-                complete: true,
-            },
+            citizen_count_total: 0,
+            citizen_offset: 0,
+            complete: true,
             citizens: Vec::new(),
-            canonical_bytes,
-            content_digest,
-        };
-        value.validate()?;
-        Ok(value)
+        })?;
+        assembler.finalize()
     }
 
     #[test]
