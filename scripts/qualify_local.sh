@@ -85,10 +85,13 @@ receipt={
    'agent_turn_contract':digest(root/'architecture/agent_turn_contract.json'),
    'agent_operating_model':digest(root/'docs/AGENT_OPERATING_MODEL.md'),
    'agent_contract_checker':digest(root/'scripts/check_agent_contract.py'),
+   'repository_integrity_checker':digest(root/'scripts/check_repository_integrity.py'),
+   'repository_integrity_tests':digest(root/'scripts/test_repository_integrity.py'),
    'dfhack_read_bridge_contract':digest(root/'architecture/dfhack_read_bridge_v1.json'),
    'dfhack_bridge_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
    'dfhack_bridge_plugin':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
    'dfhack_wire_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
+   'bridge_auth_order_checker':digest(root/'scripts/check_bridge_auth_order.py'),
    'live_connection_admission':digest(root/'crates/dfmcp-adapter/src/live_connect.rs'),
    'live_source_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source.rs'),
    'live_fortress_identity':digest(root/'crates/dfmcp-adapter/src/live_identity.rs'),
@@ -100,6 +103,11 @@ receipt={
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
    'live_read_stack_checker':digest(root/'scripts/check_live_read_stack.py'),
+   'live_acceptance_contract':digest(root/'architecture/live_read_acceptance_v1.json'),
+   'live_acceptance_contract_checker':digest(root/'scripts/check_live_acceptance_contract.py'),
+   'live_acceptance_verifier':digest(root/'scripts/verify_live_read_acceptance.py'),
+   'live_acceptance_tests':digest(root/'scripts/test_live_read_acceptance.py'),
+   'live_acceptance_wrapper':digest(root/'scripts/qualify_live_read.sh'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -112,23 +120,35 @@ PY
 }
 trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>&1 || true; fi' EXIT
 
+run_gate repository-integrity python3 scripts/check_repository_integrity.py
 run_gate static-contracts python3 scripts/validate_repo.py
 run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
+run_gate bridge-auth-order python3 scripts/check_bridge_auth_order.py
 run_gate live-mcp-contract python3 scripts/check_live_mcp.py
 run_gate compiled-live-read-stack-contract python3 scripts/check_live_read_stack.py
+run_gate live-acceptance-contract python3 scripts/check_live_acceptance_contract.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
+run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
+run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
+  scripts/check_repository_integrity.py \
+  scripts/test_repository_integrity.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_bridge_auth_order.py \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
+  scripts/check_live_acceptance_contract.py \
+  scripts/verify_live_read_acceptance.py \
+  scripts/test_live_read_acceptance.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
+  scripts/qualify_live_read.sh \
   scripts/verify.sh \
   scripts/qualify_local.sh
 
