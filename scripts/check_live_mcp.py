@@ -69,7 +69,11 @@ def require(condition: bool, path: str, message: str, failures: list[Failure]) -
 
 
 def function_body(source: str, name: str) -> str:
-    signature = re.search(rf"pub fn {re.escape(name)}\s*\([^{{]*\)\s*->\s*String\s*\{{", source, re.S)
+    signature = re.search(
+        rf"pub fn {re.escape(name)}\s*\([^{{]*\)\s*->\s*String\s*\{{",
+        source,
+        re.S,
+    )
     if signature is None:
         return ""
     opening = source.find("{", signature.start())
@@ -106,13 +110,13 @@ def check_live_server(failures: list[Failure]) -> None:
         failures,
     )
     require(
-        "ServerBuilder::new(\"dwarf-fortress-mcp-live\"" in source,
+        'ServerBuilder::new("dwarf-fortress-mcp-live"' in source,
         path,
         "live server identity is missing or ambiguous",
         failures,
     )
     require(
-        "DFMCP_BRIDGE_TOKEN" in source and "env::var(\"DFMCP_BRIDGE_TOKEN\")" in source,
+        "DFMCP_BRIDGE_TOKEN" in source and 'env::var("DFMCP_BRIDGE_TOKEN")' in source,
         path,
         "live bearer secret must come from process configuration",
         failures,
@@ -120,11 +124,19 @@ def check_live_server(failures: list[Failure]) -> None:
     for tool in EXPECTED_TOOLS:
         body = function_body(source, tool)
         require(bool(body), path, f"cannot isolate body for {tool}", failures)
-        signature = re.search(rf"pub fn {re.escape(tool)}\s*\((.*?)\)\s*->", source, re.S)
+        signature = re.search(
+            rf"pub fn {re.escape(tool)}\s*\((.*?)\)\s*->",
+            source,
+            re.S,
+        )
         if signature is not None:
             args = signature.group(1).lower()
-            require("token" not in args and "endpoint" not in args and "secret" not in args,
-                    path, f"{tool} exposes deployment secrets or endpoint as MCP arguments", failures)
+            require(
+                "token" not in args and "endpoint" not in args and "secret" not in args,
+                path,
+                f"{tool} exposes deployment secrets or endpoint as MCP arguments",
+                failures,
+            )
     for tool in MUTATION_TOOLS:
         body = function_body(source, tool)
         require(
@@ -140,13 +152,13 @@ def check_live_server(failures: list[Failure]) -> None:
         "bootstrap_live_read_adapter",
         "connect_authenticated_live_source",
         "parse_loopback_endpoint",
-        "FencedLiveSource",
+        "AuthenticatedLiveSource",
         "ContinuityStatus::Heartbeat",
         "ContinuityStatus::Reset",
         ".request_id(request_id.to_string())",
         "source_poisoned",
         "coverage_json",
-        "mutation_admissible\": false",
+        '"mutation_admissible": false',
     ]:
         require(needle in source, path, f"live server is missing contract marker {needle}", failures)
 
@@ -185,7 +197,7 @@ def check_adapter_chain(failures: list[Failure]) -> None:
         "crates/dfmcp-adapter/src/live_bootstrap.rs": [
             "bootstrap_live_read_adapter",
             "PrimedLiveSource",
-            "bootstrap reads the underlying source once",
+            "bootstrap_reads_the_underlying_source_once",
             "source manifest changed between the first capsule and adapter bootstrap",
         ],
         "crates/dfmcp-adapter/src/live_identity.rs": [
@@ -228,27 +240,57 @@ def check_adapter_chain(failures: list[Failure]) -> None:
         "live_projection",
         "live_session",
     ]:
-        require(f"pub mod {module};" in lib, lib_path, f"adapter module {module} is not compiled", failures)
+        require(
+            f"pub mod {module};" in lib,
+            lib_path,
+            f"adapter module {module} is not compiled",
+            failures,
+        )
 
 
 def check_cli_and_crate_wiring(failures: list[Failure]) -> None:
     lib_path = "crates/dfmcp-mcp/src/lib.rs"
     lib = read(lib_path, failures)
     require("pub mod live_server;" in lib, lib_path, "live server module is not compiled", failures)
-    require("pub use live_server::run_live_stdio;" in lib, lib_path, "live server entrypoint is not exported", failures)
+    require(
+        "pub use live_server::run_live_stdio;" in lib,
+        lib_path,
+        "live server entrypoint is not exported",
+        failures,
+    )
 
     cli_path = "crates/dwarf-fortress-mcp/src/main.rs"
     cli = read(cli_path, failures)
-    require('"serve-live" => dfmcp_mcp::run_live_stdio()' in cli, cli_path,
-            "CLI does not expose the explicit live server mode", failures)
-    require('"serve" => dfmcp_mcp::run_stdio()' in cli, cli_path,
-            "CLI no longer preserves the deterministic laboratory mode", failures)
-    require("connect_authenticated_live_source" in cli, cli_path,
-            "CLI bypasses shared live connection admission", failures)
-    require("derive_live_fortress_id" in cli, cli_path,
-            "CLI bypasses canonical live fortress identity", failures)
-    require("TcpStream::connect" not in cli, cli_path,
-            "CLI reimplemented socket admission instead of using the shared boundary", failures)
+    require(
+        '"serve-live" => dfmcp_mcp::run_live_stdio()' in cli,
+        cli_path,
+        "CLI does not expose the explicit live server mode",
+        failures,
+    )
+    require(
+        '"serve" => dfmcp_mcp::run_stdio()' in cli,
+        cli_path,
+        "CLI no longer preserves the deterministic laboratory mode",
+        failures,
+    )
+    require(
+        "connect_authenticated_live_source" in cli,
+        cli_path,
+        "CLI bypasses shared live connection admission",
+        failures,
+    )
+    require(
+        "derive_live_fortress_id" in cli,
+        cli_path,
+        "CLI bypasses canonical live fortress identity",
+        failures,
+    )
+    require(
+        "TcpStream::connect" not in cli,
+        cli_path,
+        "CLI reimplemented socket admission instead of using the shared boundary",
+        failures,
+    )
 
 
 def main() -> int:
