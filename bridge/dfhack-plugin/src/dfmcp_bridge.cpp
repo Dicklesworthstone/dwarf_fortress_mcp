@@ -119,9 +119,8 @@ std::string bounded_utf8_prefix(const std::string &value, std::size_t max_bytes)
 
 bool constant_time_equal(std::string_view left, std::string_view right)
 {
-    const std::size_t maximum = std::max(left.size(), right.size());
     std::size_t difference = left.size() ^ right.size();
-    for (std::size_t index = 0; index < maximum; ++index)
+    for (std::size_t index = 0; index < MAX_TOKEN_BYTES; ++index)
     {
         const auto left_byte = index < left.size()
             ? static_cast<unsigned char>(left[index])
@@ -188,21 +187,30 @@ std::string df_version()
     return version_info ? version_info->getVersion() : std::string("unknown");
 }
 
-void initialize_handshake_reply(wire::HandshakeReply *out,
-                                const std::string &client_nonce)
+void initialize_handshake_reply(wire::HandshakeReply *out)
 {
     out->set_accepted(false);
     out->set_failure_code("");
     out->set_failure_message("");
     out->set_protocol_major(PROTOCOL_MAJOR);
     out->set_protocol_minor(PROTOCOL_MINOR);
+    out->set_bridge_version("");
+    out->set_dfhack_version("");
+    out->set_df_version("");
+    out->set_world_loaded(false);
+    out->set_fortress_mode(false);
+    out->set_client_nonce("");
+    out->set_bridge_generation(0);
+}
+
+void publish_handshake_manifest(wire::HandshakeReply *out)
+{
     out->set_bridge_version(BRIDGE_VERSION);
     out->set_dfhack_version(Version::dfhack_version());
     out->set_df_version(df_version());
     const bool world_loaded = Core::getInstance().isWorldLoaded();
     out->set_world_loaded(world_loaded);
     out->set_fortress_mode(world_loaded && World::isFortressMode());
-    out->set_client_nonce(client_nonce);
     out->set_bridge_generation(BRIDGE_GENERATION);
     out->add_supported_methods("Handshake");
     out->add_supported_methods("ReadObservation");
@@ -211,7 +219,7 @@ void initialize_handshake_reply(wire::HandshakeReply *out,
 command_result Handshake(color_ostream &, const wire::HandshakeRequest *in,
                          wire::HandshakeReply *out)
 {
-    initialize_handshake_reply(out, in->client_nonce());
+    initialize_handshake_reply(out);
 
     std::string failure_code;
     std::string failure_message;
@@ -227,6 +235,7 @@ command_result Handshake(color_ostream &, const wire::HandshakeRequest *in,
             "client name, version, or nonce violates the handshake bounds");
         return CR_OK;
     }
+    out->set_client_nonce(in->client_nonce());
     if (!validate_protocol(in->protocol_major(), in->protocol_minor(),
                            failure_code, failure_message) ||
         !authenticate(in->bearer_token(), failure_code, failure_message))
@@ -236,20 +245,20 @@ command_result Handshake(color_ostream &, const wire::HandshakeRequest *in,
         return CR_OK;
     }
 
+    publish_handshake_manifest(out);
     out->set_accepted(true);
     return CR_OK;
 }
 
-void initialize_observation_reply(wire::ReadObservationReply *out,
-                                  const std::string &client_nonce)
+void initialize_observation_reply(wire::ReadObservationReply *out)
 {
     out->set_accepted(false);
     out->set_failure_code("");
     out->set_failure_message("");
     out->set_protocol_major(PROTOCOL_MAJOR);
     out->set_protocol_minor(PROTOCOL_MINOR);
-    out->set_client_nonce(client_nonce);
-    out->set_bridge_generation(BRIDGE_GENERATION);
+    out->set_client_nonce("");
+    out->set_bridge_generation(0);
     out->set_world_loaded(false);
     out->set_fortress_mode(false);
     out->set_paused(false);
@@ -267,7 +276,7 @@ command_result ReadObservation(color_ostream &,
                                const wire::ReadObservationRequest *in,
                                wire::ReadObservationReply *out)
 {
-    initialize_observation_reply(out, in->client_nonce());
+    initialize_observation_reply(out);
 
     std::string failure_code;
     std::string failure_message;
@@ -278,6 +287,7 @@ command_result ReadObservation(color_ostream &,
         out->set_failure_message("client nonce violates the 16..64 byte policy");
         return CR_OK;
     }
+    out->set_client_nonce(in->client_nonce());
     if (!validate_protocol(in->protocol_major(), in->protocol_minor(),
                            failure_code, failure_message) ||
         !authenticate(in->bearer_token(), failure_code, failure_message))
@@ -286,6 +296,7 @@ command_result ReadObservation(color_ostream &,
         out->set_failure_message(failure_message);
         return CR_OK;
     }
+    out->set_bridge_generation(BRIDGE_GENERATION);
 
     const std::uint32_t requested =
         in->has_max_citizens() ? in->max_citizens() : DEFAULT_MAX_CITIZENS;
