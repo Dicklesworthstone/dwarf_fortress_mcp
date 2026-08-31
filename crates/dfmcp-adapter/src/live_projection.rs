@@ -256,10 +256,10 @@ fn validate_projected_name(entity: &EntityRecord, names_included: bool) -> Resul
         )
     })?;
     let valid = if names_included {
-        fact.presence.is_none() && matches!(fact.value, Value::Text(_))
+        fact.presence.is_none() && matches!(&fact.value, Value::Text(_))
     } else {
-        matches!(fact.presence, Some(FactPresence::Omitted(_)))
-            && matches!(fact.value, Value::Null)
+        matches!(&fact.presence, Some(FactPresence::Omitted(_)))
+            && matches!(&fact.value, Value::Null)
     };
     if !valid {
         return Err(error(
@@ -930,7 +930,7 @@ mod tests {
             .fields
             .get("name")
             .ok_or_else(|| error(ErrorCode::CorruptLedger, "projected name fact is missing"))?;
-        assert!(matches!(name.presence, Some(FactPresence::Omitted(_))));
+        assert!(matches!(&name.presence, Some(FactPresence::Omitted(_))));
         assert_eq!(name.value, Value::Null);
         assert_eq!(entity.label, "unit-7");
         assert!(
