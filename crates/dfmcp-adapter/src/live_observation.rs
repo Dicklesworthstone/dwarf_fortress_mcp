@@ -11,11 +11,13 @@
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, sha256};
 
 use crate::dfhack_rpc::{
-    MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
+    MAX_CITIZENS_PER_PAGE, MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES,
+    MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
 };
 use crate::{BridgeManifest, CitizenRecord, ObservationPage};
 
 const CAPSULE_DOMAIN: &[u8] = b"dfmcp.live-observation-capsule.v2\0";
+const TICKS_PER_YEAR: u32 = 403_200;
 pub const MAX_CAPSULE_CITIZENS: usize = 100_000;
 pub const MAX_CANONICAL_CAPSULE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -28,6 +30,78 @@ fn validate_string_bound(value: &str, field: &str, maximum: usize) -> Result<()>
         return Err(error(
             ErrorCode::BudgetExceeded,
             format!("{field} exceeds its {maximum}-byte bound"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_nonempty_string_bound(value: &str, field: &str, maximum: usize) -> Result<()> {
+    if value.is_empty() {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            format!("{field} must not be empty"),
+        ));
+    }
+    validate_string_bound(value, field, maximum)
+}
+
+fn validate_summary(summary: &SummaryIdentity) -> Result<()> {
+    validate_nonempty_string_bound(&summary.world_name, "world name", MAX_WORLD_NAME_BYTES)?;
+    validate_nonempty_string_bound(
+        &summary.world_folder,
+        "world folder",
+        MAX_WORLD_FOLDER_BYTES,
+    )?;
+    if summary.site_id < 0 {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "live observation site ID must not be negative",
+        ));
+    }
+    if summary.current_year_tick >= TICKS_PER_YEAR {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            format!(
+                "live observation year tick {} is outside 0..{}",
+                summary.current_year_tick,
+                TICKS_PER_YEAR - 1
+            ),
+        ));
+    }
+    let total = usize::try_from(summary.total).map_err(|_| {
+        error(
+            ErrorCode::BudgetExceeded,
+            "declared citizen total does not fit usize",
+        )
+    })?;
+    if total > MAX_CAPSULE_CITIZENS {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "declared citizen total exceeds the capsule safety ceiling",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_citizen(citizen: &CitizenRecord, names_included: bool) -> Result<()> {
+    if citizen.unit_id < 0 {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "citizen unit ID must not be negative",
+        ));
+    }
+    validate_string_bound(&citizen.name, "citizen name", MAX_UNIT_NAME_BYTES)?;
+    validate_nonempty_string_bound(&citizen.race, "citizen race", MAX_RACE_NAME_BYTES)?;
+    if !names_included && !citizen.name.is_empty() {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "name-omitted live observation contains an observed citizen name",
+        ));
+    }
+    if !citizen.citizen || citizen.resident {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "strict citizen observation contains a non-citizen or resident record",
         ));
     }
     Ok(())
@@ -69,6 +143,7 @@ pub struct LiveObservationCapsule {
 
 impl LiveObservationCapsule {
     pub fn validate(&self) -> Result<()> {
+        self.bridge.validate()?;
         if !self.bridge.world_loaded || !self.bridge.fortress_mode {
             return Err(error(
                 ErrorCode::AdapterRejected,
@@ -87,6 +162,12 @@ impl LiveObservationCapsule {
                 "live observation capsule exceeds the citizen safety ceiling",
             ));
         }
+        if self.canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "canonical live observation exceeds the 64 MiB capsule ceiling",
+            ));
+        }
         if usize::try_from(self.citizen_coverage.returned).map_err(|_| {
             error(
                 ErrorCode::InternalInvariantViolation,
@@ -99,21 +180,18 @@ impl LiveObservationCapsule {
                 "citizen coverage does not match the canonical roster length",
             ));
         }
-        validate_string_bound(&self.world_name, "world name", MAX_WORLD_NAME_BYTES)?;
-        validate_string_bound(
-            &self.world_folder,
-            "world folder",
-            MAX_WORLD_FOLDER_BYTES,
-        )?;
+        let summary = SummaryIdentity {
+            paused: self.paused,
+            current_year: self.current_year,
+            current_year_tick: self.current_year_tick,
+            world_name: self.world_name.clone(),
+            world_folder: self.world_folder.clone(),
+            site_id: self.site_id,
+            total: self.citizen_coverage.total,
+        };
+        validate_summary(&summary)?;
         for citizen in &self.citizens {
-            validate_string_bound(&citizen.name, "citizen name", MAX_UNIT_NAME_BYTES)?;
-            validate_string_bound(&citizen.race, "citizen race", MAX_RACE_NAME_BYTES)?;
-            if !self.names_included && !citizen.name.is_empty() {
-                return Err(error(
-                    ErrorCode::CorruptLedger,
-                    "name-omitted live capsule contains an observed citizen name",
-                ));
-            }
+            validate_citizen(citizen, self.names_included)?;
         }
         for pair in self.citizens.windows(2) {
             if pair[0].unit_id >= pair[1].unit_id {
@@ -124,15 +202,6 @@ impl LiveObservationCapsule {
             }
         }
 
-        let summary = SummaryIdentity {
-            paused: self.paused,
-            current_year: self.current_year,
-            current_year_tick: self.current_year_tick,
-            world_name: self.world_name.clone(),
-            world_folder: self.world_folder.clone(),
-            site_id: self.site_id,
-            total: self.citizen_coverage.total,
-        };
         let recomputed = canonical_bytes(
             &self.bridge,
             &summary,
@@ -143,12 +212,6 @@ impl LiveObservationCapsule {
             return Err(error(
                 ErrorCode::CorruptLedger,
                 "live observation fields do not reproduce the stored canonical bytes",
-            ));
-        }
-        if self.canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "canonical live observation exceeds the 64 MiB capsule ceiling",
             ));
         }
         if sha256(&self.canonical_bytes) != self.content_digest {
@@ -229,6 +292,7 @@ impl ObservationAssembler {
     }
 
     pub fn push_page(&mut self, page: ObservationPage) -> Result<()> {
+        self.bridge.validate()?;
         if self.complete {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -253,12 +317,6 @@ impl ObservationAssembler {
                 "handshake world posture no longer matches the observation request",
             ));
         }
-        if !self.names_included && page.citizens.iter().any(|citizen| !citizen.name.is_empty()) {
-            return Err(error(
-                ErrorCode::AdapterRejected,
-                "name-omitted observation page contains citizen names",
-            ));
-        }
         let expected_offset = self.next_offset()?;
         if page.citizen_offset != expected_offset {
             return Err(error(
@@ -271,30 +329,37 @@ impl ObservationAssembler {
         }
 
         let candidate_summary = SummaryIdentity::from_page(&page);
-        if let Some(summary) = self.summary.as_ref() {
-            if summary != &candidate_summary {
-                return Err(error(
-                    ErrorCode::StaleAnchor,
-                    "fortress summary changed between citizen pages",
-                ));
-            }
-        } else {
-            self.summary = Some(candidate_summary);
-        }
-
-        if self.citizens.len().saturating_add(page.citizens.len()) > MAX_CAPSULE_CITIZENS {
+        validate_summary(&candidate_summary)?;
+        if let Some(summary) = self.summary.as_ref()
+            && summary != &candidate_summary
+        {
             return Err(error(
-                ErrorCode::BudgetExceeded,
-                "assembled observation exceeds the 100,000-citizen safety ceiling",
+                ErrorCode::StaleAnchor,
+                "fortress summary changed between citizen pages",
             ));
         }
-        if let (Some(previous), Some(first)) = (self.citizens.last(), page.citizens.first()) {
-            if previous.unit_id >= first.unit_id {
-                return Err(error(
-                    ErrorCode::AdapterRejected,
-                    "citizen order is not strict across page boundaries",
-                ));
-            }
+        let page_limit = usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "citizen page limit does not fit usize",
+            )
+        })?;
+        if page.citizens.len() > page_limit {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "observation page exceeds the bridge citizen-page ceiling",
+            ));
+        }
+        for citizen in &page.citizens {
+            validate_citizen(citizen, self.names_included)?;
+        }
+        if let (Some(previous), Some(first)) = (self.citizens.last(), page.citizens.first())
+            && previous.unit_id >= first.unit_id
+        {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "citizen order is not strict across page boundaries",
+            ));
         }
         for pair in page.citizens.windows(2) {
             if pair[0].unit_id >= pair[1].unit_id {
@@ -304,36 +369,52 @@ impl ObservationAssembler {
                 ));
             }
         }
-        self.citizens.extend(page.citizens);
 
-        let assembled = self.next_offset()?;
-        let total = self
-            .summary
-            .as_ref()
-            .map(|summary| summary.total)
+        let candidate_len = self
+            .citizens
+            .len()
+            .checked_add(page.citizens.len())
             .ok_or_else(|| {
                 error(
-                    ErrorCode::InternalInvariantViolation,
-                    "observation summary disappeared during assembly",
+                    ErrorCode::BudgetExceeded,
+                    "assembled observation citizen count overflowed",
                 )
             })?;
-        if assembled > total {
+        if candidate_len > MAX_CAPSULE_CITIZENS {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "assembled observation exceeds the 100,000-citizen safety ceiling",
+            ));
+        }
+        let assembled = u32::try_from(candidate_len).map_err(|_| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "assembled citizen count does not fit u32",
+            )
+        })?;
+        if assembled > candidate_summary.total {
             return Err(error(
                 ErrorCode::AdapterRejected,
                 "assembled citizen count exceeds the declared total",
             ));
         }
-        if page.complete != (assembled == total) {
+        if page.complete != (assembled == candidate_summary.total) {
             return Err(error(
                 ErrorCode::AdapterRejected,
                 "page completeness disagrees with assembled coverage",
             ));
         }
+
+        if self.summary.is_none() {
+            self.summary = Some(candidate_summary);
+        }
+        self.citizens.extend(page.citizens);
         self.complete = page.complete;
         Ok(())
     }
 
     pub fn finalize(self) -> Result<LiveObservationCapsule> {
+        self.bridge.validate()?;
         if !self.complete {
             return Err(error(
                 ErrorCode::CursorGap,
@@ -346,6 +427,7 @@ impl ObservationAssembler {
                 "cannot publish an observation with no pages",
             )
         })?;
+        validate_summary(&summary)?;
         let returned = u32::try_from(self.citizens.len()).map_err(|_| {
             error(
                 ErrorCode::BudgetExceeded,
@@ -651,5 +733,56 @@ mod tests {
         assembler.push_page(page(0, 2, &[1], false))?;
         assert!(assembler.finalize().is_err());
         Ok(())
+    }
+
+    #[test]
+    fn rejected_page_does_not_partially_mutate_assembler() -> Result<()> {
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(page(0, 2, &[1], false))?;
+        let offset_before = assembler.next_offset()?;
+
+        let invalid = page(1, 2, &[2], false);
+        assert!(assembler.push_page(invalid).is_err());
+        assert_eq!(assembler.next_offset()?, offset_before);
+        assert!(!assembler.is_complete());
+
+        assembler.push_page(page(1, 2, &[2], true))?;
+        assert!(assembler.is_complete());
+        assert_eq!(assembler.finalize()?.citizens.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn rejected_first_page_does_not_capture_summary() -> Result<()> {
+        let mut assembler = ObservationAssembler::new(manifest());
+        let invalid = page(0, 1, &[1], false);
+        assert!(assembler.push_page(invalid).is_err());
+        assert_eq!(assembler.next_offset()?, 0);
+
+        let mut corrected = page(0, 1, &[1], true);
+        corrected.world_name = "A Different Valid Realm".to_owned();
+        assembler.push_page(corrected)?;
+        assert_eq!(assembler.finalize()?.world_name, "A Different Valid Realm");
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_manifest_summary_and_citizen_semantics_fail_closed() {
+        let mut invalid_manifest = manifest();
+        invalid_manifest.bridge_generation = 0;
+        let mut assembler = ObservationAssembler::new(invalid_manifest);
+        assert!(assembler.push_page(page(0, 1, &[1], true)).is_err());
+        assert_eq!(assembler.next_offset().ok(), Some(0));
+
+        let mut assembler = ObservationAssembler::new(manifest());
+        let mut invalid_summary = page(0, 1, &[1], true);
+        invalid_summary.site_id = -1;
+        assert!(assembler.push_page(invalid_summary).is_err());
+        assert_eq!(assembler.next_offset().ok(), Some(0));
+
+        let mut invalid_citizen = page(0, 1, &[1], true);
+        invalid_citizen.citizens[0].resident = true;
+        assert!(assembler.push_page(invalid_citizen).is_err());
+        assert_eq!(assembler.next_offset().ok(), Some(0));
     }
 }
