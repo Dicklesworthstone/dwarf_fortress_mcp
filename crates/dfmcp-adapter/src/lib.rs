@@ -24,6 +24,7 @@ pub mod live_identity;
 pub mod live_observation;
 pub mod live_projection;
 pub mod live_session;
+pub mod live_version;
 pub mod transceiver;
 
 pub use delta_scanner::{
@@ -68,6 +69,10 @@ pub use live_projection::{
 };
 pub use live_session::{
     LiveObservationSource, read_complete_observation, read_complete_observation_bounded,
+};
+pub use live_version::{
+    LiveCompatibilityIdentity, LiveEpochResetReason, LiveVersionDecision, LiveVersionTracker,
+    LiveWorldIdentity,
 };
 pub use transceiver::{IpcTransceiver, TransceiverConfig};
 
