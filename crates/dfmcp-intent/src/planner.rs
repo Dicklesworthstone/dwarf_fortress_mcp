@@ -6,7 +6,14 @@ use dfmcp_core::{
 };
 use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
-use crate::{Action, Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan, RequestedAction};
+use crate::{
+    Action, BuildingKind, Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan,
+    RequestedAction, WorkOrderCondition,
+};
+
+const MAX_INTENT_CONSTRAINTS: usize = 256;
+const MAX_PREDICATES_PER_ACTION: usize = 64;
+const MAX_ACTION_AUXILIARY_ITEMS: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlanPolicy {
@@ -78,6 +85,7 @@ impl StaticPlanner {
                 "static planner requires at least one semantic action",
             ));
         }
+        validate_intent_shape(intent, &self.policy, context)?;
         if evaluate(snapshot, &intent.terminal_condition) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
@@ -132,7 +140,13 @@ impl StaticPlanner {
                 }
             }
             validate_requested(index, &normalized, snapshot.tick)?;
-            let step_id = StepId::new(index as u32);
+            let step_number = u32::try_from(index).map_err(|_| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "plan step index exceeds its wire representation",
+                )
+            })?;
+            let step_id = StepId::new(step_number);
             let dependencies = validate_dependencies(index, &normalized.depends_on)?;
             let capability = normalized.action.capability();
             required_capabilities.insert(capability);
@@ -192,6 +206,69 @@ impl StaticPlanner {
     }
 }
 
+fn validate_intent_shape(
+    intent: &Intent,
+    policy: &PlanPolicy,
+    context: &OperationContext,
+) -> Result<()> {
+    intent.terminal_condition.validate_shape()?;
+    if intent.constraints.len() > MAX_INTENT_CONSTRAINTS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "intent constraint count exceeds its explicit bound",
+        ));
+    }
+    let action_bound =
+        usize::try_from(policy.max_steps.min(context.budget.max_actions)).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "action bound is not representable",
+            )
+        })?;
+    if intent.requested_actions.len() > action_bound {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "intent action count exceeds its explicit bound",
+        ));
+    }
+    for constraint in &intent.constraints {
+        if let Constraint::ProtectEntities(entities) = constraint
+            && (entities.len() > policy.max_entities_per_action as usize
+                || entities.len() > context.budget.max_entities as usize)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "protected-entity constraint exceeds its explicit bound",
+            ));
+        }
+    }
+    for requested in &intent.requested_actions {
+        if requested.preconditions.len() > MAX_PREDICATES_PER_ACTION
+            || requested.postconditions.len() > MAX_PREDICATES_PER_ACTION
+            || requested.depends_on.len() > MAX_PREDICATES_PER_ACTION
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "requested action predicate or dependency count exceeds its explicit bound",
+            ));
+        }
+        for predicate in requested
+            .preconditions
+            .iter()
+            .chain(requested.postconditions.iter())
+        {
+            predicate.validate_shape()?;
+        }
+        if let Some(obligation) = &requested.obligation {
+            obligation.terminal.validate_shape()?;
+            if let Some(failure) = &obligation.failure {
+                failure.validate_shape()?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
     let action = requested.action.normalized();
     let compensation = requested
@@ -237,6 +314,7 @@ fn normalize_obligation(obligation: &ObligationSpec) -> ObligationSpec {
 }
 
 fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationContext) -> Result<()> {
+    validate_action_shape(action, policy)?;
     let scope = action.scope();
     if scope.entity_ids.len() > policy.max_entities_per_action as usize
         || scope.entity_ids.len() > context.budget.max_entities as usize
@@ -273,10 +351,10 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
         Action::Pause { .. } => {}
         Action::DesignateDig { .. } => {}
         Action::Build {
+            kind,
             location,
             footprint,
             material,
-            ..
         } => {
             if !footprint.contains(*location) {
                 return Err(DfmcpError::new(
@@ -291,6 +369,7 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
                     .chain(material.forbidden_tokens.iter()),
                 policy.max_string_bytes,
             )?;
+            validate_building_kind(kind, policy.max_string_bytes)?;
         }
         Action::SetLabor { units, labor, .. } => {
             if units.is_empty() {
@@ -305,7 +384,7 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
             name,
             job_token,
             amount,
-            ..
+            conditions,
         } => {
             if *amount == 0 {
                 return Err(DfmcpError::new(
@@ -315,6 +394,14 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
             }
             validate_string(name, policy.max_string_bytes, "work-order name")?;
             validate_string(job_token, policy.max_string_bytes, "job token")?;
+            for condition in conditions {
+                let token = match condition {
+                    WorkOrderCondition::ItemCountBelow { item_token, .. } => item_token,
+                    WorkOrderCondition::MaterialAvailable { material_token, .. } => material_token,
+                    WorkOrderCondition::CompletedOrder { order_name } => order_name,
+                };
+                validate_string(token, policy.max_string_bytes, "work-order condition token")?;
+            }
         }
         Action::ConfigureStockpile { accepts, .. } => {
             validate_tokens(accepts.iter(), policy.max_string_bytes)?;
@@ -351,6 +438,50 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
         }
     }
     Ok(())
+}
+
+fn validate_action_shape(action: &Action, policy: &PlanPolicy) -> Result<()> {
+    let item_count = match action {
+        Action::Build { material, .. } => material
+            .required_tokens
+            .len()
+            .checked_add(material.forbidden_tokens.len()),
+        Action::SetLabor { units, .. }
+        | Action::AssignSquad { units, .. }
+        | Action::SetBurrowMembership { units, .. } => Some(units.len()),
+        Action::CreateWorkOrder { conditions, .. } => Some(conditions.len()),
+        Action::ConfigureStockpile { accepts, .. } => Some(accepts.len()),
+        Action::Extension { parameters, .. } => Some(parameters.len()),
+        Action::Pause { .. } | Action::DesignateDig { .. } | Action::SetStandingOrder { .. } => {
+            Some(0)
+        }
+    }
+    .ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "action collection size overflowed",
+        )
+    })?;
+    let policy_bound = policy.max_entities_per_action as usize;
+    if item_count > MAX_ACTION_AUXILIARY_ITEMS || item_count > policy_bound {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "action collection exceeds its explicit bound",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_building_kind(kind: &BuildingKind, max_bytes: usize) -> Result<()> {
+    match kind {
+        BuildingKind::Workshop(token)
+        | BuildingKind::Furnace(token)
+        | BuildingKind::Furniture(token)
+        | BuildingKind::Construction(token)
+        | BuildingKind::Trap(token)
+        | BuildingKind::Custom(token) => validate_string(token, max_bytes, "building kind token"),
+        BuildingKind::FarmPlot | BuildingKind::Bridge | BuildingKind::Well => Ok(()),
+    }
 }
 
 fn validate_tokens<'a>(values: impl Iterator<Item = &'a String>, max_bytes: usize) -> Result<()> {

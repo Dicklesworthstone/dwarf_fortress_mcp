@@ -137,9 +137,9 @@ impl ObligationRuntime {
                 let cadence_basis = obligation
                     .last_evaluated_tick
                     .map_or(obligation.registered_tick, |tick| tick);
-                if snapshot.tick.0.saturating_sub(cadence_basis.0)
-                    < obligation.spec.poll_interval_ticks
-                {
+                let cadence_due = snapshot.tick.0.saturating_sub(cadence_basis.0)
+                    >= obligation.spec.poll_interval_ticks;
+                if !cadence_due && snapshot.tick < obligation.spec.deadline_tick {
                     continue;
                 }
                 obligation.last_evaluated_tick = Some(snapshot.tick);
@@ -155,8 +155,19 @@ impl ObligationRuntime {
                     });
                 }
 
-                // 2. Check terminal predicate and stability window. A terminal
-                // observation at the deadline is eligible; a missed deadline is not.
+                // 2. A terminal observation at the deadline is eligible, but
+                // terminal state first observed after the deadline is not.
+                if next_status.is_none() && snapshot.tick > obligation.spec.deadline_tick {
+                    next_status = Some(ObligationStatus::Failed {
+                        failed_at_tick: snapshot.tick,
+                        reason: format!(
+                            "obligation deadline tick {} was missed",
+                            obligation.spec.deadline_tick.0
+                        ),
+                    });
+                }
+
+                // 3. Check terminal predicate and stability window.
                 if next_status.is_none() {
                     let satisfied = evaluate(snapshot, &obligation.spec.terminal);
                     if satisfied {
@@ -378,6 +389,60 @@ mod tests {
             Some(ObligationStatus::Failed { .. })
         ));
 
+        Ok(())
+    }
+
+    #[test]
+    fn deadline_is_enforced_even_before_the_next_poll_cadence() -> Result<()> {
+        let mut runtime = ObligationRuntime::new();
+        let action_id = ActionId::new(3);
+        runtime.register_obligation(
+            action_id,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(15),
+                poll_interval_ticks: 100,
+                stable_for_observations: 1,
+            },
+            GameTick(10),
+        )?;
+
+        runtime.step_tick(&sample_snapshot(15, true))?;
+        assert!(matches!(
+            runtime.get_status(action_id),
+            Some(ObligationStatus::Failed {
+                failed_at_tick: GameTick(15),
+                ..
+            })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn terminal_state_first_seen_after_deadline_does_not_fulfill() -> Result<()> {
+        let mut runtime = ObligationRuntime::new();
+        let action_id = ActionId::new(4);
+        runtime.register_obligation(
+            action_id,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(15),
+                poll_interval_ticks: 100,
+                stable_for_observations: 1,
+            },
+            GameTick(10),
+        )?;
+
+        runtime.step_tick(&sample_snapshot(16, false))?;
+        assert!(matches!(
+            runtime.get_status(action_id),
+            Some(ObligationStatus::Failed {
+                failed_at_tick: GameTick(16),
+                ..
+            })
+        ));
         Ok(())
     }
 }

@@ -8,6 +8,11 @@ use dfmcp_world::Predicate;
 
 use crate::Action;
 
+const MAX_PLAN_STEPS: usize = 4_096;
+const MAX_PLAN_SUMMARY_BYTES: usize = 4_096;
+const MAX_PLAN_PREDICATES_PER_STEP: usize = 64;
+const MAX_PLAN_DEPENDENCIES_PER_STEP: usize = 4_096;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Constraint {
     MaxRisk(RiskTier),
@@ -284,28 +289,58 @@ impl PreparedPlan {
     }
 
     pub fn validate_structure(&self) -> Result<()> {
-        if self.intent_id == IntentId::NIL || self.summary.is_empty() {
+        if self.intent_id == IntentId::NIL
+            || self.summary.is_empty()
+            || self.summary.len() > MAX_PLAN_SUMMARY_BYTES
+        {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
-                "plan intent identifier and summary must be nonempty",
+                "plan intent identifier and bounded summary must be nonempty",
             ));
         }
-        if !self.digest_is_valid() || !self.id_is_valid() {
+        if self.steps.is_empty()
+            || self.steps.len() > MAX_PLAN_STEPS
+            || self.expires_at_tick < self.anchor.tick
+        {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
-                "plan digest or digest-derived identifier is invalid",
+                "plan step count or expiry violates its structural bound",
             ));
         }
+        self.terminal_condition.validate_shape()?;
         if self.terminal_condition != self.terminal_condition.normalized() {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
                 "plan terminal condition is not canonical",
             ));
         }
-        if self.steps.is_empty() || self.expires_at_tick < self.anchor.tick {
+        for step in &self.steps {
+            if step.preconditions.len() > MAX_PLAN_PREDICATES_PER_STEP
+                || step.postconditions.len() > MAX_PLAN_PREDICATES_PER_STEP
+                || step.depends_on.len() > MAX_PLAN_DEPENDENCIES_PER_STEP
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidPlan,
+                    "plan step predicate or dependency count exceeds its structural bound",
+                ));
+            }
+            for predicate in step.preconditions.iter().chain(step.postconditions.iter()) {
+                predicate.validate_shape()?;
+            }
+            if let Some(obligation) = &step.obligation {
+                obligation.terminal.validate_shape()?;
+                if let Some(failure) = &obligation.failure {
+                    failure.validate_shape()?;
+                }
+            }
+        }
+        let computed_digest = self.compute_digest();
+        let candidate = computed_digest.first_u128();
+        let expected_id = PlanId::new(if candidate == 0 { 1 } else { candidate });
+        if self.digest != computed_digest || self.id == PlanId::NIL || self.id != expected_id {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
-                "plan has no steps or expires before its anchor",
+                "plan digest or digest-derived identifier is invalid",
             ));
         }
 
