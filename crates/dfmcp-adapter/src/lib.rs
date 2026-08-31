@@ -16,6 +16,7 @@ pub mod fenced_live_source;
 pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
+pub mod live_bootstrap;
 pub mod live_identity;
 pub mod live_observation;
 pub mod live_projection;
@@ -41,6 +42,10 @@ pub use ipc::{
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
+pub use live_bootstrap::{
+    DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
+    bootstrap_live_read_adapter,
+};
 pub use live_identity::derive_live_fortress_id;
 pub use live_observation::{
     CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
