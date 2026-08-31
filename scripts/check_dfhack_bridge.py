@@ -400,6 +400,47 @@ def check_capsule_and_driver(failures: list[Failure]) -> None:
         "zero_citizen_fortress_finishes_in_one_empty_page",
     ]:
         require(needle in driver, driver_path, f"missing page-driver contract: {needle}", failures)
+    require(
+        "saturating_div" not in driver,
+        driver_path,
+        "page-count arithmetic must not rely on a nonportable saturating division",
+        failures,
+    )
+
+
+def check_native_build_harness(failures: list[Failure]) -> None:
+    path = "scripts/qualify_dfhack_plugin.sh"
+    source = read_required(path, failures)
+    for needle in [
+        'EXTERNAL_DIR="$WORKTREE/plugins/external"',
+        'PLUGIN_DST="$EXTERNAL_DIR/dfmcp_bridge"',
+        'EXTERNAL_CMAKE="$EXTERNAL_DIR/CMakeLists.txt"',
+        "add_subdirectory(dfmcp_bridge)",
+        "--target dfmcp_bridge",
+        "crates/dfmcp-adapter/src/dfhack_wire.rs",
+        "crates/dfmcp-adapter/src/live_observation.rs",
+        "crates/dfmcp-adapter/src/live_session.rs",
+        "external_registration",
+    ]:
+        require(needle in source, path, f"native build harness is missing: {needle}", failures)
+    require(
+        'PLUGIN_DST="$WORKTREE/plugins/dfmcp_bridge"' not in source,
+        path,
+        "harness reverted to an unregistered top-level plugin directory",
+        failures,
+    )
+    require(
+        "crates/dfmcp-adapter/src/dfhack_rpc.rs" not in source,
+        path,
+        "native receipt references the deleted wire client",
+        failures,
+    )
+    require(
+        "trap - EXIT" in source,
+        path,
+        "EXIT cleanup must disable its trap before exiting",
+        failures,
+    )
 
 
 def check_qualification_wiring(failures: list[Failure]) -> None:
@@ -442,6 +483,7 @@ def main() -> int:
     check_native_plugin(failures)
     check_rust_wire(failures)
     check_capsule_and_driver(failures)
+    check_native_build_harness(failures)
     check_qualification_wiring(failures)
     if failures:
         print(f"DFHack bridge contract: FAIL ({len(failures)} violation(s))", file=sys.stderr)
@@ -450,7 +492,7 @@ def main() -> int:
         return 1
     print(
         "DFHack bridge contract: PASS "
-        "(2 authenticated read-only RPCs, bounded native wire, canonical complete capsule)"
+        "(2 authenticated read-only RPCs, registered native target, bounded wire, complete capsule)"
     )
     return 0
 
