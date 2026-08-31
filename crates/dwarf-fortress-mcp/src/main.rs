@@ -2,14 +2,14 @@
 
 use std::env;
 use std::error::Error;
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
-    BridgeCredentials, DfHackRpcClient, FencedLiveSource, GameAdapter, HealthStatus,
-    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, derive_live_fortress_id,
-    project_live_capsule, read_complete_observation_bounded,
+    BridgeCredentials, GameAdapter, HealthStatus, LiveConnectionConfig, MAX_CAPSULE_CITIZENS,
+    MAX_CITIZENS_PER_PAGE, connect_authenticated_live_source, derive_live_fortress_id,
+    parse_loopback_endpoint, project_live_capsule, read_complete_observation_bounded,
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick, IntentId,
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let command = env::args().nth(1).unwrap_or_else(|| "help".to_owned());
+    let command = env::args().nth(1).map_or_else(|| "help".to_owned(), |value| value);
     match command.as_str() {
         "help" | "--help" | "-h" => print_help(),
         "version" | "--version" | "-V" => print_version(),
@@ -40,6 +40,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "demo" => demo()?,
         "bridge" => bridge(env::args().nth(2))?,
         "serve" => dfmcp_mcp::run_stdio(),
+        "serve-live" => dfmcp_mcp::run_live_stdio(),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
         }
@@ -61,23 +62,30 @@ COMMANDS:
     doctor      Exercise the deterministic laboratory adapter
     demo        Prepare and commit a verified laboratory pause-state action
     bridge      Authenticate to dfmcp_bridge and publish one canonical live read
-    serve       Run the MCP 2026-07-28 modern-only stdio server (fastmcp_rust)
+    serve       Run the deterministic laboratory MCP server
+    serve-live  Run the authenticated read-only live MCP server
     version     Print version information
     help        Print this help
 
-BRIDGE ENVIRONMENT:
+LIVE BRIDGE ENVIRONMENT:
+    DFMCP_BRIDGE_ENDPOINT       Numeric loopback IP:port (default 127.0.0.1:5000)
     DFMCP_BRIDGE_TOKEN          Required 32..256-byte shared loopback secret
+    DFMCP_BRIDGE_CONNECT_MILLIS Connect deadline, 1..60000 (default 2000)
+    DFMCP_BRIDGE_READ_MILLIS    Read deadline, 1..60000 (default 5000)
+    DFMCP_BRIDGE_WRITE_MILLIS   Write deadline, 1..60000 (default 5000)
     DFMCP_BRIDGE_PAGE_SIZE      Citizen page size, 1..4096 (default 4096)
     DFMCP_BRIDGE_MAX_CITIZENS   Complete-roster ceiling, 0..100000 (default 100000)
+    DFMCP_BRIDGE_INCLUDE_NAMES  true/false for serve-live (default true)
 
     The maximum page size is the safe default because one DFHack RPC is an
     internally suspended read. Multipage V1 reads are accepted only while the
     fortress remains paused on every page.
 
 STATUS:
-    The default MCP server remains the deterministic laboratory. The bridge
-    command exercises the authenticated read-only source path and emits one
-    canonical snapshot receipt; it exposes no live mutation authority.
+    `serve` is the deterministic semantic laboratory. `serve-live` is an
+    authenticated read-only server over bridge protocol V1. Both preserve the
+    exact same eleven-tool waist; live mutation-stage tools fail closed because
+    the bridge registers no mutation methods.
 ",
         version = env!("CARGO_PKG_VERSION")
     );
@@ -92,6 +100,9 @@ fn print_contract() {
         "\
 protocol: dfmcp/0
 transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust sibling
+server_modes:
+  laboratory: serve
+  authenticated_live_read_only: serve-live
 bridge_read_protocol: dfmcp.bridge.v1 over DFHack native protobuf RPC
 bridge_read_methods:
   - Handshake
@@ -144,8 +155,17 @@ fn doctor() -> Result<(), Box<dyn Error>> {
 }
 
 fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
-    let target = endpoint.unwrap_or_else(|| "127.0.0.1:5000".to_owned());
-    let address = parse_bridge_target(&target)?;
+    let target = match endpoint {
+        Some(value) => value,
+        None => match env::var("DFMCP_BRIDGE_ENDPOINT") {
+            Ok(value) => value,
+            Err(env::VarError::NotPresent) => "127.0.0.1:5000".to_owned(),
+            Err(env::VarError::NotUnicode(_)) => {
+                return Err("DFMCP_BRIDGE_ENDPOINT must be valid UTF-8".into());
+            }
+        },
+    };
+    let address = parse_loopback_endpoint(&target)?;
     let token = env::var("DFMCP_BRIDGE_TOKEN").map_err(|_| {
         "DFMCP_BRIDGE_TOKEN is required and must match the secret inherited by Dwarf Fortress/DFHack"
     })?;
@@ -163,20 +183,27 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
         0,
         hard_citizen_limit,
     )?;
+    let connect_millis = bounded_env_u64(
+        "DFMCP_BRIDGE_CONNECT_MILLIS",
+        2_000,
+        1,
+        60_000,
+    )?;
+    let read_millis = bounded_env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?;
+    let write_millis = bounded_env_u64("DFMCP_BRIDGE_WRITE_MILLIS", 5_000, 1, 60_000)?;
     let nonce = bridge_nonce(address)?;
     let credentials = BridgeCredentials::new(token.into_bytes(), nonce)?;
-
-    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-
-    let client = DfHackRpcClient::negotiate(
-        stream,
+    let mut source = connect_authenticated_live_source(
+        &LiveConnectionConfig {
+            endpoint: address,
+            connect_timeout: Duration::from_millis(connect_millis),
+            read_timeout: Duration::from_millis(read_millis),
+            write_timeout: Duration::from_millis(write_millis),
+            client_name: "dwarf-fortress-mcp-cli".to_owned(),
+            client_version: env!("CARGO_PKG_VERSION").to_owned(),
+        },
         credentials,
-        "dwarf-fortress-mcp-cli",
-        env!("CARGO_PKG_VERSION"),
     )?;
-    let mut source = FencedLiveSource::new(client)?;
     let capsule = read_complete_observation_bounded(
         &mut source,
         page_size,
@@ -278,16 +305,16 @@ fn bridge_nonce(address: SocketAddr) -> Result<Vec<u8>, Box<dyn Error>> {
     Ok(Digest32::of_bytes(&bytes).as_bytes().to_vec())
 }
 
-fn bounded_env_u32(
+fn bounded_env_u64(
     name: &str,
-    default: u32,
-    minimum: u32,
-    maximum: u32,
-) -> Result<u32, Box<dyn Error>> {
+    default: u64,
+    minimum: u64,
+    maximum: u64,
+) -> Result<u64, Box<dyn Error>> {
     let value = match env::var(name) {
         Ok(raw) => raw
-            .parse::<u32>()
-            .map_err(|_| format!("{name} must be a decimal u32"))?,
+            .parse::<u64>()
+            .map_err(|_| format!("{name} must be a decimal u64"))?,
         Err(env::VarError::NotPresent) => default,
         Err(env::VarError::NotUnicode(_)) => {
             return Err(format!("{name} must be valid UTF-8").into());
@@ -299,26 +326,19 @@ fn bounded_env_u32(
     Ok(value)
 }
 
-fn parse_bridge_target(target: &str) -> std::io::Result<SocketAddr> {
-    if target.is_empty() || target.len() > 256 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "bridge target must be a bounded numeric IP:port endpoint",
-        ));
-    }
-    let address = target.parse::<SocketAddr>().map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "bridge target must be a numeric IP:port endpoint",
-        )
-    })?;
-    if !address.ip().is_loopback() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "authenticated bridge diagnostics are restricted to loopback",
-        ));
-    }
-    Ok(address)
+fn bounded_env_u32(
+    name: &str,
+    default: u32,
+    minimum: u32,
+    maximum: u32,
+) -> Result<u32, Box<dyn Error>> {
+    let value = bounded_env_u64(
+        name,
+        u64::from(default),
+        u64::from(minimum),
+        u64::from(maximum),
+    )?;
+    Ok(u32::try_from(value).map_err(|_| format!("{name} does not fit u32"))?)
 }
 
 fn demo() -> Result<(), Box<dyn Error>> {
@@ -411,9 +431,10 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_env_u32, doctor, parse_bridge_target};
+    use super::{bounded_env_u32, doctor};
     use dfmcp_adapter::{
         BridgeManifest, ObservationAssembler, ObservationPage, derive_live_fortress_id,
+        parse_loopback_endpoint,
     };
     use dfmcp_core::FortressId;
     use std::collections::BTreeSet;
@@ -425,11 +446,11 @@ mod tests {
 
     #[test]
     fn bridge_accepts_only_numeric_loopback_targets() {
-        assert!(parse_bridge_target("127.0.0.1:5000").is_ok());
-        assert!(parse_bridge_target("[::1]:5000").is_ok());
-        assert!(parse_bridge_target("localhost:5000").is_err());
-        assert!(parse_bridge_target("192.0.2.1:5000").is_err());
-        assert!(parse_bridge_target("").is_err());
+        assert!(parse_loopback_endpoint("127.0.0.1:5000").is_ok());
+        assert!(parse_loopback_endpoint("[::1]:5000").is_ok());
+        assert!(parse_loopback_endpoint("localhost:5000").is_err());
+        assert!(parse_loopback_endpoint("192.0.2.1:5000").is_err());
+        assert!(parse_loopback_endpoint("").is_err());
     }
 
     #[test]
