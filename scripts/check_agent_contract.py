@@ -97,6 +97,7 @@ EXPECTED_PACKET_FIELDS = [
     "budget",
     "references",
 ]
+EXPECTED_INVARIANTS = 13
 
 
 @dataclass(frozen=True)
@@ -114,45 +115,94 @@ def require(condition: bool, path: str, message: str, failures: list[Failure]) -
         failures.append(Failure(path, message))
 
 
-def enum_strings(source: str, function_name: str) -> set[str]:
-    match = re.search(
-        rf"pub const fn {re.escape(function_name)}\(self\).*?\{{(?P<body>.*?)\n\s*\}}",
-        source,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        return set()
-    return set(re.findall(r'=>\s*"([a-z0-9_.]+)"', match.group("body")))
-
-
-def check_registry(failures: list[Failure]) -> dict[str, object]:
+def check_registry(failures: list[Failure]) -> None:
     path = "architecture/agent_turn_contract.json"
     try:
         registry = json.loads(read_text(path))
     except (OSError, json.JSONDecodeError) as exc:
         failures.append(Failure(path, f"cannot load registry: {exc}"))
-        return {}
+        return
 
-    require(registry.get("schema_version") == "dfmcp.agent_turn_contract/1", path,
-            "schema_version must be dfmcp.agent_turn_contract/1", failures)
-    require(registry.get("phases") == EXPECTED_PHASES, path,
-            "phase registry drifted from the frozen order", failures)
-    require(registry.get("continuity_statuses") == EXPECTED_CONTINUITY, path,
-            "continuity registry drifted", failures)
-    require(registry.get("epistemic_states") == EXPECTED_EPISTEMIC, path,
-            "epistemic registry drifted", failures)
-    require(registry.get("recovery_classes") == EXPECTED_RECOVERY, path,
-            "recovery registry drifted", failures)
+    require(
+        registry.get("schema_version") == "dfmcp.agent_turn_contract/1",
+        path,
+        "schema_version must be dfmcp.agent_turn_contract/1",
+        failures,
+    )
+    require(
+        registry.get("phases") == EXPECTED_PHASES,
+        path,
+        "phase registry drifted from the frozen order",
+        failures,
+    )
+    require(
+        registry.get("continuity_statuses") == EXPECTED_CONTINUITY,
+        path,
+        "continuity registry drifted",
+        failures,
+    )
+    require(
+        registry.get("epistemic_states") == EXPECTED_EPISTEMIC,
+        path,
+        "epistemic registry drifted",
+        failures,
+    )
+    require(
+        registry.get("recovery_classes") == EXPECTED_RECOVERY,
+        path,
+        "recovery registry drifted",
+        failures,
+    )
+    require(
+        registry.get("field_order") == EXPECTED_PACKET_FIELDS,
+        path,
+        "machine packet field order drifted from the executable builder",
+        failures,
+    )
     profiles = registry.get("observation_profiles")
-    require(isinstance(profiles, dict) and list(profiles) == EXPECTED_PROFILES, path,
-            "observation profile registry drifted", failures)
+    require(
+        isinstance(profiles, dict) and list(profiles) == EXPECTED_PROFILES,
+        path,
+        "observation profile registry drifted",
+        failures,
+    )
+    identity = registry.get("identity_rules")
+    require(isinstance(identity, dict), path, "identity_rules must be an object", failures)
+    if isinstance(identity, dict):
+        require(
+            identity.get("aliasing_forbidden") is True,
+            path,
+            "turn_id/request_id aliasing must remain forbidden",
+            failures,
+        )
+        require(
+            isinstance(identity.get("turn_id"), str) and isinstance(identity.get("request_id"), str),
+            path,
+            "both identity meanings must remain explicit",
+            failures,
+        )
     required = registry.get("required_invariants")
-    require(isinstance(required, list) and len(required) >= 12, path,
-            "at least twelve agent invariants must remain registered", failures)
+    require(
+        isinstance(required, list) and len(required) == EXPECTED_INVARIANTS,
+        path,
+        f"exactly {EXPECTED_INVARIANTS} agent invariants must remain registered",
+        failures,
+    )
     if isinstance(required, list):
         ids = [entry.get("id") for entry in required if isinstance(entry, dict)]
-        require(ids == [f"AGENT-INV-{index:03d}" for index in range(1, len(ids) + 1)], path,
-                "agent invariant IDs must be contiguous and canonically ordered", failures)
+        require(
+            ids == [f"AGENT-INV-{index:03d}" for index in range(1, EXPECTED_INVARIANTS + 1)],
+            path,
+            "agent invariant IDs must be complete, contiguous, and canonically ordered",
+            failures,
+        )
+        statements = [entry.get("statement", "") for entry in required if isinstance(entry, dict)]
+        require(
+            any("silently aliased" in statement for statement in statements),
+            path,
+            "identity-separation invariant is missing",
+            failures,
+        )
     authority = registry.get("authority_rules")
     require(isinstance(authority, dict), path, "authority_rules must be an object", failures)
     if isinstance(authority, dict):
@@ -163,38 +213,79 @@ def check_registry(failures: list[Failure]) -> dict[str, object]:
             "counterfactual_can_authorize",
             "typed_affordance_can_authorize",
         ]:
-            require(authority.get(key) is False, path,
-                    f"{key} must remain false", failures)
-    return registry
+            require(
+                authority.get(key) is False,
+                path,
+                f"{key} must remain false",
+                failures,
+            )
+        require(
+            authority.get("prepared_plan_plus_valid_witnesses_capabilities_and_fences_required")
+            is True,
+            path,
+            "the positive mutation-authority rule is missing",
+            failures,
+        )
 
 
 def check_core(failures: list[Failure]) -> None:
     path = "crates/dfmcp-core/src/agent.rs"
     source = read_text(path)
-    for expected, function in [
-        (EXPECTED_PHASES, "as_str"),
-    ]:
-        # AgentPhase is the first as_str implementation; exact variant checks
-        # below avoid accidentally accepting strings from later enums.
-        require(set(expected).issubset(set(re.findall(r'"([a-z0-9_.]+)"', source))), path,
-                f"core source is missing strings from {function}", failures)
-    for value in EXPECTED_CONTINUITY + EXPECTED_EPISTEMIC + EXPECTED_RECOVERY + EXPECTED_TOOLS:
-        require(f'"{value}"' in source, path,
-                f"typed core vocabulary is missing {value}", failures)
-    require("may_satisfy_mutation_precondition" in source, path,
-            "epistemic precondition gate is missing", failures)
-    require("can_prove_absence" in source and "proves_absence_in" in source, path,
-            "coverage/absence law is missing", failures)
-    require(source.count("can_dispatch_effect") >= 2, path,
-            "affordance and recommendation non-dispatch laws are missing", failures)
-    require("can_grant_authority" in source and "can_satisfy_live_precondition" in source, path,
-            "memory non-authority laws are missing", failures)
-    require("SurpriseRecord" in source and "HandoffPacket" in source, path,
-            "surprise or handoff typed model is missing", failures)
+    vocabulary = set(re.findall(r'"([a-z0-9_.]+)"', source))
+    for value in (
+        EXPECTED_PHASES
+        + EXPECTED_CONTINUITY
+        + EXPECTED_EPISTEMIC
+        + EXPECTED_RECOVERY
+        + EXPECTED_PROFILES
+        + EXPECTED_TOOLS
+    ):
+        require(
+            value in vocabulary,
+            path,
+            f"typed core vocabulary is missing {value}",
+            failures,
+        )
+    require(
+        "pub const ALL: [Self; 11]" in source,
+        path,
+        "FortressTool must freeze the eleven-tool waist",
+        failures,
+    )
+    require(
+        "may_satisfy_mutation_precondition" in source,
+        path,
+        "epistemic precondition gate is missing",
+        failures,
+    )
+    require(
+        "can_prove_absence" in source and "proves_absence_in" in source,
+        path,
+        "coverage/absence law is missing",
+        failures,
+    )
+    require(
+        source.count("can_dispatch_effect") >= 2,
+        path,
+        "affordance and recommendation non-dispatch laws are missing",
+        failures,
+    )
+    require(
+        "can_grant_authority" in source and "can_satisfy_live_precondition" in source,
+        path,
+        "memory non-authority laws are missing",
+        failures,
+    )
+    require(
+        "SurpriseRecord" in source and "HandoffPacket" in source,
+        path,
+        "surprise or handoff typed model is missing",
+        failures,
+    )
 
     ids_path = "crates/dfmcp-core/src/ids.rs"
     ids_source = read_text(ids_path)
-    for identity in [
+    for identity_name in [
         "ObjectiveId",
         "AttentionId",
         "AffordanceId",
@@ -203,59 +294,141 @@ def check_core(failures: list[Failure]) -> None:
         "MemoryId",
         "HandoffId",
     ]:
-        require(f"id_u128!({identity});" in ids_source, ids_path,
-                f"missing stable {identity}", failures)
+        require(
+            f"id_u128!({identity_name});" in ids_source,
+            ids_path,
+            f"missing stable {identity_name}",
+            failures,
+        )
+
+    lib_path = "crates/dfmcp-core/src/lib.rs"
+    lib_source = read_text(lib_path)
+    require(
+        "AffordanceId" in lib_source,
+        lib_path,
+        "the dedicated affordance identity is not exported",
+        failures,
+    )
 
 
 def check_packet_builder(failures: list[Failure]) -> None:
     path = "crates/dfmcp-mcp/src/agent_turn.rs"
     source = read_text(path)
-    require('AGENT_TURN_SCHEMA: &str = "dfmcp.agent_turn/1"' in source, path,
-            "packet schema constant drifted", failures)
-    require("pub use dfmcp_core::{AgentPhase, ContinuityStatus, ObservationProfile, RecoveryClass};"
-            in source, path, "MCP must reuse core semantic enums", failures)
+    require(
+        'AGENT_TURN_SCHEMA: &str = "dfmcp.agent_turn/1"' in source,
+        path,
+        "packet schema constant drifted",
+        failures,
+    )
+    require(
+        "pub use dfmcp_core::{AgentPhase, ContinuityStatus, ObservationProfile, RecoveryClass};"
+        in source,
+        path,
+        "MCP must reuse core semantic enums",
+        failures,
+    )
     for field in EXPECTED_PACKET_FIELDS:
-        require(f'"{field}"' in source, path,
-                f"packet builder is missing {field}", failures)
-    require("pub fn turn_id" in source and "pub fn request_id" in source, path,
-            "turn_id and semantic request_id must remain separate", failures)
-    require("presentation_turn_and_semantic_request_are_not_aliased" in source, path,
-            "identity-separation regression test is missing", failures)
+        require(
+            f'"{field}"' in source,
+            path,
+            f"packet builder is missing {field}",
+            failures,
+        )
+    require(
+        "pub fn turn_id" in source and "pub fn request_id" in source,
+        path,
+        "turn_id and semantic request_id must remain separate",
+        failures,
+    )
+    require(
+        "presentation_turn_and_semantic_request_are_not_aliased" in source,
+        path,
+        "identity-separation regression test is missing",
+        failures,
+    )
 
 
 def check_facade(failures: list[Failure]) -> None:
     path = "crates/dfmcp-mcp/src/agent_facade.rs"
     source = read_text(path)
-    require(".turn_id(format!(\"presentation-turn-{turn_sequence}\"))" in source, path,
-            "facade must set turn_id, not semantic request_id", failures)
-    require(".request_id(format!(\"presentation-turn-" not in source, path,
-            "facade aliases presentation turn to semantic request_id", failures)
-    require("semantic-request-id-not-projected" in source, path,
-            "facade must disclose the missing semantic request ID", failures)
-    require("last_checkpoint_id" in source and "checkpoint_is_visible_in_later_briefings" in source,
-            path, "checkpoint handoff context is not visible or tested", failures)
+    require(
+        '.turn_id(format!("presentation-turn-{turn_sequence}"))' in source,
+        path,
+        "facade must set turn_id, not semantic request_id",
+        failures,
+    )
+    require(
+        '.request_id(format!("presentation-turn-' not in source,
+        path,
+        "facade aliases presentation turn to semantic request_id",
+        failures,
+    )
+    require(
+        "semantic-request-id-not-projected" in source,
+        path,
+        "facade must disclose the missing semantic request ID",
+        failures,
+    )
+    require(
+        "last_checkpoint_id" in source and "checkpoint_is_visible_in_later_briefings" in source,
+        path,
+        "checkpoint handoff context is not visible or tested",
+        failures,
+    )
     for tool in EXPECTED_TOOLS:
         rust_name = tool.replace(".", "_")
-        require(f"pub fn {rust_name}(" in source, path,
-                f"facade is missing wrapper {rust_name}", failures)
+        require(
+            f"pub fn {rust_name}(" in source,
+            path,
+            f"facade is missing wrapper {rust_name}",
+            failures,
+        )
     registrations = re.findall(r"\.tool\((Fortress[A-Za-z]+)\)", source)
-    require(len(registrations) == 11 and len(set(registrations)) == 11, path,
-            "run_stdio must register exactly eleven unique facade tools", failures)
-    require("crate::server::fortress_" in source, path,
-            "facade must delegate to authority-bearing handlers", failures)
-    require("can_dispatch" not in source, path,
-            "presentation facade must not grow an effect-dispatch path", failures)
+    require(
+        len(registrations) == 11 and len(set(registrations)) == 11,
+        path,
+        "run_stdio must register exactly eleven unique facade tools",
+        failures,
+    )
+    require(
+        "crate::server::fortress_" in source,
+        path,
+        "facade must delegate to authority-bearing handlers",
+        failures,
+    )
+    require(
+        "can_dispatch" not in source,
+        path,
+        "presentation facade must not grow an effect-dispatch path",
+        failures,
+    )
 
     lib_path = "crates/dfmcp-mcp/src/lib.rs"
     lib_source = read_text(lib_path)
-    require("pub mod agent_facade;" in lib_source, lib_path,
-            "agent facade module is not compiled", failures)
-    require("pub use agent_facade::run_stdio;" in lib_source, lib_path,
-            "agent facade is not the default server", failures)
-    require("agent_server" not in lib_source, lib_path,
-            "superseded facade remains wired", failures)
-    require(not (ROOT / "crates/dfmcp-mcp/src/agent_server.rs").exists(), lib_path,
-            "superseded agent_server.rs must be deleted", failures)
+    require(
+        "pub mod agent_facade;" in lib_source,
+        lib_path,
+        "agent facade module is not compiled",
+        failures,
+    )
+    require(
+        "pub use agent_facade::run_stdio;" in lib_source,
+        lib_path,
+        "agent facade is not the default server",
+        failures,
+    )
+    require(
+        "agent_server" not in lib_source,
+        lib_path,
+        "superseded facade remains wired",
+        failures,
+    )
+    require(
+        not (ROOT / "crates/dfmcp-mcp/src/agent_server.rs").exists(),
+        lib_path,
+        "superseded agent_server.rs must be deleted",
+        failures,
+    )
 
 
 def check_docs(failures: list[Failure]) -> None:
@@ -263,13 +436,24 @@ def check_docs(failures: list[Failure]) -> None:
         "AGENTS.md": ["docs/AGENT_OPERATING_MODEL.md", "Agent Turn Packet"],
         "ARCHITECTURE.md": ["Agent control loop", "Epistemic separation"],
         "MCP_SURFACE.md": ["Common Agent Turn Packet", "Observation profiles"],
-        "IMPLEMENTATION_STATUS.md": ["Agent-operating-model status", "unqualified source changes"],
-        "docs/AGENT_OPERATING_MODEL.md": ["The canonical Agent Turn Packet", "Value-of-information planning"],
+        "IMPLEMENTATION_STATUS.md": [
+            "Agent-operating-model status",
+            "unqualified source changes",
+        ],
+        "docs/AGENT_OPERATING_MODEL.md": [
+            "The canonical Agent Turn Packet",
+            "Value-of-information planning",
+        ],
     }
     for path, needles in required_docs.items():
         source = read_text(path)
         for needle in needles:
-            require(needle in source, path, f"missing normative agent text: {needle}", failures)
+            require(
+                needle in source,
+                path,
+                f"missing normative agent text: {needle}",
+                failures,
+            )
 
 
 def main() -> int:
@@ -289,7 +473,7 @@ def main() -> int:
     print(
         "agent contract: PASS "
         f"({len(EXPECTED_TOOLS)} tools, {len(EXPECTED_PACKET_FIELDS)} packet fields, "
-        f"{len(EXPECTED_EPISTEMIC)} epistemic states)"
+        f"{len(EXPECTED_EPISTEMIC)} epistemic states, {EXPECTED_INVARIANTS} invariants)"
     )
     return 0
 
