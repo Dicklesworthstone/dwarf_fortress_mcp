@@ -24,7 +24,7 @@ categories = ["development-tools", "games"]
 # ADR-013: the MCP presentation plane is the owned fastmcp_rust sibling,
 # pinned to an exact upstream revision for dogfooding. Modern-only MCP
 # 2026-07-28: default features off (no legacy-2024-11-05 graph), Tasks on.
-fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "6481d49a6f9282f8161015323283fb7764dcf2f7", default-features = false, features = ["tasks"] }
+fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "12d3469df8081ffdb663019ee4936324fedc98d5", default-features = false, features = ["tasks"] }
 # Fundamental serialization (ADR-012 admits these; exact pins mirror the
 # fastmcp_rust workspace to avoid duplicate major versions).
 serde = { version = "=1.0.229", features = ["derive"] }

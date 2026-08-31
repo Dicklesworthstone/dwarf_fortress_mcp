@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 100,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    },
+    "capabilities": {},
+    "clientInfo": { "name": "test-client", "version": "1.0" }
+  }
+}

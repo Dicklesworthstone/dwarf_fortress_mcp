@@ -76,6 +76,157 @@ pub fn build_delta(
     })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContinuationToken {
+    pub fortress_id: FortressId,
+    pub cursor: ObservationCursor,
+    pub offset: u32,
+}
+
+impl ContinuationToken {
+    #[must_use]
+    pub fn new(fortress_id: FortressId, cursor: ObservationCursor, offset: u32) -> Self {
+        Self {
+            fortress_id,
+            cursor,
+            offset,
+        }
+    }
+
+    #[must_use]
+    pub fn encode(&self) -> String {
+        format!(
+            "cont:{}:{}:{}:{}",
+            self.fortress_id.get(),
+            self.cursor.epoch,
+            self.cursor.sequence,
+            self.offset
+        )
+    }
+
+    pub fn decode(token: &str) -> Result<Self> {
+        let parts: Vec<&str> = token.split(':').collect();
+        if parts.len() != 5 || parts[0] != "cont" {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "invalid continuation token format",
+            ));
+        }
+        let fid: u64 = parts[1].parse().map_err(|_| {
+            DfmcpError::new(ErrorCode::InvalidRequest, "invalid fortress ID in token")
+        })?;
+        let epoch: u64 = parts[2]
+            .parse()
+            .map_err(|_| DfmcpError::new(ErrorCode::InvalidRequest, "invalid epoch in token"))?;
+        let seq: u64 = parts[3]
+            .parse()
+            .map_err(|_| DfmcpError::new(ErrorCode::InvalidRequest, "invalid sequence in token"))?;
+        let offset: u32 = parts[4]
+            .parse()
+            .map_err(|_| DfmcpError::new(ErrorCode::InvalidRequest, "invalid offset in token"))?;
+        Ok(Self {
+            fortress_id: FortressId::new(fid),
+            cursor: ObservationCursor {
+                epoch,
+                sequence: seq,
+            },
+            offset,
+        })
+    }
+}
+
+pub fn compute_snapshot_diff(
+    base: &WorldSnapshot,
+    target: &WorldSnapshot,
+) -> Result<Vec<WorldChange>> {
+    if target.fortress_id != base.fortress_id {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "cannot diff snapshots of different fortresses",
+        ));
+    }
+
+    let mut changes = Vec::new();
+
+    // 1. Entity removals (in base but not in target)
+    for (id, entity) in &base.graph.entities {
+        if !target.graph.entities.contains_key(id) {
+            changes.push(WorldChange::RemoveEntity {
+                id: *id,
+                expected_generation: entity.generation,
+                expected_revision: entity.revision,
+            });
+        }
+    }
+
+    // 2. Entity upserts (in target and not in base, or modified)
+    for (id, target_entity) in &target.graph.entities {
+        if let Some(base_entity) = base.graph.entities.get(id) {
+            if base_entity != target_entity {
+                changes.push(WorldChange::UpsertEntity(target_entity.clone()));
+            }
+        } else {
+            changes.push(WorldChange::UpsertEntity(target_entity.clone()));
+        }
+    }
+
+    // 3. Edge removals
+    for (id, edge) in &base.graph.edges {
+        if !target.graph.edges.contains_key(id) {
+            changes.push(WorldChange::RemoveEdge {
+                id: *id,
+                expected_revision: edge.revision,
+            });
+        }
+    }
+
+    // 4. Edge upserts
+    for (id, target_edge) in &target.graph.edges {
+        if let Some(base_edge) = base.graph.edges.get(id) {
+            if base_edge != target_edge {
+                changes.push(WorldChange::UpsertEdge(target_edge.clone()));
+            }
+        } else {
+            changes.push(WorldChange::UpsertEdge(target_edge.clone()));
+        }
+    }
+
+    // 5. Map chunk removals
+    for (coord, chunk) in &base.graph.chunks {
+        if !target.graph.chunks.contains_key(coord) {
+            changes.push(WorldChange::RemoveMapChunk {
+                coord: *coord,
+                expected_revision: chunk.revision,
+            });
+        }
+    }
+
+    // 6. Map chunk upserts
+    for (coord, target_chunk) in &target.graph.chunks {
+        if let Some(base_chunk) = base.graph.chunks.get(coord) {
+            if base_chunk != target_chunk {
+                changes.push(WorldChange::UpsertMapChunk(target_chunk.clone()));
+            }
+        } else {
+            changes.push(WorldChange::UpsertMapChunk(target_chunk.clone()));
+        }
+    }
+
+    // 7. Events (appended in target)
+    for (id, event) in &target.graph.events {
+        if !base.graph.events.contains_key(id) {
+            changes.push(WorldChange::AppendEvent(event.clone()));
+        }
+    }
+
+    Ok(changes)
+}
+
+pub fn diff_snapshots(base: &WorldSnapshot, target: &WorldSnapshot) -> Result<StateDelta> {
+    let changes = compute_snapshot_diff(base, target)?;
+    build_delta(base, target.cursor, target.tick, changes)
+}
+
 pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnapshot> {
     if !base.hash_is_valid() {
         return Err(DfmcpError::new(
@@ -381,12 +532,12 @@ mod tests {
         let mut fields = BTreeMap::new();
         fields.insert(
             "stress".to_owned(),
-            Fact {
-                value: Value::I64(stress),
-                observed_at: GameTick(revision),
-                source: FactSource::Replay,
-                source_digest: Digest32::ZERO,
-            },
+            Fact::known(
+                Value::I64(stress),
+                GameTick(revision),
+                FactSource::Replay,
+                Digest32::ZERO,
+            ),
         );
         EntityRecord {
             id: EntityId::new(1),

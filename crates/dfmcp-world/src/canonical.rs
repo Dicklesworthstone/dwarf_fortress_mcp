@@ -30,3 +30,11 @@ pub(crate) fn put_bytes(output: &mut Vec<u8>, value: &[u8]) {
 pub(crate) fn put_str(output: &mut Vec<u8>, value: &str) {
     put_bytes(output, value.as_bytes());
 }
+
+pub(crate) fn put_anchor(output: &mut Vec<u8>, anchor: dfmcp_core::StateAnchor) {
+    put_u64(output, anchor.fortress_id.get());
+    put_u64(output, anchor.cursor.epoch);
+    put_u64(output, anchor.cursor.sequence);
+    put_u64(output, anchor.tick.0);
+    put_bytes(output, anchor.state_hash.as_bytes());
+}

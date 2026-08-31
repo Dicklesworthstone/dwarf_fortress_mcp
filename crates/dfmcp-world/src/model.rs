@@ -5,7 +5,9 @@ use dfmcp_core::{
     StateAnchor,
 };
 
-use crate::canonical::{put_bool, put_bytes, put_i32, put_i64, put_str, put_u16, put_u32, put_u64};
+use crate::canonical::{
+    put_anchor, put_bool, put_bytes, put_i32, put_i64, put_str, put_u16, put_u32, put_u64,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntityKind {
@@ -135,6 +137,72 @@ impl Value {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FactPresence {
+    Known(Value),
+    Absent,
+    Unknown(String),
+    Unsupported(String),
+    Omitted(String),
+    Redacted(String),
+    Stale(StateAnchor),
+}
+
+impl FactPresence {
+    #[must_use]
+    pub fn is_known(&self) -> bool {
+        matches!(self, Self::Known(_))
+    }
+
+    #[must_use]
+    pub fn as_known(&self) -> Option<&Value> {
+        match self {
+            Self::Known(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_absent(&self) -> bool {
+        matches!(self, Self::Absent)
+    }
+
+    #[must_use]
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale(_))
+    }
+
+    pub(crate) fn encode(&self, output: &mut Vec<u8>) {
+        match self {
+            Self::Known(value) => {
+                output.push(0);
+                value.encode(output);
+            }
+            Self::Absent => output.push(1),
+            Self::Unknown(reason) => {
+                output.push(2);
+                put_str(output, reason);
+            }
+            Self::Unsupported(reason) => {
+                output.push(3);
+                put_str(output, reason);
+            }
+            Self::Omitted(reason) => {
+                output.push(4);
+                put_str(output, reason);
+            }
+            Self::Redacted(reason) => {
+                output.push(5);
+                put_str(output, reason);
+            }
+            Self::Stale(anchor) => {
+                output.push(6);
+                put_anchor(output, *anchor);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FactSource {
     DfhackField(String),
     Derived(String),
@@ -168,14 +236,62 @@ pub struct Fact {
     pub observed_at: GameTick,
     pub source: FactSource,
     pub source_digest: Digest32,
+    pub presence: Option<FactPresence>,
 }
 
 impl Fact {
+    #[must_use]
+    pub fn known(
+        value: Value,
+        observed_at: GameTick,
+        source: FactSource,
+        source_digest: Digest32,
+    ) -> Self {
+        Self {
+            value,
+            observed_at,
+            source,
+            source_digest,
+            presence: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_presence(
+        presence: FactPresence,
+        observed_at: GameTick,
+        source: FactSource,
+        source_digest: Digest32,
+    ) -> Self {
+        let value = presence.as_known().cloned().unwrap_or(Value::Null);
+        Self {
+            value,
+            observed_at,
+            source,
+            source_digest,
+            presence: Some(presence),
+        }
+    }
+
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::new();
+        self.encode(&mut output);
+        output
+    }
+
     pub(crate) fn encode(&self, output: &mut Vec<u8>) {
         self.value.encode(output);
         put_u64(output, self.observed_at.0);
         self.source.encode(output);
         put_bytes(output, self.source_digest.as_bytes());
+        match &self.presence {
+            Some(presence) => {
+                output.push(1);
+                presence.encode(output);
+            }
+            None => output.push(0),
+        }
     }
 }
 
@@ -190,6 +306,13 @@ pub struct EntityRecord {
 }
 
 impl EntityRecord {
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::new();
+        self.encode(&mut output);
+        output
+    }
+
     pub(crate) fn encode(&self, output: &mut Vec<u8>) {
         put_u64(output, self.id.get());
         put_u32(output, self.generation);
@@ -320,6 +443,13 @@ impl MapChunk {
         self.terrain_runs
             .iter()
             .try_fold(0u32, |total, run| total.checked_add(run.length))
+    }
+
+    #[must_use]
+    pub fn compute_hash(&self) -> Digest32 {
+        let mut bytes = Vec::new();
+        self.encode(&mut bytes);
+        Digest32::of_bytes(&bytes)
     }
 
     pub(crate) fn encode(&self, output: &mut Vec<u8>) {

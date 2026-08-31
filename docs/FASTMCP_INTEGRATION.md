@@ -86,6 +86,78 @@ Run it:
 cargo run --locked -p dwarf-fortress-mcp -- serve
 ```
 
+### 4.1 Modern client quickstart (MCP 2026-07-28)
+
+Modern MCP 2026-07-28 stdio sessions do not use legacy `initialize` handshakes. The server is
+modern-only. Every request must supply modern era markers in `params._meta`:
+
+```json
+{
+  "_meta": {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {}
+  }
+}
+```
+
+#### Step 1: Discover Server
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+```
+
+Expected response (modern MCP 2026-07-28 — `result.protocolVersion` / `result.serverInfo` are
+NOT emitted in modern-only mode; the era is conveyed through `supportedVersions` and
+`serverInfo` is nested under `_meta`):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "supportedVersions": ["2026-07-28"],
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "dwarf-fortress-mcp",
+        "version": "0.0.1"
+      }
+    },
+    "capabilities": {
+      "tools": { "listChanged": true },
+      "extensions": { "io.modelcontextprotocol/tasks": {} }
+    },
+    "instructions": "...",
+    "resultType": "complete",
+    "cacheScope": "private",
+    "ttlMs": 60000
+  }
+}
+```
+
+#### Step 2: List Available Narrow-Waist Tools
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+```
+
+#### Step 3: Open Session
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_open_session","arguments":{"paused":true}}}
+```
+
+#### Step 4: Compile Intent into a Sealed Plan
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_plan","arguments":{"summary":"unpause the simulation","paused_target":false}}}
+```
+
+#### Step 5: Revalidate and Commit Plan by Digest
+
+```json
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"fortress_commit","arguments":{"plan_digest":"<DIGEST_FROM_STEP_4>"}}}
+```
+
 ## 5. Gates
 
 1. **Gate 1 (done): stdio laboratory slice.** All eleven tools over `MemoryAdapter`; process-local
@@ -116,7 +188,3 @@ fully determine replay regardless of framing. Modern-era request routing may int
 dfmcp semantic remains anchored, idempotent, and transcript-logged.
 
 ## 8. Rollback
-
-Delete `crates/dfmcp-mcp`, drop the `fastmcp-rust` workspace dependency, and revert the
-`[mcp_transport]`/`[admitted]` allowlist sections. The scaffold compiles without the transport,
-exactly as it did before adoption (ADR-013).

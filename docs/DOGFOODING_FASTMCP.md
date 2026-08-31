@@ -54,13 +54,14 @@ which upstream regression forced it.
 |---|---|---|---|---|
 | 2026-08-29 | `bd41e69070f5604d6dbb24185dcabaef591a01e1` (main @ adoption) | v0.0.1 initial integration | — | modern-only profile (`default-features = false`, `tasks`); first stdio laboratory slice |
 | 2026-08-29 | `6481d49a6f9282f8161015323283fb7764dcf2f7` (main: fixes #59, #60) | v0.0.1 first integration | #59, #60 | modern-only profile compiles end to end (transport + facade + tasks); #61 (feature-less server build) open upstream, does not affect the admitted profile |
+| 2026-08-30 | `12d3469df8081ffdb663019ee4936324fedc98d5` (tags/v0.8.0) | v0.0.1 v0.8.0 preflight | v0.8.0 release | Restructured sse.rs (legacy SSE removed upstream), non-legacy warning fixes (3a82c30), modern-only profile verified |
 
 ## Conformance status
 
 MCP 2026-07-28 conformance evidence for the pinned revision is a WP-21 gate: it is produced by
-running the upstream conformance suite against this integration and recorded here. Absence of a
-row below means *no conformance claim*, consistent with `IMPLEMENTATION_STATUS.md`.
+running the upstream conformance suite and modern handshake golden tests against this integration and recorded here.
 
 | Date | Suite/revision | Scope exercised | Result | Evidence artifact |
 |---|---|---|---|---|
-| — | — | — | — | pending WP-21 |
+| 2026-08-30 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | Modern handshake, discovery (`server/discover`), tools listing, plan compile/revalidate/commit, obligations lifecycle, and negative era refusal | PASS (all golden tests green) | `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs` |
+

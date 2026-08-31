@@ -10,11 +10,53 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     ActionId, Capability, CheckpointId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence,
-    EvidenceId, EvidenceKind, GameTick, OperationContext, PlanId, Result, RiskTier, StateAnchor,
-    StepId,
+    EvidenceId, EvidenceKind, FortressId, GameTick, ObservationCursor, OperationContext, PlanId,
+    Result, RiskTier, StateAnchor, StepId,
 };
 use dfmcp_intent::{Action, PlanStep, PreparedPlan};
-use dfmcp_world::{WorldSnapshot, evaluate, execute_query};
+pub mod chaos;
+
+pub use chaos::{
+    ChaosHarness, ChaosScenario, DeterminismCertificate, DeterministicRng, FaultInjectionPolicy,
+};
+
+use dfmcp_world::{WorldGraph, WorldSnapshot, evaluate, execute_query};
+
+/// Managed simulated laboratory session hosting a `MemoryAdapter`.
+#[derive(Clone, Debug)]
+pub struct LabSession {
+    adapter: MemoryAdapter,
+}
+
+impl LabSession {
+    #[must_use]
+    pub fn new(fortress_id: u64, paused: bool) -> Self {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(fortress_id),
+            GameTick(0),
+            ObservationCursor::ORIGIN,
+            paused,
+            WorldGraph::default(),
+        );
+        Self {
+            adapter: MemoryAdapter::new(snapshot),
+        }
+    }
+
+    #[must_use]
+    pub const fn adapter(&self) -> &MemoryAdapter {
+        &self.adapter
+    }
+
+    pub fn adapter_mut(&mut self) -> &mut MemoryAdapter {
+        &mut self.adapter
+    }
+
+    #[must_use]
+    pub fn current_snapshot(&self) -> &WorldSnapshot {
+        self.adapter.snapshot()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabEvent {

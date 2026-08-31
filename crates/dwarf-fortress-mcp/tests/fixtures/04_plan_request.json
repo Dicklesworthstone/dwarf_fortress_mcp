@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    },
+    "name": "fortress_plan",
+    "arguments": {
+      "summary": "unpause the simulation",
+      "paused_target": false
+    }
+  }
+}

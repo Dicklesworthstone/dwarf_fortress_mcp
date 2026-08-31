@@ -11,6 +11,16 @@
 //! plan sealing, commit-time revalidation, idempotency, or evidence checks
 //! (ADR-013, `docs/FASTMCP_INTEGRATION.md`).
 
+pub mod doctor;
+pub mod ee_memory;
+pub mod http_transport;
 pub mod server;
+pub mod tasks;
 
-pub use server::run_stdio;
+pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
+pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
+pub use http_transport::{
+    HttpSessionResumeToken, HttpTransportSessionManager, MAX_RESUMPTION_BUFFER_SIZE,
+};
+pub use server::{run_stdio, validate_localhost_bind};
+pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_action_task};

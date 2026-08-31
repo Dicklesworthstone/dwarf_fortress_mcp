@@ -9,6 +9,16 @@ pub struct GameTick(pub u64);
 
 impl GameTick {
     #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
     pub const fn saturating_add(self, amount: u64) -> Self {
         Self(self.0.saturating_add(amount))
     }
@@ -73,6 +83,22 @@ impl MapCuboid {
             ));
         }
         Ok(Self { min, max })
+    }
+
+    #[must_use]
+    pub fn from_corners(c1: MapCoord, c2: MapCoord) -> Self {
+        Self {
+            min: MapCoord {
+                x: c1.x.min(c2.x),
+                y: c1.y.min(c2.y),
+                z: c1.z.min(c2.z),
+            },
+            max: MapCoord {
+                x: c1.x.max(c2.x),
+                y: c1.y.max(c2.y),
+                z: c1.z.max(c2.z),
+            },
+        }
     }
 
     #[must_use]

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
 
 use crate::{EdgeKind, EntityKind, EntityRecord, Value, WorldSnapshot};
@@ -38,6 +40,28 @@ pub enum Predicate {
 }
 
 impl Predicate {
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::All(children) | Self::Any(children) => {
+                children.iter().map(Predicate::depth).max().unwrap_or(0) + 1
+            }
+            Self::Not(inner) => inner.depth() + 1,
+            _ => 1,
+        }
+    }
+
+    #[must_use]
+    pub fn complexity(&self) -> usize {
+        match self {
+            Self::All(children) | Self::Any(children) => {
+                1 + children.iter().map(Predicate::complexity).sum::<usize>()
+            }
+            Self::Not(inner) => 1 + inner.complexity(),
+            _ => 1,
+        }
+    }
+
     #[must_use]
     pub fn normalized(&self) -> Self {
         match self {
@@ -241,6 +265,33 @@ fn compare(left: &Value, op: CompareOp, right: &Value) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueryPlanCost {
+    pub estimated_scanned_entities: usize,
+    pub estimated_predicate_cost: usize,
+    pub estimated_total_cost: usize,
+}
+
+impl QueryPlanCost {
+    #[must_use]
+    pub fn exceeds_budget(
+        &self,
+        max_complexity: usize,
+        _max_depth: usize,
+        max_entities: usize,
+    ) -> bool {
+        self.estimated_predicate_cost > max_complexity
+            || self.estimated_scanned_entities > max_entities
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueryCost {
+    pub estimated_scanned_entities: u64,
+    pub estimated_predicate_nodes: u64,
+    pub exceeds_budget: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueryOrder {
     EntityIdAscending,
     EntityIdDescending,
@@ -254,6 +305,7 @@ pub struct WorldQuery {
     pub predicate: Option<Predicate>,
     pub order: QueryOrder,
     pub limit: u32,
+    pub continuation: Option<String>,
 }
 
 impl WorldQuery {
@@ -266,6 +318,25 @@ impl WorldQuery {
         }
         Ok(())
     }
+
+    #[must_use]
+    pub fn estimate_cost(&self, snapshot: &WorldSnapshot) -> QueryPlanCost {
+        let estimated_scanned = snapshot
+            .graph
+            .entities
+            .values()
+            .filter(|e| self.kinds.is_empty() || self.kinds.contains(&e.kind))
+            .count();
+
+        let pred_cost = self.predicate.as_ref().map_or(1, Predicate::complexity);
+        let total = estimated_scanned.saturating_mul(pred_cost).max(1);
+
+        QueryPlanCost {
+            estimated_scanned_entities: estimated_scanned,
+            estimated_predicate_cost: pred_cost,
+            estimated_total_cost: total,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,6 +344,7 @@ pub struct QueryResult {
     pub entities: Vec<EntityRecord>,
     pub matched: u64,
     pub truncated: bool,
+    pub continuation: Option<String>,
 }
 
 pub fn execute_query(
@@ -280,7 +352,30 @@ pub fn execute_query(
     query: &WorldQuery,
     hard_limit: u32,
 ) -> Result<QueryResult> {
+    execute_bounded_query(snapshot, query, hard_limit, None)
+}
+
+pub fn execute_bounded_query(
+    snapshot: &WorldSnapshot,
+    query: &WorldQuery,
+    hard_limit: u32,
+    byte_limit: Option<usize>,
+) -> Result<QueryResult> {
     query.validate(hard_limit)?;
+
+    let offset = if let Some(ref cont) = query.continuation {
+        let token = crate::ContinuationToken::decode(cont)?;
+        if token.fortress_id != snapshot.fortress_id || token.cursor != snapshot.cursor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "continuation token anchor does not match target snapshot",
+            ));
+        }
+        token.offset as usize
+    } else {
+        0
+    };
+
     let mut entities: Vec<_> = snapshot
         .graph
         .entities
@@ -292,7 +387,9 @@ pub fn execute_query(
         })
         .cloned()
         .collect();
+
     let matched = entities.len() as u64;
+
     match query.order {
         QueryOrder::EntityIdAscending => entities.sort_by_key(|entity| entity.id),
         QueryOrder::EntityIdDescending => {
@@ -314,13 +411,56 @@ pub fn execute_query(
             });
         }
     }
+
+    let remaining = if offset < entities.len() {
+        &entities[offset..]
+    } else {
+        &[]
+    };
+
     let limit = query.limit as usize;
-    let truncated = entities.len() > limit;
-    entities.truncate(limit);
+    let mut selected = Vec::new();
+    let mut current_bytes = 0usize;
+    let mut truncated = false;
+
+    for entity in remaining {
+        if selected.len() >= limit {
+            truncated = true;
+            break;
+        }
+        let entity_bytes = entity.canonical_bytes().len();
+        if let Some(max_bytes) = byte_limit
+            && current_bytes + entity_bytes > max_bytes
+            && !selected.is_empty()
+        {
+            truncated = true;
+            break;
+        }
+        current_bytes += entity_bytes;
+        selected.push(entity.clone());
+    }
+
+    if offset + selected.len() < entities.len() {
+        truncated = true;
+    }
+
+    let next_continuation = if truncated {
+        let next_offset = offset + selected.len();
+        let token = crate::ContinuationToken::new(
+            snapshot.fortress_id,
+            snapshot.cursor,
+            next_offset as u32,
+        );
+        Some(token.encode())
+    } else {
+        None
+    };
+
     Ok(QueryResult {
-        entities,
+        entities: selected,
         matched,
         truncated,
+        continuation: next_continuation,
     })
 }
 
@@ -375,12 +515,12 @@ mod tests {
             let mut fields = BTreeMap::new();
             fields.insert(
                 "stress".to_owned(),
-                Fact {
-                    value: Value::I64(stress),
-                    observed_at: GameTick(1),
-                    source: FactSource::Replay,
-                    source_digest: Digest32::ZERO,
-                },
+                Fact::known(
+                    Value::I64(stress),
+                    GameTick(1),
+                    FactSource::Replay,
+                    Digest32::ZERO,
+                ),
             );
             graph.entities.insert(
                 EntityId::new(id),
@@ -415,6 +555,7 @@ mod tests {
             }),
             order: QueryOrder::EntityIdAscending,
             limit: 10,
+            continuation: None,
         };
         let result = execute_query(&snapshot(), &query, 100)?;
         assert_eq!(result.matched, 1);

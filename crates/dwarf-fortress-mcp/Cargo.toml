@@ -18,5 +18,8 @@ dfmcp-adapter = { path = "../dfmcp-adapter" }
 dfmcp-lab = { path = "../dfmcp-lab" }
 dfmcp-mcp = { path = "../dfmcp-mcp" }
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

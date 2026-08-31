@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "supportedVersions": ["2026-07-28"],
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "dwarf-fortress-mcp",
+        "version": "0.0.1"
+      }
+    },
+    "capabilities": {
+      "tools": { "listChanged": true },
+      "extensions": { "io.modelcontextprotocol/tasks": {} }
+    },
+    "instructions": "Dwarf Fortress semantic control plane (laboratory slice). Open a session, observe the bounded snapshot, compile pause/resume intents into sealed plans, commit them with exact plan digests, and wait/cancel via the bounded obligation machinery. Dispatch success is never goal success: only evidence-backed postcondition verification counts.",
+    "resultType": "complete",
+    "cacheScope": "private",
+    "ttlMs": 60000
+  }
+}

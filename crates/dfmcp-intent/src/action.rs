@@ -243,6 +243,13 @@ impl Action {
         }
     }
 
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut output = Vec::new();
+        self.encode(&mut output);
+        output
+    }
+
     pub(crate) fn encode(&self, output: &mut Vec<u8>) {
         match self {
             Self::Pause { paused } => {

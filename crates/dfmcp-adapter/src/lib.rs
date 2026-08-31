@@ -2,6 +2,20 @@
 
 use std::collections::BTreeSet;
 
+pub mod delta_scanner;
+pub mod dispatcher;
+pub mod ipc;
+
+pub use delta_scanner::{
+    ContinuousDeltaStreamer, DirtyChunkTracker, EntityDeltaTracker, EventRingBuffer,
+    MAX_EVENT_BUFFER_CAPACITY,
+};
+pub use dispatcher::{EffectJournal, EffectJournalRecord, MutationDispatcher};
+pub use ipc::{
+    FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
+    IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
+};
+
 use dfmcp_core::{
     ActionId, Capability, CheckpointId, CommitState, Digest32, EntityId, Evidence, GameTick,
     MapCuboid, ObservationCursor, OperationContext, PlanId, Result, StateAnchor, StepId,
