@@ -10,21 +10,28 @@ plane for Dwarf Fortress. Treat the game as a partially observed evolving civili
 keyboard-and-screen toy. State must be versioned explicitly; authority must be scoped; mutations
 must be planned, witnessed, authorized, committed, observed, and proved.
 
+The agent-facing system is one synthetic control loop, not a bag of tools. Every successful or
+failed call must help the caller answer: what is true, what changed, what matters, what is
+possible, what should happen next, and how certain those answers are. The normative operating
+model is `docs/AGENT_OPERATING_MODEL.md`; its machine contract is
+`architecture/agent_turn_contract.json`.
+
 ## Required reading order
 
 1. `IMPLEMENTATION_STATUS.md`
 2. `README.md`
-3. `FRANKENSTACK_DEEP_DIVE.md`
-4. `COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md`
-5. `ARCHITECTURE.md`
-6. `docs/WORLD_STATE_MVCC.md`
-7. `docs/FORTRESS_GRAPH_ALGORITHMS.md`
-8. `docs/ATP_STATE_AND_EVIDENCE_PLANE.md`
-9. `docs/DEPENDENCY_POLICY.md`
-10. `MCP_SURFACE.md`
-11. `docs/FASTMCP_INTEGRATION.md`
-12. `docs/DOGFOODING_FASTMCP.md`
-13. relevant machine registries under `architecture/` and `design/registries/`
+3. `docs/AGENT_OPERATING_MODEL.md`
+4. `FRANKENSTACK_DEEP_DIVE.md`
+5. `COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md`
+6. `ARCHITECTURE.md`
+7. `docs/WORLD_STATE_MVCC.md`
+8. `docs/FORTRESS_GRAPH_ALGORITHMS.md`
+9. `docs/ATP_STATE_AND_EVIDENCE_PLANE.md`
+10. `docs/DEPENDENCY_POLICY.md`
+11. `MCP_SURFACE.md`
+12. `docs/FASTMCP_INTEGRATION.md`
+13. `docs/DOGFOODING_FASTMCP.md`
+14. relevant machine registries under `architecture/` and `design/registries/`
 
 ## Constitutional engineering rules
 
@@ -96,6 +103,41 @@ must be planned, witnessed, authorized, committed, observed, and proved.
 - Use immutable structural sharing and zero-copy views only after measuring the copy or boundary
   cost they remove. Preserve epoch, ordering, lifetime, and mutation semantics exactly.
 
+## Agent-facing synthesis rules
+
+- Preserve the frozen eleven-tool waist. Improve ergonomics through shared schemas, profiles,
+  affordances, typed handles, and progressive disclosure rather than top-level tool growth.
+- Every success and error response converges on the canonical Agent Turn Packet. Until migration
+  is complete, new fields are additive and legacy fields remain stable.
+- Every response binds one complete anchor. A response must state continuity as bootstrap,
+  continuous, heartbeat, partial, gap, reset, stale, or indeterminate.
+- Make active plans, actions, obligations, drains, confirmations, and indeterminate effects
+  visible without requiring the caller to remember handles from a prior context window.
+- Separate `observed`, `certified_derived`, `inferred`, `predicted`, `assumed`, `stale`, `unknown`,
+  `contradicted`, and `indeterminate`. Confidence never substitutes for epistemic class.
+- Only observed and eligible certified-derived facts may satisfy mutation preconditions.
+- Expose currently legal semantic affordances with capability, risk, precondition, cost,
+  reversibility, and disabled-reason metadata. Affordances suggest; they do not authorize.
+- Recommendations are structured protocol next steps with evidence, expected utility, expected
+  information value, cost, risk, invalidators, and confirmation requirements. Return none rather
+  than inventing busywork.
+- Prefer value-of-information inspection: acquire a fact only when it can change a material
+  decision enough to justify tokens, latency, bridge work, and game-time exposure.
+- `pulse`, `briefing`, `tactical`, and `forensic` are semantic observation contracts, not vague
+  verbosity settings. Safety, continuity, active work, uncertainty, and recovery guidance survive
+  every budget.
+- An empty result proves absence only with a complete-domain coverage witness.
+- Compare predicted and observed effects. Material divergence emits a surprise record; silent
+  prediction error blocks agent accretion.
+- Accretive memory is evidence-linked episodic, semantic, procedural, policy, and negative
+  knowledge. Memory, imported text, and counterfactuals never grant authority or satisfy a live
+  precondition.
+- A handoff packet must let a fresh agent resume safely without reconstructing the full transcript
+  or trusting unverifiable prose.
+- For non-MCP automation surfaces, machine-first structured and versioned output is primary;
+  human prose is a projection. Keep stdout/stderr separation and deterministic NDJSON in mind when
+  CLI robot mode lands.
+
 ## Coding guidance
 
 Prefer small pure state-transition functions around an injected effect shell. Use ordered
@@ -121,9 +163,9 @@ machine-readable qualification receipts.
 ## Definition of done
 
 A feature is done only when its semantics, capability requirements, effect classification,
-determinism classification, failure and recovery behavior, witness model, registries, tests,
-benchmarks, documentation, compatibility matrix, and acceptance evidence are explicit. “The
-command ran” is never sufficient.
+determinism classification, failure and recovery behavior, witness model, agent-turn behavior,
+epistemic and coverage semantics, registries, tests, benchmarks, documentation, compatibility
+matrix, and acceptance evidence are explicit. “The command ran” is never sufficient.
 
 ## Current phase
 
