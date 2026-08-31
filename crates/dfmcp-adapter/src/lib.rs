@@ -15,6 +15,7 @@ pub mod dispatcher;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
 pub mod live_observation;
+pub mod live_projection;
 pub mod live_session;
 pub mod transceiver;
 
@@ -38,6 +39,11 @@ pub use ipc::{
 pub use live_observation::{
     CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
     MAX_CAPSULE_CITIZENS, ObservationAssembler,
+};
+pub use live_projection::{
+    DAYS_PER_MONTH, DwarfFortressClock, FORTRESS_ENTITY_ID, LIVE_PROJECTION_SCHEMA,
+    LiveProjectionReceipt, LiveWorldProjection, MONTHS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_YEAR,
+    entity_id_to_raw_unit_id, project_live_capsule, raw_unit_id_to_entity_id,
 };
 pub use live_session::{LiveObservationSource, read_complete_observation};
 pub use transceiver::{IpcTransceiver, TransceiverConfig};
