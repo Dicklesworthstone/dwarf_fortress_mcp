@@ -614,6 +614,19 @@ mod tests {
             dispatcher.commit_mutation(&plan, &prepare_receipt, &mut snapshot, &ctx)?;
         assert_eq!(replay_receipt, commit_receipt);
 
+        let mut denied_context = sample_context(&snapshot);
+        denied_context.grants.clear();
+        let denied = dispatcher.commit_mutation(
+            &plan,
+            &prepare_receipt,
+            &mut snapshot,
+            &denied_context,
+        );
+        assert!(matches!(
+            denied,
+            Err(ref error) if error.code == ErrorCode::CapabilityDenied
+        ));
+
         Ok(())
     }
 
