@@ -5,19 +5,20 @@
 //!
 //! The bridge capsule is transport-independent evidence, but it is not itself
 //! the semantic world. This module performs the first admitted normalization:
-//! one fortress summary entity and one unit entity per completely covered
-//! citizen record. Every fact cites the source capsule digest. Domains absent
-//! from bridge V1 are declared omitted rather than silently represented by an
-//! empty collection.
+//! one fortress summary entity, one unit entity per completely covered citizen,
+//! and one deterministic membership edge from each citizen to the fortress.
+//! Every fact cites the source capsule digest. Domains absent from bridge V1
+//! are declared omitted rather than silently represented by an empty set.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
-    CoverageDomain, CoverageReport, CoverageStatus, DfmcpError, Digest32, EntityId, ErrorCode,
-    FortressId, GameTick, MapCoord, ObservationCursor, Result, StateAnchor,
+    CoverageDomain, CoverageReport, CoverageStatus, DfmcpError, Digest32, EdgeId, EntityId,
+    ErrorCode, FortressId, GameTick, MapCoord, ObservationCursor, Result, StateAnchor,
 };
 use dfmcp_world::{
-    EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot,
+    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph,
+    WorldSnapshot,
 };
 
 use crate::{CitizenRecord, LiveObservationCapsule};
@@ -28,6 +29,7 @@ pub const DAYS_PER_MONTH: u64 = 28;
 pub const MONTHS_PER_YEAR: u64 = 12;
 pub const TICKS_PER_YEAR: u64 = TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
 pub const FORTRESS_ENTITY_ID: EntityId = EntityId::new(u64::MAX);
+const CITIZEN_MEMBERSHIP_EDGE_NAMESPACE: u128 = 1u128 << 127;
 
 const COMPLETE_DOMAINS: [&str; 3] = [
     "fortress.summary",
@@ -39,9 +41,18 @@ const OMITTED_DOMAINS: [(&str, &str); 7] = [
     ("fortress.jobs", "bridge protocol V1 does not observe jobs"),
     ("fortress.map", "bridge protocol V1 does not observe map state"),
     ("fortress.economy", "bridge protocol V1 does not observe economy state"),
-    ("fortress.welfare", "bridge protocol V1 does not observe detailed welfare state"),
-    ("fortress.military", "bridge protocol V1 does not observe military state"),
-    ("fortress.history", "bridge protocol V1 does not observe historical state"),
+    (
+        "fortress.welfare",
+        "bridge protocol V1 does not observe detailed welfare state",
+    ),
+    (
+        "fortress.military",
+        "bridge protocol V1 does not observe military state",
+    ),
+    (
+        "fortress.history",
+        "bridge protocol V1 does not observe historical state",
+    ),
 ];
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
@@ -162,21 +173,64 @@ impl LiveWorldProjection {
                 ));
             }
         }
+        let expected_entities = capsule.citizens.len().checked_add(1).ok_or_else(|| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "live projection entity count overflowed",
+            )
+        })?;
+        if self.snapshot.graph.entities.len() != expected_entities
+            || self.snapshot.graph.edges.len() != capsule.citizens.len()
+        {
+            return Err(error(
+                ErrorCode::CorruptLedger,
+                "live projection graph cardinality does not match complete citizen coverage",
+            ));
+        }
+        if !self
+            .snapshot
+            .graph
+            .entities
+            .contains_key(&FORTRESS_ENTITY_ID)
+        {
+            return Err(error(
+                ErrorCode::CorruptLedger,
+                "live projection is missing its fortress entity",
+            ));
+        }
         for entity in self.snapshot.graph.entities.values() {
             for fact in entity.fields.values() {
-                if fact.source_digest != capsule.content_digest {
-                    return Err(error(
-                        ErrorCode::CorruptLedger,
-                        "a live projected fact does not cite the source capsule digest",
-                    ));
-                }
+                validate_fact_source(fact, capsule.content_digest)?;
+            }
+        }
+        for edge in self.snapshot.graph.edges.values() {
+            if edge.kind != EdgeKind::MemberOf
+                || edge.to != FORTRESS_ENTITY_ID
+                || !self.snapshot.graph.entities.contains_key(&edge.from)
+            {
+                return Err(error(
+                    ErrorCode::CorruptLedger,
+                    "live citizen membership edge has invalid kind or endpoints",
+                ));
+            }
+            for fact in edge.fields.values() {
+                validate_fact_source(fact, capsule.content_digest)?;
             }
         }
         Ok(())
     }
 }
 
-#[must_use]
+fn validate_fact_source(fact: &Fact, source_digest: Digest32) -> Result<()> {
+    if fact.source_digest != source_digest {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "a live projected fact does not cite the source capsule digest",
+        ));
+    }
+    Ok(())
+}
+
 pub fn raw_unit_id_to_entity_id(raw_unit_id: i32) -> Result<EntityId> {
     if raw_unit_id < 0 {
         return Err(error(
@@ -208,6 +262,24 @@ pub fn entity_id_to_raw_unit_id(entity_id: EntityId) -> Option<i32> {
     }
     let raw = encoded.checked_sub(1)?;
     i32::try_from(raw).ok()
+}
+
+fn membership_edge_id(raw_unit_id: i32) -> Result<EdgeId> {
+    if raw_unit_id < 0 {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "raw Dwarf Fortress unit ID must not be negative",
+        ));
+    }
+    let ordinal = u128::from(raw_unit_id as u32)
+        .checked_add(1)
+        .ok_or_else(|| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "citizen membership edge identity overflowed",
+            )
+        })?;
+    Ok(EdgeId::new(CITIZEN_MEMBERSHIP_EDGE_NAMESPACE | ordinal))
 }
 
 pub fn project_live_capsule(
@@ -244,9 +316,16 @@ pub fn project_live_capsule(
         })?;
 
     let mut entities = BTreeMap::new();
+    let mut edges = BTreeMap::new();
     let fortress = fortress_entity(capsule, observed_at, generation, cursor.sequence);
     entities.insert(fortress.id, fortress);
     for citizen in &capsule.citizens {
+        if !citizen.citizen || citizen.resident {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "strict citizen capsule contains a non-citizen or resident record",
+            ));
+        }
         let entity = citizen_entity(
             citizen,
             capsule.content_digest,
@@ -254,10 +333,24 @@ pub fn project_live_capsule(
             generation,
             cursor.sequence,
         )?;
-        if entities.insert(entity.id, entity).is_some() {
+        let entity_id = entity.id;
+        if entities.insert(entity_id, entity).is_some() {
             return Err(error(
                 ErrorCode::AdapterRejected,
                 "live citizen projection produced a duplicate canonical entity ID",
+            ));
+        }
+        let edge = citizen_membership_edge(
+            citizen.unit_id,
+            entity_id,
+            capsule.content_digest,
+            observed_at,
+            cursor.sequence,
+        )?;
+        if edges.insert(edge.id, edge).is_some() {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "live citizen projection produced a duplicate membership edge ID",
             ));
         }
     }
@@ -269,6 +362,7 @@ pub fn project_live_capsule(
         capsule.paused,
         WorldGraph {
             entities,
+            edges,
             ..WorldGraph::default()
         },
     );
@@ -483,6 +577,32 @@ fn citizen_entity(
     })
 }
 
+fn citizen_membership_edge(
+    raw_unit_id: i32,
+    unit_entity_id: EntityId,
+    source_digest: Digest32,
+    observed_at: GameTick,
+    revision: u64,
+) -> Result<EdgeRecord> {
+    let mut fields = BTreeMap::new();
+    insert_fact(
+        &mut fields,
+        "membership_observed",
+        Value::Bool(true),
+        observed_at,
+        source_digest,
+        "citizen.citizen",
+    );
+    Ok(EdgeRecord {
+        id: membership_edge_id(raw_unit_id)?,
+        revision,
+        kind: EdgeKind::MemberOf,
+        from: unit_entity_id,
+        to: FORTRESS_ENTITY_ID,
+        fields,
+    })
+}
+
 fn insert_fact(
     fields: &mut BTreeMap<String, Fact>,
     field: &str,
@@ -596,7 +716,7 @@ mod tests {
         }
     }
 
-    fn capsule(page_sizes: &[&[i32]]) -> Result<LiveObservationCapsule> {
+    fn build_capsule(page_sizes: &[&[i32]]) -> Result<LiveObservationCapsule> {
         let total = page_sizes.iter().try_fold(0u32, |total, page| {
             let len = u32::try_from(page.len()).map_err(|_| {
                 error(ErrorCode::BudgetExceeded, "test page length does not fit u32")
@@ -626,16 +746,17 @@ mod tests {
             year: 105,
             year_tick: 12_345,
         };
-        assert_eq!(
-            clock.absolute_tick()?.get(),
-            105 * TICKS_PER_YEAR + 12_345
-        );
+        assert_eq!(clock.absolute_tick()?.get(), 105 * TICKS_PER_YEAR + 12_345);
+        let invalid_tick = u32::try_from(TICKS_PER_YEAR).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "tick bound does not fit u32",
+            )
+        })?;
         assert!(
             DwarfFortressClock {
                 year: 1,
-                year_tick: u32::try_from(TICKS_PER_YEAR).map_err(|_| {
-                    error(ErrorCode::InternalInvariantViolation, "tick bound does not fit u32")
-                })?,
+                year_tick: invalid_tick,
             }
             .absolute_tick()
             .is_err()
@@ -657,8 +778,8 @@ mod tests {
 
     #[test]
     fn projection_is_identical_across_transport_pagination() -> Result<()> {
-        let one = capsule(&[&[0, 1, 2, 3]])?;
-        let many = capsule(&[&[0, 1], &[2], &[3]])?;
+        let one = build_capsule(&[&[0, 1, 2, 3]])?;
+        let many = build_capsule(&[&[0, 1], &[2], &[3]])?;
         assert_eq!(one.content_digest, many.content_digest);
         let cursor = ObservationCursor {
             epoch: 7,
@@ -669,13 +790,34 @@ mod tests {
         assert_eq!(one_projection, many_projection);
         assert!(one_projection.snapshot.hash_is_valid());
         assert_eq!(one_projection.snapshot.graph.entities.len(), 5);
+        assert_eq!(one_projection.snapshot.graph.edges.len(), 4);
         one_projection.validate_against(&one)?;
         Ok(())
     }
 
     #[test]
+    fn membership_edges_are_deterministic_and_provenanced() -> Result<()> {
+        let capsule = build_capsule(&[&[0, 1]])?;
+        let projection = project_live_capsule(
+            &capsule,
+            FortressId::new(9),
+            ObservationCursor::ORIGIN,
+        )?;
+        for edge in projection.snapshot.graph.edges.values() {
+            assert_eq!(edge.kind, EdgeKind::MemberOf);
+            assert_eq!(edge.to, FORTRESS_ENTITY_ID);
+            assert!(projection.snapshot.graph.entities.contains_key(&edge.from));
+            assert_eq!(
+                edge.fields["membership_observed"].source_digest,
+                capsule.content_digest
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn every_projected_fact_cites_the_capsule_digest() -> Result<()> {
-        let capsule = capsule(&[&[0, 1]])?;
+        let capsule = build_capsule(&[&[0, 1]])?;
         let projection = project_live_capsule(
             &capsule,
             FortressId::new(9),
@@ -702,26 +844,11 @@ mod tests {
     }
 
     #[test]
-    fn projection_rejects_invalid_identity_clock_and_epoch() -> Result<()> {
-        let mut capsule = capsule(&[&[1]])?;
+    fn projection_rejects_invalid_identity_clock_epoch_and_roster() -> Result<()> {
+        let valid = build_capsule(&[&[1]])?;
         assert!(
-            project_live_capsule(
-                &capsule,
-                FortressId::NIL,
-                ObservationCursor::ORIGIN
-            )
-            .is_err()
+            project_live_capsule(&valid, FortressId::NIL, ObservationCursor::ORIGIN).is_err()
         );
-        capsule.site_id = -1;
-        assert!(
-            project_live_capsule(
-                &capsule,
-                FortressId::new(9),
-                ObservationCursor::ORIGIN
-            )
-            .is_err()
-        );
-        let valid = capsule(&[&[1]])?;
         assert!(
             project_live_capsule(
                 &valid,
@@ -730,6 +857,53 @@ mod tests {
                     epoch: u64::MAX,
                     sequence: 0,
                 },
+            )
+            .is_err()
+        );
+
+        let mut invalid_site = page(0, 1, &[1], true);
+        invalid_site.site_id = -1;
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(invalid_site)?;
+        let invalid_site_capsule = assembler.finalize()?;
+        assert!(
+            project_live_capsule(
+                &invalid_site_capsule,
+                FortressId::new(9),
+                ObservationCursor::ORIGIN,
+            )
+            .is_err()
+        );
+
+        let mut invalid_clock = page(0, 1, &[1], true);
+        invalid_clock.current_year_tick = u32::try_from(TICKS_PER_YEAR).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "tick bound does not fit u32",
+            )
+        })?;
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(invalid_clock)?;
+        let invalid_clock_capsule = assembler.finalize()?;
+        assert!(
+            project_live_capsule(
+                &invalid_clock_capsule,
+                FortressId::new(9),
+                ObservationCursor::ORIGIN,
+            )
+            .is_err()
+        );
+
+        let mut invalid_roster = page(0, 1, &[1], true);
+        invalid_roster.citizens[0].resident = true;
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(invalid_roster)?;
+        let invalid_roster_capsule = assembler.finalize()?;
+        assert!(
+            project_live_capsule(
+                &invalid_roster_capsule,
+                FortressId::new(9),
+                ObservationCursor::ORIGIN,
             )
             .is_err()
         );
