@@ -22,18 +22,13 @@ use crate::doctor::DoctorInspector;
 use dfmcp_adapter::{CancelMode, GameAdapter};
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
-    ErrorCode, FortressId, GameTick, IntentId, MapCoord, ObservationCursor, OperationContext,
-    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
+    ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId,
+    Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_intent::{
-    Action, BlueprintPlanner, BlueprintTemplate, Constraint, Intent, InventoryStockpile,
-    ObligationSpec, PreparedPlan, ProductionLogisticsCompiler, RequestedAction, StaticPlanner,
-};
+use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{
-    ChunkSpatialIndex, EdgeKind, FrankenSearchEngine, Predicate, WorldGraph, WorldSnapshot,
-};
+use dfmcp_world::{EdgeKind, Predicate, WorldGraph, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -484,87 +479,50 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 // fortress.query
 // ============================================================================
 
-/// Bounded structured query and full-text/threat search.
+/// Return the bounded summary query supported by the laboratory slice.
 #[tool(
-    description = "Run a bounded query or full-text/threat search against the fortress state for an open session."
+    description = "Run the bounded summary query supported by the laboratory adapter. Full DfQL is not implemented."
 )]
-pub fn fortress_query(
-    session_id: Option<String>,
-    mode: Option<String>,
-    query: Option<String>,
-) -> String {
+pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.unwrap_or_else(|| "summary".to_owned());
+    if mode != "summary" {
+        return error_payload(
+            "fortress.query",
+            "only mode=\"summary\" is supported by the laboratory slice; full DfQL is not implemented",
+        );
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.query", &error.to_string()),
     };
-    let guard = match session.lock() {
+    let mut guard = match session.lock() {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.query", &error.to_string()),
     };
-    let snapshot = guard.adapter.snapshot();
-
-    if mode == "search" || query.is_some() {
-        let q_str = query.unwrap_or_default();
-        let mut engine = FrankenSearchEngine::new();
-        engine.index_snapshot(snapshot);
-        let hits = engine.search(&q_str, 10);
-        let hits_json: Vec<serde_json::Value> = hits
-            .iter()
-            .map(|h| {
-                json!({
-                    "entity_id": h.entity_id.map(|id| format!("{}", id.get())),
-                    "event_id": h.event_id.map(|id| format!("{}", id.get())),
-                    "title": h.title,
-                    "snippet": h.snippet,
-                    "score_micros": h.score_micros,
-                    "matched_terms": h.matched_terms,
-                })
-            })
-            .collect();
-        json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "mode": "search",
-            "query": q_str,
-            "matched": hits.len(),
-            "hits": hits_json,
-        })
-        .to_string()
-    } else if mode == "summary" {
-        let mut payload = snapshot_json(snapshot);
-        payload["matched"] = json!(0);
-        payload["session_id"] = json!(format!("{}", guard.session_id));
-        payload.to_string()
-    } else {
-        error_payload(
-            "fortress.query",
-            "supported modes: mode=\"summary\" or mode=\"search\" with query parameter",
-        )
+    let rid = next_request_id(&mut guard);
+    let ctx = context_for(&guard, rid);
+    if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
+        return error_payload("fortress.query", &error.to_string());
     }
+    let snapshot = guard.adapter.snapshot();
+    let mut payload = snapshot_json(snapshot);
+    payload["matched"] = json!(0);
+    payload["session_id"] = json!(format!("{}", guard.session_id));
+    payload.to_string()
 }
 
 // ============================================================================
 // fortress.plan
 // ============================================================================
 
-/// Compile an intent (pause, spatial blueprint, or logistics work orders) into an immutable, inspectable plan without effects.
+/// Compile a pause/resume intent into an immutable, inspectable plan without effects.
 #[tool(
-    description = "Compile an intent (pause, spatial blueprint, or logistics work orders) into an immutable, inspectable plan without effects."
+    description = "Compile a laboratory pause/resume intent into an immutable, inspectable plan without effects."
 )]
-#[allow(clippy::too_many_arguments)]
 pub fn fortress_plan(
     session_id: Option<String>,
     summary: Option<String>,
     paused_target: Option<bool>,
-    blueprint_type: Option<String>,
-    origin_x: Option<i32>,
-    origin_y: Option<i32>,
-    origin_z: Option<i32>,
-    width: Option<u8>,
-    height: Option<u8>,
-    quota_item: Option<String>,
-    quota_amount: Option<u32>,
 ) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
@@ -578,138 +536,23 @@ pub fn fortress_plan(
     let snapshot = guard.adapter.snapshot();
     let ctx = context_for(&guard, rid);
 
-    let intent_res: Result<Intent> = if let Some(bp) = blueprint_type {
-        let ox = origin_x.unwrap_or(0);
-        let oy = origin_y.unwrap_or(0);
-        let oz = origin_z.unwrap_or(100);
-        let w = width.unwrap_or(5);
-        let h = height.unwrap_or(5);
-        let origin = MapCoord::new(ox, oy, oz);
-
-        let template = match bp.as_str() {
-            "dining_hall" => BlueprintTemplate::DiningHall {
-                width: w,
-                height: h,
+    let paused_target = paused_target.unwrap_or(false);
+    let intent = Intent {
+        id: IntentId::new(rid),
+        anchor: snapshot.anchor(),
+        summary: summary.unwrap_or_else(|| "unpause the simulation".to_owned()),
+        terminal_condition: Predicate::Paused(paused_target),
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![RequestedAction {
+            action: Action::Pause {
+                paused: paused_target,
             },
-            "bedroom_cluster" => BlueprintTemplate::BedroomCluster {
-                rooms_count: 4,
-                room_size: (w, h),
-            },
-            _ => BlueprintTemplate::DiningHall {
-                width: w,
-                height: h,
-            },
-        };
-
-        let mut spatial_index = ChunkSpatialIndex::new();
-        for chunk in snapshot.graph.chunks.values() {
-            let _ = spatial_index.insert_or_update_chunk(chunk);
-        }
-        let min_chunk_x = (ox - 16).div_euclid(16);
-        let max_chunk_x = (ox + i32::from(w) + 16).div_euclid(16);
-        let min_chunk_y = (oy - 16).div_euclid(16);
-        let max_chunk_y = (oy + i32::from(h) + 16).div_euclid(16);
-
-        for z in (origin.z - 1)..=(origin.z + 1) {
-            for y in min_chunk_y..=max_chunk_y {
-                for x in min_chunk_x..=max_chunk_x {
-                    let chunk_coord = dfmcp_world::ChunkCoord { x, y, z };
-                    if !snapshot.graph.chunks.contains_key(&chunk_coord) {
-                        let _ = spatial_index.insert_or_update_chunk(&dfmcp_world::MapChunk {
-                            coord: chunk_coord,
-                            revision: 1,
-                            width: 16,
-                            height: 16,
-                            terrain_runs: vec![dfmcp_world::TerrainRun {
-                                length: 256,
-                                tile_code: 2,
-                            }],
-                            sparse_overlays: BTreeMap::new(),
-                        });
-                    }
-                }
-            }
-        }
-
-        BlueprintPlanner.compile_blueprint_intent(
-            IntentId::new(rid),
-            snapshot.anchor(),
-            origin,
-            template,
-            &spatial_index,
-        )
-    } else if let Some(item) = quota_item {
-        let amount = quota_amount.unwrap_or(10);
-        let logistics = ProductionLogisticsCompiler::default();
-        let mut inventory = InventoryStockpile::new();
-        inventory.set_stock("PLANT", 1000);
-        inventory.set_stock("WOOD", 1000);
-        inventory.set_stock("BARREL", 500);
-        inventory.set_stock("BIN", 500);
-        inventory.set_stock("CHARCOAL", 500);
-        inventory.set_stock("COAL", 500);
-        inventory.set_stock("IRON_ORE", 500);
-        inventory.set_stock("COPPER_ORE", 500);
-        inventory.set_stock("SILVER_ORE", 500);
-        inventory.set_stock("GOLD_ORE", 500);
-        inventory.set_stock("LEATHER", 500);
-        inventory.set_stock("THREAD", 500);
-        match logistics.compile_quota_work_orders(&item, amount, &inventory) {
-            Ok(actions) => {
-                let req_actions = actions
-                    .into_iter()
-                    .map(|a| RequestedAction {
-                        action: a,
-                        preconditions: Vec::new(),
-                        postconditions: vec![Predicate::Paused(false)],
-                        compensation: None,
-                        obligation: Some(ObligationSpec {
-                            terminal: Predicate::Paused(false),
-                            failure: None,
-                            deadline_tick: GameTick(snapshot.tick.0 + 1000),
-                            poll_interval_ticks: 10,
-                            stable_for_observations: 1,
-                        }),
-                        depends_on: Vec::new(),
-                    })
-                    .collect();
-
-                Ok(Intent {
-                    id: IntentId::new(rid),
-                    anchor: snapshot.anchor(),
-                    summary: summary.unwrap_or_else(|| format!("produce quota for {item}")),
-                    terminal_condition: Predicate::Paused(false),
-                    constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-                    requested_actions: req_actions,
-                })
-            }
-            Err(err) => Err(err),
-        }
-    } else {
-        let summary = summary.unwrap_or_else(|| "unpause the simulation".to_owned());
-        let paused_target = paused_target.unwrap_or(false);
-        Ok(Intent {
-            id: IntentId::new(rid),
-            anchor: snapshot.anchor(),
-            summary,
-            terminal_condition: Predicate::Paused(paused_target),
-            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-            requested_actions: vec![RequestedAction {
-                action: Action::Pause {
-                    paused: paused_target,
-                },
-                preconditions: vec![Predicate::Paused(!paused_target)],
-                postconditions: vec![Predicate::Paused(paused_target)],
-                compensation: None,
-                obligation: None,
-                depends_on: Vec::new(),
-            }],
-        })
-    };
-
-    let intent = match intent_res {
-        Ok(it) => it,
-        Err(e) => return error_payload("fortress.plan", &e.to_string()),
+            preconditions: vec![Predicate::Paused(!paused_target)],
+            postconditions: vec![Predicate::Paused(paused_target)],
+            compensation: None,
+            obligation: None,
+            depends_on: Vec::new(),
+        }],
     };
 
     match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
@@ -1011,6 +854,10 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
     };
+    let ctx = context_for(&guard, guard.next_request_id);
+    if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
+        return error_payload("fortress.explain", &error.to_string());
+    }
     let snapshot = guard.adapter.snapshot();
 
     if let Some(ent_str) = entity_id {

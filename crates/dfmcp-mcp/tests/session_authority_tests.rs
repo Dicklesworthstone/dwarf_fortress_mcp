@@ -134,7 +134,7 @@ fn test_unknown_session_rejection() -> std::result::Result<(), Box<dyn std::erro
     let obs: Value = serde_json::from_str(&obs_raw)?;
     assert_eq!(obs["ok"], false);
 
-    let query_raw = fortress_query(Some(unknown_id.clone()), Some("summary".to_owned()), None);
+    let query_raw = fortress_query(Some(unknown_id.clone()), Some("summary".to_owned()));
     let query: Value = serde_json::from_str(&query_raw)?;
     assert_eq!(query["ok"], false);
 

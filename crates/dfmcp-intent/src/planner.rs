@@ -192,10 +192,11 @@ fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
             _ => None,
         });
     let mut postconditions = requested.postconditions.clone();
-    if postconditions.is_empty()
-        && let Action::Pause { paused } = &action
-    {
-        postconditions.push(Predicate::Paused(*paused));
+    if postconditions.is_empty() {
+        match &action {
+            Action::Pause { paused } => postconditions.push(Predicate::Paused(*paused)),
+            _ => postconditions.push(Predicate::True),
+        }
     }
     RequestedAction {
         action,

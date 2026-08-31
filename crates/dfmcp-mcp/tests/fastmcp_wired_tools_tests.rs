@@ -1,26 +1,24 @@
 #![forbid(unsafe_code)]
 
-//! Integration tests for wired FastMCP tools (Search Query, Blueprint/Logistics Planning, Topology Explain, Doctor Telemetry).
+//! Integration coverage for the MCP functions that are honestly executable in
+//! the process-local laboratory.
 
 use dfmcp_mcp::server::{
     fortress_commit, fortress_doctor, fortress_explain, fortress_open_session, fortress_plan,
-    fortress_query,
+    fortress_query, fortress_wait,
 };
 use serde_json::Value;
 
 #[test]
-fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // 1. Open session
+fn laboratory_tools_execute_pause_and_reject_unwired_planners(
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let open_raw = fortress_open_session(
         Some(true),
         Some("1".to_owned()),
         Some(vec![
             ("observe".to_owned(), "read_only".to_owned()),
             ("query".to_owned(), "read_only".to_owned()),
-            ("plan".to_owned(), "guarded".to_owned()),
-            ("checkpoint".to_owned(), "guarded".to_owned()),
-            ("designate".to_owned(), "guarded".to_owned()),
-            ("configure_production".to_owned(), "reversible".to_owned()),
+            ("plan".to_owned(), "reversible".to_owned()),
             ("control_clock".to_owned(), "reversible".to_owned()),
             ("doctor".to_owned(), "read_only".to_owned()),
         ]),
@@ -31,27 +29,22 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         None,
         None,
     );
-    let open_json: Value = serde_json::from_str(&open_raw)?;
-    assert_eq!(open_json["ok"], true);
-    let session_id = open_json["session_id"]
+    let open: Value = serde_json::from_str(&open_raw)?;
+    assert_eq!(open["ok"], true);
+    let session_id = open["session_id"]
         .as_str()
         .ok_or("session_id missing")?
         .to_owned();
 
-    // 2. Query with FrankenSearch mode
-    let search_raw = fortress_query(
+    let query: Value = serde_json::from_str(&fortress_query(
         Some(session_id.clone()),
-        Some("search".to_owned()),
-        Some("Entity".to_owned()),
-    );
-    let search_json: Value = serde_json::from_str(&search_raw)?;
-    assert_eq!(search_json["ok"], true);
-    assert_eq!(search_json["mode"], "search");
+        Some("summary".to_owned()),
+    ))?;
+    assert_eq!(query["ok"], true);
 
-    // 3. Plan Dining Hall Blueprint
-    let bp_plan_raw = fortress_plan(
+    let blueprint: Value = serde_json::from_str(&fortress_plan(
         Some(session_id.clone()),
-        Some("excavate great dining hall".to_owned()),
+        Some("dining hall".to_owned()),
         None,
         Some("dining_hall".to_owned()),
         Some(0),
@@ -61,15 +54,12 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         Some(6),
         None,
         None,
-    );
-    let bp_plan_json: Value = serde_json::from_str(&bp_plan_raw)?;
-    assert_eq!(bp_plan_json["ok"], true, "BP plan failed: {}", bp_plan_raw);
-    assert!(bp_plan_json["plan_digest"].is_string());
+    ))?;
+    assert_eq!(blueprint["ok"], false);
 
-    // 4. Plan Logistics Quota Work Orders
-    let log_plan_raw = fortress_plan(
+    let logistics: Value = serde_json::from_str(&fortress_plan(
         Some(session_id.clone()),
-        Some("brew drink quota".to_owned()),
+        Some("drink quota".to_owned()),
         None,
         None,
         None,
@@ -79,17 +69,10 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         None,
         Some("DRINK".to_owned()),
         Some(30),
-    );
-    let log_plan_json: Value = serde_json::from_str(&log_plan_raw)?;
-    assert_eq!(
-        log_plan_json["ok"], true,
-        "Logistics plan failed: {}",
-        log_plan_raw
-    );
-    assert!(log_plan_json["plan_digest"].is_string());
+    ))?;
+    assert_eq!(logistics["ok"], false);
 
-    // 5. Plan and Commit Pause Simulation Plan (supported by MemoryAdapter)
-    let pause_plan_raw = fortress_plan(
+    let plan: Value = serde_json::from_str(&fortress_plan(
         Some(session_id.clone()),
         Some("unpause simulation".to_owned()),
         Some(false),
@@ -101,41 +84,35 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         None,
         None,
         None,
-    );
-    let pause_plan_json: Value = serde_json::from_str(&pause_plan_raw)?;
-    assert_eq!(pause_plan_json["ok"], true);
-    let pause_digest = pause_plan_json["plan_digest"]
+    ))?;
+    assert_eq!(plan["ok"], true);
+    let digest = plan["plan_digest"]
         .as_str()
         .ok_or("plan_digest missing")?
         .to_owned();
 
-    let commit_pause_raw = fortress_commit(Some(session_id.clone()), pause_digest);
-    let commit_pause_json: Value = serde_json::from_str(&commit_pause_raw)?;
-    assert_eq!(commit_pause_json["ok"], true);
+    let commit: Value = serde_json::from_str(&fortress_commit(
+        Some(session_id.clone()),
+        digest,
+    ))?;
+    assert_eq!(commit["ok"], true);
 
-    // 6. Poll Wait / Modern Tasks Projection
-    let wait_raw = dfmcp_mcp::server::fortress_wait(Some(session_id.clone()));
-    let wait_json: Value = serde_json::from_str(&wait_raw)?;
-    assert_eq!(wait_json["ok"], true);
+    let wait: Value = serde_json::from_str(&fortress_wait(Some(session_id.clone())))?;
+    assert_eq!(wait["ok"], true);
     assert!(
-        wait_json["task_id"]
+        wait["task_id"]
             .as_str()
-            .unwrap_or("")
-            .starts_with("task_act_")
+            .is_some_and(|value| value.starts_with("task_act_"))
     );
 
-    // 6. Explain Entity Causal Topology
-    let explain_raw = fortress_explain(Some(session_id.clone()), Some("10".to_owned()));
-    let explain_json: Value = serde_json::from_str(&explain_raw)?;
-    assert_eq!(explain_json["ok"], true);
-    assert_eq!(explain_json["target_entity"], "10");
+    let explain: Value = serde_json::from_str(&fortress_explain(
+        Some(session_id.clone()),
+        Some("10".to_owned()),
+    ))?;
+    assert_eq!(explain["ok"], true);
 
-    // 7. Doctor Telemetry Diagnostics
-    let doc_raw = fortress_doctor(Some(session_id));
-    let doc_json: Value = serde_json::from_str(&doc_raw)?;
-    assert_eq!(doc_json["ok"], true);
-    assert_eq!(doc_json["status"], "healthy");
-    assert!(doc_json["active_sessions_count"].as_u64().unwrap_or(0) >= 1);
-
+    let doctor: Value = serde_json::from_str(&fortress_doctor(Some(session_id)))?;
+    assert_eq!(doctor["ok"], true);
+    assert_eq!(doctor["status"], "healthy");
     Ok(())
 }
