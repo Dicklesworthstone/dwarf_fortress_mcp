@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use dfmcp_core::{
     ActionId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence, EvidenceId, EvidenceKind,
-    GameTick, OperationContext, PlanId, Result,
+    GameTick, OperationContext, PlanId, Result, StateAnchor,
 };
 use dfmcp_intent::{Action, PreparedPlan};
 use dfmcp_world::{WorldSnapshot, evaluate};

@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use crate::doctor::DoctorInspector;
-use dfmcp_adapter::{CancelMode, GameAdapter, HealthStatus};
+use dfmcp_adapter::{CancelMode, GameAdapter};
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
     ErrorCode, FortressId, GameTick, IntentId, MapCoord, ObservationCursor, OperationContext,
@@ -27,15 +27,12 @@ use dfmcp_core::{
 };
 use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
 use dfmcp_intent::logistics::{InventoryStockpile, ProductionLogisticsCompiler};
-use dfmcp_intent::{
-    Action, Constraint, DigMode, Intent, ObligationSpec, PreparedPlan, RequestedAction,
-    StaticPlanner,
-};
+use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::search::FrankenSearchEngine;
 use dfmcp_world::spatial_index::ChunkSpatialIndex;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
+use dfmcp_world::{EdgeKind, Predicate, WorldGraph, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -492,7 +489,7 @@ pub fn fortress_query(
                     "event_id": h.event_id.map(|id| format!("{}", id.get())),
                     "title": h.title,
                     "snippet": h.snippet,
-                    "score": h.score,
+                    "score_micros": h.score_micros,
                     "matched_terms": h.matched_terms,
                 })
             })
@@ -592,27 +589,31 @@ pub fn fortress_plan(
         let amount = quota_amount.unwrap_or(10);
         let logistics = ProductionLogisticsCompiler::default();
         let inventory = InventoryStockpile::new();
-        let actions = logistics.compile_quota_work_orders(&item, amount, &inventory)?;
-        let req_actions = actions
-            .into_iter()
-            .map(|a| RequestedAction {
-                action: a,
-                preconditions: Vec::new(),
-                postconditions: Vec::new(),
-                compensation: None,
-                obligation: None,
-                depends_on: Vec::new(),
-            })
-            .collect();
+        match logistics.compile_quota_work_orders(&item, amount, &inventory) {
+            Ok(actions) => {
+                let req_actions = actions
+                    .into_iter()
+                    .map(|a| RequestedAction {
+                        action: a,
+                        preconditions: Vec::new(),
+                        postconditions: Vec::new(),
+                        compensation: None,
+                        obligation: None,
+                        depends_on: Vec::new(),
+                    })
+                    .collect();
 
-        Ok(Intent {
-            id: IntentId::new(rid),
-            anchor: snapshot.anchor(),
-            summary: summary.unwrap_or_else(|| format!("produce quota for {}", item)),
-            terminal_condition: Predicate::Paused(false),
-            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-            requested_actions: req_actions,
-        })
+                Ok(Intent {
+                    id: IntentId::new(rid),
+                    anchor: snapshot.anchor(),
+                    summary: summary.unwrap_or_else(|| format!("produce quota for {item}")),
+                    terminal_condition: Predicate::Paused(false),
+                    constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+                    requested_actions: req_actions,
+                })
+            }
+            Err(err) => Err(err),
+        }
     } else {
         let summary = summary.unwrap_or_else(|| "unpause the simulation".to_owned());
         let paused_target = paused_target.unwrap_or(false);
@@ -950,7 +951,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             Err(err) => return error_payload("fortress.explain", &err.to_string()),
         };
 
-        let deps = get_transitive_dependencies(&snapshot.graph, target_id);
+        let deps = get_transitive_dependencies(&snapshot.graph, target_id, EdgeKind::Requires);
         let deps_str: Vec<String> = deps.iter().map(|id| format!("{}", id.get())).collect();
         let entity_record = snapshot.graph.entities.get(&target_id);
 

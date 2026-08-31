@@ -350,6 +350,7 @@ impl SemanticRebaseEngine {
     }
 
     /// Perform a 3-way merge between base, ours, and theirs.
+    #[allow(clippy::result_large_err)]
     pub fn three_way_merge(
         &self,
         base: &WorldSnapshot,
