@@ -17,6 +17,7 @@ pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
+pub mod live_server;
 pub mod server;
 pub mod tasks;
 
@@ -33,5 +34,6 @@ pub use http_transport::{
     MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,
 };
+pub use live_server::run_live_stdio;
 pub use server::validate_localhost_bind;
 pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_action_task};
