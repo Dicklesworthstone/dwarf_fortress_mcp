@@ -29,6 +29,10 @@ info "Validating the authenticated read-only DFHack bridge"
 python3 scripts/check_dfhack_bridge.py
 ok "DFHack read-only bridge contract"
 
+info "Validating the authenticated live MCP mode"
+python3 scripts/check_live_mcp.py
+ok "Live MCP contract"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
@@ -38,6 +42,7 @@ python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_live_mcp.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
