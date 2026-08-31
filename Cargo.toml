@@ -38,6 +38,11 @@ expect_used = "deny"
 panic = "deny"
 todo = "deny"
 unimplemented = "deny"
+# These two style lints recommend `unwrap_or`, which conflicts with the
+# repository's production-code prohibition on unwrap-style APIs.
+map_or_identity = "allow"
+manual_unwrap_or = "allow"
+unnecessary_option_map_or_else = "allow"
 
 [profile.release]
 lto = "thin"
