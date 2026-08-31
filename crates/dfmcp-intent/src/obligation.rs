@@ -8,10 +8,11 @@
 use std::collections::BTreeMap;
 
 use dfmcp_core::{ActionId, DfmcpError, ErrorCode, Evidence, EvidenceKind, GameTick, Result};
-use dfmcp_world::WorldSnapshot;
-use dfmcp_world::evaluate;
+use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
 use crate::plan::ObligationSpec;
+
+const MAX_TRACKED_OBLIGATIONS: usize = 65_536;
 
 /// Quantitative progress certificate emitted during cancellation drain.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,9 +77,39 @@ impl ObligationRuntime {
     pub fn register_obligation(
         &mut self,
         action_id: ActionId,
-        spec: ObligationSpec,
+        mut spec: ObligationSpec,
         current_tick: GameTick,
     ) -> Result<()> {
+        if action_id == ActionId::NIL {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "obligation action identifier zero is reserved",
+            ));
+        }
+        spec.terminal.validate_shape()?;
+        spec.terminal = spec.terminal.normalized();
+        if matches!(spec.terminal, Predicate::True | Predicate::False) {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "obligation terminal predicate must be nontrivial",
+            ));
+        }
+        if let Some(failure) = spec.failure.as_mut() {
+            failure.validate_shape()?;
+            *failure = failure.normalized();
+            if matches!(failure, Predicate::True | Predicate::False) {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "obligation failure predicate must be nontrivial",
+                ));
+            }
+            if failure == &spec.terminal {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "obligation terminal and failure predicates must differ",
+                ));
+            }
+        }
         if spec.deadline_tick <= current_tick
             || spec.poll_interval_ticks == 0
             || spec.stable_for_observations == 0
@@ -92,6 +123,12 @@ impl ObligationRuntime {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
                 "action already has a registered obligation",
+            ));
+        }
+        if self.obligations.len() >= MAX_TRACKED_OBLIGATIONS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "obligation runtime reached its explicit tracked-action bound",
             ));
         }
         let obligation = BoundedObligation {
@@ -110,6 +147,12 @@ impl ObligationRuntime {
 
     /// Advance game tick and evaluate all active obligations against the new world snapshot.
     pub fn step_tick(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::ChecksumMismatch,
+                "obligations cannot be evaluated against an invalid world snapshot",
+            ));
+        }
         for obligation in self.obligations.values_mut() {
             let mut next_status = None;
 
@@ -172,7 +215,7 @@ impl ObligationRuntime {
                     let satisfied = evaluate(snapshot, &obligation.spec.terminal);
                     if satisfied {
                         let new_stable = consecutive_stable_observations.saturating_add(1);
-                        if new_stable >= obligation.spec.stable_for_observations.max(1) {
+                        if new_stable >= obligation.spec.stable_for_observations {
                             let evidence = vec![Evidence {
                                 id: dfmcp_core::EvidenceId::new(obligation.action_id.get()),
                                 kind: EvidenceKind::Postcondition,
@@ -202,7 +245,6 @@ impl ObligationRuntime {
                             ),
                         });
                     } else {
-                        // Reset stability counter if terminal predicate was not satisfied this tick
                         next_status = Some(ObligationStatus::Active {
                             ticks_elapsed: new_elapsed.max(*ticks_elapsed),
                             consecutive_stable_observations: 0,
@@ -250,7 +292,17 @@ impl ObligationRuntime {
                 ErrorCode::InvalidRequest,
                 "cannot cancel already failed obligation",
             )),
-            ObligationStatus::Draining { .. } | ObligationStatus::Cancelled { .. } => Ok(()),
+            ObligationStatus::Draining { drain_started_tick } => {
+                if current_tick < drain_started_tick {
+                    Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        "repeated cancellation request tick precedes drain start",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            ObligationStatus::Cancelled { .. } => Ok(()),
             ObligationStatus::Pending => Err(DfmcpError::new(
                 ErrorCode::Conflict,
                 "cannot cancel an obligation that has not become active",
@@ -274,9 +326,11 @@ impl ObligationRuntime {
 
         match obligation.status {
             ObligationStatus::Draining { drain_started_tick }
-                if certificate.action_id == action_id
+                if current_tick >= drain_started_tick
+                    && certificate.action_id == action_id
                     && certificate.drain_started_tick == drain_started_tick
                     && certificate.current_tick == current_tick
+                    && certificate.current_tick >= certificate.drain_started_tick
                     && certificate.is_quiescent
                     && certificate.steps_remaining == 0 =>
             {
@@ -344,7 +398,6 @@ mod tests {
 
         runtime.register_obligation(action_id, spec, GameTick(10))?;
 
-        // Tick 11: simulation unpaused (stable count = 1)
         let snap1 = sample_snapshot(11, false);
         runtime.step_tick(&snap1)?;
         assert!(matches!(
@@ -355,7 +408,6 @@ mod tests {
             })
         ));
 
-        // Tick 12: simulation unpaused again (stable count = 2 -> fulfilled!)
         let snap2 = sample_snapshot(12, false);
         runtime.step_tick(&snap2)?;
         assert!(matches!(
@@ -381,7 +433,6 @@ mod tests {
 
         runtime.register_obligation(action_id, spec, GameTick(10))?;
 
-        // Advance to tick 51 while still paused -> should fail
         let snap = sample_snapshot(51, true);
         runtime.step_tick(&snap)?;
         assert!(matches!(
@@ -443,6 +494,65 @@ mod tests {
                 ..
             })
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn registration_rejects_zero_identity_and_trivial_predicates() {
+        let mut runtime = ObligationRuntime::new();
+        let zero = runtime.register_obligation(
+            ActionId::NIL,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(20),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            },
+            GameTick(10),
+        );
+        assert!(matches!(zero, Err(ref error) if error.code == ErrorCode::InvalidRequest));
+
+        let trivial = runtime.register_obligation(
+            ActionId::new(5),
+            ObligationSpec {
+                terminal: Predicate::True,
+                failure: None,
+                deadline_tick: GameTick(20),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            },
+            GameTick(10),
+        );
+        assert!(matches!(trivial, Err(ref error) if error.code == ErrorCode::InvalidRequest));
+    }
+
+    #[test]
+    fn drain_certificate_cannot_precede_drain_start() -> Result<()> {
+        let mut runtime = ObligationRuntime::new();
+        let action_id = ActionId::new(6);
+        runtime.register_obligation(
+            action_id,
+            ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(30),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            },
+            GameTick(10),
+        )?;
+        runtime.request_cancel(action_id, GameTick(20))?;
+        let certificate = DrainProgressCertificate {
+            action_id,
+            drain_started_tick: GameTick(20),
+            current_tick: GameTick(19),
+            steps_compensated: 0,
+            steps_remaining: 0,
+            is_quiescent: true,
+        };
+        let result = runtime.finalize_cancel(action_id, GameTick(19), &certificate);
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CancellationIncomplete));
         Ok(())
     }
 }
