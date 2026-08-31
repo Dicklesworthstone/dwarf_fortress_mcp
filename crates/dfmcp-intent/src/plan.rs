@@ -120,37 +120,101 @@ pub struct PreparedPlan {
     pub digest: Digest32,
 }
 
-impl PreparedPlan {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedPlanBuilder {
+    pub intent_id: IntentId,
+    pub anchor: StateAnchor,
+    pub summary: String,
+    pub terminal_condition: Predicate,
+    pub steps: Vec<PlanStep>,
+    pub max_risk: RiskTier,
+    pub required_capabilities: BTreeSet<Capability>,
+    pub requires_checkpoint: bool,
+    pub expires_at_tick: GameTick,
+}
+
+impl PreparedPlanBuilder {
     #[must_use]
-    #[allow(clippy::too_many_arguments)] // sealed-plan constructor mirrors the frozen plan shape
-    pub fn from_parts(
+    pub fn new(
         intent_id: IntentId,
         anchor: StateAnchor,
-        summary: String,
+        summary: impl Into<String>,
         terminal_condition: Predicate,
-        steps: Vec<PlanStep>,
-        max_risk: RiskTier,
-        required_capabilities: BTreeSet<Capability>,
-        requires_checkpoint: bool,
-        expires_at_tick: GameTick,
     ) -> Self {
-        let mut plan = Self {
-            id: PlanId::NIL,
+        Self {
             intent_id,
             anchor,
-            summary,
+            summary: summary.into(),
             terminal_condition: terminal_condition.normalized(),
-            steps,
-            max_risk,
-            required_capabilities,
-            requires_checkpoint,
-            expires_at_tick,
+            steps: Vec::new(),
+            max_risk: RiskTier::ReadOnly,
+            required_capabilities: BTreeSet::new(),
+            requires_checkpoint: false,
+            expires_at_tick: GameTick(u64::MAX),
+        }
+    }
+
+    #[must_use]
+    pub fn steps(mut self, steps: Vec<PlanStep>) -> Self {
+        self.steps = steps;
+        self
+    }
+
+    #[must_use]
+    pub fn max_risk(mut self, max_risk: RiskTier) -> Self {
+        self.max_risk = max_risk;
+        self
+    }
+
+    #[must_use]
+    pub fn required_capabilities(mut self, required_capabilities: BTreeSet<Capability>) -> Self {
+        self.required_capabilities = required_capabilities;
+        self
+    }
+
+    #[must_use]
+    pub fn requires_checkpoint(mut self, requires_checkpoint: bool) -> Self {
+        self.requires_checkpoint = requires_checkpoint;
+        self
+    }
+
+    #[must_use]
+    pub fn expires_at_tick(mut self, expires_at_tick: GameTick) -> Self {
+        self.expires_at_tick = expires_at_tick;
+        self
+    }
+
+    #[must_use]
+    pub fn build(self) -> PreparedPlan {
+        let mut plan = PreparedPlan {
+            id: PlanId::NIL,
+            intent_id: self.intent_id,
+            anchor: self.anchor,
+            summary: self.summary,
+            terminal_condition: self.terminal_condition.normalized(),
+            steps: self.steps,
+            max_risk: self.max_risk,
+            required_capabilities: self.required_capabilities,
+            requires_checkpoint: self.requires_checkpoint,
+            expires_at_tick: self.expires_at_tick,
             digest: Digest32::ZERO,
         };
         plan.digest = plan.compute_digest();
         let candidate = plan.digest.first_u128();
         plan.id = PlanId::new(if candidate == 0 { 1 } else { candidate });
         plan
+    }
+}
+
+impl PreparedPlan {
+    #[must_use]
+    pub fn builder(
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        summary: impl Into<String>,
+        terminal_condition: Predicate,
+    ) -> PreparedPlanBuilder {
+        PreparedPlanBuilder::new(intent_id, anchor, summary, terminal_condition)
     }
 
     #[must_use]
@@ -422,4 +486,51 @@ fn put_bytes(output: &mut Vec<u8>, value: &[u8]) {
 
 fn put_str(output: &mut Vec<u8>, value: &str) {
     put_bytes(output, value.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use dfmcp_core::{Capability, FortressId, GameTick, IntentId, ObservationCursor, RiskTier};
+    use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
+
+    use super::PreparedPlan;
+
+    #[test]
+    fn builder_produces_consistent_digest_and_id() {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(42),
+            GameTick(100),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let mut capabilities = BTreeSet::new();
+        capabilities.insert(Capability::Observe);
+        capabilities.insert(Capability::ControlClock);
+
+        let plan = PreparedPlan::builder(
+            IntentId::new(99),
+            snapshot.anchor(),
+            "test unpause plan",
+            Predicate::Paused(false),
+        )
+        .max_risk(RiskTier::Reversible)
+        .required_capabilities(capabilities.clone())
+        .requires_checkpoint(false)
+        .expires_at_tick(GameTick(200))
+        .build();
+
+        assert_eq!(plan.intent_id, IntentId::new(99));
+        assert_eq!(plan.summary, "test unpause plan");
+        assert_eq!(plan.terminal_condition, Predicate::Paused(false));
+        assert_eq!(plan.max_risk, RiskTier::Reversible);
+        assert_eq!(plan.required_capabilities, capabilities);
+        assert_eq!(plan.expires_at_tick, GameTick(200));
+        assert!(!plan.requires_checkpoint);
+        assert_eq!(plan.digest, plan.compute_digest());
+        assert_ne!(plan.digest, dfmcp_core::Digest32::ZERO);
+        assert_ne!(plan.id, dfmcp_core::PlanId::NIL);
+    }
 }

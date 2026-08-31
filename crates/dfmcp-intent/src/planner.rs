@@ -164,17 +164,18 @@ impl StaticPlanner {
         let intent_expiry = intent.deadline().unwrap_or(GameTick(u64::MAX));
         let policy_expiry = snapshot.tick.saturating_add(self.policy.plan_ttl_ticks);
         let expires_at_tick = intent_expiry.min(policy_expiry);
-        let plan = PreparedPlan::from_parts(
+        let plan = PreparedPlan::builder(
             intent.id,
             intent.anchor,
             intent.summary.clone(),
-            intent.terminal_condition.normalized(),
-            steps,
-            max_risk,
-            required_capabilities,
-            requires_checkpoint,
-            expires_at_tick,
-        );
+            intent.terminal_condition.clone(),
+        )
+        .steps(steps)
+        .max_risk(max_risk)
+        .required_capabilities(required_capabilities)
+        .requires_checkpoint(requires_checkpoint)
+        .expires_at_tick(expires_at_tick)
+        .build();
         validate_plan(&plan, &self.policy)?;
         Ok(plan)
     }
