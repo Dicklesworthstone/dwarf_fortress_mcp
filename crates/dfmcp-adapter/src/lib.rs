@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 
 pub mod delta_scanner;
-pub mod dfhack_adapter;
 pub mod dfhack_wire;
 /// Compatibility path for callers that imported the first unqualified client
 /// module. It contains no implementation; the audited wire is the sole source.
@@ -14,6 +13,7 @@ pub mod dfhack_rpc {
 pub mod dispatcher;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
+pub mod legacy_bridge_probe;
 pub mod live_adapter;
 pub mod live_observation;
 pub mod live_projection;
@@ -24,7 +24,6 @@ pub use delta_scanner::{
     ContinuousDeltaStreamer, DirtyChunkTracker, EntityDeltaTracker, EventRingBuffer,
     MAX_EVENT_BUFFER_CAPACITY,
 };
-pub use dfhack_adapter::{DfhackAdapter, DfhackAdapterConfig};
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
     CitizenRecord, DFHACK_RPC_VERSION, DfHackRpcClient, MAX_CITIZENS_PER_PAGE,
@@ -37,6 +36,7 @@ pub use ipc::{
     FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
     IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
 };
+pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
 pub use live_observation::{
     CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
