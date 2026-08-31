@@ -208,6 +208,12 @@ impl ContinuationToken {
         let fid: u64 = parts[1].parse().map_err(|_| {
             DfmcpError::new(ErrorCode::InvalidRequest, "invalid fortress ID in token")
         })?;
+        if fid == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "continuation token fortress identity zero is reserved",
+            ));
+        }
         let epoch: u64 = parts[2]
             .parse()
             .map_err(|_| DfmcpError::new(ErrorCode::InvalidRequest, "invalid epoch in token"))?;
@@ -412,18 +418,22 @@ pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnap
 }
 
 fn validate_cursor_transition(base: ObservationCursor, target: ObservationCursor) -> Result<()> {
-    if target.epoch != base.epoch {
+    let expected = base.checked_next().ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::CursorGap,
+            "delta base sequence is exhausted; a new epoch snapshot is required",
+        )
+        .retryable(true)
+    })?;
+    if target != expected {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,
-            "epoch changes require a full snapshot rather than a delta",
+            format!(
+                "delta target cursor must be the exact successor {:?}, got {:?}",
+                expected, target
+            ),
         )
         .retryable(true));
-    }
-    if target.sequence <= base.sequence {
-        return Err(DfmcpError::new(
-            ErrorCode::InvalidRequest,
-            "delta target cursor must advance beyond the base cursor",
-        ));
     }
     Ok(())
 }
@@ -659,7 +669,7 @@ mod tests {
         DfmcpError, Digest32, EntityId, ErrorCode, EventId, FortressId, GameTick, ObservationCursor,
     };
 
-    use super::{WorldChange, apply_delta, build_delta, diff_snapshots};
+    use super::{ContinuationToken, WorldChange, apply_delta, build_delta, diff_snapshots};
     use crate::{
         EntityKind, EntityRecord, Fact, FactSource, Value, WorldEvent, WorldEventKind, WorldGraph,
         WorldSnapshot,
@@ -722,6 +732,17 @@ mod tests {
     }
 
     #[test]
+    fn skipped_sequence_is_rejected_as_a_cursor_gap() {
+        let base = base();
+        let skipped = ObservationCursor {
+            epoch: base.cursor.epoch,
+            sequence: base.cursor.sequence.saturating_add(2),
+        };
+        let result = build_delta(&base, skipped, GameTick(2), Vec::new());
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CursorGap));
+    }
+
+    #[test]
     fn stale_base_is_not_silently_bridged() -> Result<(), DfmcpError> {
         let base = base();
         let delta = build_delta(
@@ -736,6 +757,12 @@ mod tests {
         let result = apply_delta(&altered, &delta);
         assert!(result.is_err());
         Ok(())
+    }
+
+    #[test]
+    fn zero_fortress_continuation_is_rejected() {
+        let result = ContinuationToken::decode("cont:0:0:0:1");
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 
     #[test]
