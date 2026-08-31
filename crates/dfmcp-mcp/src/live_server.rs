@@ -1,11 +1,11 @@
 //! Agent-oriented read-only MCP server over the authenticated DFHack bridge.
 //!
-//! This module preserves the frozen eleven-tool waist. Five tools are useful in
-//! bridge protocol V1 (`open_session`, `observe`, `query`, `explain`, and
-//! `doctor`). The mutation-stage tools remain registered so clients never have
-//! to discover a different protocol shape, but they fail closed and cannot
-//! reach a bridge effect path. Connection secrets and endpoints come only from
-//! the process environment, never MCP arguments.
+//! This module preserves the frozen eleven-tool waist. Six tools are useful in
+//! bridge protocol V1 (`open_session`, `observe`, `query`, `wait`, `explain`,
+//! and `doctor`). The five mutation-stage tools remain registered so clients
+//! never have to discover a different protocol shape, but they fail closed and
+//! cannot reach a bridge effect path. Connection secrets and endpoints come
+//! only from the process environment, never MCP arguments.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -19,20 +19,20 @@ use crate::agent_turn::{
 use dfmcp_adapter::{
     AuthenticatedLiveSource, BridgeCredentials, GameAdapter, InterestSet, LiveConnectionConfig,
     LiveReadAdapter, LiveReadBootstrapConfig, ObservationPayload, ObservationRequest,
-    PrimedLiveSource, Projection, QueryRequest, connect_authenticated_live_source,
-    parse_loopback_endpoint, bootstrap_live_read_adapter,
+    PrimedLiveSource, Projection, QueryRequest, bootstrap_live_read_adapter,
+    connect_authenticated_live_source, parse_loopback_endpoint,
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, EntityId, ErrorCode,
-    FortressId, ObservationCursor, OperationContext, RequestId, Result, RiskTier, SessionId,
-    StateAnchor, WorkBudget,
+    FortressId, GameTick, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
+    SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_world::{
-    EntityKind, Fact, FactPresence, QueryOrder, Value as WorldValue, WorldQuery,
+    EntityKind, Fact, FactPresence, FactSource, QueryOrder, Value as WorldValue, WorldQuery,
 };
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
-use serde_json::{Value as JsonValue, json};
+use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 const MAX_LIVE_MCP_SESSIONS: usize = 32;
 const MAX_CAPABILITY_REQUESTS: usize = 8;
@@ -214,9 +214,7 @@ fn resolve_session(value: Option<String>) -> Result<Arc<Mutex<LiveSession>>> {
     })
 }
 
-fn lock_session(
-    session: &Arc<Mutex<LiveSession>>,
-) -> Result<MutexGuard<'_, LiveSession>> {
+fn lock_session(session: &Arc<Mutex<LiveSession>>) -> Result<MutexGuard<'_, LiveSession>> {
     session.lock().map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -228,15 +226,13 @@ fn lock_session(
 fn parse_requested_capabilities(
     requested: Option<Vec<(String, String)>>,
 ) -> Result<Vec<Capability>> {
-    let raw = requested.map_or_else(
-        || {
-            DEFAULT_CAPABILITIES
-                .iter()
-                .map(|(capability, risk)| ((*capability).to_owned(), (*risk).to_owned()))
-                .collect()
-        },
-        |value| value,
-    );
+    let raw = match requested {
+        Some(value) => value,
+        None => DEFAULT_CAPABILITIES
+            .iter()
+            .map(|(capability, risk)| ((*capability).to_owned(), (*risk).to_owned()))
+            .collect(),
+    };
     if raw.len() > MAX_CAPABILITY_REQUESTS {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -284,6 +280,31 @@ fn parse_requested_capabilities(
         capabilities.push(parsed);
     }
     Ok(capabilities)
+}
+
+fn parse_optional_selector(value: Option<String>) -> Result<Option<FortressId>> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    if raw.is_empty() || raw.len() > MAX_FORTRESS_SELECTOR_BYTES {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "fortress_selector must be a bounded decimal u64",
+        ));
+    }
+    let parsed = raw.parse::<u64>().map_err(|_| {
+        error(
+            ErrorCode::InvalidRequest,
+            "fortress_selector must be a decimal u64",
+        )
+    })?;
+    if parsed == 0 {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "fortress_selector zero is reserved",
+        ));
+    }
+    Ok(Some(FortressId::new(parsed)))
 }
 
 fn requested_budget(
@@ -400,17 +421,38 @@ fn bridge_nonce(session_id: SessionId, endpoint: &str) -> Result<Vec<u8>> {
     Ok(Digest32::of_bytes(&bytes).as_bytes().to_vec())
 }
 
-fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSource> {
-    let endpoint = env::var("DFMCP_BRIDGE_ENDPOINT")
-        .unwrap_or_else(|_| "127.0.0.1:5000".to_owned());
-    let address = parse_loopback_endpoint(&endpoint)?;
-    let token = env::var("DFMCP_BRIDGE_TOKEN").map_err(|_| {
-        error(
+fn bridge_endpoint() -> Result<String> {
+    match env::var("DFMCP_BRIDGE_ENDPOINT") {
+        Ok(value) => Ok(value),
+        Err(env::VarError::NotPresent) => Ok("127.0.0.1:5000".to_owned()),
+        Err(env::VarError::NotUnicode(_)) => Err(error(
+            ErrorCode::InvalidRequest,
+            "DFMCP_BRIDGE_ENDPOINT must be valid UTF-8",
+        )),
+    }
+}
+
+fn bridge_token() -> Result<Vec<u8>> {
+    match env::var("DFMCP_BRIDGE_TOKEN") {
+        Ok(value) => Ok(value.into_bytes()),
+        Err(env::VarError::NotPresent) => Err(error(
             ErrorCode::CapabilityDenied,
             "DFMCP_BRIDGE_TOKEN is required in the MCP server environment",
-        )
-    })?;
-    let credentials = BridgeCredentials::new(token.into_bytes(), bridge_nonce(session_id, &endpoint)?)?;
+        )),
+        Err(env::VarError::NotUnicode(_)) => Err(error(
+            ErrorCode::InvalidRequest,
+            "DFMCP_BRIDGE_TOKEN must be valid UTF-8",
+        )),
+    }
+}
+
+fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSource> {
+    let endpoint = bridge_endpoint()?;
+    let address = parse_loopback_endpoint(&endpoint)?;
+    let credentials = BridgeCredentials::new(
+        bridge_token()?,
+        bridge_nonce(session_id, &endpoint)?,
+    )?;
     let connect_millis = env_u64("DFMCP_BRIDGE_CONNECT_MILLIS", 2_000, 1, 60_000)?;
     let read_millis = env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?;
     let write_millis = env_u64("DFMCP_BRIDGE_WRITE_MILLIS", 5_000, 1, 60_000)?;
@@ -550,6 +592,7 @@ fn affordances_json(session: &LiveSession) -> Vec<JsonValue> {
         (Capability::Observe, "observe-live", "fortress.observe", "observe"),
         (Capability::Query, "query-live", "fortress.query", "query"),
         (Capability::Query, "explain-live", "fortress.explain", "explain"),
+        (Capability::Observe, "wait-live", "fortress.wait", "wait"),
         (Capability::Doctor, "doctor-live", "fortress.doctor", "doctor"),
     ]
     .into_iter()
@@ -608,13 +651,15 @@ fn uncertainties_json(session: &LiveSession) -> Vec<JsonValue> {
         json!({}),
     ));
     if session.source_poisoned() {
+        let reason = match session.source_poison_reason() {
+            Some(value) => value,
+            None => "the exact failure reason is unavailable",
+        };
         values.push(uncertainty(
             "live-source-poisoned",
             "stale",
             "the negotiated live source failed and is permanently fenced",
-            session
-                .source_poison_reason()
-                .unwrap_or("the exact failure reason is unavailable"),
+            reason,
             Some("fortress.open_session"),
             json!({}),
         ));
@@ -624,11 +669,17 @@ fn uncertainties_json(session: &LiveSession) -> Vec<JsonValue> {
 
 fn references_json(session: &LiveSession) -> Vec<JsonValue> {
     let id = session.session_id.to_string();
-    vec![
+    let mut values = vec![
         json!({"kind": "resource", "uri": format!("df://session/{id}/summary")}),
         json!({"kind": "resource", "uri": format!("df://session/{id}/capabilities")}),
-        json!({"kind": "resource", "uri": format!("df://fortress/{}/anchor", session.current_anchor().map_or(FortressId::NIL, |anchor| anchor.fortress_id))}),
-    ]
+    ];
+    if let Ok(anchor) = session.current_anchor() {
+        values.push(json!({
+            "kind": "resource",
+            "uri": format!("df://fortress/{}/anchor", anchor.fortress_id),
+        }));
+    }
+    values
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -650,12 +701,7 @@ fn attach_turn(
         .session_id(session.session_id.to_string())
         .turn_id(format!("live-turn-{request_id}"))
         .request_id(request_id.to_string())
-        .continuity(
-            continuity,
-            basis.map(anchor_json),
-            None,
-            reset_reason,
-        )
+        .continuity(continuity, basis.map(anchor_json), None, reset_reason)
         .profile(profile)
         .briefing(briefing_json(session))
         .changes(changes)
@@ -675,8 +721,11 @@ fn attach_turn(
 
 fn recovery_class(code: ErrorCode) -> RecoveryClass {
     match code {
-        ErrorCode::CursorGap | ErrorCode::StaleAnchor => RecoveryClass::RefreshAndRetry,
+        ErrorCode::CursorGap | ErrorCode::StaleAnchor | ErrorCode::PreconditionsFailed => {
+            RecoveryClass::RefreshAndRetry
+        }
         ErrorCode::AdapterUnavailable | ErrorCode::AdapterFailure => RecoveryClass::Backoff,
+        ErrorCode::EffectIndeterminate => RecoveryClass::ReconciliationRequired,
         ErrorCode::VersionMismatch | ErrorCode::CompatibilityUnknown => {
             RecoveryClass::OperatorActionRequired
         }
@@ -693,6 +742,7 @@ fn error_payload(operation: &str, failure: &DfmcpError) -> JsonValue {
     let next = match class {
         RecoveryClass::RefreshAndRetry => Some("fortress.observe"),
         RecoveryClass::Backoff => Some("fortress.open_session"),
+        RecoveryClass::ReconciliationRequired => Some("fortress.wait"),
         _ => None,
     };
     json!({
@@ -758,6 +808,7 @@ fn session_error(
     profile: ObservationProfile,
     request_id: RequestId,
     basis: StateAnchor,
+    continuity: ContinuityStatus,
     failure: &DfmcpError,
 ) -> String {
     let recommendations = if session.source_poisoned() {
@@ -781,7 +832,7 @@ fn session_error(
         phase,
         profile,
         request_id,
-        ContinuityStatus::Stale,
+        continuity,
         Some(basis),
         None,
         Vec::new(),
@@ -792,12 +843,26 @@ fn session_error(
             "urgency": "now",
             "confidence": {"epistemic_state": "observed", "value": 1.0},
             "finding": failure.message,
-            "likely_consequence_if_ignored": "the agent may act from stale or incomplete live state",
+            "likely_consequence_if_ignored": if continuity == ContinuityStatus::Continuous {
+                "the request failed, but the prior canonical anchor remains valid"
+            } else {
+                "the agent may act from stale or incomplete live state"
+            },
             "evidence": [],
         })],
         recommendations,
         error_payload(operation, failure),
     )
+}
+
+fn hex_bytes(value: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(value.len().saturating_mul(2));
+    for byte in value {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 fn world_value_json(value: &WorldValue) -> JsonValue {
@@ -810,45 +875,53 @@ fn world_value_json(value: &WorldValue) -> JsonValue {
         WorldValue::Text(value) => json!(value),
         WorldValue::Entity(value) => json!({"entity_id": value.to_string()}),
         WorldValue::Coord(value) => json!({"x": value.x, "y": value.y, "z": value.z}),
-        WorldValue::Bytes(value) => json!({"byte_length": value.len()}),
+        WorldValue::Bytes(value) => json!({
+            "encoding": "hex",
+            "hex": hex_bytes(value),
+            "byte_length": value.len(),
+        }),
         WorldValue::List(values) => {
             JsonValue::Array(values.iter().map(world_value_json).collect())
         }
-        WorldValue::Object(values) => JsonValue::Object(
-            values
-                .iter()
-                .map(|(key, value)| (key.clone(), world_value_json(value)))
-                .collect(),
-        ),
+        WorldValue::Object(values) => {
+            let mut object = JsonMap::new();
+            for (key, value) in values {
+                object.insert(key.clone(), world_value_json(value));
+            }
+            JsonValue::Object(object)
+        }
     }
 }
 
 fn fact_json(fact: &Fact) -> JsonValue {
-    let presence = match fact.presence.as_ref() {
-        None => "known",
-        Some(FactPresence::Known(_)) => "known",
-        Some(FactPresence::Absent) => "absent",
-        Some(FactPresence::Unknown(_)) => "unknown",
-        Some(FactPresence::Unsupported(_)) => "unsupported",
-        Some(FactPresence::Omitted(_)) => "omitted",
-        Some(FactPresence::Redacted(_)) => "redacted",
-        Some(FactPresence::Stale(_)) => "stale",
-    };
-    let reason = match fact.presence.as_ref() {
-        Some(FactPresence::Unknown(value))
-        | Some(FactPresence::Unsupported(value))
-        | Some(FactPresence::Omitted(value))
-        | Some(FactPresence::Redacted(value)) => Some(value.clone()),
-        _ => None,
+    let (presence, epistemic_state, reason, stale_anchor) = match fact.presence.as_ref() {
+        None | Some(FactPresence::Known(_)) => ("known", "observed", None, None),
+        Some(FactPresence::Absent) => ("absent", "observed", None, None),
+        Some(FactPresence::Unknown(value)) => {
+            ("unknown", "unknown", Some(value.clone()), None)
+        }
+        Some(FactPresence::Unsupported(value)) => {
+            ("unsupported", "unknown", Some(value.clone()), None)
+        }
+        Some(FactPresence::Omitted(value)) => {
+            ("omitted", "unknown", Some(value.clone()), None)
+        }
+        Some(FactPresence::Redacted(value)) => {
+            ("redacted", "unknown", Some(value.clone()), None)
+        }
+        Some(FactPresence::Stale(anchor)) => {
+            ("stale", "stale", None, Some(anchor_json(*anchor)))
+        }
     };
     json!({
         "value": world_value_json(&fact.value),
         "presence": presence,
         "reason": reason,
+        "stale_anchor": stale_anchor,
         "observed_at_game_tick": fact.observed_at.get(),
         "source": format!("{:?}", fact.source),
         "source_digest": fact.source_digest.to_string(),
-        "epistemic_state": if presence == "known" { "observed" } else { presence },
+        "epistemic_state": epistemic_state,
     })
 }
 
@@ -874,8 +947,54 @@ fn parse_entity_id(value: &str) -> Result<EntityId> {
     Ok(EntityId::new(parsed))
 }
 
+fn validate_bootstrap_budget(adapter: &LiveMcpAdapter, budget: WorkBudget) -> Result<()> {
+    let capsule = adapter.last_capsule().ok_or_else(|| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "live bootstrap returned no source capsule",
+        )
+    })?;
+    let canonical_bytes = u64::try_from(capsule.canonical_bytes.len()).map_err(|_| {
+        error(
+            ErrorCode::BudgetExceeded,
+            "live capsule size cannot be represented in the negotiated budget",
+        )
+    })?;
+    if canonical_bytes > budget.max_bytes {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            format!(
+                "live capsule requires {canonical_bytes} bytes, exceeding the negotiated {}-byte ceiling",
+                budget.max_bytes
+            ),
+        ));
+    }
+    let projection = adapter.current_projection().ok_or_else(|| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "live bootstrap returned no canonical projection",
+        )
+    })?;
+    let entities = u32::try_from(projection.snapshot.graph.entities.len()).map_err(|_| {
+        error(
+            ErrorCode::BudgetExceeded,
+            "live projection entity count cannot be represented in u32",
+        )
+    })?;
+    if entities > budget.max_entities {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            format!(
+                "live projection contains {entities} entities, exceeding the negotiated {}-entity ceiling",
+                budget.max_entities
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[tool(
-    description = "Open an authenticated read-only live Dwarf Fortress session. Endpoint and bearer token are process configuration, never MCP arguments. Only observe, query, explain, and doctor capabilities are admitted."
+    description = "Open an authenticated read-only live Dwarf Fortress session. Endpoint and bearer token are process configuration, never MCP arguments. Only observe, query, and doctor capabilities are admitted."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -890,6 +1009,10 @@ pub fn fortress_open_session(
     max_actions: Option<u32>,
 ) -> String {
     let operation = "fortress.open_session";
+    let selector = match parse_optional_selector(fortress_selector) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
+    };
     let capabilities = match parse_requested_capabilities(requested_capabilities) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
@@ -905,6 +1028,16 @@ pub fn fortress_open_session(
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
     };
+    if sessions().is_ok_and(|registry| registry.len() >= MAX_LIVE_MCP_SESSIONS) {
+        return unbound_error(
+            operation,
+            AgentPhase::Bootstrap,
+            &error(
+                ErrorCode::BudgetExceeded,
+                "live MCP server reached its explicit session bound",
+            ),
+        );
+    }
     let session_id = match next_session_id() {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
@@ -961,6 +1094,9 @@ pub fn fortress_open_session(
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
     };
+    if let Err(failure) = validate_bootstrap_budget(&adapter, budget) {
+        return unbound_error(operation, AgentPhase::Bootstrap, &failure);
+    }
     let anchor = match adapter.current_anchor() {
         Some(value) => value,
         None => {
@@ -974,10 +1110,7 @@ pub fn fortress_open_session(
             );
         }
     };
-    if fortress_selector.as_ref().is_some_and(|selector| {
-        selector.len() > MAX_FORTRESS_SELECTOR_BYTES
-            || selector != &anchor.fortress_id.get().to_string()
-    }) {
+    if selector.is_some_and(|expected| expected != anchor.fortress_id) {
         return unbound_error(
             operation,
             AgentPhase::Bootstrap,
@@ -987,19 +1120,20 @@ pub fn fortress_open_session(
             ),
         );
     }
-    if paused.is_some_and(|expected| {
-        adapter
+    if let Some(expected) = paused {
+        let matches = adapter
             .last_capsule()
-            .is_none_or(|capsule| capsule.paused != expected)
-    }) {
-        return unbound_error(
-            operation,
-            AgentPhase::Bootstrap,
-            &error(
-                ErrorCode::PreconditionsFailed,
-                "live fortress pause state does not match the requested assertion",
-            ),
-        );
+            .is_some_and(|capsule| capsule.paused == expected);
+        if !matches {
+            return unbound_error(
+                operation,
+                AgentPhase::Bootstrap,
+                &error(
+                    ErrorCode::PreconditionsFailed,
+                    "live fortress pause state does not match the requested assertion",
+                ),
+            );
+        }
     }
     let grants = capability_grants(anchor.fortress_id, &capabilities);
     let session = Arc::new(Mutex::new(LiveSession {
@@ -1132,7 +1266,18 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
     };
     let (request_id, context) = match guard.next_context() {
         Ok(value) => value,
-        Err(failure) => return session_error(&guard, operation, AgentPhase::Orient, ObservationProfile::Pulse, RequestId::NIL, prior, &failure),
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                AgentPhase::Orient,
+                ObservationProfile::Pulse,
+                RequestId::NIL,
+                prior,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
     };
     let request = ObservationRequest {
         since: Some(prior.cursor),
@@ -1153,6 +1298,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                 ObservationProfile::Pulse,
                 request_id,
                 prior,
+                ContinuityStatus::Stale,
                 &failure,
             );
         }
@@ -1167,6 +1313,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                 ObservationProfile::Pulse,
                 request_id,
                 prior,
+                ContinuityStatus::Indeterminate,
                 &failure,
             );
         }
@@ -1214,6 +1361,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                 ObservationProfile::Pulse,
                 request_id,
                 prior,
+                ContinuityStatus::Indeterminate,
                 &failure,
             );
         }
@@ -1256,7 +1404,10 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let operation = "fortress.query";
-    let mode = mode.unwrap_or_else(|| "summary".to_owned());
+    let mode = match mode {
+        Some(value) => value,
+        None => "summary".to_owned(),
+    };
     if mode.is_empty() || mode.len() > MAX_MODE_BYTES {
         return unbound_error(
             operation,
@@ -1281,7 +1432,18 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
     };
     let (request_id, context) = match guard.next_context() {
         Ok(value) => value,
-        Err(failure) => return session_error(&guard, operation, AgentPhase::Inspect, ObservationProfile::Tactical, RequestId::NIL, anchor, &failure),
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                AgentPhase::Inspect,
+                ObservationProfile::Tactical,
+                RequestId::NIL,
+                anchor,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
     };
     let kinds = match mode.as_str() {
         "summary" => vec![EntityKind::Fortress],
@@ -1295,6 +1457,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 ObservationProfile::Tactical,
                 request_id,
                 anchor,
+                ContinuityStatus::Continuous,
                 &error(
                     ErrorCode::InvalidRequest,
                     "query mode must be summary, citizens, or all",
@@ -1326,6 +1489,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 ObservationProfile::Tactical,
                 request_id,
                 anchor,
+                ContinuityStatus::Continuous,
                 &failure,
             );
         }
@@ -1382,7 +1546,18 @@ fn read_only_tool_error(
     };
     let (request_id, _) = match guard.next_context() {
         Ok(value) => value,
-        Err(failure) => return session_error(&guard, operation, phase, ObservationProfile::Tactical, RequestId::NIL, anchor, &failure),
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                phase,
+                ObservationProfile::Tactical,
+                RequestId::NIL,
+                anchor,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
     };
     let failure = error(
         ErrorCode::CapabilityDenied,
@@ -1429,9 +1604,73 @@ pub fn fortress_commit(session_id: Option<String>, _plan_digest: String) -> Stri
     read_only_tool_error(session_id, "fortress.commit", AgentPhase::Commit)
 }
 
-#[tool(description = "No live mutation work can exist in bridge protocol V1; reports the read-only posture.")]
+#[tool(description = "Report that the authenticated read-only session has no active mutation work, then suggest a live observation pulse when useful.")]
 pub fn fortress_wait(session_id: Option<String>) -> String {
-    read_only_tool_error(session_id, "fortress.wait", AgentPhase::Verify)
+    let operation = "fortress.wait";
+    let session = match resolve_session(session_id) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
+    };
+    let mut guard = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
+    };
+    let anchor = match guard.current_anchor() {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
+    };
+    let (request_id, _) = match guard.next_context() {
+        Ok(value) => value,
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                AgentPhase::Verify,
+                ObservationProfile::Pulse,
+                RequestId::NIL,
+                anchor,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
+    };
+    let recommendations = if guard.has_grant(Capability::Observe) && !guard.source_poisoned() {
+        vec![recommendation(
+            "observe-after-empty-wait",
+            "fortress.observe",
+            "no mutation work exists; refresh live state only when new information is valuable",
+            "medium",
+            "medium",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"session_id": guard.session_id.to_string()}),
+        )]
+    } else {
+        Vec::new()
+    };
+    attach_turn(
+        &guard,
+        operation,
+        AgentPhase::Verify,
+        ObservationProfile::Pulse,
+        request_id,
+        ContinuityStatus::Continuous,
+        Some(anchor),
+        None,
+        Vec::new(),
+        Vec::new(),
+        recommendations,
+        json!({
+            "ok": true,
+            "session_id": guard.session_id.to_string(),
+            "request_id": request_id.to_string(),
+            "active_work": [],
+            "terminal": true,
+            "summary": "bridge protocol V1 has no mutation work to poll",
+            "anchor": anchor_json(anchor),
+        }),
+    )
 }
 
 #[tool(description = "Unavailable in authenticated live bridge protocol V1; fails closed without cancellation effects.")]
@@ -1468,7 +1707,18 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
     };
     let (request_id, context) = match guard.next_context() {
         Ok(value) => value,
-        Err(failure) => return session_error(&guard, operation, AgentPhase::Inspect, ObservationProfile::Forensic, RequestId::NIL, anchor, &failure),
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                AgentPhase::Inspect,
+                ObservationProfile::Forensic,
+                RequestId::NIL,
+                anchor,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
     };
     if let Err(failure) = context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
         return session_error(
@@ -1478,6 +1728,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             ObservationProfile::Forensic,
             request_id,
             anchor,
+            ContinuityStatus::Continuous,
             &failure,
         );
     }
@@ -1489,6 +1740,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             ObservationProfile::Forensic,
             request_id,
             anchor,
+            ContinuityStatus::Indeterminate,
             &error(
                 ErrorCode::InternalInvariantViolation,
                 "live session lost its canonical projection",
@@ -1507,6 +1759,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
                         ObservationProfile::Forensic,
                         request_id,
                         anchor,
+                        ContinuityStatus::Continuous,
                         &failure,
                     );
                 }
@@ -1519,6 +1772,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
                     ObservationProfile::Forensic,
                     request_id,
                     anchor,
+                    ContinuityStatus::Continuous,
                     &error(
                         ErrorCode::InvalidRequest,
                         "canonical entity ID is not present at the current anchor",
@@ -1590,7 +1844,18 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
     };
     let (request_id, context) = match guard.next_context() {
         Ok(value) => value,
-        Err(failure) => return session_error(&guard, operation, AgentPhase::Inspect, ObservationProfile::Forensic, RequestId::NIL, anchor, &failure),
+        Err(failure) => {
+            return session_error(
+                &guard,
+                operation,
+                AgentPhase::Inspect,
+                ObservationProfile::Forensic,
+                RequestId::NIL,
+                anchor,
+                ContinuityStatus::Continuous,
+                &failure,
+            );
+        }
     };
     let health = match guard.adapter.health(&context) {
         Ok(value) => value,
@@ -1602,6 +1867,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                 ObservationProfile::Forensic,
                 request_id,
                 anchor,
+                ContinuityStatus::Continuous,
                 &failure,
             );
         }
@@ -1705,7 +1971,10 @@ mod tests {
             ("query".to_owned(), "read_only".to_owned()),
             ("doctor".to_owned(), "read_only".to_owned()),
         ]))?;
-        assert_eq!(parsed, vec![Capability::Observe, Capability::Query, Capability::Doctor]);
+        assert_eq!(
+            parsed,
+            vec![Capability::Observe, Capability::Query, Capability::Doctor]
+        );
         assert!(
             parse_requested_capabilities(Some(vec![(
                 "control_clock".to_owned(),
@@ -1725,9 +1994,7 @@ mod tests {
 
     #[test]
     fn live_budget_is_bounded() {
-        assert!(
-            requested_budget(None, None, None, None, None, None).is_ok()
-        );
+        assert!(requested_budget(None, None, None, None, None, None).is_ok());
         assert!(
             requested_budget(Some(60_001), None, None, None, None, None).is_err()
         );
@@ -1752,7 +2019,12 @@ mod tests {
             AgentPhase::Orient,
             &error(ErrorCode::SessionNotFound, "missing"),
         );
-        let value: JsonValue = serde_json::from_str(&encoded)?;
+        let value: JsonValue = serde_json::from_str(&encoded).map_err(|source| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                format!("test JSON decode failed: {source}"),
+            )
+        })?;
         assert_eq!(value["ok"], false);
         assert_eq!(value["agent_turn"]["operation"], "fortress.observe");
         assert_eq!(value["agent_turn"]["continuity"]["status"], "bootstrap");
@@ -1760,15 +2032,40 @@ mod tests {
     }
 
     #[test]
-    fn world_values_have_lossless_machine_projections() {
+    fn world_values_have_deterministic_machine_projections() {
         assert_eq!(world_value_json(&WorldValue::Bool(true)), json!(true));
         assert_eq!(
             world_value_json(&WorldValue::Coord(dfmcp_core::MapCoord::new(1, 2, 3))),
             json!({"x": 1, "y": 2, "z": 3})
         );
         assert_eq!(
-            world_value_json(&WorldValue::Bytes(vec![1, 2, 3])),
-            json!({"byte_length": 3})
+            world_value_json(&WorldValue::Bytes(vec![0, 1, 254, 255])),
+            json!({
+                "encoding": "hex",
+                "hex": "0001feff",
+                "byte_length": 4,
+            })
         );
+    }
+
+    #[test]
+    fn omitted_facts_are_unknown_not_a_fake_epistemic_class() {
+        let fact = Fact::with_presence(
+            FactPresence::Omitted("not requested".to_owned()),
+            GameTick::new(7),
+            FactSource::DfhackField("citizen.name".to_owned()),
+            Digest32::of_bytes(b"source"),
+        );
+        let projected = fact_json(&fact);
+        assert_eq!(projected["presence"], "omitted");
+        assert_eq!(projected["epistemic_state"], "unknown");
+        assert_eq!(projected["reason"], "not requested");
+    }
+
+    #[test]
+    fn session_error_continuity_is_explicit_at_call_sites() {
+        assert_eq!(recovery_class(ErrorCode::InvalidRequest), RecoveryClass::NeverUnchanged);
+        assert_eq!(recovery_class(ErrorCode::CursorGap), RecoveryClass::RefreshAndRetry);
+        assert_eq!(recovery_class(ErrorCode::AdapterFailure), RecoveryClass::Backoff);
     }
 }
