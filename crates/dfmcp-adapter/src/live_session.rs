@@ -6,6 +6,12 @@
 //! may be the real [`DfHackRpcClient`](crate::DfHackRpcClient) or a deterministic
 //! laboratory double. It refuses empty nonterminal pages, total counts above
 //! the caller or capsule ceiling, page-count overruns, and assembler drift.
+//!
+//! One DFHack RPC invocation is internally suspended by DFHack. Multiple RPC
+//! pages are not one atomic game read. Therefore V1 permits a multipage capsule
+//! only while the game reports itself paused on every page. The default caller
+//! should request the maximum page size so ordinary fortresses complete in one
+//! RPC and do not need this weaker paused-world fallback.
 
 use std::io::{Read, Write};
 
@@ -135,6 +141,13 @@ pub fn read_complete_observation_bounded<T: LiveObservationSource>(
                 "bridge returned an empty nonterminal citizen page",
             ));
         }
+        if !page.complete && !page.paused {
+            return Err(error(
+                ErrorCode::PreconditionsFailed,
+                "bridge V1 cannot assemble a coherent multipage observation while Dwarf Fortress is running; request a larger page or pause the game",
+            )
+            .retryable(true));
+        }
         assembler.push_page(page)?;
         if assembler.is_complete() {
             return assembler.finalize();
@@ -262,13 +275,34 @@ mod tests {
     }
 
     #[test]
-    fn drives_multiple_pages_to_one_complete_capsule() -> Result<()> {
+    fn drives_multiple_paused_pages_to_one_complete_capsule() -> Result<()> {
         let mut source = source(vec![page(0, 3, &[1, 2], false), page(2, 3, &[3], true)]);
         let capsule = read_complete_observation(&mut source, 2, true)?;
         assert!(capsule.citizen_coverage.proves_complete_roster());
         assert!(capsule.names_included);
         assert_eq!(capsule.citizens.len(), 3);
         assert_eq!(source.calls, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn moving_multipage_observation_is_rejected_before_assembly() {
+        let mut first = page(0, 3, &[1, 2], false);
+        first.paused = false;
+        let mut source = source(vec![first, page(2, 3, &[3], true)]);
+        let result = read_complete_observation(&mut source, 2, true);
+        assert!(result.is_err());
+        assert_eq!(source.calls, 1);
+    }
+
+    #[test]
+    fn moving_single_page_observation_is_admitted() -> Result<()> {
+        let mut only = page(0, 2, &[1, 2], true);
+        only.paused = false;
+        let mut source = source(vec![only]);
+        let capsule = read_complete_observation(&mut source, 2, true)?;
+        assert!(!capsule.paused);
+        assert_eq!(source.calls, 1);
         Ok(())
     }
 
