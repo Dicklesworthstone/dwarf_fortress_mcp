@@ -10,8 +10,8 @@ use dfmcp_mcp::server::{
 use serde_json::Value;
 
 #[test]
-fn laboratory_tools_execute_pause_and_reject_unwired_planners(
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn laboratory_tools_execute_supported_pause_flow()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
     let open_raw = fortress_open_session(
         Some(true),
         Some("1".to_owned()),
@@ -42,48 +42,10 @@ fn laboratory_tools_execute_pause_and_reject_unwired_planners(
     ))?;
     assert_eq!(query["ok"], true);
 
-    let blueprint: Value = serde_json::from_str(&fortress_plan(
-        Some(session_id.clone()),
-        Some("dining hall".to_owned()),
-        None,
-        Some("dining_hall".to_owned()),
-        Some(0),
-        Some(0),
-        Some(100),
-        Some(6),
-        Some(6),
-        None,
-        None,
-    ))?;
-    assert_eq!(blueprint["ok"], false);
-
-    let logistics: Value = serde_json::from_str(&fortress_plan(
-        Some(session_id.clone()),
-        Some("drink quota".to_owned()),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some("DRINK".to_owned()),
-        Some(30),
-    ))?;
-    assert_eq!(logistics["ok"], false);
-
     let plan: Value = serde_json::from_str(&fortress_plan(
         Some(session_id.clone()),
         Some("unpause simulation".to_owned()),
         Some(false),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
     ))?;
     assert_eq!(plan["ok"], true);
     let digest = plan["plan_digest"]
@@ -91,10 +53,7 @@ fn laboratory_tools_execute_pause_and_reject_unwired_planners(
         .ok_or("plan_digest missing")?
         .to_owned();
 
-    let commit: Value = serde_json::from_str(&fortress_commit(
-        Some(session_id.clone()),
-        digest,
-    ))?;
+    let commit: Value = serde_json::from_str(&fortress_commit(Some(session_id.clone()), digest))?;
     assert_eq!(commit["ok"], true);
 
     let wait: Value = serde_json::from_str(&fortress_wait(Some(session_id.clone())))?;

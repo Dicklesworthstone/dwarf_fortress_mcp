@@ -83,14 +83,6 @@ fn test_concurrent_sessions_are_isolated() -> std::result::Result<(), Box<dyn st
         Some(session_a_id.clone()),
         Some("unpause A".to_owned()),
         Some(false),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
     );
     let plan_a: Value = serde_json::from_str(&plan_a_raw)?;
     assert_eq!(plan_a["ok"], true);

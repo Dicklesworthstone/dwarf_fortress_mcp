@@ -850,11 +850,12 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
     };
-    let guard = match session.lock() {
+    let mut guard = match session.lock() {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
     };
-    let ctx = context_for(&guard, guard.next_request_id);
+    let rid = next_request_id(&mut guard);
+    let ctx = context_for(&guard, rid);
     if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
         return error_payload("fortress.explain", &error.to_string());
     }
