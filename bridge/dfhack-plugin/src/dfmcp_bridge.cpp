@@ -17,6 +17,7 @@
 #include "modules/Units.h"
 #include "modules/World.h"
 
+#include "df/coord.h"
 #include "df/unit.h"
 
 using namespace DFHack;
@@ -351,7 +352,6 @@ command_result ReadObservation(color_ostream &,
         record->set_baby(Units::isBaby(unit));
         record->set_child(Units::isChild(unit));
         record->set_adult(Units::isAdult(unit));
-        record->set_military(unit->military.squad_id >= 0);
     }
 
     out->set_accepted(true);
@@ -362,9 +362,9 @@ command_result bridge_status(color_ostream &out,
                              std::vector<std::string> &)
 {
     const char *configured = std::getenv("DFMCP_BRIDGE_TOKEN");
-    const bool token_configured = configured &&
-        std::string(configured).size() >= MIN_TOKEN_BYTES &&
-        std::string(configured).size() <= MAX_TOKEN_BYTES;
+    const std::size_t configured_size = configured ? std::string(configured).size() : 0;
+    const bool token_configured = configured_size >= MIN_TOKEN_BYTES &&
+        configured_size <= MAX_TOKEN_BYTES;
     out.print("dfmcp_bridge %s protocol %u.%u\n", BRIDGE_VERSION,
               PROTOCOL_MAJOR, PROTOCOL_MINOR);
     out.print("token policy satisfied: %s\n",
