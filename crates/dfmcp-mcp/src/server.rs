@@ -94,6 +94,14 @@ const MAX_LABEL_BYTES: usize = 256;
 const MAX_MODE_BYTES: usize = 64;
 const U128_HEX_ID_BYTES: usize = 32;
 const DIGEST_HEX_BYTES: usize = 64;
+const MAX_LAB_BUDGET: WorkBudget = WorkBudget {
+    max_wall_millis: 60_000,
+    max_game_ticks: 1_000_000,
+    max_entities: 1_000_000,
+    max_bytes: 16 * 1024 * 1024,
+    max_output_tokens: 65_536,
+    max_actions: 4_096,
+};
 
 fn sessions() -> MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LabSession>>>> {
     match SESSIONS.lock() {
@@ -176,6 +184,23 @@ fn next_request_id(session: &mut LabSession) -> Result<u128> {
     })?;
     session.next_request_id = next;
     Ok(next)
+}
+
+fn validate_lab_budget(budget: WorkBudget) -> Result<()> {
+    budget.validate()?;
+    if budget.max_wall_millis > MAX_LAB_BUDGET.max_wall_millis
+        || budget.max_game_ticks > MAX_LAB_BUDGET.max_game_ticks
+        || budget.max_entities > MAX_LAB_BUDGET.max_entities
+        || budget.max_bytes > MAX_LAB_BUDGET.max_bytes
+        || budget.max_output_tokens > MAX_LAB_BUDGET.max_output_tokens
+        || budget.max_actions > MAX_LAB_BUDGET.max_actions
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "requested work budget exceeds the process-local laboratory ceiling",
+        ));
+    }
+    Ok(())
 }
 
 fn seed_snapshot(fortress_id: FortressId, paused: bool) -> WorldSnapshot {
@@ -402,7 +427,7 @@ pub fn fortress_open_session(
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
 ) -> String {
-    let paused = paused.map_or(true, |value| value);
+    let paused = paused.is_none_or(|value| value);
     let selector_str = fortress_selector.map_or_else(|| "1".to_owned(), |value| value);
     if selector_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
         return coded_error_payload(
@@ -464,7 +489,7 @@ pub fn fortress_open_session(
         max_actions: max_actions
             .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions, |value| value),
     };
-    if let Err(error) = budget.validate() {
+    if let Err(error) = validate_lab_budget(budget) {
         return dfmcp_error_payload("fortress.open_session", &error);
     }
 
@@ -711,7 +736,7 @@ pub fn fortress_plan(
     };
     let snapshot = guard.adapter.snapshot();
 
-    let paused_target = paused_target.map_or(false, |value| value);
+    let paused_target = paused_target.is_some_and(|value| value);
     let intent = Intent {
         id: IntentId::new(rid),
         anchor: snapshot.anchor(),
@@ -781,27 +806,25 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
         Err(_) => return mutex_poisoned_payload("fortress.commit"),
     };
 
+    // Receipt replay is independent of whichever later plan is currently
+    // pending. Reauthorize first, then return the exact stable payload without
+    // consuming or replacing that unrelated plan.
+    if let Some(payload) = guard.commit_receipts.get(&plan_digest).cloned() {
+        let (_, replay_context) = match next_context(&mut guard) {
+            Ok(value) => value,
+            Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+        };
+        if let Err(error) =
+            replay_context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)
+        {
+            return dfmcp_error_payload("fortress.commit", &error);
+        }
+        return payload;
+    }
+
     let pending = match guard.pending.take() {
         Some(pending) => pending,
         None => {
-            // ADR-006 idempotency: a duplicate commit with the same digest
-            // returns the prior receipt verbatim instead of erroring or
-            // reapplying effects.
-            if let Some(payload) = guard.commit_receipts.get(&plan_digest).cloned() {
-                let (_, replay_context) = match next_context(&mut guard) {
-                    Ok(value) => value,
-                    Err(error) => return dfmcp_error_payload("fortress.commit", &error),
-                };
-                if let Err(error) = replay_context.authorize(
-                    Capability::ControlClock,
-                    RiskTier::Reversible,
-                    &[],
-                    None,
-                ) {
-                    return dfmcp_error_payload("fortress.commit", &error);
-                }
-                return payload;
-            }
             return coded_error_payload(
                 "fortress.commit",
                 ErrorCode::InvalidPlan,

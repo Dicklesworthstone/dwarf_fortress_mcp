@@ -140,3 +140,22 @@ fn test_unknown_session_rejection() -> std::result::Result<(), Box<dyn std::erro
 
     Ok(())
 }
+
+#[test]
+fn test_session_rejects_unbounded_client_budget()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let response: Value = serde_json::from_str(&fortress_open_session(
+        Some(true),
+        Some("303".to_owned()),
+        None,
+        Some(u64::MAX),
+        None,
+        None,
+        None,
+        None,
+        None,
+    ))?;
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "budget_exceeded");
+    Ok(())
+}

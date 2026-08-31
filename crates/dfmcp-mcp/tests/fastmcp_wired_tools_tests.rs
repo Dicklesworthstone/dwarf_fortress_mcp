@@ -64,7 +64,8 @@ fn laboratory_tools_execute_supported_pause_flow()
     assert_eq!(rejected["error"]["code"], "conflict");
 
     // A mismatched digest must not consume the pending sealed plan.
-    let commit: Value = serde_json::from_str(&fortress_commit(Some(session_id.clone()), digest))?;
+    let commit_raw = fortress_commit(Some(session_id.clone()), digest.clone());
+    let commit: Value = serde_json::from_str(&commit_raw)?;
     assert_eq!(commit["ok"], true);
 
     let wait: Value = serde_json::from_str(&fortress_wait(Some(session_id.clone())))?;
@@ -74,6 +75,41 @@ fn laboratory_tools_execute_supported_pause_flow()
             .as_str()
             .is_some_and(|value| value.starts_with("task_act_"))
     );
+
+    let second_plan: Value = serde_json::from_str(&fortress_plan(
+        Some(session_id.clone()),
+        Some("pause simulation again".to_owned()),
+        Some(true),
+    ))?;
+    let second_digest = second_plan["plan_digest"]
+        .as_str()
+        .ok_or("second plan_digest missing")?
+        .to_owned();
+    let second_commit: Value =
+        serde_json::from_str(&fortress_commit(Some(session_id.clone()), second_digest))?;
+    assert_eq!(second_commit["ok"], true);
+    assert_eq!(second_commit["paused"], true);
+
+    let pending_plan: Value = serde_json::from_str(&fortress_plan(
+        Some(session_id.clone()),
+        Some("leave a newer plan pending".to_owned()),
+        Some(false),
+    ))?;
+    let pending_digest = pending_plan["plan_digest"]
+        .as_str()
+        .ok_or("pending plan_digest missing")?
+        .to_owned();
+
+    // Replaying an older receipt remains stable after a newer plan commits and
+    // must not consume an unrelated plan that was prepared afterward.
+    assert_eq!(
+        fortress_commit(Some(session_id.clone()), digest),
+        commit_raw
+    );
+    let pending_commit: Value =
+        serde_json::from_str(&fortress_commit(Some(session_id.clone()), pending_digest))?;
+    assert_eq!(pending_commit["ok"], true);
+    assert_eq!(pending_commit["paused"], false);
 
     let explain: Value = serde_json::from_str(&fortress_explain(
         Some(session_id.clone()),
