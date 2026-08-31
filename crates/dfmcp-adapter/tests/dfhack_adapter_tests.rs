@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Integration tests for the out-of-process `DfhackAdapter` and `IpcTransceiver`.
+//! Integration tests for the explicitly legacy opaque-framing laboratory.
 
 use std::collections::VecDeque;
 use std::error::Error;
@@ -8,18 +8,17 @@ use std::io::{Read, Write};
 use std::time::Duration;
 
 use dfmcp_adapter::{
-    CompatibilityLevel, DfhackAdapter, DfhackAdapterConfig, GameAdapter, HealthStatus, IpcFrame,
-    IpcMessageType, IpcTransceiver, TransceiverConfig,
+    CompatibilityLevel, GameAdapter, HealthStatus, IpcFrame, IpcMessageType, IpcTransceiver,
+    LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig, TransceiverConfig,
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, ErrorCode, FortressId, GameTick,
     ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 
-/// Duplex in-memory pipe simulating an IPC channel to DFHack.
 struct MockDuplexStream {
-    pub incoming: VecDeque<u8>,
-    pub outgoing: Vec<u8>,
+    incoming: VecDeque<u8>,
+    outgoing: Vec<u8>,
 }
 
 impl MockDuplexStream {
@@ -38,7 +37,7 @@ impl MockDuplexStream {
 }
 
 impl Read for MockDuplexStream {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if self.incoming.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
@@ -47,9 +46,9 @@ impl Read for MockDuplexStream {
         }
 
         let mut read_count = 0;
-        for byte in buf.iter_mut() {
-            if let Some(b) = self.incoming.pop_front() {
-                *byte = b;
+        for byte in buffer.iter_mut() {
+            if let Some(value) = self.incoming.pop_front() {
+                *byte = value;
                 read_count += 1;
             } else {
                 break;
@@ -60,9 +59,9 @@ impl Read for MockDuplexStream {
 }
 
 impl Write for MockDuplexStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.outgoing.extend_from_slice(buf);
-        Ok(buf.len())
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.outgoing.extend_from_slice(buffer);
+        Ok(buffer.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -132,10 +131,10 @@ fn test_context() -> OperationContext {
 }
 
 #[test]
-fn test_transceiver_request_response_round_trip() -> Result<(), Box<dyn Error>> {
+fn transceiver_request_response_round_trip() -> Result<(), Box<dyn Error>> {
     let mut stream = MockDuplexStream::new();
-    let resp_frame = IpcFrame::new(IpcMessageType::HealthResponse, vec![0x00, 0x01])?;
-    stream.queue_response(&resp_frame)?;
+    let response = IpcFrame::new(IpcMessageType::HealthResponse, vec![0x00, 0x01])?;
+    stream.queue_response(&response)?;
 
     let config = TransceiverConfig {
         request_timeout: Duration::from_millis(500),
@@ -174,9 +173,10 @@ fn transceiver_rejects_frame_header_above_byte_budget() {
 }
 
 #[test]
-fn dfhack_health_propagates_context_cancellation() {
+fn legacy_probe_health_propagates_context_cancellation() {
     let stream = MockDuplexStream::new();
-    let mut adapter = DfhackAdapter::new(stream, DfhackAdapterConfig::default());
+    let mut adapter =
+        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
     let mut context = test_context();
     context.cancellation_requested = true;
     let result = adapter.health(&context);
@@ -184,20 +184,18 @@ fn dfhack_health_propagates_context_cancellation() {
 }
 
 #[test]
-fn test_dfhack_adapter_health_check() -> Result<(), Box<dyn Error>> {
+fn legacy_probe_health_never_claims_dfhack_state() -> Result<(), Box<dyn Error>> {
     let mut stream = MockDuplexStream::new();
-    // Status 0 (Healthy), Paused 1 (true)
-    let resp_frame = IpcFrame::new(IpcMessageType::HealthResponse, vec![0x00, 0x01])?;
-    stream.queue_response(&resp_frame)?;
+    let response = IpcFrame::new(IpcMessageType::HealthResponse, vec![0x00, 0x01])?;
+    stream.queue_response(&response)?;
 
-    let mut adapter = DfhackAdapter::new(stream, DfhackAdapterConfig::default());
-    let ctx = test_context();
-
-    let health = adapter.health(&ctx)?;
+    let mut adapter =
+        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
+    let health = adapter.health(&test_context())?;
     assert_eq!(health.status, HealthStatus::Degraded);
     assert_eq!(health.paused, None);
     assert!(!health.fortress_loaded);
-    assert_eq!(health.identity.name, "dfhack-oop-bridge-probe");
+    assert_eq!(health.identity.name, "dfhack-opaque-framing-laboratory");
     assert_eq!(health.identity.dwarf_fortress_version, "unverified");
     assert_eq!(health.identity.compatibility, CompatibilityLevel::Unknown);
     assert_eq!(
@@ -210,12 +208,12 @@ fn test_dfhack_adapter_health_check() -> Result<(), Box<dyn Error>> {
 #[test]
 fn configured_version_expectations_do_not_claim_a_handshake() {
     let stream = MockDuplexStream::new();
-    let config = DfhackAdapterConfig {
+    let config = LegacyBridgeProbeConfig {
         target_df_version: "53.16".to_owned(),
         target_dfhack_version: "53.16-r1.1".to_owned(),
-        ..DfhackAdapterConfig::default()
+        ..LegacyBridgeProbeConfig::default()
     };
-    let adapter = DfhackAdapter::new(stream, config);
+    let adapter = LegacyBridgeProbeAdapter::new(stream, config);
     let identity = adapter.identity();
     assert_eq!(identity.dwarf_fortress_version, "unverified");
     assert_eq!(identity.dfhack_version, "unverified");
@@ -223,15 +221,16 @@ fn configured_version_expectations_do_not_claim_a_handshake() {
 }
 
 #[test]
-fn test_dfhack_adapter_checkpoint_and_restore_fail_closed() -> Result<(), Box<dyn Error>> {
+fn legacy_probe_checkpoint_and_restore_fail_closed() {
     let stream = MockDuplexStream::new();
-    let mut adapter = DfhackAdapter::new(stream, DfhackAdapterConfig::default());
-    let ctx = test_context();
+    let mut adapter =
+        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
+    let context = test_context();
 
-    let checkpoint = adapter.checkpoint("pre-siege-save", &ctx);
-    assert!(checkpoint.is_err());
-
-    let restore = adapter.restore(dfmcp_core::CheckpointId::new(1), &ctx);
-    assert!(restore.is_err());
-    Ok(())
+    assert!(adapter.checkpoint("pre-siege-save", &context).is_err());
+    assert!(
+        adapter
+            .restore(dfmcp_core::CheckpointId::new(1), &context)
+            .is_err()
+    );
 }
