@@ -26,6 +26,7 @@ pub enum ErrorCode {
     CancellationIncomplete,
     RestoreRequired,
     CorruptLedger,
+    ChecksumMismatch,
     CompatibilityUnknown,
     InternalInvariantViolation,
 }
@@ -58,6 +59,7 @@ impl ErrorCode {
             Self::CancellationIncomplete => "cancellation_incomplete",
             Self::RestoreRequired => "restore_required",
             Self::CorruptLedger => "corrupt_ledger",
+            Self::ChecksumMismatch => "checksum_mismatch",
             Self::CompatibilityUnknown => "compatibility_unknown",
             Self::InternalInvariantViolation => "internal_invariant_violation",
         }
