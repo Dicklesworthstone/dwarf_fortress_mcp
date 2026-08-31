@@ -288,6 +288,7 @@ command_result ReadObservation(color_ostream &,
         return CR_OK;
     }
     out->set_client_nonce(in->client_nonce());
+    out->set_bridge_generation(BRIDGE_GENERATION);
     if (!validate_protocol(in->protocol_major(), in->protocol_minor(),
                            failure_code, failure_message) ||
         !authenticate(in->bearer_token(), failure_code, failure_message))
@@ -296,7 +297,6 @@ command_result ReadObservation(color_ostream &,
         out->set_failure_message(failure_message);
         return CR_OK;
     }
-    out->set_bridge_generation(BRIDGE_GENERATION);
 
     const std::uint32_t requested =
         in->has_max_citizens() ? in->max_citizens() : DEFAULT_MAX_CITIZENS;
