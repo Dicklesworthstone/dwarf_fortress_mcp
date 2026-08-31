@@ -17,19 +17,20 @@ use dfmcp_core::{
     ErrorCode, FortressId, GameTick, MapCoord, ObservationCursor, Result, StateAnchor,
 };
 use dfmcp_world::{
-    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph,
-    WorldSnapshot,
+    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value,
+    WorldGraph, WorldSnapshot,
 };
 
 use crate::{CitizenRecord, LiveObservationCapsule};
 
-pub const LIVE_PROJECTION_SCHEMA: &str = "dfmcp.live_world_projection/1";
+pub const LIVE_PROJECTION_SCHEMA: &str = "dfmcp.live_world_projection/2";
 pub const TICKS_PER_DAY: u64 = 1_200;
 pub const DAYS_PER_MONTH: u64 = 28;
 pub const MONTHS_PER_YEAR: u64 = 12;
 pub const TICKS_PER_YEAR: u64 = TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
 pub const FORTRESS_ENTITY_ID: EntityId = EntityId::new(u64::MAX);
 const CITIZEN_MEMBERSHIP_EDGE_NAMESPACE: u128 = 1u128 << 127;
+const CITIZEN_NAMES_DOMAIN: &str = "fortress.citizens.names";
 
 const COMPLETE_DOMAINS: [&str; 3] = [
     "fortress.summary",
@@ -173,6 +174,8 @@ impl LiveWorldProjection {
                 ));
             }
         }
+        validate_name_coverage(&self.receipt.coverage, capsule.names_included)?;
+
         let expected_entities = capsule.citizens.len().checked_add(1).ok_or_else(|| {
             error(
                 ErrorCode::BudgetExceeded,
@@ -202,6 +205,9 @@ impl LiveWorldProjection {
             for fact in entity.fields.values() {
                 validate_fact_source(fact, capsule.content_digest)?;
             }
+            if entity.kind == EntityKind::Unit {
+                validate_projected_name(entity, capsule.names_included)?;
+            }
         }
         for edge in self.snapshot.graph.edges.values() {
             if edge.kind != EdgeKind::MemberOf
@@ -219,6 +225,49 @@ impl LiveWorldProjection {
         }
         Ok(())
     }
+}
+
+fn validate_name_coverage(coverage: &CoverageReport, names_included: bool) -> Result<()> {
+    let domain = coverage.domains.get(CITIZEN_NAMES_DOMAIN).ok_or_else(|| {
+        error(
+            ErrorCode::CorruptLedger,
+            "live projection is missing citizen-name coverage",
+        )
+    })?;
+    let valid = if names_included {
+        domain.status == CoverageStatus::Complete && domain.reason.is_none()
+    } else {
+        domain.status == CoverageStatus::Omitted && domain.reason.is_some()
+    };
+    if !valid {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "citizen-name coverage disagrees with the source capsule projection",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_projected_name(entity: &EntityRecord, names_included: bool) -> Result<()> {
+    let fact = entity.fields.get("name").ok_or_else(|| {
+        error(
+            ErrorCode::CorruptLedger,
+            "live unit projection is missing its name fact",
+        )
+    })?;
+    let valid = if names_included {
+        fact.presence.is_none() && matches!(fact.value, Value::Text(_))
+    } else {
+        matches!(fact.presence, Some(FactPresence::Omitted(_)))
+            && matches!(fact.value, Value::Null)
+    };
+    if !valid {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "live unit name fact disagrees with citizen-name coverage",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_fact_source(fact: &Fact, source_digest: Digest32) -> Result<()> {
@@ -328,6 +377,7 @@ pub fn project_live_capsule(
         }
         let entity = citizen_entity(
             citizen,
+            capsule.names_included,
             capsule.content_digest,
             observed_at,
             generation,
@@ -366,7 +416,7 @@ pub fn project_live_capsule(
             ..WorldGraph::default()
         },
     );
-    let coverage = projection_coverage(snapshot.anchor());
+    let coverage = projection_coverage(snapshot.anchor(), capsule.names_included);
     coverage.validate()?;
     let receipt = LiveProjectionReceipt {
         schema: LIVE_PROJECTION_SCHEMA,
@@ -446,6 +496,14 @@ fn fortress_entity(
     );
     insert_fact(
         &mut fields,
+        "citizen_names_observed",
+        Value::Bool(capsule.names_included),
+        observed_at,
+        digest,
+        "coverage.citizen_names",
+    );
+    insert_fact(
+        &mut fields,
         "bridge_generation",
         Value::U64(capsule.bridge.bridge_generation),
         observed_at,
@@ -495,6 +553,7 @@ fn fortress_entity(
 
 fn citizen_entity(
     citizen: &CitizenRecord,
+    names_included: bool,
     source_digest: Digest32,
     observed_at: GameTick,
     generation: u32,
@@ -510,14 +569,25 @@ fn citizen_entity(
         source_digest,
         "citizen.unit_id",
     );
-    insert_fact(
-        &mut fields,
-        "name",
-        Value::Text(citizen.name.clone()),
-        observed_at,
-        source_digest,
-        "citizen.name",
-    );
+    if names_included {
+        insert_fact(
+            &mut fields,
+            "name",
+            Value::Text(citizen.name.clone()),
+            observed_at,
+            source_digest,
+            "citizen.name",
+        );
+    } else {
+        insert_omitted_fact(
+            &mut fields,
+            "name",
+            "citizen names were not requested from bridge protocol V1",
+            observed_at,
+            source_digest,
+            "citizen.name",
+        );
+    }
     insert_fact(
         &mut fields,
         "race",
@@ -562,10 +632,10 @@ fn citizen_entity(
             source,
         );
     }
-    let label = if citizen.name.is_empty() {
-        format!("unit-{}", citizen.unit_id)
-    } else {
+    let label = if names_included && !citizen.name.is_empty() {
         citizen.name.clone()
+    } else {
+        format!("unit-{}", citizen.unit_id)
     };
     Ok(EntityRecord {
         id,
@@ -624,7 +694,28 @@ fn insert_fact(
     );
 }
 
-fn projection_coverage(anchor: StateAnchor) -> CoverageReport {
+fn insert_omitted_fact(
+    fields: &mut BTreeMap<String, Fact>,
+    field: &str,
+    reason: &str,
+    observed_at: GameTick,
+    source_digest: Digest32,
+    source_field: &str,
+) {
+    fields.insert(
+        field.to_owned(),
+        Fact::with_presence(
+            FactPresence::Omitted(reason.to_owned()),
+            observed_at,
+            FactSource::DfhackField(format!(
+                "dfmcp_bridge.ReadObservation.{source_field}"
+            )),
+            source_digest,
+        ),
+    );
+}
+
+fn projection_coverage(anchor: StateAnchor, names_included: bool) -> CoverageReport {
     let mut domains = BTreeMap::new();
     for domain in COMPLETE_DOMAINS {
         domains.insert(
@@ -637,6 +728,23 @@ fn projection_coverage(anchor: StateAnchor) -> CoverageReport {
             },
         );
     }
+    domains.insert(
+        CITIZEN_NAMES_DOMAIN.to_owned(),
+        CoverageDomain {
+            domain: CITIZEN_NAMES_DOMAIN.to_owned(),
+            status: if names_included {
+                CoverageStatus::Complete
+            } else {
+                CoverageStatus::Omitted
+            },
+            reason: if names_included {
+                None
+            } else {
+                Some("citizen names were not requested from bridge protocol V1".to_owned())
+            },
+            evidence: BTreeSet::new(),
+        },
+    );
     for (domain, reason) in OMITTED_DOMAINS {
         domains.insert(
             domain.to_owned(),
@@ -740,6 +848,14 @@ mod tests {
         assembler.finalize()
     }
 
+    fn build_name_omitted_capsule() -> Result<LiveObservationCapsule> {
+        let mut omitted_page = page(0, 1, &[7], true);
+        omitted_page.citizens[0].name.clear();
+        let mut assembler = ObservationAssembler::with_names(manifest(), false);
+        assembler.push_page(omitted_page)?;
+        assembler.finalize()
+    }
+
     #[test]
     fn calendar_conversion_is_exact_and_bounded() -> Result<()> {
         let clock = DwarfFortressClock {
@@ -796,6 +912,38 @@ mod tests {
     }
 
     #[test]
+    fn omitted_names_remain_omitted_in_facts_and_coverage() -> Result<()> {
+        let capsule = build_name_omitted_capsule()?;
+        let projection = project_live_capsule(
+            &capsule,
+            FortressId::new(9),
+            ObservationCursor::ORIGIN,
+        )?;
+        let entity_id = raw_unit_id_to_entity_id(7)?;
+        let entity = projection
+            .snapshot
+            .graph
+            .entities
+            .get(&entity_id)
+            .ok_or_else(|| error(ErrorCode::CorruptLedger, "projected unit is missing"))?;
+        let name = entity
+            .fields
+            .get("name")
+            .ok_or_else(|| error(ErrorCode::CorruptLedger, "projected name fact is missing"))?;
+        assert!(matches!(name.presence, Some(FactPresence::Omitted(_))));
+        assert_eq!(name.value, Value::Null);
+        assert_eq!(entity.label, "unit-7");
+        assert!(
+            !projection
+                .receipt
+                .coverage()
+                .proves_absence_in(CITIZEN_NAMES_DOMAIN)
+        );
+        projection.validate_against(&capsule)?;
+        Ok(())
+    }
+
+    #[test]
     fn membership_edges_are_deterministic_and_provenanced() -> Result<()> {
         let capsule = build_capsule(&[&[0, 1]])?;
         let projection = project_live_capsule(
@@ -833,6 +981,12 @@ mod tests {
                 .receipt
                 .coverage()
                 .proves_absence_in("fortress.citizens.roster")
+        );
+        assert!(
+            projection
+                .receipt
+                .coverage()
+                .proves_absence_in(CITIZEN_NAMES_DOMAIN)
         );
         assert!(
             !projection
