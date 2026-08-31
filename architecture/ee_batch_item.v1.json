@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dicklesworthstone/dwarf_fortress_mcp/architecture/ee_batch_item.v1.json",
+  "title": "ee batch item (v1) — dfmcp evidence export",
+  "description": "Schema for one entry in an `ee remember --batch --stdin` JSONL payload emitted by dfmcp's E09 evidence export. Every entry MUST carry the provenance block so `ee search --explain` can explain *why* the memory exists. See docs/EE_EVIDENCE_CURATION.md for the full mapping spec.",
+  "type": "object",
+  "required": ["content", "kind", "tags", "_meta"],
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable summary. Token-budgeted; no full value inlining."
+    },
+    "level": {
+      "type": "string",
+      "enum": ["working", "episodic", "semantic", "procedural"],
+      "default": "episodic"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["rule", "fact", "decision", "failure", "command", "convention", "anti-pattern", "risk", "playbook-step"],
+      "description": "Canonical ee kind. Mapping in docs/EE_EVIDENCE_CURATION.md."
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.-]*$"
+      },
+      "description": "Tags from the controlled vocabulary in docs/EE_EVIDENCE_CURATION.md."
+    },
+    "_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fortress_id",
+        "anchor_epoch",
+        "anchor_sequence",
+        "game_tick",
+        "state_hash",
+        "evidence_bundle_digest",
+        "artifact_path",
+        "schema_version",
+        "bridge_protocol_version"
+      ],
+      "properties": {
+        "fortress_id": { "type": "integer", "minimum": 0 },
+        "anchor_epoch": { "type": "integer", "minimum": 0 },
+        "anchor_sequence": { "type": "integer", "minimum": 0 },
+        "game_tick": { "type": "integer", "minimum": 0 },
+        "state_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "evidence_bundle_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Content-addressed fingerprint of the bundle that sourced this entry. The all-zeros digest is permitted ONLY when the entry is tagged source.lab (pre-WP-11/12 lab slice); all other entries must reference a real bundle."
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path of the producing artifact."
+        },
+        "schema_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].+)?$"
+        },
+        "bridge_protocol_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "decision/failure/risk entries that are NOT explicitly lab-source must reference a real bundle digest, not the all-zeros digest. Lab-source entries (tagged source.lab) are exempt until WP-11/12 lands durable custody.",
+      "if": {
+        "allOf": [
+          {
+            "properties": {
+              "kind": { "enum": ["decision", "failure", "risk"] }
+            }
+          },
+          {
+            "not": {
+              "properties": {
+                "tags": {
+                  "contains": { "const": "source.lab" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "_meta": {
+            "properties": {
+              "evidence_bundle_digest": {
+                "not": { "const": "0000000000000000000000000000000000000000000000000000000000000000" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
