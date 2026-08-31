@@ -17,6 +17,7 @@ pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
 pub mod live_bootstrap;
+pub mod live_connect;
 pub mod live_identity;
 pub mod live_observation;
 pub mod live_projection;
@@ -30,7 +31,8 @@ pub use delta_scanner::{
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
     CitizenRecord, DFHACK_RPC_VERSION, DfHackRpcClient, MAX_CITIZENS_PER_PAGE,
-    MAX_RACE_NAME_BYTES, MAX_RPC_PAYLOAD_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL,
+    MAX_CLIENT_NAME_BYTES, MAX_CLIENT_VERSION_BYTES, MAX_RACE_NAME_BYTES,
+    MAX_RPC_PAYLOAD_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL,
     MAX_TEXT_NOTIFICATION_TOTAL_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES,
     MAX_WORLD_NAME_BYTES, ObservationPage,
 };
@@ -45,6 +47,10 @@ pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
 pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
     bootstrap_live_read_adapter,
+};
+pub use live_connect::{
+    AuthenticatedLiveSource, LiveConnectionConfig, MAX_ENDPOINT_BYTES,
+    MAX_SOCKET_TIMEOUT_MILLIS, connect_authenticated_live_source, parse_loopback_endpoint,
 };
 pub use live_identity::derive_live_fortress_id;
 pub use live_observation::{
