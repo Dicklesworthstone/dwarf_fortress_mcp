@@ -5,7 +5,7 @@
 //! This layer owns pagination policy but no transport implementation. A source
 //! may be the real [`DfHackRpcClient`](crate::DfHackRpcClient) or a deterministic
 //! laboratory double. It refuses empty nonterminal pages, total counts above
-//! the capsule ceiling, page-count overruns, and any assembler inconsistency.
+//! the caller or capsule ceiling, page-count overruns, and assembler drift.
 
 use std::io::{Read, Write};
 
@@ -51,6 +51,21 @@ pub fn read_complete_observation<T: LiveObservationSource>(
     page_size: u32,
     include_names: bool,
 ) -> Result<LiveObservationCapsule> {
+    let hard_total = u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "capsule citizen ceiling does not fit u32",
+        )
+    })?;
+    read_complete_observation_bounded(source, page_size, include_names, hard_total)
+}
+
+pub fn read_complete_observation_bounded<T: LiveObservationSource>(
+    source: &mut T,
+    page_size: u32,
+    include_names: bool,
+    max_citizens: u32,
+) -> Result<LiveObservationCapsule> {
     if page_size == 0 || page_size > MAX_CITIZENS_PER_PAGE {
         return Err(error(
             ErrorCode::InvalidRequest,
@@ -60,7 +75,23 @@ pub fn read_complete_observation<T: LiveObservationSource>(
         ));
     }
 
+    let hard_total = u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "capsule citizen ceiling does not fit u32",
+        )
+    })?;
+    if max_citizens > hard_total {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "caller citizen ceiling {max_citizens} exceeds the capsule ceiling of {hard_total}"
+            ),
+        ));
+    }
+
     let manifest = source.bridge_manifest();
+    manifest.validate()?;
     if !manifest.world_loaded || !manifest.fortress_mode {
         return Err(error(
             ErrorCode::AdapterUnavailable,
@@ -68,15 +99,13 @@ pub fn read_complete_observation<T: LiveObservationSource>(
         ));
     }
     let mut assembler = ObservationAssembler::new(manifest);
-    let hard_total = u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| {
-        error(
-            ErrorCode::InternalInvariantViolation,
-            "capsule citizen ceiling does not fit u32",
-        )
-    })?;
-    let rounded_pages = hard_total
-        .saturating_add(page_size.saturating_sub(1))
-        / page_size;
+    let rounded_pages = if max_citizens == 0 {
+        0
+    } else {
+        max_citizens
+            .saturating_add(page_size.saturating_sub(1))
+            / page_size
+    };
     let maximum_pages = rounded_pages.saturating_add(1);
 
     for _ in 0..maximum_pages {
@@ -87,6 +116,15 @@ pub fn read_complete_observation<T: LiveObservationSource>(
                 ErrorCode::BudgetExceeded,
                 format!(
                     "bridge reports {} citizens, exceeding the capsule ceiling of {hard_total}",
+                    page.citizen_count_total
+                ),
+            ));
+        }
+        if page.citizen_count_total > max_citizens {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                format!(
+                    "bridge reports {} citizens, exceeding the caller ceiling of {max_citizens}",
                     page.citizen_count_total
                 ),
             ));
@@ -121,6 +159,7 @@ mod tests {
         manifest: BridgeManifest,
         pages: Vec<ObservationPage>,
         index: usize,
+        calls: usize,
     }
 
     impl LiveObservationSource for FakeSource {
@@ -134,6 +173,7 @@ mod tests {
             _maximum: u32,
             _include_names: bool,
         ) -> Result<ObservationPage> {
+            self.calls = self.calls.saturating_add(1);
             let page = self.pages.get(self.index).cloned().ok_or_else(|| {
                 error(
                     ErrorCode::AdapterFailure,
@@ -142,6 +182,15 @@ mod tests {
             })?;
             self.index = self.index.saturating_add(1);
             Ok(page)
+        }
+    }
+
+    fn source(pages: Vec<ObservationPage>) -> FakeSource {
+        FakeSource {
+            manifest: manifest(),
+            pages,
+            index: 0,
+            calls: 0,
         }
     }
 
@@ -188,7 +237,7 @@ mod tests {
             fortress_mode: true,
             paused: true,
             current_year: 105,
-            current_year_tick: 12345,
+            current_year_tick: 12_345,
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
@@ -201,45 +250,38 @@ mod tests {
 
     #[test]
     fn drives_multiple_pages_to_one_complete_capsule() -> Result<()> {
-        let mut source = FakeSource {
-            manifest: manifest(),
-            pages: vec![page(0, 3, &[1, 2], false), page(2, 3, &[3], true)],
-            index: 0,
-        };
+        let mut source = source(vec![page(0, 3, &[1, 2], false), page(2, 3, &[3], true)]);
         let capsule = read_complete_observation(&mut source, 2, true)?;
         assert!(capsule.citizen_coverage.proves_complete_roster());
         assert_eq!(capsule.citizens.len(), 3);
+        assert_eq!(source.calls, 2);
         Ok(())
     }
 
     #[test]
+    fn caller_ceiling_aborts_after_the_first_page() {
+        let mut source = source(vec![page(0, 3, &[1, 2], false), page(2, 3, &[3], true)]);
+        assert!(read_complete_observation_bounded(&mut source, 2, true, 2).is_err());
+        assert_eq!(source.calls, 1);
+    }
+
+    #[test]
     fn empty_nonterminal_page_is_rejected() {
-        let mut source = FakeSource {
-            manifest: manifest(),
-            pages: vec![page(0, 1, &[], false)],
-            index: 0,
-        };
+        let mut source = source(vec![page(0, 1, &[], false)]);
         assert!(read_complete_observation(&mut source, 1, true).is_err());
     }
 
     #[test]
     fn invalid_page_size_is_rejected_before_source_io() {
-        let mut source = FakeSource {
-            manifest: manifest(),
-            pages: Vec::new(),
-            index: 0,
-        };
+        let mut source = source(Vec::new());
         assert!(read_complete_observation(&mut source, 0, true).is_err());
+        assert_eq!(source.calls, 0);
     }
 
     #[test]
     fn zero_citizen_fortress_finishes_in_one_empty_page() -> Result<()> {
-        let mut source = FakeSource {
-            manifest: manifest(),
-            pages: vec![page(0, 0, &[], true)],
-            index: 0,
-        };
-        let capsule = read_complete_observation(&mut source, 64, true)?;
+        let mut source = source(vec![page(0, 0, &[], true)]);
+        let capsule = read_complete_observation_bounded(&mut source, 64, true, 0)?;
         assert!(capsule.citizen_coverage.proves_complete_roster());
         assert!(capsule.citizens.is_empty());
         Ok(())
