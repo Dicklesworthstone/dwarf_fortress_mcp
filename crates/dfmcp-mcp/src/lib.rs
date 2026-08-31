@@ -12,7 +12,7 @@
 //! revalidation, idempotency, or evidence checks (ADR-013,
 //! `docs/FASTMCP_INTEGRATION.md`).
 
-pub mod agent_server;
+pub mod agent_facade;
 pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
@@ -20,7 +20,7 @@ pub mod http_transport;
 pub mod server;
 pub mod tasks;
 
-pub use agent_server::run_stdio;
+pub use agent_facade::run_stdio;
 pub use agent_turn::{
     AGENT_TURN_SCHEMA, AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile,
     RecoveryClass, empty_active_work, empty_budget, empty_coverage, recommendation,
