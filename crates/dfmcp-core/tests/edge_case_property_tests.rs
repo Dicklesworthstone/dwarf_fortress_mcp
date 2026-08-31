@@ -94,7 +94,7 @@ fn test_clock_governor_high_churn_consensus() -> Result<()> {
     assert!(governor.is_unpaused());
 
     // 1st session requests emergency pause -> instantly pauses despite 6 unpause votes
-    governor.request_emergency_pause(sessions[0]);
+    governor.request_emergency_pause(sessions[0])?;
     assert!(!governor.is_unpaused());
 
     // 1st session releases emergency pause -> unpaused resumed

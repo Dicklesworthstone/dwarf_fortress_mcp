@@ -210,6 +210,10 @@ pub struct RestoreReceipt {
 pub trait GameAdapter {
     fn identity(&self) -> AdapterIdentity;
 
+    fn current_anchor(&self) -> Option<StateAnchor> {
+        None
+    }
+
     fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth>;
 
     fn observe(

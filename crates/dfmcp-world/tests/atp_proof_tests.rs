@@ -50,3 +50,56 @@ fn test_atp_proof_capsule_tamper_detection() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_atp_chain_verification_and_gap_detection() -> Result<()> {
+    let snap0 = sample_snapshot(100, ObservationCursor::ORIGIN);
+    let snap1 = sample_snapshot(
+        101,
+        ObservationCursor {
+            epoch: 0,
+            sequence: 1,
+        },
+    );
+    let snap2 = sample_snapshot(
+        102,
+        ObservationCursor {
+            epoch: 0,
+            sequence: 2,
+        },
+    );
+
+    let delta1 = StateDelta {
+        fortress_id: FortressId::new(42),
+        base_cursor: snap0.cursor,
+        target_cursor: snap1.cursor,
+        base_hash: snap0.state_hash,
+        target_hash: snap1.state_hash,
+        target_tick: snap1.tick,
+        changes: Vec::new(),
+        truncated: false,
+        continuation: None,
+    };
+    let cap1 = AtpProofCapsule::seal(&snap0, &snap1, delta1, GameTick(101))?;
+
+    let delta2 = StateDelta {
+        fortress_id: FortressId::new(42),
+        base_cursor: snap1.cursor,
+        target_cursor: snap2.cursor,
+        base_hash: snap1.state_hash,
+        target_hash: snap2.state_hash,
+        target_tick: snap2.tick,
+        changes: Vec::new(),
+        truncated: false,
+        continuation: None,
+    };
+    let cap2 = AtpProofCapsule::seal(&snap1, &snap2, delta2, GameTick(102))?;
+
+    let verifier = AtpProofVerifier;
+    assert!(verifier.verify_chain(&[cap1.clone(), cap2.clone()]).is_ok());
+
+    // Introduce chain gap: cap2 following cap2 instead of cap1
+    assert!(verifier.verify_chain(&[cap2.clone(), cap1]).is_err());
+
+    Ok(())
+}

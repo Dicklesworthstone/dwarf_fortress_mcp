@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! FrankenFS Savegame Snapshot Archive and Cryptographic Bit-Rot Scrubber.
+//! In-memory content-addressed snapshot archive and bit-rot laboratory.
 //!
-//! WP-FRK-03: Content-addressed block storage with deduplication for Dwarf Fortress
-//! world snapshots, paired with a bit-rot scrubber verifying storage integrity.
+//! This prototype exercises canonical chunking and verification semantics. It is not
+//! durable storage and is not an integration with FrankenFS.
 
 use std::collections::BTreeMap;
 
@@ -30,7 +30,7 @@ pub struct ScrubReport {
     pub is_clean: bool,
 }
 
-/// Content-Addressed Savegame Snapshot Storage Archive.
+/// In-memory content-addressed world-snapshot archive.
 #[derive(Clone, Debug, Default)]
 pub struct SavegameArchive {
     blocks: BTreeMap<Digest32, ArchiveBlock>,
@@ -48,7 +48,13 @@ impl SavegameArchive {
 
     /// Store a world snapshot into content-addressed deduplicated blocks.
     pub fn store_snapshot(&mut self, snapshot: &WorldSnapshot) -> Result<Vec<Digest32>> {
-        let serialized_bytes = format!("{:?}", snapshot).into_bytes();
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "cannot archive a snapshot with an invalid canonical state hash",
+            ));
+        }
+        let serialized_bytes = snapshot.canonical_bytes();
         let mut block_digests = Vec::new();
 
         for chunk in serialized_bytes.chunks(BLOCK_CHUNK_SIZE) {
@@ -79,6 +85,12 @@ impl SavegameArchive {
                     format!("missing block in archive with digest {:?}", digest),
                 )
             })?;
+            if Digest32::of_bytes(&block.data) != *digest || block.digest != *digest {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    format!("corrupt archive block detected while reading {digest}"),
+                ));
+            }
             payload.extend_from_slice(&block.data);
         }
 

@@ -5,9 +5,9 @@
 //! WP-PLN-02: Compiles multi-tier material dependency graphs into structured
 //! DFHack manager work orders with automatic stock threshold conditions and deadlock prevention.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
-use dfmcp_core::Result;
+use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::action::{Action, BuildingKind, WorkOrderCondition};
 
@@ -136,56 +136,181 @@ impl ProductionLogisticsCompiler {
         target_amount: u32,
         inventory: &InventoryStockpile,
     ) -> Result<Vec<Action>> {
+        if target_token.is_empty() {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "production target token must be nonempty",
+            ));
+        }
         let current_stock = inventory.get_stock(target_token);
         if current_stock >= target_amount {
             return Ok(Vec::new()); // Quota already met
         }
 
-        let deficit = target_amount.saturating_sub(current_stock);
+        let mut requirements = BTreeMap::new();
+        let mut batches = BTreeMap::new();
+        let mut visiting = BTreeSet::new();
+        self.accumulate_requirement(
+            target_token,
+            target_amount,
+            inventory,
+            &mut requirements,
+            &mut batches,
+            &mut visiting,
+        )?;
+
         let mut work_orders = Vec::new();
-        let mut visited = BTreeSet::new();
-        let mut queue = VecDeque::new();
+        let mut emitted = BTreeSet::new();
+        let mut emit_visiting = BTreeSet::new();
+        self.emit_orders(
+            target_token,
+            &requirements,
+            &batches,
+            &mut emitted,
+            &mut emit_visiting,
+            &mut work_orders,
+        )?;
+        Ok(work_orders)
+    }
 
-        queue.push_back((target_token.to_owned(), deficit));
+    fn accumulate_requirement(
+        &self,
+        token: &str,
+        additional_required: u32,
+        inventory: &InventoryStockpile,
+        requirements: &mut BTreeMap<String, u32>,
+        batches: &mut BTreeMap<String, u32>,
+        visiting: &mut BTreeSet<String>,
+    ) -> Result<()> {
+        let prior_required = requirements.get(token).copied().unwrap_or(0);
+        let total_required = prior_required
+            .checked_add(additional_required)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    format!("production requirement overflow for '{token}'"),
+                )
+            })?;
+        requirements.insert(token.to_owned(), total_required);
 
-        while let Some((token, required_amount)) = queue.pop_front() {
-            if !visited.insert(token.clone()) {
-                continue;
-            }
-
-            if let Some(recipe) = self.recipes.get(&token) {
-                let batches = required_amount.div_ceil(recipe.output_batch_size);
-                let order_count = batches * recipe.output_batch_size;
-
-                // Check prerequisites
-                for (input_token, needed_per_batch) in &recipe.input_tokens {
-                    let total_input_needed = needed_per_batch * batches;
-                    let current_input_stock = inventory.get_stock(input_token);
-
-                    if current_input_stock < total_input_needed {
-                        let input_deficit = total_input_needed - current_input_stock;
-                        queue.push_back((input_token.clone(), input_deficit));
-                    }
-                }
-
-                // Create work order action with threshold conditions
-                let conditions = vec![WorkOrderCondition::ItemCountBelow {
-                    item_token: token.clone(),
-                    threshold: target_amount,
-                }];
-
-                work_orders.push(Action::CreateWorkOrder {
-                    name: format!("Auto-JIT: {}", recipe.job_token),
-                    job_token: recipe.job_token.clone(),
-                    amount: order_count,
-                    conditions,
-                });
-            }
+        let shortage = total_required.saturating_sub(inventory.get_stock(token));
+        if shortage == 0 {
+            return Ok(());
+        }
+        let recipe = self.recipes.get(token).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!(
+                    "insufficient stock for raw or unknown production token '{token}' and no recipe is registered"
+                ),
+            )
+        })?;
+        if recipe.output_batch_size == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("recipe for '{token}' has a zero output batch size"),
+            ));
         }
 
-        // Return prerequisite orders first (reverse topological order)
-        work_orders.reverse();
-        Ok(work_orders)
+        let required_batches_u64 =
+            u64::from(shortage).div_ceil(u64::from(recipe.output_batch_size));
+        let required_batches = u32::try_from(required_batches_u64).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                format!("production batch count overflow for '{token}'"),
+            )
+        })?;
+        let prior_batches = batches.get(token).copied().unwrap_or(0);
+        if required_batches <= prior_batches {
+            return Ok(());
+        }
+        let extra_batches = required_batches - prior_batches;
+        batches.insert(token.to_owned(), required_batches);
+
+        if !visiting.insert(token.to_owned()) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                format!("cyclic production dependency detected at '{token}'"),
+            ));
+        }
+        let mut inputs = recipe.input_tokens.clone();
+        inputs.sort_by(|left, right| left.0.cmp(&right.0));
+        for (input_token, needed_per_batch) in inputs {
+            let input_required = needed_per_batch.checked_mul(extra_batches).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    format!("production input requirement overflow for '{input_token}'"),
+                )
+            })?;
+            self.accumulate_requirement(
+                &input_token,
+                input_required,
+                inventory,
+                requirements,
+                batches,
+                visiting,
+            )?;
+        }
+        visiting.remove(token);
+        Ok(())
+    }
+
+    fn emit_orders(
+        &self,
+        token: &str,
+        requirements: &BTreeMap<String, u32>,
+        batches: &BTreeMap<String, u32>,
+        emitted: &mut BTreeSet<String>,
+        visiting: &mut BTreeSet<String>,
+        output: &mut Vec<Action>,
+    ) -> Result<()> {
+        let Some(&batch_count) = batches.get(token) else {
+            return Ok(());
+        };
+        if emitted.contains(token) {
+            return Ok(());
+        }
+        if !visiting.insert(token.to_owned()) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                format!("cyclic production dependency detected at '{token}'"),
+            ));
+        }
+        let recipe = self.recipes.get(token).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                format!("planned production token '{token}' lost its recipe"),
+            )
+        })?;
+        let mut inputs: Vec<&str> = recipe
+            .input_tokens
+            .iter()
+            .map(|(input, _)| input.as_str())
+            .collect();
+        inputs.sort_unstable();
+        inputs.dedup();
+        for input in inputs {
+            self.emit_orders(input, requirements, batches, emitted, visiting, output)?;
+        }
+        visiting.remove(token);
+
+        let threshold = requirements.get(token).copied().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                format!("planned production token '{token}' has no requirement"),
+            )
+        })?;
+        output.push(Action::CreateWorkOrder {
+            name: format!("Auto-JIT: {}", recipe.job_token),
+            job_token: recipe.job_token.clone(),
+            amount: batch_count,
+            conditions: vec![WorkOrderCondition::ItemCountBelow {
+                item_token: token.to_owned(),
+                threshold,
+            }],
+        });
+        emitted.insert(token.to_owned());
+        Ok(())
     }
 }
 

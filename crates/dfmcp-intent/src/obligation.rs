@@ -55,6 +55,7 @@ pub struct BoundedObligation {
     pub spec: ObligationSpec,
     pub status: ObligationStatus,
     pub registered_tick: GameTick,
+    pub last_evaluated_tick: Option<GameTick>,
 }
 
 /// Runtime coordinator managing long-horizon obligations across game ticks.
@@ -77,7 +78,22 @@ impl ObligationRuntime {
         action_id: ActionId,
         spec: ObligationSpec,
         current_tick: GameTick,
-    ) {
+    ) -> Result<()> {
+        if spec.deadline_tick <= current_tick
+            || spec.poll_interval_ticks == 0
+            || spec.stable_for_observations == 0
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "obligation requires a future deadline and nonzero polling/stability bounds",
+            ));
+        }
+        if self.obligations.contains_key(&action_id) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "action already has a registered obligation",
+            ));
+        }
         let obligation = BoundedObligation {
             action_id,
             spec,
@@ -86,8 +102,10 @@ impl ObligationRuntime {
                 consecutive_stable_observations: 0,
             },
             registered_tick: current_tick,
+            last_evaluated_tick: None,
         };
         self.obligations.insert(action_id, obligation);
+        Ok(())
     }
 
     /// Advance game tick and evaluate all active obligations against the new world snapshot.
@@ -100,20 +118,35 @@ impl ObligationRuntime {
                 consecutive_stable_observations,
             } = &obligation.status
             {
-                let new_elapsed = ticks_elapsed.saturating_add(1);
-
-                // 1. Check deadline timeout
-                if snapshot.tick >= obligation.spec.deadline_tick {
-                    next_status = Some(ObligationStatus::Failed {
-                        failed_at_tick: snapshot.tick,
-                        reason: format!(
-                            "obligation deadline tick {} reached without fulfilling terminal predicate",
-                            obligation.spec.deadline_tick.0
-                        ),
-                    });
+                if snapshot.tick < obligation.registered_tick
+                    || obligation
+                        .last_evaluated_tick
+                        .is_some_and(|last_tick| snapshot.tick < last_tick)
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        "obligation observation tick regressed",
+                    ));
                 }
-                // 2. Check failure predicate if present
-                else if let Some(fail_pred) = &obligation.spec.failure
+                if obligation
+                    .last_evaluated_tick
+                    .is_some_and(|last_tick| snapshot.tick == last_tick)
+                {
+                    continue;
+                }
+                let cadence_basis = obligation
+                    .last_evaluated_tick
+                    .unwrap_or(obligation.registered_tick);
+                if snapshot.tick.0.saturating_sub(cadence_basis.0)
+                    < obligation.spec.poll_interval_ticks
+                {
+                    continue;
+                }
+                obligation.last_evaluated_tick = Some(snapshot.tick);
+                let new_elapsed = snapshot.tick.0.saturating_sub(obligation.registered_tick.0);
+
+                // 1. Explicit failure predicates take precedence.
+                if let Some(fail_pred) = &obligation.spec.failure
                     && evaluate(snapshot, fail_pred)
                 {
                     next_status = Some(ObligationStatus::Failed {
@@ -122,7 +155,8 @@ impl ObligationRuntime {
                     });
                 }
 
-                // 3. Check terminal predicate and stability window
+                // 2. Check terminal predicate and stability window. A terminal
+                // observation at the deadline is eligible; a missed deadline is not.
                 if next_status.is_none() {
                     let satisfied = evaluate(snapshot, &obligation.spec.terminal);
                     if satisfied {
@@ -148,10 +182,18 @@ impl ObligationRuntime {
                                 consecutive_stable_observations: new_stable,
                             });
                         }
+                    } else if snapshot.tick >= obligation.spec.deadline_tick {
+                        next_status = Some(ObligationStatus::Failed {
+                            failed_at_tick: snapshot.tick,
+                            reason: format!(
+                                "obligation deadline tick {} reached without fulfilling terminal predicate",
+                                obligation.spec.deadline_tick.0
+                            ),
+                        });
                     } else {
                         // Reset stability counter if terminal predicate was not satisfied this tick
                         next_status = Some(ObligationStatus::Active {
-                            ticks_elapsed: new_elapsed,
+                            ticks_elapsed: new_elapsed.max(*ticks_elapsed),
                             consecutive_stable_observations: 0,
                         });
                     }
@@ -175,6 +217,13 @@ impl ObligationRuntime {
             )
         })?;
 
+        if current_tick < obligation.registered_tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "cancellation tick precedes obligation registration",
+            ));
+        }
+
         match obligation.status {
             ObligationStatus::Active { .. } => {
                 obligation.status = ObligationStatus::Draining {
@@ -190,12 +239,21 @@ impl ObligationRuntime {
                 ErrorCode::InvalidRequest,
                 "cannot cancel already failed obligation",
             )),
-            _ => Ok(()),
+            ObligationStatus::Draining { .. } | ObligationStatus::Cancelled { .. } => Ok(()),
+            ObligationStatus::Pending => Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "cannot cancel an obligation that has not become active",
+            )),
         }
     }
 
-    /// Finalize cancellation drain.
-    pub fn finalize_cancel(&mut self, action_id: ActionId, current_tick: GameTick) -> Result<()> {
+    /// Finalize cancellation only after a quantitative certificate proves quiescence.
+    pub fn finalize_cancel(
+        &mut self,
+        action_id: ActionId,
+        current_tick: GameTick,
+        certificate: &DrainProgressCertificate,
+    ) -> Result<()> {
         let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::InvalidRequest,
@@ -203,10 +261,29 @@ impl ObligationRuntime {
             )
         })?;
 
-        obligation.status = ObligationStatus::Cancelled {
-            cancelled_at_tick: current_tick,
-        };
-        Ok(())
+        match obligation.status {
+            ObligationStatus::Draining { drain_started_tick }
+                if certificate.action_id == action_id
+                    && certificate.drain_started_tick == drain_started_tick
+                    && certificate.current_tick == current_tick
+                    && certificate.is_quiescent
+                    && certificate.steps_remaining == 0 =>
+            {
+                obligation.status = ObligationStatus::Cancelled {
+                    cancelled_at_tick: current_tick,
+                };
+                Ok(())
+            }
+            ObligationStatus::Cancelled { .. } => Ok(()),
+            ObligationStatus::Draining { .. } => Err(DfmcpError::new(
+                ErrorCode::CancellationIncomplete,
+                "cancellation drain certificate does not prove current quiescence",
+            )),
+            _ => Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "cancellation can be finalized only from the draining state",
+            )),
+        }
     }
 
     /// Look up status of an obligation.
@@ -254,7 +331,7 @@ mod tests {
             stable_for_observations: 2,
         };
 
-        runtime.register_obligation(action_id, spec, GameTick(10));
+        runtime.register_obligation(action_id, spec, GameTick(10))?;
 
         // Tick 11: simulation unpaused (stable count = 1)
         let snap1 = sample_snapshot(11, false);
@@ -291,7 +368,7 @@ mod tests {
             stable_for_observations: 1,
         };
 
-        runtime.register_obligation(action_id, spec, GameTick(10));
+        runtime.register_obligation(action_id, spec, GameTick(10))?;
 
         // Advance to tick 51 while still paused -> should fail
         let snap = sample_snapshot(51, true);

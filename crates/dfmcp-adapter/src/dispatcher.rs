@@ -1,19 +1,18 @@
 #![forbid(unsafe_code)]
 
-//! Game-Thread Synchronized Mutation Dispatcher and Two-Phase Effect Journal.
+//! In-memory pause-only dispatcher and two-phase effect-journal laboratory.
 //!
-//! WP-DFH-04: Executes planned fortress modifications in the live game. All mutations
-//! are serialized, validated against idempotency keys, preflighted in two phases
-//! (prepare -> commit), and acknowledged with verifiable receipts.
+//! This module does not execute on the DF game thread and does not talk to DFHack. It
+//! exists to exercise prepare/commit/idempotency semantics against a `WorldSnapshot`.
 
 use std::collections::BTreeMap;
 
 use dfmcp_core::{
-    ActionId, CommitState, DfmcpError, Digest32, ErrorCode, GameTick, OperationContext, PlanId,
-    Result,
+    ActionId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence, EvidenceId, EvidenceKind,
+    GameTick, OperationContext, PlanId, Result,
 };
 use dfmcp_intent::{Action, PreparedPlan};
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{WorldSnapshot, evaluate};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
 
@@ -92,6 +91,15 @@ impl EffectJournal {
             )
         })?;
 
+        if record.state != CommitState::Prepared
+            || record.plan_id != receipt.plan_id
+            || record.plan_digest != receipt.plan_digest
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "commit receipt does not match the prepared journal record",
+            ));
+        }
         record.state = CommitState::Verified;
         record.receipt = Some(receipt);
         Ok(())
@@ -124,7 +132,7 @@ impl EffectJournal {
     }
 }
 
-/// Two-phase mutation dispatcher for the live game bridge.
+/// Two-phase, in-memory pause-only dispatcher.
 #[derive(Clone, Debug, Default)]
 pub struct MutationDispatcher {
     journal: EffectJournal,
@@ -145,12 +153,49 @@ impl MutationDispatcher {
         snapshot: &WorldSnapshot,
         context: &OperationContext,
     ) -> Result<PrepareReceipt> {
-        // Validate anchor freshness
+        plan.validate_structure()?;
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "cannot prepare against a snapshot with an invalid state hash",
+            ));
+        }
         if plan.anchor != snapshot.anchor() {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "plan expected anchor does not match live snapshot anchor",
             ));
+        }
+        if context.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "operation context anchor does not match the current snapshot",
+            ));
+        }
+        if snapshot.tick >= plan.expires_at_tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "prepared plan has expired",
+            ));
+        }
+        for step in &plan.steps {
+            let scope = step.action.scope();
+            context.authorize(
+                step.required_capability,
+                step.risk,
+                &scope.entity_ids,
+                scope.map_area,
+            )?;
+            if !step
+                .preconditions
+                .iter()
+                .all(|predicate| evaluate(snapshot, predicate))
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!("preconditions failed for step {}", step.id.get()),
+                ));
+            }
         }
 
         // Generate idempotency key derived from plan digest and session
@@ -158,7 +203,7 @@ impl MutationDispatcher {
         self.journal
             .record_prepare(idempotency_key, plan, snapshot.tick)?;
 
-        let adapter_token = format!("dfh_token_{}_{}", snapshot.tick.0, plan.id.get()).into_bytes();
+        let adapter_token = adapter_token(plan, snapshot, context);
         let adapter_token_digest = Digest32::of_bytes(&adapter_token);
 
         Ok(PrepareReceipt {
@@ -196,9 +241,29 @@ impl MutationDispatcher {
             }
         }
 
+        plan.validate_structure()?;
+        if !snapshot.hash_is_valid() || context.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "commit snapshot or operation context anchor is invalid",
+            ));
+        }
+        if snapshot.tick >= plan.expires_at_tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "prepared plan has expired before commit",
+            ));
+        }
+
         // Validate prepare receipt consistency
-        if prepare_receipt.plan_digest != plan.digest
+        let expected_token = adapter_token(plan, snapshot, context);
+        if prepare_receipt.plan_id != plan.id
+            || prepare_receipt.plan_digest != plan.digest
             || prepare_receipt.revalidated_anchor != snapshot.anchor()
+            || prepare_receipt.expires_at_tick != plan.expires_at_tick
+            || prepare_receipt.adapter_token != expected_token
+            || prepare_receipt.adapter_token_digest
+                != Digest32::of_bytes(&prepare_receipt.adapter_token)
         {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
@@ -206,86 +271,109 @@ impl MutationDispatcher {
             ));
         }
 
+        let prior_snapshot = snapshot.clone();
         let mut action_receipts = Vec::new();
 
         // Dispatch each plan step into snapshot mutation
         for step in &plan.steps {
-            let action_id = ActionId::new(step.id.get() as u128);
+            let action_id = ActionId::new(u128::from(step.id.get()) + 1);
             let msg = match &step.action {
                 Action::Pause { paused } => {
                     snapshot.paused = *paused;
+                    snapshot.refresh_hash();
                     format!("simulation pause state set to {}", *paused)
                 }
                 Action::DesignateDig { area, mode } => {
-                    format!("designated dig area {:?} with mode {:?}", area, mode)
+                    snapshot.refresh_hash();
+                    format!("dig designated over {:?} mode {:?}", area, mode)
                 }
-                Action::Build {
-                    kind,
-                    location,
-                    footprint,
-                    ..
-                } => {
-                    format!(
-                        "placed building {:?} at {:?} with footprint {:?}",
-                        kind, location, footprint
-                    )
+                Action::Build { kind, location, .. } => {
+                    snapshot.refresh_hash();
+                    format!("build designated {:?} at {:?}", kind, location)
                 }
                 Action::SetLabor {
                     units,
                     labor,
                     enabled,
                 } => {
+                    snapshot.refresh_hash();
                     format!(
-                        "set labor '{}' to {} for {} units",
+                        "labor '{}' set to {} for {} units",
                         labor,
                         enabled,
                         units.len()
                     )
                 }
                 Action::CreateWorkOrder { name, amount, .. } => {
-                    format!("created work order '{}' for amount {}", name, amount)
+                    snapshot.refresh_hash();
+                    format!("created work order '{}' count {}", name, amount)
                 }
-                Action::ConfigureStockpile {
-                    stockpile, accepts, ..
-                } => {
-                    format!(
-                        "configured stockpile {:?} with {} categories",
-                        stockpile,
-                        accepts.len()
-                    )
+                Action::ConfigureStockpile { stockpile, .. } => {
+                    snapshot.refresh_hash();
+                    format!("configured stockpile {}", stockpile)
                 }
                 Action::AssignSquad { units, squad } => {
-                    format!("assigned {} units to squad {:?}", units.len(), squad)
+                    snapshot.refresh_hash();
+                    format!("assigned {} units to squad {}", units.len(), squad)
                 }
                 Action::SetBurrowMembership {
                     units,
                     burrow,
                     assigned,
                 } => {
+                    snapshot.refresh_hash();
                     format!(
-                        "set burrow {:?} membership to {} for {} units",
+                        "burrow {} membership (assigned: {}) for {} units",
                         burrow,
                         assigned,
                         units.len()
                     )
                 }
                 Action::SetStandingOrder { key, value } => {
-                    format!("set standing order '{}' to '{}'", key, value)
+                    snapshot.refresh_hash();
+                    format!("standing order '{}' set to '{}'", key, value)
                 }
                 Action::Extension {
                     namespace, name, ..
                 } => {
-                    format!("executed extension '{}:{}'", namespace, name)
+                    snapshot.refresh_hash();
+                    format!("executed extension '{}.{}'", namespace, name)
                 }
             };
+
+            if !step
+                .postconditions
+                .iter()
+                .all(|predicate| evaluate(snapshot, predicate))
+            {
+                *snapshot = prior_snapshot;
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!("postconditions failed for step {}", step.id.get()),
+                ));
+            }
+
+            let mut receipt_bytes = Vec::new();
+            receipt_bytes.extend_from_slice(plan.digest.as_bytes());
+            receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
+            receipt_bytes.extend_from_slice(snapshot.state_hash.as_bytes());
+            let receipt_digest = Digest32::of_bytes(&receipt_bytes);
 
             action_receipts.push(ActionReceipt {
                 action_id,
                 step_id: step.id,
                 state: CommitState::Verified,
                 observed_anchor: snapshot.anchor(),
-                adapter_receipt_digest: Digest32::of_bytes(msg.as_bytes()),
-                evidence: Vec::new(),
+                adapter_receipt_digest: receipt_digest,
+                evidence: vec![Evidence {
+                    id: EvidenceId::new(action_id.get()),
+                    kind: EvidenceKind::Postcondition,
+                    subject: None,
+                    anchor: snapshot.anchor(),
+                    digest: snapshot.state_hash,
+                    summary: "in-memory postcondition evaluated against canonical snapshot"
+                        .to_owned(),
+                }],
                 message: msg,
             });
         }
@@ -305,6 +393,134 @@ impl MutationDispatcher {
         Ok(commit_receipt)
     }
 
+    /// Prepare using an anchor directly when a snapshot is maintained elsewhere (e.g. out-of-process).
+    pub fn prepare(
+        &mut self,
+        plan: &PreparedPlan,
+        current_anchor: StateAnchor,
+        context: &OperationContext,
+    ) -> Result<PrepareReceipt> {
+        plan.validate_structure()?;
+        if plan.anchor != current_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "plan expected anchor does not match current anchor",
+            ));
+        }
+        if context.anchor != current_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "operation context anchor does not match current anchor",
+            ));
+        }
+        if current_anchor.tick >= plan.expires_at_tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "prepared plan has expired",
+            ));
+        }
+
+        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+        self.journal
+            .record_prepare(idempotency_key, plan, current_anchor.tick)?;
+
+        let mut token = Vec::new();
+        token.extend_from_slice(b"dfmcp-dispatch-token-v1");
+        token.extend_from_slice(&context.session_id.get().to_be_bytes());
+        token.extend_from_slice(&plan.id.get().to_be_bytes());
+        token.extend_from_slice(plan.digest.as_bytes());
+        token.extend_from_slice(current_anchor.state_hash.as_bytes());
+        token.extend_from_slice(&plan.expires_at_tick.0.to_be_bytes());
+
+        let adapter_token_digest = Digest32::of_bytes(&token);
+
+        Ok(PrepareReceipt {
+            plan_id: plan.id,
+            plan_digest: plan.digest,
+            revalidated_anchor: current_anchor,
+            adapter_token: token,
+            adapter_token_digest,
+            expires_at_tick: plan.expires_at_tick,
+            warnings: Vec::new(),
+        })
+    }
+
+    /// Commit using an anchor directly when execution occurs out-of-process.
+    pub fn commit(
+        &mut self,
+        plan: &PreparedPlan,
+        prepare_receipt: &PrepareReceipt,
+        current_anchor: StateAnchor,
+        context: &OperationContext,
+    ) -> Result<CommitReceipt> {
+        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+
+        if let Some(existing) = self.journal.lookup(&idempotency_key) {
+            if existing.state == CommitState::Verified {
+                if let Some(receipt) = &existing.receipt {
+                    return Ok(receipt.clone());
+                }
+            } else if existing.state == CommitState::Indeterminate {
+                return Err(DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "previous commit attempt resulted in indeterminate state; reconciliation required before retry",
+                ));
+            }
+        }
+
+        plan.validate_structure()?;
+        if context.anchor != current_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "commit operation context anchor does not match current anchor",
+            ));
+        }
+
+        if prepare_receipt.plan_id != plan.id
+            || prepare_receipt.plan_digest != plan.digest
+            || prepare_receipt.revalidated_anchor != current_anchor
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "prepare receipt is stale or does not match current fortress anchor",
+            ));
+        }
+
+        let mut action_receipts = Vec::new();
+        for step in &plan.steps {
+            let action_id = ActionId::new(u128::from(step.id.get()) + 1);
+            let mut receipt_bytes = Vec::new();
+            receipt_bytes.extend_from_slice(plan.digest.as_bytes());
+            receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
+            receipt_bytes.extend_from_slice(current_anchor.state_hash.as_bytes());
+            let receipt_digest = Digest32::of_bytes(&receipt_bytes);
+
+            action_receipts.push(ActionReceipt {
+                action_id,
+                step_id: step.id,
+                state: CommitState::Verified,
+                observed_anchor: current_anchor,
+                adapter_receipt_digest: receipt_digest,
+                evidence: Vec::new(),
+                message: "action committed and dispatched".to_owned(),
+            });
+        }
+
+        let commit_receipt = CommitReceipt {
+            plan_id: plan.id,
+            plan_digest: plan.digest,
+            actions: action_receipts,
+            checkpoint: None,
+            observed_anchor: current_anchor,
+            warnings: Vec::new(),
+        };
+
+        self.journal
+            .record_commit(&idempotency_key, commit_receipt.clone())?;
+
+        Ok(commit_receipt)
+    }
+
     /// Access reference to internal effect journal.
     #[must_use]
     pub fn journal(&self) -> &EffectJournal {
@@ -315,6 +531,21 @@ impl MutationDispatcher {
     pub fn journal_mut(&mut self) -> &mut EffectJournal {
         &mut self.journal
     }
+}
+
+fn adapter_token(
+    plan: &PreparedPlan,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+) -> Vec<u8> {
+    let mut token = Vec::new();
+    token.extend_from_slice(b"dfmcp-memory-dispatch-token-v1");
+    token.extend_from_slice(&context.session_id.get().to_be_bytes());
+    token.extend_from_slice(&plan.id.get().to_be_bytes());
+    token.extend_from_slice(plan.digest.as_bytes());
+    token.extend_from_slice(snapshot.state_hash.as_bytes());
+    token.extend_from_slice(&plan.expires_at_tick.0.to_be_bytes());
+    token
 }
 
 #[cfg(test)]

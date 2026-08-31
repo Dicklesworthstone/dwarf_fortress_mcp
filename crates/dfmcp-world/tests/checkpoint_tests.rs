@@ -42,7 +42,7 @@ fn test_013_checkpoint_creation_and_bit_rot_detection() -> Result<(), Box<dyn st
         );
     }
 
-    let manifest = store.create_checkpoint(&snapshot, files_manifest);
+    let manifest = store.create_checkpoint(&snapshot, files_manifest)?;
     assert_ne!(manifest.manifest_digest, Digest32::ZERO);
 
     manifest.verify_files(|path| files_data.get(path).cloned())?;
@@ -77,7 +77,7 @@ fn test_013_restore_epoch_bump_and_stale_anchor_rejection() -> Result<(), Box<dy
     let mut files_manifest = BTreeMap::new();
     files_manifest.insert("world.sav".to_string(), (100, Digest32::of_bytes(b"save")));
 
-    let manifest = store.create_checkpoint(&snapshot_epoch1, files_manifest);
+    let manifest = store.create_checkpoint(&snapshot_epoch1, files_manifest)?;
 
     let live_anchor_epoch1 = snapshot_epoch1.anchor();
     CheckpointStore::validate_anchor_epoch(&live_anchor_epoch1, 1)?;

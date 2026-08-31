@@ -18,14 +18,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
+use crate::doctor::DoctorInspector;
 use dfmcp_adapter::{CancelMode, GameAdapter, HealthStatus};
 use dfmcp_core::{
-    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, ErrorCode,
-    FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId, Result,
-    RiskTier, SessionId, StateAnchor, WorkBudget,
+    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
+    ErrorCode, FortressId, GameTick, IntentId, MapCoord, ObservationCursor, OperationContext,
+    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
+use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
+use dfmcp_intent::logistics::{InventoryStockpile, ProductionLogisticsCompiler};
+use dfmcp_intent::{
+    Action, Constraint, DigMode, Intent, ObligationSpec, PreparedPlan, RequestedAction,
+    StaticPlanner,
+};
 use dfmcp_lab::MemoryAdapter;
+use dfmcp_world::search::FrankenSearchEngine;
+use dfmcp_world::spatial_index::ChunkSpatialIndex;
+use dfmcp_world::topology::get_transitive_dependencies;
 use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
@@ -450,19 +459,16 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 // fortress.query
 // ============================================================================
 
-/// Bounded structured query. The laboratory slice supports `mode = "summary"`;
-/// full DfQL execution is WP-04 and is rejected with a stable message here.
+/// Bounded structured query and full-text/threat search.
 #[tool(
-    description = "Run a bounded query against the fortress state for an open session. The laboratory slice supports mode=\"summary\" only; full DfQL arrives with WP-04."
+    description = "Run a bounded query or full-text/threat search against the fortress state for an open session."
 )]
-pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
+pub fn fortress_query(
+    session_id: Option<String>,
+    mode: Option<String>,
+    query: Option<String>,
+) -> String {
     let mode = mode.unwrap_or_else(|| "summary".to_owned());
-    if mode != "summary" {
-        return error_payload(
-            "fortress.query",
-            "only mode=\"summary\" is supported by the laboratory slice; full DfQL is WP-04",
-        );
-    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.query", &error.to_string()),
@@ -471,27 +477,69 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(error) => return error_payload("fortress.query", &error.to_string()),
     };
-    let mut payload = snapshot_json(guard.adapter.snapshot());
-    payload["matched"] = json!(0);
-    payload["note"] = json!("laboratory summary projection; typed DfQL is WP-04");
-    payload["session_id"] = json!(format!("{}", guard.session_id));
-    payload.to_string()
+    let snapshot = guard.adapter.snapshot();
+
+    if mode == "search" || query.is_some() {
+        let q_str = query.unwrap_or_default();
+        let mut engine = FrankenSearchEngine::new();
+        engine.index_snapshot(snapshot);
+        let hits = engine.search(&q_str, 10);
+        let hits_json: Vec<serde_json::Value> = hits
+            .iter()
+            .map(|h| {
+                json!({
+                    "entity_id": h.entity_id.map(|id| format!("{}", id.get())),
+                    "event_id": h.event_id.map(|id| format!("{}", id.get())),
+                    "title": h.title,
+                    "snippet": h.snippet,
+                    "score": h.score,
+                    "matched_terms": h.matched_terms,
+                })
+            })
+            .collect();
+        json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "mode": "search",
+            "query": q_str,
+            "matched": hits.len(),
+            "hits": hits_json,
+        })
+        .to_string()
+    } else if mode == "summary" {
+        let mut payload = snapshot_json(snapshot);
+        payload["matched"] = json!(0);
+        payload["session_id"] = json!(format!("{}", guard.session_id));
+        payload.to_string()
+    } else {
+        error_payload(
+            "fortress.query",
+            "supported modes: mode=\"summary\" or mode=\"search\" with query parameter",
+        )
+    }
 }
 
 // ============================================================================
 // fortress.plan
 // ============================================================================
 
-/// Compile a pause/resume intent into a sealed, inspectable plan. The
-/// laboratory registry registers exactly one semantic action family
-/// (clock pause/resume); broader registries extend schemas, not tools.
+/// Compile an intent (pause, spatial blueprint, or logistics work orders) into an immutable, inspectable plan without effects.
 #[tool(
-    description = "Compile an intent into an immutable, inspectable plan without effects, scoped to the open session. Returns the plan id, digest, and terminal condition."
+    description = "Compile an intent (pause, spatial blueprint, or logistics work orders) into an immutable, inspectable plan without effects."
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn fortress_plan(
     session_id: Option<String>,
     summary: Option<String>,
     paused_target: Option<bool>,
+    blueprint_type: Option<String>,
+    origin_x: Option<i32>,
+    origin_y: Option<i32>,
+    origin_z: Option<i32>,
+    width: Option<u8>,
+    height: Option<u8>,
+    quota_item: Option<String>,
+    quota_amount: Option<u32>,
 ) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
@@ -501,28 +549,97 @@ pub fn fortress_plan(
         Ok(value) => value,
         Err(error) => return error_payload("fortress.plan", &error.to_string()),
     };
-    let summary = summary.unwrap_or_else(|| "unpause the simulation".to_owned());
-    let paused_target = paused_target.unwrap_or(false);
     let rid = next_request_id(&mut guard);
     let snapshot = guard.adapter.snapshot();
     let ctx = context_for(&guard, rid);
-    let intent = Intent {
-        id: IntentId::new(rid),
-        anchor: snapshot.anchor(),
-        summary,
-        terminal_condition: Predicate::Paused(paused_target),
-        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-        requested_actions: vec![RequestedAction {
-            action: Action::Pause {
-                paused: paused_target,
+
+    let intent_res: Result<Intent> = if let Some(bp) = blueprint_type {
+        let ox = origin_x.unwrap_or(0);
+        let oy = origin_y.unwrap_or(0);
+        let oz = origin_z.unwrap_or(100);
+        let w = width.unwrap_or(5);
+        let h = height.unwrap_or(5);
+        let origin = MapCoord::new(ox, oy, oz);
+
+        let template = match bp.as_str() {
+            "dining_hall" => BlueprintTemplate::DiningHall {
+                width: w,
+                height: h,
             },
-            preconditions: vec![Predicate::Paused(!paused_target)],
-            postconditions: Vec::new(),
-            compensation: None,
-            obligation: None,
-            depends_on: Vec::new(),
-        }],
+            "bedroom_cluster" => BlueprintTemplate::BedroomCluster {
+                rooms_count: 4,
+                room_size: (w, h),
+            },
+            _ => BlueprintTemplate::DiningHall {
+                width: w,
+                height: h,
+            },
+        };
+
+        let mut spatial_index = ChunkSpatialIndex::new();
+        for chunk in snapshot.graph.chunks.values() {
+            spatial_index.insert_or_update_chunk(chunk);
+        }
+
+        BlueprintPlanner.compile_blueprint_intent(
+            IntentId::new(rid),
+            snapshot.anchor(),
+            origin,
+            template,
+            &spatial_index,
+        )
+    } else if let Some(item) = quota_item {
+        let amount = quota_amount.unwrap_or(10);
+        let logistics = ProductionLogisticsCompiler::default();
+        let inventory = InventoryStockpile::new();
+        let actions = logistics.compile_quota_work_orders(&item, amount, &inventory)?;
+        let req_actions = actions
+            .into_iter()
+            .map(|a| RequestedAction {
+                action: a,
+                preconditions: Vec::new(),
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            })
+            .collect();
+
+        Ok(Intent {
+            id: IntentId::new(rid),
+            anchor: snapshot.anchor(),
+            summary: summary.unwrap_or_else(|| format!("produce quota for {}", item)),
+            terminal_condition: Predicate::Paused(false),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+            requested_actions: req_actions,
+        })
+    } else {
+        let summary = summary.unwrap_or_else(|| "unpause the simulation".to_owned());
+        let paused_target = paused_target.unwrap_or(false);
+        Ok(Intent {
+            id: IntentId::new(rid),
+            anchor: snapshot.anchor(),
+            summary,
+            terminal_condition: Predicate::Paused(paused_target),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+            requested_actions: vec![RequestedAction {
+                action: Action::Pause {
+                    paused: paused_target,
+                },
+                preconditions: vec![Predicate::Paused(!paused_target)],
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        })
     };
+
+    let intent = match intent_res {
+        Ok(it) => it,
+        Err(e) => return error_payload("fortress.plan", &e.to_string()),
+    };
+
     match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
         Ok(plan) => {
             let digest = plan.digest.to_string();
@@ -654,14 +771,16 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
     };
     let rid = next_request_id(&mut guard);
     let ctx = context_for(&guard, rid);
-    match guard.adapter.poll_action(action_id, &ctx) {
-        Ok(receipt) => json!({
+    match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
+        Ok(task) => json!({
             "ok": true,
             "session_id": format!("{}", guard.session_id),
-            "action_id": format!("{}", receipt.action_id),
-            "state": format!("{:?}", receipt.state),
-            "message": receipt.message,
-            "observed_anchor": anchor_json(&receipt.observed_anchor),
+            "action_id": format!("{}", action_id),
+            "task_id": task.task_id,
+            "status": task.status.as_str(),
+            "commit_state": format!("{:?}", task.commit_state),
+            "summary": task.summary,
+            "observed_anchor": anchor_json(&ctx.anchor),
         })
         .to_string(),
         Err(error) => error_payload("fortress.wait", &error.to_string()),
@@ -807,11 +926,11 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
 // fortress.explain
 // ============================================================================
 
-/// Explain recent state transitions from the immutable laboratory transcript.
+/// Explain recent state transitions or graph dependencies for a specific entity.
 #[tool(
-    description = "Explain what happened in this session: return the most recent laboratory transcript events as evidence-backed rationale for the current state."
+    description = "Explain what happened in this session: return recent transcript events, or graph dependencies and causal topology for a specified entity."
 )]
-pub fn fortress_explain(session_id: Option<String>) -> String {
+pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
@@ -820,29 +939,55 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
     };
-    let events = guard.adapter.transcript();
-    let start = events.len().saturating_sub(16);
-    let recent: Vec<String> = events[start..]
-        .iter()
-        .map(|event| format!("{event:?}"))
-        .collect();
-    json!({
-        "ok": true,
-        "session_id": format!("{}", guard.session_id),
-        "transcript_len": events.len(),
-        "recent_events": recent,
-        "note": "the laboratory transcript is the evidence ledger; production explanations cite durable evidence bundles",
-    })
-    .to_string()
+    let snapshot = guard.adapter.snapshot();
+
+    if let Some(ent_str) = entity_id {
+        let parsed_id: Result<EntityId> = ent_str.parse::<u64>().map(EntityId::new).map_err(|_| {
+            DfmcpError::new(ErrorCode::InvalidRequest, "entity_id must be a decimal u64")
+        });
+        let target_id = match parsed_id {
+            Ok(id) => id,
+            Err(err) => return error_payload("fortress.explain", &err.to_string()),
+        };
+
+        let deps = get_transitive_dependencies(&snapshot.graph, target_id);
+        let deps_str: Vec<String> = deps.iter().map(|id| format!("{}", id.get())).collect();
+        let entity_record = snapshot.graph.entities.get(&target_id);
+
+        json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "target_entity": format!("{}", target_id.get()),
+            "entity_found": entity_record.is_some(),
+            "transitive_dependencies": deps_str,
+            "note": "causal explanation derived from directed fortress multigraph topology",
+        })
+        .to_string()
+    } else {
+        let events = guard.adapter.transcript();
+        let start = events.len().saturating_sub(16);
+        let recent: Vec<String> = events[start..]
+            .iter()
+            .map(|event| format!("{event:?}"))
+            .collect();
+        json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "transcript_len": events.len(),
+            "recent_events": recent,
+            "note": "the laboratory transcript is the evidence ledger; production explanations cite durable evidence bundles",
+        })
+        .to_string()
+    }
 }
 
 // ============================================================================
 // fortress.doctor
 // ============================================================================
 
-/// Diagnose adapter health, compatibility identity, and the live anchor.
+/// Diagnose adapter health, compatibility identity, telemetry inspector, and the live anchor.
 #[tool(
-    description = "Diagnose the control plane for the open session: adapter health, compatibility identity, fortress load state, and the current anchor."
+    description = "Diagnose the control plane for the open session: adapter health, telemetry inspector, sessions count, and current anchor."
 )]
 pub fn fortress_doctor(session_id: Option<String>) -> String {
     let session = match resolve_session(session_id) {
@@ -855,26 +1000,26 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
     };
     let rid = next_request_id(&mut guard);
     let ctx = context_for(&guard, rid);
-    match guard.adapter.health(&ctx) {
-        Ok(health) => {
-            let status = match health.status {
-                HealthStatus::Healthy => "healthy",
-                HealthStatus::Degraded => "degraded",
-                HealthStatus::ReadOnly => "read_only",
-                HealthStatus::Unavailable => "unavailable",
-            };
-            json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "status": status,
-                "adapter": health.identity.name,
-                "compatibility": format!("{:?}", health.identity.compatibility),
-                "fortress_loaded": health.fortress_loaded,
-                "warnings": health.warnings,
-                "current_anchor": health.current_anchor.as_ref().map(anchor_json),
-            })
-            .to_string()
-        }
+    let health_res = guard.adapter.health(&ctx);
+
+    let active_sessions_count = sessions().len();
+    let health_opt = health_res.as_ref().ok();
+    let report = DoctorInspector.generate_report(active_sessions_count, health_opt, None, 0, 0);
+
+    match health_res {
+        Ok(health) => json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "status": if report.is_healthy { "healthy" } else { "degraded" },
+            "active_sessions_count": report.active_sessions_count,
+            "adapter": health.identity.name,
+            "compatibility": format!("{:?}", health.identity.compatibility),
+            "fortress_loaded": health.fortress_loaded,
+            "findings": report.findings,
+            "warnings": health.warnings,
+            "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+        })
+        .to_string(),
         Err(error) => error_payload("fortress.doctor", &error.to_string()),
     }
 }

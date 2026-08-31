@@ -48,10 +48,15 @@ impl StdioClient {
         stdin.flush()?;
 
         let mut response_line = String::new();
-        self.reader.read_line(&mut response_line)?;
-
-        let parsed: Value = serde_json::from_str(response_line.trim())?;
-        Ok(parsed)
+        while self.reader.read_line(&mut response_line)? > 0 {
+            let trimmed = response_line.trim();
+            if trimmed.starts_with('{') {
+                let parsed: Value = serde_json::from_str(trimmed)?;
+                return Ok(parsed);
+            }
+            response_line.clear();
+        }
+        Err("child process stdout closed without emitting JSON-RPC line".into())
     }
 }
 
@@ -63,9 +68,19 @@ impl Drop for StdioClient {
 }
 
 fn modern_meta() -> Value {
+    // MCP 2026-07-28 server/discover requires clientInfo in _meta;
+    // minimal {protocolVersion, clientCapabilities} silently fails the
+    // dispatch (no JSON-RPC response is emitted). Findings filed per
+    // docs/DOGFOODING_FASTMCP.md.
     json!({
         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-        "io.modelcontextprotocol/clientCapabilities": {}
+        "io.modelcontextprotocol/clientCapabilities": {
+            "tools": {"listChanged": true}
+        },
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "dfmcp-modern-handshake-golden",
+            "version": "0.0.1"
+        }
     })
 }
 
@@ -79,7 +94,6 @@ fn assert_modern_envelope(value: &Value, expected_id: u64) {
 }
 
 #[test]
-#[ignore]
 fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn Error>> {
     let mut client = StdioClient::spawn()?;
 

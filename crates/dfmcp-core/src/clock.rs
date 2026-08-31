@@ -66,8 +66,15 @@ impl ClockGovernor {
     }
 
     /// Emergency pause override: any single agent can immediately halt simulation.
-    pub fn request_emergency_pause(&mut self, session_id: SessionId) {
+    pub fn request_emergency_pause(&mut self, session_id: SessionId) -> Result<()> {
+        if !self.registered_sessions.contains(&session_id) {
+            return Err(DfmcpError::new(
+                ErrorCode::SessionNotFound,
+                "session not registered with governor",
+            ));
+        }
         self.emergency_pauses.insert(session_id);
+        Ok(())
     }
 
     /// Release an emergency pause previously requested by this session.
@@ -147,7 +154,9 @@ impl ClockGovernor {
             ));
         }
 
-        self.current_tick = GameTick(self.current_tick.0.saturating_add(ticks));
+        self.current_tick = GameTick(self.current_tick.0.checked_add(ticks).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "governor tick counter overflow")
+        })?);
         Ok(self.current_tick)
     }
 
@@ -187,7 +196,7 @@ mod tests {
         assert_eq!(new_tick, GameTick(10));
 
         // Emergency pause by s1 halts clock immediately
-        governor.request_emergency_pause(s1);
+        governor.request_emergency_pause(s1)?;
         assert!(!governor.is_unpaused());
 
         Ok(())

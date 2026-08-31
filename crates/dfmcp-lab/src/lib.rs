@@ -419,6 +419,10 @@ impl GameAdapter for MemoryAdapter {
         self.identity.clone()
     }
 
+    fn current_anchor(&self) -> Option<StateAnchor> {
+        Some(self.snapshot.anchor())
+    }
+
     fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth> {
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         Ok(AdapterHealth {

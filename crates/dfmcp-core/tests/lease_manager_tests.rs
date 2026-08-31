@@ -77,3 +77,46 @@ fn test_lease_ttl_cleanup_lifecycle() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_entity_lease_and_session_disconnect_cleanup() -> Result<(), Box<dyn Error>> {
+    let mut manager = LeaseManager::new();
+    let s1 = SessionId::new(1);
+    let s2 = SessionId::new(2);
+    let e1 = dfmcp_core::EntityId::new(42);
+
+    // Shared entity lease for s1
+    let _l1 = manager.acquire_entity_lease(s1, e1, false, GameTick(100), 50)?;
+    // Shared entity lease for s2 succeeds
+    let l2 = manager.acquire_entity_lease(s2, e1, false, GameTick(100), 50)?;
+    assert_eq!(manager.active_lease_count(), 2);
+
+    // Exclusive entity lease for s1 fails due to s2 holding shared lease
+    let s3 = SessionId::new(3);
+    assert!(
+        manager
+            .acquire_entity_lease(s3, e1, true, GameTick(100), 50)
+            .is_err()
+    );
+
+    // Release s2 lease
+    manager.release_lease(l2, s2)?;
+    assert_eq!(manager.active_lease_count(), 1);
+
+    // Session 1 mass disconnect releases remaining leases
+    manager.release_session_leases(s1);
+    assert_eq!(manager.active_lease_count(), 0);
+
+    // Now exclusive lease succeeds
+    let l3 = manager.acquire_entity_lease(s3, e1, true, GameTick(100), 50)?;
+    assert_eq!(manager.active_lease_count(), 1);
+    assert!(
+        manager
+            .acquire_entity_lease(s1, e1, false, GameTick(100), 50)
+            .is_err()
+    );
+    manager.release_lease(l3, s3)?;
+    assert_eq!(manager.active_lease_count(), 0);
+
+    Ok(())
+}

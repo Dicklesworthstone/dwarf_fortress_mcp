@@ -83,6 +83,14 @@ fn test_concurrent_sessions_are_isolated() -> std::result::Result<(), Box<dyn st
         Some(session_a_id.clone()),
         Some("unpause A".to_owned()),
         Some(false),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     );
     let plan_a: Value = serde_json::from_str(&plan_a_raw)?;
     assert_eq!(plan_a["ok"], true);
@@ -107,7 +115,7 @@ fn test_concurrent_sessions_are_isolated() -> std::result::Result<(), Box<dyn st
     assert_eq!(commit_a_repeat_raw, commit_a_raw);
 
     // Explain Session A has events, Doctor reports healthy
-    let explain_a_raw = fortress_explain(Some(session_a_id.clone()));
+    let explain_a_raw = fortress_explain(Some(session_a_id.clone()), None);
     let explain_a: Value = serde_json::from_str(&explain_a_raw)?;
     assert_eq!(explain_a["ok"], true);
 
@@ -126,7 +134,7 @@ fn test_unknown_session_rejection() -> std::result::Result<(), Box<dyn std::erro
     let obs: Value = serde_json::from_str(&obs_raw)?;
     assert_eq!(obs["ok"], false);
 
-    let query_raw = fortress_query(Some(unknown_id.clone()), Some("summary".to_owned()));
+    let query_raw = fortress_query(Some(unknown_id.clone()), Some("summary".to_owned()), None);
     let query: Value = serde_json::from_str(&query_raw)?;
     assert_eq!(query["ok"], false);
 

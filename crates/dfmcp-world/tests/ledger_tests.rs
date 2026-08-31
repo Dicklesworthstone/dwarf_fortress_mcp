@@ -77,7 +77,7 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
         eff_key,
         Digest32::of_bytes(b"plan_1"),
         GameTick(106),
-    );
+    )?;
 
     ledger.recover_from_crash();
 
@@ -97,13 +97,19 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
         eff_key2,
         Digest32::of_bytes(b"plan_2"),
         GameTick(107),
-    );
+    )?;
     ledger.record_commit_receipt(eff_key2, Digest32::of_bytes(b"receipt_2"))?;
 
     ledger.recover_from_crash();
 
     let recovered_committed = ledger.effects.get(eff_key2).ok_or("effect missing")?;
-    assert_eq!(recovered_committed.state, CommitState::Verified);
+    assert_eq!(
+        recovered_committed.state,
+        CommitState::AppliedAwaitingVerification
+    );
+    ledger.record_verified(eff_key2, target_snapshot.state_hash)?;
+    let verified = ledger.effects.get(eff_key2).ok_or("effect missing")?;
+    assert_eq!(verified.state, CommitState::Verified);
 
     Ok(())
 }

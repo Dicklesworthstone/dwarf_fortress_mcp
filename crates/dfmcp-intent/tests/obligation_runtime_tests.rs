@@ -4,7 +4,7 @@
 
 use dfmcp_core::{ActionId, GameTick, Result};
 use dfmcp_intent::ObligationSpec;
-use dfmcp_intent::obligation::{ObligationRuntime, ObligationStatus};
+use dfmcp_intent::obligation::{DrainProgressCertificate, ObligationRuntime, ObligationStatus};
 use dfmcp_world::Predicate;
 
 #[test]
@@ -20,7 +20,7 @@ fn test_cancellation_drain_transition() -> Result<()> {
         stable_for_observations: 3,
     };
 
-    runtime.register_obligation(action_id, spec, GameTick(100));
+    runtime.register_obligation(action_id, spec, GameTick(100))?;
 
     // Request cancel
     runtime.request_cancel(action_id, GameTick(110))?;
@@ -30,7 +30,18 @@ fn test_cancellation_drain_transition() -> Result<()> {
     ));
 
     // Finalize cancel
-    runtime.finalize_cancel(action_id, GameTick(115))?;
+    runtime.finalize_cancel(
+        action_id,
+        GameTick(115),
+        &DrainProgressCertificate {
+            action_id,
+            drain_started_tick: GameTick(110),
+            current_tick: GameTick(115),
+            steps_compensated: 1,
+            steps_remaining: 0,
+            is_quiescent: true,
+        },
+    )?;
     assert!(matches!(
         runtime.get_status(action_id),
         Some(ObligationStatus::Cancelled { .. })

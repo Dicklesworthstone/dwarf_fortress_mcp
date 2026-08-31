@@ -34,7 +34,7 @@ fn test_spatial_index_multi_level_chunks() -> Result<(), Box<dyn Error>> {
             }],
             sparse_overlays: BTreeMap::new(),
         };
-        index.insert_or_update_chunk(&chunk);
+        index.insert_or_update_chunk(&chunk)?;
     }
 
     assert_eq!(index.chunk_count(), 3);
@@ -43,7 +43,7 @@ fn test_spatial_index_multi_level_chunks() -> Result<(), Box<dyn Error>> {
         MapCoord { x: 0, y: 0, z: 90 },
         MapCoord { x: 1, y: 1, z: 92 },
     )?;
-    let tiles = index.find_cuboid(&cuboid);
+    let tiles = index.find_cuboid(&cuboid)?;
     // 2 * 2 * 3 = 12 tiles
     assert_eq!(tiles.len(), 12);
 
@@ -51,7 +51,7 @@ fn test_spatial_index_multi_level_chunks() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_spatial_index_walkable_connectivity() {
+fn test_spatial_index_walkable_connectivity() -> Result<(), Box<dyn Error>> {
     let mut index = ChunkSpatialIndex::new();
     let chunk = MapChunk {
         coord: ChunkCoord { x: 0, y: 0, z: 100 },
@@ -64,7 +64,7 @@ fn test_spatial_index_walkable_connectivity() {
         }],
         sparse_overlays: BTreeMap::new(),
     };
-    index.insert_or_update_chunk(&chunk);
+    index.insert_or_update_chunk(&chunk)?;
 
     let neighbors = index.find_walkable_neighbors(MapCoord { x: 8, y: 8, z: 100 });
     assert!(!neighbors.is_empty());
@@ -72,4 +72,5 @@ fn test_spatial_index_walkable_connectivity() {
     assert!(neighbors.contains(&MapCoord { x: 7, y: 8, z: 100 }));
     assert!(neighbors.contains(&MapCoord { x: 8, y: 9, z: 100 }));
     assert!(neighbors.contains(&MapCoord { x: 8, y: 7, z: 100 }));
+    Ok(())
 }

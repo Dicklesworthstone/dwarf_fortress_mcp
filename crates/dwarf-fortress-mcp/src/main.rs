@@ -31,6 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "contract" => print_contract(),
         "doctor" => doctor()?,
         "demo" => demo()?,
+        "bridge" => bridge(env::args().nth(2))?,
         "serve" => dfmcp_mcp::run_stdio(),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
@@ -52,6 +53,7 @@ COMMANDS:
     contract    Print the frozen phase-zero narrow-waist contract
     doctor      Exercise the deterministic laboratory adapter
     demo        Prepare and commit a verified semantic pause-state action
+    bridge      Probe out-of-process DFHack bridge connectivity (e.g. 127.0.0.1:5000)
     serve       Run the MCP 2026-07-28 modern-only stdio server (fastmcp_rust)
     version     Print version information
     help        Print this help
@@ -117,6 +119,41 @@ fn doctor() -> Result<(), Box<dyn Error>> {
             .map(|anchor| anchor.state_hash.to_string())
             .unwrap_or_else(|| "none".to_owned())
     );
+    Ok(())
+}
+
+fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
+    println!("Dwarf Fortress MCP Out-of-Process Bridge Diagnostics");
+    let target = endpoint.unwrap_or_else(|| "127.0.0.1:5000".to_owned());
+    println!("Connecting to bridge endpoint: {target}...");
+
+    match std::net::TcpStream::connect(&target) {
+        Ok(stream) => {
+            let mut adapter = dfmcp_adapter::DfhackAdapter::new(
+                stream,
+                dfmcp_adapter::DfhackAdapterConfig::default(),
+            );
+            let ctx = context(&sample_snapshot(), 1);
+            match adapter.health(&ctx) {
+                Ok(health) => {
+                    println!("Bridge connection established!");
+                    println!("Adapter: {}", health.identity.name);
+                    println!("Status: {:?}", health.status);
+                    println!(
+                        "Protocol version: {}",
+                        health.identity.bridge_protocol_version
+                    );
+                }
+                Err(err) => {
+                    println!("Connected, but health probe failed: {err}");
+                }
+            }
+        }
+        Err(err) => {
+            println!("Bridge unreachable at {target}: {err}");
+            println!("Ensure the DFHack out-of-process bridge plugin is loaded and listening.");
+        }
+    }
     Ok(())
 }
 

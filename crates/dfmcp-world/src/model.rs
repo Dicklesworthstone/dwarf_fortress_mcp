@@ -604,6 +604,12 @@ impl WorldSnapshot {
 
     #[must_use]
     pub fn compute_hash(&self) -> Digest32 {
+        Digest32::of_bytes(&self.canonical_bytes())
+    }
+
+    /// Canonical, length-delimited bytes covered by [`Self::state_hash`].
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         put_str(&mut bytes, "dfmcp-world-snapshot-v1");
         put_u64(&mut bytes, self.fortress_id.get());
@@ -612,7 +618,7 @@ impl WorldSnapshot {
         put_u64(&mut bytes, self.cursor.sequence);
         put_bool(&mut bytes, self.paused);
         self.graph.encode(&mut bytes);
-        Digest32::of_bytes(&bytes)
+        bytes
     }
 
     pub fn refresh_hash(&mut self) {

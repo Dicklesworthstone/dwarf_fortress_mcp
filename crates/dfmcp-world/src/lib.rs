@@ -24,7 +24,7 @@ pub use search::{FrankenSearchEngine, SearchHit};
 
 pub use atp::{AtpProofCapsule, AtpProofVerifier};
 pub use merkle::{MerkleInclusionProof, MerkleStateTree};
-pub use rebase::{ConflictCertificate, ConflictKind};
+pub use rebase::{ConflictCertificate, ConflictKind, RebaseOutcome, SemanticRebaseEngine};
 
 pub use spatial_index::{
     ChunkSpatialIndex, LiquidType, SpatialChunkNode, TemperatureBand, TileProperties, TileType,

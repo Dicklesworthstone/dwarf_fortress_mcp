@@ -62,13 +62,20 @@ impl ObservationCapsule {
                 "delta target_hash does not match successor anchor state_hash; refusing to capsule an unverified transition",
             ));
         }
+        if delta.target_tick != successor.tick || successor.tick < basis.tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "delta target tick does not match a monotonic successor anchor",
+            ));
+        }
+        if delta.truncated || delta.continuation.is_some() {
+            return Err(DfmcpError::new(
+                ErrorCode::CursorGap,
+                "partial deltas cannot be sealed as complete observation capsules",
+            ));
+        }
 
-        let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(basis.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(successor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(delta.target_hash.as_bytes());
-        hasher_bytes.extend_from_slice(&published_at_tick.0.to_be_bytes());
-        let capsule_digest = Digest32::of_bytes(&hasher_bytes);
+        let capsule_digest = compute_capsule_digest(basis, successor, &delta, published_at_tick);
 
         Ok(Self {
             basis_anchor: basis,
@@ -78,6 +85,43 @@ impl ObservationCapsule {
             published_at_tick,
         })
     }
+
+    /// Verify the capsule's digest and internal anchor continuity.
+    #[must_use]
+    pub fn integrity_is_valid(&self) -> bool {
+        self.basis_anchor.fortress_id == self.successor_anchor.fortress_id
+            && self.delta.fortress_id == self.basis_anchor.fortress_id
+            && self.delta.base_cursor == self.basis_anchor.cursor
+            && self.delta.target_cursor == self.successor_anchor.cursor
+            && self.delta.base_hash == self.basis_anchor.state_hash
+            && self.delta.target_hash == self.successor_anchor.state_hash
+            && self.delta.target_tick == self.successor_anchor.tick
+            && self.successor_anchor.tick >= self.basis_anchor.tick
+            && !self.delta.truncated
+            && self.delta.continuation.is_none()
+            && self.capsule_digest
+                == compute_capsule_digest(
+                    self.basis_anchor,
+                    self.successor_anchor,
+                    &self.delta,
+                    self.published_at_tick,
+                )
+    }
+}
+
+fn compute_capsule_digest(
+    basis: StateAnchor,
+    successor: StateAnchor,
+    delta: &StateDelta,
+    published_at_tick: GameTick,
+) -> Digest32 {
+    let mut bytes = Vec::new();
+    crate::canonical::put_str(&mut bytes, "dfmcp-observation-capsule-v1");
+    crate::canonical::put_anchor(&mut bytes, basis);
+    crate::canonical::put_anchor(&mut bytes, successor);
+    crate::canonical::put_bytes(&mut bytes, &delta.canonical_bytes());
+    crate::canonical::put_u64(&mut bytes, published_at_tick.0);
+    Digest32::of_bytes(&bytes)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -207,6 +251,12 @@ impl DurableLedger {
     }
 
     pub fn stage_capsule(&mut self, capsule: ObservationCapsule) -> Result<()> {
+        if !capsule.integrity_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "staged observation capsule failed integrity validation",
+            ));
+        }
         let current_head = self.head_anchor();
         if capsule.basis_anchor.fortress_id != self.fortress_id {
             return Err(DfmcpError::new(
@@ -270,22 +320,32 @@ impl DurableLedger {
         idempotency_key: impl Into<String>,
         plan_digest: Digest32,
         tick: GameTick,
-    ) {
+    ) -> Result<()> {
         let eff_id = effect_id.into();
         let key = idempotency_key.into();
+        if let Some(existing) = self.effects.get(&key) {
+            if existing.effect_id == eff_id && existing.plan_digest == plan_digest {
+                return Ok(());
+            }
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "idempotency key is already bound to a different effect or plan",
+            ));
+        }
         self.effects.insert(
             key.clone(),
             EffectJournalRecord {
                 effect_id: eff_id,
                 idempotency_key: key,
                 plan_digest,
-                state: CommitState::Prepared,
+                state: CommitState::Committing,
                 dispatch_attempted_tick: Some(tick),
                 receipt_digest: None,
                 observed_state_hash: None,
                 error_message: None,
             },
         );
+        Ok(())
     }
 
     pub fn record_commit_receipt(
@@ -299,8 +359,45 @@ impl DurableLedger {
                 format!("unknown idempotency key '{idempotency_key}'"),
             )
         })?;
-        effect.state = CommitState::Verified;
+        if effect.state != CommitState::Committing {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "commit receipt is invalid for the effect's current state",
+            ));
+        }
+        effect.state = CommitState::AppliedAwaitingVerification;
         effect.receipt_digest = Some(receipt_digest);
+        Ok(())
+    }
+
+    /// Record authoritative post-state observation after a commit receipt.
+    pub fn record_verified(
+        &mut self,
+        idempotency_key: &str,
+        observed_state_hash: Digest32,
+    ) -> Result<()> {
+        if observed_state_hash == Digest32::ZERO {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "verified effect requires a nonzero observed state hash",
+            ));
+        }
+        let effect = self.effects.get_mut(idempotency_key).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("unknown idempotency key '{idempotency_key}'"),
+            )
+        })?;
+        if effect.state != CommitState::AppliedAwaitingVerification
+            || effect.receipt_digest.is_none()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "effect cannot be verified before its commit receipt",
+            ));
+        }
+        effect.observed_state_hash = Some(observed_state_hash);
+        effect.state = CommitState::Verified;
         Ok(())
     }
 
@@ -324,7 +421,7 @@ impl DurableLedger {
         self.unpublished_capsule = None;
 
         for effect in self.effects.values_mut() {
-            if effect.state == CommitState::Prepared
+            if effect.state == CommitState::Committing
                 && effect.dispatch_attempted_tick.is_some()
                 && effect.receipt_digest.is_none()
             {

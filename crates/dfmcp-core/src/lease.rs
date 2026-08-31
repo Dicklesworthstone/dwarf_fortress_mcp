@@ -80,6 +80,7 @@ impl LeaseManager {
         current_tick: GameTick,
         ttl_ticks: u64,
     ) -> Result<LeaseId> {
+        let expires_at_tick = checked_expiry(current_tick, ttl_ticks)?;
         // 1. Check for conflicts against existing unexpired leases
         for existing in self.leases.values() {
             if existing.expires_at_tick <= current_tick {
@@ -118,8 +119,7 @@ impl LeaseManager {
         }
 
         // 2. Grant lease
-        let lease_id = LeaseId::new(u128::from(self.next_lease_seq));
-        self.next_lease_seq = self.next_lease_seq.saturating_add(1);
+        let (lease_id, next_sequence) = self.next_lease_id()?;
 
         let kind = if exclusive {
             LeaseKind::SpatialExclusive(cuboid)
@@ -132,10 +132,16 @@ impl LeaseManager {
             holder_session: session_id,
             kind,
             acquired_tick: current_tick,
-            expires_at_tick: GameTick(current_tick.0.saturating_add(ttl_ticks)),
+            expires_at_tick,
         };
 
-        self.leases.insert(lease_id, record);
+        if self.leases.insert(lease_id, record).is_some() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "lease identifier collision",
+            ));
+        }
+        self.next_lease_seq = next_sequence;
         Ok(lease_id)
     }
 
@@ -148,6 +154,7 @@ impl LeaseManager {
         current_tick: GameTick,
         ttl_ticks: u64,
     ) -> Result<LeaseId> {
+        let expires_at_tick = checked_expiry(current_tick, ttl_ticks)?;
         for existing in self.leases.values() {
             if existing.expires_at_tick <= current_tick {
                 continue;
@@ -184,8 +191,7 @@ impl LeaseManager {
             }
         }
 
-        let lease_id = LeaseId::new(u128::from(self.next_lease_seq));
-        self.next_lease_seq = self.next_lease_seq.saturating_add(1);
+        let (lease_id, next_sequence) = self.next_lease_id()?;
 
         let kind = if exclusive {
             LeaseKind::EntityExclusive(entity_id)
@@ -198,10 +204,16 @@ impl LeaseManager {
             holder_session: session_id,
             kind,
             acquired_tick: current_tick,
-            expires_at_tick: GameTick(current_tick.0.saturating_add(ttl_ticks)),
+            expires_at_tick,
         };
 
-        self.leases.insert(lease_id, record);
+        if self.leases.insert(lease_id, record).is_some() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "lease identifier collision",
+            ));
+        }
+        self.next_lease_seq = next_sequence;
         Ok(lease_id)
     }
 
@@ -219,22 +231,40 @@ impl LeaseManager {
             )
         })?;
 
-        if record.expires_at_tick < current_tick {
+        if record.expires_at_tick <= current_tick {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "cannot renew expired lease",
             ));
         }
 
-        record.expires_at_tick = GameTick(record.expires_at_tick.0.saturating_add(extension_ticks));
+        if extension_ticks == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "lease renewal extension must be nonzero",
+            ));
+        }
+        record.expires_at_tick = GameTick(
+            record
+                .expires_at_tick
+                .0
+                .checked_add(extension_ticks)
+                .ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::BudgetExceeded, "lease expiry tick overflow")
+                })?,
+        );
         Ok(())
     }
 
     /// Explicitly release a lease.
     pub fn release_lease(&mut self, lease_id: LeaseId, session_id: SessionId) -> Result<()> {
-        if let Some(record) = self.leases.get(&lease_id)
-            && record.holder_session != session_id
-        {
+        let record = self.leases.get(&lease_id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::LeaseDenied,
+                format!("lease {lease_id} not found"),
+            )
+        })?;
+        if record.holder_session != session_id {
             return Err(DfmcpError::new(
                 ErrorCode::CapabilityDenied,
                 "cannot release lease owned by another session",
@@ -269,6 +299,30 @@ impl LeaseManager {
     pub fn active_lease_count(&self) -> usize {
         self.leases.len()
     }
+
+    fn next_lease_id(&self) -> Result<(LeaseId, u64)> {
+        let next_sequence = self.next_lease_seq.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "lease identifier space exhausted",
+            )
+        })?;
+        Ok((LeaseId::new(u128::from(self.next_lease_seq)), next_sequence))
+    }
+}
+
+fn checked_expiry(current_tick: GameTick, ttl_ticks: u64) -> Result<GameTick> {
+    if ttl_ticks == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "lease TTL must be nonzero",
+        ));
+    }
+    current_tick
+        .0
+        .checked_add(ttl_ticks)
+        .map(GameTick)
+        .ok_or_else(|| DfmcpError::new(ErrorCode::BudgetExceeded, "lease expiry tick overflow"))
 }
 
 #[cfg(test)]

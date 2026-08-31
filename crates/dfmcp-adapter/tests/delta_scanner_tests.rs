@@ -29,19 +29,20 @@ fn test_dirty_chunk_batch_draining() {
 }
 
 #[test]
-fn test_entity_generation_change_detection() {
+fn test_entity_generation_change_detection() -> Result<(), Box<dyn Error>> {
     let mut tracker = EntityDeltaTracker::new();
     let id = EntityId::new(100);
 
     let e_gen1 = entity_record_helper(id, 1, 1);
-    let changes1 = tracker.process_entities(&[e_gen1]);
+    let changes1 = tracker.process_entities(&[e_gen1])?;
     assert_eq!(changes1.len(), 1);
 
     // Generation increment (e.g. entity deleted and re-spawned with same ID)
     let e_gen2 = entity_record_helper(id, 2, 1);
-    let changes2 = tracker.process_entities(&[e_gen2]);
+    let changes2 = tracker.process_entities(&[e_gen2])?;
     assert_eq!(changes2.len(), 1);
     assert!(matches!(changes2[0], WorldChange::UpsertEntity(_)));
+    Ok(())
 }
 
 #[test]
@@ -82,10 +83,17 @@ fn test_continuous_delta_sequence_stream() -> Result<(), Box<dyn Error>> {
     );
 
     let mut streamer = ContinuousDeltaStreamer::new(&base);
+    let mut expected = base.clone();
 
     for step in 1..=5 {
         let tick = GameTick(500 + step);
-        let hash = Digest32::of_bytes(format!("hash_step_{}", step).as_bytes());
+        expected.tick = tick;
+        expected.cursor = ObservationCursor {
+            epoch: 1,
+            sequence: 10 + step,
+        };
+        expected.refresh_hash();
+        let hash = expected.state_hash;
         let delta = streamer.emit_next_delta(tick, &[], &[], hash)?;
 
         assert_eq!(delta.fortress_id, FortressId::new(42));
