@@ -119,6 +119,7 @@ impl<S: Read + Write> GameAdapter for DfhackAdapter<S> {
             IpcMessageType::HealthRequest,
             Vec::new(),
             IpcMessageType::HealthResponse,
+            context,
         );
         let (status, warning) = match result {
             Ok(_) => (

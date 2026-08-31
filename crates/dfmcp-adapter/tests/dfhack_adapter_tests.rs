@@ -12,7 +12,7 @@ use dfmcp_adapter::{
     IpcMessageType, IpcTransceiver, TransceiverConfig,
 };
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick,
+    Capability, CapabilityGrant, CapabilityScope, Digest32, ErrorCode, FortressId, GameTick,
     ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 
@@ -147,6 +147,7 @@ fn test_transceiver_request_response_round_trip() -> Result<(), Box<dyn Error>> 
         IpcMessageType::HealthRequest,
         Vec::new(),
         IpcMessageType::HealthResponse,
+        &test_context(),
     )?;
 
     assert_eq!(result.message_type, IpcMessageType::HealthResponse);
@@ -154,6 +155,32 @@ fn test_transceiver_request_response_round_trip() -> Result<(), Box<dyn Error>> 
     assert_eq!(transceiver.telemetry().frames_sent, 1);
     assert_eq!(transceiver.telemetry().frames_received, 1);
     Ok(())
+}
+
+#[test]
+fn transceiver_rejects_frame_header_above_byte_budget() {
+    let stream = MockDuplexStream::new();
+    let mut transceiver = IpcTransceiver::new(stream, TransceiverConfig::default());
+    let mut context = test_context();
+    context.budget.max_bytes = 1;
+    let result = transceiver.request(
+        IpcMessageType::HealthRequest,
+        Vec::new(),
+        IpcMessageType::HealthResponse,
+        &context,
+    );
+    assert!(matches!(result, Err(ref error) if error.code == ErrorCode::BudgetExceeded));
+    assert_eq!(transceiver.telemetry().frames_sent, 0);
+}
+
+#[test]
+fn dfhack_health_propagates_context_cancellation() {
+    let stream = MockDuplexStream::new();
+    let mut adapter = DfhackAdapter::new(stream, DfhackAdapterConfig::default());
+    let mut context = test_context();
+    context.cancellation_requested = true;
+    let result = adapter.health(&context);
+    assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CancellationRequested));
 }
 
 #[test]
