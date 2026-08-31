@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::path::{Component, Path};
 
 use dfmcp_core::{
     CheckpointId, DfmcpError, Digest32, ErrorCode, FortressId, GameTick, Result, StateAnchor,
@@ -67,16 +68,28 @@ impl CheckpointManifest {
             ));
         }
         for (path, (expected_size, expected_hash)) in &self.files {
+            if !valid_manifest_path(path) {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    format!("checkpoint manifest contains unsafe path '{path}'"),
+                ));
+            }
             let file_bytes = read_file(path).ok_or_else(|| {
                 DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
+                    ErrorCode::CorruptLedger,
                     format!("checkpoint verification failed: missing file '{path}'"),
                 )
             })?;
 
-            if file_bytes.len() as u64 != *expected_size {
+            let actual_size = u64::try_from(file_bytes.len()).map_err(|_| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "checkpoint file length cannot be represented in the manifest format",
+                )
+            })?;
+            if actual_size != *expected_size {
                 return Err(DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
+                    ErrorCode::CorruptLedger,
                     format!(
                         "checkpoint verification failed: file size mismatch for '{path}' (expected {expected_size}, got {})",
                         file_bytes.len()
@@ -87,7 +100,7 @@ impl CheckpointManifest {
             let actual_hash = Digest32::of_bytes(&file_bytes);
             if actual_hash != *expected_hash {
                 return Err(DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
+                    ErrorCode::CorruptLedger,
                     format!(
                         "checkpoint bit-rot detected: hash mismatch for '{path}' (expected {expected_hash}, got {actual_hash})"
                     ),
@@ -96,6 +109,21 @@ impl CheckpointManifest {
         }
         Ok(())
     }
+}
+
+fn valid_manifest_path(path: &str) -> bool {
+    if path.is_empty()
+        || path.len() > 4_096
+        || path
+            .chars()
+            .any(|character| character == '\0' || character == '\\')
+        || path.contains("//")
+    {
+        return false;
+    }
+    Path::new(path)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn compute_manifest_digest(
@@ -128,6 +156,7 @@ pub struct RestoreCertificate {
     pub prior_anchor: StateAnchor,
     pub restored_anchor: StateAnchor,
     pub manifest_digest: Digest32,
+    pub restored_content_digest: Digest32,
     pub certificate_digest: Digest32,
 }
 
@@ -138,22 +167,54 @@ impl RestoreCertificate {
         prior_anchor: StateAnchor,
         restored_anchor: StateAnchor,
         manifest_digest: Digest32,
+        restored_content_digest: Digest32,
     ) -> Self {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&fortress_id.get().to_be_bytes());
-        bytes.extend_from_slice(prior_anchor.state_hash.as_bytes());
-        bytes.extend_from_slice(restored_anchor.state_hash.as_bytes());
-        bytes.extend_from_slice(manifest_digest.as_bytes());
-        let certificate_digest = Digest32::of_bytes(&bytes);
+        let certificate_digest = restore_certificate_digest(
+            fortress_id,
+            prior_anchor,
+            restored_anchor,
+            manifest_digest,
+            restored_content_digest,
+        );
 
         Self {
             fortress_id,
             prior_anchor,
             restored_anchor,
             manifest_digest,
+            restored_content_digest,
             certificate_digest,
         }
     }
+
+    #[must_use]
+    pub fn integrity_is_valid(&self) -> bool {
+        self.certificate_digest
+            == restore_certificate_digest(
+                self.fortress_id,
+                self.prior_anchor,
+                self.restored_anchor,
+                self.manifest_digest,
+                self.restored_content_digest,
+            )
+    }
+}
+
+fn restore_certificate_digest(
+    fortress_id: FortressId,
+    prior_anchor: StateAnchor,
+    restored_anchor: StateAnchor,
+    manifest_digest: Digest32,
+    restored_content_digest: Digest32,
+) -> Digest32 {
+    let mut bytes = Vec::new();
+    crate::canonical::put_str(&mut bytes, "dfmcp-restore-certificate-v1");
+    crate::canonical::put_u64(&mut bytes, fortress_id.get());
+    crate::canonical::put_anchor(&mut bytes, prior_anchor);
+    crate::canonical::put_anchor(&mut bytes, restored_anchor);
+    crate::canonical::put_bytes(&mut bytes, manifest_digest.as_bytes());
+    crate::canonical::put_bytes(&mut bytes, restored_content_digest.as_bytes());
+    Digest32::of_bytes(&bytes)
 }
 
 pub struct CheckpointStore {
@@ -192,10 +253,10 @@ impl CheckpointStore {
                 "cannot checkpoint a snapshot with an invalid state hash",
             ));
         }
-        if files.keys().any(|path| path.is_empty()) {
+        if files.keys().any(|path| !valid_manifest_path(path)) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "checkpoint manifest paths must be nonempty",
+                "checkpoint manifest paths must be bounded, relative normal paths",
             ));
         }
         let cid = CheckpointId::new(u128::from(self.next_checkpoint_id));
@@ -230,6 +291,7 @@ impl CheckpointStore {
         checkpoint_id: CheckpointId,
         prior_anchor: StateAnchor,
         restored_anchor: StateAnchor,
+        restored_content_digest: Digest32,
     ) -> Result<RestoreCertificate> {
         let manifest = self.manifests.get(&checkpoint_id).ok_or_else(|| {
             DfmcpError::new(
@@ -258,10 +320,22 @@ impl CheckpointStore {
                 "checkpoint restore must advance the observation epoch",
             ));
         }
+        if restored_anchor.cursor.sequence != 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::CursorGap,
+                "checkpoint restore must reset the observation sequence",
+            ));
+        }
         if restored_anchor.tick != manifest.tick {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "restored anchor tick does not match checkpoint manifest",
+            ));
+        }
+        if restored_content_digest != manifest.state_hash {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "restored content digest does not match checkpoint manifest",
             ));
         }
 
@@ -270,6 +344,7 @@ impl CheckpointStore {
             prior_anchor,
             restored_anchor,
             manifest.manifest_digest,
+            restored_content_digest,
         ))
     }
 

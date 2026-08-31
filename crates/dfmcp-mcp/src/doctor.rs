@@ -62,7 +62,9 @@ impl DoctorInspector {
             }
         };
 
-        let telemetry = ipc_telemetry.cloned().unwrap_or_default();
+        let telemetry = ipc_telemetry
+            .cloned()
+            .map_or_else(IpcTelemetry::default, |value| value);
         if telemetry.crc_errors > 0 {
             findings.push(format!(
                 "detected {} CRC32 framing errors on IPC stream",

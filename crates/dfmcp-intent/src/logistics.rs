@@ -43,7 +43,7 @@ impl InventoryStockpile {
     /// Get current stock count for an item token (defaults to 0).
     #[must_use]
     pub fn get_stock(&self, token: &str) -> u32 {
-        self.item_counts.get(token).copied().unwrap_or(0)
+        self.item_counts.get(token).copied().map_or(0, |count| count)
     }
 }
 
@@ -182,7 +182,7 @@ impl ProductionLogisticsCompiler {
         batches: &mut BTreeMap<String, u32>,
         visiting: &mut BTreeSet<String>,
     ) -> Result<()> {
-        let prior_required = requirements.get(token).copied().unwrap_or(0);
+        let prior_required = requirements.get(token).copied().map_or(0, |count| count);
         let total_required = prior_required
             .checked_add(additional_required)
             .ok_or_else(|| {
@@ -220,7 +220,7 @@ impl ProductionLogisticsCompiler {
                 format!("production batch count overflow for '{token}'"),
             )
         })?;
-        let prior_batches = batches.get(token).copied().unwrap_or(0);
+        let prior_batches = batches.get(token).copied().map_or(0, |count| count);
         if required_batches <= prior_batches {
             return Ok(());
         }

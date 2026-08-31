@@ -139,7 +139,10 @@ impl FrankenSearchEngine {
                     (document_count + 1).saturating_mul(SCALE) / (document_frequency + 1);
 
                 for &(doc_idx, freq) in postings {
-                    let document_length = self.doc_lengths[doc_idx] as u128;
+                    let Some(document_length) = self.doc_lengths.get(doc_idx).copied() else {
+                        continue;
+                    };
+                    let document_length = document_length as u128;
                     let frequency = freq as u128;
                     let length_ratio_micros = document_length
                         .saturating_mul(document_count)
@@ -155,7 +158,10 @@ impl FrankenSearchEngine {
                         .saturating_mul(SCALE)
                         / denominator_micros.max(1);
                     let term_score = idf_micros.saturating_mul(term_frequency_micros) / SCALE;
-                    let term_score = u64::try_from(term_score).unwrap_or(u64::MAX);
+                    let term_score = match u64::try_from(term_score) {
+                        Ok(value) => value,
+                        Err(_) => u64::MAX,
+                    };
 
                     let entry = doc_scores.entry(doc_idx).or_insert((0, BTreeSet::new()));
                     entry.0 = entry.0.saturating_add(term_score);
@@ -175,28 +181,28 @@ impl FrankenSearchEngine {
         ranked
             .into_iter()
             .take(limit)
-            .map(|(doc_idx, score, matched_terms)| {
-                let (entity_id, event_id, ref title, ref body) = self.doc_metadata[doc_idx];
+            .filter_map(|(doc_idx, score, matched_terms)| {
+                let (entity_id, event_id, title, body) = self.doc_metadata.get(doc_idx)?;
                 let snippet = if body.len() > 120 {
                     let boundary = body
                         .char_indices()
                         .map(|(index, _)| index)
                         .take_while(|index| *index <= 120)
                         .last()
-                        .unwrap_or(0);
+                        .map_or(0, |index| index);
                     format!("{}...", &body[..boundary])
                 } else {
                     body.clone()
                 };
 
-                SearchHit {
-                    entity_id,
-                    event_id,
+                Some(SearchHit {
+                    entity_id: *entity_id,
+                    event_id: *event_id,
                     title: title.clone(),
                     snippet,
                     score_micros: score,
                     matched_terms,
-                }
+                })
             })
             .collect()
     }

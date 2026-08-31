@@ -104,7 +104,7 @@ fn test_incremental_decoder_chunk_assembly() -> Result<()> {
 
     // Push in small 7-byte chunks
     for chunk in expected_bytes.chunks(7) {
-        decoder.push_bytes(chunk);
+        decoder.push_bytes(chunk)?;
         while let Some(frame) = decoder.poll_next_frame()? {
             decoded_frames.push(frame);
         }

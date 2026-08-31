@@ -19,7 +19,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use crate::doctor::DoctorInspector;
-use dfmcp_adapter::{CancelMode, GameAdapter};
+use dfmcp_adapter::{
+    CancelMode, GameAdapter, InterestSet, ObservationPayload, ObservationRequest, Projection,
+};
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
     ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId,
@@ -78,6 +80,8 @@ static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LabSession>>>>> =
 /// Counter for minting fresh `SessionId`s.
 static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1));
 
+const MAX_LAB_SESSIONS: usize = 1_024;
+
 fn sessions() -> MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LabSession>>>> {
     match SESSIONS.lock() {
         Ok(guard) => guard,
@@ -113,6 +117,12 @@ fn parse_session_id_arg(value: &str) -> Result<SessionId> {
             "session_id must be a u128 decimal string returned by fortress_open_session",
         )
     })?;
+    if parsed == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "session_id zero is reserved",
+        ));
+    }
     Ok(SessionId::new(parsed))
 }
 
@@ -153,9 +163,15 @@ fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>>
     }
 }
 
-fn next_request_id(session: &mut LabSession) -> u128 {
-    session.next_request_id = session.next_request_id.wrapping_add(1);
-    session.next_request_id
+fn next_request_id(session: &mut LabSession) -> Result<u128> {
+    let next = session.next_request_id.checked_add(1).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "session request identifier space is exhausted",
+        )
+    })?;
+    session.next_request_id = next;
+    Ok(next)
 }
 
 fn seed_snapshot(fortress_id: FortressId, paused: bool) -> WorldSnapshot {
@@ -267,6 +283,23 @@ fn parse_capability_request(requested: &[(String, String)]) -> Result<Vec<Negoti
                 ));
             }
         };
+        if !matches!(
+            capability,
+            Capability::Observe
+                | Capability::Query
+                | Capability::Plan
+                | Capability::ControlClock
+                | Capability::Checkpoint
+                | Capability::Restore
+                | Capability::Doctor
+        ) {
+            return Err(DfmcpError::new(
+                ErrorCode::CompatibilityUnknown,
+                format!(
+                    "capability {cap_str:?} is not implemented by the process-local laboratory"
+                ),
+            ));
+        }
         if !seen.insert(capability) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
@@ -316,8 +349,8 @@ pub fn fortress_open_session(
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
 ) -> String {
-    let paused = paused.unwrap_or(true);
-    let selector_str = fortress_selector.unwrap_or_else(|| "1".to_owned());
+    let paused = paused.map_or(true, |value| value);
+    let selector_str = fortress_selector.map_or_else(|| "1".to_owned(), |value| value);
     let parsed_fortress: Result<FortressId> = match selector_str.parse::<u64>() {
         Ok(value) => Ok(FortressId::new(value)),
         Err(_) => Err(DfmcpError::new(
@@ -326,7 +359,13 @@ pub fn fortress_open_session(
         )),
     };
     let fortress_id = match parsed_fortress {
-        Ok(value) => value,
+        Ok(value) if value != FortressId::NIL => value,
+        Ok(_) => {
+            return error_payload(
+                "fortress.open_session",
+                "fortress_selector zero is reserved",
+            );
+        }
         Err(error) => return error_payload("fortress.open_session", &error.to_string()),
     };
 
@@ -339,21 +378,35 @@ pub fn fortress_open_session(
         ("restore".to_owned(), "guarded".to_owned()),
         ("doctor".to_owned(), "read_only".to_owned()),
     ];
-    let requested_caps_raw = requested_capabilities.unwrap_or(default_caps);
+    let requested_caps_raw =
+        requested_capabilities.map_or_else(|| default_caps, |capabilities| capabilities);
     let requested_caps = match parse_capability_request(&requested_caps_raw) {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.open_session", &error.to_string()),
     };
 
     let budget = WorkBudget {
-        max_wall_millis: max_wall_millis
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis),
-        max_game_ticks: max_game_ticks.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks),
-        max_entities: max_entities.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities),
-        max_bytes: max_bytes.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes),
-        max_output_tokens: max_output_tokens
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_output_tokens),
-        max_actions: max_actions.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions),
+        max_wall_millis: max_wall_millis.map_or(
+            WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis,
+            |value| value,
+        ),
+        max_game_ticks: max_game_ticks.map_or(
+            WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks,
+            |value| value,
+        ),
+        max_entities: max_entities.map_or(
+            WorkBudget::CONSERVATIVE_DEFAULT.max_entities,
+            |value| value,
+        ),
+        max_bytes: max_bytes.map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes, |value| value),
+        max_output_tokens: max_output_tokens.map_or(
+            WorkBudget::CONSERVATIVE_DEFAULT.max_output_tokens,
+            |value| value,
+        ),
+        max_actions: max_actions.map_or(
+            WorkBudget::CONSERVATIVE_DEFAULT.max_actions,
+            |value| value,
+        ),
     };
     if let Err(error) = budget.validate() {
         return error_payload("fortress.open_session", &error.to_string());

@@ -12,26 +12,34 @@ const EMPTY_DOMAIN: &[u8] = b"dfmcp-merkle-empty-v1";
 const LEAF_DOMAIN: &[u8] = b"dfmcp-merkle-leaf-v1";
 const PAIR_DOMAIN: &[u8] = b"dfmcp-merkle-pair-v1";
 
-/// Inclusion proof containing the sibling path from a leaf to the overall state root.
-///
-/// Pair hashing sorts its two inputs, so path directions are not required. This is an
-/// inclusion proof only; it does not prove the leaf's ordinal position.
+/// Inclusion proof containing the ordered sibling path from a leaf to the
+/// overall state root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerkleInclusionProof {
     pub leaf_digest: Digest32,
     pub sibling_hashes: Vec<Digest32>,
+    /// `true` when the corresponding sibling is on the left of the current
+    /// node. The vector must have exactly the same length as `sibling_hashes`.
+    pub sibling_is_left: Vec<bool>,
 }
 
 impl MerkleInclusionProof {
     /// Verify this inclusion proof against an expected Merkle root.
     #[must_use]
     pub fn verify_root(&self, expected_root: &Digest32) -> bool {
-        let computed = self
-            .sibling_hashes
-            .iter()
-            .fold(self.leaf_digest, |current, sibling| {
-                hash_pair(current, *sibling)
-            });
+        if self.sibling_hashes.len() != self.sibling_is_left.len() {
+            return false;
+        }
+        let computed = self.sibling_hashes.iter().zip(&self.sibling_is_left).fold(
+            self.leaf_digest,
+            |current, (sibling, sibling_is_left)| {
+                if *sibling_is_left {
+                    hash_pair(*sibling, current)
+                } else {
+                    hash_pair(current, *sibling)
+                }
+            },
+        );
         computed == *expected_root
     }
 }
@@ -113,16 +121,18 @@ impl MerkleStateTree {
         let entity_ids: Vec<EntityId> = self.entity_leaf_hashes.keys().copied().collect();
         let index = entity_ids.binary_search(&id).ok()?;
         let leaves: Vec<Digest32> = self.entity_leaf_hashes.values().copied().collect();
-        let leaf_digest = leaves[index];
-        let mut sibling_hashes = merkle_path(leaves, index)?;
+        let leaf_digest = *leaves.get(index)?;
+        let mut siblings = merkle_path(leaves, index)?;
 
         // Overall tree layout is [(entities, edges), (chunks, events)].
-        sibling_hashes.push(self.edges_root);
-        sibling_hashes.push(hash_pair(self.chunks_root, self.events_root));
+        siblings.push((self.edges_root, false));
+        siblings.push((hash_pair(self.chunks_root, self.events_root), false));
+        let (sibling_hashes, sibling_is_left): (Vec<_>, Vec<_>) = siblings.into_iter().unzip();
 
         Some(MerkleInclusionProof {
             leaf_digest,
             sibling_hashes,
+            sibling_is_left,
         })
     }
 }
@@ -136,15 +146,10 @@ fn hash_leaf(bytes: &[u8]) -> Digest32 {
 }
 
 fn hash_pair(left: Digest32, right: Digest32) -> Digest32 {
-    let (first, second) = if left <= right {
-        (left, right)
-    } else {
-        (right, left)
-    };
     let mut encoded = Vec::with_capacity(PAIR_DOMAIN.len() + 64);
     encoded.extend_from_slice(PAIR_DOMAIN);
-    encoded.extend_from_slice(first.as_bytes());
-    encoded.extend_from_slice(second.as_bytes());
+    encoded.extend_from_slice(left.as_bytes());
+    encoded.extend_from_slice(right.as_bytes());
     Digest32::of_bytes(&encoded)
 }
 
@@ -163,10 +168,13 @@ fn merkle_root(mut level: Vec<Digest32>) -> Digest32 {
         }
         level = next;
     }
-    level[0]
+    match level.into_iter().next() {
+        Some(root) => root,
+        None => Digest32::of_bytes(EMPTY_DOMAIN),
+    }
 }
 
-fn merkle_path(mut level: Vec<Digest32>, mut index: usize) -> Option<Vec<Digest32>> {
+fn merkle_path(mut level: Vec<Digest32>, mut index: usize) -> Option<Vec<(Digest32, bool)>> {
     if index >= level.len() {
         return None;
     }
@@ -174,10 +182,12 @@ fn merkle_path(mut level: Vec<Digest32>, mut index: usize) -> Option<Vec<Digest3
     while level.len() > 1 {
         if index.is_multiple_of(2) {
             if let Some(sibling) = level.get(index + 1) {
-                siblings.push(*sibling);
+                siblings.push((*sibling, false));
             }
+        } else if let Some(sibling) = level.get(index - 1) {
+            siblings.push((*sibling, true));
         } else {
-            siblings.push(level[index - 1]);
+            return None;
         }
 
         let mut next = Vec::with_capacity(level.len().div_ceil(2));
@@ -262,6 +272,37 @@ mod tests {
             None => return,
         };
         proof.leaf_digest = Digest32::of_bytes(b"tampered");
+        assert!(!proof.verify_root(&tree.overall_root));
+    }
+
+    #[test]
+    fn pair_hashing_commits_to_order() {
+        let left = Digest32::of_bytes(b"left");
+        let right = Digest32::of_bytes(b"right");
+        assert_ne!(hash_pair(left, right), hash_pair(right, left));
+    }
+
+    #[test]
+    fn proof_direction_is_authenticated() {
+        let mut graph = WorldGraph::default();
+        graph.entities.insert(EntityId::new(1), entity(1));
+        graph.entities.insert(EntityId::new(2), entity(2));
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(100),
+            ObservationCursor::ORIGIN,
+            true,
+            graph,
+        );
+        let tree = MerkleStateTree::from_snapshot(&snapshot);
+        let mut proof = match tree.generate_entity_proof(EntityId::new(1)) {
+            Some(proof) => proof,
+            None => return,
+        };
+        assert!(proof.verify_root(&tree.overall_root));
+        if let Some(direction) = proof.sibling_is_left.first_mut() {
+            *direction = !*direction;
+        }
         assert!(!proof.verify_root(&tree.overall_root));
     }
 }

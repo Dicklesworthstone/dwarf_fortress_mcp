@@ -263,7 +263,7 @@ impl Fact {
         source: FactSource,
         source_digest: Digest32,
     ) -> Self {
-        let value = presence.as_known().cloned().unwrap_or(Value::Null);
+        let value = presence.as_known().cloned().map_or(Value::Null, |value| value);
         Self {
             value,
             observed_at,

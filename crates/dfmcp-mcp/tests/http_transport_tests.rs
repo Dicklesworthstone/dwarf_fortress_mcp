@@ -9,12 +9,11 @@ use dfmcp_mcp::http_transport::{HttpSessionResumeToken, HttpTransportSessionMana
 fn test_http_session_token_validation() -> Result<()> {
     let session = SessionId::new(42);
     let token = HttpSessionResumeToken::new(session, 10);
-    assert!(token.verify_signature());
+    assert!(token.integrity_is_valid());
 
     let mut tampered = token.clone();
     tampered.resume_offset = 20;
-    assert!(!tampered.verify_signature());
-
+    assert!(!tampered.integrity_is_valid());
     Ok(())
 }
 
@@ -24,8 +23,8 @@ fn test_http_transport_session_isolation() -> Result<()> {
     let s1 = SessionId::new(1);
     let s2 = SessionId::new(2);
 
-    let t1 = manager.open_session(s1);
-    let t2 = manager.open_session(s2);
+    let t1 = manager.open_session(s1)?;
+    let t2 = manager.open_session(s2)?;
 
     manager.buffer_message(s1, "msg for s1".to_owned())?;
     manager.buffer_message(s2, "msg for s2".to_owned())?;
@@ -35,6 +34,11 @@ fn test_http_transport_session_isolation() -> Result<()> {
 
     let s2_msgs = manager.resume_session(&t2)?;
     assert_eq!(s2_msgs, vec!["msg for s2"]);
+
+    // A structurally valid token is not authority unless this manager issued
+    // that exact session/offset tuple.
+    let unissued = HttpSessionResumeToken::new(s1, 1);
+    assert!(manager.resume_session(&unissued).is_err());
 
     Ok(())
 }

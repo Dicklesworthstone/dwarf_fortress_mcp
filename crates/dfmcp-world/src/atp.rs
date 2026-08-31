@@ -7,7 +7,7 @@
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, GameTick, Result, StateAnchor};
 
-use crate::delta::StateDelta;
+use crate::delta::{StateDelta, apply_delta};
 use crate::merkle::MerkleStateTree;
 use crate::model::WorldSnapshot;
 
@@ -31,6 +31,12 @@ impl AtpProofCapsule {
         published_at_tick: GameTick,
     ) -> Result<Self> {
         validate_transition_inputs(basis_snapshot, successor_snapshot, &delta)?;
+        if published_at_tick < successor_snapshot.tick {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "ATP capsule publication tick precedes its successor state",
+            ));
+        }
         let tree = MerkleStateTree::from_snapshot(successor_snapshot);
         let merkle_root = tree.overall_root;
 
@@ -102,6 +108,12 @@ impl AtpProofVerifier {
                 "ATP capsule anchor and delta continuity mismatch",
             ));
         }
+        if capsule.published_at_tick < capsule.successor_anchor.tick {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "ATP capsule publication tick precedes its successor state",
+            ));
+        }
 
         Ok(())
     }
@@ -157,6 +169,18 @@ fn validate_transition_inputs(
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
             "ATP proof inputs do not describe one continuous state transition",
+        ));
+    }
+    let reconstructed = apply_delta(basis, delta).map_err(|error| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            format!("ATP delta cannot reconstruct its successor: {error}"),
+        )
+    })?;
+    if reconstructed != *successor {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "ATP delta reconstructs a state other than the declared successor",
         ));
     }
     Ok(())
@@ -225,5 +249,32 @@ mod tests {
         assert!(verifier.verify_capsule(&capsule).is_ok());
 
         Ok(())
+    }
+
+    #[test]
+    fn seal_rejects_partial_or_premature_transition() {
+        let basis = sample_snapshot(100, ObservationCursor::ORIGIN);
+        let successor = sample_snapshot(
+            101,
+            ObservationCursor {
+                epoch: 0,
+                sequence: 1,
+            },
+        );
+        let mut delta = StateDelta {
+            fortress_id: basis.fortress_id,
+            base_cursor: basis.cursor,
+            target_cursor: successor.cursor,
+            base_hash: basis.state_hash,
+            target_hash: successor.state_hash,
+            target_tick: successor.tick,
+            changes: Vec::new(),
+            truncated: true,
+            continuation: Some("more".to_owned()),
+        };
+        assert!(AtpProofCapsule::seal(&basis, &successor, delta.clone(), GameTick(101)).is_err());
+        delta.truncated = false;
+        delta.continuation = None;
+        assert!(AtpProofCapsule::seal(&basis, &successor, delta, GameTick(100)).is_err());
     }
 }

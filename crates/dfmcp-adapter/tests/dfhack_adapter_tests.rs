@@ -8,8 +8,8 @@ use std::io::{Read, Write};
 use std::time::Duration;
 
 use dfmcp_adapter::{
-    DfhackAdapter, DfhackAdapterConfig, GameAdapter, HealthStatus, IpcFrame, IpcMessageType,
-    IpcTransceiver, TransceiverConfig,
+    CompatibilityLevel, DfhackAdapter, DfhackAdapterConfig, GameAdapter, HealthStatus, IpcFrame,
+    IpcMessageType, IpcTransceiver, TransceiverConfig,
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick,
@@ -172,7 +172,27 @@ fn test_dfhack_adapter_health_check() -> Result<(), Box<dyn Error>> {
     assert!(!health.fortress_loaded);
     assert_eq!(health.identity.name, "dfhack-oop-bridge-probe");
     assert_eq!(health.identity.dwarf_fortress_version, "unverified");
+    assert_eq!(health.identity.compatibility, CompatibilityLevel::Unknown);
+    assert_eq!(
+        health.identity.capabilities,
+        std::collections::BTreeSet::from([Capability::Doctor])
+    );
     Ok(())
+}
+
+#[test]
+fn configured_version_expectations_do_not_claim_a_handshake() {
+    let stream = MockDuplexStream::new();
+    let config = DfhackAdapterConfig {
+        target_df_version: "53.16".to_owned(),
+        target_dfhack_version: "53.16-r1.1".to_owned(),
+        ..DfhackAdapterConfig::default()
+    };
+    let adapter = DfhackAdapter::new(stream, config);
+    let identity = adapter.identity();
+    assert_eq!(identity.dwarf_fortress_version, "unverified");
+    assert_eq!(identity.dfhack_version, "unverified");
+    assert_eq!(identity.compatibility, CompatibilityLevel::Unknown);
 }
 
 #[test]

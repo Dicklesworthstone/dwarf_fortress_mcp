@@ -58,7 +58,7 @@ impl Intent {
                 _ => None,
             })
             .min()
-            .unwrap_or(RiskTier::Guarded)
+            .map_or(RiskTier::Guarded, |risk| risk)
     }
 
     #[must_use]

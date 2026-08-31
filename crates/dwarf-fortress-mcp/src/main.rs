@@ -24,7 +24,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let command = env::args().nth(1).unwrap_or_else(|| "help".to_owned());
+    let command = match env::args().nth(1) {
+        Some(command) => command,
+        None => "help".to_owned(),
+    };
     match command.as_str() {
         "help" | "--help" | "-h" => print_help(),
         "version" | "--version" | "-V" => print_version(),
@@ -53,7 +56,7 @@ COMMANDS:
     contract    Print the frozen phase-zero narrow-waist contract
     doctor      Exercise the deterministic laboratory adapter
     demo        Prepare and commit a verified semantic pause-state action
-    bridge      Probe out-of-process DFHack bridge connectivity (e.g. 127.0.0.1:5000)
+    bridge      Probe TCP reachability only; no dfmcp bridge handshake exists yet
     serve       Run the MCP 2026-07-28 modern-only stdio server (fastmcp_rust)
     version     Print version information
     help        Print this help
@@ -114,44 +117,35 @@ fn doctor() -> Result<(), Box<dyn Error>> {
         health.identity.name,
         health.identity.compatibility,
         health.fortress_loaded,
-        health
-            .current_anchor
-            .map(|anchor| anchor.state_hash.to_string())
-            .unwrap_or_else(|| "none".to_owned())
+        match health.current_anchor {
+            Some(anchor) => anchor.state_hash.to_string(),
+            None => "none".to_owned(),
+        }
     );
     Ok(())
 }
 
 fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
-    println!("Dwarf Fortress MCP Out-of-Process Bridge Diagnostics");
-    let target = endpoint.unwrap_or_else(|| "127.0.0.1:5000".to_owned());
-    println!("Connecting to bridge endpoint: {target}...");
+    println!("DF/DFHack TCP reachability diagnostic");
+    let target = match endpoint {
+        Some(target) => target,
+        None => "127.0.0.1:5000".to_owned(),
+    };
+    println!("Connecting to TCP endpoint: {target}...");
 
     match std::net::TcpStream::connect(&target) {
-        Ok(stream) => {
-            let mut adapter = dfmcp_adapter::DfhackAdapter::new(
-                stream,
-                dfmcp_adapter::DfhackAdapterConfig::default(),
+        Ok(_) => {
+            println!("TCP endpoint is reachable.");
+            println!(
+                "No dfmcp handshake was sent: this does not establish bridge identity, compatibility, fortress state, or control."
             );
-            let ctx = context(&sample_snapshot(), 1);
-            match adapter.health(&ctx) {
-                Ok(health) => {
-                    println!("Bridge connection established!");
-                    println!("Adapter: {}", health.identity.name);
-                    println!("Status: {:?}", health.status);
-                    println!(
-                        "Protocol version: {}",
-                        health.identity.bridge_protocol_version
-                    );
-                }
-                Err(err) => {
-                    println!("Connected, but health probe failed: {err}");
-                }
-            }
+            println!(
+                "DFHack's built-in port 5000 is protobuf-over-TCP and is not the proposed dfmcp bridge."
+            );
         }
         Err(err) => {
-            println!("Bridge unreachable at {target}: {err}");
-            println!("Ensure the DFHack out-of-process bridge plugin is loaded and listening.");
+            println!("TCP endpoint is unreachable at {target}: {err}");
+            println!("No compatible dfmcp bridge plugin is implemented in this repository yet.");
         }
     }
     Ok(())

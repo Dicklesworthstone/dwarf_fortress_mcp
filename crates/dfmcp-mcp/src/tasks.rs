@@ -86,11 +86,10 @@ pub fn project_action_task(
 ) -> Result<McpTaskProjection> {
     let receipt = adapter.poll_action(action_id, context)?;
     let evidence_id = receipt.evidence.first().map(|e| e.id);
-    let summary = receipt
-        .evidence
-        .first()
-        .map(|e| e.summary.clone())
-        .unwrap_or(receipt.message);
+    let summary = match receipt.evidence.first() {
+        Some(item) => item.summary.clone(),
+        None => receipt.message,
+    };
 
     Ok(McpTaskProjection::from_commit_state(
         action_id,
@@ -119,11 +118,10 @@ pub fn cancel_action_task(
 
     let cancel_receipt = adapter.request_cancel(action_id, mode, context)?;
     let evidence_id = cancel_receipt.evidence.first().map(|e| e.id);
-    let summary = cancel_receipt
-        .evidence
-        .first()
-        .map(|e| e.summary.clone())
-        .unwrap_or(cancel_receipt.message);
+    let summary = match cancel_receipt.evidence.first() {
+        Some(item) => item.summary.clone(),
+        None => cancel_receipt.message,
+    };
 
     Ok(McpTaskProjection::from_commit_state(
         action_id,

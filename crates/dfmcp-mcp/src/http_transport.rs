@@ -1,19 +1,20 @@
 #![forbid(unsafe_code)]
 
-//! Streamable HTTP Transport and Session Resumption Manager.
+//! Process-local Streamable HTTP resumption laboratory.
 //!
-//! WP-MCP-02: Provides modern-only HTTP streamable session resumption tokens,
-//! message sequence offset tracking, and reconnectable replay buffers.
+//! Tokens are integrity-sealed records and are accepted only when they exactly
+//! match a token issued by this manager. The digest is not a cryptographic
+//! signature and this module is not wired into the stdio server.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, SessionId};
 
-/// Maximum buffered messages per session before oldest are shed.
-pub const MAX_RESUMPTION_BUFFER_SIZE: usize = 1000;
+pub const MAX_RESUMPTION_BUFFER_SIZE: usize = 1_000;
+pub const MAX_HTTP_SESSIONS: usize = 1_024;
+pub const MAX_HTTP_MESSAGE_BYTES: usize = 1_048_576;
 
-/// Cryptographic session resumption token for streamable HTTP transports.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HttpSessionResumeToken {
     pub session_id: SessionId,
     pub resume_offset: u64,
@@ -23,36 +24,33 @@ pub struct HttpSessionResumeToken {
 impl HttpSessionResumeToken {
     #[must_use]
     pub fn new(session_id: SessionId, resume_offset: u64) -> Self {
-        let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(&session_id.get().to_be_bytes());
-        hasher_bytes.extend_from_slice(&resume_offset.to_be_bytes());
-
-        let token_digest = Digest32::of_bytes(&hasher_bytes);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"dfmcp-http-resume-token-v1");
+        bytes.extend_from_slice(&session_id.get().to_be_bytes());
+        bytes.extend_from_slice(&resume_offset.to_be_bytes());
         Self {
             session_id,
             resume_offset,
-            token_digest,
+            token_digest: Digest32::of_bytes(&bytes),
         }
     }
 
     #[must_use]
-    pub fn verify_signature(&self) -> bool {
-        let expected = Self::new(self.session_id, self.resume_offset);
-        self.token_digest == expected.token_digest
+    pub fn integrity_is_valid(&self) -> bool {
+        self.token_digest == Self::new(self.session_id, self.resume_offset).token_digest
     }
 }
 
-/// Buffer tracking messages for a single HTTP streaming session.
 #[derive(Clone, Debug)]
 struct SessionMessageBuffer {
     start_offset: u64,
     messages: VecDeque<String>,
 }
 
-/// Streamable HTTP Transport Session Manager.
 #[derive(Clone, Debug, Default)]
 pub struct HttpTransportSessionManager {
     sessions: BTreeMap<SessionId, SessionMessageBuffer>,
+    issued_tokens: BTreeSet<HttpSessionResumeToken>,
 }
 
 impl HttpTransportSessionManager {
@@ -60,11 +58,29 @@ impl HttpTransportSessionManager {
     pub fn new() -> Self {
         Self {
             sessions: BTreeMap::new(),
+            issued_tokens: BTreeSet::new(),
         }
     }
 
-    /// Open or register a new HTTP session.
-    pub fn open_session(&mut self, session_id: SessionId) -> HttpSessionResumeToken {
+    pub fn open_session(&mut self, session_id: SessionId) -> Result<HttpSessionResumeToken> {
+        if session_id == SessionId::NIL {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "HTTP session identifier zero is reserved",
+            ));
+        }
+        if self.sessions.contains_key(&session_id) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "HTTP session identifier is already open",
+            ));
+        }
+        if self.sessions.len() >= MAX_HTTP_SESSIONS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "HTTP session manager reached its explicit session bound",
+            ));
+        }
         self.sessions.insert(
             session_id,
             SessionMessageBuffer {
@@ -72,66 +88,114 @@ impl HttpTransportSessionManager {
                 messages: VecDeque::with_capacity(64),
             },
         );
-        HttpSessionResumeToken::new(session_id, 0)
+        let token = HttpSessionResumeToken::new(session_id, 0);
+        self.issued_tokens.insert(token.clone());
+        Ok(token)
     }
 
-    /// Buffer an outgoing message for a session.
     pub fn buffer_message(&mut self, session_id: SessionId, message: String) -> Result<u64> {
-        let buf = self
+        if message.len() > MAX_HTTP_MESSAGE_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "HTTP resumption message exceeds its explicit byte bound",
+            ));
+        }
+        let buffer = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| DfmcpError::new(ErrorCode::SessionNotFound, "session not found"))?;
 
-        if buf.messages.len() >= MAX_RESUMPTION_BUFFER_SIZE {
-            buf.messages.pop_front();
-            buf.start_offset = buf.start_offset.saturating_add(1);
+        if buffer.messages.len() >= MAX_RESUMPTION_BUFFER_SIZE {
+            let next_start = buffer.start_offset.checked_add(1).ok_or_else(|| {
+                DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
+            })?;
+            buffer.messages.pop_front();
+            buffer.start_offset = next_start;
+            self.issued_tokens.retain(|token| {
+                token.session_id != session_id || token.resume_offset >= next_start
+            });
         }
 
-        buf.messages.push_back(message);
-        let next_offset = buf.start_offset + buf.messages.len() as u64;
-        Ok(next_offset)
+        buffer.messages.push_back(message);
+        let buffered_count = u64::try_from(buffer.messages.len()).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "HTTP resumption buffer length cannot be represented",
+            )
+        })?;
+        buffer.start_offset.checked_add(buffered_count).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
+        })
     }
 
-    /// Resume session from a given token, returning all messages since `resume_offset`.
-    pub fn resume_session(&self, token: &HttpSessionResumeToken) -> Result<Vec<String>> {
-        if !token.verify_signature() {
-            return Err(DfmcpError::new(
-                ErrorCode::CapabilityDenied,
-                "invalid session resumption token signature",
-            ));
-        }
-
-        let buf = self.sessions.get(&token.session_id).ok_or_else(|| {
+    pub fn issue_resume_token(
+        &mut self,
+        session_id: SessionId,
+        resume_offset: u64,
+    ) -> Result<HttpSessionResumeToken> {
+        let buffer = self.sessions.get(&session_id).ok_or_else(|| {
             DfmcpError::new(ErrorCode::SessionNotFound, "session not found or expired")
         })?;
-
-        let current_head = buf.start_offset + buf.messages.len() as u64;
-        if token.resume_offset < buf.start_offset {
-            return Err(DfmcpError::new(
-                ErrorCode::CursorGap,
-                format!(
-                    "requested offset {} is older than buffer horizon {}; full refresh required",
-                    token.resume_offset, buf.start_offset
-                ),
-            ));
-        }
-
-        if token.resume_offset > current_head {
-            return Err(DfmcpError::new(
-                ErrorCode::CursorGap,
-                "requested resume offset is ahead of current server sequence",
-            ));
-        }
-
-        let skip_count = (token.resume_offset - buf.start_offset) as usize;
-        let messages: Vec<String> = buf.messages.iter().skip(skip_count).cloned().collect();
-        Ok(messages)
+        validate_offset(buffer, resume_offset)?;
+        let token = HttpSessionResumeToken::new(session_id, resume_offset);
+        self.issued_tokens.insert(token.clone());
+        Ok(token)
     }
 
-    /// Close and clean up session buffer.
+    pub fn resume_session(&self, token: &HttpSessionResumeToken) -> Result<Vec<String>> {
+        if !token.integrity_is_valid() || !self.issued_tokens.contains(token) {
+            return Err(DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                "session resumption token was not issued by this manager or was modified",
+            ));
+        }
+        let buffer = self.sessions.get(&token.session_id).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::SessionNotFound, "session not found or expired")
+        })?;
+        validate_offset(buffer, token.resume_offset)?;
+        let relative_offset = token.resume_offset - buffer.start_offset;
+        let skip_count = usize::try_from(relative_offset).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "HTTP resume offset cannot be represented on this platform",
+            )
+        })?;
+        Ok(buffer.messages.iter().skip(skip_count).cloned().collect())
+    }
+
     pub fn close_session(&mut self, session_id: SessionId) {
         self.sessions.remove(&session_id);
+        self.issued_tokens
+            .retain(|token| token.session_id != session_id);
     }
+}
+
+fn validate_offset(buffer: &SessionMessageBuffer, offset: u64) -> Result<()> {
+    let message_count = u64::try_from(buffer.messages.len()).map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "HTTP resumption buffer length cannot be represented",
+        )
+    })?;
+    let current_head = buffer.start_offset.checked_add(message_count).ok_or_else(|| {
+        DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
+    })?;
+    if offset < buffer.start_offset {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            format!(
+                "requested offset {offset} is older than buffer horizon {}; full refresh required",
+                buffer.start_offset
+            ),
+        ));
+    }
+    if offset > current_head {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "requested resume offset is ahead of current server sequence",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -142,25 +206,18 @@ mod tests {
     fn test_http_session_buffering_and_resumption() -> Result<()> {
         let mut manager = HttpTransportSessionManager::new();
         let session = SessionId::new(100);
-
-        let initial_token = manager.open_session(session);
-        assert_eq!(initial_token.resume_offset, 0);
-
-        // Buffer 3 messages
+        let initial_token = manager.open_session(session)?;
         manager.buffer_message(session, "msg 1".to_owned())?;
         manager.buffer_message(session, "msg 2".to_owned())?;
         manager.buffer_message(session, "msg 3".to_owned())?;
+        assert_eq!(manager.resume_session(&initial_token)?.len(), 3);
 
-        // Resume from offset 0 -> returns all 3
-        let all_msgs = manager.resume_session(&initial_token)?;
-        assert_eq!(all_msgs.len(), 3);
+        let resume_token = manager.issue_resume_token(session, 2)?;
+        let messages = manager.resume_session(&resume_token)?;
+        assert_eq!(messages, vec!["msg 3"]);
 
-        // Resume from offset 2 -> returns only "msg 3"
-        let resume_token = HttpSessionResumeToken::new(session, 2);
-        let partial_msgs = manager.resume_session(&resume_token)?;
-        assert_eq!(partial_msgs.len(), 1);
-        assert_eq!(partial_msgs[0], "msg 3");
-
+        let forged = HttpSessionResumeToken::new(session, 1);
+        assert!(manager.resume_session(&forged).is_err());
         Ok(())
     }
 }

@@ -5,10 +5,10 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 
-use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, ObservationCursor, PlanId};
+use dfmcp_core::{Digest32, EdgeId, EntityId, FortressId, GameTick, ObservationCursor, PlanId};
 use dfmcp_world::{
-    ConflictKind, EntityKind, EntityRecord, Fact, FactSource, RebaseOutcome, SemanticRebaseEngine,
-    Value, WitnessSet, WorldChange, WorldGraph, WorldSnapshot,
+    ConflictKind, EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, RebaseOutcome,
+    SemanticRebaseEngine, Value, WitnessSet, WorldChange, WorldGraph, WorldSnapshot,
 };
 
 fn sample_entity(id: EntityId, generation: u32, rev: u64, label: &str) -> EntityRecord {
@@ -154,4 +154,59 @@ fn test_three_way_merge_concurrent_independent_edits() -> Result<(), Box<dyn Err
         assert!(merged.graph.entities.contains_key(&EntityId::new(3)));
     }
     Ok(())
+}
+
+#[test]
+fn rebase_rejects_a_target_that_precedes_its_base() {
+    let entity = sample_entity(EntityId::new(1), 1, 1, "Miner");
+    let base = sample_snapshot(vec![entity.clone()], 100, 2);
+    let target = sample_snapshot(vec![entity], 99, 1);
+    let outcome = SemanticRebaseEngine::new().rebase_changes(&base, &target, &[], PlanId::new(400));
+    assert!(matches!(
+        outcome,
+        RebaseOutcome::Conflicted(ref certificate)
+            if certificate.conflict_kind == ConflictKind::AnchorDivergence
+    ));
+}
+
+#[test]
+fn witness_must_describe_the_declared_base() {
+    let entity = sample_entity(EntityId::new(1), 1, 1, "Miner");
+    let base = sample_snapshot(vec![entity.clone()], 100, 1);
+    let target = sample_snapshot(vec![entity], 101, 2);
+    let mut witness = WitnessSet::new();
+    witness.add_positive_entity(EntityId::new(1), 2, 1);
+    let outcome = SemanticRebaseEngine::new().rebase_with_witness(
+        &base,
+        &target,
+        &witness,
+        &[],
+        PlanId::new(401),
+    );
+    assert!(matches!(outcome, RebaseOutcome::Conflicted(_)));
+}
+
+#[test]
+fn three_way_merge_rejects_cross_record_dangling_edge() {
+    let first = sample_entity(EntityId::new(1), 1, 1, "Miner");
+    let second = sample_entity(EntityId::new(2), 1, 1, "Mason");
+    let base = sample_snapshot(vec![first.clone(), second.clone()], 100, 1);
+    let ours = sample_snapshot(vec![second.clone()], 101, 2);
+    let mut theirs = sample_snapshot(vec![first, second], 102, 3);
+    theirs.graph.edges.insert(
+        EdgeId::new(1),
+        EdgeRecord {
+            id: EdgeId::new(1),
+            revision: 1,
+            kind: EdgeKind::Requires,
+            from: EntityId::new(1),
+            to: EntityId::new(2),
+            fields: BTreeMap::new(),
+        },
+    );
+    theirs.refresh_hash();
+
+    let result =
+        SemanticRebaseEngine::new().three_way_merge(&base, &ours, &theirs, PlanId::new(402));
+    assert!(result.is_err());
 }

@@ -16,7 +16,7 @@ use dfmcp_world::{WorldSnapshot, evaluate};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
 
-/// Record in the durable effect journal tracking an in-flight or completed mutation.
+/// Record in the process-local effect-journal laboratory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectJournalRecord {
     pub idempotency_key: String,
@@ -28,7 +28,7 @@ pub struct EffectJournalRecord {
     pub error_message: Option<String>,
 }
 
-/// In-memory or persisted two-phase effect journal.
+/// In-memory two-phase effect journal.
 #[derive(Clone, Debug, Default)]
 pub struct EffectJournal {
     records: BTreeMap<String, EffectJournalRecord>,
@@ -94,6 +94,11 @@ impl EffectJournal {
         if record.state != CommitState::Prepared
             || record.plan_id != receipt.plan_id
             || record.plan_digest != receipt.plan_digest
+            || receipt.actions.is_empty()
+            || receipt
+                .actions
+                .iter()
+                .any(|action| action.state != CommitState::Verified)
         {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
@@ -114,6 +119,12 @@ impl EffectJournal {
             )
         })?;
 
+        if record.state != CommitState::Prepared && record.state != CommitState::Committing {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "only an in-flight journal record can become indeterminate",
+            ));
+        }
         record.state = CommitState::Indeterminate;
         record.error_message = Some(error_msg);
         Ok(())
@@ -172,13 +183,19 @@ impl MutationDispatcher {
                 "operation context anchor does not match the current snapshot",
             ));
         }
-        if snapshot.tick >= plan.expires_at_tick {
+        if snapshot.tick > plan.expires_at_tick {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "prepared plan has expired",
             ));
         }
         for step in &plan.steps {
+            if !matches!(step.action, Action::Pause { .. }) {
+                return Err(DfmcpError::new(
+                    ErrorCode::AdapterRejected,
+                    "in-memory dispatcher supports only the pause action",
+                ));
+            }
             let scope = step.action.scope();
             context.authorize(
                 step.required_capability,
@@ -248,7 +265,7 @@ impl MutationDispatcher {
                 "commit snapshot or operation context anchor is invalid",
             ));
         }
-        if snapshot.tick >= plan.expires_at_tick {
+        if snapshot.tick > plan.expires_at_tick {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "prepared plan has expired before commit",
@@ -276,68 +293,48 @@ impl MutationDispatcher {
 
         // Dispatch each plan step into snapshot mutation
         for step in &plan.steps {
+            let scope = step.action.scope();
+            context.authorize(
+                step.required_capability,
+                step.risk,
+                &scope.entity_ids,
+                scope.map_area,
+            )?;
+            if !step
+                .preconditions
+                .iter()
+                .all(|predicate| evaluate(snapshot, predicate))
+            {
+                *snapshot = prior_snapshot;
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!("preconditions changed before step {} commit", step.id.get()),
+                ));
+            }
             let action_id = ActionId::new(u128::from(step.id.get()) + 1);
             let msg = match &step.action {
                 Action::Pause { paused } => {
-                    snapshot.paused = *paused;
-                    snapshot.refresh_hash();
+                    if snapshot.paused != *paused {
+                        let next_cursor = snapshot.cursor.next();
+                        if next_cursor == snapshot.cursor {
+                            *snapshot = prior_snapshot;
+                            return Err(DfmcpError::new(
+                                ErrorCode::CursorGap,
+                                "cannot publish pause mutation because the observation cursor is exhausted",
+                            ));
+                        }
+                        snapshot.paused = *paused;
+                        snapshot.cursor = next_cursor;
+                        snapshot.refresh_hash();
+                    }
                     format!("simulation pause state set to {}", *paused)
                 }
-                Action::DesignateDig { area, mode } => {
-                    snapshot.refresh_hash();
-                    format!("dig designated over {:?} mode {:?}", area, mode)
-                }
-                Action::Build { kind, location, .. } => {
-                    snapshot.refresh_hash();
-                    format!("build designated {:?} at {:?}", kind, location)
-                }
-                Action::SetLabor {
-                    units,
-                    labor,
-                    enabled,
-                } => {
-                    snapshot.refresh_hash();
-                    format!(
-                        "labor '{}' set to {} for {} units",
-                        labor,
-                        enabled,
-                        units.len()
-                    )
-                }
-                Action::CreateWorkOrder { name, amount, .. } => {
-                    snapshot.refresh_hash();
-                    format!("created work order '{}' count {}", name, amount)
-                }
-                Action::ConfigureStockpile { stockpile, .. } => {
-                    snapshot.refresh_hash();
-                    format!("configured stockpile {}", stockpile)
-                }
-                Action::AssignSquad { units, squad } => {
-                    snapshot.refresh_hash();
-                    format!("assigned {} units to squad {}", units.len(), squad)
-                }
-                Action::SetBurrowMembership {
-                    units,
-                    burrow,
-                    assigned,
-                } => {
-                    snapshot.refresh_hash();
-                    format!(
-                        "burrow {} membership (assigned: {}) for {} units",
-                        burrow,
-                        assigned,
-                        units.len()
-                    )
-                }
-                Action::SetStandingOrder { key, value } => {
-                    snapshot.refresh_hash();
-                    format!("standing order '{}' set to '{}'", key, value)
-                }
-                Action::Extension {
-                    namespace, name, ..
-                } => {
-                    snapshot.refresh_hash();
-                    format!("executed extension '{}.{}'", namespace, name)
+                _ => {
+                    *snapshot = prior_snapshot;
+                    return Err(DfmcpError::new(
+                        ErrorCode::AdapterRejected,
+                        "in-memory dispatcher supports only the pause action",
+                    ));
                 }
             };
 
@@ -393,59 +390,22 @@ impl MutationDispatcher {
         Ok(commit_receipt)
     }
 
-    /// Prepare using an anchor directly when a snapshot is maintained elsewhere (e.g. out-of-process).
+    /// Reserved out-of-process prepare seam. It is deliberately unavailable
+    /// until an authenticated bridge can revalidate semantic preconditions.
     pub fn prepare(
         &mut self,
         plan: &PreparedPlan,
         current_anchor: StateAnchor,
         context: &OperationContext,
     ) -> Result<PrepareReceipt> {
-        plan.validate_structure()?;
-        if plan.anchor != current_anchor {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "plan expected anchor does not match current anchor",
-            ));
-        }
-        if context.anchor != current_anchor {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "operation context anchor does not match current anchor",
-            ));
-        }
-        if current_anchor.tick >= plan.expires_at_tick {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "prepared plan has expired",
-            ));
-        }
-
-        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
-        self.journal
-            .record_prepare(idempotency_key, plan, current_anchor.tick)?;
-
-        let mut token = Vec::new();
-        token.extend_from_slice(b"dfmcp-dispatch-token-v1");
-        token.extend_from_slice(&context.session_id.get().to_be_bytes());
-        token.extend_from_slice(&plan.id.get().to_be_bytes());
-        token.extend_from_slice(plan.digest.as_bytes());
-        token.extend_from_slice(current_anchor.state_hash.as_bytes());
-        token.extend_from_slice(&plan.expires_at_tick.0.to_be_bytes());
-
-        let adapter_token_digest = Digest32::of_bytes(&token);
-
-        Ok(PrepareReceipt {
-            plan_id: plan.id,
-            plan_digest: plan.digest,
-            revalidated_anchor: current_anchor,
-            adapter_token: token,
-            adapter_token_digest,
-            expires_at_tick: plan.expires_at_tick,
-            warnings: Vec::new(),
-        })
+        let _ = (plan, current_anchor, context);
+        Err(DfmcpError::new(
+            ErrorCode::CompatibilityUnknown,
+            "out-of-process mutation prepare is unavailable without a live bridge adapter",
+        ))
     }
 
-    /// Commit using an anchor directly when execution occurs out-of-process.
+    /// Reserved out-of-process commit seam. It never fabricates an effect receipt.
     pub fn commit(
         &mut self,
         plan: &PreparedPlan,
@@ -453,72 +413,11 @@ impl MutationDispatcher {
         current_anchor: StateAnchor,
         context: &OperationContext,
     ) -> Result<CommitReceipt> {
-        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
-
-        if let Some(existing) = self.journal.lookup(&idempotency_key) {
-            if existing.state == CommitState::Verified {
-                if let Some(receipt) = &existing.receipt {
-                    return Ok(receipt.clone());
-                }
-            } else if existing.state == CommitState::Indeterminate {
-                return Err(DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "previous commit attempt resulted in indeterminate state; reconciliation required before retry",
-                ));
-            }
-        }
-
-        plan.validate_structure()?;
-        if context.anchor != current_anchor {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "commit operation context anchor does not match current anchor",
-            ));
-        }
-
-        if prepare_receipt.plan_id != plan.id
-            || prepare_receipt.plan_digest != plan.digest
-            || prepare_receipt.revalidated_anchor != current_anchor
-        {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "prepare receipt is stale or does not match current fortress anchor",
-            ));
-        }
-
-        let mut action_receipts = Vec::new();
-        for step in &plan.steps {
-            let action_id = ActionId::new(u128::from(step.id.get()) + 1);
-            let mut receipt_bytes = Vec::new();
-            receipt_bytes.extend_from_slice(plan.digest.as_bytes());
-            receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
-            receipt_bytes.extend_from_slice(current_anchor.state_hash.as_bytes());
-            let receipt_digest = Digest32::of_bytes(&receipt_bytes);
-
-            action_receipts.push(ActionReceipt {
-                action_id,
-                step_id: step.id,
-                state: CommitState::Verified,
-                observed_anchor: current_anchor,
-                adapter_receipt_digest: receipt_digest,
-                evidence: Vec::new(),
-                message: "action committed and dispatched".to_owned(),
-            });
-        }
-
-        let commit_receipt = CommitReceipt {
-            plan_id: plan.id,
-            plan_digest: plan.digest,
-            actions: action_receipts,
-            checkpoint: None,
-            observed_anchor: current_anchor,
-            warnings: Vec::new(),
-        };
-
-        self.journal
-            .record_commit(&idempotency_key, commit_receipt.clone())?;
-
-        Ok(commit_receipt)
+        let _ = (plan, prepare_receipt, current_anchor, context);
+        Err(DfmcpError::new(
+            ErrorCode::CompatibilityUnknown,
+            "out-of-process mutation commit is unavailable without a live bridge adapter",
+        ))
     }
 
     /// Access reference to internal effect journal.
@@ -635,6 +534,7 @@ mod tests {
         assert_eq!(commit_receipt.actions.len(), 1);
         assert_eq!(commit_receipt.actions[0].state, CommitState::Verified);
         assert!(!snapshot.paused);
+        assert_eq!(snapshot.cursor.sequence, 1);
 
         // Idempotency replay
         let replay_receipt =

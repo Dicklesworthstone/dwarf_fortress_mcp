@@ -149,7 +149,12 @@ impl<S: Read + Write> IpcTransceiver<S> {
             .bytes_received
             .saturating_add(bytes_read as u64);
 
-        self.decoder.push_bytes(&buffer[..bytes_read]);
+        if let Err(error) = self.decoder.push_bytes(&buffer[..bytes_read]) {
+            self.state = IpcConnectionState::Degraded {
+                reason: error.message.clone(),
+            };
+            return Err(error);
+        }
         let mut count = 0;
         loop {
             let frame = match self.decoder.poll_next_frame() {

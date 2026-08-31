@@ -216,6 +216,12 @@ pub fn compute_snapshot_diff(
     base: &WorldSnapshot,
     target: &WorldSnapshot,
 ) -> Result<Vec<WorldChange>> {
+    if !base.hash_is_valid() || !target.hash_is_valid() {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "cannot diff a snapshot whose canonical state hash is invalid",
+        ));
+    }
     if target.fortress_id != base.fortress_id {
         return Err(DfmcpError::new(
             ErrorCode::InvalidRequest,
@@ -289,7 +295,25 @@ pub fn compute_snapshot_diff(
         }
     }
 
-    // 7. Events (appended in target)
+    // 7. Events are immutable. Existing IDs cannot be edited or removed by a
+    // delta; only genuinely new events can be appended.
+    for (id, base_event) in &base.graph.events {
+        match target.graph.events.get(id) {
+            Some(target_event) if target_event == base_event => {}
+            Some(_) => {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    format!("event {id} changed after publication"),
+                ));
+            }
+            None => {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    format!("event {id} disappeared after publication"),
+                ));
+            }
+        }
+    }
     for (id, event) in &target.graph.events {
         if !base.graph.events.contains_key(id) {
             changes.push(WorldChange::AppendEvent(event.clone()));
@@ -301,7 +325,16 @@ pub fn compute_snapshot_diff(
 
 pub fn diff_snapshots(base: &WorldSnapshot, target: &WorldSnapshot) -> Result<StateDelta> {
     let changes = compute_snapshot_diff(base, target)?;
-    build_delta(base, target.cursor, target.tick, changes)
+    let delta = build_delta(base, target.cursor, target.tick, changes)?;
+    if delta.target_hash != target.state_hash {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "snapshot diff did not reconstruct the declared target state",
+        )
+        .with_detail("computed", delta.target_hash.to_string())
+        .with_detail("declared", target.state_hash.to_string()));
+    }
+    Ok(delta)
 }
 
 pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnapshot> {
@@ -600,10 +633,15 @@ fn validate_graph(snapshot: &WorldSnapshot) -> Result<()> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use dfmcp_core::{DfmcpError, Digest32, EntityId, FortressId, GameTick, ObservationCursor};
+    use dfmcp_core::{
+        DfmcpError, Digest32, EntityId, ErrorCode, EventId, FortressId, GameTick, ObservationCursor,
+    };
 
-    use super::{WorldChange, apply_delta, build_delta};
-    use crate::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
+    use super::{WorldChange, apply_delta, build_delta, diff_snapshots};
+    use crate::{
+        EntityKind, EntityRecord, Fact, FactSource, Value, WorldEvent, WorldEventKind, WorldGraph,
+        WorldSnapshot,
+    };
 
     fn unit(revision: u64, stress: i64) -> EntityRecord {
         let mut fields = BTreeMap::new();
@@ -676,5 +714,41 @@ mod tests {
         let result = apply_delta(&altered, &delta);
         assert!(result.is_err());
         Ok(())
+    }
+
+    #[test]
+    fn published_events_cannot_be_edited_or_removed_by_diff() {
+        let mut base = base();
+        let event_id = EventId::new(1);
+        base.graph.events.insert(
+            event_id,
+            WorldEvent {
+                id: event_id,
+                tick: GameTick(1),
+                kind: WorldEventKind::Announcement,
+                subject: Some(EntityId::new(1)),
+                summary: "original".to_owned(),
+                fields: BTreeMap::new(),
+            },
+        );
+        base.refresh_hash();
+
+        let mut edited = base.clone();
+        edited.cursor = edited.cursor.next();
+        edited.tick = GameTick(2);
+        if let Some(event) = edited.graph.events.get_mut(&event_id) {
+            event.summary = "edited".to_owned();
+        }
+        edited.refresh_hash();
+        let edited_error = diff_snapshots(&base, &edited);
+        assert!(matches!(edited_error, Err(ref error) if error.code == ErrorCode::Conflict));
+
+        let mut removed = base.clone();
+        removed.cursor = removed.cursor.next();
+        removed.tick = GameTick(2);
+        removed.graph.events.remove(&event_id);
+        removed.refresh_hash();
+        let removed_error = diff_snapshots(&base, &removed);
+        assert!(matches!(removed_error, Err(ref error) if error.code == ErrorCode::Conflict));
     }
 }

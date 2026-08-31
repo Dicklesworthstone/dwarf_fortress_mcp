@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{Digest32, PlanId, StateAnchor};
 
-use crate::delta::{WorldChange, build_delta};
+use crate::delta::{WorldChange, build_delta, diff_snapshots};
 use crate::ledger::WitnessSet;
 use crate::model::{WorldGraph, WorldSnapshot};
 
@@ -104,6 +104,9 @@ impl SemanticRebaseEngine {
             || !target.hash_is_valid()
             || base.fortress_id != target.fortress_id
             || base.cursor.epoch != target.cursor.epoch
+            || target.cursor.sequence < base.cursor.sequence
+            || target.tick < base.tick
+            || !branch_is_valid(base, target)
         {
             return conflicted(
                 plan_id,
@@ -209,6 +212,22 @@ impl SemanticRebaseEngine {
                 }
             }
         }
+        if !rebased.is_empty() {
+            let rebased_cursor = target.cursor.next();
+            if rebased_cursor == target.cursor
+                || build_delta(target, rebased_cursor, target.tick, rebased.clone()).is_err()
+            {
+                return conflicted(
+                    plan_id,
+                    base_anchor,
+                    target_anchor,
+                    ConflictKind::PreconditionViolated {
+                        description: "rebased writes violate target invariants".to_owned(),
+                    },
+                    "rebased changes cannot be applied safely to the target snapshot",
+                );
+            }
+        }
         RebaseOutcome::Clean {
             rebased_anchor: target_anchor,
             rebased_changes: rebased,
@@ -226,9 +245,12 @@ impl SemanticRebaseEngine {
         let base_anchor = base.anchor();
         let target_anchor = target.anchor();
         for (id, generation, revision) in &witness.positive_entities {
-            if !target.graph.entities.get(id).is_some_and(|record| {
-                record.generation == *generation && record.revision == *revision
-            }) {
+            let matches_witness = |snapshot: &WorldSnapshot| {
+                snapshot.graph.entities.get(id).is_some_and(|record| {
+                    record.generation == *generation && record.revision == *revision
+                })
+            };
+            if !matches_witness(base) || !matches_witness(target) {
                 return conflicted(
                     plan_id,
                     base_anchor,
@@ -239,7 +261,7 @@ impl SemanticRebaseEngine {
             }
         }
         for id in &witness.negative_entities {
-            if target.graph.entities.contains_key(id) {
+            if base.graph.entities.contains_key(id) || target.graph.entities.contains_key(id) {
                 return conflicted(
                     plan_id,
                     base_anchor,
@@ -252,12 +274,14 @@ impl SemanticRebaseEngine {
             }
         }
         for (coord, revision) in &witness.witnessed_chunks {
-            if !target
-                .graph
-                .chunks
-                .get(coord)
-                .is_some_and(|chunk| chunk.revision == *revision)
-            {
+            let matches_witness = |snapshot: &WorldSnapshot| {
+                snapshot
+                    .graph
+                    .chunks
+                    .get(coord)
+                    .is_some_and(|chunk| chunk.revision == *revision)
+            };
+            if !matches_witness(base) || !matches_witness(target) {
                 return conflicted(
                     plan_id,
                     base_anchor,
@@ -288,6 +312,12 @@ impl SemanticRebaseEngine {
             || base.fortress_id != theirs.fortress_id
             || base.cursor.epoch != ours.cursor.epoch
             || base.cursor.epoch != theirs.cursor.epoch
+            || ours.cursor.sequence < base.cursor.sequence
+            || theirs.cursor.sequence < base.cursor.sequence
+            || ours.tick < base.tick
+            || theirs.tick < base.tick
+            || !branch_is_valid(base, ours)
+            || !branch_is_valid(base, theirs)
         {
             return Err(ConflictCertificate::new(
                 plan_id,
@@ -333,7 +363,7 @@ impl SemanticRebaseEngine {
                     "merged observation cursor would overflow".to_owned(),
                 )
             })?;
-        Ok(WorldSnapshot::new(
+        let merged = WorldSnapshot::new(
             base.fortress_id,
             ours.tick.max(theirs.tick),
             dfmcp_core::ObservationCursor {
@@ -347,7 +377,19 @@ impl SemanticRebaseEngine {
                 chunks,
                 events,
             },
-        ))
+        );
+        if diff_snapshots(base, &merged).is_err() {
+            return Err(ConflictCertificate::new(
+                plan_id,
+                base_anchor,
+                target_anchor,
+                ConflictKind::PreconditionViolated {
+                    description: "merged graph violates canonical state invariants".to_owned(),
+                },
+                "independent record merges do not form a valid world snapshot".to_owned(),
+            ));
+        }
+        Ok(merged)
     }
 }
 
@@ -428,6 +470,14 @@ fn merge_scalar<T: Copy + PartialEq>(base: T, ours: T, theirs: T) -> Option<T> {
         Some(ours)
     } else {
         None
+    }
+}
+
+fn branch_is_valid(base: &WorldSnapshot, branch: &WorldSnapshot) -> bool {
+    if base.anchor() == branch.anchor() {
+        base == branch
+    } else {
+        diff_snapshots(base, branch).is_ok()
     }
 }
 

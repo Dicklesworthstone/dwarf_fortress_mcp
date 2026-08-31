@@ -87,7 +87,7 @@ impl StaticPlanner {
 
         let step_limit = intent
             .max_steps()
-            .unwrap_or(self.policy.max_steps)
+            .map_or(self.policy.max_steps, |limit| limit)
             .min(self.policy.max_steps)
             .min(context.budget.max_actions);
         if intent.requested_actions.len() > step_limit as usize {
@@ -155,14 +155,25 @@ impl StaticPlanner {
             .iter()
             .map(|step| step.risk)
             .max()
-            .unwrap_or(RiskTier::ReadOnly);
+            .map_or(RiskTier::ReadOnly, |risk| risk);
         let requires_checkpoint =
             intent.requires_checkpoint() || max_risk >= self.policy.require_checkpoint_at_or_above;
         if requires_checkpoint {
             required_capabilities.insert(Capability::Checkpoint);
         }
-        let intent_expiry = intent.deadline().unwrap_or(GameTick(u64::MAX));
-        let policy_expiry = snapshot.tick.saturating_add(self.policy.plan_ttl_ticks);
+        let intent_expiry = intent.deadline().map_or(GameTick(u64::MAX), |tick| tick);
+        let policy_expiry = GameTick(
+            snapshot
+                .tick
+                .0
+                .checked_add(self.policy.plan_ttl_ticks)
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "plan expiry tick exceeds the representable game-time horizon",
+                    )
+                })?,
+        );
         let expires_at_tick = intent_expiry.min(policy_expiry);
         let plan = PreparedPlan::builder(
             intent.id,

@@ -276,7 +276,12 @@ fn checked_coord_offset(origin: MapCoord, dx: i64, dy: i64, dz: i64) -> Option<M
 fn inclusive_span(minimum: i32, maximum: i32) -> u64 {
     let low = i64::from(minimum.min(maximum));
     let high = i64::from(minimum.max(maximum));
-    u64::try_from(high - low + 1).unwrap_or(u64::MAX)
+    // Any pair of i32 coordinates spans at most 2^32 points, so this
+    // conversion is infallible on every Rust target that supports u64.
+    match u64::try_from(high - low + 1) {
+        Ok(span) => span,
+        Err(_) => u64::MAX,
+    }
 }
 
 fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: GameTick) -> RequestedAction {

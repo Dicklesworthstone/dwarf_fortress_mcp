@@ -44,7 +44,12 @@ impl Predicate {
     pub fn depth(&self) -> usize {
         match self {
             Self::All(children) | Self::Any(children) => {
-                children.iter().map(Predicate::depth).max().unwrap_or(0) + 1
+                children
+                    .iter()
+                    .map(Predicate::depth)
+                    .max()
+                    .map_or(0, |depth| depth)
+                    + 1
             }
             Self::Not(inner) => inner.depth() + 1,
             _ => 1,

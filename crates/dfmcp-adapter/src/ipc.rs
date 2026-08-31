@@ -10,7 +10,7 @@
 //! - 4 bytes: `payload_length` (`u32`, max 16MB)
 //! - 2 bytes: `message_type` (`u16`, `IpcMessageType`)
 //! - 4 bytes: `crc32` (`u32`, CRC-32 checksum of payload bytes)
-//! - `payload_length` bytes: Protobuf / payload data
+//! - `payload_length` bytes: opaque payload data (no canonical bridge codec exists yet)
 
 use std::io::{Read, Write};
 
@@ -21,6 +21,11 @@ pub const MAX_FRAME_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
 /// Header size: 4 (len) + 2 (type) + 4 (crc32) = 10 bytes.
 pub const FRAME_HEADER_SIZE: usize = 10;
+
+/// Maximum bytes retained by one incremental decoder. Callers must poll
+/// complete frames between input chunks rather than buffering an unbounded
+/// stream.
+pub const MAX_DECODER_BUFFER_SIZE: usize = MAX_FRAME_PAYLOAD_SIZE + FRAME_HEADER_SIZE + 8_192;
 
 /// Big-endian IPC message type discriminator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -255,8 +260,16 @@ impl IncrementalFrameDecoder {
     }
 
     /// Push fresh chunk data into the internal stream buffer.
-    pub fn push_bytes(&mut self, chunk: &[u8]) {
+    pub fn push_bytes(&mut self, chunk: &[u8]) -> Result<()> {
+        if chunk.len() > MAX_DECODER_BUFFER_SIZE.saturating_sub(self.buffer.len()) {
+            self.buffer.clear();
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "incremental IPC decoder buffer exceeded its explicit bound",
+            ));
+        }
         self.buffer.extend_from_slice(chunk);
+        Ok(())
     }
 
     /// Attempt to decode the next available frame in the buffer.
@@ -376,7 +389,7 @@ impl ReconnectionPolicy {
             return 0;
         }
         let shift = (attempt - 1).min(16);
-        let multiplier = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
+        let multiplier = 1u64.checked_shl(shift).map_or(u64::MAX, |value| value);
         let raw = self.initial_backoff_millis.saturating_mul(multiplier);
         raw.min(self.max_backoff_millis)
     }
@@ -447,7 +460,7 @@ mod tests {
         // Feed bytes 3 at a time to simulate fragmented network delivery
         let mut decoded_frames = Vec::new();
         for chunk in stream_bytes.chunks(3) {
-            decoder.push_bytes(chunk);
+            decoder.push_bytes(chunk)?;
             while let Some(frame) = decoder.poll_next_frame()? {
                 decoded_frames.push(frame);
             }
@@ -467,6 +480,14 @@ mod tests {
         assert_eq!(decoder.buffered_len(), 0);
 
         Ok(())
+    }
+
+    #[test]
+    fn incremental_decoder_rejects_unbounded_buffer_growth() {
+        let mut decoder = IncrementalFrameDecoder::new();
+        decoder.buffer.resize(MAX_DECODER_BUFFER_SIZE, 0);
+        assert!(decoder.push_bytes(&[0]).is_err());
+        assert_eq!(decoder.buffered_len(), 0);
     }
 
     #[test]

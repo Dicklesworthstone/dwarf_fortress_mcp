@@ -136,7 +136,7 @@ impl ObligationRuntime {
                 }
                 let cadence_basis = obligation
                     .last_evaluated_tick
-                    .unwrap_or(obligation.registered_tick);
+                    .map_or(obligation.registered_tick, |tick| tick);
                 if snapshot.tick.0.saturating_sub(cadence_basis.0)
                     < obligation.spec.poll_interval_ticks
                 {

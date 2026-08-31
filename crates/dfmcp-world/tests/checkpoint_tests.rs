@@ -55,7 +55,7 @@ fn test_013_checkpoint_creation_and_bit_rot_detection() -> Result<(), Box<dyn st
     let Err(rot_err) = manifest.verify_files(|path| corrupted_files.get(path).cloned()) else {
         return Err("expected bit-rot error".into());
     };
-    assert_eq!(rot_err.code, ErrorCode::InternalInvariantViolation);
+    assert_eq!(rot_err.code, ErrorCode::CorruptLedger);
     assert!(rot_err.message.contains("bit-rot"));
 
     let mut missing_files = files_data.clone();
@@ -63,7 +63,7 @@ fn test_013_checkpoint_creation_and_bit_rot_detection() -> Result<(), Box<dyn st
     let Err(missing_err) = manifest.verify_files(|path| missing_files.get(path).cloned()) else {
         return Err("expected missing file error".into());
     };
-    assert_eq!(missing_err.code, ErrorCode::InternalInvariantViolation);
+    assert_eq!(missing_err.code, ErrorCode::CorruptLedger);
 
     Ok(())
 }
@@ -84,14 +84,21 @@ fn test_013_restore_epoch_bump_and_stale_anchor_rejection() -> Result<(), Box<dy
 
     let mut restored_snapshot = snapshot_epoch1.clone();
     restored_snapshot.cursor.epoch = 2;
+    restored_snapshot.cursor.sequence = 0;
     restored_snapshot.refresh_hash();
     let restored_anchor = restored_snapshot.anchor();
 
-    let cert =
-        store.restore_checkpoint(manifest.checkpoint_id, live_anchor_epoch1, restored_anchor)?;
+    let cert = store.restore_checkpoint(
+        manifest.checkpoint_id,
+        live_anchor_epoch1,
+        restored_anchor,
+        manifest.state_hash,
+    )?;
     assert_eq!(cert.prior_anchor, live_anchor_epoch1);
     assert_eq!(cert.restored_anchor, restored_anchor);
     assert_eq!(cert.manifest_digest, manifest.manifest_digest);
+    assert_eq!(cert.restored_content_digest, manifest.state_hash);
+    assert!(cert.integrity_is_valid());
 
     let Err(stale_err) =
         CheckpointStore::validate_anchor_epoch(&live_anchor_epoch1, restored_anchor.cursor.epoch)
@@ -101,5 +108,34 @@ fn test_013_restore_epoch_bump_and_stale_anchor_rejection() -> Result<(), Box<dy
     assert_eq!(stale_err.code, ErrorCode::CursorGap);
     assert!(stale_err.message.contains("restore occurred"));
 
+    Ok(())
+}
+
+#[test]
+fn checkpoint_rejects_unsafe_paths_and_wrong_restored_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut store = CheckpointStore::new();
+    let snapshot = make_snapshot(1, 100);
+    let mut unsafe_files = BTreeMap::new();
+    unsafe_files.insert("../world.sav".to_owned(), (4, Digest32::of_bytes(b"save")));
+    assert!(store.create_checkpoint(&snapshot, unsafe_files).is_err());
+
+    let mut files = BTreeMap::new();
+    files.insert("world.sav".to_owned(), (4, Digest32::of_bytes(b"save")));
+    let manifest = store.create_checkpoint(&snapshot, files)?;
+    let prior = snapshot.anchor();
+    let mut restored = snapshot.clone();
+    restored.cursor = ObservationCursor {
+        epoch: 2,
+        sequence: 0,
+    };
+    restored.refresh_hash();
+    let result = store.restore_checkpoint(
+        manifest.checkpoint_id,
+        prior,
+        restored.anchor(),
+        Digest32::of_bytes(b"different content"),
+    );
+    assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CorruptLedger));
     Ok(())
 }

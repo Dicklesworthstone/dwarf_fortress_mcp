@@ -4,9 +4,9 @@
 
 use dfmcp_adapter::dispatcher::MutationDispatcher;
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, CommitState, ErrorCode, FortressId, GameTick,
-    IntentId, MapCoord, MapCuboid, ObservationCursor, OperationContext, RequestId, Result,
-    RiskTier, SessionId, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, ErrorCode, FortressId, GameTick, IntentId,
+    MapCoord, MapCuboid, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
+    SessionId, WorkBudget,
 };
 use dfmcp_intent::{
     Action, Constraint, DigMode, Intent, ObligationSpec, RequestedAction, StaticPlanner,
@@ -64,8 +64,8 @@ fn sample_context(snapshot: &WorldSnapshot) -> OperationContext {
 }
 
 #[test]
-fn test_dispatcher_all_actions_dispatch_and_journal() -> Result<()> {
-    let mut snapshot = sample_snapshot();
+fn test_dispatcher_rejects_actions_it_cannot_execute() -> Result<()> {
+    let snapshot = sample_snapshot();
     let ctx = sample_context(&snapshot);
 
     let dig_cuboid = MapCuboid::new(
@@ -125,17 +125,10 @@ fn test_dispatcher_all_actions_dispatch_and_journal() -> Result<()> {
     let plan = StaticPlanner::default().prepare(&snapshot, &intent, &ctx)?;
     let mut dispatcher = MutationDispatcher::new();
 
-    let prepare_receipt = dispatcher.prepare_mutation(&plan, &snapshot, &ctx)?;
-    let commit_receipt =
-        dispatcher.commit_mutation(&plan, &prepare_receipt, &mut snapshot, &ctx)?;
-
-    assert_eq!(commit_receipt.actions.len(), 3);
-    for action_receipt in &commit_receipt.actions {
-        assert_eq!(action_receipt.state, CommitState::Verified);
-    }
-
-    assert_eq!(dispatcher.journal().len(), 1);
-    assert!(!snapshot.paused);
+    let result = dispatcher.prepare_mutation(&plan, &snapshot, &ctx);
+    assert!(matches!(result, Err(ref error) if error.code == ErrorCode::AdapterRejected));
+    assert!(dispatcher.journal().is_empty());
+    assert!(snapshot.paused);
 
     Ok(())
 }
