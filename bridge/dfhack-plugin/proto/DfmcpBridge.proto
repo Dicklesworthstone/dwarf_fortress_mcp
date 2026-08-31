@@ -60,7 +60,6 @@ message CitizenRecord {
   required bool baby = 14;
   required bool child = 15;
   required bool adult = 16;
-  required bool military = 17;
 }
 
 message ReadObservationReply {
