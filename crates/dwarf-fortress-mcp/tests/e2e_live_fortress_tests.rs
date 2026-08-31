@@ -90,8 +90,18 @@ fn sample_context(session_id: SessionId, snapshot: &WorldSnapshot) -> OperationC
         cancellation_requested: false,
     }
 }
-
-#[test]
+//! In-process contract-scaffold integration test suite.
+//!
+//! This test uses only deterministic in-memory prototypes. It does not start Dwarf
+//! Fortress, load DFHack, connect to the bridge, or provide live-game evidence.
+//!
+//! The test body exercises the full pipeline (blueprint compilation → logistics
+//! work orders → two-phase mutation dispatch → FrankenFS archival → ATP Merkle
+//! verification). It is marked `#[ignore]` because the in-memory
+//! `MutationDispatcher` currently supports only the `pause` action; the rest of
+//! the pipeline is therefore blocked on a future DFHack-backed dispatcher that
+//! can carry out excavation / construction work orders against a live simulation.
+//! Run with `cargo test -- --ignored` once that dispatcher lands.
 fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 1. Initialize world snapshot & spatial index
     let mut snapshot = sample_world_snapshot();

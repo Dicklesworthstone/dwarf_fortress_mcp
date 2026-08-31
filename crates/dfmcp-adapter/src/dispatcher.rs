@@ -16,6 +16,8 @@ use dfmcp_world::{WorldSnapshot, evaluate};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
 
+const MAX_EFFECT_JOURNAL_RECORDS: usize = 65_536;
+
 /// Record in the process-local effect-journal laboratory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectJournalRecord {
@@ -65,6 +67,12 @@ impl EffectJournal {
                 ));
             }
             return Ok(());
+        }
+        if self.records.len() >= MAX_EFFECT_JOURNAL_RECORDS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "in-memory effect journal reached its explicit record bound",
+            ));
         }
 
         self.records.insert(
@@ -242,28 +250,48 @@ impl MutationDispatcher {
         snapshot: &mut WorldSnapshot,
         context: &OperationContext,
     ) -> Result<CommitReceipt> {
-        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
-
-        // Check for idempotency replay
-        if let Some(existing) = self.journal.lookup(&idempotency_key) {
-            if existing.state == CommitState::Verified {
-                if let Some(receipt) = &existing.receipt {
-                    return Ok(receipt.clone());
-                }
-            } else if existing.state == CommitState::Indeterminate {
-                return Err(DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "previous commit attempt resulted in indeterminate state; reconciliation required before retry",
-                ));
-            }
-        }
-
         plan.validate_structure()?;
         if !snapshot.hash_is_valid() || context.anchor != snapshot.anchor() {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "commit snapshot or operation context anchor is invalid",
             ));
+        }
+        // Reauthorization happens even for an idempotent receipt replay. A
+        // caller who knows a digest but lacks the session's grants gains no
+        // read or mutation authority from the journal.
+        for step in &plan.steps {
+            let scope = step.action.scope();
+            context.authorize(
+                step.required_capability,
+                step.risk,
+                &scope.entity_ids,
+                scope.map_area,
+            )?;
+        }
+
+        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+        if let Some(existing) = self.journal.lookup(&idempotency_key) {
+            if existing.plan_id != plan.id || existing.plan_digest != plan.digest {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "idempotency record does not match the supplied sealed plan",
+                ));
+            }
+            if existing.state == CommitState::Verified {
+                return existing.receipt.clone().ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "verified effect-journal record is missing its receipt",
+                    )
+                });
+            }
+            if existing.state != CommitState::Prepared {
+                return Err(DfmcpError::new(
+                    ErrorCode::EffectIndeterminate,
+                    "previous commit attempt is not safely retryable until it is reconciled",
+                ));
+            }
         }
         if snapshot.tick > plan.expires_at_tick {
             return Err(DfmcpError::new(
@@ -293,13 +321,6 @@ impl MutationDispatcher {
 
         // Dispatch each plan step into snapshot mutation
         for step in &plan.steps {
-            let scope = step.action.scope();
-            context.authorize(
-                step.required_capability,
-                step.risk,
-                &scope.entity_ids,
-                scope.map_area,
-            )?;
             if !step
                 .preconditions
                 .iter()
@@ -311,18 +332,17 @@ impl MutationDispatcher {
                     format!("preconditions changed before step {} commit", step.id.get()),
                 ));
             }
-            let action_id = ActionId::new(u128::from(step.id.get()) + 1);
+            let action_id = derived_action_id(plan.id, step.id);
             let msg = match &step.action {
                 Action::Pause { paused } => {
                     if snapshot.paused != *paused {
-                        let next_cursor = snapshot.cursor.next();
-                        if next_cursor == snapshot.cursor {
+                        let Some(next_cursor) = snapshot.cursor.checked_next() else {
                             *snapshot = prior_snapshot;
                             return Err(DfmcpError::new(
                                 ErrorCode::CursorGap,
                                 "cannot publish pause mutation because the observation cursor is exhausted",
                             ));
-                        }
+                        };
                         snapshot.paused = *paused;
                         snapshot.cursor = next_cursor;
                         snapshot.refresh_hash();
@@ -351,7 +371,9 @@ impl MutationDispatcher {
             }
 
             let mut receipt_bytes = Vec::new();
+            receipt_bytes.extend_from_slice(b"dfmcp-dispatch-action-receipt-v1");
             receipt_bytes.extend_from_slice(plan.digest.as_bytes());
+            receipt_bytes.extend_from_slice(&action_id.get().to_be_bytes());
             receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
             receipt_bytes.extend_from_slice(snapshot.state_hash.as_bytes());
             let receipt_digest = Digest32::of_bytes(&receipt_bytes);
@@ -384,8 +406,13 @@ impl MutationDispatcher {
             warnings: Vec::new(),
         };
 
-        self.journal
-            .record_commit(&idempotency_key, commit_receipt.clone())?;
+        if let Err(error) = self
+            .journal
+            .record_commit(&idempotency_key, commit_receipt.clone())
+        {
+            *snapshot = prior_snapshot;
+            return Err(error);
+        }
 
         Ok(commit_receipt)
     }
@@ -430,6 +457,15 @@ impl MutationDispatcher {
     pub fn journal_mut(&mut self) -> &mut EffectJournal {
         &mut self.journal
     }
+}
+
+fn derived_action_id(plan_id: PlanId, step_id: dfmcp_core::StepId) -> ActionId {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"dfmcp-dispatch-action-v1");
+    bytes.extend_from_slice(&plan_id.get().to_be_bytes());
+    bytes.extend_from_slice(&step_id.get().to_be_bytes());
+    let derived = Digest32::of_bytes(&bytes).first_u128();
+    ActionId::new(if derived == 0 { 1 } else { derived })
 }
 
 fn adapter_token(

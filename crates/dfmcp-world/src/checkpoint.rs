@@ -9,6 +9,9 @@ use dfmcp_core::{
 
 use crate::model::WorldSnapshot;
 
+pub const MAX_CHECKPOINT_MANIFEST_FILES: usize = 4_096;
+pub const MAX_CHECKPOINTS: usize = 65_536;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointManifest {
     pub checkpoint_id: CheckpointId,
@@ -21,7 +24,7 @@ pub struct CheckpointManifest {
 }
 
 impl CheckpointManifest {
-    pub fn new(
+    fn new(
         checkpoint_id: CheckpointId,
         fortress_id: FortressId,
         epoch: u64,
@@ -253,13 +256,31 @@ impl CheckpointStore {
                 "cannot checkpoint a snapshot with an invalid state hash",
             ));
         }
+        if files.len() > MAX_CHECKPOINT_MANIFEST_FILES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "checkpoint manifest exceeds its explicit file-count bound",
+            ));
+        }
         if files.keys().any(|path| !valid_manifest_path(path)) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
                 "checkpoint manifest paths must be bounded, relative normal paths",
             ));
         }
+        if self.manifests.len() >= MAX_CHECKPOINTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "checkpoint store reached its explicit manifest bound",
+            ));
+        }
         let cid = CheckpointId::new(u128::from(self.next_checkpoint_id));
+        if self.manifests.contains_key(&cid) {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "checkpoint identifier collision",
+            ));
+        }
         let next_checkpoint_id = self.next_checkpoint_id.checked_add(1).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -276,12 +297,7 @@ impl CheckpointStore {
             files,
         );
 
-        if self.manifests.insert(cid, manifest.clone()).is_some() {
-            return Err(DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "checkpoint identifier collision",
-            ));
-        }
+        self.manifests.insert(cid, manifest.clone());
         self.next_checkpoint_id = next_checkpoint_id;
         Ok(manifest)
     }
@@ -314,10 +330,16 @@ impl CheckpointStore {
                 "checkpoint restore anchors belong to a different fortress",
             ));
         }
-        if restored_anchor.cursor.epoch <= prior_anchor.cursor.epoch {
+        let expected_epoch = prior_anchor.cursor.epoch.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CursorGap,
+                "cannot restore because the observation epoch is exhausted",
+            )
+        })?;
+        if restored_anchor.cursor.epoch != expected_epoch {
             return Err(DfmcpError::new(
                 ErrorCode::CursorGap,
-                "checkpoint restore must advance the observation epoch",
+                "checkpoint restore must advance the observation epoch exactly once",
             ));
         }
         if restored_anchor.cursor.sequence != 0 {

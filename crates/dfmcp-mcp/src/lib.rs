@@ -20,8 +20,8 @@ pub mod tasks;
 pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
 pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
 pub use http_transport::{
-    HttpSessionResumeToken, HttpTransportSessionManager, MAX_HTTP_MESSAGE_BYTES,
-    MAX_HTTP_SESSIONS, MAX_RESUMPTION_BUFFER_SIZE,
+    HttpSessionResumeToken, HttpTransportSessionManager, MAX_HTTP_MESSAGE_BYTES, MAX_HTTP_SESSIONS,
+    MAX_RESUMPTION_BUFFER_SIZE,
 };
 pub use server::{run_stdio, validate_localhost_bind};
 pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_action_task};

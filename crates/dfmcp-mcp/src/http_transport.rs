@@ -123,9 +123,12 @@ impl HttpTransportSessionManager {
                 "HTTP resumption buffer length cannot be represented",
             )
         })?;
-        buffer.start_offset.checked_add(buffered_count).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
-        })
+        buffer
+            .start_offset
+            .checked_add(buffered_count)
+            .ok_or_else(|| {
+                DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
+            })
     }
 
     pub fn issue_resume_token(
@@ -177,9 +180,12 @@ fn validate_offset(buffer: &SessionMessageBuffer, offset: u64) -> Result<()> {
             "HTTP resumption buffer length cannot be represented",
         )
     })?;
-    let current_head = buffer.start_offset.checked_add(message_count).ok_or_else(|| {
-        DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
-    })?;
+    let current_head = buffer
+        .start_offset
+        .checked_add(message_count)
+        .ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "HTTP message offset exhausted")
+        })?;
     if offset < buffer.start_offset {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,

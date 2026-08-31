@@ -22,6 +22,14 @@ impl GameTick {
     pub const fn saturating_add(self, amount: u64) -> Self {
         Self(self.0.saturating_add(amount))
     }
+
+    #[must_use]
+    pub const fn checked_add(self, amount: u64) -> Option<Self> {
+        match self.0.checked_add(amount) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -45,10 +53,29 @@ impl ObservationCursor {
     }
 
     #[must_use]
+    pub const fn checked_next(self) -> Option<Self> {
+        match self.sequence.checked_add(1) {
+            Some(sequence) => Some(Self {
+                epoch: self.epoch,
+                sequence,
+            }),
+            None => None,
+        }
+    }
+
+    #[must_use]
     pub const fn reset_epoch(self) -> Self {
         Self {
             epoch: self.epoch.saturating_add(1),
             sequence: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn checked_reset_epoch(self) -> Option<Self> {
+        match self.epoch.checked_add(1) {
+            Some(epoch) => Some(Self { epoch, sequence: 0 }),
+            None => None,
         }
     }
 }

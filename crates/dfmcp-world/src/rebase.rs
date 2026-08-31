@@ -116,10 +116,16 @@ impl SemanticRebaseEngine {
                 "rebase snapshots have invalid hashes, fortresses, or epochs",
             );
         }
-        let validation_cursor = base.cursor.next();
-        if validation_cursor == base.cursor
-            || build_delta(base, validation_cursor, base.tick, changes.to_vec()).is_err()
-        {
+        let Some(validation_cursor) = base.cursor.checked_next() else {
+            return conflicted(
+                plan_id,
+                base_anchor,
+                target_anchor,
+                ConflictKind::AnchorDivergence,
+                "base observation cursor is exhausted",
+            );
+        };
+        if build_delta(base, validation_cursor, base.tick, changes.to_vec()).is_err() {
             return conflicted(
                 plan_id,
                 base_anchor,
@@ -213,10 +219,16 @@ impl SemanticRebaseEngine {
             }
         }
         if !rebased.is_empty() {
-            let rebased_cursor = target.cursor.next();
-            if rebased_cursor == target.cursor
-                || build_delta(target, rebased_cursor, target.tick, rebased.clone()).is_err()
-            {
+            let Some(rebased_cursor) = target.cursor.checked_next() else {
+                return conflicted(
+                    plan_id,
+                    base_anchor,
+                    target_anchor,
+                    ConflictKind::AnchorDivergence,
+                    "target observation cursor is exhausted",
+                );
+            };
+            if build_delta(target, rebased_cursor, target.tick, rebased.clone()).is_err() {
                 return conflicted(
                     plan_id,
                     base_anchor,

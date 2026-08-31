@@ -199,6 +199,11 @@ fn context_for(session: &LabSession, request_id: u128) -> OperationContext {
     }
 }
 
+fn next_context(session: &mut LabSession) -> Result<(u128, OperationContext)> {
+    let request_id = next_request_id(session)?;
+    Ok((request_id, context_for(session, request_id)))
+}
+
 fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
     json!({
         "fortress_id": format!("{}", anchor.fortress_id),
@@ -386,34 +391,30 @@ pub fn fortress_open_session(
     };
 
     let budget = WorkBudget {
-        max_wall_millis: max_wall_millis.map_or(
-            WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis,
-            |value| value,
-        ),
-        max_game_ticks: max_game_ticks.map_or(
-            WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks,
-            |value| value,
-        ),
-        max_entities: max_entities.map_or(
-            WorkBudget::CONSERVATIVE_DEFAULT.max_entities,
-            |value| value,
-        ),
+        max_wall_millis: max_wall_millis
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis, |value| {
+                value
+            }),
+        max_game_ticks: max_game_ticks
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks, |value| {
+                value
+            }),
+        max_entities: max_entities
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities, |value| value),
         max_bytes: max_bytes.map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes, |value| value),
         max_output_tokens: max_output_tokens.map_or(
             WorkBudget::CONSERVATIVE_DEFAULT.max_output_tokens,
             |value| value,
         ),
-        max_actions: max_actions.map_or(
-            WorkBudget::CONSERVATIVE_DEFAULT.max_actions,
-            |value| value,
-        ),
+        max_actions: max_actions
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions, |value| value),
     };
     if let Err(error) = budget.validate() {
         return error_payload("fortress.open_session", &error.to_string());
     }
 
     let grants = negotiate_grants(fortress_id, &requested_caps);
-    let mut probe_session = LabSession {
+    let probe_session = LabSession {
         session_id: SessionId::new(0), // placeholder; replaced below
         fortress_id,
         grants: grants.clone(),
@@ -424,85 +425,94 @@ pub fn fortress_open_session(
         last_action: None,
         last_commit: None,
     };
-    let probe_ctx = context_for(&probe_session, 1);
-    match probe_session.adapter.health(&probe_ctx) {
-        Ok(health) => {
-            let session_counter = match next_session_counter() {
-                Ok(value) => value,
-                Err(error) => return error_payload("fortress.open_session", &error.to_string()),
-            };
-            let session_id = SessionId::new(session_counter);
-            let snapshot_anchor = probe_session.adapter.snapshot().anchor();
-            let paused_after = probe_session.adapter.snapshot().paused;
-            // Move the probe adapter into the registered session.
-            let LabSession {
-                session_id: _,
-                fortress_id: _,
-                grants: _,
-                budget: _,
-                next_request_id: _,
-                adapter,
-                pending: _,
-                last_action: _,
-                last_commit: _,
-            } = probe_session;
-            let session = Arc::new(Mutex::new(LabSession {
-                session_id,
-                fortress_id,
-                grants,
-                budget,
-                next_request_id: 0,
-                adapter,
-                pending: None,
-                last_action: None,
-                last_commit: None,
-            }));
-            sessions().insert(session_id, session);
-            let granted_strings: Vec<&str> = requested_caps
-                .iter()
-                .map(|c| match c.capability {
-                    Capability::Observe => "observe",
-                    Capability::Query => "query",
-                    Capability::Plan => "plan",
-                    Capability::ControlClock => "control_clock",
-                    Capability::Checkpoint => "checkpoint",
-                    Capability::Restore => "restore",
-                    Capability::DiagnosticRaw => "diagnostic_raw",
-                    Capability::Doctor => "doctor",
-                    _ => "other",
-                })
-                .collect();
-            let payload = json!({
-                "ok": true,
-                "session_id": format!("{session_id}"),
-                "adapter": health.identity.name,
-                "compatibility": format!("{:?}", health.identity.compatibility),
-                "fortress_loaded": health.fortress_loaded,
-                "fortress_id": format!("{fortress_id}"),
-                "granted_capabilities": granted_strings,
-                "budget": {
-                    "max_wall_millis": budget.max_wall_millis,
-                    "max_game_ticks": budget.max_game_ticks,
-                    "max_entities": budget.max_entities,
-                    "max_bytes": budget.max_bytes,
-                    "max_output_tokens": budget.max_output_tokens,
-                    "max_actions": budget.max_actions,
-                },
-                "anchor": anchor_json(&snapshot_anchor),
-                "paused": paused_after,
-                "note": "session_id is required for all subsequent tool calls; transport identity grants nothing",
-            });
-            payload.to_string()
+    let identity = probe_session.adapter.identity();
+    let session_counter = match next_session_counter() {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.open_session", &error.to_string()),
+    };
+    let session_id = SessionId::new(session_counter);
+    let snapshot_anchor = probe_session.adapter.snapshot().anchor();
+    let paused_after = probe_session.adapter.snapshot().paused;
+    // Move the probe adapter into the registered session.
+    let LabSession {
+        session_id: _,
+        fortress_id: _,
+        grants: _,
+        budget: _,
+        next_request_id: _,
+        adapter,
+        pending: _,
+        last_action: _,
+        last_commit: _,
+    } = probe_session;
+    let session = Arc::new(Mutex::new(LabSession {
+        session_id,
+        fortress_id,
+        grants,
+        budget,
+        next_request_id: 0,
+        adapter,
+        pending: None,
+        last_action: None,
+        last_commit: None,
+    }));
+    {
+        let mut registry = sessions();
+        if registry.len() >= MAX_LAB_SESSIONS {
+            return error_payload(
+                "fortress.open_session",
+                "process-local laboratory reached its explicit session bound",
+            );
         }
-        Err(error) => error_payload("fortress.open_session", &error.to_string()),
+        if registry.contains_key(&session_id) {
+            return error_payload(
+                "fortress.open_session",
+                "fresh session identifier unexpectedly collided with an existing session",
+            );
+        }
+        registry.insert(session_id, session);
     }
+    let granted_strings: Vec<&str> = requested_caps
+        .iter()
+        .map(|c| match c.capability {
+            Capability::Observe => "observe",
+            Capability::Query => "query",
+            Capability::Plan => "plan",
+            Capability::ControlClock => "control_clock",
+            Capability::Checkpoint => "checkpoint",
+            Capability::Restore => "restore",
+            Capability::Doctor => "doctor",
+            _ => "unreachable-after-capability-validation",
+        })
+        .collect();
+    json!({
+        "ok": true,
+        "session_id": format!("{session_id}"),
+        "adapter": identity.name,
+        "compatibility": format!("{:?}", identity.compatibility),
+        "fortress_loaded": true,
+        "fortress_id": format!("{fortress_id}"),
+        "granted_capabilities": granted_strings,
+        "budget": {
+            "max_wall_millis": budget.max_wall_millis,
+            "max_game_ticks": budget.max_game_ticks,
+            "max_entities": budget.max_entities,
+            "max_bytes": budget.max_bytes,
+            "max_output_tokens": budget.max_output_tokens,
+            "max_actions": budget.max_actions,
+        },
+        "anchor": anchor_json(&snapshot_anchor),
+        "paused": paused_after,
+        "note": "session_id is required for all subsequent tool calls; transport identity grants nothing",
+    })
+    .to_string()
 }
 
 // ============================================================================
 // fortress.observe
 // ============================================================================
 
-/// Return the current bounded snapshot projection at the live anchor.
+/// Return the current bounded snapshot projection at the laboratory anchor.
 #[tool(
     description = "Observe the current fortress state for an open session. Requires the session_id returned by fortress_open_session."
 )]
@@ -515,15 +525,33 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.observe", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
-    match guard.adapter.health(&ctx) {
-        Ok(_) => {
-            let mut payload = snapshot_json(guard.adapter.snapshot());
-            payload["projection"] = json!("summary");
-            payload["session_id"] = json!(format!("{}", guard.session_id));
-            payload.to_string()
-        }
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.observe", &error.to_string()),
+    };
+    let request = ObservationRequest {
+        since: None,
+        projection: Projection::Summary,
+        interest: InterestSet::default(),
+        max_entities: guard.budget.max_entities,
+        max_bytes: guard.budget.max_bytes,
+        max_output_tokens: guard.budget.max_output_tokens,
+        continuation: None,
+    };
+    match guard.adapter.observe(&request, &ctx) {
+        Ok(frame) => match frame.payload {
+            ObservationPayload::Snapshot(snapshot) => {
+                let mut payload = snapshot_json(&snapshot);
+                payload["projection"] = json!("summary");
+                payload["session_id"] = json!(format!("{}", guard.session_id));
+                payload["evidence_count"] = json!(frame.evidence.len());
+                payload.to_string()
+            }
+            ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => error_payload(
+                "fortress.observe",
+                "full laboratory observation unexpectedly returned a non-snapshot payload",
+            ),
+        },
         Err(error) => error_payload("fortress.observe", &error.to_string()),
     }
 }
@@ -537,7 +565,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
     description = "Run the bounded summary query supported by the laboratory adapter. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
-    let mode = mode.unwrap_or_else(|| "summary".to_owned());
+    let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     if mode != "summary" {
         return error_payload(
             "fortress.query",
@@ -552,8 +580,10 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(error) => return error_payload("fortress.query", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.query", &error.to_string()),
+    };
     if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
         return error_payload("fortress.query", &error.to_string());
     }
@@ -585,15 +615,17 @@ pub fn fortress_plan(
         Ok(value) => value,
         Err(error) => return error_payload("fortress.plan", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
+    let (rid, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.plan", &error.to_string()),
+    };
     let snapshot = guard.adapter.snapshot();
-    let ctx = context_for(&guard, rid);
 
-    let paused_target = paused_target.unwrap_or(false);
+    let paused_target = paused_target.map_or(false, |value| value);
     let intent = Intent {
         id: IntentId::new(rid),
         anchor: snapshot.anchor(),
-        summary: summary.unwrap_or_else(|| "unpause the simulation".to_owned()),
+        summary: summary.map_or_else(|| "unpause the simulation".to_owned(), |value| value),
         terminal_condition: Predicate::Paused(paused_target),
         constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
         requested_actions: vec![RequestedAction {
@@ -673,12 +705,22 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             "plan digest does not match the pending prepared plan; plans are sealed over their digest",
         );
     }
-    let rid = next_request_id(&mut guard);
-    let prepare_ctx = context_for(&guard, rid);
+    let (_, prepare_ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => {
+            guard.pending = Some(pending);
+            return error_payload("fortress.commit", &error.to_string());
+        }
+    };
     match guard.adapter.prepare(&pending.plan, &prepare_ctx) {
         Ok(prepared) => {
-            let rid = next_request_id(&mut guard);
-            let commit_ctx = context_for(&guard, rid);
+            let (_, commit_ctx) = match next_context(&mut guard) {
+                Ok(value) => value,
+                Err(error) => {
+                    guard.pending = Some(pending);
+                    return error_payload("fortress.commit", &error.to_string());
+                }
+            };
             match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
                 Ok(receipt) => {
                     guard.last_action = receipt.actions.first().map(|action| action.action_id);
@@ -737,8 +779,10 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
             "no committed action yet; call fortress_commit first",
         );
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.wait", &error.to_string()),
+    };
     match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
         Ok(task) => json!({
             "ok": true,
@@ -782,10 +826,18 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
     let cancel_mode = match mode.as_deref() {
         Some("emergency_pause_and_drain") => CancelMode::EmergencyPauseAndDrain,
         Some("stop_future_steps") => CancelMode::StopFutureSteps,
-        _ => CancelMode::CompensateReversible,
+        Some("compensate_reversible") | None => CancelMode::CompensateReversible,
+        Some(other) => {
+            return error_payload(
+                "fortress.cancel",
+                &format!("unsupported cancellation mode {other:?}"),
+            );
+        }
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.cancel", &error.to_string()),
+    };
     match guard.adapter.request_cancel(action_id, cancel_mode, &ctx) {
         Ok(request) => match guard.adapter.finalize_cancel(action_id, &ctx) {
             Ok(finalized) => json!({
@@ -816,13 +868,15 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
         Ok(value) => value,
         Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
     };
-    let label = label.unwrap_or_else(|| "manual".to_owned());
+    let label = label.map_or_else(|| "manual".to_owned(), |value| value);
     let mut guard = match session.lock() {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.checkpoint", &error.to_string()),
+    };
     match guard.adapter.checkpoint(&label, &ctx) {
         Ok(receipt) => json!({
             "ok": true,
@@ -865,8 +919,10 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(value) => value,
         Err(error) => return error_payload("fortress.restore", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.restore", &error.to_string()),
+    };
     match guard
         .adapter
         .restore(CheckpointId::new(parsed_checkpoint), &ctx)
@@ -907,8 +963,10 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(error) => return error_payload("fortress.explain", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.explain", &error.to_string()),
+    };
     if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
         return error_payload("fortress.explain", &error.to_string());
     }
@@ -948,7 +1006,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             "session_id": format!("{}", guard.session_id),
             "transcript_len": events.len(),
             "recent_events": recent,
-            "note": "the laboratory transcript is the evidence ledger; production explanations cite durable evidence bundles",
+            "note": "process-local laboratory transcript only; no durable evidence bundle is implemented",
         })
         .to_string()
     }
@@ -971,8 +1029,10 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return error_payload("fortress.doctor", &error.to_string()),
     };
-    let rid = next_request_id(&mut guard);
-    let ctx = context_for(&guard, rid);
+    let (_, ctx) = match next_context(&mut guard) {
+        Ok(value) => value,
+        Err(error) => return error_payload("fortress.doctor", &error.to_string()),
+    };
     let health_res = guard.adapter.health(&ctx);
 
     let active_sessions_count = sessions().len();

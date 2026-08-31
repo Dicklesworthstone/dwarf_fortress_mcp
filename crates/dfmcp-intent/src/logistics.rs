@@ -43,7 +43,10 @@ impl InventoryStockpile {
     /// Get current stock count for an item token (defaults to 0).
     #[must_use]
     pub fn get_stock(&self, token: &str) -> u32 {
-        self.item_counts.get(token).copied().map_or(0, |count| count)
+        self.item_counts
+            .get(token)
+            .copied()
+            .map_or(0, |count| count)
     }
 }
 

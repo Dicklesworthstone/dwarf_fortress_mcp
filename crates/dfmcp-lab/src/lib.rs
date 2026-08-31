@@ -105,6 +105,7 @@ impl MemoryAdapter {
             Capability::ControlClock,
             Capability::Checkpoint,
             Capability::Restore,
+            Capability::Doctor,
         ]
         .into_iter()
         .collect();
@@ -160,18 +161,36 @@ impl MemoryAdapter {
         Ok(())
     }
 
-    pub fn advance_ticks(&mut self, amount: u64) {
-        self.snapshot.tick = self.snapshot.tick.saturating_add(amount);
-        self.snapshot.cursor = self.snapshot.cursor.next();
+    pub fn advance_ticks(&mut self, amount: u64) -> Result<()> {
+        let next_tick = self.snapshot.tick.checked_add(amount).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory game tick exceeds the representable horizon",
+            )
+        })?;
+        let next_cursor = self.snapshot.cursor.checked_next().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CursorGap,
+                "laboratory observation cursor is exhausted",
+            )
+        })?;
+        self.snapshot.tick = next_tick;
+        self.snapshot.cursor = next_cursor;
         self.snapshot.refresh_hash();
         self.transcript
             .push(LabEvent::TickAdvanced(self.snapshot.tick));
+        Ok(())
     }
 
-    fn next_nonce(&mut self) -> u128 {
+    fn next_nonce(&mut self) -> Result<u128> {
         let value = self.nonce;
-        self.nonce = self.nonce.saturating_add(1);
-        value
+        self.nonce = self.nonce.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory nonce space is exhausted",
+            )
+        })?;
+        Ok(value)
     }
 
     fn check_anchor(&self, anchor: StateAnchor) -> Result<()> {
@@ -239,14 +258,20 @@ impl MemoryAdapter {
         Ok(receipt)
     }
 
-    fn internal_checkpoint(&mut self, label: &str) -> CheckpointReceipt {
-        let nonce = self.next_nonce();
+    fn internal_checkpoint(&mut self, label: &str) -> Result<CheckpointReceipt> {
+        let nonce = self.next_nonce()?;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"dfmcp-lab-checkpoint-v1");
         bytes.extend_from_slice(self.snapshot.state_hash.as_bytes());
         bytes.extend_from_slice(&nonce.to_be_bytes());
         let digest = Digest32::of_bytes(&bytes);
         let checkpoint_id = CheckpointId::new(nonzero(digest.first_u128()));
+        if self.checkpoints.contains_key(&checkpoint_id) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "derived laboratory checkpoint identifier collided with existing content",
+            ));
+        }
         self.checkpoints
             .insert(checkpoint_id, self.snapshot.clone());
         let evidence = evidence(
@@ -255,7 +280,7 @@ impl MemoryAdapter {
             &format!("laboratory checkpoint {label}"),
         );
         self.transcript.push(LabEvent::Checkpointed(checkpoint_id));
-        CheckpointReceipt {
+        Ok(CheckpointReceipt {
             checkpoint_id,
             label: label.to_owned(),
             anchor: self.snapshot.anchor(),
@@ -264,7 +289,7 @@ impl MemoryAdapter {
             // laboratory, but it cannot survive process or machine loss.
             durable: false,
             evidence: vec![evidence],
-        }
+        })
     }
 
     fn dependencies_verified(&self, plan_id: PlanId, step: &PlanStep) -> bool {
@@ -426,7 +451,7 @@ impl GameAdapter for MemoryAdapter {
     }
 
     fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth> {
-        context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        context.authorize(Capability::Doctor, RiskTier::ReadOnly, &[], None)?;
         Ok(AdapterHealth {
             status: HealthStatus::Healthy,
             identity: self.identity(),
@@ -607,7 +632,7 @@ impl GameAdapter for MemoryAdapter {
                 "stored plan is missing its prepare receipt",
             ));
         }
-        let nonce = self.next_nonce();
+        let nonce = self.next_nonce()?;
         let mut token = Vec::new();
         token.extend_from_slice(b"dfmcp-lab-prepare-v1");
         token.extend_from_slice(&plan.id.get().to_be_bytes());
@@ -709,7 +734,7 @@ impl GameAdapter for MemoryAdapter {
         }
 
         let checkpoint = if plan.requires_checkpoint {
-            Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id)))
+            Some(self.internal_checkpoint(&format!("before-plan-{}", plan.id))?)
         } else {
             None
         };
@@ -924,7 +949,7 @@ impl GameAdapter for MemoryAdapter {
                 "checkpoint label is empty or too long",
             ));
         }
-        Ok(self.internal_checkpoint(label))
+        self.internal_checkpoint(label)
     }
 
     fn restore(
@@ -952,8 +977,14 @@ impl GameAdapter for MemoryAdapter {
         }
         let prior_anchor = self.snapshot.anchor();
         let content_digest = checkpoint.state_hash;
+        let restored_cursor = prior_anchor.cursor.checked_reset_epoch().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CursorGap,
+                "cannot restore because the observation epoch is exhausted",
+            )
+        })?;
         self.snapshot = checkpoint;
-        self.snapshot.cursor = prior_anchor.cursor.reset_epoch();
+        self.snapshot.cursor = restored_cursor;
         self.snapshot.refresh_hash();
         self.prepared.clear();
         self.plans.clear();
@@ -983,8 +1014,14 @@ fn apply_action(snapshot: &mut WorldSnapshot, action: &Action) -> Result<()> {
     match action {
         Action::Pause { paused } => {
             if snapshot.paused != *paused {
+                let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::CursorGap,
+                        "cannot publish pause mutation because the observation cursor is exhausted",
+                    )
+                })?;
                 snapshot.paused = *paused;
-                snapshot.cursor = snapshot.cursor.next();
+                snapshot.cursor = next_cursor;
                 snapshot.refresh_hash();
             }
             Ok(())
@@ -1102,6 +1139,7 @@ mod tests {
             (Capability::ControlClock, RiskTier::Reversible),
             (Capability::Checkpoint, RiskTier::Guarded),
             (Capability::Restore, RiskTier::Guarded),
+            (Capability::Doctor, RiskTier::ReadOnly),
         ]
         .into_iter()
         .map(|(capability, max_risk)| CapabilityGrant {
