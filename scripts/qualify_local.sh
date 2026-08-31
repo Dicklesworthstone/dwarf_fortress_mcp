@@ -81,7 +81,10 @@ receipt={
    'dependency_allowlist':digest(root/'architecture/dependency_allowlist.toml'),
    'franken_imports':digest(root/'architecture/franken_imports.json'),
    'publication_primitives':digest(root/'architecture/publication_primitives.json'),
-   'graph_algorithms':digest(root/'architecture/graph_algorithms.json')
+   'graph_algorithms':digest(root/'architecture/graph_algorithms.json'),
+   'agent_turn_contract':digest(root/'architecture/agent_turn_contract.json'),
+   'agent_operating_model':digest(root/'docs/AGENT_OPERATING_MODEL.md'),
+   'agent_contract_checker':digest(root/'scripts/check_agent_contract.py')
  },
  'gates':gates
 }
@@ -93,6 +96,7 @@ PY
 trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>&1 || true; fi' EXIT
 
 run_gate static-contracts python3 scripts/validate_repo.py
+run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n scripts/bootstrap_github_repo.sh scripts/create_source_bundle.sh scripts/verify.sh scripts/qualify_local.sh
 
