@@ -68,6 +68,13 @@ pub struct MapCoord {
     pub z: i32,
 }
 
+impl MapCoord {
+    #[must_use]
+    pub const fn new(x: i32, y: i32, z: i32) -> Self {
+        Self { x, y, z }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapCuboid {
     pub min: MapCoord,

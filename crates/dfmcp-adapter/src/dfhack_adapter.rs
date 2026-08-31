@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 
 use dfmcp_core::{
     ActionId, Capability, CheckpointId, CommitState, Digest32, FortressId, GameTick,
-    ObservationCursor, OperationContext, Result, RiskTier, StateAnchor, StepId,
+    ObservationCursor, OperationContext, Result, RiskTier, StepId,
 };
 use dfmcp_intent::PreparedPlan;
 use dfmcp_world::{WorldGraph, WorldSnapshot};
@@ -95,6 +95,12 @@ impl<S: Read + Write> DfhackAdapter<S> {
             snapshot,
             delta_streamer,
         }
+    }
+
+    /// Access fortress ID.
+    #[must_use]
+    pub fn fortress_id(&self) -> FortressId {
+        self.fortress_id
     }
 
     /// Access the underlying transceiver.

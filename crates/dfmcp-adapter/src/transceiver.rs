@@ -82,7 +82,7 @@ impl<S: Read + Write> IpcTransceiver<S> {
     pub fn send_frame(&mut self, frame: &IpcFrame) -> Result<()> {
         if matches!(self.state, IpcConnectionState::Disconnected) {
             return Err(DfmcpError::new(
-                ErrorCode::BridgeConnectionFailed,
+                ErrorCode::AdapterUnavailable,
                 "cannot send frame on disconnected transceiver",
             ));
         }
@@ -91,7 +91,7 @@ impl<S: Read + Write> IpcTransceiver<S> {
         self.stream.write_all(&encoded).map_err(|err| {
             self.state = IpcConnectionState::Disconnected;
             DfmcpError::new(
-                ErrorCode::BridgeConnectionFailed,
+                ErrorCode::AdapterUnavailable,
                 format!("failed to write frame to IPC stream: {err}"),
             )
         })?;
@@ -99,7 +99,7 @@ impl<S: Read + Write> IpcTransceiver<S> {
         self.stream.flush().map_err(|err| {
             self.state = IpcConnectionState::Disconnected;
             DfmcpError::new(
-                ErrorCode::BridgeConnectionFailed,
+                ErrorCode::AdapterUnavailable,
                 format!("failed to flush IPC stream: {err}"),
             )
         })?;
@@ -121,7 +121,7 @@ impl<S: Read + Write> IpcTransceiver<S> {
             Ok(0) => {
                 self.state = IpcConnectionState::Disconnected;
                 return Err(DfmcpError::new(
-                    ErrorCode::BridgeConnectionFailed,
+                    ErrorCode::AdapterUnavailable,
                     "IPC stream closed by remote bridge peer",
                 ));
             }
@@ -132,7 +132,7 @@ impl<S: Read + Write> IpcTransceiver<S> {
             Err(err) => {
                 self.state = IpcConnectionState::Disconnected;
                 return Err(DfmcpError::new(
-                    ErrorCode::BridgeConnectionFailed,
+                    ErrorCode::AdapterUnavailable,
                     format!("IPC stream read error: {err}"),
                 ));
             }
@@ -177,10 +177,10 @@ impl<S: Read + Write> IpcTransceiver<S> {
                 .find(|(_, frame)| frame.message_type == expected_response_type)
                 .map(|(seq, _)| *seq);
 
-            if let Some(seq) = found_seq {
-                if let Some(frame) = self.pending_responses.remove(&seq) {
-                    return Ok(frame);
-                }
+            if let Some(seq) = found_seq
+                && let Some(frame) = self.pending_responses.remove(&seq)
+            {
+                return Ok(frame);
             }
 
             // Check for error responses
@@ -190,11 +190,11 @@ impl<S: Read + Write> IpcTransceiver<S> {
                 .find(|(_, frame)| frame.message_type == IpcMessageType::ErrorResponse)
                 .map(|(seq, _)| *seq);
 
-            if let Some(seq) = error_seq {
-                if let Some(err_frame) = self.pending_responses.remove(&seq) {
-                    let err_msg = String::from_utf8_lossy(&err_frame.payload).to_string();
-                    return Err(DfmcpError::new(ErrorCode::BridgeProtocolError, err_msg));
-                }
+            if let Some(seq) = error_seq
+                && let Some(err_frame) = self.pending_responses.remove(&seq)
+            {
+                let err_msg = String::from_utf8_lossy(&err_frame.payload).to_string();
+                return Err(DfmcpError::new(ErrorCode::AdapterUnavailable, err_msg));
             }
 
             if Instant::now() >= deadline {

@@ -3,32 +3,71 @@
 //! Comprehensive edge-case and boundary property tests for dfmcp-core.
 
 use dfmcp_core::clock::{ClockGovernor, ClockPolicy};
-use dfmcp_core::lease::{LeaseKind, LeaseManager, cuboids_intersect};
-use dfmcp_core::roles::{RoleManager, SwarmRole};
-use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, GameTick, MapCoord, MapCuboid, Result, RiskTier,
-    SessionId,
-};
+use dfmcp_core::lease::cuboids_intersect;
+use dfmcp_core::{MapCoord, MapCuboid, Result, SessionId};
 
 #[test]
 fn test_cuboid_intersection_boundary_conditions() -> Result<()> {
     // 1. Point intersection at boundary
-    let c1 = MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(10, 10, 10))?;
-    let c2 = MapCuboid::new(MapCoord::new(10, 10, 10), MapCoord::new(20, 20, 20))?;
+    let c1 = MapCuboid::new(
+        MapCoord { x: 0, y: 0, z: 0 },
+        MapCoord {
+            x: 10,
+            y: 10,
+            z: 10,
+        },
+    )?;
+    let c2 = MapCuboid::new(
+        MapCoord {
+            x: 10,
+            y: 10,
+            z: 10,
+        },
+        MapCoord {
+            x: 20,
+            y: 20,
+            z: 20,
+        },
+    )?;
     assert!(cuboids_intersect(&c1, &c2));
 
     // 2. Adjacent non-overlapping cuboid
-    let c3 = MapCuboid::new(MapCoord::new(11, 0, 0), MapCoord::new(20, 10, 10))?;
+    let c3 = MapCuboid::new(
+        MapCoord { x: 11, y: 0, z: 0 },
+        MapCoord {
+            x: 20,
+            y: 10,
+            z: 10,
+        },
+    )?;
     assert!(!cuboids_intersect(&c1, &c3));
 
     // 3. Completely contained cuboid
-    let c4 = MapCuboid::new(MapCoord::new(2, 2, 2), MapCoord::new(5, 5, 5))?;
+    let c4 = MapCuboid::new(MapCoord { x: 2, y: 2, z: 2 }, MapCoord { x: 5, y: 5, z: 5 })?;
     assert!(cuboids_intersect(&c1, &c4));
     assert!(cuboids_intersect(&c4, &c1));
 
     // 4. Negative coordinates
-    let c_neg1 = MapCuboid::new(MapCoord::new(-10, -10, -10), MapCoord::new(-1, -1, -1))?;
-    let c_neg2 = MapCuboid::new(MapCoord::new(-5, -5, -5), MapCoord::new(5, 5, 5))?;
+    let c_neg1 = MapCuboid::new(
+        MapCoord {
+            x: -10,
+            y: -10,
+            z: -10,
+        },
+        MapCoord {
+            x: -1,
+            y: -1,
+            z: -1,
+        },
+    )?;
+    let c_neg2 = MapCuboid::new(
+        MapCoord {
+            x: -5,
+            y: -5,
+            z: -5,
+        },
+        MapCoord { x: 5, y: 5, z: 5 },
+    )?;
     assert!(cuboids_intersect(&c_neg1, &c_neg2));
 
     Ok(())
