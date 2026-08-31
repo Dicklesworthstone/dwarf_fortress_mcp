@@ -237,6 +237,7 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
         (Capability::ControlClock, RiskTier::Reversible),
         (Capability::Checkpoint, RiskTier::Guarded),
         (Capability::Restore, RiskTier::Guarded),
+        (Capability::Doctor, RiskTier::ReadOnly),
     ];
     OperationContext {
         session_id: SessionId::new(1),
@@ -262,7 +263,12 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_bridge_target;
+    use super::{doctor, parse_bridge_target};
+
+    #[test]
+    fn doctor_command_has_the_authority_it_exercises() {
+        assert!(doctor().is_ok());
+    }
 
     #[test]
     fn bridge_probe_accepts_only_numeric_loopback_targets() {
