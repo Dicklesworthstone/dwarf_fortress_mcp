@@ -17,6 +17,7 @@ pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
 pub mod live_bootstrap;
+pub mod live_briefing;
 pub mod live_compatibility;
 pub mod live_connect;
 pub mod live_evidence;
@@ -50,6 +51,12 @@ pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
 pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
     bootstrap_live_read_adapter,
+};
+pub use live_briefing::{
+    CitizenStatusCounts, LiveAttentionItem, LiveAttentionSeverity, LiveChangeSummary,
+    LiveCoverageDomain, LiveCoverageEntry, LiveCoverageStatus, LiveFortressBriefing,
+    MAX_BRIEFING_ATTENTION_ITEMS, MAX_BRIEFING_CHANGE_IDS, build_live_briefing,
+    summarize_live_change,
 };
 pub use live_compatibility::{LiveCompatibilityPolicy, LiveCompatibilityVerdict};
 pub use live_connect::{
