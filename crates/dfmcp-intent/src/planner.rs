@@ -131,11 +131,28 @@ impl StaticPlanner {
                     ),
                 ));
             }
+            if let Some(compensation) = normalized.compensation.as_ref() {
+                validate_action(compensation, &self.policy, context)?;
+                validate_constraints(intent, compensation)?;
+                if compensation.risk() > max_allowed_risk {
+                    return Err(DfmcpError::new(
+                        ErrorCode::RiskCeilingExceeded,
+                        format!(
+                            "compensation for action {} has risk {} above intent ceiling {}",
+                            index,
+                            compensation.risk().as_str(),
+                            max_allowed_risk.as_str()
+                        ),
+                    ));
+                }
+            }
             for precondition in &normalized.preconditions {
                 if !evaluate(snapshot, precondition) {
                     return Err(DfmcpError::new(
                         ErrorCode::PreconditionsFailed,
-                        format!("precondition for requested action {index} is false"),
+                        format!(
+                            "precondition for requested action {index} is not established true"
+                        ),
                     ));
                 }
             }
@@ -280,11 +297,10 @@ fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
             _ => None,
         });
     let mut postconditions = requested.postconditions.clone();
-    if postconditions.is_empty() {
-        match &action {
-            Action::Pause { paused } => postconditions.push(Predicate::Paused(*paused)),
-            _ => postconditions.push(Predicate::True),
-        }
+    if postconditions.is_empty()
+        && let Action::Pause { paused } = &action
+    {
+        postconditions.push(Predicate::Paused(*paused));
     }
     RequestedAction {
         action,
@@ -555,10 +571,15 @@ fn validate_requested(
     requested: &RequestedAction,
     current_tick: GameTick,
 ) -> Result<()> {
-    if requested.postconditions.is_empty() {
+    if requested.postconditions.is_empty()
+        || requested
+            .postconditions
+            .iter()
+            .all(|predicate| matches!(predicate, Predicate::True))
+    {
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
-            format!("requested action {index} has no semantic postcondition"),
+            format!("requested action {index} has no nontrivial semantic postcondition"),
         ));
     }
     if requested.action.naturally_temporal() && requested.obligation.is_none() {
@@ -687,8 +708,9 @@ fn validate_plan(plan: &PreparedPlan, policy: &PlanPolicy) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use dfmcp_core::{
-        Capability, CapabilityGrant, CapabilityScope, DfmcpError, FortressId, GameTick, IntentId,
-        ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
+        Capability, CapabilityGrant, CapabilityScope, DfmcpError, EntityId, ErrorCode, FortressId,
+        GameTick, IntentId, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId,
+        WorkBudget,
     };
     use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 
@@ -751,5 +773,59 @@ mod tests {
             Some(Action::Pause { paused: true })
         );
         Ok(())
+    }
+
+    #[test]
+    fn non_pause_action_without_postcondition_is_rejected() {
+        let snapshot = snapshot();
+        let intent = Intent {
+            id: IntentId::new(2),
+            anchor: snapshot.anchor(),
+            summary: "change a standing order".to_owned(),
+            terminal_condition: Predicate::Paused(false),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+            requested_actions: vec![RequestedAction {
+                action: Action::SetStandingOrder {
+                    key: "refuse.outside".to_owned(),
+                    value: "true".to_owned(),
+                },
+                preconditions: vec![Predicate::Paused(true)],
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        };
+        let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
+    }
+
+    #[test]
+    fn compensation_is_validated_like_a_real_action() {
+        let snapshot = snapshot();
+        let intent = Intent {
+            id: IntentId::new(3),
+            anchor: snapshot.anchor(),
+            summary: "configure labor with an invalid compensation".to_owned(),
+            terminal_condition: Predicate::Paused(false),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+            requested_actions: vec![RequestedAction {
+                action: Action::SetLabor {
+                    units: vec![EntityId::new(1)],
+                    labor: "MINE".to_owned(),
+                    enabled: true,
+                },
+                preconditions: vec![Predicate::Paused(true)],
+                postconditions: vec![Predicate::Paused(true)],
+                compensation: Some(Action::SetStandingOrder {
+                    key: "bad\nkey".to_owned(),
+                    value: "true".to_owned(),
+                }),
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        };
+        let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
     }
 }
