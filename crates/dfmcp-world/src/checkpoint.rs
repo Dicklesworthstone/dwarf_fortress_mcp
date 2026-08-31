@@ -11,6 +11,8 @@ use crate::model::WorldSnapshot;
 
 pub const MAX_CHECKPOINT_MANIFEST_FILES: usize = 4_096;
 pub const MAX_CHECKPOINTS: usize = 65_536;
+pub const MAX_CHECKPOINT_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_CHECKPOINT_TOTAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointManifest {
@@ -64,6 +66,7 @@ impl CheckpointManifest {
     where
         F: FnMut(&str) -> Option<Vec<u8>>,
     {
+        validate_manifest_shape(self)?;
         if !self.integrity_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::CorruptLedger,
@@ -112,6 +115,41 @@ impl CheckpointManifest {
         }
         Ok(())
     }
+}
+
+fn validate_manifest_shape(manifest: &CheckpointManifest) -> Result<()> {
+    if manifest.checkpoint_id == CheckpointId::NIL
+        || manifest.fortress_id == FortressId::NIL
+        || manifest.state_hash == Digest32::ZERO
+        || manifest.files.len() > MAX_CHECKPOINT_MANIFEST_FILES
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "checkpoint manifest has invalid identity or exceeds its file-count bound",
+        ));
+    }
+    let mut total_bytes = 0u64;
+    for (path, (size, _)) in &manifest.files {
+        if !valid_manifest_path(path) || *size > MAX_CHECKPOINT_FILE_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "checkpoint manifest contains an unsafe path or oversized file",
+            ));
+        }
+        total_bytes = total_bytes.checked_add(*size).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "checkpoint manifest total byte count overflowed",
+            )
+        })?;
+        if total_bytes > MAX_CHECKPOINT_TOTAL_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "checkpoint manifest exceeds its total byte bound",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn valid_manifest_path(path: &str) -> bool {
@@ -221,7 +259,7 @@ fn restore_certificate_digest(
 }
 
 pub struct CheckpointStore {
-    pub manifests: BTreeMap<CheckpointId, CheckpointManifest>,
+    manifests: BTreeMap<CheckpointId, CheckpointManifest>,
     next_checkpoint_id: u64,
 }
 
@@ -245,6 +283,16 @@ impl CheckpointStore {
         self.manifests.get(&id)
     }
 
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.manifests.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.manifests.is_empty()
+    }
+
     pub fn create_checkpoint(
         &mut self,
         snapshot: &WorldSnapshot,
@@ -262,10 +310,16 @@ impl CheckpointStore {
                 "checkpoint manifest exceeds its explicit file-count bound",
             ));
         }
-        if files.keys().any(|path| !valid_manifest_path(path)) {
+        let mut total_bytes = 0u64;
+        if files.iter().any(|(path, (size, _))| {
+            total_bytes = total_bytes.saturating_add(*size);
+            !valid_manifest_path(path)
+                || *size > MAX_CHECKPOINT_FILE_BYTES
+                || total_bytes > MAX_CHECKPOINT_TOTAL_BYTES
+        }) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "checkpoint manifest paths must be bounded, relative normal paths",
+                "checkpoint manifest paths and declared file sizes must be safely bounded",
             ));
         }
         if self.manifests.len() >= MAX_CHECKPOINTS {
@@ -316,6 +370,7 @@ impl CheckpointStore {
             )
         })?;
 
+        validate_manifest_shape(manifest)?;
         if !manifest.integrity_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::CorruptLedger,

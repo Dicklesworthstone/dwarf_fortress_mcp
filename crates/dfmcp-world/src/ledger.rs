@@ -7,8 +7,13 @@ use dfmcp_core::{
     StateAnchor,
 };
 
-use crate::delta::StateDelta;
+use crate::delta::{MAX_STATE_DELTA_CHANGES, StateDelta, apply_delta};
 use crate::model::{ChunkCoord, WorldSnapshot};
+
+const MAX_LEDGER_CAPSULES: usize = 65_536;
+const MAX_LEDGER_EFFECTS: usize = 65_536;
+const MAX_EFFECT_ID_BYTES: usize = 256;
+const MAX_EFFECT_ERROR_BYTES: usize = 4_096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservationCapsule {
@@ -68,10 +73,21 @@ impl ObservationCapsule {
                 "delta target tick does not match a monotonic successor anchor",
             ));
         }
-        if delta.truncated || delta.continuation.is_some() {
+        if delta.changes.len() > MAX_STATE_DELTA_CHANGES
+            || delta.truncated
+            || delta.continuation.is_some()
+            || delta.target_cursor.epoch != delta.base_cursor.epoch
+            || delta.target_cursor.sequence <= delta.base_cursor.sequence
+        {
             return Err(DfmcpError::new(
                 ErrorCode::CursorGap,
-                "partial deltas cannot be sealed as complete observation capsules",
+                "partial, unbounded, or non-advancing deltas cannot be sealed as complete observation capsules",
+            ));
+        }
+        if published_at_tick < successor.tick {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "observation capsule publication tick precedes its successor state",
             ));
         }
 
@@ -97,8 +113,12 @@ impl ObservationCapsule {
             && self.delta.target_hash == self.successor_anchor.state_hash
             && self.delta.target_tick == self.successor_anchor.tick
             && self.successor_anchor.tick >= self.basis_anchor.tick
+            && self.delta.changes.len() <= MAX_STATE_DELTA_CHANGES
+            && self.delta.target_cursor.epoch == self.delta.base_cursor.epoch
+            && self.delta.target_cursor.sequence > self.delta.base_cursor.sequence
             && !self.delta.truncated
             && self.delta.continuation.is_none()
+            && self.published_at_tick >= self.successor_anchor.tick
             && self.capsule_digest
                 == compute_capsule_digest(
                     self.basis_anchor,
@@ -219,22 +239,25 @@ pub struct EffectJournalRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableLedger {
-    pub fortress_id: FortressId,
-    pub epoch: u64,
-    pub root_snapshot: WorldSnapshot,
-    pub capsules: Vec<ObservationCapsule>,
-    pub effects: BTreeMap<String, EffectJournalRecord>,
-    pub unpublished_capsule: Option<ObservationCapsule>,
+    fortress_id: FortressId,
+    epoch: u64,
+    root_snapshot: WorldSnapshot,
+    head_snapshot: WorldSnapshot,
+    capsules: Vec<ObservationCapsule>,
+    effects: BTreeMap<String, EffectJournalRecord>,
+    unpublished_capsule: Option<ObservationCapsule>,
 }
 
 impl DurableLedger {
     pub fn new(root_snapshot: WorldSnapshot) -> Self {
         let fortress_id = root_snapshot.fortress_id;
         let epoch = root_snapshot.cursor.epoch;
+        let head_snapshot = root_snapshot.clone();
         Self {
             fortress_id,
             epoch,
             root_snapshot,
+            head_snapshot,
             capsules: Vec::new(),
             effects: BTreeMap::new(),
             unpublished_capsule: None,
@@ -243,11 +266,42 @@ impl DurableLedger {
 
     #[must_use]
     pub fn head_anchor(&self) -> StateAnchor {
-        if let Some(last) = self.capsules.last() {
-            last.successor_anchor
-        } else {
-            self.root_snapshot.anchor()
-        }
+        self.head_snapshot.anchor()
+    }
+
+    #[must_use]
+    pub const fn fortress_id(&self) -> FortressId {
+        self.fortress_id
+    }
+
+    #[must_use]
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    #[must_use]
+    pub const fn root_snapshot(&self) -> &WorldSnapshot {
+        &self.root_snapshot
+    }
+
+    #[must_use]
+    pub const fn head_snapshot(&self) -> &WorldSnapshot {
+        &self.head_snapshot
+    }
+
+    #[must_use]
+    pub fn capsule_count(&self) -> usize {
+        self.capsules.len()
+    }
+
+    #[must_use]
+    pub const fn has_staged_capsule(&self) -> bool {
+        self.unpublished_capsule.is_some()
+    }
+
+    #[must_use]
+    pub fn effect(&self, idempotency_key: &str) -> Option<&EffectJournalRecord> {
+        self.effects.get(idempotency_key)
     }
 
     pub fn stage_capsule(&mut self, capsule: ObservationCapsule) -> Result<()> {
@@ -276,7 +330,34 @@ impl DurableLedger {
                 "staged capsule basis state_hash does not match ledger head state_hash",
             ));
         }
+        if capsule.basis_anchor.tick != current_head.tick {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "staged capsule basis tick does not match ledger head tick",
+            ));
+        }
+        let reconstructed = apply_delta(&self.head_snapshot, &capsule.delta).map_err(|error| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                format!("staged capsule delta does not reconstruct its successor: {error}"),
+            )
+        })?;
+        if reconstructed.anchor() != capsule.successor_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "staged capsule successor anchor does not match its reconstructed state",
+            ));
+        }
 
+        if let Some(existing) = &self.unpublished_capsule {
+            if existing == &capsule {
+                return Ok(());
+            }
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "a different observation capsule is already staged",
+            ));
+        }
         self.unpublished_capsule = Some(capsule);
         Ok(())
     }
@@ -289,14 +370,27 @@ impl DurableLedger {
             )
         })?;
 
+        if !capsule.integrity_is_valid() {
+            self.unpublished_capsule = Some(capsule);
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "staged observation capsule failed publication-time integrity validation",
+            ));
+        }
+        if self.capsules.len() >= MAX_LEDGER_CAPSULES {
+            self.unpublished_capsule = Some(capsule);
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "observation capsule ledger reached its explicit bound",
+            ));
+        }
+
         // Re-validate the staged capsule still matches the current head. If
         // someone moved the head between stage_capsule and publish_staged,
         // we must NOT publish a stale capsule on top of the new head — that
         // would silently fork the ledger.
         let current_head = self.head_anchor();
-        if capsule.basis_anchor.cursor != current_head.cursor
-            || capsule.basis_anchor.state_hash != current_head.state_hash
-        {
+        if capsule.basis_anchor != current_head {
             // Restore the staged capsule so the caller can reconcile it.
             self.unpublished_capsule = Some(capsule);
             return Err(DfmcpError::new(
@@ -305,8 +399,26 @@ impl DurableLedger {
             ));
         }
 
+        let successor_snapshot = match apply_delta(&self.head_snapshot, &capsule.delta) {
+            Ok(snapshot) if snapshot.anchor() == capsule.successor_anchor => snapshot,
+            Ok(_) => {
+                self.unpublished_capsule = Some(capsule);
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "staged capsule successor changed before publication",
+                ));
+            }
+            Err(error) => {
+                self.unpublished_capsule = Some(capsule);
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    format!("staged capsule failed publication-time reconstruction: {error}"),
+                ));
+            }
+        };
         let successor = capsule.successor_anchor;
         self.capsules.push(capsule);
+        self.head_snapshot = successor_snapshot;
         Ok(successor)
     }
 
@@ -323,6 +435,16 @@ impl DurableLedger {
     ) -> Result<()> {
         let eff_id = effect_id.into();
         let key = idempotency_key.into();
+        if eff_id.is_empty()
+            || key.is_empty()
+            || eff_id.len() > MAX_EFFECT_ID_BYTES
+            || key.len() > MAX_EFFECT_ID_BYTES
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "effect and idempotency identifiers must be nonempty and bounded",
+            ));
+        }
         if let Some(existing) = self.effects.get(&key) {
             if existing.effect_id == eff_id && existing.plan_digest == plan_digest {
                 return Ok(());
@@ -330,6 +452,12 @@ impl DurableLedger {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
                 "idempotency key is already bound to a different effect or plan",
+            ));
+        }
+        if self.effects.len() >= MAX_LEDGER_EFFECTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "effect journal reached its explicit record bound",
             ));
         }
         self.effects.insert(
@@ -359,6 +487,13 @@ impl DurableLedger {
                 format!("unknown idempotency key '{idempotency_key}'"),
             )
         })?;
+        if matches!(
+            effect.state,
+            CommitState::AppliedAwaitingVerification | CommitState::Verified
+        ) && effect.receipt_digest == Some(receipt_digest)
+        {
+            return Ok(());
+        }
         if effect.state != CommitState::Committing {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
@@ -388,6 +523,11 @@ impl DurableLedger {
                 format!("unknown idempotency key '{idempotency_key}'"),
             )
         })?;
+        if effect.state == CommitState::Verified
+            && effect.observed_state_hash == Some(observed_state_hash)
+        {
+            return Ok(());
+        }
         if effect.state != CommitState::AppliedAwaitingVerification
             || effect.receipt_digest.is_none()
         {
@@ -406,14 +546,35 @@ impl DurableLedger {
         idempotency_key: &str,
         message: impl Into<String>,
     ) -> Result<()> {
+        let message = message.into();
+        if message.len() > MAX_EFFECT_ERROR_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "effect error message exceeds its explicit byte bound",
+            ));
+        }
         let effect = self.effects.get_mut(idempotency_key).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::InvalidRequest,
                 format!("unknown idempotency key '{idempotency_key}'"),
             )
         })?;
+        if effect.state == CommitState::Indeterminate
+            && effect.error_message.as_deref() == Some(message.as_str())
+        {
+            return Ok(());
+        }
+        if !matches!(
+            effect.state,
+            CommitState::Committing | CommitState::AppliedAwaitingVerification
+        ) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "only an unresolved in-flight effect can become indeterminate",
+            ));
+        }
         effect.state = CommitState::Indeterminate;
-        effect.error_message = Some(message.into());
+        effect.error_message = Some(message);
         Ok(())
     }
 

@@ -75,9 +75,9 @@ fn test_attention_engine_budget_truncation() {
     assert_eq!(ledger.signals.len(), 0);
 }
 
-/// Durable Ledger: Crash Recovery & Indeterminate Reconciliation (WP-11)
+/// In-memory ledger contract: simulated recovery and indeterminate reconciliation.
 #[test]
-fn test_durable_ledger_crash_recovery_and_witness_validation() -> Result<(), Box<dyn Error>> {
+fn test_in_memory_ledger_recovery_model_and_witness_validation() -> Result<(), Box<dyn Error>> {
     let snapshot = make_test_snapshot();
     let mut ledger = DurableLedger::new(snapshot.clone());
 
@@ -88,12 +88,12 @@ fn test_durable_ledger_crash_recovery_and_witness_validation() -> Result<(), Box
         Digest32::of_bytes(b"plan_dig"),
         GameTick(105),
     )?;
-    let initial_rec = ledger.effects.get("idemp_key_01").ok_or("effect missing")?;
+    let initial_rec = ledger.effect("idemp_key_01").ok_or("effect missing")?;
     assert_eq!(initial_rec.state, CommitState::Committing);
 
     // 2. Simulate crash before receipt arrived: must recover as Indeterminate
     ledger.recover_from_crash();
-    let rec = ledger.effects.get("idemp_key_01").ok_or("effect missing")?;
+    let rec = ledger.effect("idemp_key_01").ok_or("effect missing")?;
     assert_eq!(rec.state, CommitState::Indeterminate);
     let err_msg = rec.error_message.as_ref().ok_or("error message missing")?;
     assert!(err_msg.contains("reconciliation required"));

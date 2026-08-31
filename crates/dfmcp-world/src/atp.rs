@@ -7,7 +7,7 @@
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, GameTick, Result, StateAnchor};
 
-use crate::delta::{StateDelta, apply_delta};
+use crate::delta::{MAX_STATE_DELTA_CHANGES, StateDelta, apply_delta};
 use crate::merkle::MerkleStateTree;
 use crate::model::WorldSnapshot;
 
@@ -61,9 +61,14 @@ impl AtpProofCapsule {
         })
     }
 
-    /// Verify transition proof integrity.
+    /// Verify the capsule envelope digest. This does not reconstruct the
+    /// successor; use [`AtpProofVerifier::verify_capsule_against_basis`] when
+    /// the basis snapshot is available.
     #[must_use]
     pub fn verify_transition(&self) -> bool {
+        if self.delta.changes.len() > MAX_STATE_DELTA_CHANGES {
+            return false;
+        }
         let expected = capsule_digest(
             self.basis_anchor,
             self.successor_anchor,
@@ -80,8 +85,26 @@ impl AtpProofCapsule {
 pub struct AtpProofVerifier;
 
 impl AtpProofVerifier {
-    /// Verify an incoming transition proof capsule.
+    /// Verify the self-contained capsule envelope and declared anchor
+    /// continuity. This cannot prove the semantic successor or Merkle root
+    /// without the basis snapshot.
     pub fn verify_capsule(&self, capsule: &AtpProofCapsule) -> Result<()> {
+        if capsule.basis_anchor.fortress_id == dfmcp_core::FortressId::NIL
+            || capsule.basis_anchor.state_hash == Digest32::ZERO
+            || capsule.successor_anchor.state_hash == Digest32::ZERO
+            || capsule.merkle_root == Digest32::ZERO
+            || capsule.delta.changes.len() > MAX_STATE_DELTA_CHANGES
+            || capsule.delta.truncated
+            || capsule.delta.continuation.is_some()
+            || capsule.successor_anchor.tick < capsule.basis_anchor.tick
+            || capsule.delta.target_cursor.epoch != capsule.delta.base_cursor.epoch
+            || capsule.delta.target_cursor.sequence <= capsule.delta.base_cursor.sequence
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "ATP capsule is partial, unbounded, or has invalid anchor progression",
+            ));
+        }
         if !capsule.verify_transition() {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -118,6 +141,41 @@ impl AtpProofVerifier {
         Ok(())
     }
 
+    /// Reconstruct and verify an incoming transition from an authoritative
+    /// basis snapshot, including its declared successor anchor and Merkle root.
+    pub fn verify_capsule_against_basis(
+        &self,
+        capsule: &AtpProofCapsule,
+        basis: &WorldSnapshot,
+    ) -> Result<WorldSnapshot> {
+        self.verify_capsule(capsule)?;
+        if !basis.hash_is_valid() || basis.anchor() != capsule.basis_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "ATP verification basis does not match the capsule basis anchor",
+            ));
+        }
+        let successor = apply_delta(basis, &capsule.delta).map_err(|error| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                format!("ATP capsule delta failed semantic reconstruction: {error}"),
+            )
+        })?;
+        if successor.anchor() != capsule.successor_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "ATP reconstructed successor does not match the declared successor anchor",
+            ));
+        }
+        if MerkleStateTree::from_snapshot(&successor).overall_root != capsule.merkle_root {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "ATP reconstructed successor does not match the declared Merkle root",
+            ));
+        }
+        Ok(successor)
+    }
+
     /// Verify a chain of contiguous transition capsules.
     pub fn verify_chain(&self, chain: &[AtpProofCapsule]) -> Result<()> {
         if chain.is_empty() {
@@ -144,6 +202,26 @@ impl AtpProofVerifier {
             }
         }
         Ok(())
+    }
+
+    /// Verify and reconstruct every transition in a contiguous chain,
+    /// beginning from an authoritative basis snapshot.
+    pub fn verify_chain_from_basis(
+        &self,
+        basis: &WorldSnapshot,
+        chain: &[AtpProofCapsule],
+    ) -> Result<WorldSnapshot> {
+        if chain.is_empty() {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "cannot verify empty ATP proof capsule chain",
+            ));
+        }
+        let mut current = basis.clone();
+        for capsule in chain {
+            current = self.verify_capsule_against_basis(capsule, &current)?;
+        }
+        Ok(current)
     }
 }
 
@@ -247,6 +325,10 @@ mod tests {
 
         let verifier = AtpProofVerifier;
         assert!(verifier.verify_capsule(&capsule).is_ok());
+        assert_eq!(
+            verifier.verify_capsule_against_basis(&capsule, &snap_base)?,
+            snap_target
+        );
 
         Ok(())
     }
@@ -276,5 +358,36 @@ mod tests {
         delta.truncated = false;
         delta.continuation = None;
         assert!(AtpProofCapsule::seal(&basis, &successor, delta, GameTick(100)).is_err());
+    }
+
+    #[test]
+    fn basis_verification_rejects_a_resealed_false_merkle_root() -> Result<()> {
+        let basis = sample_snapshot(100, ObservationCursor::ORIGIN);
+        let successor = sample_snapshot(
+            101,
+            ObservationCursor {
+                epoch: 0,
+                sequence: 1,
+            },
+        );
+        let delta = crate::diff_snapshots(&basis, &successor)?;
+        let mut capsule = AtpProofCapsule::seal(&basis, &successor, delta, GameTick(101))?;
+        capsule.merkle_root = Digest32::of_bytes(b"false merkle root");
+        capsule.capsule_digest = capsule_digest(
+            capsule.basis_anchor,
+            capsule.successor_anchor,
+            capsule.merkle_root,
+            &capsule.delta,
+            capsule.published_at_tick,
+        );
+
+        let verifier = AtpProofVerifier;
+        assert!(verifier.verify_capsule(&capsule).is_ok());
+        assert!(
+            verifier
+                .verify_capsule_against_basis(&capsule, &basis)
+                .is_err()
+        );
+        Ok(())
     }
 }

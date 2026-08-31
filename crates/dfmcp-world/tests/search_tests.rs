@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Integration tests for WP-FRK-02 FrankenSearch Attention & Knowledge Retrieval.
+//! Integration tests for the in-memory lexical search contract prototype.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +9,7 @@ use dfmcp_world::search::FrankenSearchEngine;
 use dfmcp_world::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
 
 #[test]
-fn test_frankensearch_snapshot_indexing() {
+fn test_in_memory_lexical_snapshot_indexing() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = FrankenSearchEngine::new();
     let mut graph = WorldGraph::default();
 
@@ -45,9 +45,10 @@ fn test_frankensearch_snapshot_indexing() {
         graph,
     );
 
-    engine.index_snapshot(&snapshot);
+    engine.index_snapshot(&snapshot)?;
 
-    let results = engine.search("spider caverns", 5);
+    let results = engine.search("spider caverns", 5)?;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].entity_id, Some(EntityId::new(10)));
+    Ok(())
 }

@@ -6,8 +6,8 @@ use dfmcp_core::{
     CommitState, Digest32, EntityId, ErrorCode, FortressId, GameTick, ObservationCursor,
 };
 use dfmcp_world::{
-    DurableLedger, EntityKind, EntityRecord, ObservationCapsule, WitnessSet, WorldGraph,
-    WorldSnapshot, diff_snapshots,
+    DurableLedger, EntityKind, EntityRecord, ObservationCapsule, StateDelta, WitnessSet,
+    WorldGraph, WorldSnapshot, diff_snapshots,
 };
 
 fn make_sample_snapshot(tick: u64, cursor: ObservationCursor) -> WorldSnapshot {
@@ -54,10 +54,10 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
     )?;
 
     ledger.stage_capsule(capsule)?;
-    assert!(ledger.unpublished_capsule.is_some());
+    assert!(ledger.has_staged_capsule());
 
     ledger.recover_from_crash();
-    assert!(ledger.unpublished_capsule.is_none());
+    assert!(!ledger.has_staged_capsule());
     assert_eq!(ledger.head_anchor(), base_snapshot.anchor());
 
     let capsule2 = ObservationCapsule::new(
@@ -70,6 +70,7 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
     let published_anchor = ledger.publish_staged()?;
     assert_eq!(published_anchor, target_snapshot.anchor());
     assert_eq!(ledger.head_anchor(), target_snapshot.anchor());
+    assert_eq!(ledger.head_snapshot(), &target_snapshot);
 
     let eff_key = "effect_001";
     ledger.record_dispatch_attempt(
@@ -81,7 +82,7 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
 
     ledger.recover_from_crash();
 
-    let recovered_effect = ledger.effects.get(eff_key).ok_or("effect missing")?;
+    let recovered_effect = ledger.effect(eff_key).ok_or("effect missing")?;
     assert_eq!(recovered_effect.state, CommitState::Indeterminate);
     assert!(
         recovered_effect
@@ -102,15 +103,50 @@ fn test_016_crash_point_matrix_and_recovery() -> Result<(), Box<dyn std::error::
 
     ledger.recover_from_crash();
 
-    let recovered_committed = ledger.effects.get(eff_key2).ok_or("effect missing")?;
+    let recovered_committed = ledger.effect(eff_key2).ok_or("effect missing")?;
     assert_eq!(
         recovered_committed.state,
         CommitState::AppliedAwaitingVerification
     );
     ledger.record_verified(eff_key2, target_snapshot.state_hash)?;
-    let verified = ledger.effects.get(eff_key2).ok_or("effect missing")?;
+    let verified = ledger.effect(eff_key2).ok_or("effect missing")?;
     assert_eq!(verified.state, CommitState::Verified);
 
+    Ok(())
+}
+
+#[test]
+fn ledger_rejects_self_consistent_capsule_that_cannot_reconstruct_successor()
+-> Result<(), Box<dyn std::error::Error>> {
+    let base = make_sample_snapshot(100, ObservationCursor::ORIGIN);
+    let forged_hash = Digest32::of_bytes(b"forged successor");
+    let target_cursor = base.cursor.next();
+    let forged_successor = dfmcp_core::StateAnchor {
+        fortress_id: base.fortress_id,
+        tick: GameTick(101),
+        cursor: target_cursor,
+        state_hash: forged_hash,
+    };
+    let forged_delta = StateDelta {
+        fortress_id: base.fortress_id,
+        base_cursor: base.cursor,
+        target_cursor,
+        base_hash: base.state_hash,
+        target_hash: forged_hash,
+        target_tick: GameTick(101),
+        changes: Vec::new(),
+        truncated: false,
+        continuation: None,
+    };
+    let capsule =
+        ObservationCapsule::new(base.anchor(), forged_successor, forged_delta, GameTick(101))?;
+    assert!(capsule.integrity_is_valid());
+
+    let mut ledger = DurableLedger::new(base.clone());
+    let result = ledger.stage_capsule(capsule);
+    assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CorruptLedger));
+    assert_eq!(ledger.head_snapshot(), &base);
+    assert!(!ledger.has_staged_capsule());
     Ok(())
 }
 

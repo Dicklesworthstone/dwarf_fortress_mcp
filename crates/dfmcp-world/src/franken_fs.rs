@@ -13,6 +13,9 @@ use crate::model::WorldSnapshot;
 
 /// Standard block chunk size for content-addressed savegame deduplication (64KB).
 pub const BLOCK_CHUNK_SIZE: usize = 64 * 1024;
+pub const MAX_ARCHIVE_SNAPSHOTS: usize = 4_096;
+pub const MAX_ARCHIVE_STORED_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_ARCHIVE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 /// Content-addressed binary storage block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +38,7 @@ pub struct ScrubReport {
 pub struct SavegameArchive {
     blocks: BTreeMap<Digest32, ArchiveBlock>,
     snapshots: BTreeMap<Digest32, Vec<Digest32>>, // snapshot_hash -> [block_digests]
+    stored_bytes: usize,
 }
 
 impl SavegameArchive {
@@ -43,6 +47,7 @@ impl SavegameArchive {
         Self {
             blocks: BTreeMap::new(),
             snapshots: BTreeMap::new(),
+            stored_bytes: 0,
         }
     }
 
@@ -55,19 +60,83 @@ impl SavegameArchive {
             ));
         }
         let serialized_bytes = snapshot.canonical_bytes();
+        if serialized_bytes.len() > MAX_ARCHIVE_PAYLOAD_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "snapshot exceeds the in-memory archive payload bound",
+            ));
+        }
+        if let Some(existing) = self.snapshots.get(&snapshot.state_hash) {
+            if self.read_snapshot_payload(&snapshot.state_hash)? != serialized_bytes {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "archived snapshot digest is bound to different canonical bytes",
+                ));
+            }
+            return Ok(existing.clone());
+        }
+        if self.snapshots.len() >= MAX_ARCHIVE_SNAPSHOTS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "in-memory archive reached its explicit snapshot bound",
+            ));
+        }
         let mut block_digests = Vec::new();
+        let mut new_blocks: Vec<(Digest32, Vec<u8>)> = Vec::new();
+        let mut additional_bytes = 0usize;
 
         for chunk in serialized_bytes.chunks(BLOCK_CHUNK_SIZE) {
             let digest = Digest32::of_bytes(chunk);
-            self.blocks.entry(digest).or_insert_with(|| ArchiveBlock {
-                digest,
-                data: chunk.to_vec(),
-            });
+            if let Some(existing) = self.blocks.get(&digest) {
+                if existing.digest != digest || existing.data.as_slice() != chunk {
+                    return Err(DfmcpError::new(
+                        ErrorCode::CorruptLedger,
+                        "content-addressed archive block conflicts with existing bytes",
+                    ));
+                }
+            } else if let Some((_, pending_data)) =
+                new_blocks.iter().find(|entry| entry.0 == digest)
+            {
+                if pending_data.as_slice() != chunk {
+                    return Err(DfmcpError::new(
+                        ErrorCode::CorruptLedger,
+                        "two archive blocks produced the same digest for different bytes",
+                    ));
+                }
+            } else {
+                additional_bytes = additional_bytes.checked_add(chunk.len()).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "archive stored-byte count overflowed",
+                    )
+                })?;
+                new_blocks.push((digest, chunk.to_vec()));
+            }
             block_digests.push(digest);
+        }
+
+        let next_stored_bytes =
+            self.stored_bytes
+                .checked_add(additional_bytes)
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "archive stored-byte count overflowed",
+                    )
+                })?;
+        if next_stored_bytes > MAX_ARCHIVE_STORED_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "in-memory archive reached its explicit stored-byte bound",
+            ));
+        }
+        for (digest, data) in new_blocks {
+            self.blocks.insert(digest, ArchiveBlock { digest, data });
         }
 
         self.snapshots
             .insert(snapshot.state_hash, block_digests.clone());
+        self.stored_bytes = next_stored_bytes;
         Ok(block_digests)
     }
 
@@ -77,7 +146,7 @@ impl SavegameArchive {
             DfmcpError::new(ErrorCode::InvalidRequest, "snapshot not found in archive")
         })?;
 
-        let mut payload = Vec::new();
+        let mut payload_bytes = 0usize;
         for digest in block_digests {
             let block = self.blocks.get(digest).ok_or_else(|| {
                 DfmcpError::new(
@@ -91,6 +160,28 @@ impl SavegameArchive {
                     format!("corrupt archive block detected while reading {digest}"),
                 ));
             }
+            payload_bytes = payload_bytes.checked_add(block.data.len()).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "archive payload byte count overflowed",
+                )
+            })?;
+            if payload_bytes > MAX_ARCHIVE_PAYLOAD_BYTES {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "archive payload exceeds its explicit read bound",
+                ));
+            }
+        }
+
+        let mut payload = Vec::with_capacity(payload_bytes);
+        for digest in block_digests {
+            let block = self.blocks.get(digest).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    format!("missing block in archive with digest {digest}"),
+                )
+            })?;
             payload.extend_from_slice(&block.data);
         }
 
@@ -116,6 +207,11 @@ impl SavegameArchive {
     #[must_use]
     pub fn snapshot_count(&self) -> usize {
         self.snapshots.len()
+    }
+
+    #[must_use]
+    pub const fn stored_bytes(&self) -> usize {
+        self.stored_bytes
     }
 }
 
@@ -195,6 +291,7 @@ mod tests {
         let report_after_rot = scrubber.scrub_archive(&archive);
         assert!(!report_after_rot.is_clean);
         assert_eq!(report_after_rot.corrupt_blocks, vec![corrupt_target]);
+        assert!(archive.store_snapshot(&snap1).is_err());
 
         Ok(())
     }

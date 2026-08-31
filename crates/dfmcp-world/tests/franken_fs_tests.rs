@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Integration tests for WP-FRK-03 FrankenFS Savegame Storage & Bit-Rot Scrubber.
+//! Integration tests for the in-memory savegame archive contract prototype.
 
 use dfmcp_core::{FortressId, GameTick, ObservationCursor, Result};
 use dfmcp_world::franken_fs::{SavegameArchive, SavegameScrubber};

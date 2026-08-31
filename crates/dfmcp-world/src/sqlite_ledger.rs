@@ -12,9 +12,14 @@ use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
 };
 
-use crate::delta::StateDelta;
+use crate::delta::{MAX_STATE_DELTA_CHANGES, StateDelta};
 use crate::ledger::{EffectJournalRecord, ObservationCapsule};
 use crate::model::WorldSnapshot;
+
+const MAX_TABLE_ROWS: usize = 65_536;
+const MAX_TABLE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_EFFECT_IDENTIFIER_BYTES: usize = 256;
+const MAX_EFFECT_MESSAGE_BYTES: usize = 4_096;
 
 /// Prospective persistence settings retained as contract data; currently not applied.
 #[derive(Clone, Debug)]
@@ -38,7 +43,7 @@ impl Default for SqliteLedgerConfig {
     }
 }
 
-/// A persisted capsule row in the ledger database.
+/// An in-memory capsule row shaped like the prospective ledger table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapsuleRow {
     pub capsule_digest: Digest32,
@@ -50,7 +55,7 @@ pub struct CapsuleRow {
     pub payload: Vec<u8>,
 }
 
-/// A persisted delta row in the ledger database.
+/// An in-memory delta row shaped like the prospective ledger table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeltaRow {
     pub delta_hash: Digest32,
@@ -61,7 +66,7 @@ pub struct DeltaRow {
     pub delta: StateDelta,
 }
 
-/// A persisted snapshot row in the ledger database.
+/// An in-memory snapshot row shaped like the prospective ledger table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapshotRow {
     pub state_hash: Digest32,
@@ -101,6 +106,18 @@ impl SqliteProductionLedger {
                 "observation capsule failed integrity validation",
             ));
         }
+        ensure_insert_capacity(
+            &self.capsules_table,
+            &capsule.capsule_digest,
+            "capsule table",
+        )?;
+        let payload = capsule.delta.canonical_bytes();
+        if payload.len() > MAX_TABLE_PAYLOAD_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "capsule payload exceeds the in-memory table byte bound",
+            ));
+        }
         let row = CapsuleRow {
             capsule_digest: capsule.capsule_digest,
             fortress_id: capsule.delta.fortress_id,
@@ -108,7 +125,7 @@ impl SqliteProductionLedger {
             successor_hash: capsule.successor_anchor.state_hash,
             tick: capsule.successor_anchor.tick,
             published_at_tick: capsule.published_at_tick,
-            payload: capsule.delta.canonical_bytes(),
+            payload,
         };
         insert_exact_or_reject(&mut self.capsules_table, capsule.capsule_digest, row)?;
         Ok(())
@@ -120,7 +137,7 @@ impl SqliteProductionLedger {
         self.capsules_table.get(digest)
     }
 
-    /// Insert a state delta into durable storage.
+    /// Insert a state delta into this process-local table prototype.
     pub fn insert_delta(&mut self, delta: &StateDelta) -> Result<()> {
         if delta.base_cursor.epoch != delta.target_cursor.epoch
             || delta.target_cursor.sequence <= delta.base_cursor.sequence
@@ -128,12 +145,20 @@ impl SqliteProductionLedger {
             || delta.target_hash == Digest32::ZERO
             || delta.truncated
             || delta.continuation.is_some()
+            || delta.changes.len() > MAX_STATE_DELTA_CHANGES
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
                 "state delta is partial or has invalid anchor continuity",
             ));
         }
+        if delta.canonical_bytes().len() > MAX_TABLE_PAYLOAD_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "delta payload exceeds the in-memory table byte bound",
+            ));
+        }
+        ensure_insert_capacity(&self.deltas_table, &delta.target_hash, "delta table")?;
         let row = DeltaRow {
             delta_hash: delta.target_hash,
             fortress_id: delta.fortress_id,
@@ -160,6 +185,17 @@ impl SqliteProductionLedger {
                 "snapshot canonical state hash is invalid",
             ));
         }
+        if snapshot.canonical_bytes().len() > MAX_TABLE_PAYLOAD_BYTES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "snapshot exceeds the in-memory table byte bound",
+            ));
+        }
+        ensure_insert_capacity(
+            &self.snapshots_table,
+            &snapshot.state_hash,
+            "snapshot table",
+        )?;
         let row = SnapshotRow {
             state_hash: snapshot.state_hash,
             fortress_id: snapshot.fortress_id,
@@ -179,14 +215,24 @@ impl SqliteProductionLedger {
             .map(|row| &row.snapshot)
     }
 
-    /// Upsert an effect journal record with idempotency key.
+    /// Insert an effect journal record exactly once. An identical replay is
+    /// accepted, but state transitions are not implemented by this prototype.
     pub fn upsert_effect(&mut self, record: EffectJournalRecord) -> Result<()> {
-        if record.idempotency_key.is_empty() || record.effect_id.is_empty() {
+        if record.idempotency_key.is_empty()
+            || record.effect_id.is_empty()
+            || record.idempotency_key.len() > MAX_EFFECT_IDENTIFIER_BYTES
+            || record.effect_id.len() > MAX_EFFECT_IDENTIFIER_BYTES
+            || record
+                .error_message
+                .as_ref()
+                .is_some_and(|message| message.len() > MAX_EFFECT_MESSAGE_BYTES)
+        {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "effect and idempotency identifiers must be nonempty",
+                "effect journal identifiers or error message are empty or unbounded",
             ));
         }
+        ensure_insert_capacity(&self.effects_table, &record.idempotency_key, "effect table")?;
         insert_exact_or_reject(
             &mut self.effects_table,
             record.idempotency_key.clone(),
@@ -218,21 +264,64 @@ impl SqliteProductionLedger {
     /// Verify storage integrity and consistency invariants.
     pub fn verify_storage_integrity(&self) -> Result<()> {
         // 1. Verify all capsule hashes match basis/successor continuity
-        for digest in self.capsules_table.keys() {
-            if *digest == Digest32::ZERO {
+        for (digest, row) in &self.capsules_table {
+            if *digest == Digest32::ZERO
+                || row.capsule_digest != *digest
+                || row.fortress_id == FortressId::NIL
+                || row.basis_hash == Digest32::ZERO
+                || row.successor_hash == Digest32::ZERO
+                || row.published_at_tick < row.tick
+                || row.payload.is_empty()
+                || row.payload.len() > MAX_TABLE_PAYLOAD_BYTES
+            {
                 return Err(DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "zero digest in capsule table",
+                    ErrorCode::CorruptLedger,
+                    "capsule row failed table integrity validation",
                 ));
             }
         }
 
         // 2. Verify all snapshot hashes are valid
         for (state_hash, row) in &self.snapshots_table {
-            if row.snapshot.state_hash != *state_hash || !row.snapshot.hash_is_valid() {
+            if row.state_hash != *state_hash
+                || row.snapshot.state_hash != *state_hash
+                || row.fortress_id != row.snapshot.fortress_id
+                || row.tick != row.snapshot.tick
+                || row.cursor != row.snapshot.cursor
+                || !row.snapshot.hash_is_valid()
+            {
                 return Err(DfmcpError::new(
                     ErrorCode::CorruptLedger,
                     "snapshot hash mismatch in table",
+                ));
+            }
+        }
+
+        for (target_hash, row) in &self.deltas_table {
+            if row.delta_hash != *target_hash
+                || row.delta.target_hash != *target_hash
+                || row.fortress_id != row.delta.fortress_id
+                || row.base_cursor != row.delta.base_cursor
+                || row.target_cursor != row.delta.target_cursor
+                || row.changes_count != row.delta.changes.len()
+                || row.delta.truncated
+                || row.delta.continuation.is_some()
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "delta row failed table integrity validation",
+                ));
+            }
+        }
+
+        for (idempotency_key, row) in &self.effects_table {
+            if row.idempotency_key != *idempotency_key
+                || row.idempotency_key.is_empty()
+                || row.effect_id.is_empty()
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "effect row failed table integrity validation",
                 ));
             }
         }
@@ -269,6 +358,19 @@ impl SqliteProductionLedger {
     pub fn config(&self) -> &SqliteLedgerConfig {
         &self.config
     }
+}
+
+fn ensure_insert_capacity<K, V>(table: &BTreeMap<K, V>, key: &K, name: &str) -> Result<()>
+where
+    K: Ord,
+{
+    if !table.contains_key(key) && table.len() >= MAX_TABLE_ROWS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            format!("{name} reached its explicit row bound"),
+        ));
+    }
+    Ok(())
 }
 
 fn insert_exact_or_reject<K, V>(table: &mut BTreeMap<K, V>, key: K, value: V) -> Result<()>

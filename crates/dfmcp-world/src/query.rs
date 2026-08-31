@@ -9,6 +9,9 @@ const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
 const MAX_QUERY_PREDICATE_NODES: usize = 4_096;
 const MAX_QUERY_FIELD_BYTES: usize = 256;
 const MAX_QUERY_KIND_BYTES: usize = 128;
+const MAX_QUERY_VALUE_DEPTH: usize = 64;
+const MAX_QUERY_VALUE_NODES: usize = 4_096;
+const MAX_QUERY_VALUE_BYTES: usize = 64 * 1_024;
 const MAX_QUERY_SCAN_ENTITIES: usize = 1_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,14 +50,19 @@ pub enum Predicate {
 }
 
 impl Predicate {
+    /// Validates the bounded shape required before recursively evaluating,
+    /// normalizing, or canonically encoding a predicate.
+    pub fn validate_shape(&self) -> Result<()> {
+        validate_predicate_shape(self)
+    }
+
     #[must_use]
     pub fn depth(&self) -> usize {
         match self {
             Self::All(children) | Self::Any(children) => children
                 .iter()
                 .map(Predicate::depth)
-                .max()
-                .map_or(0, |depth| depth)
+                .fold(0, usize::max)
                 .saturating_add(1),
             Self::Not(inner) => inner.depth().saturating_add(1),
             _ => 1,
@@ -348,7 +356,7 @@ impl WorldQuery {
             ));
         }
         if let Some(predicate) = &self.predicate {
-            validate_predicate_shape(predicate)?;
+            predicate.validate_shape()?;
         }
         Ok(())
     }
@@ -391,6 +399,12 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
         }
         match predicate {
             Predicate::All(children) | Predicate::Any(children) => {
+                if children.len() > MAX_QUERY_PREDICATE_NODES.saturating_sub(nodes) {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query predicate exceeds its explicit node bound",
+                    ));
+                }
                 let child_depth = depth.checked_add(1).ok_or_else(|| {
                     DfmcpError::new(
                         ErrorCode::BudgetExceeded,
@@ -414,8 +428,84 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                     "query field name exceeds its explicit byte bound",
                 ));
             }
+            Predicate::FieldCompare { value, .. } => validate_query_value(value)?,
             _ => {}
         }
+    }
+    Ok(())
+}
+
+fn validate_query_value(root: &Value) -> Result<()> {
+    let mut pending = vec![(root, 1usize)];
+    let mut nodes = 0usize;
+    let mut bytes = 0usize;
+    while let Some((value, depth)) = pending.pop() {
+        nodes = nodes.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query predicate value node count overflowed",
+            )
+        })?;
+        if depth > MAX_QUERY_VALUE_DEPTH || nodes > MAX_QUERY_VALUE_NODES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query predicate value exceeds its explicit depth or node bound",
+            ));
+        }
+        let child_depth = depth.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query predicate value depth overflowed",
+            )
+        })?;
+        match value {
+            Value::Text(value) => add_query_value_bytes(&mut bytes, value.len())?,
+            Value::Bytes(value) => add_query_value_bytes(&mut bytes, value.len())?,
+            Value::List(values) => {
+                if values.len() > MAX_QUERY_VALUE_NODES.saturating_sub(nodes) {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query predicate value exceeds its explicit node bound",
+                    ));
+                }
+                pending.extend(values.iter().map(|value| (value, child_depth)));
+            }
+            Value::Object(values) => {
+                if values.len() > MAX_QUERY_VALUE_NODES.saturating_sub(nodes) {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "query predicate value exceeds its explicit node bound",
+                    ));
+                }
+                for (key, value) in values {
+                    add_query_value_bytes(&mut bytes, key.len())?;
+                    pending.push((value, child_depth));
+                }
+            }
+            Value::Null
+            | Value::Bool(_)
+            | Value::I64(_)
+            | Value::U64(_)
+            | Value::Fixed { .. }
+            | Value::Entity(_)
+            | Value::Coord(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn add_query_value_bytes(total: &mut usize, additional: usize) -> Result<()> {
+    *total = total.checked_add(additional).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query predicate value byte count overflowed",
+        )
+    })?;
+    if *total > MAX_QUERY_VALUE_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query predicate value exceeds its explicit byte bound",
+        ));
     }
     Ok(())
 }
@@ -477,7 +567,6 @@ pub fn execute_bounded_query(
             Some(predicate) => evaluate_for_candidate(snapshot, entity.id, predicate),
             None => true,
         })
-        .cloned()
         .collect();
 
     let matched = u64::try_from(entities.len()).map_err(|_| {
@@ -509,10 +598,10 @@ pub fn execute_bounded_query(
         }
     }
 
-    if offset > entities.len() {
+    if query.continuation.is_some() && offset >= entities.len() {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,
-            "query continuation offset is beyond the deterministic result set",
+            "query continuation offset is at or beyond the deterministic result horizon",
         ));
     }
     let remaining = if offset < entities.len() {
@@ -551,7 +640,7 @@ pub fn execute_bounded_query(
             break;
         }
         current_bytes = next_bytes;
-        selected.push(entity.clone());
+        selected.push((*entity).clone());
     }
 
     let consumed = offset.checked_add(selected.len()).ok_or_else(|| {
@@ -725,8 +814,63 @@ mod tests {
             limit: 10,
             continuation: Some("cont:1:0:0:3".to_owned()),
         };
-        let error = execute_query(&snapshot(), &query, 100)
-            .expect_err("offset beyond the two-row result must fail");
+        let result = execute_query(&snapshot(), &query, 100);
+        let is_ok = result.is_ok();
+        let error = match result {
+            Ok(_) => {
+                assert!(!is_ok, "offset beyond the two-row result must fail");
+                return;
+            }
+            Err(error) => error,
+        };
         assert_eq!(error.code, ErrorCode::CursorGap);
+    }
+
+    #[test]
+    fn continuation_at_result_horizon_is_a_cursor_gap() {
+        let query = WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: None,
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: Some("cont:1:0:0:2".to_owned()),
+        };
+        let result = execute_query(&snapshot(), &query, 100);
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CursorGap));
+    }
+
+    #[test]
+    fn deeply_nested_predicate_is_rejected_before_recursive_evaluation() {
+        let mut predicate = Predicate::True;
+        for _ in 0..65 {
+            predicate = Predicate::Not(Box::new(predicate));
+        }
+        let query = WorldQuery {
+            kinds: Vec::new(),
+            predicate: Some(predicate),
+            order: QueryOrder::EntityIdAscending,
+            limit: 1,
+            continuation: None,
+        };
+        assert!(
+            matches!(query.validate(10), Err(ref error) if error.code == ErrorCode::BudgetExceeded)
+        );
+    }
+
+    #[test]
+    fn deeply_nested_predicate_value_is_rejected_before_encoding() {
+        let mut value = Value::Null;
+        for _ in 0..65 {
+            value = Value::List(vec![value]);
+        }
+        let predicate = Predicate::FieldCompare {
+            entity_id: EntityId::NIL,
+            field: "bounded".to_owned(),
+            op: CompareOp::Eq,
+            value,
+        };
+        assert!(
+            matches!(predicate.validate_shape(), Err(ref error) if error.code == ErrorCode::BudgetExceeded)
+        );
     }
 }

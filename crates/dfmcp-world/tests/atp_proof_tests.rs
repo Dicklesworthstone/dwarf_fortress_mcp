@@ -43,6 +43,10 @@ fn test_atp_proof_capsule_tamper_detection() -> Result<()> {
     let verifier = AtpProofVerifier;
 
     assert!(verifier.verify_capsule(&capsule).is_ok());
+    assert_eq!(
+        verifier.verify_capsule_against_basis(&capsule, &snap_base)?,
+        snap_target
+    );
 
     // Tamper with Merkle root
     capsule.merkle_root = dfmcp_core::Digest32::of_bytes(b"tampered_root");
@@ -97,6 +101,10 @@ fn test_atp_chain_verification_and_gap_detection() -> Result<()> {
 
     let verifier = AtpProofVerifier;
     assert!(verifier.verify_chain(&[cap1.clone(), cap2.clone()]).is_ok());
+    assert_eq!(
+        verifier.verify_chain_from_basis(&snap0, &[cap1.clone(), cap2.clone()])?,
+        snap2
+    );
 
     // Introduce chain gap: cap2 following cap2 instead of cap1
     assert!(verifier.verify_chain(&[cap2.clone(), cap1]).is_err());

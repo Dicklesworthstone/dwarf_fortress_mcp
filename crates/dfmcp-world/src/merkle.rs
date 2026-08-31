@@ -184,12 +184,10 @@ fn merkle_path(mut level: Vec<Digest32>, mut index: usize) -> Option<Vec<(Digest
             if let Some(sibling) = level.get(index + 1) {
                 siblings.push((*sibling, false));
             }
-        } else if let Some(sibling) = level.get(index - 1) {
-            siblings.push((*sibling, true));
         } else {
-            return None;
+            let sibling = level.get(index - 1)?;
+            siblings.push((*sibling, true));
         }
-
         let mut next = Vec::with_capacity(level.len().div_ceil(2));
         for pair in level.chunks(2) {
             match pair {

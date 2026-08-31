@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! Integration tests for WP-FRK-01 FrankenSQLite production ledger & state storage.
+//! Integration tests for the in-memory table contract that precedes a real
+//! FrankenSQLite ledger integration.
 
 use dfmcp_core::{
     CommitState, DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
@@ -19,7 +20,7 @@ fn sample_snapshot(tick: u64, cursor: ObservationCursor) -> WorldSnapshot {
 }
 
 #[test]
-fn test_sqlite_ledger_capsule_and_delta_persistence() -> Result<()> {
+fn test_table_prototype_capsule_and_delta_roundtrip() -> Result<()> {
     let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
 
     let snap_base = sample_snapshot(100, ObservationCursor::ORIGIN);
@@ -74,7 +75,7 @@ fn test_sqlite_ledger_capsule_and_delta_persistence() -> Result<()> {
 }
 
 #[test]
-fn test_sqlite_ledger_effect_records() -> Result<()> {
+fn test_table_prototype_effect_records() -> Result<()> {
     let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
 
     let effect = EffectJournalRecord {

@@ -5,6 +5,8 @@ use dfmcp_core::{
 
 use crate::{ChunkCoord, EdgeRecord, EntityRecord, MapChunk, WorldEvent, WorldSnapshot};
 
+pub const MAX_STATE_DELTA_CHANGES: usize = 1_000_000;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorldChange {
     UpsertEntity(EntityRecord),
@@ -122,6 +124,12 @@ pub fn build_delta(
     target_tick: GameTick,
     changes: Vec<WorldChange>,
 ) -> Result<StateDelta> {
+    if changes.len() > MAX_STATE_DELTA_CHANGES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "state delta exceeds the implementation change-count safety bound",
+        ));
+    }
     validate_cursor_transition(base.cursor, target_cursor)?;
     if target_tick < base.tick {
         return Err(DfmcpError::new(
@@ -358,6 +366,12 @@ pub fn apply_delta(base: &WorldSnapshot, delta: &StateDelta) -> Result<WorldSnap
             "a partial delta cannot be applied as a complete state transition",
         )
         .retryable(true));
+    }
+    if delta.changes.len() > MAX_STATE_DELTA_CHANGES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "state delta exceeds the implementation change-count safety bound",
+        ));
     }
     if delta.fortress_id != base.fortress_id {
         return Err(DfmcpError::new(
