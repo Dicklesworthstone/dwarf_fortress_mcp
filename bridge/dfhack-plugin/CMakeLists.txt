@@ -1,27 +1,27 @@
-cmake_minimum_required(VERSION 3.20)
-project(dfmcp_bridge CXX)
+project(dfmcp_bridge)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-message(STATUS "Building compile-only placeholder; no DFHack integration is present")
-
-set(SOURCES
+set(PROJECT_SRCS
     src/dfmcp_bridge.cpp
 )
 
-add_library(dfmcp_bridge SHARED ${SOURCES})
-
-target_include_directories(dfmcp_bridge PRIVATE include)
-
-target_compile_options(dfmcp_bridge PRIVATE
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    -fPIC
+set(PROJECT_HDRS
+    include/dfmcp_ipc.h
 )
 
-set_target_properties(dfmcp_bridge PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "dfmcp_bridge"
+set(PROJECT_PROTO
+    DfmcpBridge
 )
+
+# Build as a genuine DFHack plugin and let DFHack generate/link protobuf Lite
+# messages from proto/DfmcpBridge.proto. Protocol v1 deliberately exposes only
+# Handshake and ReadObservation.
+dfhack_plugin(
+    dfmcp_bridge
+    ${PROJECT_SRCS}
+    LINK_LIBRARIES ${PROJECT_LIBS}
+    PROTOBUFS ${PROJECT_PROTO}
+)
+
+if(BUILD_PLUGINS)
+    target_include_directories(dfmcp_bridge PRIVATE include)
+endif()
