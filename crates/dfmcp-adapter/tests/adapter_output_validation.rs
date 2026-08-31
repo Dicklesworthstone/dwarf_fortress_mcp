@@ -1,1 +1,0 @@
-/mnt/data/dfmcp-current-main/crates/dfmcp-adapter/tests/adapter_output_validation.rs
