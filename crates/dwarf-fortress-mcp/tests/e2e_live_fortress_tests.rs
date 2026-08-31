@@ -1,10 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! End-to-End Live Fortress Integration Test Suite.
+//! In-process contract-scaffold integration test suite.
 //!
-//! WP-DFH-05 / WP-TST-01: Exercises full end-to-end multi-agent orchestration,
-//! from FastMCP endpoints and blueprint compilation to two-phase mutation dispatch,
-//! delta streaming, and ATP cryptographic evidence verification.
+//! This test uses only deterministic in-memory prototypes. It does not start Dwarf
+//! Fortress, load DFHack, connect to the bridge, or provide live-game evidence.
 
 use std::collections::BTreeMap;
 
@@ -14,9 +13,9 @@ use dfmcp_core::clock::{ClockGovernor, ClockPolicy};
 use dfmcp_core::lease::LeaseManager;
 use dfmcp_core::roles::{RoleManager, SwarmRole};
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick, IntentId,
-    MapCoord, MapCuboid, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
-    SessionId, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, FortressId, GameTick, IntentId, MapCoord,
+    MapCuboid, ObservationCursor, OperationContext, RequestId, Result, RiskTier, SessionId,
+    WorkBudget,
 };
 use dfmcp_intent::StaticPlanner;
 use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
@@ -95,10 +94,31 @@ fn sample_context(session_id: SessionId, snapshot: &WorldSnapshot) -> OperationC
 #[test]
 fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 1. Initialize world snapshot & spatial index
-    let mut snapshot = sample_world_snapshot();
+    let snapshot = sample_world_snapshot();
     let mut spatial_index = ChunkSpatialIndex::new();
     for chunk in snapshot.graph.chunks.values() {
-        spatial_index.insert_or_update_chunk(chunk);
+        spatial_index.insert_or_update_chunk(chunk)?;
+    }
+    for z in 99..=101 {
+        for y in -1..=1 {
+            for x in -1..=1 {
+                let coord = ChunkCoord { x, y, z };
+                if snapshot.graph.chunks.contains_key(&coord) {
+                    continue;
+                }
+                spatial_index.insert_or_update_chunk(&MapChunk {
+                    coord,
+                    revision: 1,
+                    width: 16,
+                    height: 16,
+                    terrain_runs: vec![TerrainRun {
+                        length: 256,
+                        tile_code: 2,
+                    }],
+                    sparse_overlays: BTreeMap::new(),
+                })?;
+            }
+        }
     }
 
     // 2. Setup Multi-Agent Role & Lease governance
@@ -153,22 +173,22 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     let ctx = sample_context(session_leader, &snapshot);
     let plan = StaticPlanner::default().prepare(&snapshot, &blueprint_intent, &ctx)?;
 
-    // 5. Two-Phase Mutation Dispatch
+    // 5. The in-memory dispatcher must reject unsupported live-game actions.
     let mut dispatcher = MutationDispatcher::new();
-    let prepare_receipt = dispatcher.prepare_mutation(&plan, &snapshot, &ctx)?;
-    let commit_receipt =
-        dispatcher.commit_mutation(&plan, &prepare_receipt, &mut snapshot, &ctx)?;
-
-    assert_eq!(commit_receipt.actions.len(), 1);
-    assert_eq!(
-        commit_receipt.actions[0].state,
-        dfmcp_core::CommitState::Verified
-    );
+    let dispatch_result = dispatcher.prepare_mutation(&plan, &snapshot, &ctx);
+    assert!(dispatch_result.is_err());
 
     // 6. Continuous Delta Streaming
     let mut streamer = ContinuousDeltaStreamer::new(&snapshot);
     let next_tick = GameTick(101);
-    let next_hash = Digest32::of_bytes(b"post_mutation_hash");
+    let mut snap_after = snapshot.clone();
+    snap_after.tick = next_tick;
+    snap_after.cursor = ObservationCursor {
+        epoch: 0,
+        sequence: 1,
+    };
+    snap_after.state_hash = snap_after.compute_hash();
+    let next_hash = snap_after.state_hash;
     let delta = streamer.emit_next_delta(next_tick, &[], &[], next_hash)?;
 
     assert_eq!(delta.base_cursor, ObservationCursor::ORIGIN);
@@ -181,14 +201,6 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     );
 
     // 7. ATP Merkle Proof Capsule Verification
-    let mut snap_after = snapshot.clone();
-    snap_after.tick = next_tick;
-    snap_after.cursor = ObservationCursor {
-        epoch: 0,
-        sequence: 1,
-    };
-    snap_after.state_hash = next_hash;
-
     let capsule = AtpProofCapsule::seal(&snapshot, &snap_after, delta.clone(), next_tick)?;
     let verifier = AtpProofVerifier;
     assert!(verifier.verify_capsule(&capsule).is_ok());

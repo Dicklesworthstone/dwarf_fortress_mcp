@@ -72,16 +72,31 @@ impl AttentionLedger {
         });
 
         let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(&generation.to_be_bytes());
-        hasher_bytes.extend_from_slice(anchor.state_hash.as_bytes());
+        crate::canonical::put_str(&mut hasher_bytes, "dfmcp-attention-ledger-v1");
+        crate::canonical::put_u64(&mut hasher_bytes, generation);
+        crate::canonical::put_anchor(&mut hasher_bytes, anchor);
+        hasher_bytes.push(match completeness {
+            CompletenessStatus::Complete => 0,
+            CompletenessStatus::BudgetTruncated => 1,
+        });
+        crate::canonical::put_u64(&mut hasher_bytes, signals.len() as u64);
 
         for sig in &signals {
-            hasher_bytes.extend_from_slice(sig.kind.name().as_bytes());
-            hasher_bytes.extend_from_slice(&sig.severity_score.to_be_bytes());
-            if let Some(sub) = sig.subject {
-                hasher_bytes.extend_from_slice(&sub.get().to_be_bytes());
+            crate::canonical::put_str(&mut hasher_bytes, sig.kind.name());
+            crate::canonical::put_u32(&mut hasher_bytes, sig.severity_score);
+            match sig.subject {
+                Some(subject) => {
+                    hasher_bytes.push(1);
+                    crate::canonical::put_u64(&mut hasher_bytes, subject.get());
+                }
+                None => hasher_bytes.push(0),
             }
-            hasher_bytes.extend_from_slice(sig.evidence_digest.as_bytes());
+            crate::canonical::put_str(&mut hasher_bytes, &sig.summary);
+            crate::canonical::put_u64(&mut hasher_bytes, sig.contributing_factors.len() as u64);
+            for factor in &sig.contributing_factors {
+                crate::canonical::put_str(&mut hasher_bytes, factor);
+            }
+            crate::canonical::put_bytes(&mut hasher_bytes, sig.evidence_digest.as_bytes());
         }
 
         let ledger_digest = Digest32::of_bytes(&hasher_bytes);
@@ -113,7 +128,7 @@ impl AttentionEngine {
                 && let Value::I64(stress_val) = fact.value
                 && stress_val > 50
             {
-                let severity = (stress_val as u32).min(1000);
+                let severity = u32::try_from(stress_val).map_or(1_000, |value| value.min(1_000));
                 signals.push(AttentionSignal {
                     kind: AttentionSignalKind::StressAnomaly,
                     subject: Some(*id),

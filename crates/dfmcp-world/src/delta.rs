@@ -39,6 +39,83 @@ pub struct StateDelta {
     pub continuation: Option<String>,
 }
 
+impl StateDelta {
+    /// Canonical, length-delimited encoding suitable for integrity digests.
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        use crate::canonical::{put_bool, put_bytes, put_i32, put_str, put_u32, put_u64};
+
+        let mut output = Vec::new();
+        put_str(&mut output, "dfmcp-state-delta-v1");
+        put_u64(&mut output, self.fortress_id.get());
+        put_u64(&mut output, self.base_cursor.epoch);
+        put_u64(&mut output, self.base_cursor.sequence);
+        put_u64(&mut output, self.target_cursor.epoch);
+        put_u64(&mut output, self.target_cursor.sequence);
+        put_bytes(&mut output, self.base_hash.as_bytes());
+        put_bytes(&mut output, self.target_hash.as_bytes());
+        put_u64(&mut output, self.target_tick.0);
+        put_u64(&mut output, self.changes.len() as u64);
+        for change in &self.changes {
+            match change {
+                WorldChange::UpsertEntity(entity) => {
+                    output.push(0);
+                    entity.encode(&mut output);
+                }
+                WorldChange::RemoveEntity {
+                    id,
+                    expected_generation,
+                    expected_revision,
+                } => {
+                    output.push(1);
+                    put_u64(&mut output, id.get());
+                    put_u32(&mut output, *expected_generation);
+                    put_u64(&mut output, *expected_revision);
+                }
+                WorldChange::UpsertEdge(edge) => {
+                    output.push(2);
+                    edge.encode(&mut output);
+                }
+                WorldChange::RemoveEdge {
+                    id,
+                    expected_revision,
+                } => {
+                    output.push(3);
+                    output.extend_from_slice(&id.get().to_be_bytes());
+                    put_u64(&mut output, *expected_revision);
+                }
+                WorldChange::UpsertMapChunk(chunk) => {
+                    output.push(4);
+                    chunk.encode(&mut output);
+                }
+                WorldChange::RemoveMapChunk {
+                    coord,
+                    expected_revision,
+                } => {
+                    output.push(5);
+                    put_i32(&mut output, coord.x);
+                    put_i32(&mut output, coord.y);
+                    put_i32(&mut output, coord.z);
+                    put_u64(&mut output, *expected_revision);
+                }
+                WorldChange::AppendEvent(event) => {
+                    output.push(6);
+                    event.encode(&mut output);
+                }
+            }
+        }
+        put_bool(&mut output, self.truncated);
+        match &self.continuation {
+            Some(token) => {
+                output.push(1);
+                put_str(&mut output, token);
+            }
+            None => output.push(0),
+        }
+        output
+    }
+}
+
 pub fn build_delta(
     base: &WorldSnapshot,
     target_cursor: ObservationCursor,

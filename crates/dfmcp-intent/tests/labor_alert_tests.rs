@@ -11,7 +11,7 @@ use dfmcp_intent::labor::{DwarfLaborProfile, LaborAllocator};
 #[test]
 fn test_labor_and_alert_orchestration() -> Result<()> {
     let allocator = LaborAllocator;
-    let mut fsm = CivilianAlertFsm::new(EntityId::new(100), vec![EntityId::new(200)]);
+    let mut fsm = CivilianAlertFsm::new(EntityId::new(100), vec![EntityId::new(200)])?;
 
     let mut dwarf_skills = BTreeMap::new();
     dwarf_skills.insert("MINING".to_owned(), 15);
@@ -23,12 +23,13 @@ fn test_labor_and_alert_orchestration() -> Result<()> {
         assigned_labors: BTreeSet::new(),
     };
 
-    let actions = allocator.optimize_roster(&[dwarf1]);
+    let actions = allocator.optimize_roster(&[dwarf1])?;
     assert_eq!(actions.len(), 1);
 
     // Threat escalation
     let alert_actions = fsm.transition_to(ThreatLevel::EmergencyLockdown, &[EntityId::new(1)])?;
     assert_eq!(alert_actions.len(), 2);
+    fsm.confirm_observed_level(ThreatLevel::EmergencyLockdown);
     assert_eq!(fsm.current_level(), ThreatLevel::EmergencyLockdown);
 
     Ok(())

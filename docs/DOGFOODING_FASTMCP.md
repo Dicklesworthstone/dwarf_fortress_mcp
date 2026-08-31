@@ -58,10 +58,17 @@ which upstream regression forced it.
 
 ## Conformance status
 
-MCP 2026-07-28 conformance evidence for the pinned revision is a WP-21 gate: it is produced by
-running the upstream conformance suite and modern handshake golden tests against this integration and recorded here.
+## Open defects under the v0.8.0 pin (`12d3469`)
 
-| Date | Suite/revision | Scope exercised | Result | Evidence artifact |
+Findings from the 2026-08-31 dogfooding pass; not yet filed as upstream
+issues (paste the byte captures below into the upstream tracker once the
+project is online).
+
+| Finding | Minimal repro | Expected | Actual | Filing status |
 |---|---|---|---|---|
-| 2026-08-30 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | Modern handshake, discovery (`server/discover`), tools listing, plan compile/revalidate/commit, obligations lifecycle, and negative era refusal | PASS (all golden tests green) | `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs` |
+| `server/discover` silently fails when `_meta` carries only `protocolVersion` + `clientCapabilities` (no `clientInfo`). | Send one `server/discover` request with `_meta = {protocolVersion: "2026-07-28", clientCapabilities: {}}`. | JSON-RPC response (either discover result or an error envelope). | No response is ever written to stdout; the server keeps reading stdin until the pipe closes. | DRAFT — pending upload |
+| After a successful modern `server/discover`, a follow-up `tools/list` (same `_meta`) is not dispatched. | Send `server/discover` then `tools/list` with full modern `_meta` (incl. `clientInfo`). | Two JSON-RPC responses. | Only the discover response is written; `tools/list` hangs forever. | DRAFT — pending upload |
 
+Workaround (annotated at the call site): the modern golden test now
+supplies `io.modelcontextprotocol/clientInfo` in `_meta`. This is a
+test-side adaptation, not a server-side mask; both fixes belong upstream.

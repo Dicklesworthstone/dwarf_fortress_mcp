@@ -59,10 +59,21 @@ impl AbaEntityValidator {
     }
 
     /// Increment generation upon entity retirement/recycling.
-    pub fn retire_and_advance_generation(&mut self, id: EntityId) -> u32 {
+    pub fn retire_and_advance_generation(&mut self, id: EntityId) -> Result<u32> {
+        if id == EntityId::NIL {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "cannot track the reserved nil entity identifier",
+            ));
+        }
         let entry = self.generations.entry(id).or_insert(0);
-        *entry = entry.saturating_add(1);
-        *entry
+        *entry = entry.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "entity generation counter exhausted",
+            )
+        })?;
+        Ok(*entry)
     }
 }
 
@@ -74,6 +85,10 @@ pub fn find_reachability(
 ) -> BTreeSet<EntityId> {
     let mut visited = BTreeSet::new();
     let mut queue = VecDeque::new();
+
+    if !graph.entities.contains_key(&from) {
+        return visited;
+    }
 
     queue.push_back(from);
     visited.insert(from);
@@ -164,21 +179,22 @@ mod tests {
     use dfmcp_core::EdgeId;
 
     #[test]
-    fn test_aba_entity_validator() {
+    fn test_aba_entity_validator() -> Result<()> {
         let mut validator = AbaEntityValidator::new();
         let e1 = EntityId::new(1);
 
         assert!(validator.validate_reference(e1, 0).is_err());
 
-        let gen1 = validator.retire_and_advance_generation(e1);
+        let gen1 = validator.retire_and_advance_generation(e1)?;
         assert_eq!(gen1, 1);
         assert!(validator.validate_reference(e1, 1).is_ok());
         assert!(validator.validate_reference(e1, 0).is_err());
 
-        let gen2 = validator.retire_and_advance_generation(e1);
+        let gen2 = validator.retire_and_advance_generation(e1)?;
         assert_eq!(gen2, 2);
         assert!(validator.validate_reference(e1, 2).is_ok());
         assert!(validator.validate_reference(e1, 1).is_err());
+        Ok(())
     }
 
     #[test]

@@ -30,19 +30,20 @@ impl AtpProofCapsule {
         delta: StateDelta,
         published_at_tick: GameTick,
     ) -> Result<Self> {
+        validate_transition_inputs(basis_snapshot, successor_snapshot, &delta)?;
         let tree = MerkleStateTree::from_snapshot(successor_snapshot);
         let merkle_root = tree.overall_root;
 
         let basis_anchor = basis_snapshot.anchor();
         let successor_anchor = successor_snapshot.anchor();
 
-        let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(basis_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(successor_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(merkle_root.as_bytes());
-        hasher_bytes.extend_from_slice(delta.target_hash.as_bytes());
-
-        let capsule_digest = Digest32::of_bytes(&hasher_bytes);
+        let capsule_digest = capsule_digest(
+            basis_anchor,
+            successor_anchor,
+            merkle_root,
+            &delta,
+            published_at_tick,
+        );
 
         Ok(Self {
             basis_anchor,
@@ -57,13 +58,13 @@ impl AtpProofCapsule {
     /// Verify transition proof integrity.
     #[must_use]
     pub fn verify_transition(&self) -> bool {
-        let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(self.basis_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(self.successor_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(self.merkle_root.as_bytes());
-        hasher_bytes.extend_from_slice(self.delta.target_hash.as_bytes());
-
-        let expected = Digest32::of_bytes(&hasher_bytes);
+        let expected = capsule_digest(
+            self.basis_anchor,
+            self.successor_anchor,
+            self.merkle_root,
+            &self.delta,
+            self.published_at_tick,
+        );
         expected == self.capsule_digest
     }
 }
@@ -89,8 +90,65 @@ impl AtpProofVerifier {
             ));
         }
 
+        if capsule.delta.base_hash != capsule.basis_anchor.state_hash
+            || capsule.delta.fortress_id != capsule.basis_anchor.fortress_id
+            || capsule.successor_anchor.fortress_id != capsule.basis_anchor.fortress_id
+            || capsule.delta.base_cursor != capsule.basis_anchor.cursor
+            || capsule.delta.target_cursor != capsule.successor_anchor.cursor
+            || capsule.delta.target_tick != capsule.successor_anchor.tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "ATP capsule anchor and delta continuity mismatch",
+            ));
+        }
+
         Ok(())
     }
+}
+
+fn validate_transition_inputs(
+    basis: &WorldSnapshot,
+    successor: &WorldSnapshot,
+    delta: &StateDelta,
+) -> Result<()> {
+    if !basis.hash_is_valid() || !successor.hash_is_valid() {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "cannot seal ATP proof from a snapshot with an invalid state hash",
+        ));
+    }
+    if delta.fortress_id != basis.fortress_id
+        || successor.fortress_id != basis.fortress_id
+        || delta.base_cursor != basis.cursor
+        || delta.target_cursor != successor.cursor
+        || delta.base_hash != basis.state_hash
+        || delta.target_hash != successor.state_hash
+        || delta.target_tick != successor.tick
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "ATP proof inputs do not describe one continuous state transition",
+        ));
+    }
+    Ok(())
+}
+
+fn capsule_digest(
+    basis: StateAnchor,
+    successor: StateAnchor,
+    merkle_root: Digest32,
+    delta: &StateDelta,
+    published_at_tick: GameTick,
+) -> Digest32 {
+    let mut bytes = Vec::new();
+    crate::canonical::put_str(&mut bytes, "dfmcp-atp-proof-capsule-v1");
+    crate::canonical::put_anchor(&mut bytes, basis);
+    crate::canonical::put_anchor(&mut bytes, successor);
+    crate::canonical::put_bytes(&mut bytes, merkle_root.as_bytes());
+    crate::canonical::put_bytes(&mut bytes, &delta.canonical_bytes());
+    crate::canonical::put_u64(&mut bytes, published_at_tick.0);
+    Digest32::of_bytes(&bytes)
 }
 
 #[cfg(test)]

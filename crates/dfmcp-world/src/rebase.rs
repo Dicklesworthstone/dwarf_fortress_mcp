@@ -37,12 +37,14 @@ impl ConflictCertificate {
         conflict_kind: ConflictKind,
         diagnosis: String,
     ) -> Self {
-        let mut hasher_bytes = Vec::new();
-        hasher_bytes.extend_from_slice(&plan_id.get().to_be_bytes());
-        hasher_bytes.extend_from_slice(base_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(target_anchor.state_hash.as_bytes());
-        hasher_bytes.extend_from_slice(diagnosis.as_bytes());
-        let certificate_digest = Digest32::of_bytes(&hasher_bytes);
+        let mut bytes = Vec::new();
+        crate::canonical::put_str(&mut bytes, "dfmcp-conflict-certificate-v1");
+        bytes.extend_from_slice(&plan_id.get().to_be_bytes());
+        crate::canonical::put_anchor(&mut bytes, base_anchor);
+        crate::canonical::put_anchor(&mut bytes, target_anchor);
+        encode_conflict_kind(&mut bytes, &conflict_kind);
+        crate::canonical::put_str(&mut bytes, &diagnosis);
+        let certificate_digest = Digest32::of_bytes(&bytes);
 
         Self {
             plan_id,
@@ -52,5 +54,18 @@ impl ConflictCertificate {
             diagnosis,
             certificate_digest,
         }
+    }
+}
+
+fn encode_conflict_kind(output: &mut Vec<u8>, kind: &ConflictKind) {
+    match kind {
+        ConflictKind::AnchorDivergence => output.push(0),
+        ConflictKind::PreconditionViolated { description } => {
+            output.push(1);
+            crate::canonical::put_str(output, description);
+        }
+        ConflictKind::SpatialOverlap => output.push(2),
+        ConflictKind::EntityUnavailable => output.push(3),
+        ConflictKind::ResourceDepleted => output.push(4),
     }
 }

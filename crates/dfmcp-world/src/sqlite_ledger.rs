@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! Production-grade durable SQLite/WAL ledger backend for world state and effect journal.
+//! In-memory persistence-contract prototype for world state and effect journals.
 //!
-//! WP-FRK-01: Provides high-performance Write-Ahead-Log (WAL) persistence for world
-//! state deltas, observation capsules, transaction receipts, and crash-recovery records.
+//! Despite the compatibility-preserving type names, this module does not open SQLite,
+//! write a WAL, or provide crash durability. It exists only to exercise table-like
+//! invariants until the admitted owned persistence crate is integrated.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +16,7 @@ use crate::delta::StateDelta;
 use crate::ledger::{EffectJournalRecord, ObservationCapsule};
 use crate::model::WorldSnapshot;
 
-/// Configuration for the production durable ledger backend.
+/// Prospective persistence settings retained as contract data; currently not applied.
 #[derive(Clone, Debug)]
 pub struct SqliteLedgerConfig {
     pub journal_mode: String,
@@ -70,7 +71,7 @@ pub struct SnapshotRow {
     pub snapshot: WorldSnapshot,
 }
 
-/// In-memory / durable mock of SQLite production ledger for validation.
+/// In-memory table prototype. This is neither SQLite-backed nor durable.
 #[derive(Clone, Debug, Default)]
 pub struct SqliteProductionLedger {
     config: SqliteLedgerConfig,
@@ -94,6 +95,12 @@ impl SqliteProductionLedger {
 
     /// Insert or replace an observation capsule.
     pub fn insert_capsule(&mut self, capsule: &ObservationCapsule) -> Result<()> {
+        if !capsule.integrity_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "observation capsule failed integrity validation",
+            ));
+        }
         let row = CapsuleRow {
             capsule_digest: capsule.capsule_digest,
             fortress_id: capsule.delta.fortress_id,
@@ -101,9 +108,9 @@ impl SqliteProductionLedger {
             successor_hash: capsule.successor_anchor.state_hash,
             tick: capsule.successor_anchor.tick,
             published_at_tick: capsule.published_at_tick,
-            payload: Vec::new(),
+            payload: capsule.delta.canonical_bytes(),
         };
-        self.capsules_table.insert(capsule.capsule_digest, row);
+        insert_exact_or_reject(&mut self.capsules_table, capsule.capsule_digest, row)?;
         Ok(())
     }
 
@@ -115,6 +122,18 @@ impl SqliteProductionLedger {
 
     /// Insert a state delta into durable storage.
     pub fn insert_delta(&mut self, delta: &StateDelta) -> Result<()> {
+        if delta.base_cursor.epoch != delta.target_cursor.epoch
+            || delta.target_cursor.sequence <= delta.base_cursor.sequence
+            || delta.base_hash == Digest32::ZERO
+            || delta.target_hash == Digest32::ZERO
+            || delta.truncated
+            || delta.continuation.is_some()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "state delta is partial or has invalid anchor continuity",
+            ));
+        }
         let row = DeltaRow {
             delta_hash: delta.target_hash,
             fortress_id: delta.fortress_id,
@@ -123,7 +142,7 @@ impl SqliteProductionLedger {
             changes_count: delta.changes.len(),
             delta: delta.clone(),
         };
-        self.deltas_table.insert(delta.target_hash, row);
+        insert_exact_or_reject(&mut self.deltas_table, delta.target_hash, row)?;
         Ok(())
     }
 
@@ -135,6 +154,12 @@ impl SqliteProductionLedger {
 
     /// Insert a full world snapshot.
     pub fn insert_snapshot(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        if !snapshot.hash_is_valid() || snapshot.state_hash == Digest32::ZERO {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "snapshot canonical state hash is invalid",
+            ));
+        }
         let row = SnapshotRow {
             state_hash: snapshot.state_hash,
             fortress_id: snapshot.fortress_id,
@@ -142,7 +167,7 @@ impl SqliteProductionLedger {
             cursor: snapshot.cursor,
             snapshot: snapshot.clone(),
         };
-        self.snapshots_table.insert(snapshot.state_hash, row);
+        insert_exact_or_reject(&mut self.snapshots_table, snapshot.state_hash, row)?;
         Ok(())
     }
 
@@ -156,8 +181,17 @@ impl SqliteProductionLedger {
 
     /// Upsert an effect journal record with idempotency key.
     pub fn upsert_effect(&mut self, record: EffectJournalRecord) -> Result<()> {
-        self.effects_table
-            .insert(record.idempotency_key.clone(), record);
+        if record.idempotency_key.is_empty() || record.effect_id.is_empty() {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "effect and idempotency identifiers must be nonempty",
+            ));
+        }
+        insert_exact_or_reject(
+            &mut self.effects_table,
+            record.idempotency_key.clone(),
+            record,
+        )?;
         Ok(())
     }
 
@@ -195,7 +229,7 @@ impl SqliteProductionLedger {
 
         // 2. Verify all snapshot hashes are valid
         for (state_hash, row) in &self.snapshots_table {
-            if row.snapshot.state_hash != *state_hash {
+            if row.snapshot.state_hash != *state_hash || !row.snapshot.hash_is_valid() {
                 return Err(DfmcpError::new(
                     ErrorCode::CorruptLedger,
                     "snapshot hash mismatch in table",
@@ -235,6 +269,24 @@ impl SqliteProductionLedger {
     pub fn config(&self) -> &SqliteLedgerConfig {
         &self.config
     }
+}
+
+fn insert_exact_or_reject<K, V>(table: &mut BTreeMap<K, V>, key: K, value: V) -> Result<()>
+where
+    K: Ord,
+    V: PartialEq,
+{
+    if let Some(existing) = table.get(&key) {
+        if existing == &value {
+            return Ok(());
+        }
+        return Err(DfmcpError::new(
+            ErrorCode::Conflict,
+            "storage key is already bound to different content",
+        ));
+    }
+    table.insert(key, value);
+    Ok(())
 }
 
 #[cfg(test)]

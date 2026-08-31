@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use dfmcp_core::EntityId;
+use dfmcp_core::{DfmcpError, EntityId, ErrorCode, Result};
 
 use crate::action::Action;
 
@@ -29,11 +29,31 @@ pub struct LaborAllocator;
 
 impl LaborAllocator {
     /// Optimize labor assignments for a roster of citizen dwarves.
-    #[must_use]
-    pub fn optimize_roster(&self, roster: &[DwarfLaborProfile]) -> Vec<Action> {
+    pub fn optimize_roster(&self, roster: &[DwarfLaborProfile]) -> Result<Vec<Action>> {
         let mut actions = Vec::new();
+        let mut seen = BTreeSet::new();
 
         for dwarf in roster {
+            if dwarf.id == EntityId::NIL || !seen.insert(dwarf.id) || dwarf.stress_level > 1_000 {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "labor roster contains a nil/duplicate ID or out-of-range stress value",
+                ));
+            }
+            if dwarf
+                .skills
+                .iter()
+                .any(|(skill, rating)| skill.trim().is_empty() || *rating > 20)
+                || dwarf
+                    .assigned_labors
+                    .iter()
+                    .any(|labor| labor.trim().is_empty())
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "labor profile contains an empty token or out-of-range skill rating",
+                ));
+            }
             // 1. High-stress mental health guard
             if dwarf.stress_level >= HIGH_STRESS_THRESHOLD {
                 let heavy_labors = [
@@ -72,7 +92,7 @@ impl LaborAllocator {
             }
         }
 
-        actions
+        Ok(actions)
     }
 }
 
@@ -81,7 +101,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_high_stress_dwarf_relieved_from_heavy_labor() {
+    fn test_high_stress_dwarf_relieved_from_heavy_labor() -> Result<()> {
         let allocator = LaborAllocator;
         let dwarf = DwarfLaborProfile {
             id: EntityId::new(1),
@@ -90,7 +110,7 @@ mod tests {
             assigned_labors: BTreeSet::from(["MINING".to_owned(), "HAULING".to_owned()]),
         };
 
-        let actions = allocator.optimize_roster(&[dwarf]);
+        let actions = allocator.optimize_roster(&[dwarf])?;
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -100,10 +120,11 @@ mod tests {
                 enabled: false,
             } if units == &vec![EntityId::new(1)] && labor == "MINING"
         ));
+        Ok(())
     }
 
     #[test]
-    fn test_master_craftsdwarf_assigned_labor() {
+    fn test_master_craftsdwarf_assigned_labor() -> Result<()> {
         let allocator = LaborAllocator;
         let mut skills = BTreeMap::new();
         skills.insert("WEAPONSMITHING".to_owned(), 15);
@@ -115,7 +136,7 @@ mod tests {
             assigned_labors: BTreeSet::new(),
         };
 
-        let actions = allocator.optimize_roster(&[dwarf]);
+        let actions = allocator.optimize_roster(&[dwarf])?;
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -125,5 +146,6 @@ mod tests {
                 ..
             } if labor == "WEAPONSMITHING"
         ));
+        Ok(())
     }
 }

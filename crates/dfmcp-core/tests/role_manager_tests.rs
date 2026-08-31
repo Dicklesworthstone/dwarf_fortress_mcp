@@ -34,6 +34,7 @@ fn test_delegation_tamper_detection() -> Result<()> {
     let mut manager = RoleManager::new();
     let s1 = SessionId::new(1);
     let s2 = SessionId::new(2);
+    manager.assign_role(s1, SwarmRole::ExpeditionLeader);
 
     let grants = vec![CapabilityGrant {
         capability: Capability::Designate,

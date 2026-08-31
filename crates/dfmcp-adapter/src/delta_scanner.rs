@@ -7,12 +7,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use dfmcp_core::{
-    DfmcpError, Digest32, EntityId, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
-};
+use dfmcp_core::{DfmcpError, Digest32, EntityId, ErrorCode, GameTick, ObservationCursor, Result};
 use dfmcp_world::{
     ChunkCoord, EntityRecord, MapChunk, StateDelta, WorldChange, WorldEvent, WorldGraph,
-    WorldSnapshot,
+    WorldSnapshot, apply_delta, build_delta,
 };
 
 /// Maximum capacity of the bounded event ring buffer before shedding oldest non-critical events.
@@ -91,14 +89,30 @@ impl EntityDeltaTracker {
     }
 
     /// Compare active entities against known state and generate entity changes.
-    pub fn process_entities(&mut self, active_entities: &[EntityRecord]) -> Vec<WorldChange> {
+    pub fn process_entities(
+        &mut self,
+        active_entities: &[EntityRecord],
+    ) -> Result<Vec<WorldChange>> {
         let mut changes = Vec::new();
         let mut seen_ids = BTreeSet::new();
 
         for entity in active_entities {
-            seen_ids.insert(entity.id);
+            if entity.id == EntityId::NIL || !seen_ids.insert(entity.id) {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "active entity set contains a nil or duplicate entity identifier",
+                ));
+            }
             match self.known_entities.get(&entity.id) {
                 Some(&(known_gen, known_rev)) => {
+                    if entity.generation < known_gen
+                        || (entity.generation == known_gen && entity.revision < known_rev)
+                    {
+                        return Err(DfmcpError::new(
+                            ErrorCode::StaleAnchor,
+                            format!("entity {} generation or revision regressed", entity.id),
+                        ));
+                    }
                     if entity.generation != known_gen || entity.revision > known_rev {
                         self.known_entities
                             .insert(entity.id, (entity.generation, entity.revision));
@@ -131,7 +145,7 @@ impl EntityDeltaTracker {
             }
         }
 
-        changes
+        Ok(changes)
     }
 }
 
@@ -196,9 +210,7 @@ impl EventRingBuffer {
 /// and event stream into continuous `StateDelta` packets.
 #[derive(Clone, Debug)]
 pub struct ContinuousDeltaStreamer {
-    fortress_id: FortressId,
-    current_cursor: ObservationCursor,
-    current_hash: Digest32,
+    current_snapshot: WorldSnapshot,
     chunk_tracker: DirtyChunkTracker,
     entity_tracker: EntityDeltaTracker,
     event_buffer: EventRingBuffer,
@@ -211,9 +223,7 @@ impl ContinuousDeltaStreamer {
         entity_tracker.seed_from_graph(&base_snapshot.graph);
 
         Self {
-            fortress_id: base_snapshot.fortress_id,
-            current_cursor: base_snapshot.cursor,
-            current_hash: base_snapshot.state_hash,
+            current_snapshot: base_snapshot.clone(),
             chunk_tracker: DirtyChunkTracker::new(),
             entity_tracker,
             event_buffer: EventRingBuffer::default(),
@@ -238,7 +248,13 @@ impl ContinuousDeltaStreamer {
         modified_chunks: &[MapChunk],
         target_hash: Digest32,
     ) -> Result<StateDelta> {
-        let base_cursor = self.current_cursor;
+        if target_tick < self.current_snapshot.tick || target_hash == Digest32::ZERO {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "delta target tick regressed or target hash is zero",
+            ));
+        }
+        let base_cursor = self.current_snapshot.cursor;
         let target_cursor = ObservationCursor {
             epoch: base_cursor.epoch,
             sequence: base_cursor
@@ -247,49 +263,59 @@ impl ContinuousDeltaStreamer {
                 .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "cursor sequence overflow"))?,
         };
 
+        let mut staged_entity_tracker = self.entity_tracker.clone();
+        let mut staged_chunk_tracker = self.chunk_tracker.clone();
+        let mut staged_event_buffer = self.event_buffer.clone();
         let mut changes = Vec::new();
 
         // 1. Entity changes
-        let entity_changes = self.entity_tracker.process_entities(active_entities);
+        let entity_changes = staged_entity_tracker.process_entities(active_entities)?;
         changes.extend(entity_changes);
 
         // 2. Chunk changes
-        let dirty_coords = self.chunk_tracker.drain_dirty();
-        let mut chunk_map: BTreeMap<ChunkCoord, MapChunk> = modified_chunks
-            .iter()
-            .map(|chunk| (chunk.coord, chunk.clone()))
-            .collect();
+        let dirty_coords = staged_chunk_tracker.drain_dirty();
+        let mut chunk_map: BTreeMap<ChunkCoord, MapChunk> = BTreeMap::new();
+        for chunk in modified_chunks {
+            if chunk_map.insert(chunk.coord, chunk.clone()).is_some() {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "modified chunk set contains duplicate coordinates",
+                ));
+            }
+        }
 
         for coord in dirty_coords {
-            if let Some(chunk) = chunk_map.remove(&coord) {
-                changes.push(WorldChange::UpsertMapChunk(chunk));
-            }
+            let chunk = chunk_map.remove(&coord).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::CursorGap,
+                    format!("dirty chunk {coord:?} was not supplied for delta emission"),
+                )
+            })?;
+            changes.push(WorldChange::UpsertMapChunk(chunk));
         }
         for (_, chunk) in chunk_map {
             changes.push(WorldChange::UpsertMapChunk(chunk));
         }
 
         // 3. Event changes
-        let events = self.event_buffer.drain_events();
+        let events = staged_event_buffer.drain_events();
         for event in events {
             changes.push(WorldChange::AppendEvent(event));
         }
 
-        let delta = StateDelta {
-            fortress_id: self.fortress_id,
-            base_cursor,
-            target_cursor,
-            base_hash: self.current_hash,
-            target_hash,
-            target_tick,
-            changes,
-            truncated: false,
-            continuation: None,
-        };
+        let delta = build_delta(&self.current_snapshot, target_cursor, target_tick, changes)?;
+        if delta.target_hash != target_hash {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "declared target hash does not match the canonical emitted changes",
+            ));
+        }
+        let next_snapshot = apply_delta(&self.current_snapshot, &delta)?;
 
-        // Advance internal state
-        self.current_cursor = target_cursor;
-        self.current_hash = target_hash;
+        self.entity_tracker = staged_entity_tracker;
+        self.chunk_tracker = staged_chunk_tracker;
+        self.event_buffer = staged_event_buffer;
+        self.current_snapshot = next_snapshot;
 
         Ok(delta)
     }
@@ -297,20 +323,20 @@ impl ContinuousDeltaStreamer {
     /// Current cursor sequence.
     #[must_use]
     pub fn current_cursor(&self) -> ObservationCursor {
-        self.current_cursor
+        self.current_snapshot.cursor
     }
 
     /// Current anchor hash.
     #[must_use]
     pub fn current_hash(&self) -> Digest32 {
-        self.current_hash
+        self.current_snapshot.state_hash
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dfmcp_core::EventId;
+    use dfmcp_core::{EventId, FortressId};
     use dfmcp_world::{EntityKind, Fact, FactSource, TerrainRun, Value};
 
     fn sample_snapshot() -> WorldSnapshot {
@@ -340,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_entity_delta_tracker_upsert_and_removal() {
+    fn test_entity_delta_tracker_upsert_and_removal() -> Result<()> {
         let mut tracker = EntityDeltaTracker::new();
         let mut fields = BTreeMap::new();
         fields.insert(
@@ -362,24 +388,25 @@ mod tests {
         };
 
         // First pass: add e1
-        let changes1 = tracker.process_entities(std::slice::from_ref(&e1));
+        let changes1 = tracker.process_entities(std::slice::from_ref(&e1))?;
         assert_eq!(changes1.len(), 1);
         assert!(matches!(changes1[0], WorldChange::UpsertEntity(_)));
 
         // Second pass: unchanged e1 produces no changes
-        let changes2 = tracker.process_entities(std::slice::from_ref(&e1));
+        let changes2 = tracker.process_entities(std::slice::from_ref(&e1))?;
         assert_eq!(changes2.len(), 0);
 
         // Third pass: modified revision produces upsert
         let mut e1_mod = e1.clone();
         e1_mod.revision = 2;
-        let changes3 = tracker.process_entities(&[e1_mod]);
+        let changes3 = tracker.process_entities(&[e1_mod])?;
         assert_eq!(changes3.len(), 1);
 
         // Fourth pass: empty list produces removal
-        let changes4 = tracker.process_entities(&[]);
+        let changes4 = tracker.process_entities(&[])?;
         assert_eq!(changes4.len(), 1);
         assert!(matches!(changes4[0], WorldChange::RemoveEntity { .. }));
+        Ok(())
     }
 
     #[test]
@@ -424,7 +451,16 @@ mod tests {
 
         streamer.mark_chunk_dirty(c1);
 
-        let target_hash = Digest32::of_bytes(b"target_hash_step_1");
+        let target_hash = build_delta(
+            &base,
+            ObservationCursor {
+                epoch: 0,
+                sequence: 1,
+            },
+            GameTick(101),
+            vec![WorldChange::UpsertMapChunk(chunk1.clone())],
+        )?
+        .target_hash;
         let delta = streamer.emit_next_delta(GameTick(101), &[], &[chunk1], target_hash)?;
 
         assert_eq!(delta.base_cursor, ObservationCursor::ORIGIN);

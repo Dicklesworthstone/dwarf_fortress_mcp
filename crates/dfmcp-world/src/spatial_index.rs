@@ -7,9 +7,12 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{MapCoord, MapCuboid};
+use dfmcp_core::{DfmcpError, ErrorCode, MapCoord, MapCuboid, Result};
 
 use crate::model::{ChunkCoord, MapChunk};
+
+/// Hard limit for one materialized cuboid query.
+pub const MAX_SPATIAL_QUERY_TILES: u64 = 1_000_000;
 
 /// Tile classification for spatial indexing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -102,8 +105,17 @@ pub struct SpatialChunkNode {
 }
 
 impl SpatialChunkNode {
-    #[must_use]
-    pub fn from_map_chunk(chunk: &MapChunk) -> Self {
+    pub fn from_map_chunk(chunk: &MapChunk) -> Result<Self> {
+        if chunk.width != 16
+            || chunk.height != 16
+            || chunk.encoded_tile_count() != Some(256)
+            || chunk.sparse_overlays.keys().any(|offset| *offset >= 256)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "spatial index currently accepts only complete 16x16 chunks",
+            ));
+        }
         let mut tiles = [TileProperties::from_tile_type(TileType::SolidWall); 256];
         let mut idx = 0;
 
@@ -120,18 +132,10 @@ impl SpatialChunkNode {
             }
         }
 
-        // Apply sparse overlays
-        for offset in chunk.sparse_overlays.keys() {
-            let tile_idx = *offset as usize;
-            if tile_idx < 256 {
-                tiles[tile_idx] = TileProperties::from_tile_type(TileType::Floor);
-            }
-        }
-
-        Self {
+        Ok(Self {
             coord: chunk.coord,
             tiles,
-        }
+        })
     }
 
     #[must_use]
@@ -160,9 +164,10 @@ impl ChunkSpatialIndex {
     }
 
     /// Index or update a map chunk.
-    pub fn insert_or_update_chunk(&mut self, chunk: &MapChunk) {
-        let node = SpatialChunkNode::from_map_chunk(chunk);
+    pub fn insert_or_update_chunk(&mut self, chunk: &MapChunk) -> Result<()> {
+        let node = SpatialChunkNode::from_map_chunk(chunk)?;
         self.chunks.insert(chunk.coord, node);
+        Ok(())
     }
 
     /// Remove a chunk from the index.
@@ -189,7 +194,21 @@ impl ChunkSpatialIndex {
     }
 
     /// Find all tiles within a specified 3D cuboid bounding box.
-    pub fn find_cuboid(&self, cuboid: &MapCuboid) -> Vec<(MapCoord, TileProperties)> {
+    pub fn find_cuboid(&self, cuboid: &MapCuboid) -> Result<Vec<(MapCoord, TileProperties)>> {
+        let tile_count = cuboid.tile_count().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "spatial query cuboid tile count overflow",
+            )
+        })?;
+        if tile_count > MAX_SPATIAL_QUERY_TILES {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                format!(
+                    "spatial query covers {tile_count} tiles, exceeding limit {MAX_SPATIAL_QUERY_TILES}"
+                ),
+            ));
+        }
         let mut results = Vec::new();
         let min_x = cuboid.min.x.min(cuboid.max.x);
         let max_x = cuboid.min.x.max(cuboid.max.x);
@@ -209,7 +228,7 @@ impl ChunkSpatialIndex {
             }
         }
 
-        results
+        Ok(results)
     }
 
     /// Find all 6-directional walkable adjacent neighbors (up, down, north, south, east, west).
@@ -225,11 +244,16 @@ impl ChunkSpatialIndex {
 
         let mut neighbors = Vec::new();
         for (dx, dy, dz) in deltas {
-            let neighbor_coord = MapCoord {
-                x: coord.x.saturating_add(dx),
-                y: coord.y.saturating_add(dy),
-                z: coord.z.saturating_add(dz),
+            let Some(x) = coord.x.checked_add(dx) else {
+                continue;
             };
+            let Some(y) = coord.y.checked_add(dy) else {
+                continue;
+            };
+            let Some(z) = coord.z.checked_add(dz) else {
+                continue;
+            };
+            let neighbor_coord = MapCoord { x, y, z };
             if let Some(props) = self.get_tile(neighbor_coord)
                 && props.walkable
             {
@@ -257,10 +281,9 @@ impl ChunkSpatialIndex {
 mod tests {
     use super::*;
     use crate::model::TerrainRun;
-    use std::error::Error;
 
     #[test]
-    fn test_spatial_chunk_indexing_and_point_query() {
+    fn test_spatial_chunk_indexing_and_point_query() -> Result<()> {
         let mut index = ChunkSpatialIndex::new();
         let coord = ChunkCoord { x: 0, y: 0, z: 100 };
 
@@ -276,7 +299,7 @@ mod tests {
             sparse_overlays: BTreeMap::new(),
         };
 
-        index.insert_or_update_chunk(&chunk);
+        index.insert_or_update_chunk(&chunk)?;
         assert_eq!(index.chunk_count(), 1);
 
         let tile = index.get_tile(MapCoord { x: 5, y: 5, z: 100 });
@@ -284,10 +307,11 @@ mod tests {
         let tile = tile.unwrap_or(TileProperties::from_tile_type(TileType::SolidWall));
         assert_eq!(tile.tile_type, TileType::Floor);
         assert!(tile.walkable);
+        Ok(())
     }
 
     #[test]
-    fn test_cuboid_query() -> Result<(), Box<dyn Error>> {
+    fn test_cuboid_query() -> Result<()> {
         let mut index = ChunkSpatialIndex::new();
         let coord = ChunkCoord { x: 0, y: 0, z: 100 };
 
@@ -303,13 +327,13 @@ mod tests {
             sparse_overlays: BTreeMap::new(),
         };
 
-        index.insert_or_update_chunk(&chunk);
+        index.insert_or_update_chunk(&chunk)?;
 
         let cuboid = MapCuboid::new(
             MapCoord { x: 2, y: 2, z: 100 },
             MapCoord { x: 4, y: 4, z: 100 },
         )?;
-        let results = index.find_cuboid(&cuboid);
+        let results = index.find_cuboid(&cuboid)?;
         assert_eq!(results.len(), 9); // 3x3 on z=100
 
         Ok(())

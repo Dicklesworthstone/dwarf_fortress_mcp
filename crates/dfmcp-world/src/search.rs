@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! FrankenSearch Hybrid Attention and Knowledge Retrieval Engine.
+//! Deterministic in-memory attention-search prototype.
 //!
-//! WP-FRK-02: Provides deterministic BM25 full-text search and attention ranking
-//! over fortress thoughts, combat reports, announcements, and runbooks.
+//! WP-FRK-02 laboratory: provides a fixed-point lexical relevance ranking over
+//! fortress thoughts, combat reports, announcements, and runbooks. It is not an
+//! integration with FrankenSearch.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,13 +13,13 @@ use dfmcp_core::{EntityId, EventId};
 use crate::model::WorldSnapshot;
 
 /// A ranked search match from the FrankenSearch engine.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchHit {
     pub entity_id: Option<EntityId>,
     pub event_id: Option<EventId>,
     pub title: String,
     pub snippet: String,
-    pub score: f64,
+    pub score_micros: u64,
     pub matched_terms: Vec<String>,
 }
 
@@ -30,7 +31,7 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Hybrid BM25 Full-Text and Attention Ranking Search Engine.
+/// Fixed-point full-text and attention ranking laboratory.
 #[derive(Clone, Debug, Default)]
 pub struct FrankenSearchEngine {
     documents_count: usize,
@@ -84,6 +85,7 @@ impl FrankenSearchEngine {
 
     /// Index all entities and events from a world snapshot.
     pub fn index_snapshot(&mut self, snapshot: &WorldSnapshot) {
+        self.clear();
         for (id, entity) in &snapshot.graph.entities {
             let facts_text: Vec<String> = entity
                 .fields
@@ -105,7 +107,16 @@ impl FrankenSearchEngine {
         }
     }
 
-    /// Query the index using deterministic BM25 scoring.
+    /// Remove every indexed document.
+    pub fn clear(&mut self) {
+        self.documents_count = 0;
+        self.total_length = 0;
+        self.doc_lengths.clear();
+        self.inverted_index.clear();
+        self.doc_metadata.clear();
+    }
+
+    /// Query the index using deterministic fixed-point lexical scoring.
     #[must_use]
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchHit> {
         let query_terms = tokenize(query);
@@ -113,42 +124,53 @@ impl FrankenSearchEngine {
             return Vec::new();
         }
 
-        let avgdl = (self.total_length as f64) / (self.documents_count as f64);
-        let k1 = 1.2;
-        let b = 0.75;
+        const SCALE: u128 = 1_000_000;
+        const K1_MICROS: u128 = 1_200_000;
+        const ONE_PLUS_K1_MICROS: u128 = 2_200_000;
+        const B_MICROS: u128 = 750_000;
 
-        let mut doc_scores: BTreeMap<usize, (f64, BTreeSet<String>)> = BTreeMap::new();
+        let mut doc_scores: BTreeMap<usize, (u64, BTreeSet<String>)> = BTreeMap::new();
 
         for term in &query_terms {
             if let Some(postings) = self.inverted_index.get(term) {
-                let n_q = postings.len() as f64;
-                let idf = ((self.documents_count as f64 - n_q + 0.5) / (n_q + 0.5) + 1.0).ln();
+                let document_count = self.documents_count as u128;
+                let document_frequency = postings.len() as u128;
+                let idf_micros =
+                    (document_count + 1).saturating_mul(SCALE) / (document_frequency + 1);
 
                 for &(doc_idx, freq) in postings {
-                    let doc_len = self.doc_lengths[doc_idx] as f64;
-                    let tf = freq as f64;
-                    let numerator = tf * (k1 + 1.0);
-                    let denominator = tf + k1 * (1.0 - b + b * (doc_len / avgdl));
-                    let term_score = idf * (numerator / denominator);
+                    let document_length = self.doc_lengths[doc_idx] as u128;
+                    let frequency = freq as u128;
+                    let length_ratio_micros = document_length
+                        .saturating_mul(document_count)
+                        .saturating_mul(SCALE)
+                        / (self.total_length.max(1) as u128);
+                    let length_normalization_micros = (SCALE - B_MICROS)
+                        .saturating_add(B_MICROS.saturating_mul(length_ratio_micros) / SCALE);
+                    let denominator_micros = frequency.saturating_mul(SCALE).saturating_add(
+                        K1_MICROS.saturating_mul(length_normalization_micros) / SCALE,
+                    );
+                    let term_frequency_micros = frequency
+                        .saturating_mul(ONE_PLUS_K1_MICROS)
+                        .saturating_mul(SCALE)
+                        / denominator_micros.max(1);
+                    let term_score = idf_micros.saturating_mul(term_frequency_micros) / SCALE;
+                    let term_score = u64::try_from(term_score).unwrap_or(u64::MAX);
 
-                    let entry = doc_scores.entry(doc_idx).or_insert((0.0, BTreeSet::new()));
-                    entry.0 += term_score;
+                    let entry = doc_scores.entry(doc_idx).or_insert((0, BTreeSet::new()));
+                    entry.0 = entry.0.saturating_add(term_score);
                     entry.1.insert(term.clone());
                 }
             }
         }
 
-        let mut ranked: Vec<(usize, f64, Vec<String>)> = doc_scores
+        let mut ranked: Vec<(usize, u64, Vec<String>)> = doc_scores
             .into_iter()
             .map(|(doc_idx, (score, terms))| (doc_idx, score, terms.into_iter().collect()))
             .collect();
 
         // Sort by score desc, then doc_idx asc for deterministic tie-breaking
-        ranked.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
         ranked
             .into_iter()
@@ -156,7 +178,13 @@ impl FrankenSearchEngine {
             .map(|(doc_idx, score, matched_terms)| {
                 let (entity_id, event_id, ref title, ref body) = self.doc_metadata[doc_idx];
                 let snippet = if body.len() > 120 {
-                    format!("{}...", &body[..120])
+                    let boundary = body
+                        .char_indices()
+                        .map(|(index, _)| index)
+                        .take_while(|index| *index <= 120)
+                        .last()
+                        .unwrap_or(0);
+                    format!("{}...", &body[..boundary])
                 } else {
                     body.clone()
                 };
@@ -166,7 +194,7 @@ impl FrankenSearchEngine {
                     event_id,
                     title: title.clone(),
                     snippet,
-                    score,
+                    score_micros: score,
                     matched_terms,
                 }
             })

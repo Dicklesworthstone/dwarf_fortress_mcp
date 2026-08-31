@@ -87,9 +87,9 @@ fn test_durable_ledger_crash_recovery_and_witness_validation() -> Result<(), Box
         "idemp_key_01",
         Digest32::of_bytes(b"plan_dig"),
         GameTick(105),
-    );
+    )?;
     let initial_rec = ledger.effects.get("idemp_key_01").ok_or("effect missing")?;
-    assert_eq!(initial_rec.state, CommitState::Prepared);
+    assert_eq!(initial_rec.state, CommitState::Committing);
 
     // 2. Simulate crash before receipt arrived: must recover as Indeterminate
     ledger.recover_from_crash();

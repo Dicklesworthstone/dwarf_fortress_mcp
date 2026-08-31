@@ -167,23 +167,24 @@ fn test_dfhack_adapter_health_check() -> Result<(), Box<dyn Error>> {
     let ctx = test_context();
 
     let health = adapter.health(&ctx)?;
-    assert_eq!(health.status, HealthStatus::Healthy);
-    assert_eq!(health.paused, Some(true));
-    assert_eq!(health.identity.name, "dfhack-oop-bridge");
+    assert_eq!(health.status, HealthStatus::Degraded);
+    assert_eq!(health.paused, None);
+    assert!(!health.fortress_loaded);
+    assert_eq!(health.identity.name, "dfhack-oop-bridge-probe");
+    assert_eq!(health.identity.dwarf_fortress_version, "unverified");
     Ok(())
 }
 
 #[test]
-fn test_dfhack_adapter_checkpoint_and_restore_lifecycle() -> Result<(), Box<dyn Error>> {
+fn test_dfhack_adapter_checkpoint_and_restore_fail_closed() -> Result<(), Box<dyn Error>> {
     let stream = MockDuplexStream::new();
     let mut adapter = DfhackAdapter::new(stream, DfhackAdapterConfig::default());
     let ctx = test_context();
 
-    let checkpoint = adapter.checkpoint("pre-siege-save", &ctx)?;
-    assert_eq!(checkpoint.label, "pre-siege-save");
-    assert!(checkpoint.durable);
+    let checkpoint = adapter.checkpoint("pre-siege-save", &ctx);
+    assert!(checkpoint.is_err());
 
-    let restore = adapter.restore(checkpoint.checkpoint_id, &ctx)?;
-    assert_eq!(restore.restored_anchor.cursor.epoch, 1);
+    let restore = adapter.restore(dfmcp_core::CheckpointId::new(1), &ctx);
+    assert!(restore.is_err());
     Ok(())
 }

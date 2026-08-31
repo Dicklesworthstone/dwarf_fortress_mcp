@@ -63,9 +63,19 @@ impl Drop for StdioClient {
 }
 
 fn modern_meta() -> Value {
+    // MCP 2026-07-28 server/discover requires clientInfo in _meta;
+    // minimal {protocolVersion, clientCapabilities} silently fails the
+    // dispatch (no JSON-RPC response is emitted). Findings filed per
+    // docs/DOGFOODING_FASTMCP.md.
     json!({
         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-        "io.modelcontextprotocol/clientCapabilities": {}
+        "io.modelcontextprotocol/clientCapabilities": {
+            "tools": {"listChanged": true}
+        },
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "dfmcp-modern-handshake-golden",
+            "version": "0.0.1"
+        }
     })
 }
 
