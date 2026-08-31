@@ -431,13 +431,15 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::error::Error;
+
     use super::{bounded_env_u32, doctor};
     use dfmcp_adapter::{
         BridgeManifest, ObservationAssembler, ObservationPage, derive_live_fortress_id,
         parse_loopback_endpoint,
     };
     use dfmcp_core::FortressId;
-    use std::collections::BTreeSet;
 
     #[test]
     fn doctor_command_has_the_authority_it_exercises() {
