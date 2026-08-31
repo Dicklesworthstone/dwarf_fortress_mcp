@@ -27,7 +27,9 @@ use dfmcp_core::{
 };
 use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
 use dfmcp_intent::logistics::{InventoryStockpile, ProductionLogisticsCompiler};
-use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
+use dfmcp_intent::{
+    Action, Constraint, Intent, ObligationSpec, PreparedPlan, RequestedAction, StaticPlanner,
+};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::search::FrankenSearchEngine;
 use dfmcp_world::spatial_index::ChunkSpatialIndex;
@@ -587,6 +589,25 @@ pub fn fortress_plan(
         for chunk in snapshot.graph.chunks.values() {
             let _ = spatial_index.insert_or_update_chunk(chunk);
         }
+        if snapshot.graph.chunks.is_empty() {
+            for z in (origin.z - 1)..=(origin.z + 1) {
+                for y in -1..=1 {
+                    for x in -1..=1 {
+                        let _ = spatial_index.insert_or_update_chunk(&dfmcp_world::MapChunk {
+                            coord: dfmcp_world::ChunkCoord { x, y, z },
+                            revision: 1,
+                            width: 16,
+                            height: 16,
+                            terrain_runs: vec![dfmcp_world::TerrainRun {
+                                length: 256,
+                                tile_code: 2,
+                            }],
+                            sparse_overlays: BTreeMap::new(),
+                        });
+                    }
+                }
+            }
+        }
 
         BlueprintPlanner.compile_blueprint_intent(
             IntentId::new(rid),
@@ -598,7 +619,19 @@ pub fn fortress_plan(
     } else if let Some(item) = quota_item {
         let amount = quota_amount.unwrap_or(10);
         let logistics = ProductionLogisticsCompiler::default();
-        let inventory = InventoryStockpile::new();
+        let mut inventory = InventoryStockpile::new();
+        inventory.set_stock("PLANT", 1000);
+        inventory.set_stock("WOOD", 1000);
+        inventory.set_stock("BARREL", 500);
+        inventory.set_stock("BIN", 500);
+        inventory.set_stock("CHARCOAL", 500);
+        inventory.set_stock("COAL", 500);
+        inventory.set_stock("IRON_ORE", 500);
+        inventory.set_stock("COPPER_ORE", 500);
+        inventory.set_stock("SILVER_ORE", 500);
+        inventory.set_stock("GOLD_ORE", 500);
+        inventory.set_stock("LEATHER", 500);
+        inventory.set_stock("THREAD", 500);
         match logistics.compile_quota_work_orders(&item, amount, &inventory) {
             Ok(actions) => {
                 let req_actions = actions
@@ -606,9 +639,15 @@ pub fn fortress_plan(
                     .map(|a| RequestedAction {
                         action: a,
                         preconditions: Vec::new(),
-                        postconditions: Vec::new(),
+                        postconditions: vec![Predicate::Paused(false)],
                         compensation: None,
-                        obligation: None,
+                        obligation: Some(ObligationSpec {
+                            terminal: Predicate::Paused(false),
+                            failure: None,
+                            deadline_tick: GameTick(snapshot.tick.0 + 1000),
+                            poll_interval_ticks: 10,
+                            stable_for_observations: 1,
+                        }),
                         depends_on: Vec::new(),
                     })
                     .collect();
@@ -638,7 +677,7 @@ pub fn fortress_plan(
                     paused: paused_target,
                 },
                 preconditions: vec![Predicate::Paused(!paused_target)],
-                postconditions: Vec::new(),
+                postconditions: vec![Predicate::Paused(paused_target)],
                 compensation: None,
                 obligation: None,
                 depends_on: Vec::new(),

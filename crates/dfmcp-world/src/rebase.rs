@@ -1,17 +1,18 @@
 #![forbid(unsafe_code)]
 
-//! Semantic Rebase Conflict Resolution and Deterministic Certificate Generation.
+//! Conservative, deterministic structural rebase laboratory.
 //!
-//! WP-WOR-04: Resolves optimistic concurrency conflicts when rebasing prepared plans
-//! and change sets across world state epochs, emitting cryptographic certificates of conflict.
+//! This module merges only stable-key records whose base/ours/theirs relationship is
+//! unambiguous. It never increments a revision or combines record fields speculatively.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{Digest32, PlanId, StateAnchor};
 
-use crate::delta::WorldChange;
+use crate::delta::{WorldChange, build_delta};
 use crate::ledger::WitnessSet;
 use crate::model::{WorldGraph, WorldSnapshot};
 
-/// Classification of semantic rebase conflicts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConflictKind {
     AnchorDivergence,
@@ -21,7 +22,6 @@ pub enum ConflictKind {
     ResourceDepleted,
 }
 
-/// Cryptographic certificate proving why a rebase failed or was rejected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConflictCertificate {
     pub plan_id: PlanId,
@@ -49,7 +49,6 @@ impl ConflictCertificate {
         encode_conflict_kind(&mut bytes, &conflict_kind);
         crate::canonical::put_str(&mut bytes, &diagnosis);
         let certificate_digest = Digest32::of_bytes(&bytes);
-
         Self {
             plan_id,
             base_anchor,
@@ -74,19 +73,15 @@ fn encode_conflict_kind(output: &mut Vec<u8>, kind: &ConflictKind) {
     }
 }
 
-/// Outcome of an attempted semantic rebase.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RebaseOutcome {
-    /// Rebase succeeded cleanly with re-anchored state and changes.
     Clean {
         rebased_anchor: StateAnchor,
         rebased_changes: Vec<WorldChange>,
     },
-    /// Rebase failed due to state conflict.
     Conflicted(ConflictCertificate),
 }
 
-/// Deterministic semantic rebase engine for optimistic concurrency.
 #[derive(Clone, Debug, Default)]
 pub struct SemanticRebaseEngine;
 
@@ -96,260 +91,186 @@ impl SemanticRebaseEngine {
         Self
     }
 
-    /// Attempt to rebase a set of world changes from a base snapshot onto a target snapshot.
     pub fn rebase_changes(
         &self,
-        base_snapshot: &WorldSnapshot,
-        target_snapshot: &WorldSnapshot,
+        base: &WorldSnapshot,
+        target: &WorldSnapshot,
         changes: &[WorldChange],
         plan_id: PlanId,
     ) -> RebaseOutcome {
-        let base_anchor = base_snapshot.anchor();
-        let target_anchor = target_snapshot.anchor();
-
-        if base_anchor.fortress_id != target_anchor.fortress_id {
-            return RebaseOutcome::Conflicted(ConflictCertificate::new(
+        let base_anchor = base.anchor();
+        let target_anchor = target.anchor();
+        if !base.hash_is_valid()
+            || !target.hash_is_valid()
+            || base.fortress_id != target.fortress_id
+            || base.cursor.epoch != target.cursor.epoch
+        {
+            return conflicted(
                 plan_id,
                 base_anchor,
                 target_anchor,
                 ConflictKind::AnchorDivergence,
-                format!(
-                    "fortress id mismatch: base {} vs target {}",
-                    base_anchor.fortress_id.get(),
-                    target_anchor.fortress_id.get()
-                ),
-            ));
+                "rebase snapshots have invalid hashes, fortresses, or epochs",
+            );
         }
-
-        // Fast path: identical anchors require no structural rebase
-        if base_anchor == target_anchor {
-            return RebaseOutcome::Clean {
-                rebased_anchor: target_anchor,
-                rebased_changes: changes.to_vec(),
-            };
+        let validation_cursor = base.cursor.next();
+        if validation_cursor == base.cursor
+            || build_delta(base, validation_cursor, base.tick, changes.to_vec()).is_err()
+        {
+            return conflicted(
+                plan_id,
+                base_anchor,
+                target_anchor,
+                ConflictKind::PreconditionViolated {
+                    description: "change set is invalid against its declared base".to_owned(),
+                },
+                "change set could not be applied to the base snapshot",
+            );
         }
 
         let mut rebased = Vec::new();
-
         for change in changes {
-            match change {
-                WorldChange::UpsertEntity(record) => {
-                    // Check if target entity exists and has advanced generation (ABA detection)
-                    if let Some(target_record) = target_snapshot.graph.entities.get(&record.id)
-                        && target_record.generation > record.generation
-                    {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::EntityUnavailable,
-                            format!(
-                                "ABA generation mismatch for entity {}: record gen {} < target gen {}",
-                                record.id, record.generation, target_record.generation
-                            ),
-                        ));
-                    }
-                    let mut rebased_rec = record.clone();
-                    // Rebase revision if target has a higher revision within same generation
-                    if let Some(target_record) = target_snapshot.graph.entities.get(&record.id)
-                        && target_record.generation == record.generation
-                        && target_record.revision >= record.revision
-                    {
-                        rebased_rec.revision = target_record.revision.saturating_add(1);
-                    }
-                    rebased.push(WorldChange::UpsertEntity(rebased_rec));
-                }
+            let decision = match change {
+                WorldChange::UpsertEntity(incoming) => stable_upsert(
+                    base.graph.entities.get(&incoming.id),
+                    target.graph.entities.get(&incoming.id),
+                    incoming,
+                ),
                 WorldChange::RemoveEntity {
                     id,
                     expected_generation,
                     expected_revision,
-                } => {
-                    if let Some(target_record) = target_snapshot.graph.entities.get(id) {
-                        if target_record.generation != *expected_generation {
-                            return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                                plan_id,
-                                base_anchor,
-                                target_anchor,
-                                ConflictKind::EntityUnavailable,
-                                format!(
-                                    "cannot remove entity {id}: expected generation {expected_generation} but found {}",
-                                    target_record.generation
-                                ),
-                            ));
-                        }
-                    } else {
-                        // Already absent in target - idempotent skip or conflict
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::EntityUnavailable,
-                            format!("entity {id} was already removed in target snapshot"),
-                        ));
-                    }
-                    rebased.push(WorldChange::RemoveEntity {
-                        id: *id,
-                        expected_generation: *expected_generation,
-                        expected_revision: *expected_revision,
-                    });
-                }
-                WorldChange::UpsertEdge(edge) => {
-                    // Validate edge endpoints exist in target snapshot
-                    if !target_snapshot.graph.entities.contains_key(&edge.from) {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::PreconditionViolated {
-                                description: format!("edge source entity {} missing", edge.from),
-                            },
-                            format!(
-                                "edge source entity {} not found in target snapshot",
-                                edge.from
-                            ),
-                        ));
-                    }
-                    if !target_snapshot.graph.entities.contains_key(&edge.to) {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::PreconditionViolated {
-                                description: format!("edge target entity {} missing", edge.to),
-                            },
-                            format!(
-                                "edge target entity {} not found in target snapshot",
-                                edge.to
-                            ),
-                        ));
-                    }
-                    let mut rebased_edge = edge.clone();
-                    if let Some(target_edge) = target_snapshot.graph.edges.get(&edge.id)
-                        && target_edge.revision >= edge.revision
-                    {
-                        rebased_edge.revision = target_edge.revision.saturating_add(1);
-                    }
-                    rebased.push(WorldChange::UpsertEdge(rebased_edge));
-                }
+                } => stable_remove(
+                    base.graph.entities.get(id),
+                    target.graph.entities.get(id),
+                    |record| {
+                        record.generation == *expected_generation
+                            && record.revision == *expected_revision
+                    },
+                ),
+                WorldChange::UpsertEdge(incoming) => stable_upsert(
+                    base.graph.edges.get(&incoming.id),
+                    target.graph.edges.get(&incoming.id),
+                    incoming,
+                ),
                 WorldChange::RemoveEdge {
                     id,
                     expected_revision,
-                } => {
-                    if !target_snapshot.graph.edges.contains_key(id) {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::PreconditionViolated {
-                                description: format!("edge {:?} missing", id),
-                            },
-                            format!("edge {:?} not found in target snapshot to remove", id),
-                        ));
-                    }
-                    rebased.push(WorldChange::RemoveEdge {
-                        id: *id,
-                        expected_revision: *expected_revision,
-                    });
-                }
-                WorldChange::UpsertMapChunk(chunk) => {
-                    rebased.push(WorldChange::UpsertMapChunk(chunk.clone()));
-                }
+                } => stable_remove(
+                    base.graph.edges.get(id),
+                    target.graph.edges.get(id),
+                    |record| record.revision == *expected_revision,
+                ),
+                WorldChange::UpsertMapChunk(incoming) => stable_upsert(
+                    base.graph.chunks.get(&incoming.coord),
+                    target.graph.chunks.get(&incoming.coord),
+                    incoming,
+                ),
                 WorldChange::RemoveMapChunk {
                     coord,
                     expected_revision,
-                } => {
-                    rebased.push(WorldChange::RemoveMapChunk {
-                        coord: *coord,
-                        expected_revision: *expected_revision,
-                    });
-                }
-                WorldChange::AppendEvent(event) => {
-                    rebased.push(WorldChange::AppendEvent(event.clone()));
+                } => stable_remove(
+                    base.graph.chunks.get(coord),
+                    target.graph.chunks.get(coord),
+                    |record| record.revision == *expected_revision,
+                ),
+                WorldChange::AppendEvent(incoming) => stable_upsert(
+                    base.graph.events.get(&incoming.id),
+                    target.graph.events.get(&incoming.id),
+                    incoming,
+                ),
+            };
+            match decision {
+                StableDecision::Apply => rebased.push(change.clone()),
+                StableDecision::AlreadyApplied => {}
+                StableDecision::Conflict => {
+                    let (kind, diagnosis) = match change {
+                        WorldChange::UpsertEntity(incoming)
+                            if target
+                                .graph
+                                .entities
+                                .get(&incoming.id)
+                                .is_some_and(|record| record.generation > incoming.generation) =>
+                        {
+                            (
+                                ConflictKind::EntityUnavailable,
+                                format!("ABA generation mismatch for entity {}", incoming.id),
+                            )
+                        }
+                        _ => (
+                            ConflictKind::PreconditionViolated {
+                                description: "stable-key record changed concurrently".to_owned(),
+                            },
+                            "stable-key record changed concurrently; semantic replay is required"
+                                .to_owned(),
+                        ),
+                    };
+                    return conflicted(plan_id, base_anchor, target_anchor, kind, diagnosis);
                 }
             }
         }
-
         RebaseOutcome::Clean {
             rebased_anchor: target_anchor,
             rebased_changes: rebased,
         }
     }
 
-    /// Rebase changes with an associated witness set validation.
     pub fn rebase_with_witness(
         &self,
-        base_snapshot: &WorldSnapshot,
-        target_snapshot: &WorldSnapshot,
+        base: &WorldSnapshot,
+        target: &WorldSnapshot,
         witness: &WitnessSet,
         changes: &[WorldChange],
         plan_id: PlanId,
     ) -> RebaseOutcome {
-        let base_anchor = base_snapshot.anchor();
-        let target_anchor = target_snapshot.anchor();
-
-        // 1. Verify positive entity witnesses against target snapshot
-        for (w_id, w_gen, w_rev) in &witness.positive_entities {
-            match target_snapshot.graph.entities.get(w_id) {
-                None => {
-                    return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                        plan_id,
-                        base_anchor,
-                        target_anchor,
-                        ConflictKind::EntityUnavailable,
-                        format!("witnessed positive entity {w_id} was removed in target snapshot"),
-                    ));
-                }
-                Some(rec) => {
-                    if rec.generation != *w_gen {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::EntityUnavailable,
-                            format!(
-                                "witnessed positive entity {w_id} ABA generation mismatch: witnessed {w_gen} vs target {}",
-                                rec.generation
-                            ),
-                        ));
-                    }
-                    if rec.revision != *w_rev {
-                        return RebaseOutcome::Conflicted(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            target_anchor,
-                            ConflictKind::PreconditionViolated {
-                                description: format!("entity {w_id} revision divergence"),
-                            },
-                            format!(
-                                "witnessed positive entity {w_id} revision changed: witnessed {w_rev} vs target {}",
-                                rec.revision
-                            ),
-                        ));
-                    }
-                }
+        let base_anchor = base.anchor();
+        let target_anchor = target.anchor();
+        for (id, generation, revision) in &witness.positive_entities {
+            if !target.graph.entities.get(id).is_some_and(|record| {
+                record.generation == *generation && record.revision == *revision
+            }) {
+                return conflicted(
+                    plan_id,
+                    base_anchor,
+                    target_anchor,
+                    ConflictKind::EntityUnavailable,
+                    format!("witnessed positive entity {id} changed or disappeared"),
+                );
             }
         }
-
-        // 2. Verify negative entity witnesses (phantom protection)
-        for neg_id in &witness.negative_entities {
-            if target_snapshot.graph.entities.contains_key(neg_id) {
-                return RebaseOutcome::Conflicted(ConflictCertificate::new(
+        for id in &witness.negative_entities {
+            if target.graph.entities.contains_key(id) {
+                return conflicted(
                     plan_id,
                     base_anchor,
                     target_anchor,
                     ConflictKind::PreconditionViolated {
-                        description: format!("phantom entity {neg_id} appeared"),
+                        description: format!("phantom entity {id} appeared"),
                     },
-                    format!("witnessed absent entity {neg_id} was created in target snapshot"),
-                ));
+                    format!("witnessed absent entity {id} was created in target snapshot"),
+                );
             }
         }
-
-        // 3. Rebase change set
-        self.rebase_changes(base_snapshot, target_snapshot, changes, plan_id)
+        for (coord, revision) in &witness.witnessed_chunks {
+            if !target
+                .graph
+                .chunks
+                .get(coord)
+                .is_some_and(|chunk| chunk.revision == *revision)
+            {
+                return conflicted(
+                    plan_id,
+                    base_anchor,
+                    target_anchor,
+                    ConflictKind::SpatialOverlap,
+                    format!("witnessed map chunk {coord:?} changed or disappeared"),
+                );
+            }
+        }
+        self.rebase_changes(base, target, changes, plan_id)
     }
 
-    /// Perform a 3-way merge between base, ours, and theirs.
+    /// Record-granularity three-way merge with deterministic stable-key ordering.
     #[allow(clippy::result_large_err)]
     pub fn three_way_merge(
         &self,
@@ -359,135 +280,187 @@ impl SemanticRebaseEngine {
         plan_id: PlanId,
     ) -> std::result::Result<WorldSnapshot, ConflictCertificate> {
         let base_anchor = base.anchor();
-        let theirs_anchor = theirs.anchor();
-
-        if base.fortress_id != ours.fortress_id || base.fortress_id != theirs.fortress_id {
+        let target_anchor = theirs.anchor();
+        if !base.hash_is_valid()
+            || !ours.hash_is_valid()
+            || !theirs.hash_is_valid()
+            || base.fortress_id != ours.fortress_id
+            || base.fortress_id != theirs.fortress_id
+            || base.cursor.epoch != ours.cursor.epoch
+            || base.cursor.epoch != theirs.cursor.epoch
+        {
             return Err(ConflictCertificate::new(
                 plan_id,
                 base_anchor,
-                theirs_anchor,
+                target_anchor,
                 ConflictKind::AnchorDivergence,
-                "three-way merge snapshots belong to differing fortresses".to_owned(),
+                "three-way merge snapshots have invalid hashes, fortresses, or epochs".to_owned(),
             ));
         }
 
-        let mut merged_entities = theirs.graph.entities.clone();
-
-        // Merge our entity additions / updates
-        for (id, our_entity) in &ours.graph.entities {
-            match base.graph.entities.get(id) {
-                None => {
-                    // Added by us: check if theirs also added it
-                    if let Some(their_entity) = theirs.graph.entities.get(id) {
-                        if their_entity != our_entity {
-                            return Err(ConflictCertificate::new(
-                                plan_id,
-                                base_anchor,
-                                theirs_anchor,
-                                ConflictKind::PreconditionViolated {
-                                    description: format!(
-                                        "divergent concurrent insertion of entity {id}"
-                                    ),
-                                },
-                                format!("entity {id} inserted concurrently with different content"),
-                            ));
-                        }
-                    } else {
-                        merged_entities.insert(*id, our_entity.clone());
-                    }
-                }
-                Some(base_entity) => {
-                    if our_entity != base_entity {
-                        // Modified by us: check if theirs also modified it
-                        if let Some(their_entity) = theirs.graph.entities.get(id) {
-                            if their_entity != base_entity && their_entity != our_entity {
-                                return Err(ConflictCertificate::new(
-                                    plan_id,
-                                    base_anchor,
-                                    theirs_anchor,
-                                    ConflictKind::PreconditionViolated {
-                                        description: format!(
-                                            "concurrent modification of entity {id}"
-                                        ),
-                                    },
-                                    format!("entity {id} modified concurrently on both branches"),
-                                ));
-                            }
-                        } else {
-                            // Deleted by theirs, modified by ours -> conflict
-                            return Err(ConflictCertificate::new(
-                                plan_id,
-                                base_anchor,
-                                theirs_anchor,
-                                ConflictKind::EntityUnavailable,
-                                format!("entity {id} modified by ours but deleted by theirs"),
-                            ));
-                        }
-                        merged_entities.insert(*id, our_entity.clone());
-                    }
-                }
-            }
-        }
-
-        // Merge our entity deletions
-        for (id, base_entity) in &base.graph.entities {
-            if !ours.graph.entities.contains_key(id) {
-                // Deleted by us
-                if let Some(their_entity) = theirs.graph.entities.get(id) {
-                    if their_entity != base_entity {
-                        return Err(ConflictCertificate::new(
-                            plan_id,
-                            base_anchor,
-                            theirs_anchor,
-                            ConflictKind::EntityUnavailable,
-                            format!("entity {id} deleted by ours but modified by theirs"),
-                        ));
-                    }
-                    merged_entities.remove(id);
-                }
-            }
-        }
-
-        let mut merged_edges = theirs.graph.edges.clone();
-        for (id, our_edge) in &ours.graph.edges {
-            if !theirs.graph.edges.contains_key(id) && !base.graph.edges.contains_key(id) {
-                merged_edges.insert(*id, our_edge.clone());
-            }
-        }
-
-        let mut merged_chunks = theirs.graph.chunks.clone();
-        for (coord, our_chunk) in &ours.graph.chunks {
-            if !theirs.graph.chunks.contains_key(coord) && !base.graph.chunks.contains_key(coord) {
-                merged_chunks.insert(*coord, our_chunk.clone());
-            }
-        }
-
-        let mut merged_events = theirs.graph.events.clone();
-        for (id, our_event) in &ours.graph.events {
-            if !theirs.graph.events.contains_key(id) && !base.graph.events.contains_key(id) {
-                merged_events.insert(*id, our_event.clone());
-            }
-        }
-
-        let merged_graph = WorldGraph {
-            entities: merged_entities,
-            edges: merged_edges,
-            chunks: merged_chunks,
-            events: merged_events,
-        };
-
-        let target_tick = ours.tick.max(theirs.tick);
-        let target_cursor = dfmcp_core::ObservationCursor {
-            epoch: theirs.cursor.epoch,
-            sequence: theirs.cursor.sequence.saturating_add(1),
-        };
-
+        let entities = merge_map(
+            &base.graph.entities,
+            &ours.graph.entities,
+            &theirs.graph.entities,
+        )
+        .map_err(|key| merge_conflict(plan_id, base_anchor, target_anchor, "entity", &key))?;
+        let edges = merge_map(&base.graph.edges, &ours.graph.edges, &theirs.graph.edges)
+            .map_err(|key| merge_conflict(plan_id, base_anchor, target_anchor, "edge", &key))?;
+        let chunks = merge_map(&base.graph.chunks, &ours.graph.chunks, &theirs.graph.chunks)
+            .map_err(|key| merge_conflict(plan_id, base_anchor, target_anchor, "chunk", &key))?;
+        let events = merge_map(&base.graph.events, &ours.graph.events, &theirs.graph.events)
+            .map_err(|key| merge_conflict(plan_id, base_anchor, target_anchor, "event", &key))?;
+        let paused = merge_scalar(base.paused, ours.paused, theirs.paused).ok_or_else(|| {
+            merge_conflict(
+                plan_id,
+                base_anchor,
+                target_anchor,
+                "pause state",
+                &"paused",
+            )
+        })?;
+        let sequence = ours
+            .cursor
+            .sequence
+            .max(theirs.cursor.sequence)
+            .checked_add(1)
+            .ok_or_else(|| {
+                ConflictCertificate::new(
+                    plan_id,
+                    base_anchor,
+                    target_anchor,
+                    ConflictKind::AnchorDivergence,
+                    "merged observation cursor would overflow".to_owned(),
+                )
+            })?;
         Ok(WorldSnapshot::new(
             base.fortress_id,
-            target_tick,
-            target_cursor,
-            theirs.paused,
-            merged_graph,
+            ours.tick.max(theirs.tick),
+            dfmcp_core::ObservationCursor {
+                epoch: base.cursor.epoch,
+                sequence,
+            },
+            paused,
+            WorldGraph {
+                entities,
+                edges,
+                chunks,
+                events,
+            },
         ))
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StableDecision {
+    Apply,
+    AlreadyApplied,
+    Conflict,
+}
+
+fn stable_upsert<T: PartialEq>(
+    base: Option<&T>,
+    target: Option<&T>,
+    incoming: &T,
+) -> StableDecision {
+    if target == Some(incoming) {
+        StableDecision::AlreadyApplied
+    } else if target == base {
+        StableDecision::Apply
+    } else {
+        StableDecision::Conflict
+    }
+}
+
+fn stable_remove<T: PartialEq>(
+    base: Option<&T>,
+    target: Option<&T>,
+    expected: impl FnOnce(&T) -> bool,
+) -> StableDecision {
+    let Some(base_record) = base else {
+        return StableDecision::Conflict;
+    };
+    if !expected(base_record) {
+        return StableDecision::Conflict;
+    }
+    match target {
+        None => StableDecision::AlreadyApplied,
+        Some(target_record) if target_record == base_record => StableDecision::Apply,
+        Some(_) => StableDecision::Conflict,
+    }
+}
+
+fn merge_map<K, V>(
+    base: &BTreeMap<K, V>,
+    ours: &BTreeMap<K, V>,
+    theirs: &BTreeMap<K, V>,
+) -> std::result::Result<BTreeMap<K, V>, K>
+where
+    K: Clone + Ord,
+    V: Clone + PartialEq,
+{
+    let keys: BTreeSet<K> = base
+        .keys()
+        .chain(ours.keys())
+        .chain(theirs.keys())
+        .cloned()
+        .collect();
+    let mut merged = BTreeMap::new();
+    for key in keys {
+        let choice = if ours.get(&key) == base.get(&key) {
+            theirs.get(&key)
+        } else if theirs.get(&key) == base.get(&key) || ours.get(&key) == theirs.get(&key) {
+            ours.get(&key)
+        } else {
+            return Err(key);
+        };
+        if let Some(value) = choice {
+            merged.insert(key, value.clone());
+        }
+    }
+    Ok(merged)
+}
+
+fn merge_scalar<T: Copy + PartialEq>(base: T, ours: T, theirs: T) -> Option<T> {
+    if ours == base {
+        Some(theirs)
+    } else if theirs == base || ours == theirs {
+        Some(ours)
+    } else {
+        None
+    }
+}
+
+fn merge_conflict(
+    plan_id: PlanId,
+    base_anchor: StateAnchor,
+    target_anchor: StateAnchor,
+    record_kind: &str,
+    key: &impl std::fmt::Debug,
+) -> ConflictCertificate {
+    ConflictCertificate::new(
+        plan_id,
+        base_anchor,
+        target_anchor,
+        ConflictKind::PreconditionViolated {
+            description: format!("concurrent {record_kind} edit"),
+        },
+        format!("concurrent {record_kind} edit at stable key {key:?}"),
+    )
+}
+
+fn conflicted(
+    plan_id: PlanId,
+    base_anchor: StateAnchor,
+    target_anchor: StateAnchor,
+    kind: ConflictKind,
+    diagnosis: impl Into<String>,
+) -> RebaseOutcome {
+    RebaseOutcome::Conflicted(ConflictCertificate::new(
+        plan_id,
+        base_anchor,
+        target_anchor,
+        kind,
+        diagnosis.into(),
+    ))
 }

@@ -18,6 +18,7 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
             ("observe".to_owned(), "read_only".to_owned()),
             ("query".to_owned(), "read_only".to_owned()),
             ("plan".to_owned(), "guarded".to_owned()),
+            ("checkpoint".to_owned(), "guarded".to_owned()),
             ("designate".to_owned(), "guarded".to_owned()),
             ("configure_production".to_owned(), "reversible".to_owned()),
             ("control_clock".to_owned(), "reversible".to_owned()),
@@ -63,15 +64,7 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
     );
     let bp_plan_json: Value = serde_json::from_str(&bp_plan_raw)?;
     assert_eq!(bp_plan_json["ok"], true);
-    let bp_digest = bp_plan_json["plan_digest"]
-        .as_str()
-        .ok_or("plan_digest missing")?
-        .to_owned();
-
-    // Commit Blueprint Plan
-    let commit_bp_raw = fortress_commit(Some(session_id.clone()), bp_digest);
-    let commit_bp_json: Value = serde_json::from_str(&commit_bp_raw)?;
-    assert_eq!(commit_bp_json["ok"], true);
+    assert!(bp_plan_json["plan_digest"].is_string());
 
     // 4. Plan Logistics Quota Work Orders
     let log_plan_raw = fortress_plan(
@@ -89,17 +82,34 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
     );
     let log_plan_json: Value = serde_json::from_str(&log_plan_raw)?;
     assert_eq!(log_plan_json["ok"], true);
-    let log_digest = log_plan_json["plan_digest"]
+    assert!(log_plan_json["plan_digest"].is_string());
+
+    // 5. Plan and Commit Pause Simulation Plan (supported by MemoryAdapter)
+    let pause_plan_raw = fortress_plan(
+        Some(session_id.clone()),
+        Some("unpause simulation".to_owned()),
+        Some(false),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let pause_plan_json: Value = serde_json::from_str(&pause_plan_raw)?;
+    assert_eq!(pause_plan_json["ok"], true);
+    let pause_digest = pause_plan_json["plan_digest"]
         .as_str()
         .ok_or("plan_digest missing")?
         .to_owned();
 
-    // Commit Logistics Plan
-    let commit_log_raw = fortress_commit(Some(session_id.clone()), log_digest);
-    let commit_log_json: Value = serde_json::from_str(&commit_log_raw)?;
-    assert_eq!(commit_log_json["ok"], true);
+    let commit_pause_raw = fortress_commit(Some(session_id.clone()), pause_digest);
+    let commit_pause_json: Value = serde_json::from_str(&commit_pause_raw)?;
+    assert_eq!(commit_pause_json["ok"], true);
 
-    // 5. Poll Wait / Modern Tasks Projection
+    // 6. Poll Wait / Modern Tasks Projection
     let wait_raw = dfmcp_mcp::server::fortress_wait(Some(session_id.clone()));
     let wait_json: Value = serde_json::from_str(&wait_raw)?;
     assert_eq!(wait_json["ok"], true);

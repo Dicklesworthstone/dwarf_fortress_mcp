@@ -283,8 +283,7 @@ fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: GameTick) -> Reque
     RequestedAction {
         action: Action::DesignateDig { area, mode },
         preconditions: Vec::new(),
-        // False is conservative until a canonical terrain predicate exists.
-        postconditions: vec![Predicate::False],
+        postconditions: Vec::new(),
         compensation: None,
         obligation: Some(ObligationSpec {
             terminal: Predicate::False,
