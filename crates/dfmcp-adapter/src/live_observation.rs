@@ -11,6 +11,9 @@
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, sha256};
 
 use crate::{BridgeManifest, CitizenRecord, ObservationPage};
+use crate::dfhack_rpc::{
+    MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
+};
 
 const CAPSULE_DOMAIN: &[u8] = b"dfmcp.live-observation-capsule.v1\0";
 pub const MAX_CAPSULE_CITIZENS: usize = 100_000;
@@ -18,6 +21,16 @@ pub const MAX_CANONICAL_CAPSULE_BYTES: usize = 64 * 1024 * 1024;
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
+}
+
+fn validate_string_bound(value: &str, field: &str, maximum: usize) -> Result<()> {
+    if value.len() > maximum {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            format!("{field} exceeds its {maximum}-byte bound"),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +77,12 @@ impl LiveObservationCapsule {
                 "a published live observation capsule requires complete citizen coverage",
             ));
         }
+        if self.citizens.len() > MAX_CAPSULE_CITIZENS {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "live observation capsule exceeds the citizen safety ceiling",
+            ));
+        }
         if usize::try_from(self.citizen_coverage.returned).map_err(|_| {
             error(
                 ErrorCode::InternalInvariantViolation,
@@ -76,17 +95,15 @@ impl LiveObservationCapsule {
                 "citizen coverage does not match the canonical roster length",
             ));
         }
-        if self.canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "canonical live observation exceeds the 64 MiB capsule ceiling",
-            ));
-        }
-        if sha256(&self.canonical_bytes) != self.content_digest {
-            return Err(error(
-                ErrorCode::ChecksumMismatch,
-                "live observation capsule digest does not match its canonical bytes",
-            ));
+        validate_string_bound(&self.world_name, "world name", MAX_WORLD_NAME_BYTES)?;
+        validate_string_bound(
+            &self.world_folder,
+            "world folder",
+            MAX_WORLD_FOLDER_BYTES,
+        )?;
+        for citizen in &self.citizens {
+            validate_string_bound(&citizen.name, "citizen name", MAX_UNIT_NAME_BYTES)?;
+            validate_string_bound(&citizen.race, "citizen race", MAX_RACE_NAME_BYTES)?;
         }
         for pair in self.citizens.windows(2) {
             if pair[0].unit_id >= pair[1].unit_id {
@@ -95,6 +112,35 @@ impl LiveObservationCapsule {
                     "canonical citizen roster is not in strict unit-ID order",
                 ));
             }
+        }
+
+        let summary = SummaryIdentity {
+            paused: self.paused,
+            current_year: self.current_year,
+            current_year_tick: self.current_year_tick,
+            world_name: self.world_name.clone(),
+            world_folder: self.world_folder.clone(),
+            site_id: self.site_id,
+            total: self.citizen_coverage.total,
+        };
+        let recomputed = canonical_bytes(&self.bridge, &summary, &self.citizens)?;
+        if recomputed != self.canonical_bytes {
+            return Err(error(
+                ErrorCode::CorruptLedger,
+                "live observation fields do not reproduce the stored canonical bytes",
+            ));
+        }
+        if self.canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "canonical live observation exceeds the 64 MiB capsule ceiling",
+            ));
+        }
+        if sha256(&self.canonical_bytes) != self.content_digest {
+            return Err(error(
+                ErrorCode::CorruptLedger,
+                "live observation capsule digest does not match its canonical bytes",
+            ));
         }
         Ok(())
     }
@@ -144,9 +190,13 @@ impl ObservationAssembler {
         }
     }
 
-    #[must_use]
-    pub fn next_offset(&self) -> u32 {
-        u32::try_from(self.citizens.len()).unwrap_or(u32::MAX)
+    pub fn next_offset(&self) -> Result<u32> {
+        u32::try_from(self.citizens.len()).map_err(|_| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "assembled citizen offset does not fit u32",
+            )
+        })
     }
 
     #[must_use]
@@ -179,12 +229,7 @@ impl ObservationAssembler {
                 "handshake world posture no longer matches the observation request",
             ));
         }
-        let expected_offset = u32::try_from(self.citizens.len()).map_err(|_| {
-            error(
-                ErrorCode::BudgetExceeded,
-                "assembled citizen offset does not fit u32",
-            )
-        })?;
+        let expected_offset = self.next_offset()?;
         if page.citizen_offset != expected_offset {
             return Err(error(
                 ErrorCode::CursorGap,
@@ -231,12 +276,7 @@ impl ObservationAssembler {
         }
         self.citizens.extend(page.citizens);
 
-        let assembled = u32::try_from(self.citizens.len()).map_err(|_| {
-            error(
-                ErrorCode::BudgetExceeded,
-                "assembled citizen count does not fit u32",
-            )
-        })?;
+        let assembled = self.next_offset()?;
         let total = self
             .summary
             .as_ref()
@@ -486,6 +526,26 @@ mod tests {
         assert_eq!(one.content_digest, many.content_digest);
         assert_eq!(one.canonical_bytes, many.canonical_bytes);
         assert_eq!(one.citizens, many.citizens);
+        Ok(())
+    }
+
+    #[test]
+    fn structured_field_tampering_invalidates_the_capsule() -> Result<()> {
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(page(0, 1, &[1], true))?;
+        let mut capsule = assembler.finalize()?;
+        capsule.citizens[0].x = 999;
+        assert!(capsule.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_byte_tampering_invalidates_the_capsule() -> Result<()> {
+        let mut assembler = ObservationAssembler::new(manifest());
+        assembler.push_page(page(0, 1, &[1], true))?;
+        let mut capsule = assembler.finalize()?;
+        capsule.canonical_bytes.push(0);
+        assert!(capsule.validate().is_err());
         Ok(())
     }
 
