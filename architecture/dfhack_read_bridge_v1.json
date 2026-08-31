@@ -1,0 +1,135 @@
+{
+  "schema_version": "dfmcp.dfhack_read_bridge/1",
+  "status": "normative_first_live_slice",
+  "transport": {
+    "substrate": "DFHack supported protobuf RPC service",
+    "handshake_magic_request": "DFHack?\\n",
+    "handshake_magic_response": "DFHack!\\n",
+    "dfhack_rpc_version": 1,
+    "default_host": "127.0.0.1",
+    "default_port": 5000,
+    "remote_access": false,
+    "plugin": "dfmcp_bridge",
+    "plugin_protocol_major": 1,
+    "plugin_protocol_minor": 0
+  },
+  "authentication": {
+    "kind": "loopback_bearer_token",
+    "provisioning": "DFMCP_BRIDGE_TOKEN environment variable inherited by Dwarf Fortress/DFHack",
+    "minimum_token_bytes": 32,
+    "maximum_token_bytes": 256,
+    "comparison": "constant_time_length_padded",
+    "token_echoed_in_response": false,
+    "session_binding": "client_nonce echoed in every response",
+    "limitations": "Protects against accidental and unauthenticated loopback callers; it is not a defense against a process that can read the DFHack process environment or memory."
+  },
+  "methods": [
+    {
+      "name": "Handshake",
+      "input_type": "dfmcp.bridge.v1.HandshakeRequest",
+      "output_type": "dfmcp.bridge.v1.HandshakeReply",
+      "effect": "read_only",
+      "requires_world": false,
+      "requires_authentication": true,
+      "bounds": {
+        "client_name_bytes": 128,
+        "client_version_bytes": 64,
+        "client_nonce_bytes": 64,
+        "bearer_token_bytes": 256
+      }
+    },
+    {
+      "name": "ReadObservation",
+      "input_type": "dfmcp.bridge.v1.ReadObservationRequest",
+      "output_type": "dfmcp.bridge.v1.ReadObservationReply",
+      "effect": "read_only",
+      "requires_world": true,
+      "requires_authentication": true,
+      "bounds": {
+        "max_citizens_hard": 4096,
+        "default_max_citizens": 256,
+        "max_unit_name_bytes": 256,
+        "max_race_name_bytes": 128,
+        "max_total_reply_bytes": 8388608
+      }
+    }
+  ],
+  "observation_fields": {
+    "summary": [
+      "world_loaded",
+      "fortress_mode",
+      "paused",
+      "current_year",
+      "current_year_tick",
+      "world_name",
+      "world_folder",
+      "site_id",
+      "citizen_count_total"
+    ],
+    "citizen": [
+      "unit_id",
+      "name",
+      "race",
+      "profession",
+      "x",
+      "y",
+      "z",
+      "alive",
+      "sane",
+      "active",
+      "visible",
+      "citizen",
+      "resident",
+      "baby",
+      "child",
+      "adult",
+      "military"
+    ]
+  },
+  "canonicalization": {
+    "citizen_order": ["unit_id_ascending"],
+    "strings": "UTF-8 protobuf strings truncated only at valid code point boundaries",
+    "pagination": "offset over canonical unit_id ordering",
+    "reply_complete": "true only when every citizen in the requested canonical range is returned",
+    "anchor_inputs": [
+      "DF version",
+      "DFHack version",
+      "bridge version",
+      "site_id",
+      "current_year",
+      "current_year_tick",
+      "paused",
+      "canonical citizen records"
+    ]
+  },
+  "failure_codes": [
+    "AUTH_REQUIRED",
+    "AUTH_FAILED",
+    "PROTOCOL_MISMATCH",
+    "WORLD_NOT_LOADED",
+    "NOT_FORTRESS_MODE",
+    "INVALID_BOUND",
+    "INTERNAL_FAILURE"
+  ],
+  "security_invariants": [
+    "The V1 plugin registers no mutation RPC methods.",
+    "The V1 plugin does not register RunCommand, RunLua, keyboard, pause, dig, teleport, or arbitrary command forwarding.",
+    "Every plugin method authenticates before inspecting world state.",
+    "The plugin requests no SF_ALLOW_REMOTE flag and is intended only for the loopback DFHack remote server.",
+    "All repeated output is bounded by request and hard server ceilings.",
+    "Unit output is sorted by stable unit ID before pagination.",
+    "A partial page cannot prove absence outside its declared range.",
+    "The Rust process treats the plugin response as untrusted until bounds, nonce, versions, enum values, and canonical ordering validate.",
+    "No transport acknowledgment is a canonical observation until an ObservationCapsule validates and publishes."
+  ],
+  "acceptance": [
+    "Plugin builds through DFHack's dfhack_plugin(... PROTOBUFS ...) macro.",
+    "Handshake rejects missing, short, wrong, or oversized tokens.",
+    "Handshake returns exact DF, DFHack, bridge, plugin protocol, world-loaded, and fortress-mode manifests.",
+    "ReadObservation is deterministic across two calls while the game is paused and unchanged.",
+    "Citizen pages concatenate to the same canonical roster as one sufficiently large page.",
+    "Rust decoder rejects noncanonical order, nonce mismatch, version mismatch, oversize strings, oversize pages, and trailing protobuf garbage.",
+    "One live reply produces one immutable canonical ObservationCapsule and an agent briefing with explicit complete/partial coverage.",
+    "No live mutation symbol or RPC is linked into the V1 plugin."
+  ]
+}
