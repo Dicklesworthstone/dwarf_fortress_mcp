@@ -23,9 +23,9 @@ pub use clock::{ClockGovernor, ClockPolicy};
 pub use digest::{Digest32, sha256};
 pub use error::{DfmcpError, ErrorCode, Result};
 pub use ids::{
-    ActionId, AttentionId, CheckpointId, EdgeId, EntityId, EventId, EvidenceId, FortressId,
-    HandoffId, IntentId, LeaseId, MemoryId, ObjectiveId, PlanId, RecommendationId, RequestId,
-    SessionId, StepId, SurpriseId,
+    ActionId, AffordanceId, AttentionId, CheckpointId, EdgeId, EntityId, EventId, EvidenceId,
+    FortressId, HandoffId, IntentId, LeaseId, MemoryId, ObjectiveId, PlanId, RecommendationId,
+    RequestId, SessionId, StepId, SurpriseId,
 };
 pub use lease::{LeaseKind, LeaseManager, LeaseRecord, cuboids_intersect};
 pub use model::{
