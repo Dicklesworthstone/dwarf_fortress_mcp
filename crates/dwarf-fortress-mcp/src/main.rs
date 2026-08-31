@@ -2,16 +2,23 @@
 
 use std::env;
 use std::error::Error;
+use std::net::{SocketAddr, TcpStream};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use dfmcp_adapter::{GameAdapter, HealthStatus};
+use dfmcp_adapter::{
+    BridgeCredentials, DfHackRpcClient, GameAdapter, HealthStatus, LiveObservationCapsule,
+    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, project_live_capsule,
+    read_complete_observation_bounded,
+};
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, FortressId, GameTick, IntentId,
+    Capability, CapabilityGrant, CapabilityScope, Digest32, FortressId, GameTick, IntentId,
     ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
 };
 use dfmcp_intent::{Action, Constraint, Intent, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
+use serde_json::json;
 
 fn main() -> ExitCode {
     match run() {
@@ -24,10 +31,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let command = match env::args().nth(1) {
-        Some(command) => command,
-        None => "help".to_owned(),
-    };
+    let command = env::args().nth(1).unwrap_or_else(|| "help".to_owned());
     match command.as_str() {
         "help" | "--help" | "-h" => print_help(),
         "version" | "--version" | "-V" => print_version(),
@@ -47,24 +51,29 @@ fn print_help() {
     println!(
         "\
 dwarf-fortress-mcp {version}
-Design-first semantic control plane for Dwarf Fortress agents
+Agent-native semantic control plane for Dwarf Fortress
 
 USAGE:
     dwarf-fortress-mcp <COMMAND>
 
 COMMANDS:
-    contract    Print the frozen phase-zero narrow-waist contract
+    contract    Print the frozen narrow-waist contract
     doctor      Exercise the deterministic laboratory adapter
-    demo        Prepare and commit a verified semantic pause-state action
-    bridge      Probe TCP reachability only; no dfmcp bridge handshake exists yet
+    demo        Prepare and commit a verified laboratory pause-state action
+    bridge      Authenticate to dfmcp_bridge and publish one canonical live read
     serve       Run the MCP 2026-07-28 modern-only stdio server (fastmcp_rust)
     version     Print version information
     help        Print this help
 
+BRIDGE ENVIRONMENT:
+    DFMCP_BRIDGE_TOKEN          Required 32..256-byte shared loopback secret
+    DFMCP_BRIDGE_PAGE_SIZE      Citizen page size, 1..4096 (default 256)
+    DFMCP_BRIDGE_MAX_CITIZENS   Complete-roster ceiling, 0..100000 (default 100000)
+
 STATUS:
-    Executable contract scaffold plus a laboratory MCP transport. The stdio
-    server runs the owned fastmcp_rust sibling pinned to MCP 2026-07-28,
-    modern-only. Live DFHack integration is not claimed.
+    The default MCP server remains the deterministic laboratory. The bridge
+    command exercises the authenticated read-only source path and emits one
+    canonical snapshot receipt; it exposes no live mutation authority.
 ",
         version = env!("CARGO_PKG_VERSION")
     );
@@ -79,6 +88,11 @@ fn print_contract() {
         "\
 protocol: dfmcp/0
 transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust sibling
+bridge_read_protocol: dfmcp.bridge.v1 over DFHack native protobuf RPC
+bridge_read_methods:
+  - Handshake
+  - ReadObservation
+bridge_mutation_methods: []
 tools:
   - fortress.open_session
   - fortress.observe
@@ -113,56 +127,191 @@ fn doctor() -> Result<(), Box<dyn Error>> {
         HealthStatus::Unavailable => "unavailable",
     };
     println!(
-        "{{\n  \"status\": \"{status}\",\n  \"adapter\": \"{}\",\n  \"compatibility\": \"{:?}\",\n  \"fortress_loaded\": {},\n  \"anchor\": \"{}\"\n}}",
-        health.identity.name,
-        health.identity.compatibility,
-        health.fortress_loaded,
-        match health.current_anchor {
-            Some(anchor) => anchor.state_hash.to_string(),
-            None => "none".to_owned(),
-        }
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "status": status,
+            "adapter": health.identity.name,
+            "compatibility": format!("{:?}", health.identity.compatibility),
+            "fortress_loaded": health.fortress_loaded,
+            "anchor": health.current_anchor.map(|anchor| anchor.state_hash.to_string()),
+        }))?
     );
     Ok(())
 }
 
 fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
-    println!("DF/DFHack TCP reachability diagnostic");
-    let target = match endpoint {
-        Some(target) => target,
-        None => "127.0.0.1:5000".to_owned(),
-    };
+    let target = endpoint.unwrap_or_else(|| "127.0.0.1:5000".to_owned());
     let address = parse_bridge_target(&target)?;
-    println!("Connecting to TCP endpoint: {target}...");
+    let token = env::var("DFMCP_BRIDGE_TOKEN").map_err(|_| {
+        "DFMCP_BRIDGE_TOKEN is required and must match the secret inherited by Dwarf Fortress/DFHack"
+    })?;
+    let page_size = bounded_env_u32(
+        "DFMCP_BRIDGE_PAGE_SIZE",
+        256,
+        1,
+        MAX_CITIZENS_PER_PAGE,
+    )?;
+    let hard_citizen_limit = u32::try_from(MAX_CAPSULE_CITIZENS)
+        .map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
+    let max_citizens = bounded_env_u32(
+        "DFMCP_BRIDGE_MAX_CITIZENS",
+        hard_citizen_limit,
+        0,
+        hard_citizen_limit,
+    )?;
+    let nonce = bridge_nonce(address)?;
+    let credentials = BridgeCredentials::new(token.into_bytes(), nonce)?;
 
-    match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(2)) {
-        Ok(stream) => {
-            drop(stream);
-            println!("TCP endpoint is reachable.");
-            println!(
-                "No dfmcp handshake was sent: this does not establish bridge identity, compatibility, fortress state, or control."
-            );
-            println!(
-                "DFHack's built-in port 5000 is protobuf-over-TCP and is not the proposed dfmcp bridge."
-            );
-        }
-        Err(err) => {
-            return Err(format!(
-                "TCP endpoint is unreachable at {target}: {err}; no compatible dfmcp bridge plugin is implemented in this repository yet"
-            )
-            .into());
-        }
-    }
+    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    let mut client = DfHackRpcClient::negotiate(
+        stream,
+        credentials,
+        "dwarf-fortress-mcp-cli",
+        env!("CARGO_PKG_VERSION"),
+    )?;
+    let capsule = read_complete_observation_bounded(
+        &mut client,
+        page_size,
+        true,
+        max_citizens,
+    )?;
+    let fortress_id = derive_fortress_id(&capsule);
+    let projection = project_live_capsule(
+        &capsule,
+        fortress_id,
+        ObservationCursor::ORIGIN,
+    )?;
+    projection.validate_against(&capsule)?;
+    let complete_domains = projection
+        .receipt
+        .coverage()
+        .domains
+        .values()
+        .filter(|domain| domain.status.as_str() == "complete")
+        .map(|domain| domain.domain.clone())
+        .collect::<Vec<_>>();
+    let omitted_domains = projection
+        .receipt
+        .coverage()
+        .domains
+        .values()
+        .filter(|domain| domain.status.as_str() == "omitted")
+        .map(|domain| {
+            json!({
+                "domain": domain.domain,
+                "reason": domain.reason,
+            })
+        })
+        .collect::<Vec<_>>();
+    let result = json!({
+        "status": "authenticated_read_only_live_observation",
+        "endpoint": target,
+        "bridge": {
+            "protocol": format!(
+                "{}.{}",
+                dfmcp_adapter::BRIDGE_PROTOCOL_MAJOR,
+                dfmcp_adapter::BRIDGE_PROTOCOL_MINOR
+            ),
+            "version": capsule.bridge.bridge_version,
+            "generation": capsule.bridge.bridge_generation,
+            "dfhack_version": capsule.bridge.dfhack_version,
+            "dwarf_fortress_version": capsule.bridge.df_version,
+            "supported_methods": capsule.bridge.supported_methods,
+            "mutation_methods": [],
+        },
+        "fortress": {
+            "fortress_id": fortress_id.to_string(),
+            "site_id": capsule.site_id,
+            "world_name": capsule.world_name,
+            "world_folder": capsule.world_folder,
+            "paused": capsule.paused,
+            "calendar_year": capsule.current_year,
+            "year_tick": capsule.current_year_tick,
+            "absolute_game_tick": projection.snapshot.tick.get(),
+            "citizens": capsule.citizen_coverage.total,
+        },
+        "capsule": {
+            "digest": capsule.content_digest.to_string(),
+            "canonical_bytes": capsule.canonical_bytes.len(),
+            "complete": capsule.citizen_coverage.proves_complete_roster(),
+        },
+        "snapshot": {
+            "anchor": {
+                "epoch": projection.snapshot.cursor.epoch,
+                "sequence": projection.snapshot.cursor.sequence,
+                "game_tick": projection.snapshot.tick.get(),
+                "state_hash": projection.snapshot.state_hash.to_string(),
+            },
+            "entities": projection.snapshot.graph.entities.len(),
+            "edges": projection.snapshot.graph.edges.len(),
+        },
+        "coverage": {
+            "complete_domains": complete_domains,
+            "omitted_domains": omitted_domains,
+        },
+    });
+    let _stream = client.close()?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
-fn parse_bridge_target(target: &str) -> std::io::Result<std::net::SocketAddr> {
+fn bridge_nonce(address: SocketAddr) -> Result<Vec<u8>, Box<dyn Error>> {
+    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"dfmcp-bridge-cli-nonce-v1\0");
+    bytes.extend_from_slice(&elapsed.as_nanos().to_be_bytes());
+    bytes.extend_from_slice(&std::process::id().to_be_bytes());
+    bytes.extend_from_slice(address.to_string().as_bytes());
+    bytes.extend_from_slice(env!("CARGO_PKG_VERSION").as_bytes());
+    Ok(Digest32::of_bytes(&bytes).as_bytes().to_vec())
+}
+
+fn derive_fortress_id(capsule: &LiveObservationCapsule) -> FortressId {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"dfmcp-live-fortress-id-v1\0");
+    bytes.extend_from_slice(capsule.world_folder.as_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&capsule.site_id.to_be_bytes());
+    let digest = Digest32::of_bytes(&bytes);
+    let source = digest.as_bytes();
+    let raw = u64::from_be_bytes([
+        source[0], source[1], source[2], source[3], source[4], source[5], source[6], source[7],
+    ]) | 1;
+    FortressId::new(raw)
+}
+
+fn bounded_env_u32(
+    name: &str,
+    default: u32,
+    minimum: u32,
+    maximum: u32,
+) -> Result<u32, Box<dyn Error>> {
+    let value = match env::var(name) {
+        Ok(raw) => raw
+            .parse::<u32>()
+            .map_err(|_| format!("{name} must be a decimal u32"))?,
+        Err(env::VarError::NotPresent) => default,
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(format!("{name} must be valid UTF-8").into());
+        }
+    };
+    if value < minimum || value > maximum {
+        return Err(format!("{name} must be in {minimum}..={maximum}, got {value}").into());
+    }
+    Ok(value)
+}
+
+fn parse_bridge_target(target: &str) -> std::io::Result<SocketAddr> {
     if target.is_empty() || target.len() > 256 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "bridge target must be a bounded numeric IP:port endpoint",
         ));
     }
-    let address = target.parse::<std::net::SocketAddr>().map_err(|_| {
+    let address = target.parse::<SocketAddr>().map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "bridge target must be a numeric IP:port endpoint",
@@ -171,7 +320,7 @@ fn parse_bridge_target(target: &str) -> std::io::Result<std::net::SocketAddr> {
     if !address.ip().is_loopback() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "unauthenticated bridge diagnostics are restricted to loopback",
+            "authenticated bridge diagnostics are restricted to loopback",
         ));
     }
     Ok(address)
@@ -206,15 +355,19 @@ fn demo() -> Result<(), Box<dyn Error>> {
         .first()
         .ok_or_else(|| "commit returned no action receipts".to_owned())?;
     println!(
-        "{{\n  \"plan_id\": \"{}\",\n  \"plan_digest\": \"{}\",\n  \"action_id\": \"{}\",\n  \"state\": \"{:?}\",\n  \"paused\": {},\n  \"cursor\": {{\"epoch\": {}, \"sequence\": {}}},\n  \"state_hash\": \"{}\"\n}}",
-        plan.id,
-        plan.digest,
-        action.action_id,
-        action.state,
-        adapter.snapshot().paused,
-        adapter.snapshot().cursor.epoch,
-        adapter.snapshot().cursor.sequence,
-        adapter.snapshot().state_hash
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "plan_id": plan.id.to_string(),
+            "plan_digest": plan.digest.to_string(),
+            "action_id": action.action_id.to_string(),
+            "state": format!("{:?}", action.state),
+            "paused": adapter.snapshot().paused,
+            "cursor": {
+                "epoch": adapter.snapshot().cursor.epoch,
+                "sequence": adapter.snapshot().cursor.sequence,
+            },
+            "state_hash": adapter.snapshot().state_hash.to_string(),
+        }))?
     );
     Ok(())
 }
@@ -263,7 +416,10 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{doctor, parse_bridge_target};
+    use super::{bounded_env_u32, derive_fortress_id, doctor, parse_bridge_target};
+    use dfmcp_adapter::{BridgeManifest, CitizenCoverage, LiveObservationCapsule};
+    use dfmcp_core::{Digest32, FortressId};
+    use std::collections::BTreeSet;
 
     #[test]
     fn doctor_command_has_the_authority_it_exercises() {
@@ -271,11 +427,54 @@ mod tests {
     }
 
     #[test]
-    fn bridge_probe_accepts_only_numeric_loopback_targets() {
+    fn bridge_accepts_only_numeric_loopback_targets() {
         assert!(parse_bridge_target("127.0.0.1:5000").is_ok());
         assert!(parse_bridge_target("[::1]:5000").is_ok());
         assert!(parse_bridge_target("localhost:5000").is_err());
         assert!(parse_bridge_target("192.0.2.1:5000").is_err());
         assert!(parse_bridge_target("").is_err());
+    }
+
+    #[test]
+    fn fortress_identity_is_stable_and_nonzero() {
+        let capsule = LiveObservationCapsule {
+            bridge: BridgeManifest {
+                bridge_version: "0.1.0".to_owned(),
+                dfhack_version: "0.51.11-r1".to_owned(),
+                df_version: "0.51.11".to_owned(),
+                world_loaded: true,
+                fortress_mode: true,
+                bridge_generation: 1,
+                supported_methods: BTreeSet::from([
+                    "Handshake".to_owned(),
+                    "ReadObservation".to_owned(),
+                ]),
+            },
+            paused: true,
+            current_year: 105,
+            current_year_tick: 1,
+            world_name: "Realm".to_owned(),
+            world_folder: "region1".to_owned(),
+            site_id: 7,
+            citizen_coverage: CitizenCoverage {
+                offset: 0,
+                returned: 0,
+                total: 0,
+                complete: true,
+            },
+            citizens: Vec::new(),
+            canonical_bytes: Vec::new(),
+            content_digest: Digest32::ZERO,
+        };
+        let first = derive_fortress_id(&capsule);
+        let second = derive_fortress_id(&capsule);
+        assert_eq!(first, second);
+        assert_ne!(first, FortressId::NIL);
+    }
+
+    #[test]
+    fn bounded_environment_defaults_when_absent() {
+        let name = "DFMCP_TEST_ABSENT_U32_918273645";
+        assert_eq!(bounded_env_u32(name, 7, 1, 10).ok(), Some(7));
     }
 }
