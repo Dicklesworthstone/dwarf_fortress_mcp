@@ -27,6 +27,7 @@ const MAX_LAB_ACTIONS: usize = 16_384;
 const MAX_LAB_CHECKPOINTS: usize = 1_024;
 const MAX_LAB_COMMITS: usize = 4_096;
 const MAX_LAB_TRANSCRIPT_EVENTS: usize = 65_536;
+const CONSERVATIVE_BYTES_PER_OUTPUT_TOKEN: u64 = 4;
 
 /// Managed simulated laboratory session hosting a `MemoryAdapter`.
 #[derive(Clone, Debug)]
@@ -84,6 +85,7 @@ struct LabAction {
     step: PlanStep,
     receipt: ActionReceipt,
     stable_observations: u32,
+    last_stable_anchor: Option<StateAnchor>,
     cancel_mode: Option<CancelMode>,
 }
 
@@ -163,6 +165,14 @@ impl MemoryAdapter {
         self.transcript.push_back(event);
     }
 
+    fn invalidate_active_work(&mut self) {
+        self.prepared.clear();
+        self.plans.clear();
+        self.actions.clear();
+        self.action_by_step.clear();
+        self.commits.clear();
+    }
+
     pub fn inject_snapshot(&mut self, snapshot: WorldSnapshot) -> Result<()> {
         if snapshot.fortress_id != self.snapshot.fortress_id {
             return Err(DfmcpError::new(
@@ -176,12 +186,36 @@ impl MemoryAdapter {
                 "injected snapshot has an invalid state hash",
             ));
         }
+        if snapshot == self.snapshot {
+            return Ok(());
+        }
+        let current = self.snapshot.anchor();
+        let incoming = snapshot.anchor();
+        let cursor_regressed = incoming.cursor.epoch < current.cursor.epoch
+            || (incoming.cursor.epoch == current.cursor.epoch
+                && incoming.cursor.sequence <= current.cursor.sequence);
+        let tick_regressed_without_epoch = incoming.cursor.epoch == current.cursor.epoch
+            && incoming.tick < current.tick;
+        if cursor_regressed || tick_regressed_without_epoch {
+            return Err(DfmcpError::new(
+                ErrorCode::CursorGap,
+                "injected snapshot does not advance the canonical laboratory lineage",
+            )
+            .retryable(false));
+        }
         self.snapshot = snapshot;
+        self.invalidate_active_work();
         self.record_event(LabEvent::SnapshotInjected(self.snapshot.anchor()));
         Ok(())
     }
 
     pub fn advance_ticks(&mut self, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "laboratory tick advancement must be positive",
+            ));
+        }
         let next_tick = self.snapshot.tick.checked_add(amount).ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::BudgetExceeded,
@@ -376,6 +410,7 @@ impl MemoryAdapter {
                 step: step.clone(),
                 receipt: receipt.clone(),
                 stable_observations: 0,
+                last_stable_anchor: None,
                 cancel_mode: None,
             },
         );
@@ -383,7 +418,7 @@ impl MemoryAdapter {
     }
 
     fn refresh_action(&mut self, action_id: ActionId) -> Result<ActionReceipt> {
-        let (plan_id, step, prior_state, stable) = self
+        let (plan_id, step, prior_state, stable, prior_stable_anchor) = self
             .actions
             .get(&action_id)
             .map(|action| {
@@ -392,6 +427,7 @@ impl MemoryAdapter {
                     action.step.clone(),
                     action.receipt.state,
                     action.stable_observations,
+                    action.last_stable_anchor,
                 )
             })
             .ok_or_else(|| {
@@ -408,6 +444,7 @@ impl MemoryAdapter {
 
         let mut state = prior_state;
         let mut stable_observations = stable;
+        let mut last_stable_anchor = prior_stable_anchor;
         if matches!(
             state,
             CommitState::Prepared | CommitState::AppliedAwaitingVerification
@@ -418,23 +455,36 @@ impl MemoryAdapter {
                     .failure
                     .as_ref()
                     .is_some_and(|predicate| evaluate(&self.snapshot, predicate));
-                if failure_triggered || self.snapshot.tick > obligation.deadline_tick {
-                    state = CommitState::Failed;
-                } else if evaluate(&self.snapshot, &obligation.terminal)
+                let completed = evaluate(&self.snapshot, &obligation.terminal)
                     && step
                         .postconditions
                         .iter()
-                        .all(|predicate| evaluate(&self.snapshot, predicate))
-                {
-                    stable_observations = stable_observations.saturating_add(1);
+                        .all(|predicate| evaluate(&self.snapshot, predicate));
+                if failure_triggered {
+                    stable_observations = 0;
+                    last_stable_anchor = None;
+                    state = CommitState::Failed;
+                } else if completed {
+                    let current_anchor = self.snapshot.anchor();
+                    if last_stable_anchor != Some(current_anchor) {
+                        stable_observations = stable_observations.saturating_add(1);
+                        last_stable_anchor = Some(current_anchor);
+                    }
                     if stable_observations >= obligation.stable_for_observations {
                         state = CommitState::Verified;
+                    } else if self.snapshot.tick >= obligation.deadline_tick {
+                        state = CommitState::Failed;
                     } else {
                         state = CommitState::AppliedAwaitingVerification;
                     }
                 } else {
                     stable_observations = 0;
-                    state = CommitState::AppliedAwaitingVerification;
+                    last_stable_anchor = None;
+                    state = if self.snapshot.tick >= obligation.deadline_tick {
+                        CommitState::Failed
+                    } else {
+                        CommitState::AppliedAwaitingVerification
+                    };
                 }
             } else if step
                 .postconditions
@@ -450,7 +500,7 @@ impl MemoryAdapter {
         let message = if state == CommitState::Verified {
             "semantic postconditions verified"
         } else if state == CommitState::Failed {
-            "obligation failed or exceeded its game-tick deadline"
+            "obligation failed or reached its game-tick deadline without stable completion"
         } else if state == CommitState::Prepared {
             "waiting for dependency verification"
         } else {
@@ -467,6 +517,7 @@ impl MemoryAdapter {
         if let Some(action) = self.actions.get_mut(&action_id) {
             action.receipt = receipt.clone();
             action.stable_observations = stable_observations;
+            action.last_stable_anchor = last_stable_anchor;
         }
         self.record_event(LabEvent::ActionPolled(action_id, state));
         Ok(receipt)
@@ -484,6 +535,7 @@ impl GameAdapter for MemoryAdapter {
 
     fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth> {
         context.authorize(Capability::Doctor, RiskTier::ReadOnly, &[], None)?;
+        self.check_anchor(context.anchor)?;
         Ok(AdapterHealth {
             status: HealthStatus::Healthy,
             identity: self.identity(),
@@ -519,15 +571,7 @@ impl GameAdapter for MemoryAdapter {
                 "laboratory adapter has no outstanding observation continuation",
             ));
         }
-        let returns_snapshot = match request.since {
-            None => true,
-            Some(cursor) => {
-                cursor != self.snapshot.cursor
-                    && cursor.epoch == self.snapshot.cursor.epoch
-                    && cursor.sequence < self.snapshot.cursor.sequence
-            }
-        };
-        if returns_snapshot {
+        if request.since.is_none() {
             let entity_count = u32::try_from(self.snapshot.graph.entities.len()).map_err(|_| {
                 DfmcpError::new(
                     ErrorCode::BudgetExceeded,
@@ -541,9 +585,11 @@ impl GameAdapter for MemoryAdapter {
                         "laboratory snapshot byte count cannot be represented",
                     )
                 })?;
+            let output_byte_bound = u64::from(request.max_output_tokens)
+                .saturating_mul(CONSERVATIVE_BYTES_PER_OUTPUT_TOKEN);
             if entity_count > request.max_entities
                 || snapshot_bytes > request.max_bytes
-                || snapshot_bytes > u64::from(request.max_output_tokens)
+                || snapshot_bytes > output_byte_bound
             {
                 return Err(DfmcpError::new(
                     ErrorCode::BudgetExceeded,
@@ -556,16 +602,10 @@ impl GameAdapter for MemoryAdapter {
             Some(cursor) if cursor == self.snapshot.cursor => {
                 ObservationPayload::Heartbeat(self.snapshot.anchor())
             }
-            Some(cursor)
-                if cursor.epoch == self.snapshot.cursor.epoch
-                    && cursor.sequence < self.snapshot.cursor.sequence =>
-            {
-                ObservationPayload::Snapshot(self.snapshot.clone())
-            }
             Some(_) => {
                 return Err(DfmcpError::new(
                     ErrorCode::CursorGap,
-                    "observation cursor is not resumable",
+                    "laboratory adapter retains no delta history for the requested cursor",
                 )
                 .retryable(true));
             }
@@ -578,14 +618,7 @@ impl GameAdapter for MemoryAdapter {
                 EvidenceKind::Observation,
                 "deterministic laboratory observation",
             )],
-            warnings: if request
-                .since
-                .is_some_and(|cursor| cursor != self.snapshot.cursor)
-            {
-                vec!["delta history unavailable; returned a full snapshot".to_owned()]
-            } else {
-                Vec::new()
-            },
+            warnings: Vec::new(),
             truncated: false,
             continuation: None,
         })
@@ -626,10 +659,10 @@ impl GameAdapter for MemoryAdapter {
             .continuation
             .clone()
             .or_else(|| query.continuation.clone());
-        let byte_limit_u64 = context
-            .budget
-            .max_bytes
-            .min(u64::from(request.max_output_tokens));
+        let byte_limit_u64 = context.budget.max_bytes.min(
+            u64::from(request.max_output_tokens)
+                .saturating_mul(CONSERVATIVE_BYTES_PER_OUTPUT_TOKEN),
+        );
         let byte_limit = usize::try_from(byte_limit_u64).map_err(|_| {
             DfmcpError::new(
                 ErrorCode::BudgetExceeded,
@@ -680,7 +713,7 @@ impl GameAdapter for MemoryAdapter {
                 DfmcpError::new(ErrorCode::StaleAnchor, "plan anchor is stale").retryable(true),
             );
         }
-        if self.snapshot.tick > plan.expires_at_tick {
+        if self.snapshot.tick >= plan.expires_at_tick {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
                 "plan expired before adapter preparation",
@@ -816,8 +849,8 @@ impl GameAdapter for MemoryAdapter {
                 "prepare receipt is stale, forged, or inconsistent",
             ));
         }
-        if self.snapshot.tick > prepared.expires_at_tick
-            || self.snapshot.tick > plan.expires_at_tick
+        if self.snapshot.tick >= prepared.expires_at_tick
+            || self.snapshot.tick >= plan.expires_at_tick
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidPlan,
@@ -974,11 +1007,7 @@ impl GameAdapter for MemoryAdapter {
             apply_action(&mut self.snapshot, &Action::Pause { paused: true })?;
         }
         if let Some(stored) = self.actions.get_mut(&action_id) {
-            stored.cancel_mode = if state == CommitState::CancelRequested {
-                Some(mode)
-            } else {
-                None
-            };
+            stored.cancel_mode = Some(mode);
         }
         let message = "cancellation request recorded; drain remains pending";
         self.stored_action_receipt(action_id, state, EvidenceKind::AdapterReceipt, message)?;
@@ -1034,36 +1063,34 @@ impl GameAdapter for MemoryAdapter {
             ));
         }
         let mut compensation_action = None;
-        if state == CommitState::CancelRequested {
-            if action.cancel_mode == Some(CancelMode::CompensateReversible) {
-                if let Some(compensation) = &action.step.compensation {
-                    if !action_is_supported(compensation)
-                        || !self
-                            .identity
-                            .capabilities
-                            .contains(&compensation.capability())
-                    {
-                        return Err(DfmcpError::new(
-                            ErrorCode::AdapterRejected,
-                            "laboratory adapter cannot execute the compensation action",
-                        ));
-                    }
-                    let compensation_scope = compensation.scope();
-                    context.authorize(
-                        compensation.capability(),
-                        compensation.risk(),
-                        &compensation_scope.entity_ids,
-                        compensation_scope.map_area,
-                    )?;
-                    apply_action(&mut self.snapshot, compensation)?;
-                    compensation_action = Some(derived_compensation_id(action_id));
-                    state = CommitState::Compensated;
-                } else {
-                    state = CommitState::Cancelled;
+        if action.cancel_mode == Some(CancelMode::CompensateReversible) {
+            if let Some(compensation) = &action.step.compensation {
+                if !action_is_supported(compensation)
+                    || !self
+                        .identity
+                        .capabilities
+                        .contains(&compensation.capability())
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::AdapterRejected,
+                        "laboratory adapter cannot execute the compensation action",
+                    ));
                 }
+                let compensation_scope = compensation.scope();
+                context.authorize(
+                    compensation.capability(),
+                    compensation.risk(),
+                    &compensation_scope.entity_ids,
+                    compensation_scope.map_area,
+                )?;
+                apply_action(&mut self.snapshot, compensation)?;
+                compensation_action = Some(derived_compensation_id(action_id));
+                state = CommitState::Compensated;
             } else {
                 state = CommitState::Cancelled;
             }
+        } else {
+            state = CommitState::Cancelled;
         }
         let message = match state {
             CommitState::Compensated => "cancellation drained and compensation applied",
@@ -1092,10 +1119,10 @@ impl GameAdapter for MemoryAdapter {
     fn checkpoint(&mut self, label: &str, context: &OperationContext) -> Result<CheckpointReceipt> {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
-        if label.is_empty() || label.len() > 256 {
+        if label.is_empty() || label.len() > 256 || label.chars().any(char::is_control) {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "checkpoint label is empty or too long",
+                "checkpoint label is empty, too long, or contains control characters",
             ));
         }
         self.internal_checkpoint(label)
@@ -1135,11 +1162,7 @@ impl GameAdapter for MemoryAdapter {
         self.snapshot = checkpoint;
         self.snapshot.cursor = restored_cursor;
         self.snapshot.refresh_hash();
-        self.prepared.clear();
-        self.plans.clear();
-        self.actions.clear();
-        self.action_by_step.clear();
-        self.commits.clear();
+        self.invalidate_active_work();
         self.record_event(LabEvent::Restored(checkpoint_id));
         Ok(RestoreReceipt {
             checkpoint_id,
@@ -1282,9 +1305,9 @@ const fn nonzero(value: u128) -> u128 {
 mod tests {
     use dfmcp_adapter::{GameAdapter, ObservationRequest, Projection};
     use dfmcp_core::{
-        Capability, CapabilityGrant, CapabilityScope, DfmcpError, ErrorCode, FortressId, GameTick,
-        IntentId, MapCoord, MapCuboid, ObservationCursor, OperationContext, RequestId, RiskTier,
-        SessionId, WorkBudget,
+        Capability, CapabilityGrant, CapabilityScope, CommitState, DfmcpError, ErrorCode,
+        FortressId, GameTick, IntentId, MapCoord, MapCuboid, ObservationCursor,
+        OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
     };
     use dfmcp_intent::{
         Action, Constraint, DigMode, Intent, ObligationSpec, RequestedAction, StaticPlanner,
@@ -1327,17 +1350,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn duplicate_commit_does_not_duplicate_effect() -> Result<(), DfmcpError> {
-        let snapshot = WorldSnapshot::new(
-            FortressId::new(1),
-            GameTick(1),
-            ObservationCursor::ORIGIN,
-            true,
-            WorldGraph::default(),
-        );
-        let intent = Intent {
-            id: IntentId::new(1),
+    fn unpause_intent(
+        snapshot: &WorldSnapshot,
+        intent_id: u128,
+        obligation: Option<ObligationSpec>,
+    ) -> Intent {
+        Intent {
+            id: IntentId::new(intent_id),
             anchor: snapshot.anchor(),
             summary: "unpause".to_owned(),
             terminal_condition: Predicate::Paused(false),
@@ -1347,10 +1366,22 @@ mod tests {
                 preconditions: vec![Predicate::Paused(true)],
                 postconditions: Vec::new(),
                 compensation: None,
-                obligation: None,
+                obligation,
                 depends_on: Vec::new(),
             }],
-        };
+        }
+    }
+
+    #[test]
+    fn duplicate_commit_does_not_duplicate_effect() -> Result<(), DfmcpError> {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let intent = unpause_intent(&snapshot, 1, None);
         let planner = StaticPlanner::default();
         let plan = planner.prepare(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
@@ -1395,6 +1426,40 @@ mod tests {
     }
 
     #[test]
+    fn older_cursor_is_not_silently_bridged() -> Result<(), DfmcpError> {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let mut adapter = MemoryAdapter::new(snapshot);
+        let old_cursor = adapter.snapshot().cursor;
+        adapter.advance_ticks(1)?;
+        let request = ObservationRequest {
+            since: Some(old_cursor),
+            projection: Projection::Summary,
+            interest: Default::default(),
+            max_entities: 1,
+            max_bytes: 1_024,
+            max_output_tokens: 128,
+            continuation: None,
+        };
+        let failure = adapter
+            .observe(&request, &context(adapter.snapshot(), 1))
+            .err()
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "older laboratory cursor was silently bridged",
+                )
+            })?;
+        assert_eq!(failure.code, ErrorCode::CursorGap);
+        Ok(())
+    }
+
+    #[test]
     fn laboratory_identity_does_not_advertise_unimplemented_effects() {
         let adapter = MemoryAdapter::new(WorldSnapshot::new(
             FortressId::new(1),
@@ -1431,11 +1496,11 @@ mod tests {
                     mode: DigMode::Mine,
                 },
                 preconditions: vec![Predicate::Paused(true)],
-                postconditions: vec![Predicate::True],
+                postconditions: vec![Predicate::Paused(true)],
                 compensation: None,
                 obligation: Some(ObligationSpec {
-                    terminal: Predicate::True,
-                    failure: None,
+                    terminal: Predicate::Paused(true),
+                    failure: Some(Predicate::Paused(false)),
                     deadline_tick: GameTick(20),
                     poll_interval_ticks: 1,
                     stable_for_observations: 1,
@@ -1446,7 +1511,7 @@ mod tests {
         let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
-        let error = adapter
+        let failure = adapter
             .prepare(&plan, &prepare_context)
             .err()
             .ok_or_else(|| {
@@ -1455,8 +1520,94 @@ mod tests {
                     "unsupported plan was accepted",
                 )
             })?;
-        assert_eq!(error.code, ErrorCode::AdapterRejected);
+        assert_eq!(failure.code, ErrorCode::AdapterRejected);
         Ok(())
+    }
+
+    #[test]
+    fn stable_observations_require_distinct_authoritative_anchors() -> Result<(), DfmcpError> {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let intent = unpause_intent(
+            &snapshot,
+            10,
+            Some(ObligationSpec {
+                terminal: Predicate::Paused(false),
+                failure: None,
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 2,
+            }),
+        );
+        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let mut adapter = MemoryAdapter::new(snapshot);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+        let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+        let action_id = committed.actions[0].action_id;
+
+        let first = adapter.poll_action(action_id, &context(adapter.snapshot(), 4))?;
+        assert_eq!(first.state, CommitState::AppliedAwaitingVerification);
+        let repeated = adapter.poll_action(action_id, &context(adapter.snapshot(), 5))?;
+        assert_eq!(repeated.state, CommitState::AppliedAwaitingVerification);
+
+        adapter.advance_ticks(1)?;
+        let distinct = adapter.poll_action(action_id, &context(adapter.snapshot(), 6))?;
+        assert_eq!(distinct.state, CommitState::Verified);
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_injection_invalidates_prepared_work() -> Result<(), DfmcpError> {
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let intent = unpause_intent(&snapshot, 11, None);
+        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let mut adapter = MemoryAdapter::new(snapshot);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+
+        let mut injected = adapter.snapshot().clone();
+        injected.tick = injected.tick.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "test tick overflow")
+        })?;
+        injected.cursor = injected.cursor.checked_next().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
+        })?;
+        injected.refresh_hash();
+        adapter.inject_snapshot(injected)?;
+
+        let failure = adapter
+            .commit(&plan, &prepared, &context(adapter.snapshot(), 3))
+            .err()
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "pre-injection prepared work remained valid",
+                )
+            })?;
+        assert_eq!(failure.code, ErrorCode::InvalidPlan);
+        Ok(())
+    }
+
+    #[test]
+    fn zero_tick_advance_is_rejected() {
+        let mut adapter = MemoryAdapter::new(WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        ));
+        assert!(matches!(adapter.advance_ticks(0), Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 
     #[test]
@@ -1468,21 +1619,7 @@ mod tests {
             true,
             WorldGraph::default(),
         );
-        let intent = Intent {
-            id: IntentId::new(3),
-            anchor: snapshot.anchor(),
-            summary: "unpause".to_owned(),
-            terminal_condition: Predicate::Paused(false),
-            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-            requested_actions: vec![RequestedAction {
-                action: Action::Pause { paused: false },
-                preconditions: vec![Predicate::Paused(true)],
-                postconditions: Vec::new(),
-                compensation: None,
-                obligation: None,
-                depends_on: Vec::new(),
-            }],
-        };
+        let intent = unpause_intent(&snapshot, 3, None);
         let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
@@ -1516,21 +1653,7 @@ mod tests {
         let mut adapter = MemoryAdapter::new(snapshot.clone());
         let checkpoint_context = context(adapter.snapshot(), 1);
         let checkpoint = adapter.checkpoint("before-unpause", &checkpoint_context)?;
-        let intent = Intent {
-            id: IntentId::new(4),
-            anchor: snapshot.anchor(),
-            summary: "unpause".to_owned(),
-            terminal_condition: Predicate::Paused(false),
-            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-            requested_actions: vec![RequestedAction {
-                action: Action::Pause { paused: false },
-                preconditions: vec![Predicate::Paused(true)],
-                postconditions: Vec::new(),
-                compensation: None,
-                obligation: None,
-                depends_on: Vec::new(),
-            }],
-        };
+        let intent = unpause_intent(&snapshot, 4, None);
         let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 2))?;
         let prepare_context = context(adapter.snapshot(), 3);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
