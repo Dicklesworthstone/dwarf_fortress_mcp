@@ -17,6 +17,10 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
+info "Rejecting local-path placeholders and probe debris"
+python3 scripts/check_repository_integrity.py
+ok "Repository integrity"
+
 info "Validating repository contracts"
 python3 scripts/validate_repo.py
 ok "Repository contracts"
@@ -29,6 +33,10 @@ info "Validating the authenticated read-only DFHack bridge"
 python3 scripts/check_dfhack_bridge.py
 ok "DFHack read-only bridge contract"
 
+info "Validating native bridge authentication ordering"
+python3 scripts/check_bridge_auth_order.py
+ok "Bridge authentication ordering"
+
 info "Validating the authenticated live MCP mode"
 python3 scripts/check_live_mcp.py
 ok "Live MCP contract"
@@ -37,22 +45,38 @@ info "Validating the compiled authenticated live-read stack"
 python3 scripts/check_live_read_stack.py
 ok "Compiled live-read stack contract"
 
+info "Validating the R2-R5 live-read evidence contract"
+python3 scripts/check_live_acceptance_contract.py
+ok "Live-read acceptance contract"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
 
+info "Running Python contract tests"
+python3 scripts/test_repository_integrity.py
+python3 scripts/test_live_read_acceptance.py
+ok "Python contract tests"
+
 info "Checking script syntax"
 python3 -m py_compile \
   scripts/validate_repo.py \
+  scripts/check_repository_integrity.py \
+  scripts/test_repository_integrity.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_bridge_auth_order.py \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
+  scripts/check_live_acceptance_contract.py \
+  scripts/verify_live_read_acceptance.py \
+  scripts/test_live_read_acceptance.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
+  scripts/qualify_live_read.sh \
   scripts/qualify_local.sh \
   scripts/verify.sh
 ok "Script syntax"
