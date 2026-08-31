@@ -3,7 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Core.h"
@@ -42,57 +44,80 @@ constexpr std::size_t MAX_UNIT_NAME_BYTES = 256;
 constexpr std::size_t MAX_RACE_NAME_BYTES = 128;
 constexpr std::size_t MAX_WORLD_NAME_BYTES = 256;
 constexpr std::size_t MAX_WORLD_FOLDER_BYTES = 512;
+constexpr std::uint32_t TICKS_PER_DAY = 1200;
+constexpr std::uint32_t DAYS_PER_MONTH = 28;
+constexpr std::uint32_t MONTHS_PER_YEAR = 12;
+constexpr std::uint32_t TICKS_PER_YEAR =
+    TICKS_PER_DAY * DAYS_PER_MONTH * MONTHS_PER_YEAR;
 
 const std::uint64_t BRIDGE_GENERATION =
     static_cast<std::uint64_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count());
+        std::chrono::steady_clock::now().time_since_epoch().count()) |
+    std::uint64_t{1};
+
+bool is_continuation(unsigned char byte)
+{
+    return (byte & 0xC0U) == 0x80U;
+}
+
+std::size_t valid_utf8_width(const std::string &value, std::size_t offset)
+{
+    const auto lead = static_cast<unsigned char>(value[offset]);
+    if (lead <= 0x7FU)
+        return 1;
+    if (lead >= 0xC2U && lead <= 0xDFU)
+    {
+        if (offset + 2 > value.size())
+            return 0;
+        return is_continuation(static_cast<unsigned char>(value[offset + 1])) ? 2 : 0;
+    }
+    if (lead >= 0xE0U && lead <= 0xEFU)
+    {
+        if (offset + 3 > value.size())
+            return 0;
+        const auto second = static_cast<unsigned char>(value[offset + 1]);
+        const auto third = static_cast<unsigned char>(value[offset + 2]);
+        if (!is_continuation(second) || !is_continuation(third))
+            return 0;
+        if (lead == 0xE0U && second < 0xA0U)
+            return 0;
+        if (lead == 0xEDU && second > 0x9FU)
+            return 0;
+        return 3;
+    }
+    if (lead >= 0xF0U && lead <= 0xF4U)
+    {
+        if (offset + 4 > value.size())
+            return 0;
+        const auto second = static_cast<unsigned char>(value[offset + 1]);
+        const auto third = static_cast<unsigned char>(value[offset + 2]);
+        const auto fourth = static_cast<unsigned char>(value[offset + 3]);
+        if (!is_continuation(second) || !is_continuation(third) ||
+            !is_continuation(fourth))
+            return 0;
+        if (lead == 0xF0U && second < 0x90U)
+            return 0;
+        if (lead == 0xF4U && second > 0x8FU)
+            return 0;
+        return 4;
+    }
+    return 0;
+}
 
 std::string bounded_utf8_prefix(const std::string &value, std::size_t max_bytes)
 {
-    if (value.size() <= max_bytes)
-        return value;
-
     std::size_t offset = 0;
-    std::size_t last_complete = 0;
     while (offset < value.size() && offset < max_bytes)
     {
-        const auto lead = static_cast<unsigned char>(value[offset]);
-        std::size_t width = 0;
-        if ((lead & 0x80U) == 0)
-            width = 1;
-        else if ((lead & 0xE0U) == 0xC0U)
-            width = 2;
-        else if ((lead & 0xF0U) == 0xE0U)
-            width = 3;
-        else if ((lead & 0xF8U) == 0xF0U)
-            width = 4;
-        else
+        const std::size_t width = valid_utf8_width(value, offset);
+        if (width == 0 || offset + width > max_bytes)
             break;
-
-        if (offset + width > value.size() || offset + width > max_bytes)
-            break;
-
-        bool valid = true;
-        for (std::size_t index = 1; index < width; ++index)
-        {
-            const auto continuation =
-                static_cast<unsigned char>(value[offset + index]);
-            if ((continuation & 0xC0U) != 0x80U)
-            {
-                valid = false;
-                break;
-            }
-        }
-        if (!valid)
-            break;
-
         offset += width;
-        last_complete = offset;
     }
-    return value.substr(0, last_complete);
+    return value.substr(0, offset);
 }
 
-bool constant_time_equal(const std::string &left, const std::string &right)
+bool constant_time_equal(std::string_view left, std::string_view right)
 {
     const std::size_t maximum = std::max(left.size(), right.size());
     std::size_t difference = left.size() ^ right.size();
@@ -121,7 +146,7 @@ bool authenticate(const std::string &presented, std::string &failure_code,
         return false;
     }
 
-    const std::string expected(configured);
+    const std::string_view expected(configured);
     if (expected.size() < MIN_TOKEN_BYTES || expected.size() > MAX_TOKEN_BYTES)
     {
         failure_code = "AUTH_REQUIRED";
@@ -159,7 +184,7 @@ bool validate_protocol(std::uint32_t major, std::uint32_t minor,
 
 std::string df_version()
 {
-    const auto *version_info = Core::getInstance().vinfo;
+    const auto &version_info = Core::getInstance().vinfo;
     return version_info ? version_info->getVersion() : std::string("unknown");
 }
 
@@ -264,10 +289,10 @@ command_result ReadObservation(color_ostream &,
 
     const std::uint32_t requested =
         in->has_max_citizens() ? in->max_citizens() : DEFAULT_MAX_CITIZENS;
-    if (requested > HARD_MAX_CITIZENS)
+    if (requested == 0 || requested > HARD_MAX_CITIZENS)
     {
         out->set_failure_code("INVALID_BOUND");
-        out->set_failure_message("max_citizens exceeds the hard limit of 4096");
+        out->set_failure_message("max_citizens must be in the range 1..4096");
         return CR_OK;
     }
 
@@ -289,17 +314,27 @@ command_result ReadObservation(color_ostream &,
         return CR_OK;
     }
 
+    const std::uint32_t year_tick = World::ReadCurrentTick();
+    const std::int32_t site_id = World::GetCurrentSiteId();
+    if (year_tick >= TICKS_PER_YEAR || site_id < 0)
+    {
+        out->set_failure_code("INTERNAL_FAILURE");
+        out->set_failure_message(
+            "fortress clock or site identity is outside the V1 canonical domain");
+        return CR_OK;
+    }
+
     out->set_paused(World::ReadPauseState());
     out->set_current_year(World::ReadCurrentYear());
-    out->set_current_year_tick(World::ReadCurrentTick());
+    out->set_current_year_tick(year_tick);
     out->set_world_name(
         bounded_utf8_prefix(World::getWorldName(false), MAX_WORLD_NAME_BYTES));
     out->set_world_folder(
         bounded_utf8_prefix(World::ReadWorldFolder(), MAX_WORLD_FOLDER_BYTES));
-    out->set_site_id(World::GetCurrentSiteId());
+    out->set_site_id(site_id);
 
     std::vector<df::unit *> citizens;
-    if (!Units::getCitizens(citizens, false, false))
+    if (!Units::getCitizens(citizens, true, false))
     {
         out->set_failure_code("INTERNAL_FAILURE");
         out->set_failure_message("DFHack could not enumerate fortress citizens");
@@ -307,6 +342,12 @@ command_result ReadObservation(color_ostream &,
     }
     citizens.erase(
         std::remove(citizens.begin(), citizens.end(), nullptr), citizens.end());
+    if (citizens.size() > std::numeric_limits<std::uint32_t>::max())
+    {
+        out->set_failure_code("INTERNAL_FAILURE");
+        out->set_failure_message("citizen roster exceeds the V1 count domain");
+        return CR_OK;
+    }
     std::sort(citizens.begin(), citizens.end(),
               [](const df::unit *left, const df::unit *right) {
                   return left->id < right->id;
@@ -324,13 +365,28 @@ command_result ReadObservation(color_ostream &,
     for (std::size_t index = offset; index < end; ++index)
     {
         df::unit *unit = citizens[index];
+        if (!Units::isCitizen(unit, false))
+        {
+            out->set_failure_code("INTERNAL_FAILURE");
+            out->set_failure_message(
+                "DFHack returned a non-citizen in the strict citizen roster");
+            out->clear_citizens();
+            out->set_citizen_count_total(0);
+            out->set_citizen_offset(0);
+            out->set_complete(false);
+            return CR_OK;
+        }
+
         auto *record = out->add_citizens();
         record->set_unit_id(unit->id);
         if (!in->has_include_names() || in->include_names())
         {
-            record->set_name(bounded_utf8_prefix(
-                Translation::translateName(&unit->name, false),
-                MAX_UNIT_NAME_BYTES));
+            const auto *visible_name = Units::getVisibleName(unit);
+            const std::string translated_name = visible_name
+                ? Translation::translateName(visible_name, false)
+                : std::string();
+            record->set_name(
+                bounded_utf8_prefix(translated_name, MAX_UNIT_NAME_BYTES));
         }
         else
         {
@@ -338,7 +394,8 @@ command_result ReadObservation(color_ostream &,
         }
         record->set_race(bounded_utf8_prefix(
             Units::getRaceReadableName(unit), MAX_RACE_NAME_BYTES));
-        record->set_profession(static_cast<std::int32_t>(unit->profession));
+        record->set_profession(
+            static_cast<std::int32_t>(Units::getProfession(unit)));
         const df::coord position = Units::getPosition(unit);
         record->set_x(position.x);
         record->set_y(position.y);
@@ -347,7 +404,7 @@ command_result ReadObservation(color_ostream &,
         record->set_sane(Units::isSane(unit));
         record->set_active(Units::isActive(unit));
         record->set_visible(Units::isVisible(unit));
-        record->set_citizen(Units::isCitizen(unit, false));
+        record->set_citizen(true);
         record->set_resident(Units::isResident(unit, false));
         record->set_baby(Units::isBaby(unit));
         record->set_child(Units::isChild(unit));
@@ -362,14 +419,15 @@ command_result bridge_status(color_ostream &out,
                              std::vector<std::string> &)
 {
     const char *configured = std::getenv("DFMCP_BRIDGE_TOKEN");
-    const std::size_t configured_size = configured ? std::string(configured).size() : 0;
+    const std::size_t configured_size =
+        configured ? std::string_view(configured).size() : 0;
     const bool token_configured = configured_size >= MIN_TOKEN_BYTES &&
         configured_size <= MAX_TOKEN_BYTES;
-    out.print("dfmcp_bridge %s protocol %u.%u\n", BRIDGE_VERSION,
+    out.print("dfmcp_bridge {} protocol {}.{}\n", BRIDGE_VERSION,
               PROTOCOL_MAJOR, PROTOCOL_MINOR);
-    out.print("token policy satisfied: %s\n",
+    out.print("token policy satisfied: {}\n",
               token_configured ? "yes" : "no");
-    out.print("world loaded: %s\n",
+    out.print("world loaded: {}\n",
               Core::getInstance().isWorldLoaded() ? "yes" : "no");
     out.print("RPC methods: Handshake, ReadObservation\n");
     return token_configured ? CR_OK : CR_FAILURE;
