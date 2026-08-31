@@ -1,7 +1,7 @@
 # New-machine setup: repository, Dwarf Fortress, and DFHack
 
 This guide reproduces the development/reference environment assembled on Ubuntu x86-64 on
-August 30, 2026. It installs the Rust workspace and a separately runnable Dwarf Fortress Classic
+August 31, 2026. It installs the Rust workspace and a separately runnable Dwarf Fortress Classic
 53.16 + DFHack 53.16-r1.1 reference stack.
 
 It does **not** make this repository control Dwarf Fortress. The checked-in bridge is a
@@ -18,7 +18,7 @@ The reference machine uses:
 | Dwarf Fortress Classic | 53.16 Linux x86-64 |
 | DFHack binary release | 53.16-r1.1 Linux x86-64 |
 | DFHack source | tag `53.16-r1.1`, commit `b638b59d0876d9bdf8b5f97e52714206ab7f3266` |
-| Rust | repository-selected latest nightly; observed `1.100.0-nightly (2026-08-29)` |
+| Rust | repository-selected latest nightly; observed `1.100.0-nightly (2026-08-30)` |
 | MCP dependency | exact `fastmcp_rust` revision from the workspace `Cargo.toml`/`Cargo.lock` |
 
 The installation root used here is `/data/opt/dwarf_fortress_reference`. You may choose another
@@ -44,10 +44,11 @@ uname -m
 df -h /data
 ```
 
-Expect roughly 2 GiB for downloads, the runnable stack, Cargo artifacts, and the DFHack source
-checkout. Reserve substantially more (8–12 GiB is prudent) before attempting a full DFHack source
-build. The reference setup deliberately used the official DFHack binary release rather than
-spending scarce disk on a redundant full build.
+The pinned archives, runnable stack, and recursive DFHack source checkout used about 400 MiB on
+the reference machine. Rust artifacts are much larger: reserve at least 20 GiB for the repository's
+full debug-and-release qualification. A full DFHack source build needs another 8–12 GiB of
+headroom. The reference setup deliberately used the official DFHack binary release rather than
+spending that space on a redundant full build.
 
 Install the packages used for the repository, binary runtime, headless launch, and optional C++
 smoke build:
@@ -55,7 +56,8 @@ smoke build:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  build-essential ca-certificates ccache cmake curl git mesa-utils ninja-build pkg-config \
+  build-essential bzip2 ca-certificates ccache cmake curl git iproute2 mesa-utils \
+  ninja-build pkg-config python3 ripgrep \
   protobuf-compiler libprotobuf-dev zlib1g-dev libsdl2-dev libsdl2-image-2.0-0 \
   libxml-libxml-perl libxml-libxslt-perl xvfb
 ```
@@ -65,9 +67,13 @@ sudo apt-get install -y \
 Install `rustup` using your operating-system package or the official instructions at
 <https://rustup.rs>. If `rustup` is already present, do not reinstall it. From the repository
 root, the checked-in `rust-toolchain.toml` selects nightly and installs `clippy`, `rustfmt`,
-`rust-src`, and `llvm-tools-preview`:
+`rust-src`, and `llvm-tools-preview`. Clone the project if it is not already present:
 
 ```bash
+sudo mkdir -p /data/projects
+sudo chown "$(id -u):$(id -g)" /data/projects
+git clone https://github.com/Dicklesworthstone/dwarf_fortress_mcp \
+  /data/projects/dwarf_fortress_mcp
 cd /data/projects/dwarf_fortress_mcp
 rustup show active-toolchain
 rustup component add clippy rustfmt rust-src llvm-tools-preview --toolchain nightly
@@ -208,6 +214,10 @@ git clone --recursive --branch 53.16-r1.1 \
   https://github.com/DFHack/dfhack.git \
   "$DFMCP_STACK_ROOT/sources/dfhack-53.16-r1.1"
 
+git -C "$DFMCP_STACK_ROOT/sources/dfhack-53.16-r1.1" checkout --detach \
+  b638b59d0876d9bdf8b5f97e52714206ab7f3266
+git -C "$DFMCP_STACK_ROOT/sources/dfhack-53.16-r1.1" submodule update --init --recursive
+
 git -C "$DFMCP_STACK_ROOT/sources/dfhack-53.16-r1.1" rev-parse HEAD
 git -C "$DFMCP_STACK_ROOT/sources/dfhack-53.16-r1.1" submodule status --recursive
 ```
@@ -237,8 +247,9 @@ The dirty-tree receipt is development evidence, not release evidence. Inspect th
 You may compile the proposed bridge target only as a fail-closed C++ smoke check:
 
 ```bash
-cmake -S bridge/dfhack-plugin -B build/dfmcp-bridge-smoke
-cmake --build build/dfmcp-bridge-smoke
+DFMCP_BRIDGE_BUILD_DIR="$(mktemp -d /tmp/dfmcp-bridge-smoke.XXXXXXXX)"
+cmake -S bridge/dfhack-plugin -B "$DFMCP_BRIDGE_BUILD_DIR"
+cmake --build "$DFMCP_BRIDGE_BUILD_DIR"
 ```
 
 Do **not** install the resulting `.so` into DFHack. It is not registered or linked as a genuine
@@ -258,8 +269,10 @@ DFHack plugin, and its initialization deliberately fails.
 - Cargo `--offline` failure: run `cargo fetch --locked` once with network access, then retry.
 - qualification rejects a dirty tree: commit/stash intentionally, or use
   `DFMCP_ALLOW_DIRTY=1` only for a development receipt.
-- low disk space: remove disposable build outputs through normal project cleanup; never delete the
-  installation root through an unresolved variable or broad recursive command.
+- low disk space: check before qualification with `df -h .` and `du -sh target`; use
+  `cargo clean --target-dir /absolute/disposable/target` for an explicitly identified build tree,
+  or set `CARGO_TARGET_DIR` to a volume with at least 20 GiB free. Never delete the installation
+  root through an unresolved variable or broad recursive command.
 
 ## Updating the reference stack
 

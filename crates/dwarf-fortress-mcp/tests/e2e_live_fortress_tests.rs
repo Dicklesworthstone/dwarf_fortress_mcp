@@ -221,9 +221,12 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 7. ATP Merkle Proof Capsule Verification
     let capsule = AtpProofCapsule::seal(&snapshot, &snap_after, delta.clone(), next_tick)?;
     let verifier = AtpProofVerifier;
-    assert!(verifier.verify_capsule(&capsule).is_ok());
+    assert_eq!(
+        verifier.verify_capsule_against_basis(&capsule, &snapshot)?,
+        snap_after
+    );
 
-    // 8. Durable SQLite WAL Ledger and FrankenFS Archival
+    // 8. In-memory table and archive contract prototypes
     let mut sqlite_ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
     sqlite_ledger.insert_snapshot(&snapshot)?;
     sqlite_ledger.insert_snapshot(&snap_after)?;
@@ -238,8 +241,8 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
 
     // 9. Full-Text Search indexing
     let mut search_engine = FrankenSearchEngine::new();
-    search_engine.index_snapshot(&snapshot);
-    let hits = search_engine.search("Entity", 5);
+    search_engine.index_snapshot(&snapshot)?;
+    let hits = search_engine.search("Entity", 5)?;
     assert_eq!(hits.len(), 0); // No entities initially, only chunk
 
     Ok(())

@@ -81,6 +81,7 @@ project is online).
 | `server/discover` silently fails when `_meta` carries only `protocolVersion` + `clientCapabilities` (no `clientInfo`). | Send one `server/discover` request with `_meta = {protocolVersion: "2026-07-28", clientCapabilities: {}}`. | JSON-RPC response (either discover result or an error envelope). | No response is ever written to stdout; the server keeps reading stdin until the pipe closes. | DRAFT — pending upload |
 | After a successful modern `server/discover`, a follow-up `tools/list` (same `_meta`) is not dispatched. | Send `server/discover` then `tools/list` with full modern `_meta` (incl. `clientInfo`). | Two JSON-RPC responses. | Only the discover response is written; `tools/list` hangs forever. | DRAFT — pending upload |
 
-Workaround (annotated at the call site): the modern golden test now
-supplies `io.modelcontextprotocol/clientInfo` in `_meta`. This is a
-test-side adaptation, not a server-side mask; both fixes belong upstream.
+The modern golden test supplies `io.modelcontextprotocol/clientInfo` so it
+can reach and preserve the second-request reproduction. No server-side
+workaround is present. Both findings remain DRAFT and must be filed upstream
+before any downstream workaround would be permitted.

@@ -70,8 +70,8 @@ impl Drop for StdioClient {
 fn modern_meta() -> Value {
     // MCP 2026-07-28 server/discover requires clientInfo in _meta;
     // minimal {protocolVersion, clientCapabilities} silently fails the
-    // dispatch (no JSON-RPC response is emitted). Findings filed per
-    // docs/DOGFOODING_FASTMCP.md.
+    // dispatch (no JSON-RPC response is emitted). The unfiled finding is
+    // recorded in docs/DOGFOODING_FASTMCP.md.
     json!({
         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientCapabilities": {
@@ -94,7 +94,7 @@ fn assert_modern_envelope(value: &Value, expected_id: u64) {
 }
 
 #[test]
-#[ignore = "lifecycle test exercises the full WP-13 gate 2 server via stdio subprocess; the per-session server's open_session response is not read by BufReader::read_line within the harness, so the test hangs past the 30s request timeout. The negative era marker test below covers the wire-shape contract; full lifecycle coverage lives in crates/dfmcp-mcp/tests/fastmcp_wired_tools_tests.rs::laboratory_tools_execute_supported_pause_flow. See bead dfmcp-wp13-modern-handshake-golden-7nu."]
+#[ignore = "KNOWN UPSTREAM BLOCKER, NOT A PASS: fastmcp_rust v0.8.0 stops writing responses at tools/list after a successful modern server/discover, so this blocking stdio harness cannot complete. The defect is still DRAFT/unfiled in docs/DOGFOODING_FASTMCP.md; remove this ignore only with a conforming pin bump. In-process semantic coverage is not transport conformance."]
 fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn Error>> {
     let mut client = StdioClient::spawn()?;
 
@@ -355,6 +355,10 @@ fn assert_era_refusal(resp: &Value, expected_id: u64) {
         supported.iter().any(|v| v.as_str() == Some("2026-07-28")),
         "supported array must include 2026-07-28"
     );
+    assert!(
+        supported.iter().any(|v| v.as_str() == Some("2024-11-05")),
+        "upstream era refusal currently advertises the disabled legacy era"
+    );
 }
 
 #[test]
@@ -369,6 +373,9 @@ fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Erro
             serde_json::from_str(include_str!("fixtures/neg_mixed_era_request.json"))?;
         let mixed_resp = client.send(&mixed_req)?;
         assert_era_refusal(&mixed_resp, 100);
+        let expected: Value =
+            serde_json::from_str(include_str!("fixtures/neg_mixed_era_response.json"))?;
+        assert_eq!(mixed_resp, expected);
     }
 
     // Negative 2: Bare legacy initialize without modern marker — the
@@ -379,6 +386,9 @@ fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Erro
             serde_json::from_str(include_str!("fixtures/neg_bare_initialize_request.json"))?;
         let bare_resp = client.send(&bare_req)?;
         assert_era_refusal(&bare_resp, 101);
+        let expected: Value =
+            serde_json::from_str(include_str!("fixtures/neg_bare_initialize_response.json"))?;
+        assert_eq!(bare_resp, expected);
     }
 
     // Negative 3: Once modern era is established, a request missing the
@@ -393,6 +403,9 @@ fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Erro
             serde_json::from_str(include_str!("fixtures/neg_missing_meta_request.json"))?;
         let missing_meta_resp = client.send(&missing_meta_req)?;
         assert_era_refusal(&missing_meta_resp, 2);
+        let expected: Value =
+            serde_json::from_str(include_str!("fixtures/neg_missing_meta_response.json"))?;
+        assert_eq!(missing_meta_resp, expected);
     }
     Ok(())
 }

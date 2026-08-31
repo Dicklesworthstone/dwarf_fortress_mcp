@@ -131,10 +131,12 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
         Some(target) => target,
         None => "127.0.0.1:5000".to_owned(),
     };
+    let address = parse_bridge_target(&target)?;
     println!("Connecting to TCP endpoint: {target}...");
 
-    match std::net::TcpStream::connect(&target) {
-        Ok(_) => {
+    match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(2)) {
+        Ok(stream) => {
+            drop(stream);
             println!("TCP endpoint is reachable.");
             println!(
                 "No dfmcp handshake was sent: this does not establish bridge identity, compatibility, fortress state, or control."
@@ -144,11 +146,35 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
             );
         }
         Err(err) => {
-            println!("TCP endpoint is unreachable at {target}: {err}");
-            println!("No compatible dfmcp bridge plugin is implemented in this repository yet.");
+            return Err(format!(
+                "TCP endpoint is unreachable at {target}: {err}; no compatible dfmcp bridge plugin is implemented in this repository yet"
+            )
+            .into());
         }
     }
     Ok(())
+}
+
+fn parse_bridge_target(target: &str) -> std::io::Result<std::net::SocketAddr> {
+    if target.is_empty() || target.len() > 256 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "bridge target must be a bounded numeric IP:port endpoint",
+        ));
+    }
+    let address = target.parse::<std::net::SocketAddr>().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "bridge target must be a numeric IP:port endpoint",
+        )
+    })?;
+    if !address.ip().is_loopback() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "unauthenticated bridge diagnostics are restricted to loopback",
+        ));
+    }
+    Ok(address)
 }
 
 fn demo() -> Result<(), Box<dyn Error>> {
@@ -231,5 +257,19 @@ fn context(snapshot: &WorldSnapshot, request_id: u128) -> OperationContext {
             })
             .collect(),
         cancellation_requested: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bridge_target;
+
+    #[test]
+    fn bridge_probe_accepts_only_numeric_loopback_targets() {
+        assert!(parse_bridge_target("127.0.0.1:5000").is_ok());
+        assert!(parse_bridge_target("[::1]:5000").is_ok());
+        assert!(parse_bridge_target("localhost:5000").is_err());
+        assert!(parse_bridge_target("192.0.2.1:5000").is_err());
+        assert!(parse_bridge_target("").is_err());
     }
 }
