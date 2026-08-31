@@ -1,14 +1,14 @@
 use std::collections::BTreeSet;
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EntityId, ErrorCode, GameTick, MapCuboid, OperationContext,
-    Result, RiskTier, StepId,
+    Capability, DfmcpError, EntityId, ErrorCode, GameTick, MapCuboid, OperationContext, Result,
+    RiskTier, StepId,
 };
 use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
 use crate::{
     Action, BuildingKind, Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan,
-    RequestedAction, WorkOrderCondition,
+    RequestedAction, WorkOrderCondition, derive_step_idempotency_key,
 };
 
 const MAX_INTENT_CONSTRAINTS: usize = 256;
@@ -55,6 +55,7 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
+        validate_policy(&self.policy)?;
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -105,11 +106,11 @@ impl StaticPlanner {
             ));
         }
         if let Some(deadline) = intent.deadline()
-            && deadline < snapshot.tick
+            && deadline <= snapshot.tick
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
-                "intent deadline is already in the past",
+                "intent deadline must be strictly after the planning tick",
             ));
         }
 
@@ -167,7 +168,8 @@ impl StaticPlanner {
             let dependencies = validate_dependencies(index, &normalized.depends_on)?;
             let capability = normalized.action.capability();
             required_capabilities.insert(capability);
-            let idempotency_key = step_key(intent, step_id, &normalized.action);
+            let idempotency_key =
+                derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
             steps.push(PlanStep {
                 id: step_id,
                 action: normalized.action.clone(),
@@ -223,12 +225,29 @@ impl StaticPlanner {
     }
 }
 
+fn validate_policy(policy: &PlanPolicy) -> Result<()> {
+    if policy.max_steps == 0 || policy.plan_ttl_ticks == 0 || policy.max_string_bytes == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "planner policy requires positive step, TTL, and string bounds",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_intent_shape(
     intent: &Intent,
     policy: &PlanPolicy,
     context: &OperationContext,
 ) -> Result<()> {
     intent.terminal_condition.validate_shape()?;
+    let normalized_terminal = intent.terminal_condition.normalized();
+    if matches!(normalized_terminal, Predicate::True | Predicate::False) {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidIntent,
+            "intent terminal condition must be a nontrivial semantic predicate",
+        ));
+    }
     if intent.constraints.len() > MAX_INTENT_CONSTRAINTS {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
@@ -576,10 +595,16 @@ fn validate_requested(
             .postconditions
             .iter()
             .all(|predicate| matches!(predicate, Predicate::True))
+        || requested
+            .postconditions
+            .iter()
+            .any(|predicate| matches!(predicate, Predicate::False))
     {
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
-            format!("requested action {index} has no nontrivial semantic postcondition"),
+            format!(
+                "requested action {index} has empty, trivial, or impossible semantic postconditions"
+            ),
         ));
     }
     if requested.action.naturally_temporal() && requested.obligation.is_none() {
@@ -619,6 +644,17 @@ fn validate_obligation(
             format!("obligation for action {index} has a zero liveness bound"),
         ));
     }
+    if matches!(obligation.terminal, Predicate::True | Predicate::False)
+        || obligation
+            .failure
+            .as_ref()
+            .is_some_and(|failure| matches!(failure, Predicate::True | Predicate::False))
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidIntent,
+            format!("obligation for action {index} has a trivial terminal or failure predicate"),
+        ));
+    }
     Ok(())
 }
 
@@ -642,16 +678,6 @@ fn validate_dependencies(index: usize, dependencies: &[u32]) -> Result<Vec<StepI
     }
     output.sort_unstable();
     Ok(output)
-}
-
-fn step_key(intent: &Intent, step_id: StepId, action: &Action) -> String {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"dfmcp-step-idempotency-v1");
-    bytes.extend_from_slice(&intent.id.get().to_be_bytes());
-    bytes.extend_from_slice(&step_id.get().to_be_bytes());
-    bytes.extend_from_slice(intent.anchor.state_hash.as_bytes());
-    action.encode(&mut bytes);
-    Digest32::of_bytes(&bytes).to_hex()
 }
 
 fn validate_plan(plan: &PreparedPlan, policy: &PlanPolicy) -> Result<()> {
@@ -714,7 +740,7 @@ mod tests {
     };
     use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 
-    use super::StaticPlanner;
+    use super::{PlanPolicy, StaticPlanner};
     use crate::{Action, Constraint, Intent, RequestedAction};
 
     fn snapshot() -> WorldSnapshot {
@@ -827,5 +853,29 @@ mod tests {
         };
         let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
+    }
+
+    #[test]
+    fn zero_ttl_policy_is_rejected_before_plan_construction() {
+        let snapshot = snapshot();
+        let mut policy = PlanPolicy::default();
+        policy.plan_ttl_ticks = 0;
+        let intent = Intent {
+            id: IntentId::new(4),
+            anchor: snapshot.anchor(),
+            summary: "invalid zero TTL".to_owned(),
+            terminal_condition: Predicate::Paused(false),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+            requested_actions: vec![RequestedAction {
+                action: Action::Pause { paused: false },
+                preconditions: vec![Predicate::Paused(true)],
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        };
+        let result = StaticPlanner::new(policy).prepare(&snapshot, &intent, &context(&snapshot));
+        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 }
