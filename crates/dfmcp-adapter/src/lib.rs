@@ -5,6 +5,12 @@ use std::collections::BTreeSet;
 pub mod delta_scanner;
 pub mod dfhack_adapter;
 pub mod dfhack_wire;
+/// Compatibility path for callers that imported the first unqualified client
+/// module. It contains no implementation; the audited wire is the sole source.
+#[doc(hidden)]
+pub mod dfhack_rpc {
+    pub use crate::dfhack_wire::*;
+}
 pub mod dispatcher;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
@@ -20,8 +26,9 @@ pub use dfhack_adapter::{DfhackAdapter, DfhackAdapterConfig};
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
     CitizenRecord, DFHACK_RPC_VERSION, DfHackRpcClient, MAX_CITIZENS_PER_PAGE,
-    MAX_RPC_PAYLOAD_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL,
-    MAX_TEXT_NOTIFICATION_TOTAL_BYTES, ObservationPage,
+    MAX_RACE_NAME_BYTES, MAX_RPC_PAYLOAD_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL,
+    MAX_TEXT_NOTIFICATION_TOTAL_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES,
+    MAX_WORLD_NAME_BYTES, ObservationPage,
 };
 pub use dispatcher::{EffectJournal, EffectJournalRecord, MutationDispatcher};
 pub use ipc::{
