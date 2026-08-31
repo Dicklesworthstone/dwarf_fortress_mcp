@@ -519,6 +519,7 @@ fn fortress_restore(_ctx: &McpContext, checkpoint_id: String) -> String {
         Ok(receipt) => {
             state.pending = None;
             state.last_action = None;
+            state.last_commit = None;
             json!({
                 "ok": true,
                 "checkpoint_id": format!("{}", receipt.checkpoint_id),
