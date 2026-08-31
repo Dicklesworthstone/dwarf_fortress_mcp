@@ -19,6 +19,7 @@ pub mod live_adapter;
 pub mod live_bootstrap;
 pub mod live_compatibility;
 pub mod live_connect;
+pub mod live_evidence;
 pub mod live_identity;
 pub mod live_observation;
 pub mod live_projection;
@@ -54,6 +55,7 @@ pub use live_connect::{
     AuthenticatedLiveSource, LiveConnectionConfig, MAX_ENDPOINT_BYTES,
     MAX_SOCKET_TIMEOUT_MILLIS, connect_authenticated_live_source, parse_loopback_endpoint,
 };
+pub use live_evidence::LiveObservationReceipt;
 pub use live_identity::derive_live_fortress_id;
 pub use live_observation::{
     CitizenCoverage, LiveObservationCapsule, MAX_CANONICAL_CAPSULE_BYTES,
