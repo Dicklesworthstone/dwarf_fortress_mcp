@@ -17,6 +17,7 @@ pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
 pub mod live_bootstrap;
+pub mod live_compatibility;
 pub mod live_connect;
 pub mod live_identity;
 pub mod live_observation;
@@ -48,6 +49,7 @@ pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
     bootstrap_live_read_adapter,
 };
+pub use live_compatibility::{LiveCompatibilityPolicy, LiveCompatibilityVerdict};
 pub use live_connect::{
     AuthenticatedLiveSource, LiveConnectionConfig, MAX_ENDPOINT_BYTES,
     MAX_SOCKET_TIMEOUT_MILLIS, connect_authenticated_live_source, parse_loopback_endpoint,
