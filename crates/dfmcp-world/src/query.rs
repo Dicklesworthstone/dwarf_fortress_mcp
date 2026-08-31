@@ -2,7 +2,9 @@
 
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
 
-use crate::{EdgeKind, EntityKind, EntityRecord, Value, WorldSnapshot};
+use crate::{
+    EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, Value, WorldSnapshot,
+};
 
 const MAX_QUERY_KINDS: usize = 64;
 const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
@@ -211,6 +213,20 @@ fn normalize_variadic(predicates: &[Predicate], all: bool) -> Predicate {
     }
 }
 
+fn comparable_fact_value(fact: &Fact) -> Option<&Value> {
+    match fact.presence.as_ref() {
+        None => Some(&fact.value),
+        Some(FactPresence::Known(value)) if value == &fact.value => Some(value),
+        Some(FactPresence::Known(_))
+        | Some(FactPresence::Absent)
+        | Some(FactPresence::Unknown(_))
+        | Some(FactPresence::Unsupported(_))
+        | Some(FactPresence::Omitted(_))
+        | Some(FactPresence::Redacted(_))
+        | Some(FactPresence::Stale(_)) => None,
+    }
+}
+
 #[must_use]
 pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
     match predicate {
@@ -232,7 +248,8 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
             .entities
             .get(entity_id)
             .and_then(|entity| entity.fields.get(field))
-            .is_some_and(|fact| compare(&fact.value, *op, value)),
+            .and_then(comparable_fact_value)
+            .is_some_and(|known| compare(known, *op, value)),
         Predicate::EdgeExists { edge_id, kind } => {
             snapshot
                 .graph
@@ -699,7 +716,8 @@ fn evaluate_for_candidate(
             .entities
             .get(&candidate)
             .and_then(|entity| entity.fields.get(field))
-            .is_some_and(|fact| compare(&fact.value, *op, value)),
+            .and_then(comparable_fact_value)
+            .is_some_and(|known| compare(known, *op, value)),
         Predicate::All(predicates) => predicates
             .iter()
             .all(|predicate| evaluate_for_candidate(snapshot, candidate, predicate)),
@@ -718,9 +736,13 @@ mod tests {
     use dfmcp_core::{Digest32, EntityId, ErrorCode, FortressId, GameTick, ObservationCursor};
 
     use super::{
-        CompareOp, Predicate, QueryOrder, WorldQuery, execute_bounded_query, execute_query,
+        CompareOp, Predicate, QueryOrder, WorldQuery, evaluate, execute_bounded_query,
+        execute_query,
     };
-    use crate::{EntityKind, EntityRecord, Fact, FactSource, Value, WorldGraph, WorldSnapshot};
+    use crate::{
+        EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value, WorldGraph,
+        WorldSnapshot,
+    };
 
     fn snapshot() -> WorldSnapshot {
         let mut graph = WorldGraph::default();
@@ -730,6 +752,15 @@ mod tests {
                 "stress".to_owned(),
                 Fact::known(
                     Value::I64(stress),
+                    GameTick(1),
+                    FactSource::Replay,
+                    Digest32::ZERO,
+                ),
+            );
+            fields.insert(
+                "unobserved".to_owned(),
+                Fact::with_presence(
+                    FactPresence::Omitted("not included in this projection".to_owned()),
                     GameTick(1),
                     FactSource::Replay,
                     Digest32::ZERO,
@@ -773,6 +804,39 @@ mod tests {
         let result = execute_query(&snapshot(), &query, 100)?;
         assert_eq!(result.matched, 1);
         assert_eq!(result.entities[0].label, "Urist");
+        Ok(())
+    }
+
+    #[test]
+    fn omitted_facts_never_satisfy_absolute_or_candidate_comparisons()
+    -> Result<(), dfmcp_core::DfmcpError> {
+        let snapshot = snapshot();
+        for (op, value) in [
+            (CompareOp::Eq, Value::Null),
+            (CompareOp::Ne, Value::I64(999)),
+        ] {
+            let absolute = Predicate::FieldCompare {
+                entity_id: EntityId::new(1),
+                field: "unobserved".to_owned(),
+                op,
+                value: value.clone(),
+            };
+            assert!(!evaluate(&snapshot, &absolute));
+
+            let query = WorldQuery {
+                kinds: vec![EntityKind::Unit],
+                predicate: Some(Predicate::FieldCompare {
+                    entity_id: EntityId::NIL,
+                    field: "unobserved".to_owned(),
+                    op,
+                    value,
+                }),
+                order: QueryOrder::EntityIdAscending,
+                limit: 10,
+                continuation: None,
+            };
+            assert_eq!(execute_query(&snapshot, &query, 100)?.matched, 0);
+        }
         Ok(())
     }
 
