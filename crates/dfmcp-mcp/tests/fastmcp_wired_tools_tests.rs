@@ -63,7 +63,7 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         None,
     );
     let bp_plan_json: Value = serde_json::from_str(&bp_plan_raw)?;
-    assert_eq!(bp_plan_json["ok"], true);
+    assert_eq!(bp_plan_json["ok"], true, "BP plan failed: {}", bp_plan_raw);
     assert!(bp_plan_json["plan_digest"].is_string());
 
     // 4. Plan Logistics Quota Work Orders
@@ -81,7 +81,11 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         Some(30),
     );
     let log_plan_json: Value = serde_json::from_str(&log_plan_raw)?;
-    assert_eq!(log_plan_json["ok"], true);
+    assert_eq!(
+        log_plan_json["ok"], true,
+        "Logistics plan failed: {}",
+        log_plan_raw
+    );
     assert!(log_plan_json["plan_digest"].is_string());
 
     // 5. Plan and Commit Pause Simulation Plan (supported by MemoryAdapter)

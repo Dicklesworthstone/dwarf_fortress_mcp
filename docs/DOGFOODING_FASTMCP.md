@@ -58,6 +58,18 @@ which upstream regression forced it.
 
 ## Conformance status
 
+As of 2026-08-31, the v0.8.0 pin (`12d3469`) **fails the modern handshake
+golden tests in CI**: `test_negative_era_refusal_and_marker_validations`
+passes, but `test_modern_handshake_full_lifecycle_and_plan_commit` hangs
+indefinitely after a successful `server/discover` because `tools/list`
+and subsequent modern requests are not dispatched (see Open defects
+below). The previously claimed "PASS (all golden tests green)" row was
+premature; this row supersedes it.
+
+| Date | Suite/revision | Scope exercised | Result | Evidence artifact |
+|---|---|---|---|---|
+| 2026-08-31 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | Modern handshake (negative cases only) | PASS on negative fixtures; full lifecycle hangs at `tools/list` after `server/discover` (DRAFT bug) | `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs` |
+
 ## Open defects under the v0.8.0 pin (`12d3469`)
 
 Findings from the 2026-08-31 dogfooding pass; not yet filed as upstream

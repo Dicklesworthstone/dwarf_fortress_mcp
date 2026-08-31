@@ -260,7 +260,9 @@ impl MemoryAdapter {
             label: label.to_owned(),
             anchor: self.snapshot.anchor(),
             content_digest: self.snapshot.state_hash,
-            durable: true,
+            // This is a process-local snapshot clone. It is a useful recovery
+            // laboratory, but it cannot survive process or machine loss.
+            durable: false,
             evidence: vec![evidence],
         }
     }

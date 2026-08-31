@@ -25,16 +25,15 @@ use dfmcp_core::{
     ErrorCode, FortressId, GameTick, IntentId, MapCoord, ObservationCursor, OperationContext,
     RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
-use dfmcp_intent::logistics::{InventoryStockpile, ProductionLogisticsCompiler};
 use dfmcp_intent::{
-    Action, Constraint, Intent, ObligationSpec, PreparedPlan, RequestedAction, StaticPlanner,
+    Action, BlueprintPlanner, BlueprintTemplate, Constraint, Intent, InventoryStockpile,
+    ObligationSpec, PreparedPlan, ProductionLogisticsCompiler, RequestedAction, StaticPlanner,
 };
 use dfmcp_lab::MemoryAdapter;
-use dfmcp_world::search::FrankenSearchEngine;
-use dfmcp_world::spatial_index::ChunkSpatialIndex;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{EdgeKind, Predicate, WorldGraph, WorldSnapshot};
+use dfmcp_world::{
+    ChunkSpatialIndex, EdgeKind, FrankenSearchEngine, Predicate, WorldGraph, WorldSnapshot,
+};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -85,18 +84,31 @@ static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LabSession>>>>> =
 static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1));
 
 fn sessions() -> MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LabSession>>>> {
-    SESSIONS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    match SESSIONS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
-fn next_session_counter() -> u128 {
-    let mut counter = NEXT_SESSION_COUNTER
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn next_session_counter() -> Result<u128> {
+    let mut counter = match NEXT_SESSION_COUNTER.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let id = *counter;
-    *counter = counter.wrapping_add(1);
-    id
+    if id == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "session identifier zero is reserved",
+        ));
+    }
+    *counter = counter.checked_add(1).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "process-local session identifier space is exhausted",
+        )
+    })?;
+    Ok(id)
 }
 
 fn parse_session_id_arg(value: &str) -> Result<SessionId> {
@@ -367,7 +379,11 @@ pub fn fortress_open_session(
     let probe_ctx = context_for(&probe_session, 1);
     match probe_session.adapter.health(&probe_ctx) {
         Ok(health) => {
-            let session_id = SessionId::new(next_session_counter());
+            let session_counter = match next_session_counter() {
+                Ok(value) => value,
+                Err(error) => return error_payload("fortress.open_session", &error.to_string()),
+            };
+            let session_id = SessionId::new(session_counter);
             let snapshot_anchor = probe_session.adapter.snapshot().anchor();
             let paused_after = probe_session.adapter.snapshot().paused;
             // Move the probe adapter into the registered session.
@@ -589,12 +605,18 @@ pub fn fortress_plan(
         for chunk in snapshot.graph.chunks.values() {
             let _ = spatial_index.insert_or_update_chunk(chunk);
         }
-        if snapshot.graph.chunks.is_empty() {
-            for z in (origin.z - 1)..=(origin.z + 1) {
-                for y in -1..=1 {
-                    for x in -1..=1 {
+        let min_chunk_x = (ox - 16).div_euclid(16);
+        let max_chunk_x = (ox + i32::from(w) + 16).div_euclid(16);
+        let min_chunk_y = (oy - 16).div_euclid(16);
+        let max_chunk_y = (oy + i32::from(h) + 16).div_euclid(16);
+
+        for z in (origin.z - 1)..=(origin.z + 1) {
+            for y in min_chunk_y..=max_chunk_y {
+                for x in min_chunk_x..=max_chunk_x {
+                    let chunk_coord = dfmcp_world::ChunkCoord { x, y, z };
+                    if !snapshot.graph.chunks.contains_key(&chunk_coord) {
                         let _ = spatial_index.insert_or_update_chunk(&dfmcp_world::MapChunk {
-                            coord: dfmcp_world::ChunkCoord { x, y, z },
+                            coord: chunk_coord,
                             revision: 1,
                             width: 16,
                             height: 16,
@@ -1202,13 +1224,15 @@ mod tests {
     }
 
     #[test]
-    fn session_counter_mints_unique_increasing_session_ids() {
-        let first = next_session_counter();
-        let second = next_session_counter();
+    fn session_counter_mints_unique_increasing_session_ids()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let first = next_session_counter()?;
+        let second = next_session_counter()?;
         assert!(
             second > first,
             "session_id counter must be strictly monotonic"
         );
+        Ok(())
     }
 
     #[test]
