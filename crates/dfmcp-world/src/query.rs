@@ -213,6 +213,34 @@ fn normalize_variadic(predicates: &[Predicate], all: bool) -> Predicate {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PredicateTruth {
+    True,
+    False,
+    Unknown,
+}
+
+impl PredicateTruth {
+    #[must_use]
+    const fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
+
+    #[must_use]
+    const fn is_true(self) -> bool {
+        matches!(self, Self::True)
+    }
+
+    #[must_use]
+    const fn not(self) -> Self {
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unknown => Self::Unknown,
+        }
+    }
+}
+
 fn comparable_fact_value(fact: &Fact) -> Option<&Value> {
     match fact.presence.as_ref() {
         None => Some(&fact.value),
@@ -227,17 +255,35 @@ fn comparable_fact_value(fact: &Fact) -> Option<&Value> {
     }
 }
 
-#[must_use]
-pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
+fn target_entity(entity_id: EntityId, candidate: Option<EntityId>) -> EntityId {
+    if entity_id == EntityId::NIL {
+        candidate.unwrap_or(EntityId::NIL)
+    } else {
+        entity_id
+    }
+}
+
+fn evaluate_truth(
+    snapshot: &WorldSnapshot,
+    candidate: Option<EntityId>,
+    predicate: &Predicate,
+) -> PredicateTruth {
     match predicate {
-        Predicate::True => true,
-        Predicate::False => false,
-        Predicate::EntityExists(entity_id) => snapshot.graph.entities.contains_key(entity_id),
-        Predicate::EntityKind { entity_id, kind } => snapshot
-            .graph
-            .entities
-            .get(entity_id)
-            .is_some_and(|entity| &entity.kind == kind),
+        Predicate::True => PredicateTruth::True,
+        Predicate::False => PredicateTruth::False,
+        Predicate::EntityExists(entity_id) => PredicateTruth::from_bool(
+            snapshot
+                .graph
+                .entities
+                .contains_key(&target_entity(*entity_id, candidate)),
+        ),
+        Predicate::EntityKind { entity_id, kind } => PredicateTruth::from_bool(
+            snapshot
+                .graph
+                .entities
+                .get(&target_entity(*entity_id, candidate))
+                .is_some_and(|entity| &entity.kind == kind),
+        ),
         Predicate::FieldCompare {
             entity_id,
             field,
@@ -246,11 +292,13 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
         } => snapshot
             .graph
             .entities
-            .get(entity_id)
+            .get(&target_entity(*entity_id, candidate))
             .and_then(|entity| entity.fields.get(field))
             .and_then(comparable_fact_value)
-            .is_some_and(|known| compare(known, *op, value)),
-        Predicate::EdgeExists { edge_id, kind } => {
+            .map_or(PredicateTruth::Unknown, |known| {
+                PredicateTruth::from_bool(compare(known, *op, value))
+            }),
+        Predicate::EdgeExists { edge_id, kind } => PredicateTruth::from_bool(
             snapshot
                 .graph
                 .edges
@@ -258,17 +306,38 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
                 .is_some_and(|edge| match kind.as_ref() {
                     Some(expected) => &edge.kind == expected,
                     None => true,
-                })
+                }),
+        ),
+        Predicate::Paused(expected) => PredicateTruth::from_bool(snapshot.paused == *expected),
+        Predicate::All(predicates) => {
+            let mut result = PredicateTruth::True;
+            for predicate in predicates {
+                match evaluate_truth(snapshot, candidate, predicate) {
+                    PredicateTruth::False => return PredicateTruth::False,
+                    PredicateTruth::Unknown => result = PredicateTruth::Unknown,
+                    PredicateTruth::True => {}
+                }
+            }
+            result
         }
-        Predicate::Paused(expected) => snapshot.paused == *expected,
-        Predicate::All(predicates) => predicates
-            .iter()
-            .all(|predicate| evaluate(snapshot, predicate)),
-        Predicate::Any(predicates) => predicates
-            .iter()
-            .any(|predicate| evaluate(snapshot, predicate)),
-        Predicate::Not(predicate) => !evaluate(snapshot, predicate),
+        Predicate::Any(predicates) => {
+            let mut result = PredicateTruth::False;
+            for predicate in predicates {
+                match evaluate_truth(snapshot, candidate, predicate) {
+                    PredicateTruth::True => return PredicateTruth::True,
+                    PredicateTruth::Unknown => result = PredicateTruth::Unknown,
+                    PredicateTruth::False => {}
+                }
+            }
+            result
+        }
+        Predicate::Not(predicate) => evaluate_truth(snapshot, candidate, predicate).not(),
     }
+}
+
+#[must_use]
+pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
+    evaluate_truth(snapshot, None, predicate).is_true()
 }
 
 fn compare(left: &Value, op: CompareOp, right: &Value) -> bool {
@@ -697,36 +766,7 @@ fn evaluate_for_candidate(
     candidate: EntityId,
     predicate: &Predicate,
 ) -> bool {
-    match predicate {
-        Predicate::EntityExists(entity_id) if *entity_id == EntityId::NIL => {
-            snapshot.graph.entities.contains_key(&candidate)
-        }
-        Predicate::EntityKind { entity_id, kind } if *entity_id == EntityId::NIL => snapshot
-            .graph
-            .entities
-            .get(&candidate)
-            .is_some_and(|entity| &entity.kind == kind),
-        Predicate::FieldCompare {
-            entity_id,
-            field,
-            op,
-            value,
-        } if *entity_id == EntityId::NIL => snapshot
-            .graph
-            .entities
-            .get(&candidate)
-            .and_then(|entity| entity.fields.get(field))
-            .and_then(comparable_fact_value)
-            .is_some_and(|known| compare(known, *op, value)),
-        Predicate::All(predicates) => predicates
-            .iter()
-            .all(|predicate| evaluate_for_candidate(snapshot, candidate, predicate)),
-        Predicate::Any(predicates) => predicates
-            .iter()
-            .any(|predicate| evaluate_for_candidate(snapshot, candidate, predicate)),
-        Predicate::Not(predicate) => !evaluate_for_candidate(snapshot, candidate, predicate),
-        _ => evaluate(snapshot, predicate),
-    }
+    evaluate_truth(snapshot, Some(candidate), predicate).is_true()
 }
 
 #[cfg(test)]
@@ -808,35 +848,75 @@ mod tests {
     }
 
     #[test]
-    fn omitted_facts_never_satisfy_absolute_or_candidate_comparisons()
+    fn omitted_facts_remain_unknown_through_boolean_logic()
     -> Result<(), dfmcp_core::DfmcpError> {
         let snapshot = snapshot();
-        for (op, value) in [
-            (CompareOp::Eq, Value::Null),
-            (CompareOp::Ne, Value::I64(999)),
+        let omitted_absolute = Predicate::FieldCompare {
+            entity_id: EntityId::new(1),
+            field: "unobserved".to_owned(),
+            op: CompareOp::Eq,
+            value: Value::Null,
+        };
+        for predicate in [
+            omitted_absolute.clone(),
+            Predicate::Not(Box::new(omitted_absolute.clone())),
+            Predicate::All(vec![Predicate::True, omitted_absolute.clone()]),
+            Predicate::Any(vec![Predicate::False, omitted_absolute]),
         ] {
-            let absolute = Predicate::FieldCompare {
-                entity_id: EntityId::new(1),
-                field: "unobserved".to_owned(),
-                op,
-                value: value.clone(),
-            };
-            assert!(!evaluate(&snapshot, &absolute));
+            assert!(!evaluate(&snapshot, &predicate));
+        }
 
+        for predicate in [
+            Predicate::FieldCompare {
+                entity_id: EntityId::NIL,
+                field: "unobserved".to_owned(),
+                op: CompareOp::Eq,
+                value: Value::Null,
+            },
+            Predicate::Not(Box::new(Predicate::FieldCompare {
+                entity_id: EntityId::NIL,
+                field: "unobserved".to_owned(),
+                op: CompareOp::Ne,
+                value: Value::I64(999),
+            })),
+        ] {
             let query = WorldQuery {
                 kinds: vec![EntityKind::Unit],
-                predicate: Some(Predicate::FieldCompare {
-                    entity_id: EntityId::NIL,
-                    field: "unobserved".to_owned(),
-                    op,
-                    value,
-                }),
+                predicate: Some(predicate),
                 order: QueryOrder::EntityIdAscending,
                 limit: 10,
                 continuation: None,
             };
             assert_eq!(execute_query(&snapshot, &query, 100)?.matched, 0);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn known_boolean_branches_still_short_circuit_unknown_facts()
+    -> Result<(), dfmcp_core::DfmcpError> {
+        let unknown = Predicate::FieldCompare {
+            entity_id: EntityId::NIL,
+            field: "unobserved".to_owned(),
+            op: CompareOp::Eq,
+            value: Value::Null,
+        };
+        let always_true = WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: Some(Predicate::Any(vec![Predicate::True, unknown.clone()])),
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: None,
+        };
+        let always_false = WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: Some(Predicate::All(vec![Predicate::False, unknown])),
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: None,
+        };
+        assert_eq!(execute_query(&snapshot(), &always_true, 100)?.matched, 2);
+        assert_eq!(execute_query(&snapshot(), &always_false, 100)?.matched, 0);
         Ok(())
     }
 
