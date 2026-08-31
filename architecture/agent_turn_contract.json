@@ -1,0 +1,204 @@
+{
+  "schema_version": "dfmcp.agent_turn_contract/1",
+  "status": "normative-target",
+  "purpose": "Shared orientation, continuity, epistemic, active-work, affordance, recommendation, uncertainty, coverage, and budget spine for every agent-facing result.",
+  "phases": [
+    "bootstrap",
+    "orient",
+    "inspect",
+    "formulate",
+    "propose",
+    "compare",
+    "commit",
+    "verify",
+    "learn",
+    "handoff",
+    "reconcile"
+  ],
+  "continuity_statuses": [
+    "bootstrap",
+    "continuous",
+    "heartbeat",
+    "partial",
+    "gap",
+    "reset",
+    "stale",
+    "indeterminate"
+  ],
+  "epistemic_states": [
+    "observed",
+    "certified_derived",
+    "inferred",
+    "predicted",
+    "assumed",
+    "stale",
+    "unknown",
+    "contradicted",
+    "indeterminate"
+  ],
+  "recovery_classes": [
+    "never_unchanged",
+    "safe_read_retry",
+    "refresh_and_retry",
+    "rebase_required",
+    "backoff",
+    "reconciliation_required",
+    "confirmation_required",
+    "operator_action_required"
+  ],
+  "observation_profiles": {
+    "pulse": {
+      "intent": "Cheapest safe heartbeat and control-state update.",
+      "required_sections": [
+        "identity",
+        "continuity",
+        "critical_changes",
+        "critical_attention",
+        "active_work_transitions",
+        "indeterminate_effects",
+        "recommendations",
+        "uncertainty",
+        "coverage",
+        "budget"
+      ],
+      "target_output_tokens": {"min": 150, "max": 400}
+    },
+    "briefing": {
+      "intent": "Default orientation after a meaningful interval or context reset.",
+      "required_sections": [
+        "identity",
+        "continuity",
+        "briefing",
+        "changes",
+        "attention",
+        "active_work",
+        "affordances",
+        "recommendations",
+        "uncertainty",
+        "coverage",
+        "budget"
+      ],
+      "target_output_tokens": {"min": 500, "max": 1500}
+    },
+    "tactical": {
+      "intent": "Decision-specific entity, region, causal, witness, blocker, and option detail.",
+      "requires_explicit_interest": true
+    },
+    "forensic": {
+      "intent": "Evidence-complete reconciliation, diagnosis, audit, or replay for a bounded scope.",
+      "requires_explicit_scope": true,
+      "may_require_capability": "diagnostic_raw"
+    },
+    "custom": {
+      "intent": "Explicit union of registered projections under hard bounds.",
+      "unknown_projection_behavior": "fail_closed"
+    }
+  },
+  "field_order": [
+    "schema",
+    "operation",
+    "phase",
+    "session_id",
+    "request_id",
+    "anchor",
+    "continuity",
+    "briefing",
+    "changes",
+    "attention",
+    "active_work",
+    "affordances",
+    "recommendations",
+    "uncertainty",
+    "coverage",
+    "budget",
+    "references"
+  ],
+  "recommendation_order": [
+    "continuity_or_indeterminate_hazard",
+    "imminent_irreversible_loss",
+    "hard_objective_or_deadline",
+    "high_value_information",
+    "expected_fortress_utility",
+    "future_control_cost_reduction",
+    "lower_risk_cost_and_greater_reversibility",
+    "canonical_tie_break"
+  ],
+  "required_invariants": [
+    {
+      "id": "AGENT-INV-001",
+      "statement": "Every success and error response carries the same agent_turn schema spine."
+    },
+    {
+      "id": "AGENT-INV-002",
+      "statement": "A response binds one complete canonical anchor and one immutable generation of each derived projection."
+    },
+    {
+      "id": "AGENT-INV-003",
+      "statement": "Continuity gaps, resets, staleness, and indeterminate outcomes are explicit and never silently repaired."
+    },
+    {
+      "id": "AGENT-INV-004",
+      "statement": "Only observed and eligible certified_derived facts may satisfy mutation preconditions."
+    },
+    {
+      "id": "AGENT-INV-005",
+      "statement": "Active work and the minimum safe next protocol step remain visible across context and agent handoffs."
+    },
+    {
+      "id": "AGENT-INV-006",
+      "statement": "Recommendations are structured, costed, risk-classified, evidence-linked, and authority-free until separately planned and committed."
+    },
+    {
+      "id": "AGENT-INV-007",
+      "statement": "An empty result cannot prove absence without a complete-domain coverage witness."
+    },
+    {
+      "id": "AGENT-INV-008",
+      "statement": "Budget exhaustion returns a complete decision-useful prefix, explicit omissions, and a continuation; it never removes safety or continuity state."
+    },
+    {
+      "id": "AGENT-INV-009",
+      "statement": "Memory, imported text, attention, and counterfactuals cannot grant capability or dispatch effects."
+    },
+    {
+      "id": "AGENT-INV-010",
+      "statement": "Equivalent attention, affordance, candidate, and recommendation outputs use registered canonical tie-break policies."
+    },
+    {
+      "id": "AGENT-INV-011",
+      "statement": "Prediction-versus-observation divergence creates an explicit surprise record."
+    },
+    {
+      "id": "AGENT-INV-012",
+      "statement": "A handoff packet is sufficient to resume safely without reconstructing the full transcript."
+    }
+  ],
+  "authority_rules": {
+    "attention_can_authorize": false,
+    "recommendation_can_authorize": false,
+    "memory_can_authorize": false,
+    "counterfactual_can_authorize": false,
+    "typed_affordance_can_authorize": false,
+    "prepared_plan_plus_valid_witnesses_capabilities_and_fences_required": true
+  },
+  "budget_categories": [
+    "canonical_reads",
+    "derived_queries",
+    "bridge_bytes",
+    "graph_operations",
+    "search_operations",
+    "planning_expansions",
+    "candidate_simulation",
+    "evidence_materialization",
+    "output_bytes",
+    "output_tokens"
+  ],
+  "acceptance_gates": [
+    "A0_contract_lock",
+    "A1_laboratory_briefing",
+    "A2_epistemic_and_coverage_semantics",
+    "A3_affordances_and_objective_slice",
+    "A4_live_read_only_bridge_orientation",
+    "A5_verified_live_mutation_and_accretion"
+  ]
+}
