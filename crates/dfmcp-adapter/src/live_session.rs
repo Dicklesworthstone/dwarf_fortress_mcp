@@ -74,10 +74,10 @@ pub fn read_complete_observation<T: LiveObservationSource>(
             "capsule citizen ceiling does not fit u32",
         )
     })?;
-    let maximum_pages = hard_total
+    let rounded_pages = hard_total
         .saturating_add(page_size.saturating_sub(1))
-        .saturating_div(page_size)
-        .saturating_add(1);
+        / page_size;
+    let maximum_pages = rounded_pages.saturating_add(1);
 
     for _ in 0..maximum_pages {
         let offset = assembler.next_offset()?;
