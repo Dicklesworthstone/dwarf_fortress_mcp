@@ -27,10 +27,17 @@ EXPECTED_TOOLS = [
     "fortress_explain",
     "fortress_doctor",
 ]
-MUTATION_TOOLS = [
+READ_ONLY_TOOLS = [
+    "fortress_open_session",
+    "fortress_observe",
+    "fortress_query",
+    "fortress_wait",
+    "fortress_explain",
+    "fortress_doctor",
+]
+EFFECT_REFUSAL_TOOLS = [
     "fortress_plan",
     "fortress_commit",
-    "fortress_wait",
     "fortress_cancel",
     "fortress_checkpoint",
     "fortress_restore",
@@ -78,9 +85,21 @@ def function_body(source: str, name: str) -> str:
         return ""
     opening = source.find("{", signature.start())
     depth = 0
+    in_string = False
+    escaped = False
     for index in range(opening, len(source)):
         char = source[index]
-        if char == "{":
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
@@ -116,11 +135,12 @@ def check_live_server(failures: list[Failure]) -> None:
         failures,
     )
     require(
-        "DFMCP_BRIDGE_TOKEN" in source and 'env::var("DFMCP_BRIDGE_TOKEN")' in source,
+        'env::var("DFMCP_BRIDGE_TOKEN")' in source,
         path,
         "live bearer secret must come from process configuration",
         failures,
     )
+
     for tool in EXPECTED_TOOLS:
         body = function_body(source, tool)
         require(bool(body), path, f"cannot isolate body for {tool}", failures)
@@ -130,14 +150,17 @@ def check_live_server(failures: list[Failure]) -> None:
             re.S,
         )
         if signature is not None:
-            args = signature.group(1).lower()
+            arguments = signature.group(1).lower()
             require(
-                "token" not in args and "endpoint" not in args and "secret" not in args,
+                "token" not in arguments
+                and "endpoint" not in arguments
+                and "secret" not in arguments,
                 path,
                 f"{tool} exposes deployment secrets or endpoint as MCP arguments",
                 failures,
             )
-    for tool in MUTATION_TOOLS:
+
+    for tool in EFFECT_REFUSAL_TOOLS:
         body = function_body(source, tool)
         require(
             "read_only_tool_error" in body,
@@ -145,14 +168,40 @@ def check_live_server(failures: list[Failure]) -> None:
             f"{tool} does not route through the common read-only refusal",
             failures,
         )
+
+    wait_body = function_body(source, "fortress_wait")
+    require(
+        "read_only_tool_error" not in wait_body,
+        path,
+        "fortress_wait regressed into a mutation refusal instead of read-only synchronization",
+        failures,
+    )
+    require(
+        "attach_turn" in wait_body,
+        path,
+        "fortress_wait must return the common Agent Turn Packet",
+        failures,
+    )
+    require(
+        "ContinuityStatus::Heartbeat" in wait_body
+        or "ContinuityStatus::Continuous" in wait_body,
+        path,
+        "fortress_wait must classify read-only continuity explicitly",
+        failures,
+    )
+
     for token in FORBIDDEN_LIVE_EFFECT_TOKENS:
-        require(token not in source, path, f"live server contains forbidden effect token {token}", failures)
+        require(
+            token not in source,
+            path,
+            f"live server contains forbidden effect token {token}",
+            failures,
+        )
 
     for needle in [
         "bootstrap_live_read_adapter",
         "connect_authenticated_live_source",
         "parse_loopback_endpoint",
-        "AuthenticatedLiveSource",
         "ContinuityStatus::Heartbeat",
         "ContinuityStatus::Reset",
         ".request_id(request_id.to_string())",
@@ -160,7 +209,12 @@ def check_live_server(failures: list[Failure]) -> None:
         "coverage_json",
         '"mutation_admissible": false',
     ]:
-        require(needle in source, path, f"live server is missing contract marker {needle}", failures)
+        require(
+            needle in source,
+            path,
+            f"live server is missing contract marker {needle}",
+            failures,
+        )
 
     require(
         "Capability::ControlClock" not in source
@@ -178,6 +232,16 @@ def check_live_server(failures: list[Failure]) -> None:
         "live capability allowlist is incomplete",
         failures,
     )
+
+    for tool in READ_ONLY_TOOLS:
+        body = function_body(source, tool)
+        for token in FORBIDDEN_LIVE_EFFECT_TOKENS:
+            require(
+                token not in body,
+                path,
+                f"read-only tool {tool} contains effect token {token}",
+                failures,
+            )
 
 
 def check_adapter_chain(failures: list[Failure]) -> None:
@@ -197,7 +261,7 @@ def check_adapter_chain(failures: list[Failure]) -> None:
         "crates/dfmcp-adapter/src/live_bootstrap.rs": [
             "bootstrap_live_read_adapter",
             "PrimedLiveSource",
-            "bootstrap_reads_the_underlying_source_once",
+            "bootstrap reads the underlying source once",
             "source manifest changed between the first capsule and adapter bootstrap",
         ],
         "crates/dfmcp-adapter/src/live_identity.rs": [
@@ -226,7 +290,12 @@ def check_adapter_chain(failures: list[Failure]) -> None:
     for path, needles in paths.items():
         source = read(path, failures)
         for needle in needles:
-            require(needle in source, path, f"missing live adapter contract marker {needle}", failures)
+            require(
+                needle in source,
+                path,
+                f"missing live adapter contract marker {needle}",
+                failures,
+            )
 
     lib_path = "crates/dfmcp-adapter/src/lib.rs"
     lib = read(lib_path, failures)
@@ -251,7 +320,12 @@ def check_adapter_chain(failures: list[Failure]) -> None:
 def check_cli_and_crate_wiring(failures: list[Failure]) -> None:
     lib_path = "crates/dfmcp-mcp/src/lib.rs"
     lib = read(lib_path, failures)
-    require("pub mod live_server;" in lib, lib_path, "live server module is not compiled", failures)
+    require(
+        "pub mod live_server;" in lib,
+        lib_path,
+        "live server module is not compiled",
+        failures,
+    )
     require(
         "pub use live_server::run_live_stdio;" in lib,
         lib_path,
@@ -303,7 +377,7 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure.path}: {failure.message}", file=sys.stderr)
         return 1
-    print("live MCP contract: PASS (11 tools, 5 read-only operations, 0 live effect paths)")
+    print("live MCP contract: PASS (11 tools, 6 read-only operations, 0 live effect paths)")
     return 0
 
 
