@@ -145,8 +145,10 @@ def check(source: str) -> list[Failure]:
     ]:
         if needle not in observation_init:
             failures.append(Failure(f"observation neutral initializer is missing {needle}"))
-    if not before(observation, "!authenticate(in->bearer_token()", "out->set_bridge_generation(BRIDGE_GENERATION)"):
-        failures.append(Failure("observation discloses generation before authentication succeeds"))
+    if not before(observation, "out->set_client_nonce(in->client_nonce())", "out->set_bridge_generation(BRIDGE_GENERATION)"):
+        failures.append(Failure("observation does not bind the bounded nonce before publishing continuity metadata"))
+    if not before(observation, "out->set_bridge_generation(BRIDGE_GENERATION)", "!authenticate(in->bearer_token()"):
+        failures.append(Failure("observation rejection cannot preserve negotiated generation semantics"))
     for sensitive in [
         "Core::getInstance().isWorldLoaded()",
         "World::isFortressMode()",
@@ -170,7 +172,7 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure.message}", file=sys.stderr)
         return 1
-    print("bridge auth order: PASS (fixed-work comparison and post-auth disclosure only)")
+    print("bridge auth order: PASS (fixed-work comparison and post-auth world disclosure with correlated rejection metadata)")
     return 0
 
 
