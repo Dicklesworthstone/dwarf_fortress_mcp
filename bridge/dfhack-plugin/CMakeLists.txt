@@ -4,10 +4,6 @@ set(PROJECT_SRCS
     src/dfmcp_bridge.cpp
 )
 
-set(PROJECT_HDRS
-    include/dfmcp_ipc.h
-)
-
 set(PROJECT_PROTO
     DfmcpBridge
 )
@@ -21,7 +17,3 @@ dfhack_plugin(
     LINK_LIBRARIES ${PROJECT_LIBS}
     PROTOBUFS ${PROJECT_PROTO}
 )
-
-if(BUILD_PLUGINS)
-    target_include_directories(dfmcp_bridge PRIVATE include)
-endif()
