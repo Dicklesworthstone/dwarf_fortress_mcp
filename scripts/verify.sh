@@ -20,6 +20,10 @@ info "Validating repository contracts"
 python3 scripts/validate_repo.py
 ok "Repository contracts"
 
+info "Validating the agent operating-model contract"
+python3 scripts/check_agent_contract.py
+ok "Agent operating-model contract"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
