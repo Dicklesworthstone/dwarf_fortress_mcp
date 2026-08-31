@@ -284,6 +284,10 @@ fn bounded_ids<'a>(
     (ids, truncated)
 }
 
+fn bounded_i64(value: usize) -> i64 {
+    i64::try_from(value).map_or(i64::MAX, |converted| converted)
+}
+
 fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
     let mut items = Vec::new();
     let source = capsule.content_digest;
@@ -291,7 +295,7 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
     let (not_alive, not_alive_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.alive));
     if !not_alive.is_empty() || not_alive_truncated {
         let mut score = BTreeMap::new();
-        score.insert("affected_units".to_owned(), i64::try_from(not_alive.len()).unwrap_or(i64::MAX));
+        score.insert("affected_units".to_owned(), bounded_i64(not_alive.len()));
         score.insert("ids_truncated".to_owned(), i64::from(not_alive_truncated));
         items.push(LiveAttentionItem {
             attention_id: "live.basic_status.not_alive".to_owned(),
@@ -307,7 +311,7 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
     let (not_sane, not_sane_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.sane));
     if !not_sane.is_empty() || not_sane_truncated {
         let mut score = BTreeMap::new();
-        score.insert("affected_units".to_owned(), i64::try_from(not_sane.len()).unwrap_or(i64::MAX));
+        score.insert("affected_units".to_owned(), bounded_i64(not_sane.len()));
         score.insert("ids_truncated".to_owned(), i64::from(not_sane_truncated));
         items.push(LiveAttentionItem {
             attention_id: "live.basic_status.not_sane".to_owned(),
@@ -323,7 +327,7 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
     let (inactive, inactive_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.active));
     if !inactive.is_empty() || inactive_truncated {
         let mut score = BTreeMap::new();
-        score.insert("affected_units".to_owned(), i64::try_from(inactive.len()).unwrap_or(i64::MAX));
+        score.insert("affected_units".to_owned(), bounded_i64(inactive.len()));
         score.insert("ids_truncated".to_owned(), i64::from(inactive_truncated));
         items.push(LiveAttentionItem {
             attention_id: "live.basic_status.inactive".to_owned(),
@@ -486,7 +490,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{BridgeManifest, CitizenCoverage};
+    use crate::{BridgeManifest, ObservationAssembler, ObservationPage};
 
     fn citizen(id: i32, sane: bool, x: i32) -> CitizenRecord {
         CitizenRecord {
@@ -510,42 +514,38 @@ mod tests {
     }
 
     fn capsule(discriminator: u8, citizens: Vec<CitizenRecord>) -> Result<LiveObservationCapsule> {
-        let canonical_bytes = vec![discriminator];
-        let content_digest = Digest32::of_bytes(&canonical_bytes);
+        let bridge = BridgeManifest {
+            bridge_version: "0.1.0".to_owned(),
+            dfhack_version: "0.51.11-r1".to_owned(),
+            df_version: "0.51.11".to_owned(),
+            world_loaded: true,
+            fortress_mode: true,
+            bridge_generation: 42,
+            supported_methods: BTreeSet::from([
+                "Handshake".to_owned(),
+                "ReadObservation".to_owned(),
+            ]),
+        };
         let total = u32::try_from(citizens.len()).map_err(|_| {
             error(ErrorCode::BudgetExceeded, "test citizen count does not fit u32")
         })?;
-        let value = LiveObservationCapsule {
-            bridge: BridgeManifest {
-                bridge_version: "0.1.0".to_owned(),
-                dfhack_version: "0.51.11-r1".to_owned(),
-                df_version: "0.51.11".to_owned(),
-                world_loaded: true,
-                fortress_mode: true,
-                bridge_generation: 42,
-                supported_methods: BTreeSet::from([
-                    "Handshake".to_owned(),
-                    "ReadObservation".to_owned(),
-                ]),
-            },
+        let mut assembler = ObservationAssembler::new(bridge);
+        assembler.push_page(ObservationPage {
+            bridge_generation: 42,
+            world_loaded: true,
+            fortress_mode: true,
             paused: true,
             current_year: 105,
-            current_year_tick: 12345,
+            current_year_tick: 12_345u32.saturating_add(u32::from(discriminator)),
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_coverage: CitizenCoverage {
-                offset: 0,
-                returned: total,
-                total,
-                complete: true,
-            },
+            citizen_count_total: total,
+            citizen_offset: 0,
+            complete: true,
             citizens,
-            canonical_bytes,
-            content_digest,
-        };
-        value.validate()?;
-        Ok(value)
+        })?;
+        assembler.finalize()
     }
 
     #[test]
