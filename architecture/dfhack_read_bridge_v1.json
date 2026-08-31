@@ -18,10 +18,12 @@
     "provisioning": "DFMCP_BRIDGE_TOKEN environment variable inherited by Dwarf Fortress/DFHack",
     "minimum_token_bytes": 32,
     "maximum_token_bytes": 256,
-    "comparison": "constant_time_length_padded",
+    "comparison": "fixed_256_byte_length_padded_work",
     "token_echoed_in_response": false,
     "rust_debug_rendering": "redacted",
-    "session_binding": "client_nonce echoed in every response",
+    "session_binding": "a bounded client_nonce is echoed in every correlated response",
+    "handshake_rejection_posture": "empty versions, false world posture, zero generation, and no method manifest",
+    "observation_rejection_posture": "after nonce and protocol admission, nonce plus bridge generation may be returned for correlation and restart classification; world posture and world data remain neutral until authentication",
     "limitations": "Protects against accidental and unauthenticated loopback callers; it is not a defense against a process that can read the DFHack process environment or memory."
   },
   "methods": [
@@ -47,6 +49,7 @@
       "requires_world": true,
       "requires_authentication": true,
       "bounds": {
+        "min_citizens": 1,
         "max_citizens_hard": 4096,
         "default_max_citizens": 256,
         "max_unit_name_bytes": 256,
@@ -120,10 +123,26 @@
     "INVALID_BOUND",
     "INTERNAL_FAILURE"
   ],
+  "acceptance_evidence": {
+    "contract": "architecture/live_read_acceptance_v1.json",
+    "verifier": "scripts/verify_live_read_acceptance.py",
+    "qualification_wrapper": "scripts/qualify_live_read.sh",
+    "gate_order": [
+      "R1 native build",
+      "R2 handshake matrix",
+      "R3 read determinism",
+      "R4 restart and drift fencing",
+      "R5 cold-agent orientation"
+    ],
+    "policy": "Static/unit checks are contract evidence only. Experimental live-read status requires a qualified receipt bound to one clean dfmcp commit, one passing R1 native receipt, one DFHack commit, one plugin digest, and one exact DF/DFHack/bridge version tuple."
+  },
   "security_invariants": [
     "The V1 plugin registers no mutation RPC methods.",
     "The V1 plugin does not register RunCommand, RunLua, keyboard, pause, dig, teleport, or arbitrary command forwarding.",
     "Every plugin method authenticates before inspecting world state.",
+    "Handshake rejection does not disclose DF, DFHack, world-mode, bridge-generation, or method-manifest posture.",
+    "ReadObservation may expose only bounded nonce correlation and bridge generation before authentication so an already negotiated client can distinguish a typed rejection from a restart; world posture and world data remain neutral.",
+    "Token comparison performs exactly the full 256-byte admitted workload after token-length admission and never exits early on content.",
     "The plugin requests no SF_ALLOW_REMOTE flag and is intended only for the loopback DFHack remote server.",
     "All repeated output is bounded by request and hard server ceilings.",
     "Unit output is sorted by stable unit ID before pagination.",
@@ -135,12 +154,13 @@
   ],
   "acceptance": [
     "Plugin builds through DFHack's dfhack_plugin(... PROTOBUFS ...) macro.",
-    "Handshake rejects missing, short, wrong, or oversized tokens.",
-    "Handshake returns exact DF, DFHack, bridge, plugin protocol, world-loaded, fortress-mode, generation, nonce, and method manifests.",
+    "Handshake rejects missing, short, wrong, or oversized tokens without disclosing sensitive posture.",
+    "Handshake returns exact DF, DFHack, bridge, plugin protocol, world-loaded, fortress-mode, generation, nonce, and method manifests only after authentication.",
     "ReadObservation is deterministic across two calls while the game is paused and unchanged.",
     "Citizen pages concatenate to the same canonical roster as one sufficiently large page.",
     "Rust decoder rejects noncanonical order, nonce mismatch, version mismatch, generation changes, oversize strings, oversize pages, duplicate required fields, overlong varints, noncanonical Booleans, projection mismatch, and malformed trailing wire data.",
     "One complete live page set produces one immutable canonical LiveObservationCapsule and an agent briefing with explicit complete coverage.",
-    "No live mutation symbol or RPC is linked into the V1 plugin."
+    "No live mutation symbol or RPC is linked into the V1 plugin.",
+    "R2-R5 evidence passes scripts/verify_live_read_acceptance.py and produces a source-bound machine-readable receipt."
   ]
 }
