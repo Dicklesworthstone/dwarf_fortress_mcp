@@ -302,6 +302,25 @@ impl CapabilityGrant {
             && uses_available
             && self.scope.permits(fortress_id, entity_ids, map_area)
     }
+
+    #[must_use]
+    pub const fn is_limited(&self) -> bool {
+        self.remaining_uses.is_some()
+    }
+
+    fn consume_one_use(&mut self) -> Result<()> {
+        let Some(remaining) = self.remaining_uses else {
+            return Ok(());
+        };
+        let Some(next) = remaining.checked_sub(1) else {
+            return Err(DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                "limited capability grant has no remaining uses",
+            ));
+        };
+        self.remaining_uses = Some(next);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -333,7 +352,7 @@ impl WorkBudget {
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "all non-time work-budget dimensions must be nonzero",
+                "wall-time, entity, byte, output-token, and action budget dimensions must be nonzero",
             ));
         }
         Ok(())
@@ -357,13 +376,7 @@ pub struct OperationContext {
 }
 
 impl OperationContext {
-    pub fn authorize(
-        &self,
-        capability: Capability,
-        risk: RiskTier,
-        entity_ids: &[EntityId],
-        map_area: Option<MapCuboid>,
-    ) -> Result<()> {
+    fn validate_authorization_request(&self) -> Result<()> {
         if self.cancellation_requested {
             return Err(DfmcpError::new(
                 ErrorCode::CancellationRequested,
@@ -371,18 +384,73 @@ impl OperationContext {
             )
             .retryable(false));
         }
-        self.budget.validate()?;
-        if self.grants.iter().any(|grant| {
-            grant.allows(
+        self.budget.validate()
+    }
+
+    pub fn authorize(
+        &self,
+        capability: Capability,
+        risk: RiskTier,
+        entity_ids: &[EntityId],
+        map_area: Option<MapCuboid>,
+    ) -> Result<()> {
+        self.validate_authorization_request()?;
+        let mut limited_match = false;
+        for grant in &self.grants {
+            if grant.allows(
                 capability,
                 risk,
                 self.anchor.tick,
                 self.anchor.fortress_id,
                 entity_ids,
                 map_area,
-            )
-        }) {
-            return Ok(());
+            ) {
+                if grant.is_limited() {
+                    limited_match = true;
+                } else {
+                    return Ok(());
+                }
+            }
+        }
+        if limited_match {
+            return Err(DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                format!(
+                    "capability {} is represented only by a limited-use grant; call authorize_and_consume so the use cannot be replayed",
+                    capability.as_str()
+                ),
+            ));
+        }
+        Err(DfmcpError::new(
+            ErrorCode::CapabilityDenied,
+            format!(
+                "capability {} is not granted for risk tier {} and requested scope",
+                capability.as_str(),
+                risk.as_str()
+            ),
+        ))
+    }
+
+    pub fn authorize_and_consume(
+        &mut self,
+        capability: Capability,
+        risk: RiskTier,
+        entity_ids: &[EntityId],
+        map_area: Option<MapCuboid>,
+    ) -> Result<()> {
+        self.validate_authorization_request()?;
+        for grant in &mut self.grants {
+            if grant.allows(
+                capability,
+                risk,
+                self.anchor.tick,
+                self.anchor.fortress_id,
+                entity_ids,
+                map_area,
+            ) {
+                grant.consume_one_use()?;
+                return Ok(());
+            }
         }
         Err(DfmcpError::new(
             ErrorCode::CapabilityDenied,
@@ -458,9 +526,42 @@ pub enum OperationOutcome<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Capability, CapabilityGrant, CapabilityScope, GameTick, MapCoord, MapCuboid, RiskTier,
+        Capability, CapabilityGrant, CapabilityScope, GameTick, MapCoord, MapCuboid,
+        ObservationCursor, OperationContext, RiskTier, StateAnchor, WorkBudget,
     };
-    use crate::{EntityId, FortressId};
+    use crate::{Digest32, EntityId, FortressId, RequestId, SessionId};
+
+    fn anchor() -> StateAnchor {
+        StateAnchor {
+            fortress_id: FortressId::new(7),
+            cursor: ObservationCursor {
+                epoch: 1,
+                sequence: 3,
+            },
+            tick: GameTick(99),
+            state_hash: Digest32::ZERO,
+        }
+    }
+
+    fn limited_context(remaining_uses: u32) -> OperationContext {
+        OperationContext {
+            session_id: SessionId::new(1),
+            request_id: RequestId::new(2),
+            anchor: anchor(),
+            budget: WorkBudget::default(),
+            grants: vec![CapabilityGrant {
+                capability: Capability::ConfigureLabor,
+                scope: CapabilityScope {
+                    fortress_id: Some(FortressId::new(7)),
+                    ..CapabilityScope::default()
+                },
+                max_risk: RiskTier::Reversible,
+                expires_at_tick: Some(GameTick(100)),
+                remaining_uses: Some(remaining_uses),
+            }],
+            cancellation_requested: false,
+        }
+    }
 
     #[test]
     fn cuboid_scope_is_inclusive() -> crate::Result<()> {
@@ -516,5 +617,43 @@ mod tests {
             &[EntityId::new(11)],
             None,
         ));
+    }
+
+    #[test]
+    fn immutable_authorization_rejects_limited_grants() {
+        let context = limited_context(1);
+        assert!(
+            context
+                .authorize(
+                    Capability::ConfigureLabor,
+                    RiskTier::Reversible,
+                    &[],
+                    None,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn consuming_authorization_exhausts_a_one_use_grant() -> crate::Result<()> {
+        let mut context = limited_context(1);
+        context.authorize_and_consume(
+            Capability::ConfigureLabor,
+            RiskTier::Reversible,
+            &[],
+            None,
+        )?;
+        assert_eq!(context.grants[0].remaining_uses, Some(0));
+        assert!(
+            context
+                .authorize_and_consume(
+                    Capability::ConfigureLabor,
+                    RiskTier::Reversible,
+                    &[],
+                    None,
+                )
+                .is_err()
+        );
+        Ok(())
     }
 }
