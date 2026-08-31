@@ -332,6 +332,10 @@ are never authoritative state.
 
 See `docs/DFHACK_BRIDGE.md` and `proto/dfmcp.proto`.
 
+For the exact Ubuntu packages, pinned downloads, checksums, extraction layout, headless launch,
+verification commands, source checkout, qualification procedure, and current bridge limitation,
+see [`docs/NEW_MACHINE_SETUP.md`](docs/NEW_MACHINE_SETUP.md).
+
 ---
 
 ## Platform and distribution support

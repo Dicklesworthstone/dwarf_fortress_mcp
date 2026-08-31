@@ -17,7 +17,9 @@ fn test_wired_fastmcp_tools_suite() -> std::result::Result<(), Box<dyn std::erro
         Some(vec![
             ("observe".to_owned(), "read_only".to_owned()),
             ("query".to_owned(), "read_only".to_owned()),
-            ("plan".to_owned(), "reversible".to_owned()),
+            ("plan".to_owned(), "guarded".to_owned()),
+            ("designate".to_owned(), "guarded".to_owned()),
+            ("configure_production".to_owned(), "reversible".to_owned()),
             ("control_clock".to_owned(), "reversible".to_owned()),
             ("doctor".to_owned(), "read_only".to_owned()),
         ]),

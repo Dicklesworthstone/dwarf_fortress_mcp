@@ -94,7 +94,7 @@ fn sample_context(session_id: SessionId, snapshot: &WorldSnapshot) -> OperationC
 #[test]
 fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 1. Initialize world snapshot & spatial index
-    let snapshot = sample_world_snapshot();
+    let mut snapshot = sample_world_snapshot();
     let mut spatial_index = ChunkSpatialIndex::new();
     for chunk in snapshot.graph.chunks.values() {
         spatial_index.insert_or_update_chunk(chunk)?;

@@ -236,11 +236,21 @@ fn parse_capability_request(requested: &[(String, String)]) -> Result<Vec<Negoti
             "observe" => Capability::Observe,
             "query" => Capability::Query,
             "plan" => Capability::Plan,
+            "designate" => Capability::Designate,
+            "construct" => Capability::Construct,
+            "configure_labor" => Capability::ConfigureLabor,
+            "configure_production" => Capability::ConfigureProduction,
+            "configure_logistics" => Capability::ConfigureLogistics,
+            "configure_military" => Capability::ConfigureMilitary,
             "control_clock" => Capability::ControlClock,
             "checkpoint" => Capability::Checkpoint,
             "restore" => Capability::Restore,
+            "extension" => Capability::Extension,
             "diagnostic_raw" => Capability::DiagnosticRaw,
             "doctor" => Capability::Doctor,
+            "repair_plan" => Capability::RepairPlan,
+            "repair_apply" => Capability::RepairApply,
+            "admin" => Capability::Admin,
             other => {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidRequest,
@@ -575,7 +585,7 @@ pub fn fortress_plan(
 
         let mut spatial_index = ChunkSpatialIndex::new();
         for chunk in snapshot.graph.chunks.values() {
-            spatial_index.insert_or_update_chunk(chunk);
+            let _ = spatial_index.insert_or_update_chunk(chunk);
         }
 
         BlueprintPlanner.compile_blueprint_intent(
