@@ -16,6 +16,7 @@ warn() { printf '%bWARN%b %s\n' "$YELLOW" "$RESET" "$*"; }
 die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
+
 info "Validating repository contracts"
 python3 scripts/validate_repo.py
 ok "Repository contracts"
@@ -24,9 +25,27 @@ info "Validating the agent operating-model contract"
 python3 scripts/check_agent_contract.py
 ok "Agent operating-model contract"
 
+info "Validating the authenticated read-only DFHack bridge"
+python3 scripts/check_dfhack_bridge.py
+ok "DFHack read-only bridge contract"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
+
+info "Checking script syntax"
+python3 -m py_compile \
+  scripts/validate_repo.py \
+  scripts/check_agent_contract.py \
+  scripts/check_dfhack_bridge.py \
+  scripts/check_dependency_policy.py
+bash -n \
+  scripts/bootstrap_github_repo.sh \
+  scripts/create_source_bundle.sh \
+  scripts/qualify_dfhack_plugin.sh \
+  scripts/qualify_local.sh \
+  scripts/verify.sh
+ok "Script syntax"
 
 if ! command -v cargo >/dev/null 2>&1; then
   if [[ "${DFMCP_ALLOW_MISSING_RUST:-0}" == "1" ]]; then
