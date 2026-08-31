@@ -20,6 +20,7 @@
     "maximum_token_bytes": 256,
     "comparison": "constant_time_length_padded",
     "token_echoed_in_response": false,
+    "rust_debug_rendering": "redacted",
     "session_binding": "client_nonce echoed in every response",
     "limitations": "Protects against accidental and unauthenticated loopback callers; it is not a defense against a process that can read the DFHack process environment or memory."
   },
@@ -50,7 +51,11 @@
         "default_max_citizens": 256,
         "max_unit_name_bytes": 256,
         "max_race_name_bytes": 128,
-        "max_total_reply_bytes": 8388608
+        "max_world_name_bytes": 256,
+        "max_world_folder_bytes": 512,
+        "max_total_reply_bytes": 8388608,
+        "max_text_notifications_per_call": 64,
+        "max_text_notification_total_bytes": 262144
       }
     }
   ],
@@ -82,19 +87,23 @@
       "resident",
       "baby",
       "child",
-      "adult",
-      "military"
+      "adult"
     ]
   },
   "canonicalization": {
-    "citizen_order": ["unit_id_ascending"],
+    "citizen_order": [
+      "unit_id_ascending"
+    ],
     "strings": "UTF-8 protobuf strings truncated only at valid code point boundaries",
     "pagination": "offset over canonical unit_id ordering",
-    "reply_complete": "true only when every citizen in the requested canonical range is returned",
+    "reply_complete": "true exactly when citizen_offset plus returned citizens equals citizen_count_total",
+    "capsule_identity": "The same observation returned in one page or many contiguous pages produces byte-identical canonical capsule bytes and one SHA-256 digest.",
+    "capsule_validation": "The structured fields must reproduce the stored canonical bytes before their digest is accepted.",
     "anchor_inputs": [
       "DF version",
       "DFHack version",
       "bridge version",
+      "bridge generation",
       "site_id",
       "current_year",
       "current_year_tick",
@@ -119,17 +128,19 @@
     "All repeated output is bounded by request and hard server ceilings.",
     "Unit output is sorted by stable unit ID before pagination.",
     "A partial page cannot prove absence outside its declared range.",
-    "The Rust process treats the plugin response as untrusted until bounds, nonce, versions, enum values, and canonical ordering validate.",
-    "No transport acknowledgment is a canonical observation until an ObservationCapsule validates and publishes."
+    "The Rust process treats the plugin response as untrusted until bounds, duplicate fields, varint form, nonce, versions, method set, generation, UTF-8, Boolean values, offsets, completeness, and canonical ordering validate.",
+    "Per-call DFHack text notifications have count and aggregate-byte ceilings.",
+    "Bridge credentials never render bearer-token contents through Debug.",
+    "No transport acknowledgment is a canonical observation until a complete LiveObservationCapsule reproduces and validates its canonical bytes."
   ],
   "acceptance": [
     "Plugin builds through DFHack's dfhack_plugin(... PROTOBUFS ...) macro.",
     "Handshake rejects missing, short, wrong, or oversized tokens.",
-    "Handshake returns exact DF, DFHack, bridge, plugin protocol, world-loaded, and fortress-mode manifests.",
+    "Handshake returns exact DF, DFHack, bridge, plugin protocol, world-loaded, fortress-mode, generation, nonce, and method manifests.",
     "ReadObservation is deterministic across two calls while the game is paused and unchanged.",
     "Citizen pages concatenate to the same canonical roster as one sufficiently large page.",
-    "Rust decoder rejects noncanonical order, nonce mismatch, version mismatch, oversize strings, oversize pages, and trailing protobuf garbage.",
-    "One live reply produces one immutable canonical ObservationCapsule and an agent briefing with explicit complete/partial coverage.",
+    "Rust decoder rejects noncanonical order, nonce mismatch, version mismatch, generation changes, oversize strings, oversize pages, duplicate required fields, overlong varints, noncanonical Booleans, projection mismatch, and malformed trailing wire data.",
+    "One complete live page set produces one immutable canonical LiveObservationCapsule and an agent briefing with explicit complete coverage.",
     "No live mutation symbol or RPC is linked into the V1 plugin."
   ]
 }
