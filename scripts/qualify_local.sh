@@ -84,7 +84,15 @@ receipt={
    'graph_algorithms':digest(root/'architecture/graph_algorithms.json'),
    'agent_turn_contract':digest(root/'architecture/agent_turn_contract.json'),
    'agent_operating_model':digest(root/'docs/AGENT_OPERATING_MODEL.md'),
-   'agent_contract_checker':digest(root/'scripts/check_agent_contract.py')
+   'agent_contract_checker':digest(root/'scripts/check_agent_contract.py'),
+   'dfhack_read_bridge_contract':digest(root/'architecture/dfhack_read_bridge_v1.json'),
+   'dfhack_bridge_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
+   'dfhack_bridge_plugin':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
+   'dfhack_wire_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
+   'live_observation_capsule':digest(root/'crates/dfmcp-adapter/src/live_observation.rs'),
+   'live_observation_driver':digest(root/'crates/dfmcp-adapter/src/live_session.rs'),
+   'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
+   'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
  'gates':gates
 }
@@ -97,8 +105,19 @@ trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>
 
 run_gate static-contracts python3 scripts/validate_repo.py
 run_gate agent-contract python3 scripts/check_agent_contract.py
+run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
-run_gate shell-syntax bash -n scripts/bootstrap_github_repo.sh scripts/create_source_bundle.sh scripts/verify.sh scripts/qualify_local.sh
+run_gate python-syntax python3 -m py_compile \
+  scripts/validate_repo.py \
+  scripts/check_agent_contract.py \
+  scripts/check_dfhack_bridge.py \
+  scripts/check_dependency_policy.py
+run_gate shell-syntax bash -n \
+  scripts/bootstrap_github_repo.sh \
+  scripts/create_source_bundle.sh \
+  scripts/qualify_dfhack_plugin.sh \
+  scripts/verify.sh \
+  scripts/qualify_local.sh
 
 if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
   if [[ "${DFMCP_STATIC_ONLY:-0}" == 1 ]]; then
