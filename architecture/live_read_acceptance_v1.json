@@ -1,0 +1,268 @@
+{
+  "schema_version": "dfmcp.live-read-acceptance/1",
+  "event_schema": "dfmcp.live-read-acceptance-event/1",
+  "receipt_schema": "dfmcp.live-read-acceptance-receipt/1",
+  "status": "normative_r2_r5_evidence_contract",
+  "limits": {
+    "maximum_stream_bytes": 16777216,
+    "maximum_event_bytes": 262144,
+    "maximum_events": 512,
+    "maximum_string_bytes": 4096,
+    "maximum_collection_items": 4096,
+    "maximum_depth": 64
+  },
+  "source_binding": {
+    "hash_algorithm": "sha256",
+    "require_clean_dfmcp_source_for_qualified_status": true,
+    "require_native_build_receipt": true,
+    "native_build_receipt_schema": "dfmcp.dfhack-plugin-qualification/1",
+    "required_source_digests": {
+      "bridge_registry": "architecture/dfhack_read_bridge_v1.json",
+      "bridge_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+      "bridge_cpp": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
+      "rust_wire": "crates/dfmcp-adapter/src/dfhack_wire.rs",
+      "live_capsule": "crates/dfmcp-adapter/src/live_observation.rs",
+      "live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
+      "live_adapter": "crates/dfmcp-adapter/src/live_adapter.rs",
+      "live_mcp_server": "crates/dfmcp-mcp/src/live_server.rs",
+      "acceptance_contract": "architecture/live_read_acceptance_v1.json",
+      "acceptance_verifier": "scripts/verify_live_read_acceptance.py"
+    }
+  },
+  "forbidden_event_material": {
+    "keys": [
+      "bearer_token",
+      "credentials",
+      "raw_nonce",
+      "secret",
+      "token"
+    ],
+    "substrings": [
+      "DFMCP_BRIDGE_TOKEN=",
+      "-----BEGIN PRIVATE KEY-----",
+      "-----BEGIN OPENSSH PRIVATE KEY-----"
+    ]
+  },
+  "gate_order": [
+    "R2",
+    "R3",
+    "R4",
+    "R5"
+  ],
+  "gates": {
+    "R2": {
+      "title": "authenticated handshake and secret non-disclosure",
+      "required_cases": [
+        {
+          "case": "missing_token",
+          "result": "rejected",
+          "error_code": "AUTH_REQUIRED"
+        },
+        {
+          "case": "configured_token_short",
+          "result": "rejected",
+          "error_code": "AUTH_REQUIRED"
+        },
+        {
+          "case": "configured_token_long",
+          "result": "rejected",
+          "error_code": "AUTH_REQUIRED"
+        },
+        {
+          "case": "presented_token_short",
+          "result": "rejected",
+          "error_code": "AUTH_FAILED"
+        },
+        {
+          "case": "presented_token_long",
+          "result": "rejected",
+          "error_code": "AUTH_FAILED"
+        },
+        {
+          "case": "wrong_token",
+          "result": "rejected",
+          "error_code": "AUTH_FAILED"
+        },
+        {
+          "case": "correct_token",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "nonce_short",
+          "result": "rejected",
+          "error_code": "INVALID_BOUND"
+        },
+        {
+          "case": "nonce_long",
+          "result": "rejected",
+          "error_code": "INVALID_BOUND"
+        },
+        {
+          "case": "nonce_mismatch",
+          "result": "rejected",
+          "error_code": "CLIENT_NONCE_MISMATCH"
+        },
+        {
+          "case": "protocol_mismatch",
+          "result": "rejected",
+          "error_code": "PROTOCOL_MISMATCH"
+        },
+        {
+          "case": "secret_scan",
+          "result": "passed",
+          "error_code": null
+        }
+      ]
+    },
+    "R3": {
+      "title": "paused-world read determinism and pagination invariance",
+      "page_sizes": [
+        1,
+        2,
+        7,
+        64,
+        256,
+        4096
+      ],
+      "required_cases": [
+        {
+          "case": "baseline_names_included",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "repeat_names_included",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_1",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_2",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_7",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_64",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_256",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "page_size_4096",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "baseline_names_omitted",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "repeat_names_omitted",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "offset_at_total",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "offset_beyond_total",
+          "result": "accepted",
+          "error_code": null
+        },
+        {
+          "case": "oversize_request",
+          "result": "rejected",
+          "error_code": "INVALID_BOUND"
+        },
+        {
+          "case": "running_multipage_rejected",
+          "result": "rejected",
+          "error_code": "PRECONDITIONS_FAILED"
+        }
+      ]
+    },
+    "R4": {
+      "title": "restart, world-mode, and partial-publication fencing",
+      "required_cases": [
+        {
+          "case": "restart_generation_changed",
+          "result": "passed",
+          "error_code": null
+        },
+        {
+          "case": "old_client_rejected",
+          "result": "rejected",
+          "error_code": "STALE_ANCHOR"
+        },
+        {
+          "case": "world_unloaded",
+          "result": "rejected",
+          "error_code": "WORLD_NOT_LOADED"
+        },
+        {
+          "case": "non_fortress_mode",
+          "result": "rejected",
+          "error_code": "NOT_FORTRESS_MODE"
+        },
+        {
+          "case": "summary_drift",
+          "result": "rejected",
+          "error_code": "ADAPTER_REJECTED"
+        },
+        {
+          "case": "partial_not_published",
+          "result": "passed",
+          "error_code": null
+        },
+        {
+          "case": "fresh_handshake",
+          "result": "accepted",
+          "error_code": null
+        }
+      ]
+    },
+    "R5": {
+      "title": "cold-agent semantic orientation",
+      "required_omitted_domains": [
+        "fortress.items",
+        "fortress.jobs",
+        "fortress.map",
+        "fortress.economy",
+        "fortress.welfare",
+        "fortress.military",
+        "fortress.history"
+      ],
+      "required_cases": [
+        {
+          "case": "cold_agent_turn",
+          "result": "accepted",
+          "error_code": null
+        }
+      ]
+    }
+  },
+  "claims_not_established_by_this_contract": [
+    "live mutation authority or correctness",
+    "compatibility with any version tuple other than the one bound into the receipt",
+    "durable world-state custody or crash recovery",
+    "production security against a compromised local host",
+    "release support or end-user installation quality"
+  ]
+}
