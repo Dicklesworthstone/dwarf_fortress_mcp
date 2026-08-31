@@ -12,6 +12,7 @@
 //! revalidation, idempotency, or evidence checks (ADR-013,
 //! `docs/FASTMCP_INTEGRATION.md`).
 
+pub mod agent_server;
 pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
@@ -19,6 +20,7 @@ pub mod http_transport;
 pub mod server;
 pub mod tasks;
 
+pub use agent_server::run_stdio;
 pub use agent_turn::{
     AGENT_TURN_SCHEMA, AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile,
     RecoveryClass, empty_active_work, empty_budget, empty_coverage, recommendation,
@@ -31,5 +33,5 @@ pub use http_transport::{
     MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,
 };
-pub use server::{run_stdio, validate_localhost_bind};
+pub use server::validate_localhost_bind;
 pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_action_task};
