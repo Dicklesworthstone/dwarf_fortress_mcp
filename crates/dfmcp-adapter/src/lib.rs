@@ -11,6 +11,7 @@ pub mod dfhack_rpc {
     pub use crate::dfhack_wire::*;
 }
 pub mod dispatcher;
+pub mod fenced_live_source;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
 pub mod legacy_bridge_probe;
@@ -33,6 +34,7 @@ pub use dfhack_wire::{
     MAX_WORLD_NAME_BYTES, ObservationPage,
 };
 pub use dispatcher::{EffectJournal, EffectJournalRecord, MutationDispatcher};
+pub use fenced_live_source::FencedLiveSource;
 pub use ipc::{
     FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
     IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
