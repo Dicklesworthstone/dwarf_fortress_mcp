@@ -4,7 +4,9 @@ use std::collections::BTreeSet;
 
 pub mod delta_scanner;
 pub mod dfhack_adapter;
+pub mod dfhack_rpc;
 pub mod dispatcher;
+/// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
 pub mod transceiver;
 
@@ -13,6 +15,11 @@ pub use delta_scanner::{
     MAX_EVENT_BUFFER_CAPACITY,
 };
 pub use dfhack_adapter::{DfhackAdapter, DfhackAdapterConfig};
+pub use dfhack_rpc::{
+    BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
+    CitizenRecord, DFHACK_RPC_VERSION, DfHackRpcClient, MAX_CITIZENS_PER_PAGE,
+    MAX_RPC_PAYLOAD_BYTES, ObservationPage,
+};
 pub use dispatcher::{EffectJournal, EffectJournalRecord, MutationDispatcher};
 pub use ipc::{
     FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
