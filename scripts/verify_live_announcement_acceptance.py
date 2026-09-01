@@ -164,6 +164,50 @@ def require_commit(value: Any, path: str) -> str:
     return text
 
 
+def expected_cases(contract: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    output: list[tuple[str, dict[str, Any]]] = []
+    for raw_gate in contract["gates"]:
+        gate = require_object(raw_gate, "contract.gates[]")
+        require_exact_keys(
+            gate,
+            {"gate", "name", "cases"},
+            f"contract.{gate.get('gate')}",
+        )
+        gate_name = require_string(gate.get("gate"), "contract.gate", 8)
+        for raw_case in require_list(
+            gate.get("cases"), f"contract.{gate_name}.cases"
+        ):
+            case = require_object(raw_case, f"contract.{gate_name}.cases[]")
+            require_exact_keys(
+                case,
+                {"case", "required_equals", "required_artifact_digests"},
+                f"contract.{gate_name}.case",
+            )
+            require_string(case.get("case"), f"contract.{gate_name}.case.case", 128)
+            require_object(
+                case.get("required_equals"),
+                f"contract.{gate_name}.case.required_equals",
+            )
+            artifact_names = require_list(
+                case.get("required_artifact_digests"),
+                f"contract.{gate_name}.case.required_artifact_digests",
+            )
+            if not artifact_names:
+                fail(f"contract.{gate_name}.case has no required artifact digest")
+            normalized_names = [
+                require_string(
+                    name,
+                    f"contract.{gate_name}.case.required_artifact_digests[]",
+                    128,
+                )
+                for name in artifact_names
+            ]
+            if len(normalized_names) != len(set(normalized_names)):
+                fail(f"contract.{gate_name}.case repeats an artifact name")
+            output.append((gate_name, case))
+    return output
+
+
 def load_contract(path: Path) -> dict[str, Any]:
     raw = path.read_bytes()
     if not raw or len(raw) > 4 * 1024 * 1024:
@@ -276,12 +320,24 @@ def load_contract(path: Path) -> dict[str, Any]:
     ]:
         fail("announcement acceptance gate order drifted")
     cases = expected_cases(contract)
-    if len(cases) != int(contract["limits"]["maximum_events"]):
+    limits = require_object(contract.get("limits"), "contract.limits")
+    require_exact_keys(
+        limits,
+        {"maximum_stream_bytes", "maximum_event_bytes", "maximum_events"},
+        "contract.limits",
+    )
+    for name in ["maximum_stream_bytes", "maximum_event_bytes", "maximum_events"]:
+        value = limits.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            fail(f"contract.limits.{name} must be a positive integer")
+    if len(cases) != limits["maximum_events"]:
         fail("announcement acceptance case count and event bound drifted")
     return contract
 
 
-def read_event_stream(path: Path, contract: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+def read_event_stream(
+    path: Path, contract: dict[str, Any]
+) -> tuple[list[dict[str, Any]], str]:
     maximum_stream = int(contract["limits"]["maximum_stream_bytes"])
     maximum_event = int(contract["limits"]["maximum_event_bytes"])
     maximum_events = int(contract["limits"]["maximum_events"])
@@ -311,44 +367,6 @@ def read_event_stream(path: Path, contract: dict[str, Any]) -> tuple[list[dict[s
     return events, hashlib.sha256(raw).hexdigest()
 
 
-def expected_cases(contract: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    output: list[tuple[str, dict[str, Any]]] = []
-    for raw_gate in contract["gates"]:
-        gate = require_object(raw_gate, "contract.gates[]")
-        require_exact_keys(gate, {"gate", "name", "cases"}, f"contract.{gate.get('gate')}")
-        gate_name = require_string(gate.get("gate"), "contract.gate", 8)
-        for raw_case in require_list(gate.get("cases"), f"contract.{gate_name}.cases"):
-            case = require_object(raw_case, f"contract.{gate_name}.cases[]")
-            require_exact_keys(
-                case,
-                {"case", "required_equals", "required_artifact_digests"},
-                f"contract.{gate_name}.case",
-            )
-            require_string(case.get("case"), f"contract.{gate_name}.case.case", 128)
-            require_object(
-                case.get("required_equals"),
-                f"contract.{gate_name}.case.required_equals",
-            )
-            artifact_names = require_list(
-                case.get("required_artifact_digests"),
-                f"contract.{gate_name}.case.required_artifact_digests",
-            )
-            if not artifact_names:
-                fail(f"contract.{gate_name}.case has no required artifact digest")
-            normalized_names = [
-                require_string(
-                    name,
-                    f"contract.{gate_name}.case.required_artifact_digests[]",
-                    128,
-                )
-                for name in artifact_names
-            ]
-            if len(normalized_names) != len(set(normalized_names)):
-                fail(f"contract.{gate_name}.case repeats an artifact name")
-            output.append((gate_name, case))
-    return output
-
-
 def validate_native_receipt(
     native_receipt_path: Path,
     native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
@@ -363,12 +381,36 @@ def validate_native_receipt(
     return normalized, native_file_sha
 
 
+def normalize_event_artifacts(
+    event: dict[str, Any], expected_case: dict[str, Any], index: int
+) -> dict[str, str]:
+    artifacts = require_object(event.get("artifacts"), f"event[{index}].artifacts")
+    required_names = list(expected_case["required_artifact_digests"])
+    if len(artifacts) != len(required_names) or set(artifacts) != set(required_names):
+        fail(
+            f"event[{index}] artifact key set differs: "
+            f"expected {required_names}, got {sorted(artifacts)}"
+        )
+    return {
+        name: require_hash(
+            artifacts.get(name), f"event[{index}].artifacts.{name}"
+        )
+        for name in required_names
+    }
+
+
 def validate_events(
     events: list[dict[str, Any]],
     contract: dict[str, Any],
     native: dict[str, Any],
     native_file_sha: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
     cases = expected_cases(contract)
     if len(events) != len(cases):
         fail(
@@ -383,7 +425,9 @@ def validate_events(
         gate: [] for gate in ["A1", "A2", "A3", "A4", "A5", "A6"]
     }
 
-    for index, (event, (expected_gate, expected_case)) in enumerate(zip(events, cases), 1):
+    for index, (event, (expected_gate, expected_case)) in enumerate(
+        zip(events, cases), 1
+    ):
         require_exact_keys(event, event_fields, f"event[{index}]")
         if event.get("schema") != contract["event_schema"]:
             fail(f"event[{index}] schema drifted")
@@ -393,7 +437,8 @@ def validate_events(
             fail(f"event[{index}] gate must be {expected_gate}")
         if event.get("case") != expected_case["case"]:
             fail(
-                f"event[{index}] case must be {expected_case['case']!r}, got {event.get('case')!r}"
+                f"event[{index}] case must be {expected_case['case']!r}, "
+                f"got {event.get('case')!r}"
             )
         if event.get("status") != "passed":
             fail(f"event[{index}] did not pass")
@@ -463,7 +508,10 @@ def validate_events(
                 version.get("protocol"), f"event[{index}].version_tuple.protocol", 16
             ),
         }
-        if normalized_version["bridge"] != "0.2.0" or normalized_version["protocol"] != "1.1":
+        if (
+            normalized_version["bridge"] != "0.2.0"
+            or normalized_version["protocol"] != "1.1"
+        ):
             fail(f"event[{index}] is not exact bridge 0.2.0 protocol 1.1 evidence")
         if native["bridge"]["bridge_version"] != normalized_version["bridge"]:
             fail(f"event[{index}] bridge version differs from the native generation receipt")
@@ -473,23 +521,18 @@ def validate_events(
         host = require_object(event.get("host"), f"event[{index}].host")
         require_exact_keys(host, {"system", "machine"}, f"event[{index}].host")
         normalized_host = {
-            "system": require_string(host.get("system"), f"event[{index}].host.system", 128),
-            "machine": require_string(host.get("machine"), f"event[{index}].host.machine", 128),
+            "system": require_string(
+                host.get("system"), f"event[{index}].host.system", 128
+            ),
+            "machine": require_string(
+                host.get("machine"), f"event[{index}].host.machine", 128
+            ),
         }
 
         assertions = require_object(event.get("assertions"), f"event[{index}].assertions")
         if assertions != expected_case["required_equals"]:
             fail(f"event[{index}] assertions differ from the exact case contract")
-        artifacts = require_object(event.get("artifacts"), f"event[{index}].artifacts")
-        required_artifacts = expected_case["required_artifact_digests"]
-        if list(artifacts) != required_artifacts:
-            fail(
-                f"event[{index}] artifact order differs: expected {required_artifacts}, got {list(artifacts)}"
-            )
-        normalized_artifacts = {
-            name: require_hash(artifacts.get(name), f"event[{index}].artifacts.{name}")
-            for name in required_artifacts
-        }
+        normalized_artifacts = normalize_event_artifacts(event, expected_case, index)
         expected_evidence_digest = sha256_bytes(
             canonical_json(
                 {
@@ -498,7 +541,12 @@ def validate_events(
                 }
             )
         )
-        if require_hash(event.get("evidence_digest"), f"event[{index}].evidence_digest") != expected_evidence_digest:
+        if (
+            require_hash(
+                event.get("evidence_digest"), f"event[{index}].evidence_digest"
+            )
+            != expected_evidence_digest
+        ):
             fail(f"event[{index}] evidence digest is not canonical")
 
         if common_source is None:
@@ -551,7 +599,13 @@ def validate_events(
                 ),
             }
         )
-    return common_source, common_version, common_host, gate_receipts
+    return (
+        common_source,
+        common_version,
+        common_host,
+        gate_receipts,
+        canonical_events,
+    )
 
 
 def verify(
@@ -565,10 +619,10 @@ def verify(
         native_receipt_path, native_contract_path
     )
     events, stream_sha = read_event_stream(event_stream_path, contract)
-    source, version, host, gates = validate_events(
+    source, version, host, gates, canonical_events = validate_events(
         events, contract, native, native_file_sha
     )
-    canonical_events_sha = sha256_bytes(canonical_json(events))
+    canonical_events_sha = sha256_bytes(canonical_json(canonical_events))
     unsigned: dict[str, Any] = {
         "schema": contract["receipt_schema"],
         "status": "qualified",
@@ -577,7 +631,7 @@ def verify(
         "host": host,
         "evidence": {
             "stream_sha256": stream_sha,
-            "event_count": len(events),
+            "event_count": len(canonical_events),
             "canonical_events_sha256": canonical_events_sha,
         },
         "gates": gates,
@@ -597,7 +651,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("events", type=Path)
     parser.add_argument("native_receipt", type=Path)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--native-contract", type=Path, default=DEFAULT_NATIVE_CONTRACT)
+    parser.add_argument(
+        "--native-contract", type=Path, default=DEFAULT_NATIVE_CONTRACT
+    )
     parser.add_argument("--output", type=Path)
     return parser.parse_args(argv)
 
