@@ -47,6 +47,38 @@ class RepositoryIntegrityTests(unittest.TestCase):
             (root / "target/result.txt").write_text("/mnt/data/generated/result.txt\n")
             self.assertEqual(checker.inspect(root), [])
 
+    def test_non_utf8_python_source_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "broken.py").write_bytes(b"print('ok')\n\xbf\n")
+            failures = checker.inspect(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("not valid UTF-8", failures[0].reason)
+
+    def test_nul_corrupted_rust_source_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "broken.rs").write_bytes(b"pub fn ok() {}\x00\n")
+            failures = checker.inspect(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("NUL byte", failures[0].reason)
+
+    def test_binary_asset_is_not_misclassified_as_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.bin").write_bytes(b"\x00\xff\x80")
+            self.assertEqual(checker.inspect(root), [])
+
+    def test_oversized_source_text_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "oversized.py"
+            with path.open("wb") as handle:
+                handle.truncate(checker.MAX_TEXT_BYTES + 1)
+            failures = checker.inspect(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("integrity bound", failures[0].reason)
+
 
 if __name__ == "__main__":
     unittest.main()
