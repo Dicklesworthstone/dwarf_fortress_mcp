@@ -17,6 +17,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
+[[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
 info "Rejecting local-path placeholders and probe debris"
 python3 scripts/check_repository_integrity.py
