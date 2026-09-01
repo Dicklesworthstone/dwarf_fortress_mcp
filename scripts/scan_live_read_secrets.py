@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ MAX_FILES = 512
 MAX_FILE_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_PATH_BYTES = 1_024
+READ_CHUNK_BYTES = 1024 * 1024
 
 
 class ScanError(ValueError):
@@ -44,8 +46,23 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def ensure_real_output(path: Path) -> None:
+    if path.is_symlink():
+        fail("secret-scan output must not be a symbolic link")
+    parent = path.parent
+    if parent.is_symlink() or not parent.is_dir():
+        fail("secret-scan output parent must be a real directory")
+    if path.exists():
+        try:
+            mode = path.lstat().st_mode
+        except OSError as exc:
+            fail(f"cannot inspect existing secret-scan output: {exc}")
+        if not stat.S_ISREG(mode):
+            fail("existing secret-scan output must be a regular file")
+
+
 def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_real_output(path)
     content = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
@@ -54,6 +71,7 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+        ensure_real_output(path)
         os.replace(temporary, path)
     except BaseException:
         try:
@@ -105,11 +123,60 @@ def relative_path(root: Path, path: Path) -> str:
     return relative
 
 
-def regular_files(root: Path, output: Path) -> list[Path]:
+def identity(value: os.stat_result) -> tuple[int, int, int, int]:
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+
+
+def read_stable_regular_file(path: Path, expected: os.stat_result, label: str) -> bytes:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            fail(f"artifact {label} became a symbolic link before it was opened")
+        fail(f"cannot open artifact {label}: {exc}")
+    try:
+        opened_before = os.fstat(descriptor)
+        if not stat.S_ISREG(opened_before.st_mode):
+            fail(f"artifact {label} is not a regular file after opening")
+        if identity(opened_before) != identity(expected):
+            fail(f"artifact {label} changed identity before it was opened")
+        if opened_before.st_size > MAX_FILE_BYTES:
+            fail(f"artifact {label} exceeds the {MAX_FILE_BYTES}-byte file bound")
+        chunks: list[bytes] = []
+        remaining = opened_before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, READ_CHUNK_BYTES))
+            if not chunk:
+                fail(f"artifact {label} was truncated while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            fail(f"artifact {label} grew while being read")
+        opened_after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = path.lstat()
+    except OSError as exc:
+        fail(f"artifact {label} disappeared after it was read: {exc}")
+    if not stat.S_ISREG(path_after.st_mode):
+        fail(f"artifact {label} was redirected after it was read")
+    if identity(opened_before) != identity(opened_after) or identity(opened_after) != identity(path_after):
+        fail(f"artifact {label} changed while it was being scanned")
+    data = b"".join(chunks)
+    if len(data) != opened_after.st_size:
+        fail(f"artifact {label} byte count disagrees with its stable file identity")
+    return data
+
+
+def regular_files(root: Path, output: Path) -> list[tuple[Path, os.stat_result]]:
     if root.is_symlink() or not root.is_dir():
         fail("artifact root must be a real directory, not a symbolic link")
     output_resolved = output.resolve()
-    files: list[Path] = []
+    files: list[tuple[Path, os.stat_result]] = []
     for directory, names, filenames in os.walk(root, followlinks=False):
         names.sort()
         filenames.sort()
@@ -121,16 +188,20 @@ def regular_files(root: Path, output: Path) -> list[Path]:
         for name in filenames:
             path = directory_path / name
             try:
-                mode = path.lstat().st_mode
+                metadata = path.lstat()
             except OSError as exc:
                 fail(f"cannot inspect artifact {relative_path(root, path)}: {exc}")
-            if stat.S_ISLNK(mode):
+            if stat.S_ISLNK(metadata.st_mode):
                 fail(f"artifact tree contains symbolic-link file {relative_path(root, path)}")
-            if not stat.S_ISREG(mode):
+            if not stat.S_ISREG(metadata.st_mode):
                 fail(f"artifact tree contains non-regular file {relative_path(root, path)}")
             if path.resolve() == output_resolved:
                 continue
-            files.append(path)
+            if metadata.st_size < 0 or metadata.st_size > MAX_FILE_BYTES:
+                fail(
+                    f"artifact {relative_path(root, path)} exceeds the {MAX_FILE_BYTES}-byte file bound"
+                )
+            files.append((path, metadata))
             if len(files) > MAX_FILES:
                 fail(f"artifact tree exceeds the explicit {MAX_FILES}-file bound")
     if not files:
@@ -142,27 +213,17 @@ def scan(root: Path, output: Path, token: bytes) -> tuple[dict[str, Any], list[M
     if root.is_symlink():
         fail("artifact root must not be a symbolic link")
     root = root.resolve()
+    ensure_real_output(output)
     candidates = representations(token)
     artifacts: list[dict[str, Any]] = []
     matches: list[Match] = []
     total_bytes = 0
-    for path in regular_files(root, output):
+    for path, metadata in regular_files(root, output):
         relative = relative_path(root, path)
-        try:
-            size = path.stat().st_size
-        except OSError as exc:
-            fail(f"cannot stat artifact {relative}: {exc}")
-        if size < 0 or size > MAX_FILE_BYTES:
-            fail(f"artifact {relative} exceeds the {MAX_FILE_BYTES}-byte file bound")
-        total_bytes += size
+        total_bytes += metadata.st_size
         if total_bytes > MAX_TOTAL_BYTES:
             fail(f"artifact set exceeds the {MAX_TOTAL_BYTES}-byte aggregate bound")
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            fail(f"cannot read artifact {relative}: {exc}")
-        if len(data) != size:
-            fail(f"artifact {relative} changed size while being scanned")
+        data = read_stable_regular_file(path, metadata, relative)
         for representation, needle in candidates.items():
             occurrences = data.count(needle)
             if occurrences:
@@ -170,7 +231,7 @@ def scan(root: Path, output: Path, token: bytes) -> tuple[dict[str, Any], list[M
         artifacts.append(
             {
                 "path": relative,
-                "bytes": size,
+                "bytes": len(data),
                 "sha256": sha256_bytes(data),
             }
         )
