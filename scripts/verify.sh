@@ -16,6 +16,7 @@ warn() { printf '%bWARN%b %s\n' "$YELLOW" "$RESET" "$*"; }
 die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
+[[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 
 info "Rejecting local-path placeholders and probe debris"
 python3 scripts/check_repository_integrity.py
@@ -61,7 +62,7 @@ info "Validating registry-generation-bound compatibility resolution"
 python3 scripts/check_live_compatibility_resolution.py
 ok "Exact compatibility resolution"
 
-info "Validating receipt-bound descriptor-only live execution"
+info "Validating receipt-, ticket-, and descriptor-bound live execution"
 python3 scripts/check_live_server_artifact.py
 ok "Live server artifact admission"
 
@@ -79,6 +80,7 @@ python3 scripts/test_live_compatibility_registry.py
 python3 scripts/test_live_compatibility_resolution.py
 python3 scripts/test_live_server_binary_receipt.py
 python3 scripts/test_admitted_live_launcher.py
+python3 scripts/test_live_admission_ticket.py
 ok "Python contract tests"
 
 info "Checking script syntax"
@@ -112,6 +114,7 @@ python3 -m py_compile \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
   scripts/test_admitted_live_launcher.py \
+  scripts/test_live_admission_ticket.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
