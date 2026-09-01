@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -78,6 +79,77 @@ class RepositoryIntegrityTests(unittest.TestCase):
             failures = checker.inspect(root)
             self.assertEqual(len(failures), 1)
             self.assertIn("integrity bound", failures[0].reason)
+
+    def test_symbolic_link_file_is_rejected_without_following_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "real.py"
+            target.write_text("print('real')\n")
+            link = root / "linked.py"
+            try:
+                link.symlink_to(target)
+            except OSError:
+                self.skipTest("symbolic links are unavailable")
+            failures = checker.inspect(root)
+            self.assertEqual(len(failures), 1)
+            self.assertEqual(failures[0].path, "linked.py")
+            self.assertIn("symbolic link", failures[0].reason)
+
+    def test_symbolic_link_directory_is_rejected_and_not_traversed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            external = Path(temporary).parent / f"dfmcp-external-{os.getpid()}"
+            external.mkdir(exist_ok=False)
+            try:
+                (external / "poison.py").write_bytes(b"\xbf")
+                link = root / "linked-source"
+                try:
+                    link.symlink_to(external, target_is_directory=True)
+                except OSError:
+                    self.skipTest("symbolic links are unavailable")
+                failures = checker.inspect(root)
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(failures[0].path, "linked-source")
+                self.assertIn("symbolic link", failures[0].reason)
+            finally:
+                for child in external.iterdir():
+                    child.unlink()
+                external.rmdir()
+
+    def test_fifo_is_rejected_without_opening_or_blocking(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFOs are unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fifo = root / "source.py"
+            os.mkfifo(fifo)
+            failures = checker.inspect(root)
+            self.assertEqual(len(failures), 1)
+            self.assertEqual(failures[0].path, "source.py")
+            self.assertIn("not a regular file", failures[0].reason)
+
+    def test_file_replacement_during_read_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "source.py"
+            path.write_text("print('first')\n")
+            original_read_bytes = Path.read_bytes
+
+            def replacing_read_bytes(candidate: Path) -> bytes:
+                value = original_read_bytes(candidate)
+                if candidate == path:
+                    replacement = root / "replacement.py"
+                    replacement.write_text("print('second')\n")
+                    replacement.replace(path)
+                return value
+
+            Path.read_bytes = replacing_read_bytes
+            try:
+                failures = checker.inspect(root)
+            finally:
+                Path.read_bytes = original_read_bytes
+            self.assertEqual(len(failures), 1)
+            self.assertIn("changed while being inspected", failures[0].reason)
 
 
 if __name__ == "__main__":
