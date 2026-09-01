@@ -31,7 +31,9 @@
       "acceptance_contract": "architecture/live_read_acceptance_v1.json",
       "acceptance_contract_checker": "scripts/check_live_acceptance_contract.py",
       "acceptance_verifier": "scripts/verify_live_read_acceptance.py",
-      "acceptance_journal": "scripts/live_read_evidence_journal.py"
+      "acceptance_journal": "scripts/live_read_evidence_journal.py",
+      "acceptance_secret_scanner": "scripts/scan_live_read_secrets.py",
+      "acceptance_secret_scanner_tests": "scripts/test_scan_live_read_secrets.py"
     }
   },
   "forbidden_event_material": {
@@ -266,9 +268,11 @@
   "evidence_capture": {
     "raw_probe": "dfmcp-live-probe",
     "journal": "scripts/live_read_evidence_journal.py",
+    "secret_scanner": "scripts/scan_live_read_secrets.py",
     "publication_order": "raw artifact first, canonical event second, journal root last",
     "manual_transition_policy": "Configured-token failures, world unload/mode changes, bridge restart, and fault injection require explicit disposable-fort operator transitions. No capture tool may forward arbitrary DFHack commands or Lua.",
-    "composite_case_policy": "Restart, stale-client, summary-drift, partial-publication, secret-scan, and cold-agent cases require composite or normalized evidence; one raw probe result may not fabricate them."
+    "composite_case_policy": "Restart, stale-client, summary-drift, partial-publication, secret-scan, and cold-agent cases require composite or normalized evidence; one raw probe result may not fabricate them.",
+    "secret_scan_policy": "The scanner fingerprints the admitted token, scans bounded stable regular-file bytes for raw, hexadecimal, base64, URL-safe base64, and environment-assignment representations, rejects symlinks and file-identity drift, and emits a passed secret_scan event only when the match count is zero."
   },
   "claims_not_established_by_this_contract": [
     "live mutation authority or correctness",
