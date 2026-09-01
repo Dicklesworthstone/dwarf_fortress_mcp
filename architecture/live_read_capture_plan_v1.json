@@ -1,0 +1,354 @@
+{
+  "schema_version": "dfmcp.live-read-capture-plan/1",
+  "status": "normative_agent_guidance",
+  "output_contract": {
+    "machine_output": "JSON object only",
+    "command_representation": "argv array without shell interpolation",
+    "secrets_in_arguments": false,
+    "arbitrary_dfhack_commands": false,
+    "arbitrary_lua": false,
+    "mutation_authority": false
+  },
+  "cases": [
+    {
+      "gate": "R2",
+      "case": "missing_token",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "missing_token"],
+      "append_mode": "append-probe",
+      "preconditions": ["DFHack remote server is reachable on numeric loopback", "the disposable DFHack process has no DFMCP_BRIDGE_TOKEN configured"],
+      "operator_action": "restart only the disposable DF/DFHack fixture without DFMCP_BRIDGE_TOKEN, then run the probe"
+    },
+    {
+      "gate": "R2",
+      "case": "configured_token_short",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "configured_token_short"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process and probe environment carry the same 1..31-byte token"],
+      "operator_action": "restart the disposable fixture with a 31-byte token and export the same token only in the probe process"
+    },
+    {
+      "gate": "R2",
+      "case": "configured_token_long",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "configured_token_long"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process and probe environment carry the same token longer than 256 bytes"],
+      "operator_action": "restart the disposable fixture with a 257-byte token and export the same token only in the probe process"
+    },
+    {
+      "gate": "R2",
+      "case": "presented_token_short",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "presented_token_short"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid 32..256-byte token configured"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "presented_token_long",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "presented_token_long"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid 32..256-byte token configured"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "wrong_token",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "wrong_token"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid token configured", "DFMCP_BRIDGE_TOKEN in the probe environment equals the server token so the probe can derive a distinct wrong token"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "correct_token",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "correct_token"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process and probe environment share the valid token", "a fortress-mode world is loaded"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "nonce_short",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "nonce_short"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid token configured"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "nonce_long",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "nonce_long"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid token configured"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "nonce_mismatch",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "nonce_mismatch"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process and probe environment share the valid token"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "protocol_mismatch",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "protocol_mismatch"],
+      "append_mode": "append-probe",
+      "preconditions": ["the disposable DFHack process has a valid token configured"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R2",
+      "case": "secret_scan",
+      "capture_kind": "scanner",
+      "automatable": true,
+      "argv": ["python3", "scripts/scan_live_read_secrets.py", "<artifact_root>", "<output_event.json>"],
+      "append_mode": "append",
+      "preconditions": ["all stdout, stderr, structured logs, doctor bundles, and crash artifacts from R2 are copied under one stable artifact root", "scanner output is outside the artifact root", "DFMCP_BRIDGE_TOKEN contains the valid server token only in the scanner process"],
+      "operator_action": "collect the complete bounded R2 artifact set before scanning"
+    },
+    {
+      "gate": "R3",
+      "case": "baseline_names_included",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "4096", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress is paused and unchanged", "the complete citizen roster fits the configured capsule bound"],
+      "operator_action": "pause the disposable fortress and stop all external mutation sources"
+    },
+    {
+      "gate": "R3",
+      "case": "repeat_names_included",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "4096", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged since baseline_names_included"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_1",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "1", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_2",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "2", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_7",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "7", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_64",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "64", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_256",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "256", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "page_size_4096",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "4096", "true"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "baseline_names_omitted",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "4096", "false"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "repeat_names_omitted",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "capsule", "4096", "false"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress remains paused and unchanged since baseline_names_omitted"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "offset_at_total",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "offset_at_total"],
+      "append_mode": "append-probe",
+      "preconditions": ["a fortress-mode world is loaded"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "offset_beyond_total",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "offset_beyond_total"],
+      "append_mode": "append-probe",
+      "preconditions": ["a fortress-mode world is loaded"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "oversize_request",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "oversize_request"],
+      "append_mode": "append-probe",
+      "preconditions": ["a fortress-mode world is loaded"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R3",
+      "case": "running_multipage_rejected",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "running_multipage_rejected"],
+      "append_mode": "append-probe",
+      "preconditions": ["the fortress is unpaused", "the fortress has at least two citizens"],
+      "operator_action": "unpause the disposable fortress immediately before running the probe"
+    },
+    {
+      "gate": "R4",
+      "case": "restart_generation_changed",
+      "capture_kind": "composite",
+      "automatable": false,
+      "argv": [],
+      "append_mode": "append",
+      "preconditions": ["complete before-restart and after-restart capsule probes exist", "the fortress save identity is unchanged", "the bridge process was genuinely restarted"],
+      "operator_action": "build a normalized event binding both generations and both anchors; one probe cannot fabricate this case"
+    },
+    {
+      "gate": "R4",
+      "case": "old_client_rejected",
+      "capture_kind": "composite",
+      "automatable": false,
+      "argv": [],
+      "append_mode": "append",
+      "preconditions": ["before-restart expected generation and after-restart observed generation are independently captured", "no canonical publication occurred through the stale client"],
+      "operator_action": "build a normalized stale-client event from the restart evidence and client rejection artifact"
+    },
+    {
+      "gate": "R4",
+      "case": "world_unloaded",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "world_unloaded"],
+      "append_mode": "append-probe",
+      "preconditions": ["DFHack is running with no world loaded", "the valid token remains configured"],
+      "operator_action": "return the disposable fixture to the title screen without terminating DFHack"
+    },
+    {
+      "gate": "R4",
+      "case": "non_fortress_mode",
+      "capture_kind": "probe",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "observation-case", "non_fortress_mode"],
+      "append_mode": "append-probe",
+      "preconditions": ["a non-fortress game mode is loaded", "the valid token remains configured"],
+      "operator_action": "load an explicitly disposable non-fortress fixture"
+    },
+    {
+      "gate": "R4",
+      "case": "summary_drift",
+      "capture_kind": "composite",
+      "automatable": false,
+      "argv": [],
+      "append_mode": "append",
+      "preconditions": ["a controlled two-page fault campaign changes a summary field between pages", "the assembler returns ADAPTER_REJECTED or STALE_ANCHOR without publication"],
+      "operator_action": "capture both page summaries and the assembler rejection as a normalized event"
+    },
+    {
+      "gate": "R4",
+      "case": "partial_not_published",
+      "capture_kind": "composite",
+      "automatable": false,
+      "argv": [],
+      "append_mode": "append",
+      "preconditions": ["at least one nonterminal page was captured", "capsule finalization failed or was not attempted", "no canonical anchor was issued"],
+      "operator_action": "build a normalized event from the partial-page and publication-ledger artifacts"
+    },
+    {
+      "gate": "R4",
+      "case": "fresh_handshake",
+      "capture_kind": "probe",
+      "automatable": true,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "handshake-case", "correct_token"],
+      "append_mode": "append-probe",
+      "preconditions": ["the bridge restart is complete", "the valid token is configured", "the fortress-mode world is reloaded"],
+      "operator_action": "none"
+    },
+    {
+      "gate": "R5",
+      "case": "cold_agent_turn",
+      "capture_kind": "composite",
+      "automatable": false,
+      "argv": ["cargo", "run", "--locked", "--quiet", "--bin", "dfmcp-live-probe", "--", "agent-turn"],
+      "append_mode": "append",
+      "preconditions": ["a complete names-included capsule probe and independent observation receipt are available", "the live MCP server uses the same source/version tuple", "the Agent Turn is from a fresh process context"],
+      "operator_action": "combine the capsule, receipt, and Agent Turn into the normalized R5 event; preserve all omitted-domain uncertainty and empty mutation surfaces"
+    }
+  ]
+}
