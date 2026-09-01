@@ -347,8 +347,8 @@ def validate_receipt(value: dict[str, Any], contract: dict[str, Any]) -> dict[st
     mapping = require_object(
         contract.get("required_source_digests"), "contract.required_source_digests"
     )
-    if list(digests) != list(mapping):
-        fail("protocol-1.1 native receipt source-digest order drifted")
+    if set(digests) != set(mapping):
+        fail("protocol-1.1 native receipt source-digest key set drifted")
     normalized_digests = {
         name: require_hash(digests.get(name), f"receipt.source_digests.{name}")
         for name in mapping
