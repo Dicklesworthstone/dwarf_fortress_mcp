@@ -1,0 +1,51 @@
+{
+  "schema_version": "dfmcp.live-admission-doctor-contract/1",
+  "report_schema": "dfmcp.live-admission-doctor/1",
+  "status": "normative_authority_free_preflight",
+  "stages": [
+    "registry",
+    "compatibility_floor",
+    "exact_tuple_resolution",
+    "server_artifact"
+  ],
+  "readiness_states": {
+    "not_ready": "one or more required preflight stages failed",
+    "compatibility_ready": "registry, floor, manifest, and exact entry fence passed; no server artifact was supplied",
+    "artifact_preflight_ready": "compatibility readiness plus source-bound server receipt and opened binary identity passed"
+  },
+  "determinism": {
+    "timestamps_allowed": false,
+    "environment_secrets_allowed": false,
+    "stage_order_fixed": true,
+    "diagnostic_text_maximum_bytes": 1024,
+    "hash_algorithm": "sha256",
+    "report_digest_covers": "every report field except report_digest"
+  },
+  "authority": {
+    "executes_server": false,
+    "connects_to_dfhack": false,
+    "reads_bridge_token": false,
+    "modifies_registry": false,
+    "modifies_floor": false,
+    "grants_capabilities": [],
+    "mutation_capabilities": []
+  },
+  "artifact_input_policy": {
+    "optional": true,
+    "all_or_none": [
+      "binary",
+      "server_receipt",
+      "local_qualification_receipt",
+      "binary_contract",
+      "source_root",
+      "expected_dfmcp_commit"
+    ]
+  },
+  "limitations": [
+    "a passing report does not execute the server",
+    "a passing report does not prove a bridge connection",
+    "a passing report does not replace R1-R5 compatibility evidence",
+    "the report is valid only for the exact input bytes it identifies",
+    "the report grants no game or process authority"
+  ]
+}
