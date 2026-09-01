@@ -5,7 +5,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 if [[ -t 1 ]]; then
-  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
+  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; RESET='\033[0m'
 else
   BLUE=''; GREEN=''; YELLOW=''; RED=''; RESET=''
 fi
@@ -91,6 +91,7 @@ receipt={
    'dfhack_bridge_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
    'dfhack_bridge_plugin':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
    'dfhack_wire_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
+   'dfhack_acceptance_probe':digest(root/'crates/dfmcp-adapter/src/dfhack_probe.rs'),
    'bridge_auth_order_checker':digest(root/'scripts/check_bridge_auth_order.py'),
    'live_connection_admission':digest(root/'crates/dfmcp-adapter/src/live_connect.rs'),
    'live_source_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source.rs'),
@@ -103,10 +104,14 @@ receipt={
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
    'live_read_stack_checker':digest(root/'scripts/check_live_read_stack.py'),
+   'live_acceptance_probe_binary':digest(root/'crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs'),
+   'live_acceptance_probe_manifest':digest(root/'crates/dwarf-fortress-mcp/Cargo.toml'),
    'live_acceptance_contract':digest(root/'architecture/live_read_acceptance_v1.json'),
    'live_acceptance_contract_checker':digest(root/'scripts/check_live_acceptance_contract.py'),
    'live_acceptance_verifier':digest(root/'scripts/verify_live_read_acceptance.py'),
    'live_acceptance_tests':digest(root/'scripts/test_live_read_acceptance.py'),
+   'live_acceptance_journal':digest(root/'scripts/live_read_evidence_journal.py'),
+   'live_acceptance_journal_tests':digest(root/'scripts/test_live_read_evidence_journal.py'),
    'live_acceptance_wrapper':digest(root/'scripts/qualify_live_read.sh'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
@@ -131,6 +136,7 @@ run_gate live-acceptance-contract python3 scripts/check_live_acceptance_contract
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
 run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
+run_gate live-acceptance-journal-tests python3 scripts/test_live_read_evidence_journal.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_repository_integrity.py \
@@ -143,6 +149,8 @@ run_gate python-syntax python3 -m py_compile \
   scripts/check_live_acceptance_contract.py \
   scripts/verify_live_read_acceptance.py \
   scripts/test_live_read_acceptance.py \
+  scripts/live_read_evidence_journal.py \
+  scripts/test_live_read_evidence_journal.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
@@ -172,6 +180,7 @@ run_gate rustdoc env RUSTDOCFLAGS=-Dwarnings cargo doc --locked --workspace --al
 run_gate contract cargo run --locked --quiet --bin dwarf-fortress-mcp -- contract
 run_gate doctor cargo run --locked --quiet --bin dwarf-fortress-mcp -- doctor
 run_gate demo cargo run --locked --quiet --bin dwarf-fortress-mcp -- demo
+run_gate live-probe-help cargo run --locked --quiet --bin dfmcp-live-probe -- help
 
 write_receipt passed
 trap - EXIT
