@@ -1,0 +1,38 @@
+{
+  "schema_version": "dfmcp.live-compatibility-floor-contract/1",
+  "floor_schema": "dfmcp.live-compatibility-floor/1",
+  "status": "normative_local_anti_rollback_contract",
+  "custody": {
+    "floor_path_must_be_absolute": true,
+    "parent_directory_mode": "0700",
+    "file_mode": "0600",
+    "symbolic_links_allowed": false,
+    "permitted_owner": "effective_user_or_root",
+    "maximum_bytes": 1048576
+  },
+  "generation": {
+    "registry_schema": "dfmcp.live-compatibility-registry/1",
+    "hash_algorithm": "sha256",
+    "identity_fields": [
+      "registry_file_sha256",
+      "canonical_registry_digest",
+      "ordered_entry_ids"
+    ],
+    "sequence_starts_at": 0,
+    "advance_policy": "strict_compare_and_swap",
+    "entry_policy": "every prior entry_id must remain present byte-for-byte through its content-addressed identifier",
+    "idempotent_same_generation": true
+  },
+  "authority": {
+    "grants_capabilities": [],
+    "mutation_capabilities": [],
+    "note": "The floor is local anti-rollback custody. It does not admit a tuple, create compatibility evidence, or authorize game effects."
+  },
+  "limitations": [
+    "the floor protects only callers that require and verify it",
+    "the floor is not distributed consensus",
+    "the floor does not defend against compromise of the owning account or root",
+    "registry entry removal requires an explicit future revocation schema rather than silent rollback",
+    "relocating the floor requires preserving its exact owner-private custody and content"
+  ]
+}
