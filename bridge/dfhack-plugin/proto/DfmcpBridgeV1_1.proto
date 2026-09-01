@@ -1,0 +1,108 @@
+syntax = "proto2";
+
+package dfmcp.bridge.v1_1;
+
+option optimize_for = LITE_RUNTIME;
+
+// Plugin: dfmcp_bridge_v1_1
+// RPC Handshake : HandshakeRequest -> HandshakeReply
+// RPC ReadObservation : ReadObservationRequest -> ReadObservationReply
+
+message HandshakeRequest {
+  required uint32 protocol_major = 1;
+  required uint32 protocol_minor = 2;
+  required string client_name = 3;
+  required string client_version = 4;
+  required bytes client_nonce = 5;
+  required bytes bearer_token = 6;
+}
+
+message HandshakeReply {
+  required bool accepted = 1;
+  required string failure_code = 2;
+  required string failure_message = 3;
+  required uint32 protocol_major = 4;
+  required uint32 protocol_minor = 5;
+  required string bridge_version = 6;
+  required string dfhack_version = 7;
+  required string df_version = 8;
+  required bool world_loaded = 9;
+  required bool fortress_mode = 10;
+  required bytes client_nonce = 11;
+  required uint64 bridge_generation = 12;
+  repeated string supported_methods = 13;
+}
+
+message ReadObservationRequest {
+  required uint32 protocol_major = 1;
+  required uint32 protocol_minor = 2;
+  required bytes client_nonce = 3;
+  required bytes bearer_token = 4;
+  optional uint32 citizen_offset = 5 [default = 0];
+  optional uint32 max_citizens = 6 [default = 256];
+  optional bool include_names = 7 [default = true];
+  optional sint32 announcement_after_id = 8 [default = -1];
+  optional uint32 max_announcements = 9 [default = 128];
+}
+
+message CitizenRecord {
+  required sint32 unit_id = 1;
+  required string name = 2;
+  required string race = 3;
+  required sint32 profession = 4;
+  required sint32 x = 5;
+  required sint32 y = 6;
+  required sint32 z = 7;
+  required bool alive = 8;
+  required bool sane = 9;
+  required bool active = 10;
+  required bool visible = 11;
+  required bool citizen = 12;
+  required bool resident = 13;
+  required bool baby = 14;
+  required bool child = 15;
+  required bool adult = 16;
+}
+
+message AnnouncementRecord {
+  required sint32 report_id = 1;
+  required sint32 report_type = 2;
+  required string text = 3;
+  required sint32 year = 4;
+  required sint32 year_tick = 5;
+  required sint32 repeat_count = 6;
+  required bool continuation = 7;
+  required bool unconscious = 8;
+  required bool announcement = 9;
+}
+
+message ReadObservationReply {
+  required bool accepted = 1;
+  required string failure_code = 2;
+  required string failure_message = 3;
+  required uint32 protocol_major = 4;
+  required uint32 protocol_minor = 5;
+  required bytes client_nonce = 6;
+  required uint64 bridge_generation = 7;
+
+  required bool world_loaded = 8;
+  required bool fortress_mode = 9;
+  required bool paused = 10;
+  required uint32 current_year = 11;
+  required uint32 current_year_tick = 12;
+  required string world_name = 13;
+  required string world_folder = 14;
+  required sint32 site_id = 15;
+
+  required uint32 citizen_count_total = 16;
+  required uint32 citizen_offset = 17;
+  required bool complete = 18;
+  repeated CitizenRecord citizens = 19;
+
+  required sint32 announcement_oldest_available_id = 20;
+  required sint32 announcement_latest_available_id = 21;
+  required sint32 announcement_requested_after_id = 22;
+  required bool announcement_gap_before_window = 23;
+  required bool announcement_complete_through_latest = 24;
+  repeated AnnouncementRecord announcements = 25;
+}
