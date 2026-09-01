@@ -45,7 +45,7 @@ info "Validating the compiled authenticated live-read stack"
 python3 scripts/check_live_read_stack.py
 ok "Compiled live-read stack contract"
 
-info "Validating the R2-R5 live-read evidence contract"
+info "Validating the R2-R5 probe, journal, and evidence contract"
 python3 scripts/check_live_acceptance_contract.py
 ok "Live-read acceptance contract"
 
@@ -56,6 +56,7 @@ ok "Dependency policy"
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
 python3 scripts/test_live_read_acceptance.py
+python3 scripts/test_live_read_evidence_journal.py
 ok "Python contract tests"
 
 info "Checking script syntax"
@@ -71,6 +72,8 @@ python3 -m py_compile \
   scripts/check_live_acceptance_contract.py \
   scripts/verify_live_read_acceptance.py \
   scripts/test_live_read_acceptance.py \
+  scripts/live_read_evidence_journal.py \
+  scripts/test_live_read_evidence_journal.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
@@ -109,6 +112,7 @@ info "Running executable contract checks"
 cargo run --locked --quiet --bin dwarf-fortress-mcp -- contract >/dev/null
 cargo run --locked --quiet --bin dwarf-fortress-mcp -- doctor >/dev/null
 cargo run --locked --quiet --bin dwarf-fortress-mcp -- demo >/dev/null
+cargo run --locked --quiet --bin dfmcp-live-probe -- help >/dev/null
 ok "Executable contract checks"
 
 printf '%bAll verification gates passed.%b\n' "$GREEN" "$RESET"
