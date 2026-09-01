@@ -2,7 +2,7 @@
   "schema_version": "dfmcp.dfhack-plugin-native-qualification-contract/1.1",
   "receipt_schema": "dfmcp.dfhack-plugin-native-qualification/1.1",
   "status": "normative_protocol_generation_wrapper",
-  "base_receipt_schema": "dfmcp.dfhack-plugin-native-qualification/1",
+  "base_receipt_schema": "dfmcp.dfhack-plugin-qualification/1",
   "bridge": {
     "plugin": "dfmcp_bridge_v1_1",
     "protobuf_package": "dfmcp.bridge.v1_1",
