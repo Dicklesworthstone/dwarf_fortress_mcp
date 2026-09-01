@@ -8,10 +8,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, DfHackProbeClient,
-    LiveConnectionConfig, LiveObservationSource, MAX_CAPSULE_CITIZENS,
-    MAX_CITIZENS_PER_PAGE, ObservationAssembler, ProbeHandshakeRequest,
-    ProbeObservationRequest, connect_authenticated_live_source, derive_live_fortress_id,
-    parse_loopback_endpoint, project_live_capsule,
+    LiveConnectionConfig, LiveObservationReceipt, LiveObservationSource,
+    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, ObservationAssembler,
+    ProbeHandshakeRequest, ProbeObservationRequest, connect_authenticated_live_source,
+    derive_live_fortress_id, parse_loopback_endpoint, project_live_capsule,
 };
 use dfmcp_core::{Digest32, ErrorCode, ObservationCursor};
 use serde_json::{Value as JsonValue, json};
@@ -21,7 +21,6 @@ const DEFAULT_CONNECT_MILLIS: u64 = 2_000;
 const DEFAULT_READ_MILLIS: u64 = 5_000;
 const DEFAULT_WRITE_MILLIS: u64 = 5_000;
 const MAX_TIMEOUT_MILLIS: u64 = 60_000;
-const VALID_NONCE_BYTES: usize = 32;
 const SHORT_NONCE_BYTES: usize = 15;
 const LONG_NONCE_BYTES: usize = 65;
 const SHORT_TOKEN_BYTES: usize = 31;
@@ -39,7 +38,10 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let mut arguments = env::args().skip(1);
-    let command = arguments.next().unwrap_or_else(|| "help".to_owned());
+    let command = match arguments.next() {
+        Some(value) => value,
+        None => "help".to_owned(),
+    };
     match command.as_str() {
         "help" | "--help" | "-h" => print_help(),
         "handshake-case" => {
@@ -236,12 +238,20 @@ fn fresh_nonce(address: &str, domain: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> 
     Ok(Digest32::of_bytes(&bytes).as_bytes().to_vec())
 }
 
+fn wrong_token() -> Vec<u8> {
+    let candidate = vec![b'w'; 32];
+    match env::var("DFMCP_BRIDGE_TOKEN") {
+        Ok(configured) if configured.as_bytes() == candidate => vec![b'x'; 32],
+        _ => candidate,
+    }
+}
+
 fn case_token(case: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     match case {
         "missing_token" => Ok(Vec::new()),
         "presented_token_short" => Ok(vec![b's'; SHORT_TOKEN_BYTES]),
         "presented_token_long" => Ok(vec![b'l'; LONG_TOKEN_BYTES]),
-        "wrong_token" => Ok(vec![b'w'; 32]),
+        "wrong_token" => Ok(wrong_token()),
         "configured_token_short" | "configured_token_long" | "correct_token"
         | "nonce_short" | "nonce_long" | "nonce_mismatch" | "protocol_mismatch" => {
             configured_token()
@@ -512,6 +522,8 @@ fn run_capsule(page_size: u32, include_names: bool) -> Result<(), Box<dyn Error>
     let fortress_id = derive_live_fortress_id(&capsule)?;
     let projection = project_live_capsule(&capsule, fortress_id, ObservationCursor::ORIGIN)?;
     projection.validate_against(&capsule)?;
+    let receipt = LiveObservationReceipt::issue(&capsule, &projection.snapshot)?;
+    receipt.verify(&capsule, &projection.snapshot)?;
     let mut identity_bytes = b"dfmcp.live-probe.citizen-identities/1\0".to_vec();
     for citizen in &capsule.citizens {
         identity_bytes.extend_from_slice(&citizen.unit_id.to_le_bytes());
@@ -531,6 +543,7 @@ fn run_capsule(page_size: u32, include_names: bool) -> Result<(), Box<dyn Error>
         "bridge_generation": capsule.bridge.bridge_generation,
         "capsule_sha256": capsule.content_digest.to_string(),
         "snapshot_sha256": projection.snapshot.state_hash.to_string(),
+        "receipt_sha256": receipt.receipt_digest.to_string(),
         "citizen_identity_sha256": citizen_identity.to_string(),
         "anchor": {
             "fortress_id": anchor.fortress_id.to_string(),
