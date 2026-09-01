@@ -165,9 +165,17 @@ fn number(value: u64) -> Value {
 
 fn unsigned_ticket_value(ticket: &AdmissionTicket) -> Value {
     let mut fields = BTreeMap::new();
-    fields.insert("capabilities".to_owned(), Value::Array(
-        ticket.capabilities.iter().cloned().map(Value::String).collect(),
-    ));
+    fields.insert(
+        "capabilities".to_owned(),
+        Value::Array(
+            ticket
+                .capabilities
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
     fields.insert(
         "compatibility_decision_digest".to_owned(),
         Value::String(ticket.compatibility_decision_digest.clone()),
@@ -392,7 +400,8 @@ fn validate_executable_identity(
             executable_path.display()
         ))
     })?;
-    if metadata.dev() != ticket.server_binary_device
+    if !metadata.is_file()
+        || metadata.dev() != ticket.server_binary_device
         || metadata.ino() != ticket.server_binary_inode
         || metadata.len() != ticket.server_binary_bytes
         || metadata.mode() != ticket.server_binary_mode
@@ -455,15 +464,16 @@ fn read_stable_ticket(path: &Path) -> Result<Vec<u8>, AdmissionError> {
         ));
     }
 
-    let mut bytes = Vec::with_capacity(
-        usize::try_from(opened.len())
-            .map_err(|_| invalid("admission ticket length does not fit memory bounds"))?,
-    );
+    let capacity = usize::try_from(opened.len())
+        .map_err(|_| invalid("admission ticket length does not fit memory bounds"))?;
+    let mut bytes = Vec::with_capacity(capacity);
     (&mut file)
         .take(MAX_TICKET_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|source| invalid(format!("cannot read admission ticket: {source}")))?;
-    if u64::try_from(bytes.len()).map_or(true, |length| length > MAX_TICKET_BYTES) {
+    let bytes_length = u64::try_from(bytes.len())
+        .map_err(|_| invalid("admission ticket read length does not fit u64"))?;
+    if bytes_length > MAX_TICKET_BYTES {
         return Err(invalid("admission ticket exceeded its byte bound while read"));
     }
     let after = file.metadata().map_err(|source| {
@@ -472,9 +482,7 @@ fn read_stable_ticket(path: &Path) -> Result<Vec<u8>, AdmissionError> {
             path.display()
         ))
     })?;
-    if !same_file_identity(&opened, &after)
-        || u64::try_from(bytes.len()).map_or(true, |length| length != after.len())
-    {
+    if !same_file_identity(&opened, &after) || bytes_length != after.len() {
         return Err(invalid("admission ticket changed while being read"));
     }
     Ok(bytes)
@@ -561,7 +569,7 @@ pub fn run_live_stdio() {
 mod tests {
     use std::fs::{OpenOptions, create_dir, set_permissions};
     use std::io::Write;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
