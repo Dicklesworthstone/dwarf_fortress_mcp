@@ -172,11 +172,14 @@ class LiveAnnouncementEvidenceJournalTests(unittest.TestCase):
         temporary, fixture = self.fixture()
         with temporary:
             fixture.initialize()
-            arguments = fixture.artifact_arguments(0)
+            fixture.append_next()
+            captured = 1
+            arguments = fixture.artifact_arguments(captured)
+            self.assertGreater(len(arguments), 1)
             with self.assertRaises(journal.JournalError):
                 fixture.append_next(artifact_arguments=list(reversed(arguments)))
 
-            _gate, case = fixture.next_case(0)
+            _gate, case = fixture.next_case(captured)
             fixture.write_assertions(copy.deepcopy(case["required_equals"]))
             with self.assertRaises(journal.JournalError):
                 journal.append_event(
