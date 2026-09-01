@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve an exact tuple, verify one qualified inode, and exec read-only live MCP."""
+"""Resolve an exact tuple, verify monotonic custody, and exec read-only live MCP."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from typing import Any, NoReturn
 ROOT = Path(__file__).resolve().parents[1]
 PROMOTION_PATH = ROOT / "scripts/promote_live_compatibility.py"
 RESOLVER_PATH = ROOT / "scripts/resolve_live_compatibility.py"
+FLOOR_PATH = ROOT / "scripts/live_compatibility_floor.py"
 BINARY_VERIFIER_PATH = ROOT / "scripts/verify_live_server_binary_receipt.py"
 DEFAULT_REGISTRY = ROOT / "architecture/live_compatibility_registry_v1.json"
 DEFAULT_BINARY = ROOT / "target/release/dwarf-fortress-mcp"
@@ -39,6 +40,7 @@ def load_module(name: str, path: Path) -> Any:
 
 promotion = load_module("promote_live_compatibility", PROMOTION_PATH)
 resolver = load_module("resolve_live_compatibility", RESOLVER_PATH)
+compatibility_floor = load_module("live_compatibility_floor", FLOOR_PATH)
 binary_verifier = load_module("verify_live_server_binary_receipt", BINARY_VERIFIER_PATH)
 
 
@@ -83,8 +85,24 @@ def validate_loader_environment(environment: dict[str, str]) -> None:
         )
 
 
+def read_launch_generation(
+    registry_path: Path, floor_path: Path
+) -> tuple[dict[str, Any], dict[str, Any], str, dict[str, Any]]:
+    floor_value, floor_file_sha256 = compatibility_floor.read_floor(floor_path)
+    registry, registry_file_sha256 = promotion.read_object_with_digest(
+        registry_path, promotion.MAX_JSON_BYTES, "compatibility registry"
+    )
+    generation = compatibility_floor.registry_generation_from_value(
+        registry, registry_file_sha256
+    )
+    compatibility_floor.verify_generation(floor_value, generation)
+    return registry, floor_value, floor_file_sha256, generation
+
+
 def build_launch_record(
     compatibility_decision: dict[str, Any],
+    floor_value: dict[str, Any],
+    floor_file_sha256: str,
     normalized_server_receipt: dict[str, Any],
     opened_binary: Any,
 ) -> dict[str, Any]:
@@ -92,6 +110,10 @@ def build_launch_record(
         fail("compatibility decision is not admitted")
     if compatibility_decision.get("required_entry_id") != compatibility_decision.get("entry_id"):
         fail("compatibility decision is not fenced to its admitted entry identifier")
+    if compatibility_decision.get("registry_digest") != floor_value["registry_digest"]:
+        fail("compatibility decision is not bound to the trusted monotonic floor generation")
+    if compatibility_decision.get("entry_id") not in floor_value["entry_ids"]:
+        fail("admitted compatibility entry is absent from the trusted monotonic floor")
     source_commit = compatibility_decision["manifest"]["source"]["dfmcp_commit"]
     if normalized_server_receipt["source"]["dfmcp_commit"] != source_commit:
         fail("server binary receipt and compatibility decision name different source commits")
@@ -110,6 +132,14 @@ def build_launch_record(
         "required_entry_id": compatibility_decision["required_entry_id"],
         "compatibility_decision_digest": compatibility_decision["decision_digest"],
         "compatibility_registry_digest": compatibility_decision["registry_digest"],
+        "compatibility_floor": {
+            "file_sha256": floor_file_sha256,
+            "floor_digest": floor_value["floor_digest"],
+            "sequence": floor_value["sequence"],
+            "registry_file_sha256": floor_value["registry_file_sha256"],
+            "registry_digest": floor_value["registry_digest"],
+            "entry_count": len(floor_value["entry_ids"]),
+        },
         "support_level": compatibility_decision["support_level"],
         "deployment_manifest": compatibility_decision["manifest"],
         "server_receipt": {
@@ -138,8 +168,47 @@ def build_launch_record(
     }
 
 
+def reverify_opened_binary(opened_binary: Any, record: dict[str, Any]) -> os.stat_result:
+    metadata = os.fstat(opened_binary.descriptor)
+    expected = record["server_binary"]
+    if (
+        metadata.st_dev != expected["device"]
+        or metadata.st_ino != expected["inode"]
+        or metadata.st_size != expected["bytes"]
+        or stat.S_IMODE(metadata.st_mode) != expected["mode"]
+        or metadata.st_uid != expected["owner_uid"]
+    ):
+        fail("opened server binary metadata changed after qualification")
+    digest = binary_verifier.sha256_descriptor(opened_binary.descriptor)
+    if digest != expected["sha256"] or digest != opened_binary.sha256:
+        fail("opened server binary bytes changed after qualification")
+    return metadata
+
+
+def reverify_launch_generation(
+    registry_path: Path,
+    floor_path: Path,
+    record: dict[str, Any],
+) -> None:
+    _, floor_value, floor_file_sha256, generation = read_launch_generation(
+        registry_path, floor_path
+    )
+    expected = record["compatibility_floor"]
+    if (
+        floor_file_sha256 != expected["file_sha256"]
+        or floor_value["floor_digest"] != expected["floor_digest"]
+        or floor_value["sequence"] != expected["sequence"]
+        or generation["registry_file_sha256"] != expected["registry_file_sha256"]
+        or generation["registry_digest"] != expected["registry_digest"]
+        or len(generation["entry_ids"]) != expected["entry_count"]
+        or record["compatibility_entry_id"] not in generation["entry_ids"]
+    ):
+        fail("compatibility registry or monotonic floor changed during admitted launch preparation")
+
+
 def prepare_launch(
     registry_path: Path,
+    floor_path: Path,
     manifest_path: Path,
     binary_path: Path,
     server_receipt_path: Path,
@@ -152,8 +221,8 @@ def prepare_launch(
 ) -> tuple[Any, dict[str, Any]]:
     validate_token_environment(environment)
     validate_loader_environment(environment)
-    registry = promotion.read_object(
-        registry_path, promotion.MAX_JSON_BYTES, "compatibility registry"
+    registry, floor_value, floor_file_sha256, _ = read_launch_generation(
+        registry_path, floor_path
     )
     manifest = promotion.read_object(
         manifest_path, 1024 * 1024, "deployment manifest"
@@ -175,7 +244,15 @@ def prepare_launch(
         expected_commit,
     )
     try:
-        record = build_launch_record(decision, normalized_receipt, opened)
+        record = build_launch_record(
+            decision,
+            floor_value,
+            floor_file_sha256,
+            normalized_receipt,
+            opened,
+        )
+        reverify_opened_binary(opened, record)
+        reverify_launch_generation(registry_path, floor_path, record)
     except BaseException:
         os.close(opened.descriptor)
         raise
@@ -221,13 +298,7 @@ def build_admission_ticket(
         fail("admission ticket creation time must not be negative")
     if pid <= 0 or pid > 0xFFFF_FFFF:
         fail("admission ticket process ID is outside the u32 domain")
-    metadata = os.fstat(opened_binary.descriptor)
-    if (
-        metadata.st_dev != opened_binary.device
-        or metadata.st_ino != opened_binary.inode
-        or metadata.st_size != opened_binary.size
-    ):
-        fail("opened server binary changed before admission ticket issuance")
+    metadata = reverify_opened_binary(opened_binary, record)
     unsigned: dict[str, Any] = {
         "schema": TICKET_SCHEMA,
         "state": "authorized_to_exec",
@@ -238,6 +309,9 @@ def build_admission_ticket(
         "compatibility_entry_id": record["compatibility_entry_id"],
         "compatibility_registry_digest": record["compatibility_registry_digest"],
         "compatibility_decision_digest": record["compatibility_decision_digest"],
+        "compatibility_floor_digest": record["compatibility_floor"]["floor_digest"],
+        "compatibility_floor_file_sha256": record["compatibility_floor"]["file_sha256"],
+        "compatibility_floor_sequence": record["compatibility_floor"]["sequence"],
         "server_receipt_digest": record["server_receipt"]["content_digest"],
         "launch_digest": record["launch_digest"],
         "server_binary_sha256": record["server_binary"]["sha256"],
@@ -332,6 +406,15 @@ def admitted_environment(
     environment["DFMCP_COMPATIBILITY_REGISTRY_DIGEST"] = record[
         "compatibility_registry_digest"
     ]
+    environment["DFMCP_COMPATIBILITY_FLOOR_DIGEST"] = record["compatibility_floor"][
+        "floor_digest"
+    ]
+    environment["DFMCP_COMPATIBILITY_FLOOR_FILE_SHA256"] = record[
+        "compatibility_floor"
+    ]["file_sha256"]
+    environment["DFMCP_COMPATIBILITY_FLOOR_SEQUENCE"] = str(
+        record["compatibility_floor"]["sequence"]
+    )
     environment["DFMCP_SERVER_RECEIPT_DIGEST"] = record["server_receipt"][
         "content_digest"
     ]
@@ -342,13 +425,16 @@ def admitted_environment(
 
 
 def execute_verified_descriptor(
-    opened_binary: Any, environment: dict[str, str]
+    opened_binary: Any,
+    environment: dict[str, str],
+    record: dict[str, Any],
 ) -> NoReturn:
     if os.execve not in getattr(os, "supports_fd", set()):
         fail(
             "this Python runtime cannot execute an opened descriptor; "
             "refusing a path-based live-execution fallback"
         )
+    reverify_opened_binary(opened_binary, record)
     arguments = [opened_binary.path.name, "serve-live"]
     os.execve(opened_binary.descriptor, arguments, environment)
     fail("descriptor-based exec returned unexpectedly")
@@ -358,6 +444,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
+    parser.add_argument("--compatibility-floor", type=Path, required=True)
     parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
     parser.add_argument("--server-receipt", type=Path, required=True)
     parser.add_argument("--local-qualification-receipt", type=Path, required=True)
@@ -378,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         inherited = dict(os.environ)
         opened, record = prepare_launch(
             args.registry,
+            args.compatibility_floor,
             args.manifest,
             args.binary,
             args.server_receipt,
@@ -406,14 +494,22 @@ def main(argv: list[str] | None = None) -> int:
             record,
             opened,
         )
+        reverify_launch_generation(
+            args.registry,
+            args.compatibility_floor,
+            record,
+        )
         environment = admitted_environment(inherited, record, ticket_path)
-        execute_verified_descriptor(opened, environment)
+        execute_verified_descriptor(opened, environment, record)
     except (
         OSError,
         KeyError,
         TypeError,
         promotion.PromotionError,
+        resolver.promotion.PromotionError,
         resolver.ResolutionError,
+        compatibility_floor.FloorError,
+        compatibility_floor.promotion.PromotionError,
         binary_verifier.VerificationError,
         LaunchError,
     ) as exc:
