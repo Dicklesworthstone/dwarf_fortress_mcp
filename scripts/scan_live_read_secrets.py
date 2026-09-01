@@ -123,6 +123,14 @@ def relative_path(root: Path, path: Path) -> str:
     return relative
 
 
+def ensure_output_outside_root(root: Path, output: Path) -> None:
+    try:
+        output.resolve().relative_to(root)
+    except ValueError:
+        return
+    fail("secret-scan output must be outside the scanned artifact tree")
+
+
 def identity(value: os.stat_result) -> tuple[int, int, int, int]:
     return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
 
@@ -172,10 +180,9 @@ def read_stable_regular_file(path: Path, expected: os.stat_result, label: str) -
     return data
 
 
-def regular_files(root: Path, output: Path) -> list[tuple[Path, os.stat_result]]:
+def regular_files(root: Path) -> list[tuple[Path, os.stat_result]]:
     if root.is_symlink() or not root.is_dir():
         fail("artifact root must be a real directory, not a symbolic link")
-    output_resolved = output.resolve()
     files: list[tuple[Path, os.stat_result]] = []
     for directory, names, filenames in os.walk(root, followlinks=False):
         names.sort()
@@ -195,8 +202,6 @@ def regular_files(root: Path, output: Path) -> list[tuple[Path, os.stat_result]]
                 fail(f"artifact tree contains symbolic-link file {relative_path(root, path)}")
             if not stat.S_ISREG(metadata.st_mode):
                 fail(f"artifact tree contains non-regular file {relative_path(root, path)}")
-            if path.resolve() == output_resolved:
-                continue
             if metadata.st_size < 0 or metadata.st_size > MAX_FILE_BYTES:
                 fail(
                     f"artifact {relative_path(root, path)} exceeds the {MAX_FILE_BYTES}-byte file bound"
@@ -213,12 +218,13 @@ def scan(root: Path, output: Path, token: bytes) -> tuple[dict[str, Any], list[M
     if root.is_symlink():
         fail("artifact root must not be a symbolic link")
     root = root.resolve()
+    ensure_output_outside_root(root, output)
     ensure_real_output(output)
     candidates = representations(token)
     artifacts: list[dict[str, Any]] = []
     matches: list[Match] = []
     total_bytes = 0
-    for path, metadata in regular_files(root, output):
+    for path, metadata in regular_files(root):
         relative = relative_path(root, path)
         total_bytes += metadata.st_size
         if total_bytes > MAX_TOTAL_BYTES:
