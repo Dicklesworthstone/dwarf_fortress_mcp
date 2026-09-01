@@ -19,7 +19,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
-info "Rejecting corrupted source, local-path placeholders, and probe debris"
+info "Rejecting corrupted source, symlinks, local-path placeholders, and probe debris"
 python3 scripts/check_repository_integrity.py
 ok "Repository integrity"
 
@@ -81,6 +81,7 @@ ok "Dependency policy"
 
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
+python3 scripts/test_read_stable_repository_file.py
 python3 scripts/test_live_read_acceptance.py
 python3 scripts/test_live_read_evidence_journal.py
 python3 scripts/test_scan_live_read_secrets.py
@@ -98,8 +99,10 @@ ok "Python contract tests"
 info "Checking script syntax"
 python3 -m py_compile \
   scripts/validate_repo.py \
+  scripts/read_stable_repository_file.py \
   scripts/check_repository_integrity.py \
   scripts/test_repository_integrity.py \
+  scripts/test_read_stable_repository_file.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_bridge_auth_order.py \
