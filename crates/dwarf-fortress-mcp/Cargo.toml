@@ -10,6 +10,10 @@ repository.workspace = true
 name = "dwarf-fortress-mcp"
 path = "src/main.rs"
 
+[[bin]]
+name = "dfmcp-live-probe"
+path = "src/bin/dfmcp-live-probe.rs"
+
 [dependencies]
 dfmcp-core = { path = "../dfmcp-core" }
 dfmcp-world = { path = "../dfmcp-world" }
