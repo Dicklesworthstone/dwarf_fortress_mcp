@@ -1,0 +1,69 @@
+{
+  "schema_version": "dfmcp.live-announcement-evidence-journal-contract/1",
+  "journal_schema": "dfmcp.live-announcement-evidence-journal/1",
+  "status": "normative_capture_custody_contract",
+  "acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
+  "commands": [
+    "init",
+    "status",
+    "append",
+    "export"
+  ],
+  "custody": {
+    "journal_must_be_regular_file": true,
+    "symbolic_links_allowed": false,
+    "owner_read_write_only": true,
+    "same_directory_atomic_replace": true,
+    "file_fsync_before_replace": true,
+    "directory_fsync_after_replace": true,
+    "exclusive_lock_file": true,
+    "compare_and_swap_sha256_required_for_append_and_export": true
+  },
+  "identity": {
+    "contract_sha256_bound": true,
+    "native_receipt_sha256_bound": true,
+    "clean_dfmcp_commit_bound": true,
+    "clean_dfhack_commit_bound": true,
+    "plugin_sha256_bound": true,
+    "version_tuple_bound": true,
+    "platform_bound": true
+  },
+  "append_semantics": {
+    "next_case_is_derived_from_acceptance_contract": true,
+    "manual_sequence_selection_allowed": false,
+    "manual_gate_selection_allowed": false,
+    "manual_case_selection_allowed": false,
+    "assertions_must_equal_exact_case_contract": true,
+    "artifact_names_and_order_must_equal_exact_case_contract": true,
+    "artifact_contents_or_paths_persisted": false,
+    "only_artifact_sha256_values_persisted": true,
+    "failed_case_may_advance_journal": false,
+    "journal_digest_covers_all_fields_except_itself": true
+  },
+  "export_semantics": {
+    "incomplete_journal_export_allowed": false,
+    "full_stream_revalidated_before_export": true,
+    "event_order_is_contract_order": true,
+    "export_is_canonical_jsonl": true,
+    "exported_stream_contains_secrets_or_environment": false
+  },
+  "bounds": {
+    "maximum_journal_bytes": 67108864,
+    "maximum_assertions_file_bytes": 1048576,
+    "maximum_artifact_file_bytes": 536870912,
+    "maximum_artifact_path_bytes": 4096,
+    "maximum_lock_path_bytes": 4096
+  },
+  "authority": {
+    "capabilities_granted": [],
+    "mutation_capabilities": []
+  },
+  "claims_not_established": [
+    "the appended assertions were measured correctly by an external probe",
+    "artifact availability from a digest alone",
+    "compatibility admission",
+    "runtime admission",
+    "complete announcement history",
+    "mutation authority"
+  ]
+}
