@@ -13,7 +13,7 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "architecture/live_server_binary_receipt_v1.json"
@@ -22,6 +22,7 @@ LOCAL_RECEIPT_SCHEMA = "dfmcp.qualification-receipt.v1"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 MAX_JSON_BYTES = 8 * 1024 * 1024
+MAX_HASHED_FILE_BYTES = 256 * 1024 * 1024
 MAX_STRING_BYTES = 16 * 1024
 MAX_COLLECTION_ITEMS = 4096
 MAX_DEPTH = 64
@@ -38,6 +39,8 @@ EXPECTED_LOCAL_QUALIFICATION_GATES = [
     "live-capture-plan",
     "live-compatibility-registry",
     "live-compatibility-resolution",
+    "live-compatibility-floor",
+    "live-admission-doctor",
     "live-server-artifact-admission",
     "dependency-policy",
     "repository-integrity-tests",
@@ -47,6 +50,8 @@ EXPECTED_LOCAL_QUALIFICATION_GATES = [
     "live-capture-guidance-tests",
     "live-compatibility-promotion-tests",
     "live-compatibility-resolution-tests",
+    "live-compatibility-floor-tests",
+    "live-admission-doctor-tests",
     "live-server-binary-qualification-tests",
     "live-server-binary-receipt-tests",
     "admitted-live-launcher-tests",
@@ -67,6 +72,10 @@ EXPECTED_SOURCE_DIGESTS = {
     "cargo_lock": "Cargo.lock",
     "workspace_manifest": "Cargo.toml",
     "binary_main": "crates/dwarf-fortress-mcp/src/main.rs",
+    "binary_admission_tests": "crates/dwarf-fortress-mcp/tests/live_admission.rs",
+    "mcp_crate_root": "crates/dfmcp-mcp/src/lib.rs",
+    "mcp_admission": "crates/dfmcp-mcp/src/admission.rs",
+    "mcp_agent_turn": "crates/dfmcp-mcp/src/agent_turn.rs",
     "mcp_live_server": "crates/dfmcp-mcp/src/live_server.rs",
     "adapter_live_connect": "crates/dfmcp-adapter/src/live_connect.rs",
     "adapter_live_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap.rs",
@@ -74,6 +83,14 @@ EXPECTED_SOURCE_DIGESTS = {
     "adapter_live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
     "compatibility_registry": "architecture/live_compatibility_registry_v1.json",
     "compatibility_resolver": "scripts/resolve_live_compatibility.py",
+    "compatibility_floor_contract": "architecture/live_compatibility_floor_v1.json",
+    "compatibility_floor": "scripts/live_compatibility_floor.py",
+    "compatibility_floor_checker": "scripts/check_live_compatibility_floor.py",
+    "compatibility_floor_tests": "scripts/test_live_compatibility_floor.py",
+    "admission_doctor_contract": "architecture/live_admission_doctor_v1.json",
+    "admission_doctor": "scripts/doctor_live_admission.py",
+    "admission_doctor_checker": "scripts/check_live_admission_doctor.py",
+    "admission_doctor_tests": "scripts/test_doctor_live_admission.py",
     "artifact_contract": "architecture/live_server_binary_receipt_v1.json",
     "artifact_qualification": "scripts/qualify_live_server_binary.sh",
     "artifact_qualification_tests": "scripts/test_qualify_live_server_binary.py",
@@ -82,6 +99,7 @@ EXPECTED_SOURCE_DIGESTS = {
     "artifact_verifier_tests": "scripts/test_live_server_binary_receipt.py",
     "admitted_launcher": "scripts/serve_admitted_live.py",
     "admitted_launcher_tests": "scripts/test_admitted_live_launcher.py",
+    "admission_ticket_tests": "scripts/test_live_admission_ticket.py",
 }
 
 
@@ -101,7 +119,7 @@ class OpenBinary:
     owner_uid: int
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
     raise VerificationError(message)
 
 
@@ -124,10 +142,28 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _open_stable_regular(path: Path, maximum_bytes: int, label: str) -> tuple[int, os.stat_result]:
+def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and left.st_size == right.st_size
+        and left.st_mode == right.st_mode
+        and left.st_uid == right.st_uid
+        and left.st_mtime_ns == right.st_mtime_ns
+        and left.st_ctime_ns == right.st_ctime_ns
+    )
+
+
+def open_stable_regular(
+    path: Path,
+    maximum_bytes: int,
+    label: str,
+) -> tuple[int, os.stat_result]:
     raw = os.fspath(path)
     if not raw or len(os.fsencode(raw)) > 4096:
         fail(f"{label} path is empty or exceeds its byte bound")
+    if any(ord(character) < 0x20 for character in raw):
+        fail(f"{label} path contains a control character")
     if not hasattr(os, "O_NOFOLLOW"):
         fail("this platform cannot enforce no-follow artifact opening")
     flags = os.O_RDONLY | os.O_NOFOLLOW
@@ -142,7 +178,9 @@ def _open_stable_regular(path: Path, maximum_bytes: int, label: str) -> tuple[in
         if not stat.S_ISREG(metadata.st_mode):
             fail(f"{label} must be a regular file")
         if metadata.st_size <= 0 or metadata.st_size > maximum_bytes:
-            fail(f"{label} must contain 1..={maximum_bytes} bytes, got {metadata.st_size}")
+            fail(
+                f"{label} must contain 1..={maximum_bytes} bytes, got {metadata.st_size}"
+            )
         return descriptor, metadata
     except BaseException:
         os.close(descriptor)
@@ -150,15 +188,20 @@ def _open_stable_regular(path: Path, maximum_bytes: int, label: str) -> tuple[in
 
 
 def read_bytes_with_digest(
-    path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES
+    path: Path,
+    label: str,
+    maximum_bytes: int = MAX_JSON_BYTES,
 ) -> tuple[bytes, str]:
-    descriptor, before = _open_stable_regular(path, maximum_bytes, label)
+    descriptor, before = open_stable_regular(path, maximum_bytes, label)
     try:
         digest = hashlib.sha256()
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(descriptor, min(1024 * 1024, maximum_bytes + 1 - total))
+            chunk = os.read(
+                descriptor,
+                min(1024 * 1024, maximum_bytes + 1 - total),
+            )
             if not chunk:
                 break
             total += len(chunk)
@@ -167,12 +210,7 @@ def read_bytes_with_digest(
             digest.update(chunk)
             chunks.append(chunk)
         after = os.fstat(descriptor)
-        if (
-            before.st_dev != after.st_dev
-            or before.st_ino != after.st_ino
-            or before.st_size != after.st_size
-            or total != before.st_size
-        ):
+        if not same_identity(before, after) or total != after.st_size:
             fail(f"{label} changed while being read")
         return b"".join(chunks), digest.hexdigest()
     finally:
@@ -180,11 +218,16 @@ def read_bytes_with_digest(
 
 
 def sha256_file(path: Path) -> str:
-    _, digest = read_bytes_with_digest(path, "source-bound file")
+    _, digest = read_bytes_with_digest(
+        path,
+        "source-bound file",
+        MAX_HASHED_FILE_BYTES,
+    )
     return digest
 
 
 def sha256_descriptor(descriptor: int) -> str:
+    before = os.fstat(descriptor)
     duplicate = os.dup(descriptor)
     try:
         os.lseek(duplicate, 0, os.SEEK_SET)
@@ -193,6 +236,9 @@ def sha256_descriptor(descriptor: int) -> str:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         duplicate = -1
+        after = os.fstat(descriptor)
+        if not same_identity(before, after):
+            fail("opened artifact changed while being hashed")
         return digest.hexdigest()
     finally:
         if duplicate >= 0:
@@ -232,12 +278,15 @@ def bounded_tree(value: Any, path: str = "$", depth: int = 1) -> None:
 
 
 def read_object_with_digest(
-    path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES
+    path: Path,
+    label: str,
+    maximum_bytes: int = MAX_JSON_BYTES,
 ) -> tuple[dict[str, Any], str]:
     raw, digest = read_bytes_with_digest(path, label, maximum_bytes)
     try:
         value = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=duplicate_rejecting_object
+            raw.decode("utf-8"),
+            object_pairs_hook=duplicate_rejecting_object,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         fail(f"cannot parse {label}: {exc}")
@@ -247,7 +296,11 @@ def read_object_with_digest(
     return value, digest
 
 
-def read_object(path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, Any]:
+def read_object(
+    path: Path,
+    label: str,
+    maximum_bytes: int = MAX_JSON_BYTES,
+) -> dict[str, Any]:
     value, _ = read_object_with_digest(path, label, maximum_bytes)
     return value
 
@@ -300,8 +353,22 @@ def require_positive_int(value: Any, path: str, maximum: int | None = None) -> i
     return value
 
 
+def validate_relative_path(value: Any, path: str) -> str:
+    text = require_string(value, path, 1024)
+    candidate = Path(text)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        fail(f"{path} must be a traversal-free relative path")
+    if text.startswith("./") or "//" in text or candidate.as_posix() != text:
+        fail(f"{path} is not in canonical relative-path form")
+    return text
+
+
 def load_contract(path: Path) -> dict[str, Any]:
-    contract = read_object(path, "live server binary receipt contract", 1024 * 1024)
+    contract = read_object(
+        path,
+        "live server binary receipt contract",
+        1024 * 1024,
+    )
     require_exact_keys(
         contract,
         {
@@ -322,6 +389,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         fail("live server binary receipt schema drifted")
     if contract.get("status") != "normative_runtime_artifact_contract":
         fail("live server binary contract status drifted")
+
     source_binding = require_object(contract.get("source_binding"), "contract.source_binding")
     require_exact_keys(
         source_binding,
@@ -343,7 +411,7 @@ def load_contract(path: Path) -> dict[str, Any]:
     gates = require_list(
         source_binding.get("required_local_qualification_gates"),
         "contract.source_binding.required_local_qualification_gates",
-     )
+    )
     if gates != EXPECTED_LOCAL_QUALIFICATION_GATES:
         fail("binary contract local qualification gate set or order drifted")
     required_digests = require_object(
@@ -353,89 +421,455 @@ def load_contract(path: Path) -> dict[str, Any]:
     if required_digests != EXPECTED_SOURCE_DIGESTS:
         fail("binary contract source-digest mapping drifted")
     for name, relative in required_digests.items():
-        candidate = Path(relative)
-        if candidate.is_absolute() or ".." in candidate.parts or relative.startswith("./"):
-            fail(f"binary contract source path {name!s¿vÙÈZ®ËkºwµçYXÙZ\˜š[˜\žK˜ž]\È‹ˆ™\]Z\™WÜÜÚ]]™WÚ[
-ÛÛ˜XÝØš[˜\žK™Ù]
-›X^[][WØž]\ÈŠJKˆ
-Bˆš[˜\žWÜÚLMˆH™\]Z\™WÚ\Ú
-š[˜\žK™Ù]
-œÚLMˆŠKœÙ\™\—Ü™XÙZ\˜š[˜\žKœÚLMˆŠB‚ˆÚXÚÜÈH™\]Z\™WÛ\Ý
-™XÙZ\™Ù]
-™^XÝ]X›WØÚXÚÜÈŠKœÙ\™\—Ü™XÙZ\™^XÝ]X›WØÚXÚÜÈŠBˆ^XÝYØÚXÚÜÈHÛÛ˜XÝÈœ™\]Z\™YÙ^XÝ]X›WØÚXÚÜÈ—BˆYˆ[ŠÚXÚÜÊHOH[Š^XÝYØÚXÚÜÊN‚ˆ˜Z[
-œÙ\™\ˆ™XÙZ\^XÝ]X›KXÚXÚÈÛÝ[šYYŠBˆ›Ü›X[^™YØÚXÚÜÎˆ\ÝÙXÝÜÝ‹[žWWHH×Bˆ›Üˆ[™^^XÝYÛ˜[YH[ˆ[[Y\˜]J^XÝYØÚXÚÜÊN‚ˆÚXÚÈH™\]Z\™WÛØš™XÝ
-ÚXÚÜÖÚ[™^KˆœÙ\™\—Ü™XÙZ\™^XÝ]X›WØÚXÚÜÖÞÚ[™^WHŠBˆ™\]Z\™WÙ^XÝÚÙ^\ÊˆÚXÚËˆÈ›˜[YH‹œÝ]\È‹œÝÝ]ÜÚLMˆ‹œÝ\œ—ÜÚLMˆŸKˆˆœÙ\™\—Ü™XÙZ\™^XÝ]X›WØÚXÚÜÖÞÚ[™^WH‹ˆ
-BˆYˆÚXÚË™Ù]
-›˜[YHŠHOH^XÝYÛ˜[YHÜˆÚXÚË™Ù]
-œÝ]\ÈŠHOHœ\ÜÙYŽ‚ˆ˜Z[
-ˆœÙ\™\ˆ^XÝ]X›HÚXÚÈÙ^XÝYÛ˜[Y_HY›Ý\ÜÈ[ˆØ[›ÛšXØ[Ü™\ˆŠBˆ›Ü›X[^™YØÚXÚÜË˜\[™
-ˆÂˆ›˜[YHŽˆ^XÝYÛ˜[YKˆœÝ]\ÈŽˆœ\ÜÙY‹ˆœÝÝ]ÜÚLMˆŽˆ™\]Z\™WÚ\Ú
-ˆÚXÚË™Ù]
-œÝÝ]ÜÚLMˆŠKˆˆœÙ\™\—Ü™XÙZ\™^XÝ]X›WØÚXÚÜÖÞÚ[™^WKœÝÝ]ÜÚLMˆ‹ˆ
-KˆœÝ\œ—ÜÚLMˆŽˆ™\]Z\™WÚ\Ú
-ˆÚXÚË™Ù]
-œÝ\œ—ÜÚLMˆŠKˆˆœÙ\™\—Ü™XÙZ\™^XÝ]X›WØÚXÚÜÖÞÚ[™^WKœÝ\œ—ÜÚLMˆ‹ˆ
-KˆBˆ
-B‚ˆÛÝ\˜ÙWÙYÙ\ÝÈH™\]Z\™WÛØš™XÝ
-™XÙZ\™Ù]
-œÛÝ\˜ÙWÙYÙ\ÝÈŠKœÙ\™\—Ü™XÙZ\œÛÝ\˜ÙWÙYÙ\ÝÈŠBˆ™\]Z\™YÙYÙ\ÝÈHÛÛ˜XÝÈœÛÝ\˜ÙWØš[™[™È—VÈœ™\]Z\™YÜÛÝ\˜ÙWÙYÙ\ÝÈ—BˆYˆÙ]
-ÛÝ\˜ÙWÙYÙ\ÝÊHOHÙ]
-™\]Z\™YÙYÙ\ÝÊN‚ˆ˜Z[
-œÙ\™\ˆ™XÙZ\ÛÝ\˜ÙKYYÙ\ÝÙ^HÙ]šYYŠBˆ›Ü›X[^™YÙYÙ\ÝÎˆXÝÜÝ‹Ý—HHßBˆ›Üˆ˜[YK™[]]™H[ˆ™\]Z\™YÙYÙ\ÝËš][\Ê
-N‚ˆXÛ\™YH™\]Z\™WÚ\Ú
-ˆÛÝ\˜ÙWÙYÙ\ÝË™Ù]
-˜[YJKˆœÙ\™\—Ü™XÙZ\œÛÝ\˜ÙWÙYÙ\ÝËžÛ˜[Y_H‚ˆ
-Bˆ]HÛÝ\˜ÙWÜ›ÛÝÈ™[]]™BˆYˆ›Ý]š\×Ùš[J
-N‚ˆ˜Z[
-ˆœÙ\™\ˆ™XÙZ\ÛÝ\˜ÙHš[™[™È\ÈZ\ÜÚ[™Èš[HÜ™[]]™_HŠBˆXÝX[HÚLM—Ùš[J]
-BˆYˆXÛ\™YOHXÝX[‚ˆ˜Z[
-ˆœÙ\™\ˆ™XÙZ\ÛÝ\˜ÙHYÙ\ÝY™™\œÈ›ÜˆÜ™[]]™_HŠBˆ›Ü›X[^™YÙYÙ\ÝÖÛ˜[YWHHXÛ\™Y‚ˆYˆ™XÙZ\™Ù]
-›]]][Û—ØØ\Xš[]Y\ÈŠHOH×N‚ˆ˜Z[
-œÙ\™\ˆ™XÙZ\]\ÝØ\œžH›È]]][ÛˆØ\Xš[]Y\ÈŠBˆYˆ™XÙZ\™Ù]
-˜ÛZ[\×Û›ÝÙ\ÝX›\ÚYŠHOHÛÛ˜XÝ™Ù]
-˜ÛZ[\×Û›ÝÙ\ÝX›\ÚYŠN‚ˆ˜Z[
-œÙ\™\ˆ™XÙZ\ÛZ[\Ë[›ÝY\ÝX›\ÚYÙ]šYYŠB‚ˆ™]\›ˆÂˆœ™XÙZ\ÜÚLMˆŽˆ™XÙZ\Ùš[WÜÚLM‹ˆœ™XÙZ\ÙYÙ\ÝŽˆXÛ\™YÜ™XÙZ\ÙYÙ\ÝˆœÛÝ\˜ÙHŽˆÂˆ™›XÜØÛÛ[Z]ŽˆÛÛ[Z]ˆ™›XÜÙ\HŽˆ˜[ÙKˆ›ØØ[Ü]X[YšXØ][Û—Ü™XÙZ\ÜÚLMˆŽˆØØ[Ü™XÙZ\ÜÚKˆKˆœ]›Ü›HŽˆÈœÞ\Ý[HŽˆÞ\Ý[K›XXÚ[™HŽˆXXÚ[™_Kˆ˜š[˜\žHŽˆÂˆ›˜[YHŽˆš[˜\žVÈ›˜[YH—Kˆœ›Ùš[HŽˆœ™[X\ÙH‹ˆœ™[]]™WÜ]Žˆ™[]]™WÜ]ˆ˜ž]\ÈŽˆš[˜\žWØž]\ËˆœÚLMˆŽˆš[˜\žWÜÚLM‹ˆKˆ™^XÝ]X›WØÚXÚÜÈŽˆ›Ü›X[^™YØÚXÚÜËˆœÛÝ\˜ÙWÙYÙ\ÝÈŽˆ›Ü›X[^™YÙYÙ\ÝËˆ›]]][Û—ØØ\Xš[]Y\ÈŽˆ×KˆB‚‚™Yˆ˜[Y]WÛÜ[—ÛY]Y]JY]Y]NˆÜËœÝ]Ü™\Ý[
-HOˆ›Û™N‚ˆYˆ›ÝÝ]”×ÒTÔ‘QÊY]Y]KœÝÛ[ÙJN‚ˆ˜Z[
-›Ü[™YÙ\™\ˆ\Y˜XÝ\È›ÝH™YÝ[\ˆš[HŠBˆYˆY]Y]KœÝÛ[ÙH	ˆ
-Ý]”×ÒUÑÔ”Ý]”×ÒUÓÕ
-N‚ˆ˜Z[
-œÙ\™\ˆ\Y˜XÝ\ÈÜ›Ý\HÜˆÛÜ›]Üš]X›HŠBˆYˆY]Y]KœÝÛ[ÙH	ˆ
-Ý]”×ÒVTÔˆÝ]”×ÒVÔ”Ý]”×ÒVÕ
-HOH‚ˆ˜Z[
-›Ü[™YÙ\™\ˆ\Y˜XÝ\È›È^XÝ]X›H\›Z\ÜÚ[Ûˆš]ŠBˆYˆ\Ø]ŠÜË™Ù]]ZYŠN‚ˆ\›Z]YÛÝÛ™\œÈHÌÜË™Ù]]ZY
+        validate_relative_path(relative, f"contract.source_binding.required_source_digests.{name}")
 
-_BˆYˆY]Y]KœÝÝZY›Ý[ˆ\›Z]YÛÝÛ™\œÎ‚ˆ˜Z[
-œÙ\™\ˆ\Y˜XÝ\È›ÝÝÛ™YžH›ÛÝÜˆH][˜Ú[™ÈY™™XÝ]™H\Ù\ˆŠB‚‚™YˆÜ[—Ý™\šYšYYØš[˜\žJš[˜\žWÜ]ˆ]^XÝYˆXÝÜÝ‹[žWJHOˆÜ[š[˜\žN‚ˆ˜]ÈHÜË™œÜ]
-š[˜\žWÜ]
-BˆYˆ›Ý˜]ÈÜˆ[ŠÜË™œÙ[˜ÛÙJ˜]ÊJHˆMŽ‚ˆ˜Z[
-œÙ\™\ˆ\Y˜XÝ]\È[\HÜˆ^ÙYYÈ]Èž]H›Ý[™ŠBˆYˆ[žJÜ™
-Ú\˜XÝ\ŠHŒ›ÜˆÚ\˜XÝ\ˆ[ˆ˜]ÊN‚ˆ˜Z[
-œÙ\™\ˆ\Y˜XÝ]ÛÛZ[œÈHÛÛ›ÛÚ\˜XÝ\ˆŠBˆXœÛÛ]HHš[˜\žWÜ]Yˆš[˜\žWÜ]š\×ØXœÛÛ]J
-H[ÙH]˜ÝÙ
+    binary = require_object(contract.get("binary"), "contract.binary")
+    require_exact_keys(
+        binary,
+        {
+            "name",
+            "profile",
+            "hash_algorithm",
+            "must_be_regular_file",
+            "symbolic_links_allowed",
+            "group_or_world_writable_allowed",
+            "maximum_bytes",
+        },
+        "contract.binary",
+    )
+    if binary.get("name") != "dwarf-fortress-mcp":
+        fail("binary contract names the wrong executable")
+    if binary.get("profile") != "release" or binary.get("hash_algorithm") != "sha256":
+        fail("binary contract must require a SHA-256 release artifact")
+    if binary.get("must_be_regular_file") is not True:
+        fail("binary contract must require a regular file")
+    if binary.get("symbolic_links_allowed") is not False:
+        fail("binary contract must reject symbolic links")
+    if binary.get("group_or_world_writable_allowed") is not False:
+        fail("binary contract must reject group/world-writable artifacts")
+    require_positive_int(binary.get("maximum_bytes"), "contract.binary.maximum_bytes")
 
-HÈš[˜\žWÜ]ˆ\™[HXœÛÛ]Kœ\™[œ™\ÛÛ™JÝšXÝUYJBˆØ[™Y]HH\™[ÈXœÛÛ]K›˜[YBˆYˆ›Ý\Ø]ŠÜË“×Ó“Ñ“ÓÕÈŠN‚ˆ˜Z[
-\È]›Ü›HØ[››Ý[™›Ü˜ÙH›ËY›ÛÝÈ^XÝ]X›HÜ[š[™ÈŠBˆ›YÜÈHÜË“×Ô‘Ó“HÜË“×Ó“Ñ“ÓÕÂˆYˆ\Ø]ŠÜË“×ÐÓÑVPÈŠN‚ˆ›YÜÈHÜË“×ÐÓÑVPÂˆžN‚ˆ\ØÜš\ÜˆHÜË›Ü[ŠØ[™Y]K›YÜÊBˆ^Ù\ÔÑ\œ›Üˆ\È^Î‚ˆ˜Z[
-ˆ˜Ø[››ÝÜ[ˆÙ\™\ˆ\Y˜XÝÚ]Ý]›ÛÝÚ[™ÈÞ[X›ÛXÈ[šÜÎˆÙ^ßHŠBˆžN‚ˆY]Y]HHÜË™œÝ]
-\ØÜš\ÜŠBˆ˜[Y]WÛÜ[—ÛY]Y]JY]Y]JBˆÚ^™HHY]Y]KœÝÜÚ^™BˆYˆÚ^™HOH^XÝYÈ˜ž]\È—N‚ˆ˜Z[
-ˆœÙ\™\ˆ\Y˜XÝÚ^™HÜÚ^™_HY™™\œÈœ›ÛH™XÙZ\Ú^™HÙ^XÝYÉØž]\É×_HŠBˆYÙ\ÝHÚLM—Ù\ØÜš\ÜŠ\ØÜš\ÜŠBˆYˆYÙ\ÝOH^XÝYÈœÚLMˆ—N‚ˆ˜Z[
-œÙ\™\ˆ\Y˜XÝÒKLMˆY™™\œÈœ›ÛHH]X[YšYY™XÙZ\ŠBˆ™]\›ˆÜ[š[˜\žJˆ\ØÜš\ÜY\ØÜš\Ü‹ˆ]XØ[™Y]KˆÚLMYYÙ\ÝˆÚ^™O\Ú^™Kˆ]šXÙO[Y]Y]KœÝÙ]‹ˆ[›ÙO[Y]Y]KœÝÚ[›Ëˆ[ÙO\Ý]”×ÒSSÑJY]Y]KœÝÛ[ÙJKˆÝÛ™\—ÝZY[Y]Y]KœÝÝZYˆ
-Bˆ^Ù\˜\ÙQ^Ù\[ÛŽ‚ˆÜË˜ÛÜÙJ\ØÜš\ÜŠBˆ˜Z\ÙB‚‚™Yˆ™\šYžJˆ™XÙZ\Ü]ˆ]ˆš[˜\žWÜ]ˆ]ˆÛÛ˜XÝÜ]ˆ]ˆÛÝ\˜ÙWÜ›ÛÝˆ]ˆØØ[Ü]X[YšXØ][Û—Ü™XÙZ\ˆ]ˆ^XÝYØÛÛ[Z]ˆÝˆ›Û™HH›Û™KŠHOˆ\VÙXÝÜÝ‹[žWKÜ[š[˜\žWN‚ˆ›Ü›X[^™YH˜[Y]WÜ™XÙZ\
-ˆ™XÙZ\Ü]ˆÛÛ˜XÝÜ]ˆÛÝ\˜ÙWÜ›ÛÝˆØØ[Ü]X[YšXØ][Û—Ü™XÙZ\ˆ^XÝYØÛÛ[Z]ˆ
-BˆÜ[™YHÜ[—Ý™\šYšYYØš[˜\žJš[˜\žWÜ]›Ü›X[^™YÈ˜š[˜\žH—JBˆ™]\›ˆ›Ü›X[^™YÜ[™Y‚‚™Yˆ\œÙWØ\™ÜÊ\™ÝŽˆ\ÝÜÝ—JHOˆ\™Ü\œÙK“˜[Y\ÜXÙN‚ˆ\œÙ\ˆH\™Ü\œÙK\™Ý[Y[\œÙ\Š\ØÜš\[ÛW×ÙØ××ÊBˆ\œÙ\‹˜YØ\™Ý[Y[
-œ™XÙZ\‹\OT]
-Bˆ\œÙ\‹˜YØ\™Ý[Y[
-˜š[˜\žH‹\OT]
-Bˆ\œÙ\‹˜YØ\™Ý[Y[
-‹KXÛÛ˜XÝ‹\OT]Y˜][QQUSÐÓÓ•PÕ
-Bˆ\œÙ\‹˜YØ\™Ý[Y[
-‹K\ÛÝ\˜ÙK\›ÛÝ‹\OT]Y˜][T“ÓÕ
-Bˆ\œÙ\‹˜YØ\™Ý[Y[
-‹K[ØØ[\]X[YšXØ][Û‹\™XÙZ\‹\OT]™\]Z\™YUYJBˆ\œÙ\‹˜YØ\™Ý[Y[
-‹KY^XÝYY›XÜXÛÛ[Z]ŠBˆ™]\›ˆ\œÙ\‹œ\œÙWØ\™ÜÊ\™ÝŠB‚‚™YˆXZ[Š\™ÝŽˆ\ÝÜÝ—H›Û™HH›Û™JHOˆ[‚ˆ\™ÜÈH\œÙWØ\™ÜÊÞ\Ë˜\™Ý–ÌN—HYˆ\™Ýˆ\È›Û™H[ÙH\™ÝŠBˆÜ[™YˆÜ[š[˜\žH›Û™HH›Û™BˆžN‚ˆ›Ü›X[^™YÜ[™YH™\šYžJˆ\™ÜËœ™XÙZ\ˆ\™ÜË˜š[˜\žKˆ\™ÜË˜ÛÛ˜XÝˆ\™ÜËœÛÝ\˜ÙWÜ›ÛÝˆ\™ÜË›ØØ[Ü]X[YšXØ][Û—Ü™XÙZ\ˆ\™ÜË™^XÝYÙ›XÜØÛÛ[Z]ˆ
-Bˆ^Ù\
-ÔÑ\œ›Ü‹™\šYšXØ][Û‘\œ›ÜŠH\È^Î‚ˆš[
-ˆ›]™HÙ\™\ˆš[˜\žH™XÙZ\ˆRSˆÙ^ßH‹š[O\Þ\ËœÝ\œŠBˆ™]\›ˆBˆš[˜[N‚ˆYˆÜ[™Y\È›Ý›Û™N‚ˆÜË˜ÛÜÙJÜ[™Y™\ØÜš\ÜŠBˆš[
-ˆ›]™HÙ\™\ˆš[˜\žH™XÙZ\ˆTÔÈ‚ˆˆŠÛ›Ü›X[^™YÉÜÛÝ\˜ÙI×VÉÙ›XÜØÛÛ[Z]	×_KÛ›Ü›X[^™YÉØš[˜\žI×VÉÜÚLM‰×_JH‚ˆ
-Bˆ™]\›ˆ‚‚šYˆ×Û˜[YW×ÈOH—×ÛXZ[—×ÈŽ‚ˆ˜Z\ÙHÞ\Ý[Q^]
-XZ[Š
-JB
+    checks = require_list(
+        contract.get("required_executable_checks"),
+        "contract.required_executable_checks",
+    )
+    if checks != ["contract", "doctor", "demo"]:
+        fail("binary executable-check set or order drifted")
+    authority = require_object(contract.get("authority"), "contract.authority")
+    require_exact_keys(
+        authority,
+        {"mode", "mutation_capabilities", "note"},
+        "contract.authority",
+    )
+    if authority.get("mode") != "authenticated_live_read_only":
+        fail("binary contract authority mode drifted")
+    if authority.get("mutation_capabilities") != []:
+        fail("binary contract must carry no mutation capabilities")
+    require_string(authority.get("note"), "contract.authority.note", 4096)
+    claims = require_list(
+        contract.get("claims_not_established"),
+        "contract.claims_not_established",
+    )
+    for index, claim in enumerate(claims):
+        require_string(claim, f"contract.claims_not_established[{index}]", 4096)
+    return contract
+
+
+def validate_local_qualification_receipt(
+    path: Path,
+    expected_commit: str,
+    expected_sha256: str,
+    expected_gates: list[str] | None = None,
+) -> dict[str, Any]:
+    receipt, actual_sha256 = read_object_with_digest(
+        path,
+        "local qualification receipt",
+    )
+    if actual_sha256 != expected_sha256:
+        fail("local qualification receipt bytes do not match the server receipt binding")
+    require_exact_keys(
+        receipt,
+        {
+            "schema",
+            "status",
+            "started_at",
+            "finished_at",
+            "source",
+            "host",
+            "toolchain",
+            "digests",
+            "gates",
+        },
+        "local_receipt",
+    )
+    if receipt.get("schema") != LOCAL_RECEIPT_SCHEMA:
+        fail("local qualification receipt schema is unsupported")
+    if receipt.get("status") != "passed":
+        fail("local qualification receipt did not pass")
+    require_string(receipt.get("started_at"), "local_receipt.started_at", 128)
+    require_string(receipt.get("finished_at"), "local_receipt.finished_at", 128)
+    source = require_object(receipt.get("source"), "local_receipt.source")
+    require_exact_keys(source, {"commit", "dirty"}, "local_receipt.source")
+    if source.get("commit") != expected_commit:
+        fail("local qualification receipt names a different source commit")
+    if source.get("dirty") is not False:
+        fail("local qualification receipt is not bound to a clean source tree")
+    require_object(receipt.get("host"), "local_receipt.host")
+    require_object(receipt.get("toolchain"), "local_receipt.toolchain")
+    require_object(receipt.get("digests"), "local_receipt.digests")
+
+    required_gates = (
+        EXPECTED_LOCAL_QUALIFICATION_GATES
+        if expected_gates is None
+        else expected_gates
+    )
+    gates = require_list(receipt.get("gates"), "local_receipt.gates")
+    if len(gates) != len(required_gates):
+        fail("local qualification receipt gate count drifted")
+    for index, expected_name in enumerate(required_gates):
+        gate = require_object(gates[index], f"local_receipt.gates[{index}]")
+        require_exact_keys(
+            gate,
+            {"name", "state", "detail"},
+            f"local_receipt.gates[{index}]",
+        )
+        if gate.get("name") != expected_name:
+            fail("local qualification receipt gate set or order drifted")
+        if gate.get("state") != "passed":
+            fail(f"local qualification gate {expected_name!r} did not pass")
+        detail = gate.get("detail")
+        if detail is not None:
+            require_string(detail, f"local_receipt.gates[{index}].detail", 4096)
+    return receipt
+
+
+def validate_receipt(
+    receipt_path: Path,
+    contract_path: Path,
+    source_root: Path,
+    local_qualification_receipt: Path,
+    expected_commit: str | None = None,
+    require_current_platform: bool = True,
+) -> dict[str, Any]:
+    contract = load_contract(contract_path)
+    receipt, receipt_file_sha256 = read_object_with_digest(
+        receipt_path,
+        "live server binary receipt",
+    )
+    require_exact_keys(
+        receipt,
+        {
+            "schema",
+            "status",
+            "receipt_digest",
+            "source",
+            "platform",
+            "toolchain",
+            "binary",
+            "executable_checks",
+            "source_digests",
+            "mutation_capabilities",
+            "claims_not_established",
+        },
+        "server_receipt",
+    )
+    if receipt.get("schema") != RECEIPT_SCHEMA or receipt.get("status") != "qualified":
+        fail("server receipt is not a qualified V1 receipt")
+    declared_receipt_digest = require_hash(
+        receipt.get("receipt_digest"),
+        "server_receipt.receipt_digest",
+    )
+    unsigned = dict(receipt)
+    del unsigned["receipt_digest"]
+    if sha256_bytes(canonical_json(unsigned)) != declared_receipt_digest:
+        fail("server receipt fields do not reproduce receipt_digest")
+
+    source = require_object(receipt.get("source"), "server_receipt.source")
+    require_exact_keys(
+        source,
+        {"dfmcp_commit", "dfmcp_dirty", "local_qualification_receipt_sha256"},
+        "server_receipt.source",
+    )
+    commit = require_commit(
+        source.get("dfmcp_commit"),
+        "server_receipt.source.dfmcp_commit",
+    )
+    if expected_commit is not None and commit != require_commit(
+        expected_commit,
+        "expected_commit",
+    ):
+        fail("server receipt source commit differs from the expected deployment commit")
+    if source.get("dfmcp_dirty") is not False:
+        fail("server receipt is not bound to a clean source tree")
+    local_receipt_sha = require_hash(
+        source.get("local_qualification_receipt_sha256"),
+        "server_receipt.source.local_qualification_receipt_sha256",
+    )
+    validate_local_qualification_receipt(
+        local_qualification_receipt,
+        commit,
+        local_receipt_sha,
+        contract["source_binding"]["required_local_qualification_gates"],
+    )
+
+    platform_value = require_object(receipt.get("platform"), "server_receipt.platform")
+    require_exact_keys(platform_value, {"system", "machine"}, "server_receipt.platform")
+    system = require_string(
+        platform_value.get("system"),
+        "server_receipt.platform.system",
+        128,
+    )
+    machine = require_string(
+        platform_value.get("machine"),
+        "server_receipt.platform.machine",
+        128,
+    )
+    if require_current_platform and (
+        system != platform.system() or machine != platform.machine()
+    ):
+        fail("server receipt platform differs from the current execution platform")
+
+    toolchain = require_object(receipt.get("toolchain"), "server_receipt.toolchain")
+    require_exact_keys(toolchain, {"rustc_vv", "cargo"}, "server_receipt.toolchain")
+    require_string(
+        toolchain.get("rustc_vv"),
+        "server_receipt.toolchain.rustc_vv",
+        16 * 1024,
+    )
+    require_string(
+        toolchain.get("cargo"),
+        "server_receipt.toolchain.cargo",
+        1024,
+    )
+
+    binary = require_object(receipt.get("binary"), "server_receipt.binary")
+    require_exact_keys(
+        binary,
+        {"name", "profile", "relative_path", "bytes", "sha256"},
+        "server_receipt.binary",
+    )
+    contract_binary = contract["binary"]
+    if binary.get("name") != contract_binary["name"] or binary.get("profile") != "release":
+        fail("server receipt identifies the wrong binary or build profile")
+    relative_path = validate_relative_path(
+        binary.get("relative_path"),
+        "server_receipt.binary.relative_path",
+    )
+    if Path(relative_path).name not in {
+        "dwarf-fortress-mcp",
+        "dwarf-fortress-mcp.exe",
+    }:
+        fail("server receipt relative path has the wrong executable filename")
+    binary_bytes = require_positive_int(
+        binary.get("bytes"),
+        "server_receipt.binary.bytes",
+        require_positive_int(
+            contract_binary.get("maximum_bytes"),
+            "contract.binary.maximum_bytes",
+        ),
+    )
+    binary_sha256 = require_hash(
+        binary.get("sha256"),
+        "server_receipt.binary.sha256",
+    )
+
+    checks = require_list(
+        receipt.get("executable_checks"),
+        "server_receipt.executable_checks",
+    )
+    expected_checks = contract["required_executable_checks"]
+    if len(checks) != len(expected_checks):
+        fail("server receipt executable-check count drifted")
+    normalized_checks: list[dict[str, Any]] = []
+    for index, expected_name in enumerate(expected_checks):
+        check = require_object(
+            checks[index],
+            f"server_receipt.executable_checks[{index}]",
+        )
+        require_exact_keys(
+            check,
+            {"name", "status", "stdout_sha256", "stderr_sha256"},
+            f"server_receipt.executable_checks[{index}]",
+        )
+        if check.get("name") != expected_name or check.get("status") != "passed":
+            fail(f"server executable check {expected_name} did not pass in canonical order")
+        normalized_checks.append(
+            {
+                "name": expected_name,
+                "status": "passed",
+                "stdout_sha256": require_hash(
+                    check.get("stdout_sha256"),
+                    f"server_receipt.executable_checks[{index}].stdout_sha256",
+                ),
+                "stderr_sha256": require_hash(
+                    check.get("stderr_sha256"),
+                    f"server_receipt.executable_checks[{index}].stderr_sha256",
+                ),
+            }
+        )
+
+    source_digests = require_object(
+        receipt.get("source_digests"),
+        "server_receipt.source_digests",
+    )
+    required_digests = contract["source_binding"]["required_source_digests"]
+    if set(source_digests) != set(required_digests):
+        fail("server receipt source-digest key set drifted")
+    normalized_digests: dict[str, str] = {}
+    for name, relative in required_digests.items():
+        declared = require_hash(
+            source_digests.get(name),
+            f"server_receipt.source_digests.{name}",
+        )
+        canonical_relative = validate_relative_path(
+            relative,
+            f"contract.source_binding.required_source_digests.{name}",
+        )
+        actual = sha256_file(source_root / canonical_relative)
+        if declared != actual:
+            fail(f"server receipt source digest differs for {canonical_relative}")
+        normalized_digests[name] = declared
+
+    if receipt.get("mutation_capabilities") != []:
+        fail("server receipt must carry no mutation capabilities")
+    if receipt.get("claims_not_established") != contract.get("claims_not_established"):
+        fail("server receipt claims-not-established set drifted")
+
+    return {
+        "receipt_sha256": receipt_file_sha256,
+        "receipt_digest": declared_receipt_digest,
+        "source": {
+            "dfmcp_commit": commit,
+            "dfmcp_dirty": False,
+            "local_qualification_receipt_sha256": local_receipt_sha,
+        },
+        "platform": {"system": system, "machine": machine},
+        "binary": {
+            "name": binary["name"],
+            "profile": "release",
+            "relative_path": relative_path,
+            "bytes": binary_bytes,
+            "sha256": binary_sha256,
+        },
+        "executable_checks": normalized_checks,
+        "source_digests": normalized_digests,
+        "mutation_capabilities": [],
+    }
+
+
+def validate_open_metadata(metadata: os.stat_result) -> None:
+    if not stat.S_ISREG(metadata.st_mode):
+        fail("opened server artifact is not a regular file")
+    if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        fail("server artifact is group- or world-writable")
+    if metadata.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) == 0:
+        fail("opened server artifact has no executable permission bit")
+    if hasattr(os, "geteuid"):
+        permitted_owners = {0, os.geteuid()}
+        if metadata.st_uid not in permitted_owners:
+            fail("server artifact is not owned by root or the launching effective user")
+
+
+def open_verified_binary(binary_path: Path, expected: dict[str, Any]) -> OpenBinary:
+    raw = os.fspath(binary_path)
+    if not raw or len(os.fsencode(raw)) > 4096:
+        fail("server artifact path is empty or exceeds its byte bound")
+    if any(ord(character) < 0x20 for character in raw):
+        fail("server artifact path contains a control character")
+    absolute = binary_path if binary_path.is_absolute() else Path.cwd() / binary_path
+    parent = absolute.parent.resolve(strict=True)
+    candidate = parent / absolute.name
+    if not hasattr(os, "O_NOFOLLOW"):
+        fail("this platform cannot enforce no-follow executable opening")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(candidate, flags)
+    except OSError as exc:
+        fail(f"cannot open server artifact without following symbolic links: {exc}")
+    try:
+        before = os.fstat(descriptor)
+        validate_open_metadata(before)
+        if before.st_size != expected["bytes"]:
+            fail(
+                f"server artifact size {before.st_size} differs from receipt size {expected['bytes']}"
+            )
+        digest = sha256_descriptor(descriptor)
+        after = os.fstat(descriptor)
+        if not same_identity(before, after):
+            fail("server artifact changed while being verified")
+        if digest != expected["sha256"]:
+            fail("server artifact SHA-256 differs from the qualified receipt")
+        return OpenBinary(
+            descriptor=descriptor,
+            path=candidate,
+            sha256=digest,
+            size=after.st_size,
+            device=after.st_dev,
+            inode=after.st_ino,
+            mode=stat.S_IMODE(after.st_mode),
+            owner_uid=after.st_uid,
+        )
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def verify(
+    receipt_path: Path,
+    binary_path: Path,
+    contract_path: Path,
+    source_root: Path,
+    local_qualification_receipt: Path,
+    expected_commit: str | None = None,
+) -> tuple[dict[str, Any], OpenBinary]:
+    normalized = validate_receipt(
+        receipt_path,
+        contract_path,
+        source_root,
+        local_qualification_receipt,
+        expected_commit,
+    )
+    opened = open_verified_binary(binary_path, normalized["binary"])
+    return normalized, opened
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("receipt", type=Path)
+    parser.add_argument("binary", type=Path)
+    parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument("--source-root", type=Path, default=ROOT)
+    parser.add_argument("--local-qualification-receipt", type=Path, required=True)
+    parser.add_argument("--expected-dfmcp-commit")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    opened: OpenBinary | None = None
+    try:
+        normalized, opened = verify(
+            args.receipt,
+            args.binary,
+            args.contract,
+            args.source_root,
+            args.local_qualification_receipt,
+            args.expected_dfmcp_commit,
+        )
+    except (OSError, VerificationError) as exc:
+        print(f"live server binary receipt: FAIL: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if opened is not None:
+            os.close(opened.descriptor)
+    print(
+        "live server binary receipt: PASS "
+        f"({normalized['source']['dfmcp_commit']}, {normalized['binary']['sha256']})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
