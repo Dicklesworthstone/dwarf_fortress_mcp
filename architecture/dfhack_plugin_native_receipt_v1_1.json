@@ -1,0 +1,50 @@
+{
+  "schema_version": "dfmcp.dfhack-plugin-native-qualification-contract/1.1",
+  "receipt_schema": "dfmcp.dfhack-plugin-native-qualification/1.1",
+  "status": "normative_protocol_generation_wrapper",
+  "base_receipt_schema": "dfmcp.dfhack-plugin-native-qualification/1",
+  "bridge": {
+    "plugin": "dfmcp_bridge_v1_1",
+    "protobuf_package": "dfmcp.bridge.v1_1",
+    "bridge_version": "0.2.0",
+    "protocol": "1.1",
+    "rpc_methods": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "mutation_rpc_methods": []
+  },
+  "required_source_digests": {
+    "protocol_1_0_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+    "protocol_1_0_native": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
+    "protocol_1_1_proto": "bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto",
+    "protocol_1_1_native": "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp",
+    "protocol_1_1_build_fragment": "bridge/dfhack-plugin/CMakeLists.v1_1.txt",
+    "protocol_1_1_qualifier": "scripts/qualify_dfhack_plugin_v1_1.sh",
+    "protocol_1_1_receipt_tool": "scripts/issue_dfhack_plugin_receipt_v1_1.py",
+    "protocol_1_1_receipt_contract": "architecture/dfhack_plugin_native_receipt_v1_1.json",
+    "bridge_contract": "architecture/dfhack_read_bridge_v1_1.json",
+    "announcement_acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json"
+  },
+  "required_inventories": {
+    "strings_inventory": "passed",
+    "symbols_inventory": "passed"
+  },
+  "authority": {
+    "capabilities_granted": [],
+    "mutation_capabilities": []
+  },
+  "claims_established": [
+    "the wrapped base native receipt passed for the named clean source revisions and plugin digest",
+    "the source-bound native plugin generation is dfmcp_bridge_v1_1 package dfmcp.bridge.v1_1 bridge 0.2.0 protocol 1.1",
+    "the native method inventory contains exactly Handshake and ReadObservation and no mutation method"
+  ],
+  "claims_not_established": [
+    "the plugin loaded into Dwarf Fortress",
+    "any A1-A6 live behavior",
+    "compatibility admission",
+    "runtime admission",
+    "complete announcement history",
+    "mutation authority"
+  ]
+}
