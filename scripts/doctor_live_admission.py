@@ -73,7 +73,7 @@ def recovery(action: str, reason: str, arguments: dict[str, Any]) -> dict[str, A
 def stage(
     name: str,
     status: str,
-    summary: str,
+    summary: object,
     evidence: dict[str, Any] | None = None,
     next_step: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -150,12 +150,15 @@ def artifact_inputs(
         raise ValueError("server artifact inputs are all-or-none")
     if not any(supplied):
         return False, None
-    assert binary_path is not None
-    assert server_receipt_path is not None
-    assert local_qualification_receipt is not None
-    assert binary_contract_path is not None
-    assert source_root is not None
-    assert expected_dfmcp_commit is not None
+    if (
+        binary_path is None
+        or server_receipt_path is None
+        or local_qualification_receipt is None
+        or binary_contract_path is None
+        or source_root is None
+        or expected_dfmcp_commit is None
+    ):
+        raise ValueError("complete server artifact inputs were not retained")
     return True, (
         binary_path,
         server_receipt_path,
@@ -216,7 +219,7 @@ def diagnose(
                 registry_summary,
             )
         )
-    except Exception as exc:
+    except (OSError, promotion.PromotionError) as exc:
         stages.append(
             stage(
                 "registry",
@@ -264,7 +267,11 @@ def diagnose(
                 floor_summary,
             )
         )
-    except Exception as exc:
+    except (
+        OSError,
+        compatibility_floor.FloorError,
+        compatibility_floor.promotion.PromotionError,
+    ) as exc:
         stages.append(
             stage(
                 "compatibility_floor",
@@ -329,7 +336,14 @@ def diagnose(
                 decision_summary,
             )
         )
-    except Exception as exc:
+    except (
+        OSError,
+        ValueError,
+        promotion.PromotionError,
+        resolver.PromotionError if hasattr(resolver, "PromotionError") else resolver.ResolutionError,
+        resolver.ResolutionError,
+        resolver.promotion.PromotionError,
+    ) as exc:
         stages.append(
             stage(
                 "exact_tuple_resolution",
@@ -377,7 +391,8 @@ def diagnose(
             artifact_summary,
         )
 
-    assert artifact_parameters is not None
+    if artifact_parameters is None or decision_summary is None:
+        raise ValueError("artifact preflight reached an impossible incomplete state")
     opened = None
     try:
         (
@@ -446,7 +461,13 @@ def diagnose(
             decision_summary,
             artifact_summary,
         )
-    except Exception as exc:
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        binary_verifier.VerificationError,
+    ) as exc:
         stages.append(
             stage(
                 "server_artifact",
