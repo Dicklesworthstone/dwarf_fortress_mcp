@@ -5,7 +5,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 if [[ -t 1 ]]; then
-  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
+  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; RESET='\033[0m'
 else
   BLUE=''; GREEN=''; YELLOW=''; RED=''; RESET=''
 fi
@@ -128,6 +128,7 @@ receipt={
    'live_compatibility_resolution_tests':digest(root/'scripts/test_live_compatibility_resolution.py'),
    'live_server_binary_contract':digest(root/'architecture/live_server_binary_receipt_v1.json'),
    'live_server_binary_verifier':digest(root/'scripts/verify_live_server_binary_receipt.py'),
+   'live_server_binary_verifier_tests':digest(root/'scripts/test_live_server_binary_receipt.py'),
    'admitted_live_launcher':digest(root/'scripts/serve_admitted_live.py'),
    'admitted_live_launcher_checker':digest(root/'scripts/check_live_server_artifact.py'),
    'admitted_live_launcher_tests':digest(root/'scripts/test_admitted_live_launcher.py'),
@@ -163,6 +164,7 @@ run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_rea
 run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guidance.py
 run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibility_registry.py
 run_gate live-compatibility-resolution-tests python3 scripts/test_live_compatibility_resolution.py
+run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binary_receipt.py
 run_gate admitted-live-launcher-tests python3 scripts/test_admitted_live_launcher.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
@@ -190,6 +192,7 @@ run_gate python-syntax python3 -m py_compile \
   scripts/check_live_compatibility_resolution.py \
   scripts/test_live_compatibility_resolution.py \
   scripts/verify_live_server_binary_receipt.py \
+  scripts/test_live_server_binary_receipt.py \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
   scripts/test_admitted_live_launcher.py \
