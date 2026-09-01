@@ -44,14 +44,6 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
@@ -71,18 +63,22 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
         raise
 
 
+def validate_token(token: bytes) -> bytes:
+    if len(token) < MIN_TOKEN_BYTES or len(token) > MAX_TOKEN_BYTES:
+        fail(f"token must contain {MIN_TOKEN_BYTES}..={MAX_TOKEN_BYTES} bytes")
+    return token
+
+
 def token_from_environment(name: str) -> bytes:
     try:
         value = os.environ[name]
     except KeyError:
         fail(f"{name} is required for secret scanning")
-    token = value.encode("utf-8")
-    if len(token) < MIN_TOKEN_BYTES or len(token) > MAX_TOKEN_BYTES:
-        fail(f"{name} must contain {MIN_TOKEN_BYTES}..={MAX_TOKEN_BYTES} UTF-8 bytes")
-    return token
+    return validate_token(value.encode("utf-8"))
 
 
 def representations(token: bytes) -> dict[str, bytes]:
+    token = validate_token(token)
     candidates = {
         "raw": token,
         "hex_lower": token.hex().encode("ascii"),
@@ -124,8 +120,6 @@ def regular_files(root: Path, output: Path) -> list[Path]:
                 fail(f"artifact tree contains symbolic-link directory {relative_path(root, child)}")
         for name in filenames:
             path = directory_path / name
-            if path.resolve() == output_resolved:
-                continue
             try:
                 mode = path.lstat().st_mode
             except OSError as exc:
@@ -134,6 +128,8 @@ def regular_files(root: Path, output: Path) -> list[Path]:
                 fail(f"artifact tree contains symbolic-link file {relative_path(root, path)}")
             if not stat.S_ISREG(mode):
                 fail(f"artifact tree contains non-regular file {relative_path(root, path)}")
+            if path.resolve() == output_resolved:
+                continue
             files.append(path)
             if len(files) > MAX_FILES:
                 fail(f"artifact tree exceeds the explicit {MAX_FILES}-file bound")
@@ -143,6 +139,8 @@ def regular_files(root: Path, output: Path) -> list[Path]:
 
 
 def scan(root: Path, output: Path, token: bytes) -> tuple[dict[str, Any], list[Match]]:
+    if root.is_symlink():
+        fail("artifact root must not be a symbolic link")
     root = root.resolve()
     candidates = representations(token)
     artifacts: list[dict[str, Any]] = []
@@ -184,7 +182,7 @@ def scan(root: Path, output: Path, token: bytes) -> tuple[dict[str, Any], list[M
         "result": "passed",
         "error_code": None,
         "scanner": SCANNER_ID,
-        "token_fingerprint_sha256": sha256_bytes(token),
+        "token_fingerprint_sha256": sha256_bytes(validate_token(token)),
         "match_count": sum(match.occurrences for match in matches),
         "representation_count": len(candidates),
         "scanned_file_count": len(artifacts),
