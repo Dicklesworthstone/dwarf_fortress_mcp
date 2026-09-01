@@ -53,6 +53,18 @@ info "Validating the agent-facing live capture plan"
 python3 scripts/check_live_capture_plan.py
 ok "Live capture plan"
 
+info "Validating exact compatibility promotion"
+python3 scripts/check_live_compatibility_registry.py
+ok "Exact compatibility promotion"
+
+info "Validating registry-generation-bound compatibility resolution"
+python3 scripts/check_live_compatibility_resolution.py
+ok "Exact compatibility resolution"
+
+info "Validating receipt-bound descriptor-only live execution"
+python3 scripts/check_live_server_artifact.py
+ok "Live server artifact admission"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
@@ -63,6 +75,9 @@ python3 scripts/test_live_read_acceptance.py
 python3 scripts/test_live_read_evidence_journal.py
 python3 scripts/test_scan_live_read_secrets.py
 python3 scripts/test_live_read_capture_guidance.py
+python3 scripts/test_live_compatibility_registry.py
+python3 scripts/test_live_compatibility_resolution.py
+python3 scripts/test_admitted_live_launcher.py
 ok "Python contract tests"
 
 info "Checking script syntax"
@@ -85,12 +100,23 @@ python3 -m py_compile \
   scripts/test_scan_live_read_secrets.py \
   scripts/live_read_capture_guidance.py \
   scripts/test_live_read_capture_guidance.py \
+  scripts/promote_live_compatibility.py \
+  scripts/check_live_compatibility_registry.py \
+  scripts/test_live_compatibility_registry.py \
+  scripts/resolve_live_compatibility.py \
+  scripts/check_live_compatibility_resolution.py \
+  scripts/test_live_compatibility_resolution.py \
+  scripts/verify_live_server_binary_receipt.py \
+  scripts/serve_admitted_live.py \
+  scripts/check_live_server_artifact.py \
+  scripts/test_admitted_live_launcher.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
   scripts/qualify_live_read.sh \
+  scripts/qualify_live_server_binary.sh \
   scripts/qualify_local.sh \
   scripts/verify.sh
 ok "Script syntax"
