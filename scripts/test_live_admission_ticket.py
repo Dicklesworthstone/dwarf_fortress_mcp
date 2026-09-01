@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -26,6 +27,10 @@ def digest(label: str) -> str:
     return launcher.promotion.sha256_bytes(label.encode("utf-8"))
 
 
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def launch_record(binary_path: Path, metadata: os.stat_result) -> dict[str, Any]:
     return {
         "schema": launcher.LAUNCH_SCHEMA,
@@ -34,6 +39,14 @@ def launch_record(binary_path: Path, metadata: os.stat_result) -> dict[str, Any]
         "required_entry_id": digest("entry"),
         "compatibility_decision_digest": digest("decision"),
         "compatibility_registry_digest": digest("registry"),
+        "compatibility_floor": {
+            "file_sha256": digest("floor-file"),
+            "floor_digest": digest("floor-content"),
+            "sequence": 7,
+            "registry_file_sha256": digest("registry-file"),
+            "registry_digest": digest("registry"),
+            "entry_count": 1,
+        },
         "support_level": "experimental",
         "deployment_manifest": {},
         "server_receipt": {
@@ -43,7 +56,7 @@ def launch_record(binary_path: Path, metadata: os.stat_result) -> dict[str, Any]
         },
         "server_binary": {
             "path": os.fspath(binary_path),
-            "sha256": digest("binary"),
+            "sha256": file_digest(binary_path),
             "bytes": metadata.st_size,
             "device": metadata.st_dev,
             "inode": metadata.st_ino,
@@ -68,7 +81,7 @@ class Fixture:
         self.opened = SimpleNamespace(
             descriptor=self.descriptor,
             path=self.binary_path,
-            sha256=digest("binary"),
+            sha256=file_digest(self.binary_path),
             size=metadata.st_size,
             device=metadata.st_dev,
             inode=metadata.st_ino,
@@ -111,6 +124,11 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 self.assertEqual(first, second)
                 self.assertEqual(first["schema"], launcher.TICKET_SCHEMA)
                 self.assertEqual(first["process_id"], 1234)
+                self.assertEqual(first["compatibility_floor_sequence"], 7)
+                self.assertEqual(
+                    first["compatibility_floor_digest"],
+                    fixture.record["compatibility_floor"]["floor_digest"],
+                )
                 self.assertEqual(first["mutation_capabilities"], [])
                 unsigned = dict(first)
                 declared = unsigned.pop("ticket_digest")
@@ -139,11 +157,12 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 value = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(value["process_id"], os.getpid())
                 self.assertEqual(value["server_binary_inode"], fixture.opened.inode)
+                self.assertEqual(value["compatibility_floor_sequence"], 7)
                 self.assertNotIn("DFMCP_BRIDGE_TOKEN", path.read_text(encoding="utf-8"))
             finally:
                 fixture.close()
 
-    def test_admitted_environment_binds_ticket_and_preserves_secret_only_in_environment(self) -> None:
+    def test_admitted_environment_binds_floor_ticket_and_secret_only_in_environment(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
@@ -160,6 +179,13 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 self.assertEqual(
                     environment["DFMCP_COMPATIBILITY_ENTRY_ID"],
                     fixture.record["compatibility_entry_id"],
+                )
+                self.assertEqual(
+                    environment["DFMCP_COMPATIBILITY_FLOOR_DIGEST"],
+                    fixture.record["compatibility_floor"]["floor_digest"],
+                )
+                self.assertEqual(
+                    environment["DFMCP_COMPATIBILITY_FLOOR_SEQUENCE"], "7"
                 )
                 self.assertNotIn("x" * 32, path.read_text(encoding="utf-8"))
             finally:
@@ -184,6 +210,19 @@ class LiveAdmissionTicketTests(unittest.TestCase):
         with temporary:
             try:
                 fixture.binary_path.write_bytes(b"changed executable bytes")
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.build_admission_ticket(fixture.record, fixture.opened)
+            finally:
+                fixture.close()
+
+    def test_same_size_executable_byte_drift_is_rejected_before_ticket_issue(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                replacement = b"fixture server executablE"
+                self.assertEqual(len(replacement), fixture.binary_path.stat().st_size)
+                fixture.binary_path.write_bytes(replacement)
+                fixture.binary_path.chmod(0o700)
                 with self.assertRaises(launcher.LaunchError):
                     launcher.build_admission_ticket(fixture.record, fixture.opened)
             finally:
