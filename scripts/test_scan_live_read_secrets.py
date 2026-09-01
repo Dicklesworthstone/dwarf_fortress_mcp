@@ -24,7 +24,8 @@ TOKEN = b"correct-horse-battery-staple-12345"
 class LiveSecretScannerTests(unittest.TestCase):
     def test_clean_artifacts_produce_normalized_zero_match_event(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             (root / "bridge.log").write_text("bridge started without secrets\n")
             (root / "doctor.json").write_text('{"status":"healthy"}\n')
             output = root.parent / "secret-scan.json"
@@ -38,7 +39,8 @@ class LiveSecretScannerTests(unittest.TestCase):
 
     def test_raw_token_leak_is_detected_without_echoing_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             (root / "bridge.log").write_bytes(b"prefix " + TOKEN + b" suffix")
             event, matches = scanner.scan(root, root.parent / "out.json", TOKEN)
             self.assertGreater(event["match_count"], 0)
@@ -48,7 +50,8 @@ class LiveSecretScannerTests(unittest.TestCase):
 
     def test_hex_and_base64_representations_are_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             (root / "hex.log").write_bytes(TOKEN.hex().encode())
             (root / "base64.log").write_bytes(base64.b64encode(TOKEN))
             event, matches = scanner.scan(root, root.parent / "out.json", TOKEN)
@@ -59,30 +62,31 @@ class LiveSecretScannerTests(unittest.TestCase):
 
     def test_environment_assignment_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             (root / "env.txt").write_bytes(b"DFMCP_BRIDGE_TOKEN=" + TOKEN)
             _, matches = scanner.scan(root, root.parent / "out.json", TOKEN)
             self.assertIn("environment_assignment", {match.representation for match in matches})
 
-    def test_output_inside_artifact_root_is_excluded(self) -> None:
+    def test_output_inside_artifact_root_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output = root / "secret-scan.json"
-            output.write_bytes(TOKEN)
             (root / "clean.log").write_text("clean\n")
-            event, matches = scanner.scan(root, output, TOKEN)
-            self.assertEqual(matches, [])
-            self.assertEqual(event["scanned_file_count"], 1)
+            with self.assertRaises(scanner.ScanError):
+                scanner.scan(root, output, TOKEN)
 
     def test_empty_tree_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             with self.assertRaises(scanner.ScanError):
                 scanner.scan(root, root.parent / "out.json", TOKEN)
 
     def test_symbolic_link_artifact_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             target = root / "target.log"
             target.write_text("clean\n")
             link = root / "link.log"
@@ -95,7 +99,8 @@ class LiveSecretScannerTests(unittest.TestCase):
 
     def test_symbolic_link_output_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             (root / "clean.log").write_text("clean\n")
             target = root.parent / "target.json"
             target.write_text("unchanged\n")
@@ -122,7 +127,8 @@ class LiveSecretScannerTests(unittest.TestCase):
 
     def test_oversized_file_is_rejected_before_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "artifacts"
+            root.mkdir()
             path = root / "large.log"
             with path.open("wb") as handle:
                 handle.truncate(scanner.MAX_FILE_BYTES + 1)
