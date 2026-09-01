@@ -396,36 +396,85 @@ def validate_live_receipt(path: Path) -> dict[str, Any]:
     }
 
 
-def validate_native_receipt(path: Path, live: dict[str, Any]) -> dict[str, Any]:
-    receipt, actual_receipt_digest = read_object_with_digest(
-        path, MAX_JSON_BYTES, "native build receipt"
-    )
-    expected_receipt_digest = live["source"]["native_build_receipt_sha256"]
-    if actual_receipt_digest != expected_receipt_digest:
-        fail("native build receipt bytes do not match the live receipt binding")
+def normalize_native_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
     if receipt.get("schema") != NATIVE_RECEIPT_SCHEMA or receipt.get("status") != "native-build-passed":
         fail("native receipt is not a passing dfmcp R1 build receipt")
     source = require_object(receipt.get("source"), "native_receipt.source")
-    if source.get("dfmcp_commit") != live["source"]["dfmcp_commit"]:
-        fail("native and live receipts name different dfmcp commits")
-    if source.get("dfhack_commit") != live["source"]["dfhack_commit"]:
-        fail("native and live receipts name different DFHack commits")
-    if source.get("dfmcp_dirty") is not False:
+    normalized_source = {
+        "dfmcp_commit": require_commit(
+            source.get("dfmcp_commit"), "native_receipt.source.dfmcp_commit"
+        ),
+        "dfmcp_dirty": source.get("dfmcp_dirty"),
+        "dfhack_commit": require_commit(
+            source.get("dfhack_commit"), "native_receipt.source.dfhack_commit"
+        ),
+    }
+    if normalized_source["dfmcp_dirty"] is not False:
         fail("native build receipt is not bound to a clean dfmcp tree")
+    if source.get("dfhack_dirty") not in {None, False}:
+        fail("native build receipt is not bound to a clean DFHack tree")
+
     plugin = require_object(receipt.get("plugin"), "native_receipt.plugin")
-    if plugin.get("sha256") != live["source"]["plugin_sha256"]:
-        fail("native and live receipts name different plugin binaries")
-    if plugin.get("rpc_methods") != EXPECTED_RPC_METHODS:
+    normalized_plugin = {
+        "sha256": require_hash(plugin.get("sha256"), "native_receipt.plugin.sha256"),
+        "rpc_methods": plugin.get("rpc_methods"),
+        "mutation_rpc_methods": plugin.get("mutation_rpc_methods"),
+        "strings_inventory": plugin.get("strings_inventory"),
+        "symbols_inventory": plugin.get("symbols_inventory"),
+    }
+    if normalized_plugin["rpc_methods"] != EXPECTED_RPC_METHODS:
         fail("native receipt RPC method set drifted")
-    if plugin.get("mutation_rpc_methods") != []:
+    if normalized_plugin["mutation_rpc_methods"] != []:
         fail("native receipt contains mutation RPC methods")
-    if plugin.get("strings_inventory") != "passed":
+    if normalized_plugin["strings_inventory"] != "passed":
         fail("compatibility promotion requires a passing plugin string inventory")
-    if plugin.get("symbols_inventory") != "passed":
+    if normalized_plugin["symbols_inventory"] != "passed":
         fail("compatibility promotion requires a passing plugin symbol inventory")
+
+    source_digests: dict[str, str] = {}
+    if "source_digests" in receipt:
+        source_digests = _validate_hash_map(
+            receipt.get("source_digests"), "native_receipt.source_digests"
+        )
+    return {
+        "source": normalized_source,
+        "plugin": normalized_plugin,
+        "source_digests": source_digests,
+    }
+
+
+def validate_native_receipt(
+    value: Path | dict[str, Any],
+    live: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    actual_receipt_digest: str | None = None
+    if isinstance(value, Path):
+        receipt, actual_receipt_digest = read_object_with_digest(
+            value, MAX_JSON_BYTES, "native build receipt"
+        )
+    elif isinstance(value, dict):
+        receipt = value
+    else:
+        fail("native receipt must be a path or parsed JSON object")
+
+    normalized = normalize_native_receipt(receipt)
+    if live is None:
+        return normalized
+    if actual_receipt_digest is None:
+        fail("cross-receipt native validation requires exact receipt-file bytes")
+
+    expected_receipt_digest = live["source"]["native_build_receipt_sha256"]
+    if actual_receipt_digest != expected_receipt_digest:
+        fail("native build receipt bytes do not match the live receipt binding")
+    if normalized["source"]["dfmcp_commit"] != live["source"]["dfmcp_commit"]:
+        fail("native and live receipts name different dfmcp commits")
+    if normalized["source"]["dfhack_commit"] != live["source"]["dfhack_commit"]:
+        fail("native and live receipts name different DFHack commits")
+    if normalized["plugin"]["sha256"] != live["source"]["plugin_sha256"]:
+        fail("native and live receipts name different plugin binaries")
     return {
         "native_build_receipt_sha256": actual_receipt_digest,
-        "plugin_sha256": plugin["sha256"],
+        "plugin_sha256": normalized["plugin"]["sha256"],
     }
 
 
