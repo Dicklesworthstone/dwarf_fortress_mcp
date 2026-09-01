@@ -17,6 +17,7 @@ pub mod fenced_live_source;
 pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
+pub mod live_announcements;
 pub mod live_bootstrap;
 pub mod live_briefing;
 pub mod live_compatibility;
@@ -54,6 +55,12 @@ pub use ipc::{
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
+pub use live_announcements::{
+    AnnouncementPage, AnnouncementRecord, AnnouncementSourceIdentity,
+    AnnouncementWindowAssembler, LiveAnnouncementWindow, MAX_ANNOUNCEMENTS_PER_PAGE,
+    MAX_ANNOUNCEMENT_TEXT_BYTES, MAX_ANNOUNCEMENT_WINDOW_RECORDS,
+    MAX_CANONICAL_ANNOUNCEMENT_BYTES,
+};
 pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
     bootstrap_live_read_adapter,
