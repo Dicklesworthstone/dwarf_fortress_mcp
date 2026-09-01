@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the R2-R5 acceptance schema, verifier, tests, and qualification wiring."""
+"""Validate the R2-R5 contract, probe, journal, verifier, tests, and wiring."""
 
 from __future__ import annotations
 
@@ -13,8 +13,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "architecture/live_read_acceptance_v1.json"
 VERIFIER_PATH = ROOT / "scripts/verify_live_read_acceptance.py"
 TEST_PATH = ROOT / "scripts/test_live_read_acceptance.py"
+JOURNAL_PATH = ROOT / "scripts/live_read_evidence_journal.py"
+JOURNAL_TEST_PATH = ROOT / "scripts/test_live_read_evidence_journal.py"
 WRAPPER_PATH = ROOT / "scripts/qualify_live_read.sh"
 BRIDGE_REGISTRY_PATH = ROOT / "architecture/dfhack_read_bridge_v1.json"
+PROBE_ADAPTER_PATH = ROOT / "crates/dfmcp-adapter/src/dfhack_probe.rs"
+PROBE_BINARY_PATH = ROOT / "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs"
+PROBE_MANIFEST_PATH = ROOT / "crates/dwarf-fortress-mcp/Cargo.toml"
+ADAPTER_LIB_PATH = ROOT / "crates/dfmcp-adapter/src/lib.rs"
 
 EXPECTED_CASES = {
     "R2": [
@@ -73,14 +79,19 @@ EXPECTED_SOURCE_BINDINGS = {
     "bridge_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
     "bridge_cpp": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
     "rust_wire": "crates/dfmcp-adapter/src/dfhack_wire.rs",
+    "rust_acceptance_probe": "crates/dfmcp-adapter/src/dfhack_probe.rs",
     "live_capsule": "crates/dfmcp-adapter/src/live_observation.rs",
     "live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
     "live_adapter": "crates/dfmcp-adapter/src/live_adapter.rs",
     "live_mcp_server": "crates/dfmcp-mcp/src/live_server.rs",
+    "acceptance_probe_binary": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs",
+    "acceptance_probe_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
     "acceptance_contract": "architecture/live_read_acceptance_v1.json",
+    "acceptance_contract_checker": "scripts/check_live_acceptance_contract.py",
     "acceptance_verifier": "scripts/verify_live_read_acceptance.py",
+    "acceptance_journal": "scripts/live_read_evidence_journal.py",
 }
-ALLOWED_IMPORT_ROOTS = {
+VERIFIER_IMPORT_ROOTS = {
     "__future__",
     "argparse",
     "dataclasses",
@@ -92,6 +103,12 @@ ALLOWED_IMPORT_ROOTS = {
     "sys",
     "tempfile",
     "typing",
+}
+JOURNAL_IMPORT_ROOTS = VERIFIER_IMPORT_ROOTS | {
+    "platform",
+    "shutil",
+    "subprocess",
+    "verify_live_read_acceptance",
 }
 
 
@@ -112,6 +129,17 @@ def read(path: pathlib.Path, failures: list[Failure]) -> str:
 def require(condition: bool, path: pathlib.Path, message: str, failures: list[Failure]) -> None:
     if not condition:
         failures.append(Failure(path.relative_to(ROOT).as_posix(), message))
+
+
+def parse_python(path: pathlib.Path, failures: list[Failure]) -> tuple[str, ast.AST | None]:
+    source = read(path, failures)
+    if not source:
+        return source, None
+    try:
+        return source, ast.parse(source)
+    except SyntaxError as exc:
+        failures.append(Failure(path.relative_to(ROOT).as_posix(), f"syntax error: {exc}"))
+        return source, None
 
 
 def check_contract(failures: list[Failure]) -> None:
@@ -142,6 +170,12 @@ def check_contract(failures: list[Failure]) -> None:
     require(binding == EXPECTED_SOURCE_BINDINGS, CONTRACT_PATH, "source-digest binding drifted", failures)
     forbidden = contract.get("forbidden_event_material", {})
     require("token" in forbidden.get("keys", []) and "bearer_token" in forbidden.get("keys", []), CONTRACT_PATH, "secret-bearing key denylist is incomplete", failures)
+    capture = contract.get("evidence_capture")
+    require(isinstance(capture, dict), CONTRACT_PATH, "evidence_capture policy is missing", failures)
+    if isinstance(capture, dict):
+        require(capture.get("raw_probe") == "dfmcp-live-probe", CONTRACT_PATH, "raw probe identity drifted", failures)
+        require(capture.get("journal") == "scripts/live_read_evidence_journal.py", CONTRACT_PATH, "journal identity drifted", failures)
+        require("root last" in capture.get("publication_order", ""), CONTRACT_PATH, "root-last publication rule is missing", failures)
 
 
 def imported_roots(tree: ast.AST) -> set[str]:
@@ -156,15 +190,10 @@ def imported_roots(tree: ast.AST) -> set[str]:
 
 
 def check_verifier(failures: list[Failure]) -> None:
-    source = read(VERIFIER_PATH, failures)
-    if not source:
+    source, tree = parse_python(VERIFIER_PATH, failures)
+    if tree is None:
         return
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as exc:
-        failures.append(Failure(VERIFIER_PATH.relative_to(ROOT).as_posix(), f"syntax error: {exc}"))
-        return
-    unexpected = imported_roots(tree) - ALLOWED_IMPORT_ROOTS
+    unexpected = imported_roots(tree) - VERIFIER_IMPORT_ROOTS
     require(not unexpected, VERIFIER_PATH, f"verifier imports non-fundamental modules: {sorted(unexpected)}", failures)
     functions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     for name in [
@@ -196,16 +225,19 @@ def check_verifier(failures: list[Failure]) -> None:
         require(marker in source, VERIFIER_PATH, f"missing verifier marker {marker}", failures)
 
 
+def test_names(path: pathlib.Path, failures: list[Failure]) -> tuple[str, list[str]]:
+    source, tree = parse_python(path, failures)
+    if tree is None:
+        return source, []
+    return source, [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    ]
+
+
 def check_tests(failures: list[Failure]) -> None:
-    source = read(TEST_PATH, failures)
-    if not source:
-        return
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as exc:
-        failures.append(Failure(TEST_PATH.relative_to(ROOT).as_posix(), f"syntax error: {exc}"))
-        return
-    tests = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")]
+    _, tests = test_names(TEST_PATH, failures)
     require(len(tests) >= 9, TEST_PATH, "acceptance verifier needs at least nine adversarial tests", failures)
     for name in [
         "test_valid_evidence_is_qualified_and_deterministic",
@@ -219,6 +251,102 @@ def check_tests(failures: list[Failure]) -> None:
         "test_oversized_event_line_is_rejected",
     ]:
         require(name in tests, TEST_PATH, f"missing adversarial test {name}", failures)
+
+    _, journal_tests = test_names(JOURNAL_TEST_PATH, failures)
+    require(len(journal_tests) >= 9, JOURNAL_TEST_PATH, "evidence journal needs at least nine adversarial tests", failures)
+    for name in [
+        "test_wrong_token_probe_normalizes_without_secret_material",
+        "test_probe_acceptance_must_match_the_normative_case",
+        "test_page_size_case_is_bound_to_the_requested_size",
+        "test_secret_bearing_normalized_event_is_rejected",
+        "test_append_writes_artifacts_before_advancing_root",
+        "test_sealed_journal_rejects_new_events",
+        "test_composite_cases_cannot_be_fabricated_from_one_probe",
+    ]:
+        require(name in journal_tests, JOURNAL_TEST_PATH, f"missing journal test {name}", failures)
+
+
+def check_probe(failures: list[Failure]) -> None:
+    adapter = read(PROBE_ADAPTER_PATH, failures)
+    for marker in [
+        "#![forbid(unsafe_code)]",
+        "DfHackProbeClient",
+        "ProbeHandshakeRequest",
+        "ProbeObservationRequest",
+        "MAX_PROBE_FIELD_BYTES",
+        "MAX_PROBE_METHODS",
+        'field("bearer_token", &"<redacted>")',
+        "negotiate_transport",
+        "read_observation",
+        "protobuf varint is not minimally encoded",
+        "MAX_TEXT_NOTIFICATIONS_PER_CALL",
+        "raw_probe_sends_locally_invalid_credentials_and_returns_typed_rejection",
+        "raw_probe_can_send_an_oversized_protocol_page_bound",
+    ]:
+        require(marker in adapter, PROBE_ADAPTER_PATH, f"raw adapter probe is missing {marker}", failures)
+    for forbidden in ["TcpStream", "RunCommand", "RunLua", "ApplyEffect", "SetPauseState"]:
+        require(forbidden not in adapter, PROBE_ADAPTER_PATH, f"raw adapter probe contains forbidden policy/effect token {forbidden}", failures)
+
+    binary = read(PROBE_BINARY_PATH, failures)
+    for marker in [
+        "#![forbid(unsafe_code)]",
+        '"handshake-case"',
+        '"observation-case"',
+        '"capsule"',
+        '"agent-turn"',
+        "parse_loopback_endpoint",
+        "DfHackProbeClient::negotiate_transport",
+        "LiveObservationReceipt::issue",
+        "receipt_sha256",
+        "sensitive_manifest_disclosed",
+        "running_multipage_rejected",
+        "the probe never prints the bearer token",
+    ]:
+        require(marker.lower() in binary.lower(), PROBE_BINARY_PATH, f"probe binary is missing {marker}", failures)
+    for forbidden in ["RunCommand", "RunLua", "ApplyEffect", "SetPauseState", "SF_ALLOW_REMOTE"]:
+        require(forbidden not in binary, PROBE_BINARY_PATH, f"probe binary contains forbidden effect token {forbidden}", failures)
+    require("println!(\"{}\", token" not in binary, PROBE_BINARY_PATH, "probe binary prints a token variable", failures)
+
+    manifest = read(PROBE_MANIFEST_PATH, failures)
+    require('name = "dfmcp-live-probe"' in manifest, PROBE_MANIFEST_PATH, "probe binary is not explicitly registered", failures)
+    require('path = "src/bin/dfmcp-live-probe.rs"' in manifest, PROBE_MANIFEST_PATH, "probe binary path drifted", failures)
+
+    adapter_lib = read(ADAPTER_LIB_PATH, failures)
+    require("pub mod dfhack_probe;" in adapter_lib, ADAPTER_LIB_PATH, "raw acceptance probe is not compiled", failures)
+    require("DfHackProbeClient" in adapter_lib, ADAPTER_LIB_PATH, "raw acceptance probe is not exported", failures)
+
+
+def check_journal(failures: list[Failure]) -> None:
+    source, tree = parse_python(JOURNAL_PATH, failures)
+    if tree is None:
+        return
+    unexpected = imported_roots(tree) - JOURNAL_IMPORT_ROOTS
+    require(not unexpected, JOURNAL_PATH, f"journal imports non-fundamental modules: {sorted(unexpected)}", failures)
+    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    for name in [
+        "initialize",
+        "load_journal",
+        "normalize_probe",
+        "validate_event",
+        "append_record",
+        "append_event",
+        "show_status",
+        "finalize",
+        "atomic_write_bytes",
+    ]:
+        require(name in functions, JOURNAL_PATH, f"journal is missing boundary {name}", failures)
+    for marker in [
+        "raw artifact first",
+        "journal root last",
+        "orphan event file conflicts",
+        "sealed evidence journal cannot be modified",
+        "composite or normalized event",
+        "verify_acceptance",
+        "native-build-passed",
+        "source_commit",
+        "SHA256SUMS",
+    ]:
+        require(marker.lower() in source.lower(), JOURNAL_PATH, f"journal is missing marker {marker}", failures)
 
 
 def check_wrapper(failures: list[Failure]) -> None:
@@ -260,6 +388,8 @@ def check_wiring(failures: list[Failure]) -> None:
         "scripts/check_live_acceptance_contract.py",
         "scripts/test_repository_integrity.py",
         "scripts/test_live_read_acceptance.py",
+        "scripts/test_live_read_evidence_journal.py",
+        "scripts/live_read_evidence_journal.py",
         "scripts/qualify_live_read.sh",
     ]
     for relative in ["scripts/verify.sh", "scripts/qualify_local.sh"]:
@@ -274,6 +404,8 @@ def main() -> int:
     check_contract(failures)
     check_verifier(failures)
     check_tests(failures)
+    check_probe(failures)
+    check_journal(failures)
     check_wrapper(failures)
     check_registry(failures)
     check_wiring(failures)
@@ -282,7 +414,7 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure.path}: {failure.message}", file=sys.stderr)
         return 1
-    print("live acceptance contract: PASS (bounded R2-R5 schema, verifier, tests, and wiring)")
+    print("live acceptance contract: PASS (bounded R2-R5 probe, journal, verifier, tests, and wiring)")
     return 0
 
 
