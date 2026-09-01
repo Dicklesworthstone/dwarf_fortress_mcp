@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -19,6 +20,7 @@ PROMOTION_PATH = ROOT / "scripts/promote_live_compatibility.py"
 DEFAULT_REGISTRY = ROOT / "architecture/live_compatibility_registry_v1.json"
 FLOOR_SCHEMA = "dfmcp.live-compatibility-floor/1"
 MAX_FLOOR_BYTES = 1024 * 1024
+MAX_SEQUENCE = (1 << 64) - 1
 
 SPEC = importlib.util.spec_from_file_location("promote_live_compatibility", PROMOTION_PATH)
 if SPEC is None or SPEC.loader is None:
@@ -36,9 +38,14 @@ def fail(message: str) -> NoReturn:
     raise FloorError(message)
 
 
-def require_nonnegative_int(value: Any, path: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        fail(f"{path} must be a nonnegative integer")
+def require_nonnegative_int(value: Any, path: str, maximum: int = MAX_SEQUENCE) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > maximum
+    ):
+        fail(f"{path} must be an integer in 0..={maximum}")
     return value
 
 
@@ -116,7 +123,7 @@ def read_private_bytes(path: Path) -> tuple[bytes, str]:
         opened = os.fstat(descriptor)
         if not same_identity(before, opened):
             fail("compatibility floor changed between path inspection and open")
-        digest = promotion.hashlib.sha256()
+        digest = hashlib.sha256()
         chunks: list[bytes] = []
         total = 0
         while True:
@@ -208,9 +215,11 @@ def read_floor(path: Path) -> tuple[dict[str, Any], str]:
     return validate_floor(value), file_sha256
 
 
-def registry_generation(registry_path: Path) -> dict[str, Any]:
-    registry, file_sha256 = promotion.read_object_with_digest(
-        registry_path, promotion.MAX_JSON_BYTES, "compatibility registry"
+def registry_generation_from_value(
+    registry: dict[str, Any], registry_file_sha256: str
+) -> dict[str, Any]:
+    file_sha256 = promotion.require_hash(
+        registry_file_sha256, "registry_file_sha256"
     )
     entries = promotion.validate_registry(registry)
     return {
@@ -220,14 +229,22 @@ def registry_generation(registry_path: Path) -> dict[str, Any]:
     }
 
 
+def registry_generation(registry_path: Path) -> dict[str, Any]:
+    registry, file_sha256 = promotion.read_object_with_digest(
+        registry_path, promotion.MAX_JSON_BYTES, "compatibility registry"
+    )
+    return registry_generation_from_value(registry, file_sha256)
+
+
 def build_floor(
     generation: dict[str, Any],
     sequence: int,
     previous_floor_digest: str | None,
 ) -> dict[str, Any]:
+    normalized_sequence = require_nonnegative_int(sequence, "compatibility_floor.sequence")
     unsigned: dict[str, Any] = {
         "schema": FLOOR_SCHEMA,
-        "sequence": sequence,
+        "sequence": normalized_sequence,
         "registry_file_sha256": generation["registry_file_sha256"],
         "registry_digest": generation["registry_digest"],
         "entry_ids": list(generation["entry_ids"]),
@@ -239,24 +256,27 @@ def build_floor(
     }
 
 
-def generation_matches(floor: dict[str, Any], generation: dict[str, Any]) -> bool:
+def generation_matches(floor_value: dict[str, Any], generation: dict[str, Any]) -> bool:
     return (
-        floor["registry_file_sha256"] == generation["registry_file_sha256"]
-        and floor["registry_digest"] == generation["registry_digest"]
-        and floor["entry_ids"] == generation["entry_ids"]
+        floor_value["registry_file_sha256"] == generation["registry_file_sha256"]
+        and floor_value["registry_digest"] == generation["registry_digest"]
+        and floor_value["entry_ids"] == generation["entry_ids"]
     )
+
+
+def verify_generation(floor_value: dict[str, Any], generation: dict[str, Any]) -> None:
+    if not generation_matches(floor_value, generation):
+        fail("compatibility registry generation does not match the trusted monotonic floor")
 
 
 def verify_floor(
     floor_path: Path,
     registry_path: Path | None = None,
 ) -> tuple[dict[str, Any], str]:
-    floor, floor_file_sha256 = read_floor(floor_path)
+    floor_value, floor_file_sha256 = read_floor(floor_path)
     if registry_path is not None:
-        generation = registry_generation(registry_path)
-        if not generation_matches(floor, generation):
-            fail("compatibility registry generation does not match the trusted monotonic floor")
-    return floor, floor_file_sha256
+        verify_generation(floor_value, registry_generation(registry_path))
+    return floor_value, floor_file_sha256
 
 
 def fsync_directory(path: Path) -> None:
@@ -360,10 +380,10 @@ def floor_lock(path: Path) -> Iterator[None]:
 
 def initialize_floor(floor_path: Path, registry_path: Path) -> dict[str, Any]:
     generation = registry_generation(registry_path)
-    floor = build_floor(generation, 0, None)
+    floor_value = build_floor(generation, 0, None)
     with floor_lock(floor_path):
-        write_private_exclusive(floor_path, floor)
-    return floor
+        write_private_exclusive(floor_path, floor_value)
+    return floor_value
 
 
 def advance_floor(
@@ -387,8 +407,13 @@ def advance_floor(
             )
         if generation_matches(current, generation):
             return current, False
-        sequence = current["sequence"] + 1
-        candidate = build_floor(generation, sequence, current["floor_digest"])
+        if current["sequence"] == MAX_SEQUENCE:
+            fail("compatibility floor sequence space is exhausted")
+        candidate = build_floor(
+            generation,
+            current["sequence"] + 1,
+            current["floor_digest"],
+        )
         write_private_atomic(floor_path, candidate)
         return candidate, True
 
@@ -421,25 +446,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.command == "init":
-            floor = initialize_floor(args.floor, args.registry)
-            emit({"status": "initialized", "floor": floor})
+            floor_value = initialize_floor(args.floor, args.registry)
+            emit({"status": "initialized", "floor": floor_value})
         elif args.command == "verify":
-            floor, file_sha256 = verify_floor(args.floor, args.registry)
+            floor_value, file_sha256 = verify_floor(args.floor, args.registry)
             emit(
                 {
                     "status": "verified",
                     "floor_file_sha256": file_sha256,
-                    "floor": floor,
+                    "floor": floor_value,
                 }
             )
         elif args.command == "advance":
-            floor, changed = advance_floor(
+            floor_value, changed = advance_floor(
                 args.floor, args.registry, args.expected_floor_sha256
             )
             emit(
                 {
                     "status": "advanced" if changed else "unchanged",
-                    "floor": floor,
+                    "floor": floor_value,
                 }
             )
         else:
