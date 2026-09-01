@@ -1,95 +1,607 @@
 {
   "schema_version": "dfmcp.live_announcement_acceptance/1.1",
+  "event_schema": "dfmcp.live-announcement-evidence/1.1",
+  "receipt_schema": "dfmcp.live-announcement-acceptance-receipt/1.1",
   "status": "normative_unexecuted_acceptance_contract",
-  "bridge_protocol": "1.1",
-  "bridge_version": "0.2.0",
-  "inherits_protocol_1_0_evidence": false,
+  "bridge": {
+    "plugin": "dfmcp_bridge_v1_1",
+    "bridge_version": "0.2.0",
+    "protocol": "1.1",
+    "rpc_methods": [
+      "Handshake",
+      "ReadObservation"
+    ]
+  },
+  "limits": {
+    "maximum_stream_bytes": 67108864,
+    "maximum_event_bytes": 1048576,
+    "maximum_events": 43
+  },
   "authority": {
     "mode": "read_only",
+    "capabilities": [
+      "doctor",
+      "observe",
+      "query",
+      "wait"
+    ],
     "mutation_capabilities": []
   },
+  "source_binding": {
+    "requires_clean_dfmcp_source": true,
+    "requires_clean_dfhack_source": true,
+    "requires_exact_native_receipt_bytes": true,
+    "requires_same_source_version_platform_for_all_events": true,
+    "inherits_protocol_1_0_evidence": false,
+    "baseline_evidence_required_for_promotion": [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5"
+    ]
+  },
+  "event_fields": [
+    "schema",
+    "sequence",
+    "gate",
+    "case",
+    "status",
+    "source",
+    "version_tuple",
+    "host",
+    "assertions",
+    "artifacts",
+    "evidence_digest"
+  ],
   "gates": [
     {
       "gate": "A1",
       "name": "native_protocol_shape",
-      "required_cases": [
-        "plugin builds through the supported DFHack protobuf macro",
-        "method manifest remains exactly Handshake and ReadObservation",
-        "string and symbol inventories contain no mutation route",
-        "protocol manifest is exactly 1.1 and bridge implementation is exactly 0.2.0"
+      "cases": [
+        {
+          "case": "native_receipt_bound",
+          "required_equals": {
+            "native_receipt_valid": true,
+            "bridge_version": "0.2.0",
+            "protocol": "1.1"
+          },
+          "required_artifact_digests": [
+            "native_receipt_validation"
+          ]
+        },
+        {
+          "case": "supported_dfhack_macro_build",
+          "required_equals": {
+            "supported_dfhack_protobuf_macro": true,
+            "plugin_build_passed": true
+          },
+          "required_artifact_digests": [
+            "build_stdout",
+            "build_stderr",
+            "plugin_binary"
+          ]
+        },
+        {
+          "case": "exact_method_manifest",
+          "required_equals": {
+            "rpc_methods": [
+              "Handshake",
+              "ReadObservation"
+            ],
+            "mutation_rpc_methods": []
+          },
+          "required_artifact_digests": [
+            "method_manifest"
+          ]
+        },
+        {
+          "case": "clean_binary_inventories",
+          "required_equals": {
+            "strings_inventory": "passed",
+            "symbols_inventory": "passed",
+            "mutation_surface_found": false
+          },
+          "required_artifact_digests": [
+            "strings_inventory",
+            "symbols_inventory"
+          ]
+        }
       ]
     },
     {
       "gate": "A2",
       "name": "authentication_and_neutral_rejection",
-      "required_cases": [
-        "missing configured token",
-        "invalid configured-token lengths",
-        "invalid presented-token lengths",
-        "wrong token",
-        "correct token",
-        "nonce mismatch",
-        "protocol 1.0 rejected by the 1.1 plugin",
-        "protocol 1.2 rejected by the 1.1 plugin",
-        "secret scan has zero matches"
+      "cases": [
+        {
+          "case": "configured_token_missing",
+          "required_equals": {
+            "accepted": false,
+            "failure_class": "configuration_error",
+            "bridge_state_changed": false
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "configured_token_length_out_of_bounds",
+          "required_equals": {
+            "short_rejected": true,
+            "long_rejected": true,
+            "bridge_state_changed": false
+          },
+          "required_artifact_digests": [
+            "short_transcript",
+            "long_transcript"
+          ]
+        },
+        {
+          "case": "presented_token_length_out_of_bounds",
+          "required_equals": {
+            "short_rejected": true,
+            "long_rejected": true,
+            "bridge_state_changed": false
+          },
+          "required_artifact_digests": [
+            "short_transcript",
+            "long_transcript"
+          ]
+        },
+        {
+          "case": "wrong_token_neutral",
+          "required_equals": {
+            "accepted": false,
+            "failure_class": "authentication_failed",
+            "response_contains_secret": false,
+            "bridge_state_changed": false
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "correct_token_accepts",
+          "required_equals": {
+            "accepted": true,
+            "rpc_methods": [
+              "Handshake",
+              "ReadObservation"
+            ],
+            "mutation_rpc_methods": []
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "nonce_mismatch_neutral",
+          "required_equals": {
+            "accepted": false,
+            "failure_class": "nonce_mismatch",
+            "bridge_state_changed": false
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "protocol_1_0_rejected",
+          "required_equals": {
+            "requested_protocol": "1.0",
+            "accepted": false,
+            "advertised_protocol": "1.1"
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "protocol_1_2_rejected",
+          "required_equals": {
+            "requested_protocol": "1.2",
+            "accepted": false,
+            "advertised_protocol": "1.1"
+          },
+          "required_artifact_digests": [
+            "transcript"
+          ]
+        },
+        {
+          "case": "secret_scan_clean",
+          "required_equals": {
+            "secret_matches": 0,
+            "environment_dump_present": false,
+            "bearer_token_present": false
+          },
+          "required_artifact_digests": [
+            "secret_scan_report"
+          ]
+        }
       ]
     },
     {
       "gate": "A3",
       "name": "cursor_and_retained_window",
-      "required_cases": [
-        "initial cursor -1",
-        "cursor before retained window with explicit gap",
-        "cursor immediately before oldest retained report without gap",
-        "cursor inside retained window",
-        "cursor at latest retained report",
-        "cursor beyond latest retained report",
-        "empty retained window",
-        "partial suffix continuation",
-        "complete suffix continuation"
+      "cases": [
+        {
+          "case": "initial_cursor_minus_one",
+          "required_equals": {
+            "requested_after_id": -1,
+            "gap_before_retained_window": false,
+            "strictly_increasing_report_ids": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "cursor_before_retained_window_gap",
+          "required_equals": {
+            "gap_before_retained_window": true,
+            "oldest_retained_report_id_present": true,
+            "complete_history_claimed": false
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "cursor_immediately_before_oldest",
+          "required_equals": {
+            "gap_before_retained_window": false,
+            "first_returned_is_oldest_retained": true,
+            "strictly_increasing_report_ids": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "cursor_inside_retained_window",
+          "required_equals": {
+            "only_reports_after_cursor_returned": true,
+            "gap_before_retained_window": false,
+            "strictly_increasing_report_ids": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "cursor_at_latest",
+          "required_equals": {
+            "record_count": 0,
+            "complete_through_latest": true,
+            "next_after_id_equals_latest": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "cursor_beyond_latest",
+          "required_equals": {
+            "record_count": 0,
+            "complete_through_latest": true,
+            "cursor_regression_invented": false
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "empty_retained_window",
+          "required_equals": {
+            "record_count": 0,
+            "retained_window_empty": true,
+            "complete_history_claimed": false
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "partial_suffix_continuation",
+          "required_equals": {
+            "complete_through_latest": false,
+            "continuation_present": true,
+            "continuation_after_id_equals_next_after_id": true
+          },
+          "required_artifact_digests": [
+            "first_batch",
+            "continuation_batch"
+          ]
+        },
+        {
+          "case": "complete_suffix_continuation",
+          "required_equals": {
+            "complete_through_latest": true,
+            "continuation_present": false,
+            "next_after_id_equals_last_returned_or_cursor": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        }
       ]
     },
     {
       "gate": "A4",
       "name": "canonicality_and_bounds",
-      "required_cases": [
-        "strict report-ID ordering",
-        "duplicate report rejection",
-        "negative report-ID rejection",
-        "UTF-8 text validation",
-        "2048-byte per-record text ceiling",
-        "512-record batch ceiling",
-        "2 MiB canonical batch ceiling",
-        "noncanonical protobuf Boolean rejection",
-        "overlong protobuf varint rejection",
-        "unknown-field tolerance without identity change",
-        "field tampering changes or invalidates the canonical digest"
+      "cases": [
+        {
+          "case": "strict_report_id_order",
+          "required_equals": {
+            "strictly_increasing_report_ids": true,
+            "canonical_order_stable": true
+          },
+          "required_artifact_digests": [
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "duplicate_report_rejected",
+          "required_equals": {
+            "duplicate_presented": true,
+            "accepted": false,
+            "partial_state_published": false
+          },
+          "required_artifact_digests": [
+            "malformed_wire",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "negative_report_id_rejected",
+          "required_equals": {
+            "negative_report_id_presented": true,
+            "accepted": false,
+            "partial_state_published": false
+          },
+          "required_artifact_digests": [
+            "malformed_wire",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "utf8_text_validated",
+          "required_equals": {
+            "invalid_utf8_presented": true,
+            "accepted": false,
+            "replacement_text_invented": false
+          },
+          "required_artifact_digests": [
+            "malformed_wire",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "text_2048_byte_ceiling",
+          "required_equals": {
+            "maximum_text_bytes": 2048,
+            "boundary_accepted": true,
+            "oversized_rejected": true
+          },
+          "required_artifact_digests": [
+            "boundary_batch",
+            "oversized_rejection"
+          ]
+        },
+        {
+          "case": "batch_512_record_ceiling",
+          "required_equals": {
+            "maximum_records": 512,
+            "boundary_accepted": true,
+            "oversized_rejected": true
+          },
+          "required_artifact_digests": [
+            "boundary_batch",
+            "oversized_rejection"
+          ]
+        },
+        {
+          "case": "canonical_batch_2mib_ceiling",
+          "required_equals": {
+            "maximum_canonical_bytes": 2097152,
+            "boundary_accepted": true,
+            "oversized_rejected": true
+          },
+          "required_artifact_digests": [
+            "boundary_batch",
+            "oversized_rejection"
+          ]
+        },
+        {
+          "case": "noncanonical_boolean_rejected",
+          "required_equals": {
+            "noncanonical_boolean_presented": true,
+            "accepted": false,
+            "partial_state_published": false
+          },
+          "required_artifact_digests": [
+            "malformed_wire",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "overlong_varint_rejected",
+          "required_equals": {
+            "overlong_varint_presented": true,
+            "accepted": false,
+            "partial_state_published": false
+          },
+          "required_artifact_digests": [
+            "malformed_wire",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "unknown_fields_identity_stable",
+          "required_equals": {
+            "unknown_fields_present": true,
+            "semantic_identity_unchanged": true,
+            "unknown_fields_grant_authority": false
+          },
+          "required_artifact_digests": [
+            "baseline_batch",
+            "unknown_field_batch"
+          ]
+        },
+        {
+          "case": "field_tampering_detected",
+          "required_equals": {
+            "field_tampered": true,
+            "canonical_digest_changed_or_validation_failed": true,
+            "tampered_state_published": false
+          },
+          "required_artifact_digests": [
+            "baseline_batch",
+            "tampered_batch",
+            "validation_transcript"
+          ]
+        }
       ]
     },
     {
       "gate": "A5",
       "name": "observation_atomicity_and_restart",
-      "required_cases": [
-        "one-page moving-world observation binds citizens and announcements to one RPC",
-        "paused multipage citizen read reproduces identical announcement fields",
-        "announcement drift between citizen pages rejects the entire assembly",
-        "bridge restart changes generation and fences the old cursor",
-        "aborted partial assembly publishes no anchor"
+      "cases": [
+        {
+          "case": "moving_world_single_rpc_atomic",
+          "required_equals": {
+            "single_rpc": true,
+            "citizens_and_announcements_same_response": true,
+            "moving_world_accepted": true
+          },
+          "required_artifact_digests": [
+            "wire_response",
+            "canonical_capsule"
+          ]
+        },
+        {
+          "case": "paused_multipage_announcements_stable",
+          "required_equals": {
+            "paused": true,
+            "citizen_pages": 2,
+            "announcement_fields_identical_across_pages": true,
+            "assembly_published_once": true
+          },
+          "required_artifact_digests": [
+            "page_1",
+            "page_2",
+            "canonical_capsule"
+          ]
+        },
+        {
+          "case": "announcement_drift_rejected",
+          "required_equals": {
+            "announcement_fields_changed_between_pages": true,
+            "assembly_accepted": false,
+            "partial_state_published": false
+          },
+          "required_artifact_digests": [
+            "page_1",
+            "page_2",
+            "rejection_transcript"
+          ]
+        },
+        {
+          "case": "bridge_restart_fences_cursor",
+          "required_equals": {
+            "bridge_generation_changed": true,
+            "old_cursor_reused": false,
+            "continuity": "reset"
+          },
+          "required_artifact_digests": [
+            "before_restart",
+            "after_restart"
+          ]
+        },
+        {
+          "case": "aborted_assembly_not_published",
+          "required_equals": {
+            "assembly_aborted": true,
+            "successor_anchor_published": false,
+            "partial_announcement_batch_visible": false
+          },
+          "required_artifact_digests": [
+            "failure_transcript",
+            "post_failure_state"
+          ]
+        }
       ]
     },
     {
       "gate": "A6",
       "name": "cold_agent_orientation",
-      "required_cases": [
-        "complete suffix is distinguished from complete history",
-        "retained-window gap is surfaced as uncertainty",
-        "partial suffix emits one bounded continuation",
-        "announcement attention items cite canonical batch evidence",
-        "no announcement creates mutation authority or an autonomous action recommendation"
+      "cases": [
+        {
+          "case": "suffix_not_history",
+          "required_equals": {
+            "complete_suffix_distinguished_from_complete_history": true,
+            "history_before_oldest_retained": "unknown",
+            "absence_overclaimed": false
+          },
+          "required_artifact_digests": [
+            "agent_turn"
+          ]
+        },
+        {
+          "case": "retained_gap_uncertainty",
+          "required_equals": {
+            "gap_before_retained_window": true,
+            "uncertainty_present": true,
+            "recovery_step_present": true
+          },
+          "required_artifact_digests": [
+            "agent_turn"
+          ]
+        },
+        {
+          "case": "partial_suffix_one_continuation",
+          "required_equals": {
+            "complete_through_latest": false,
+            "continuation_count": 1,
+            "continuation_bounded": true
+          },
+          "required_artifact_digests": [
+            "agent_turn"
+          ]
+        },
+        {
+          "case": "attention_cites_batch",
+          "required_equals": {
+            "announcement_attention_present": true,
+            "canonical_batch_evidence_cited": true,
+            "uncited_attention_present": false
+          },
+          "required_artifact_digests": [
+            "agent_turn",
+            "canonical_batch"
+          ]
+        },
+        {
+          "case": "no_authority_or_autonomous_action",
+          "required_equals": {
+            "mutation_capabilities": [],
+            "announcement_grants_authority": false,
+            "autonomous_action_recommendation_present": false
+          },
+          "required_artifact_digests": [
+            "agent_turn"
+          ]
+        }
       ]
     }
   ],
-  "promotion_rule": "No protocol-1.1 tuple may be promoted until every A1-A6 case is represented in a clean, source-bound, immutable live receipt and the existing R1-R5 fortress/citizen campaign also passes for the same source and native plugin bytes.",
+  "promotion_rule": "No protocol-1.1 tuple may be promoted until every A1-A6 case is represented in a clean, source-bound, immutable announcement receipt and the existing R1-R5 fortress/citizen campaign also passes for the same source revisions, native plugin bytes, version tuple, and platform.",
+  "claims_established": [
+    "the named clean protocol-1.1 source and native plugin passed every A1-A6 case on the named platform",
+    "announcement records are canonical, bounded, cursor-addressed retained suffix evidence",
+    "retained-window gaps and partial suffixes remain explicit to a cold agent",
+    "announcement evidence grants no mutation capability"
+  ],
   "claims_not_established": [
     "complete announcement history before the oldest retained report",
     "compatibility with any untested DF or DFHack build",
