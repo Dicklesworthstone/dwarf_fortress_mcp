@@ -21,12 +21,17 @@
       "bridge_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
       "bridge_cpp": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
       "rust_wire": "crates/dfmcp-adapter/src/dfhack_wire.rs",
+      "rust_acceptance_probe": "crates/dfmcp-adapter/src/dfhack_probe.rs",
       "live_capsule": "crates/dfmcp-adapter/src/live_observation.rs",
       "live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
       "live_adapter": "crates/dfmcp-adapter/src/live_adapter.rs",
       "live_mcp_server": "crates/dfmcp-mcp/src/live_server.rs",
+      "acceptance_probe_binary": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs",
+      "acceptance_probe_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
       "acceptance_contract": "architecture/live_read_acceptance_v1.json",
-      "acceptance_verifier": "scripts/verify_live_read_acceptance.py"
+      "acceptance_contract_checker": "scripts/check_live_acceptance_contract.py",
+      "acceptance_verifier": "scripts/verify_live_read_acceptance.py",
+      "acceptance_journal": "scripts/live_read_evidence_journal.py"
     }
   },
   "forbidden_event_material": {
@@ -257,6 +262,13 @@
         }
       ]
     }
+  },
+  "evidence_capture": {
+    "raw_probe": "dfmcp-live-probe",
+    "journal": "scripts/live_read_evidence_journal.py",
+    "publication_order": "raw artifact first, canonical event second, journal root last",
+    "manual_transition_policy": "Configured-token failures, world unload/mode changes, bridge restart, and fault injection require explicit disposable-fort operator transitions. No capture tool may forward arbitrary DFHack commands or Lua.",
+    "composite_case_policy": "Restart, stale-client, summary-drift, partial-publication, secret-scan, and cold-agent cases require composite or normalized evidence; one raw probe result may not fabricate them."
   },
   "claims_not_established_by_this_contract": [
     "live mutation authority or correctness",
