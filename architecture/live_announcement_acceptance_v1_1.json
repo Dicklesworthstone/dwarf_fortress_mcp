@@ -1,0 +1,100 @@
+{
+  "schema_version": "dfmcp.live_announcement_acceptance/1.1",
+  "status": "normative_unexecuted_acceptance_contract",
+  "bridge_protocol": "1.1",
+  "bridge_version": "0.2.0",
+  "inherits_protocol_1_0_evidence": false,
+  "authority": {
+    "mode": "read_only",
+    "mutation_capabilities": []
+  },
+  "gates": [
+    {
+      "gate": "A1",
+      "name": "native_protocol_shape",
+      "required_cases": [
+        "plugin builds through the supported DFHack protobuf macro",
+        "method manifest remains exactly Handshake and ReadObservation",
+        "string and symbol inventories contain no mutation route",
+        "protocol manifest is exactly 1.1 and bridge implementation is exactly 0.2.0"
+      ]
+    },
+    {
+      "gate": "A2",
+      "name": "authentication_and_neutral_rejection",
+      "required_cases": [
+        "missing configured token",
+        "invalid configured-token lengths",
+        "invalid presented-token lengths",
+        "wrong token",
+        "correct token",
+        "nonce mismatch",
+        "protocol 1.0 rejected by the 1.1 plugin",
+        "protocol 1.2 rejected by the 1.1 plugin",
+        "secret scan has zero matches"
+      ]
+    },
+    {
+      "gate": "A3",
+      "name": "cursor_and_retained_window",
+      "required_cases": [
+        "initial cursor -1",
+        "cursor before retained window with explicit gap",
+        "cursor immediately before oldest retained report without gap",
+        "cursor inside retained window",
+        "cursor at latest retained report",
+        "cursor beyond latest retained report",
+        "empty retained window",
+        "partial suffix continuation",
+        "complete suffix continuation"
+      ]
+    },
+    {
+      "gate": "A4",
+      "name": "canonicality_and_bounds",
+      "required_cases": [
+        "strict report-ID ordering",
+        "duplicate report rejection",
+        "negative report-ID rejection",
+        "UTF-8 text validation",
+        "2048-byte per-record text ceiling",
+        "512-record batch ceiling",
+        "2 MiB canonical batch ceiling",
+        "noncanonical protobuf Boolean rejection",
+        "overlong protobuf varint rejection",
+        "unknown-field tolerance without identity change",
+        "field tampering changes or invalidates the canonical digest"
+      ]
+    },
+    {
+      "gate": "A5",
+      "name": "observation_atomicity_and_restart",
+      "required_cases": [
+        "one-page moving-world observation binds citizens and announcements to one RPC",
+        "paused multipage citizen read reproduces identical announcement fields",
+        "announcement drift between citizen pages rejects the entire assembly",
+        "bridge restart changes generation and fences the old cursor",
+        "aborted partial assembly publishes no anchor"
+      ]
+    },
+    {
+      "gate": "A6",
+      "name": "cold_agent_orientation",
+      "required_cases": [
+        "complete suffix is distinguished from complete history",
+        "retained-window gap is surfaced as uncertainty",
+        "partial suffix emits one bounded continuation",
+        "announcement attention items cite canonical batch evidence",
+        "no announcement creates mutation authority or an autonomous action recommendation"
+      ]
+    }
+  ],
+  "promotion_rule": "No protocol-1.1 tuple may be promoted until every A1-A6 case is represented in a clean, source-bound, immutable live receipt and the existing R1-R5 fortress/citizen campaign also passes for the same source and native plugin bytes.",
+  "claims_not_established": [
+    "complete announcement history before the oldest retained report",
+    "compatibility with any untested DF or DFHack build",
+    "mutation correctness",
+    "durable report retention across game restart",
+    "protection against a compromised local host"
+  ]
+}
