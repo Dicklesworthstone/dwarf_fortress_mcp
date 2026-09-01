@@ -1,25 +1,24 @@
 #![forbid(unsafe_code)]
 
-//! Bounded driver for obtaining one complete canonical live observation.
+//! Bounded drivers for complete canonical live reads.
 //!
-//! This layer owns pagination policy but no transport implementation. A source
-//! may be the real [`DfHackRpcClient`](crate::DfHackRpcClient) or a deterministic
-//! laboratory double. It refuses empty nonterminal pages, total counts above
-//! the caller or capsule ceiling, page-count overruns, and assembler drift.
-//!
-//! One DFHack RPC invocation is internally suspended by DFHack. Multiple RPC
-//! pages are not one atomic game read. Therefore V1 permits a multipage capsule
-//! only while the game reports itself paused on every page. The default caller
-//! should request the maximum page size so ordinary fortresses complete in one
-//! RPC and do not need this weaker paused-world fallback.
+//! Citizen pagination and announcement pagination have different coherence
+//! rules. A citizen capsule requires stable summary fields and permits multiple
+//! pages only while the fortress is paused. An announcement read freezes the
+//! first page's retained high-water mark, then requires every continuation to
+//! reproduce the same retained-window witness. Neither driver publishes a
+//! partial candidate.
 
 use std::io::{Read, Write};
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::{
-    BridgeManifest, DfHackRpcClient, LiveObservationCapsule, MAX_CAPSULE_CITIZENS,
-    MAX_CITIZENS_PER_PAGE, ObservationAssembler, ObservationPage,
+    AnnouncementPage, AnnouncementSourceIdentity, AnnouncementWindowAssembler,
+    BridgeManifest, DfHackRpcClient, LiveAnnouncementWindow, LiveObservationCapsule,
+    MAX_ANNOUNCEMENTS_PER_PAGE, MAX_ANNOUNCEMENT_WINDOW_RECORDS,
+    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, ObservationAssembler,
+    ObservationPage,
 };
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
@@ -49,6 +48,32 @@ impl<S: Read + Write> LiveObservationSource for DfHackRpcClient<S> {
         include_names: bool,
     ) -> Result<ObservationPage> {
         self.read_observation(offset, maximum, include_names)
+    }
+}
+
+pub trait LiveAnnouncementSource {
+    fn announcement_source_identity(&self) -> Result<AnnouncementSourceIdentity>;
+
+    fn read_announcement_page(
+        &mut self,
+        after_report_id: i32,
+        through_report_id: i32,
+        maximum: u32,
+    ) -> Result<AnnouncementPage>;
+}
+
+impl<S: Read + Write> LiveAnnouncementSource for DfHackRpcClient<S> {
+    fn announcement_source_identity(&self) -> Result<AnnouncementSourceIdentity> {
+        DfHackRpcClient::announcement_source_identity(self)
+    }
+
+    fn read_announcement_page(
+        &mut self,
+        after_report_id: i32,
+        through_report_id: i32,
+        maximum: u32,
+    ) -> Result<AnnouncementPage> {
+        self.read_announcements(after_report_id, through_report_id, maximum)
     }
 }
 
@@ -160,12 +185,100 @@ pub fn read_complete_observation_bounded<T: LiveObservationSource>(
     ))
 }
 
+pub fn read_complete_announcement_window<T: LiveAnnouncementSource>(
+    source: &mut T,
+    after_report_id: i32,
+    page_size: u32,
+    max_records: u32,
+) -> Result<LiveAnnouncementWindow> {
+    if after_report_id < -1 {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "announcement cursor must be -1 or a nonnegative report ID",
+        ));
+    }
+    if page_size == 0 || page_size > MAX_ANNOUNCEMENTS_PER_PAGE {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "announcement page size must be in 1..={MAX_ANNOUNCEMENTS_PER_PAGE}"
+            ),
+        ));
+    }
+    let hard_records = u32::try_from(MAX_ANNOUNCEMENT_WINDOW_RECORDS).map_err(|_| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "announcement record ceiling does not fit u32",
+        )
+    })?;
+    if max_records == 0 || max_records > hard_records {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "announcement record ceiling must be in 1..={hard_records}"
+            ),
+        ));
+    }
+
+    let identity = source.announcement_source_identity()?;
+    identity.validate()?;
+    let mut assembler = AnnouncementWindowAssembler::new(identity, after_report_id)?;
+    let maximum_pages = max_records
+        .saturating_add(page_size.saturating_sub(1))
+        .checked_div(page_size)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let mut retained = 0u32;
+
+    for _ in 0..maximum_pages {
+        let after = assembler.next_after_report_id();
+        let through = assembler.frozen_high_water_mark().unwrap_or(-1);
+        let remaining = max_records.saturating_sub(retained);
+        if remaining == 0 {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "announcement window exceeds the caller record ceiling",
+            ));
+        }
+        let requested = page_size.min(remaining);
+        let page = source.read_announcement_page(after, through, requested)?;
+        let page_records = u32::try_from(page.announcements.len()).map_err(|_| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "announcement page length does not fit u32",
+            )
+        })?;
+        let candidate_total = retained.checked_add(page_records).ok_or_else(|| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "announcement window record count overflowed",
+            )
+        })?;
+        if candidate_total > max_records {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "announcement window exceeds the caller record ceiling",
+            ));
+        }
+        assembler.push_page(page)?;
+        retained = candidate_total;
+        if assembler.is_complete() {
+            return assembler.finalize();
+        }
+    }
+
+    Err(error(
+        ErrorCode::BudgetExceeded,
+        "announcement window exceeded the maximum admitted page count",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, VecDeque};
 
     use super::*;
-    use crate::CitizenRecord;
+    use crate::{AnnouncementRecord, CitizenRecord};
 
     #[derive(Clone)]
     struct FakeSource {
@@ -198,6 +311,35 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct FakeAnnouncementSource {
+        identity: AnnouncementSourceIdentity,
+        pages: VecDeque<AnnouncementPage>,
+        calls: Vec<(i32, i32, u32)>,
+    }
+
+    impl LiveAnnouncementSource for FakeAnnouncementSource {
+        fn announcement_source_identity(&self) -> Result<AnnouncementSourceIdentity> {
+            Ok(self.identity.clone())
+        }
+
+        fn read_announcement_page(
+            &mut self,
+            after_report_id: i32,
+            through_report_id: i32,
+            maximum: u32,
+        ) -> Result<AnnouncementPage> {
+            self.calls
+                .push((after_report_id, through_report_id, maximum));
+            self.pages.pop_front().ok_or_else(|| {
+                error(
+                    ErrorCode::AdapterFailure,
+                    "fake announcement source exhausted its pages",
+                )
+            })
+        }
+    }
+
     fn source(pages: Vec<ObservationPage>) -> FakeSource {
         FakeSource {
             manifest: manifest(),
@@ -219,6 +361,17 @@ mod tests {
                 "Handshake".to_owned(),
                 "ReadObservation".to_owned(),
             ]),
+        }
+    }
+
+    fn announcement_identity() -> AnnouncementSourceIdentity {
+        AnnouncementSourceIdentity {
+            bridge_version: "0.2.0".to_owned(),
+            dfhack_version: "0.51.11-r1".to_owned(),
+            dwarf_fortress_version: "0.51.11".to_owned(),
+            protocol_major: 1,
+            protocol_minor: 1,
+            bridge_generation: 42,
         }
     }
 
@@ -272,6 +425,44 @@ mod tests {
             citizen.name.clear();
         }
         page
+    }
+
+    fn announcement(report_id: i32) -> AnnouncementRecord {
+        AnnouncementRecord {
+            report_id,
+            announcement_type: 7,
+            text: format!("announcement {report_id}"),
+            year: 105,
+            year_tick: 12_345,
+            has_position: false,
+            x: 0,
+            y: 0,
+            z: 0,
+            repeat_count: 0,
+            continuation: false,
+            unconscious: false,
+            announcement: true,
+        }
+    }
+
+    fn announcement_page(
+        after: i32,
+        maximum: u32,
+        ids: &[i32],
+        complete: bool,
+    ) -> AnnouncementPage {
+        AnnouncementPage {
+            bridge_generation: 42,
+            requested_after_report_id: after,
+            requested_maximum: maximum,
+            oldest_retained_report_id: 1,
+            latest_retained_report_id: 4,
+            window_latest_report_id: 4,
+            next_after_report_id: ids.last().copied().unwrap_or(after),
+            history_truncated: false,
+            complete,
+            announcements: ids.iter().copied().map(announcement).collect(),
+        }
     }
 
     #[test]
@@ -342,5 +533,61 @@ mod tests {
         assert!(capsule.citizen_coverage.proves_complete_roster());
         assert!(capsule.citizens.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn announcement_driver_freezes_first_page_high_water() -> Result<()> {
+        let mut source = FakeAnnouncementSource {
+            identity: announcement_identity(),
+            pages: VecDeque::from([
+                announcement_page(-1, 2, &[1, 2], false),
+                announcement_page(2, 2, &[3, 4], true),
+            ]),
+            calls: Vec::new(),
+        };
+        let window = read_complete_announcement_window(&mut source, -1, 2, 8)?;
+        assert_eq!(window.announcements.len(), 4);
+        assert_eq!(source.calls, vec![(-1, -1, 2), (2, 4, 2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn announcement_driver_rejects_record_budget_before_partial_publication() {
+        let mut source = FakeAnnouncementSource {
+            identity: announcement_identity(),
+            pages: VecDeque::from([announcement_page(-1, 2, &[1, 2], false)]),
+            calls: Vec::new(),
+        };
+        assert!(read_complete_announcement_window(&mut source, -1, 2, 1).is_err());
+        assert_eq!(source.calls.len(), 1);
+    }
+
+    #[test]
+    fn announcement_driver_preserves_retained_history_loss() -> Result<()> {
+        let mut page = announcement_page(0, 4, &[3, 4], true);
+        page.oldest_retained_report_id = 3;
+        page.history_truncated = true;
+        let mut source = FakeAnnouncementSource {
+            identity: announcement_identity(),
+            pages: VecDeque::from([page]),
+            calls: Vec::new(),
+        };
+        let window = read_complete_announcement_window(&mut source, 0, 4, 8)?;
+        assert!(window.history_truncated);
+        assert!(!window.can_prove_absence_in_frozen_interval());
+        Ok(())
+    }
+
+    #[test]
+    fn announcement_driver_rejects_invalid_inputs_without_io() {
+        let mut source = FakeAnnouncementSource {
+            identity: announcement_identity(),
+            pages: VecDeque::new(),
+            calls: Vec::new(),
+        };
+        assert!(read_complete_announcement_window(&mut source, -2, 1, 1).is_err());
+        assert!(read_complete_announcement_window(&mut source, -1, 0, 1).is_err());
+        assert!(read_complete_announcement_window(&mut source, -1, 1, 0).is_err());
+        assert!(source.calls.is_empty());
     }
 }
