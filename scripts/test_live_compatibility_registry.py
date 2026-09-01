@@ -99,7 +99,7 @@ class Fixture:
                     "case_count": count,
                     "evidence_digest": digest(f"gate-{gate}"),
                 }
-                for gate, count in [("R2", 12), ("R3", 14), ("R4", 7), ("R5", 1)]
+                for gate, count in promotion.EXPECTED_LIVE_CASE_COUNTS.items()
             ],
             "claims_established": ["fixture"],
             "claims_not_established": ["mutation"],
@@ -115,12 +115,13 @@ class Fixture:
     def write_live(self, value: dict[str, Any]) -> None:
         self.live_path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
-    def promote(self) -> dict[str, Any]:
+    def promote(self, expected_registry_sha256: str | None = None) -> dict[str, Any]:
         return promotion.promote(
             self.registry_path,
             self.live_path,
             self.native_path,
             "qualification/fixture-run/live-read-acceptance-receipt.json",
+            expected_registry_sha256,
         )
 
 
@@ -139,9 +140,15 @@ class CompatibilityPromotionTests(unittest.TestCase):
             entry = first["entries"][0]
             unsigned = dict(entry)
             del unsigned["entry_id"]
-            self.assertEqual(entry["entry_id"], promotion.sha256_bytes(promotion.canonical_json(unsigned)))
+            self.assertEqual(
+                entry["entry_id"],
+                promotion.sha256_bytes(promotion.canonical_json(unsigned)),
+            )
             self.assertEqual(entry["mutation_capabilities"], [])
-            self.assertEqual([gate["gate"] for gate in entry["gates"]], ["R1", "R2", "R3", "R4", "R5"])
+            self.assertEqual(
+                [gate["gate"] for gate in entry["gates"]],
+                ["R1", "R2", "R3", "R4", "R5"],
+            )
 
     def test_development_or_synthetic_status_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
@@ -176,8 +183,7 @@ class CompatibilityPromotionTests(unittest.TestCase):
             native = fixture.native_receipt()
             native["plugin"]["symbols_inventory"] = "skipped"
             fixture.write_native(native)
-            live = fixture.live_receipt()
-            fixture.write_live(live)
+            fixture.write_live(fixture.live_receipt())
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
@@ -187,8 +193,7 @@ class CompatibilityPromotionTests(unittest.TestCase):
             native = fixture.native_receipt()
             native["plugin"]["mutation_rpc_methods"] = ["Pause"]
             fixture.write_native(native)
-            live = fixture.live_receipt()
-            fixture.write_live(live)
+            fixture.write_live(fixture.live_receipt())
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
@@ -219,6 +224,90 @@ class CompatibilityPromotionTests(unittest.TestCase):
                     fixture.native_path,
                     "../outside/receipt.json",
                 )
+
+    def test_duplicate_json_keys_are_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.registry_path.write_text(
+                '{"schema_version":"dfmcp.live-compatibility-registry/1",'
+                '"status":"no_admitted_live_tuples","status":"admitted_live_tuples",'
+                '"entries":[]}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(promotion.PromotionError):
+                fixture.promote()
+
+    def test_expected_registry_digest_is_a_compare_and_swap_fence(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            actual = promotion.sha256_file(fixture.registry_path)
+            self.assertEqual(fixture.promote(actual)["status"], "admitted_live_tuples")
+            with self.assertRaises(promotion.PromotionError):
+                fixture.promote(digest("stale-registry"))
+
+    def test_self_digested_but_structurally_invalid_existing_entry_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            registry = fixture.promote()
+            entry = registry["entries"][0]
+            entry["unexpected_authority"] = "pause"
+            unsigned = dict(entry)
+            del unsigned["entry_id"]
+            entry["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+            fixture.registry_path.write_text(json.dumps(registry, sort_keys=True) + "\n", encoding="utf-8")
+            with self.assertRaises(promotion.PromotionError):
+                fixture.promote()
+
+    def test_lock_prevents_concurrent_in_place_promotion(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            with promotion.registry_lock(fixture.registry_path):
+                with self.assertRaises(promotion.PromotionError):
+                    with promotion.registry_lock(fixture.registry_path):
+                        self.fail("second lock unexpectedly acquired")
+
+    def test_candidate_identity_is_returned_independently_of_sort_position(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            candidate_registry, candidate_id = promotion._promote(
+                fixture.registry_path,
+                fixture.live_path,
+                fixture.native_path,
+                "qualification/fixture-run/live-read-acceptance-receipt.json",
+            )
+            candidate = candidate_registry["entries"][0]
+            existing = copy.deepcopy(candidate)
+            for counter in range(1, 10_000):
+                existing["source"]["dfmcp_commit"] = f"{counter:040x}"
+                existing["source"]["plugin_sha256"] = digest(f"other-plugin-{counter}")
+                unsigned = dict(existing)
+                unsigned.pop("entry_id", None)
+                existing["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+                if existing["entry_id"] > candidate_id:
+                    break
+            else:
+                self.fail("could not construct a lexicographically later valid entry")
+            fixture.registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": promotion.REGISTRY_SCHEMA,
+                        "status": "admitted_live_tuples",
+                        "entries": [existing],
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            output, returned = promotion._promote(
+                fixture.registry_path,
+                fixture.live_path,
+                fixture.native_path,
+                "qualification/fixture-run/live-read-acceptance-receipt.json",
+            )
+            self.assertEqual(returned, candidate_id)
+            self.assertIn(candidate_id, [entry["entry_id"] for entry in output["entries"]])
+            self.assertNotEqual(output["entries"][-1]["entry_id"], candidate_id)
 
 
 if __name__ == "__main__":
