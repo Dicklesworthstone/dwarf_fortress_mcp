@@ -17,6 +17,7 @@ LAUNCHER_TEST_PATH = ROOT / "scripts/test_admitted_live_launcher.py"
 TICKET_TEST_PATH = ROOT / "scripts/test_live_admission_ticket.py"
 MCP_LIB_PATH = ROOT / "crates/dfmcp-mcp/src/lib.rs"
 RUST_ADMISSION_PATH = ROOT / "crates/dfmcp-mcp/src/admission.rs"
+BINARY_ADMISSION_TEST_PATH = ROOT / "crates/dwarf-fortress-mcp/tests/live_admission.rs"
 DOC_PATH = ROOT / "docs/LIVE_COMPATIBILITY_ADMISSION.md"
 
 
@@ -211,6 +212,18 @@ def check_rust_admission() -> None:
         "raw live server runner remains publicly re-exported",
     )
 
+    binary_tests = BINARY_ADMISSION_TEST_PATH.read_text(encoding="utf-8")
+    require(binary_tests.count("#[test]") >= 2, "binary admission needs at least two process tests")
+    for marker in [
+        "direct_serve_live_without_ticket_fails_closed",
+        "nonexistent_ticket_path_fails_before_live_server_startup",
+        "CARGO_BIN_EXE_dwarf-fortress-mcp",
+        "env_remove(\"DFMCP_ADMISSION_TICKET\")",
+        "scripts/serve_admitted_live.py",
+        "cannot inspect admission ticket",
+    ]:
+        require(marker in binary_tests, f"binary admission tests omit marker {marker}")
+
 
 def check_wiring_and_docs() -> None:
     for relative in ["scripts/verify.sh", "scripts/qualify_local.sh"]:
@@ -221,6 +234,7 @@ def check_wiring_and_docs() -> None:
             "scripts/test_admitted_live_launcher.py",
             "scripts/test_live_admission_ticket.py",
             "crates/dfmcp-mcp/src/admission.rs",
+            "crates/dwarf-fortress-mcp/tests/live_admission.rs",
         ]:
             require(marker in source, f"{relative} omits {marker}")
     documentation = DOC_PATH.read_text(encoding="utf-8")
