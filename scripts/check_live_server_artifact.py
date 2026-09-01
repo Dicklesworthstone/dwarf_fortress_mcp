@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate source-bound qualification and mandatory single-use live admission."""
+"""Validate source-bound qualification and floor-bound descriptor execution."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ LAUNCHER_TEST_PATH = ROOT / "scripts/test_admitted_live_launcher.py"
 TICKET_TEST_PATH = ROOT / "scripts/test_live_admission_ticket.py"
 MCP_LIB_PATH = ROOT / "crates/dfmcp-mcp/src/lib.rs"
 RUST_ADMISSION_PATH = ROOT / "crates/dfmcp-mcp/src/admission.rs"
+AGENT_TURN_PATH = ROOT / "crates/dfmcp-mcp/src/agent_turn.rs"
 BINARY_ADMISSION_TEST_PATH = ROOT / "crates/dwarf-fortress-mcp/tests/live_admission.rs"
 DOC_PATH = ROOT / "docs/LIVE_COMPATIBILITY_ADMISSION.md"
 
@@ -59,10 +60,28 @@ def check_contract() -> None:
         binding.get("requires_passing_local_qualification_receipt") is True,
         "passing local qualification is not required",
     )
+    gates = binding.get("required_local_qualification_gates", [])
+    for gate in [
+        "live-compatibility-floor",
+        "live-compatibility-floor-tests",
+        "live-admission-doctor",
+        "live-admission-doctor-tests",
+    ]:
+        require(gate in gates, f"server artifact contract omits local gate {gate}")
     digests = binding.get("required_source_digests", {})
     for name, relative in {
         "compatibility_registry": "architecture/live_compatibility_registry_v1.json",
         "compatibility_resolver": "scripts/resolve_live_compatibility.py",
+        "compatibility_floor_contract": "architecture/live_compatibility_floor_v1.json",
+        "compatibility_floor": "scripts/live_compatibility_floor.py",
+        "compatibility_floor_checker": "scripts/check_live_compatibility_floor.py",
+        "compatibility_floor_tests": "scripts/test_live_compatibility_floor.py",
+        "admission_doctor_contract": "architecture/live_admission_doctor_v1.json",
+        "admission_doctor": "scripts/doctor_live_admission.py",
+        "admission_doctor_checker": "scripts/check_live_admission_doctor.py",
+        "admission_doctor_tests": "scripts/test_doctor_live_admission.py",
+        "mcp_admission": "crates/dfmcp-mcp/src/admission.rs",
+        "mcp_agent_turn": "crates/dfmcp-mcp/src/agent_turn.rs",
         "artifact_verifier": "scripts/verify_live_server_binary_receipt.py",
         "admitted_launcher": "scripts/serve_admitted_live.py",
     }.items():
@@ -95,6 +114,10 @@ def check_verifier() -> None:
         "st_dev",
         "st_ino",
         "receipt_file_sha256",
+        '"compatibility_floor"',
+        '"admission_doctor"',
+        '"mcp_admission"',
+        '"mcp_agent_turn"',
     ]:
         require(marker in source, f"server binary verifier is missing marker {marker}")
     require("os.access(" not in source, "server binary verifier must inspect the opened inode, not path access bits")
@@ -121,7 +144,10 @@ def check_launcher() -> None:
     for name in [
         "validate_token_environment",
         "validate_loader_environment",
+        "read_launch_generation",
         "build_launch_record",
+        "reverify_opened_binary",
+        "reverify_launch_generation",
         "prepare_launch",
         "ensure_private_ticket_directory",
         "build_admission_ticket",
@@ -132,20 +158,19 @@ def check_launcher() -> None:
     ]:
         require(name in names, f"admitted launcher is missing {name}")
     for marker in [
+        "--compatibility-floor",
         "--server-receipt",
         "--local-qualification-receipt",
         "--expected-dfmcp-commit",
         "--require-entry-id",
-        "compatibility_registry_digest",
-        "local_qualification_receipt_sha256",
-        "owner_uid",
-        "authorized_to_exec",
-        "dfmcp.live-admission-ticket/1",
-        ".dfmcp-admission",
-        "DFMCP_ADMISSION_TICKET",
-        "os.getpid()",
-        "os.fstat(opened_binary.descriptor)",
-        "os.urandom(32)",
+        "compatibility_floor.read_floor",
+        "compatibility_floor.verify_generation",
+        "compatibility_floor_digest",
+        "compatibility_floor_file_sha256",
+        "compatibility_floor_sequence",
+        "binary_verifier.sha256_descriptor",
+        "compatibility registry or monotonic floor changed during admitted launch preparation",
+        "opened server binary bytes changed after qualification",
         "os.execve(opened_binary.descriptor",
         "os.execve not in getattr(os, \"supports_fd\", set())",
         "dynamic-loader override variables are forbidden",
@@ -155,24 +180,28 @@ def check_launcher() -> None:
         require(forbidden not in source, f"admitted launcher contains forbidden path {forbidden}")
 
     tests = LAUNCHER_TEST_PATH.read_text(encoding="utf-8")
-    require(tests.count("def test_") >= 10, "admitted launcher needs at least ten focused tests")
+    require(tests.count("def test_") >= 14, "admitted launcher needs at least fourteen focused tests")
     for name in [
-        "test_exact_admitted_chain_binds_opened_inode_and_receipts",
-        "test_loader_injection_environment_is_rejected",
+        "test_exact_admitted_chain_binds_floor_inode_and_receipts",
+        "test_registry_floor_mismatch_is_rejected_before_binary_verification",
+        "test_permissive_floor_custody_is_rejected_before_binary_verification",
         "test_required_entry_fence_is_mandatory_and_exact",
         "test_server_receipt_source_mismatch_closes_opened_descriptor",
+        "test_generation_change_after_prepare_is_rejected",
+        "test_same_size_binary_mutation_is_detected_before_exec",
         "test_no_path_fallback_when_descriptor_exec_is_unsupported",
     ]:
         require(f"def {name}" in tests, f"admitted launcher tests omit {name}")
 
     ticket_tests = TICKET_TEST_PATH.read_text(encoding="utf-8")
-    require(ticket_tests.count("def test_") >= 5, "admission ticket issuance needs at least five tests")
+    require(ticket_tests.count("def test_") >= 6, "admission ticket issuance needs at least six tests")
     for name in [
         "test_ticket_fields_and_digest_are_deterministic",
         "test_ticket_file_and_directory_are_owner_private",
-        "test_admitted_environment_binds_ticket_and_preserves_secret_only_in_environment",
+        "test_admitted_environment_binds_floor_ticket_and_secret_only_in_environment",
         "test_permissive_existing_ticket_directory_is_rejected",
         "test_executable_metadata_drift_is_rejected_before_ticket_issue",
+        "test_same_size_executable_byte_drift_is_rejected_before_ticket_issue",
     ]:
         require(f"def {name}" in ticket_tests, f"admission ticket tests omit {name}")
 
@@ -186,19 +215,27 @@ def check_rust_admission() -> None:
         "OnceLock<AdmissionProvenance>",
         "current_exe()",
         "std::process::id()",
+        "compatibility_floor_digest",
+        "compatibility_floor_file_sha256",
+        "compatibility_floor_sequence",
         "server_binary_device",
         "server_binary_inode",
         "server_binary_owner_uid",
+        "MAX_EXECUTABLE_BYTES",
+        "symlink_metadata(executable_path)",
+        "Digest32::of_bytes(&bytes).to_hex()",
+        "current executable SHA-256 does not match the admitted server binary",
         "remove_file(path)",
         "mutation_capabilities.is_empty()",
         "std::process::exit(1)",
         "valid_ticket_is_consumed_exactly_once",
         "expired_and_cross_process_tickets_fail_closed",
         "mutation_capability_and_inode_drift_are_rejected",
+        "floor_digest_and_same_size_binary_drift_are_rejected",
         "permissive_or_symbolic_ticket_paths_are_rejected",
     ]:
         require(marker in source, f"Rust live admission is missing marker {marker}")
-    require(source.count("#[test]") >= 4, "Rust live admission needs at least four focused tests")
+    require(source.count("#[test]") >= 5, "Rust live admission needs at least five focused tests")
     require("pub mod admission;" in library, "dfmcp-mcp does not compile the admission boundary")
     require("mod live_server;" in library, "raw live server module is not private")
     require(
@@ -211,6 +248,14 @@ def check_rust_admission() -> None:
         "pub use live_server::run_live_stdio;" not in library,
         "raw live server runner remains publicly re-exported",
     )
+
+    agent_turn = AGENT_TURN_PATH.read_text(encoding="utf-8")
+    for marker in [
+        "provenance.compatibility_floor_digest()",
+        "provenance.compatibility_floor_file_sha256()",
+        "provenance.compatibility_floor_sequence()",
+    ]:
+        require(marker in agent_turn, f"live Agent Turn omits admitted provenance marker {marker}")
 
     binary_tests = BINARY_ADMISSION_TEST_PATH.read_text(encoding="utf-8")
     require(binary_tests.count("#[test]") >= 2, "binary admission needs at least two process tests")
@@ -229,11 +274,16 @@ def check_wiring_and_docs() -> None:
     for relative in ["scripts/verify.sh", "scripts/qualify_local.sh"]:
         source = (ROOT / relative).read_text(encoding="utf-8")
         for marker in [
+            "scripts/check_live_compatibility_floor.py",
+            "scripts/test_live_compatibility_floor.py",
+            "scripts/check_live_admission_doctor.py",
+            "scripts/test_doctor_live_admission.py",
             "scripts/check_live_server_artifact.py",
             "scripts/test_live_server_binary_receipt.py",
             "scripts/test_admitted_live_launcher.py",
             "scripts/test_live_admission_ticket.py",
             "crates/dfmcp-mcp/src/admission.rs",
+            "crates/dfmcp-mcp/src/agent_turn.rs",
             "crates/dwarf-fortress-mcp/tests/live_admission.rs",
         ]:
             require(marker in source, f"{relative} omits {marker}")
@@ -243,6 +293,8 @@ def check_wiring_and_docs() -> None:
         "local qualification receipt",
         "registry generation",
         "entry ID",
+        "monotonic floor",
+        "anti-rollback",
         "descriptor",
         "dynamic loader",
         "no path fallback",
@@ -263,7 +315,7 @@ def main() -> int:
     except (OSError, SyntaxError, json.JSONDecodeError, ContractError) as exc:
         print(f"live server artifact admission: FAIL: {exc}", file=sys.stderr)
         return 1
-    print("live server artifact admission: PASS (receipt, ticket, and descriptor-bound execution)")
+    print("live server artifact admission: PASS (floor, receipt, ticket, and descriptor bound)")
     return 0
 
 
