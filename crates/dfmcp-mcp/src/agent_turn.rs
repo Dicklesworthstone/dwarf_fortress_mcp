@@ -16,6 +16,30 @@ use serde_json::{Value, json};
 
 pub const AGENT_TURN_SCHEMA: &str = "dfmcp.agent_turn/1";
 
+fn attach_live_admission_provenance(briefing: &mut Value) {
+    let Some(provenance) = crate::admission::current_admission_provenance() else {
+        return;
+    };
+    let Some(object) = briefing.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "admission".to_owned(),
+        json!({
+            "state": "admitted",
+            "mode": "authenticated_live_read_only",
+            "ticket_id": provenance.ticket_id(),
+            "compatibility_entry_id": provenance.compatibility_entry_id(),
+            "compatibility_registry_digest": provenance.compatibility_registry_digest(),
+            "compatibility_decision_digest": provenance.compatibility_decision_digest(),
+            "server_receipt_digest": provenance.server_receipt_digest(),
+            "launch_digest": provenance.launch_digest(),
+            "server_binary_sha256": provenance.server_binary_sha256(),
+            "mutation_capabilities": [],
+        }),
+    );
+}
+
 /// Builder for the common agent-facing turn packet.
 ///
 /// All collections are caller-supplied in canonical order. The builder does
@@ -187,7 +211,8 @@ impl AgentTurnBuilder {
     }
 
     #[must_use]
-    pub fn build(self) -> Value {
+    pub fn build(mut self) -> Value {
+        attach_live_admission_provenance(&mut self.briefing);
         json!({
             "schema": AGENT_TURN_SCHEMA,
             "operation": self.operation,
