@@ -74,7 +74,7 @@ def entry() -> dict[str, Any]:
                     "case_count": count,
                     "evidence_digest": digest(f"gate-{gate}"),
                 }
-                for gate, count in [("R2", 12), ("R3", 14), ("R4", 7), ("R5", 1)]
+                for gate, count in promotion.EXPECTED_LIVE_CASE_COUNTS.items()
             ],
         ],
         "capabilities": promotion.READ_ONLY_CAPABILITIES,
@@ -83,14 +83,21 @@ def entry() -> dict[str, Any]:
         "conditional_domains": promotion.CONDITIONAL_DOMAINS,
         "omitted_domains": promotion.OMITTED_DOMAINS,
         "evidence_locator": "qualification/fixture/live-read-acceptance-receipt.json",
-        "limitations": [
-            "admission applies only to this exact source, binary, version, and platform tuple",
-            "host compromise is outside the loopback bearer threat model",
-            "no live mutation method is admitted",
-            "durable production custody and release support are not established by R1-R5",
-        ],
+        "limitations": promotion.LIMITATIONS,
     }
     return {"entry_id": promotion.sha256_bytes(promotion.canonical_json(unsigned)), **unsigned}
+
+
+def different_entry(label: str) -> dict[str, Any]:
+    value = copy.deepcopy(entry())
+    value["version_tuple"]["dfhack"] = f"0.51.11-r1-{label}"
+    value["source"]["dfmcp_commit"] = digest(f"commit-{label}")[:40]
+    value["source"]["plugin_sha256"] = digest(f"plugin-{label}")
+    value["evidence_locator"] = f"qualification/{label}/receipt.json"
+    unsigned = dict(value)
+    del unsigned["entry_id"]
+    value["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+    return value
 
 
 def registry(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -112,6 +119,10 @@ class CompatibilityResolutionTests(unittest.TestCase):
         self.assertEqual(first["entry_id"], entry()["entry_id"])
         self.assertEqual(first["support_level"], "experimental")
         self.assertEqual(first["mutation_capabilities"], [])
+        self.assertEqual(
+            first["registry_digest"],
+            promotion.sha256_bytes(promotion.canonical_json(value)),
+        )
         unsigned = dict(first)
         del unsigned["decision_digest"]
         self.assertEqual(
@@ -125,6 +136,7 @@ class CompatibilityResolutionTests(unittest.TestCase):
         self.assertIsNone(decision["entry_id"])
         self.assertEqual(decision["capabilities"], [])
         self.assertTrue(decision["reasons"])
+        self.assertEqual(decision["registry_status"], "no_admitted_live_tuples")
 
     def test_same_versions_with_different_binary_are_not_admitted(self) -> None:
         deployment = manifest()
@@ -147,10 +159,32 @@ class CompatibilityResolutionTests(unittest.TestCase):
         self.assertFalse(decision["admitted"])
         self.assertTrue(any("source revision" in reason for reason in decision["reasons"]))
 
-    def test_required_entry_id_mismatch_fails_closed(self) -> None:
-        decision = resolver.resolve(registry([entry()]), manifest(), digest("other-entry"))
+    def test_required_entry_id_mismatch_fails_closed_and_is_bound(self) -> None:
+        required = digest("other-entry")
+        decision = resolver.resolve(registry([entry()]), manifest(), required)
         self.assertFalse(decision["admitted"])
         self.assertIsNone(decision["entry_id"])
+        self.assertEqual(decision["required_entry_id"], required)
+
+    def test_correct_entry_fence_changes_decision_identity(self) -> None:
+        value = registry([entry()])
+        unfenced = resolver.resolve(value, manifest())
+        fenced = resolver.resolve(value, manifest(), entry()["entry_id"])
+        self.assertTrue(fenced["admitted"])
+        self.assertEqual(fenced["required_entry_id"], entry()["entry_id"])
+        self.assertNotEqual(fenced["decision_digest"], unfenced["decision_digest"])
+
+    def test_registry_generation_changes_decision_identity(self) -> None:
+        first_registry = registry([entry(), different_entry("alpha")])
+        second_registry = registry([entry(), different_entry("beta")])
+        first = resolver.resolve(first_registry, manifest(), entry()["entry_id"])
+        second = resolver.resolve(second_registry, manifest(), entry()["entry_id"])
+        self.assertTrue(first["admitted"])
+        self.assertTrue(second["admitted"])
+        self.assertEqual(first["entry_id"], second["entry_id"])
+        self.assertEqual(first["registry_entry_count"], second["registry_entry_count"])
+        self.assertNotEqual(first["registry_digest"], second["registry_digest"])
+        self.assertNotEqual(first["decision_digest"], second["decision_digest"])
 
     def test_manifest_extra_field_is_rejected(self) -> None:
         deployment = manifest()
@@ -172,8 +206,16 @@ class CompatibilityResolutionTests(unittest.TestCase):
             "status": "admitted_live_tuples",
             "entries": [damaged],
         }
-        with self.assertRaises(promotion.PromotionError):
+        with self.assertRaises((promotion.PromotionError, resolver.promotion.PromotionError)):
             resolver.resolve(value, manifest())
+
+    def test_decision_lists_do_not_alias_registry_lists(self) -> None:
+        value = registry([entry()])
+        decision = resolver.resolve(value, manifest())
+        decision["capabilities"].append("pause")
+        decision["omitted_domains"].clear()
+        self.assertEqual(value["entries"][0]["capabilities"], promotion.READ_ONLY_CAPABILITIES)
+        self.assertEqual(value["entries"][0]["omitted_domains"], promotion.OMITTED_DOMAINS)
 
 
 if __name__ == "__main__":
