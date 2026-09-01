@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -91,6 +92,33 @@ class LiveSecretScannerTests(unittest.TestCase):
                 self.skipTest("symbolic links are unavailable")
             with self.assertRaises(scanner.ScanError):
                 scanner.scan(root, root.parent / "out.json", TOKEN)
+
+    def test_symbolic_link_output_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "clean.log").write_text("clean\n")
+            target = root.parent / "target.json"
+            target.write_text("unchanged\n")
+            output = root.parent / "scan-link.json"
+            try:
+                output.symlink_to(target)
+            except OSError:
+                self.skipTest("symbolic links are unavailable")
+            with self.assertRaises(scanner.ScanError):
+                scanner.scan(root, output, TOKEN)
+            self.assertEqual(target.read_text(), "unchanged\n")
+
+    def test_stable_reader_rejects_replaced_file_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "artifact.log"
+            path.write_text("first\n")
+            expected = path.lstat()
+            replacement = root / "replacement.log"
+            replacement.write_text("second\n")
+            os.replace(replacement, path)
+            with self.assertRaises(scanner.ScanError):
+                scanner.read_stable_regular_file(path, expected, "artifact.log")
 
     def test_oversized_file_is_rejected_before_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
