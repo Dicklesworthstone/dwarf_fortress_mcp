@@ -1,0 +1,98 @@
+{
+  "schema_version": "dfmcp.dfhack_read_bridge/1.1",
+  "status": "prospective_unadmitted_read_only_generation",
+  "supersedes": null,
+  "extends": "architecture/dfhack_read_bridge_v1.json",
+  "transport": {
+    "substrate": "DFHack supported protobuf RPC service",
+    "dfhack_rpc_version": 1,
+    "default_host": "127.0.0.1",
+    "default_port": 5000,
+    "remote_access": false,
+    "plugin": "dfmcp_bridge",
+    "plugin_protocol_major": 1,
+    "plugin_protocol_minor": 1,
+    "bridge_version": "0.2.0"
+  },
+  "method_manifest": [
+    "Handshake",
+    "ReadObservation",
+    "ReadAnnouncements"
+  ],
+  "methods": [
+    {
+      "name": "Handshake",
+      "effect": "read_only",
+      "requires_world": false,
+      "requires_authentication": true
+    },
+    {
+      "name": "ReadObservation",
+      "effect": "read_only",
+      "requires_world": true,
+      "requires_authentication": true,
+      "semantic_contract": "architecture/dfhack_read_bridge_v1.json"
+    },
+    {
+      "name": "ReadAnnouncements",
+      "effect": "read_only",
+      "requires_world": true,
+      "requires_authentication": true,
+      "semantic_contract": "architecture/live_announcement_read_v1.json"
+    }
+  ],
+  "compatibility": {
+    "protocol_1_0_default_client_path_preserved": true,
+    "protocol_1_1_requires_explicit_negotiation": true,
+    "protocol_1_0_expected_method_manifest": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "protocol_1_1_expected_method_manifest": [
+      "Handshake",
+      "ReadObservation",
+      "ReadAnnouncements"
+    ],
+    "admission_policy": "Protocol 1.1 requires a new source revision, native plugin digest, R1 receipt, live acceptance receipt, server binary receipt, and exact compatibility entry. It inherits no authority from protocol 1.0."
+  },
+  "coverage": {
+    "complete_domains": [
+      "fortress.summary",
+      "fortress.clock",
+      "fortress.pause_state",
+      "fortress.citizens.roster",
+      "fortress.citizens.identity_position_status"
+    ],
+    "conditional_domains": [
+      "fortress.citizens.names",
+      "fortress.announcements.retained_window"
+    ],
+    "omitted_domains": [
+      "fortress.items",
+      "fortress.jobs",
+      "fortress.map",
+      "fortress.buildings",
+      "fortress.economy",
+      "fortress.welfare",
+      "fortress.military",
+      "fortress.history"
+    ],
+    "announcement_caveat": "The retained announcement window is never complete fortress history. History truncation produces partial coverage."
+  },
+  "security_invariants": [
+    "All three methods authenticate before inspecting world or report state.",
+    "Protocol 1.1 registers no mutation RPC methods.",
+    "No RunCommand, RunLua, keyboard, pause, dig, labor, military, teleport, checkpoint, restore, or arbitrary forwarding method exists.",
+    "Protocol 1.0 and 1.1 handshakes publish exact, generation-specific method manifests.",
+    "Announcement pages are bounded and use a frozen high-water mark.",
+    "The Rust client rejects malformed protobuf, duplicate fields, nonminimal varints, invalid UTF-8, generation drift, method-manifest drift, cursor drift, window drift, and noncanonical order.",
+    "A complete announcement window grants no capability and is not an effect receipt."
+  ],
+  "acceptance": {
+    "source_contract_checker": "scripts/check_live_announcement_contract.py",
+    "source_qualification_wrapper": "scripts/qualify_live_announcement_generation.sh",
+    "live_campaign_required": true,
+    "exact_compatibility_promotion_required": true,
+    "current_admission": "none"
+  }
+}
