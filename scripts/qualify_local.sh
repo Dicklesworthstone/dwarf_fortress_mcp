@@ -5,7 +5,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 if [[ -t 1 ]]; then
-  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; RESET='\033[0m'
+  BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
 else
   BLUE=''; GREEN=''; YELLOW=''; RED=''; RESET=''
 fi
@@ -112,6 +112,8 @@ receipt={
    'live_acceptance_tests':digest(root/'scripts/test_live_read_acceptance.py'),
    'live_acceptance_journal':digest(root/'scripts/live_read_evidence_journal.py'),
    'live_acceptance_journal_tests':digest(root/'scripts/test_live_read_evidence_journal.py'),
+   'live_acceptance_secret_scanner':digest(root/'scripts/scan_live_read_secrets.py'),
+   'live_acceptance_secret_scanner_tests':digest(root/'scripts/test_scan_live_read_secrets.py'),
    'live_acceptance_wrapper':digest(root/'scripts/qualify_live_read.sh'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
@@ -137,6 +139,7 @@ run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
 run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
 run_gate live-acceptance-journal-tests python3 scripts/test_live_read_evidence_journal.py
+run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_repository_integrity.py \
@@ -151,6 +154,8 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_live_read_acceptance.py \
   scripts/live_read_evidence_journal.py \
   scripts/test_live_read_evidence_journal.py \
+  scripts/scan_live_read_secrets.py \
+  scripts/test_scan_live_read_secrets.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
