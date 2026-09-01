@@ -31,22 +31,53 @@ class Fixture:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.contract_path = root / "contract.json"
-        self.native_path = root / "native.json"
+        self.native_contract_path = root / "native-contract.json"
+        self.base_native_path = root / "base-native.json"
+        self.native_path = root / "native-v1-1.json"
         self.events_path = root / "events.jsonl"
         self.contract = json.loads(verifier.DEFAULT_CONTRACT.read_text(encoding="utf-8"))
+        self.native_contract = json.loads(
+            verifier.DEFAULT_NATIVE_CONTRACT.read_text(encoding="utf-8")
+        )
         self.contract_path.write_text(
             json.dumps(self.contract, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        self.native_contract_path.write_text(
+            json.dumps(self.native_contract, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
         self.dfmcp_commit = "1" * 40
         self.dfhack_commit = "2" * 40
         self.plugin_sha256 = digest("plugin")
-        self.native = {
+        self.generation_digests = {
+            name: digest(f"generation:{name}")
+            for name in self.native_contract["required_source_digests"]
+        }
+        self.base_native = self.base_native_receipt()
+        self.base_native_path.write_text(
+            json.dumps(self.base_native, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        self.native = self.native_receipt()
+        self.write_native(self.native)
+        self.events = self.make_events()
+        self.write_events(self.events)
+
+    def base_native_receipt(self) -> dict[str, Any]:
+        source_digests = {
+            "fixture": digest("fixture-source"),
+            **{
+                f"bound_{name}": value
+                for name, value in self.generation_digests.items()
+            },
+        }
+        return {
             "schema": verifier.promotion.NATIVE_RECEIPT_SCHEMA,
             "status": "native-build-passed",
             "source": {
                 "dfmcp_commit": self.dfmcp_commit,
                 "dfmcp_dirty": False,
                 "dfhack_commit": self.dfhack_commit,
+                "dfhack_dirty": False,
             },
             "plugin": {
                 "sha256": self.plugin_sha256,
@@ -55,10 +86,52 @@ class Fixture:
                 "strings_inventory": "passed",
                 "symbols_inventory": "passed",
             },
+            "source_digests": source_digests,
         }
-        self.write_native(self.native)
-        self.events = self.make_events()
-        self.write_events(self.events)
+
+    def native_receipt(self) -> dict[str, Any]:
+        unsigned: dict[str, Any] = {
+            "schema": verifier.native_generation.RECEIPT_SCHEMA,
+            "status": "qualified",
+            "base_receipt": {
+                "file_sha256": verifier.promotion.sha256_file(self.base_native_path),
+                "content_digest": verifier.native_generation.sha256_bytes(
+                    verifier.native_generation.canonical_json(self.base_native)
+                ),
+                "receipt": self.base_native,
+                "source_digests": self.base_native["source_digests"],
+            },
+            "source": {
+                "dfmcp_commit": self.dfmcp_commit,
+                "dfmcp_dirty": False,
+                "dfhack_commit": self.dfhack_commit,
+                "dfhack_dirty": False,
+            },
+            "bridge": self.native_contract["bridge"],
+            "plugin": {
+                "sha256": self.plugin_sha256,
+                "rpc_methods": ["Handshake", "ReadObservation"],
+                "mutation_rpc_methods": [],
+                "strings_inventory": "passed",
+                "symbols_inventory": "passed",
+            },
+            "source_digests": self.generation_digests,
+            "capabilities_granted": [],
+            "mutation_capabilities": [],
+            "claims_established": self.native_contract["claims_established"],
+            "claims_not_established": self.native_contract[
+                "claims_not_established"
+            ],
+        }
+        receipt = {
+            **unsigned,
+            "receipt_digest": verifier.native_generation.sha256_bytes(
+                verifier.native_generation.canonical_json(unsigned)
+            ),
+        }
+        return verifier.native_generation.validate_receipt(
+            receipt, self.native_contract
+        )
 
     def write_native(self, value: dict[str, Any]) -> None:
         self.native_path.write_text(
@@ -112,7 +185,8 @@ class Fixture:
     def write_events(self, events: list[dict[str, Any]]) -> None:
         self.events_path.write_text(
             "".join(
-                json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\n"
+                json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+                + "\n"
                 for event in events
             ),
             encoding="utf-8",
@@ -123,6 +197,7 @@ class Fixture:
             self.events_path,
             self.native_path,
             self.contract_path,
+            self.native_contract_path,
         )
 
 
@@ -138,9 +213,11 @@ class LiveAnnouncementAcceptanceTests(unittest.TestCase):
             second = fixture.verify()
             self.assertEqual(first, second)
             self.assertEqual(first["status"], "qualified")
-            self.assertEqual([gate["gate"] for gate in first["gates"]], [
-                "A1", "A2", "A3", "A4", "A5", "A6"
-            ])
+            self.assertEqual(
+                [gate["gate"] for gate in first["gates"]],
+                ["A1", "A2", "A3", "A4", "A5", "A6"],
+            )
+            self.assertEqual(first["evidence"]["event_count"], 43)
             self.assertEqual(first["mutation_capabilities"], [])
             unsigned = dict(first)
             del unsigned["receipt_digest"]
@@ -148,6 +225,15 @@ class LiveAnnouncementAcceptanceTests(unittest.TestCase):
                 first["receipt_digest"],
                 verifier.sha256_bytes(verifier.canonical_json(unsigned)),
             )
+
+    def test_native_generation_receipt_is_required(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.write_native(fixture.base_native)
+            fixture.events = fixture.make_events()
+            fixture.write_events(fixture.events)
+            with self.assertRaises(verifier.native_generation.ReceiptError):
+                fixture.verify()
 
     def test_missing_or_reordered_event_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
@@ -214,8 +300,15 @@ class LiveAnnouncementAcceptanceTests(unittest.TestCase):
             fixture.write_events(fixture.events)
             native = copy.deepcopy(fixture.native)
             native["plugin"]["sha256"] = digest("different-plugin")
+            unsigned = dict(native)
+            unsigned.pop("receipt_digest", None)
+            native["receipt_digest"] = verifier.native_generation.sha256_bytes(
+                verifier.native_generation.canonical_json(unsigned)
+            )
             fixture.write_native(native)
-            with self.assertRaises((verifier.VerificationError, verifier.promotion.PromotionError)):
+            fixture.events = fixture.make_events()
+            fixture.write_events(fixture.events)
+            with self.assertRaises(verifier.native_generation.ReceiptError):
                 fixture.verify()
 
     def test_dirty_source_or_protocol_drift_is_rejected(self) -> None:
@@ -240,7 +333,9 @@ class LiveAnnouncementAcceptanceTests(unittest.TestCase):
             first = json.loads(lines[0])
             first["DFMCP_BRIDGE_TOKEN"] = "must-not-appear"
             lines[0] = json.dumps(first, separators=(",", ":"))
-            fixture.events_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            fixture.events_path.write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
@@ -285,6 +380,8 @@ class LiveAnnouncementAcceptanceTests(unittest.TestCase):
                     str(fixture.native_path),
                     "--contract",
                     str(fixture.contract_path),
+                    "--native-contract",
+                    str(fixture.native_contract_path),
                     "--output",
                     str(output),
                 ]
