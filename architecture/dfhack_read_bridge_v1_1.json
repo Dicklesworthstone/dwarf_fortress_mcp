@@ -1,7 +1,6 @@
 {
   "schema_version": "dfmcp.dfhack_read_bridge/1.1",
-  "status": "prospective_unadmitted_read_only_generation",
-  "supersedes": null,
+  "status": "implemented_unadmitted_live_read_generation",
   "extends": "architecture/dfhack_read_bridge_v1.json",
   "transport": {
     "substrate": "DFHack supported protobuf RPC service",
@@ -9,15 +8,15 @@
     "default_host": "127.0.0.1",
     "default_port": 5000,
     "remote_access": false,
-    "plugin": "dfmcp_bridge",
+    "plugin": "dfmcp_bridge_v1_1",
+    "protobuf_package": "dfmcp.bridge.v1_1",
     "plugin_protocol_major": 1,
     "plugin_protocol_minor": 1,
     "bridge_version": "0.2.0"
   },
   "method_manifest": [
     "Handshake",
-    "ReadObservation",
-    "ReadAnnouncements"
+    "ReadObservation"
   ],
   "methods": [
     {
@@ -31,17 +30,27 @@
       "effect": "read_only",
       "requires_world": true,
       "requires_authentication": true,
-      "semantic_contract": "architecture/dfhack_read_bridge_v1.json"
-    },
-    {
-      "name": "ReadAnnouncements",
-      "effect": "read_only",
-      "requires_world": true,
-      "requires_authentication": true,
-      "semantic_contract": "architecture/live_announcement_read_v1.json"
+      "base_semantic_contract": "architecture/dfhack_read_bridge_v1.json",
+      "announcement_extension": {
+        "request_fields": [
+          "announcement_after_id",
+          "max_announcements"
+        ],
+        "reply_fields": [
+          "announcement_oldest_available_id",
+          "announcement_latest_available_id",
+          "announcement_requested_after_id",
+          "announcement_gap_before_window",
+          "announcement_complete_through_latest",
+          "announcements"
+        ],
+        "canonical_batch_contract": "dfmcp.live-announcement-batch.v1",
+        "projection_contract": "architecture/live_announcement_projection_v1.json"
+      }
     }
   ],
   "compatibility": {
+    "inherits_protocol_1_0_admission": false,
     "protocol_1_0_default_client_path_preserved": true,
     "protocol_1_1_requires_explicit_negotiation": true,
     "protocol_1_0_expected_method_manifest": [
@@ -50,48 +59,70 @@
     ],
     "protocol_1_1_expected_method_manifest": [
       "Handshake",
-      "ReadObservation",
-      "ReadAnnouncements"
+      "ReadObservation"
     ],
-    "admission_policy": "Protocol 1.1 requires a new source revision, native plugin digest, R1 receipt, live acceptance receipt, server binary receipt, and exact compatibility entry. It inherits no authority from protocol 1.0."
+    "method_manifest_alone_does_not_identify_generation": true,
+    "generation_identity_fields": [
+      "protocol_major",
+      "protocol_minor",
+      "bridge_version",
+      "plugin_sha256",
+      "dfmcp_commit",
+      "dfhack_commit",
+      "platform"
+    ],
+    "admission_policy": "Protocol 1.1 requires its own clean source revision, native plugin digest, protocol-1.1 native receipt, complete A1-A6 live receipt, baseline fortress/citizen evidence re-executed for protocol 1.1, server binary receipt, exact registry entry, trusted monotonic floor, and single-use process admission. It inherits no authority from protocol 1.0."
   },
   "coverage": {
     "complete_domains": [
-      "fortress.summary",
-      "fortress.clock",
-      "fortress.pause_state",
       "fortress.citizens.roster",
-      "fortress.citizens.identity_position_status"
+      "fortress.clock",
+      "fortress.identity",
+      "fortress.pause_state"
     ],
     "conditional_domains": [
       "fortress.citizens.names",
-      "fortress.announcements.retained_window"
+      "fortress.announcements.retained_suffix"
     ],
     "omitted_domains": [
+      "fortress.buildings",
+      "fortress.economy",
+      "fortress.history",
       "fortress.items",
       "fortress.jobs",
       "fortress.map",
-      "fortress.buildings",
-      "fortress.economy",
-      "fortress.welfare",
       "fortress.military",
-      "fortress.history"
+      "fortress.welfare"
     ],
-    "announcement_caveat": "The retained announcement window is never complete fortress history. History truncation produces partial coverage."
+    "announcement_caveat": "The bridge exposes a bounded retained suffix after one cursor. A gap before the oldest retained report is explicit. No response proves complete fortress announcement history."
+  },
+  "bounds": {
+    "maximum_citizens_per_page": 4096,
+    "maximum_announcements_per_response": 512,
+    "maximum_announcement_text_bytes": 2048,
+    "maximum_canonical_announcement_batch_bytes": 2097152
   },
   "security_invariants": [
-    "All three methods authenticate before inspecting world or report state.",
+    "Both methods authenticate before inspecting world, citizen, or report state.",
     "Protocol 1.1 registers no mutation RPC methods.",
-    "No RunCommand, RunLua, keyboard, pause, dig, labor, military, teleport, checkpoint, restore, or arbitrary forwarding method exists.",
-    "Protocol 1.0 and 1.1 handshakes publish exact, generation-specific method manifests.",
-    "Announcement pages are bounded and use a frozen high-water mark.",
-    "The Rust client rejects malformed protobuf, duplicate fields, nonminimal varints, invalid UTF-8, generation drift, method-manifest drift, cursor drift, window drift, and noncanonical order.",
-    "A complete announcement window grants no capability and is not an effect receipt."
+    "No RunCommand, RunLua, keyboard, pause, dig, labor, military, teleport, checkpoint, restore, arbitrary forwarding, or client-selected method exists.",
+    "The handshake publishes exact protocol, bridge, plugin generation, and two-method manifest identity.",
+    "Announcement records are returned inside the same ReadObservation reply as fortress and citizen fields.",
+    "Citizen pagination requires paused-world summary and announcement fields to remain identical across pages before one capsule is published.",
+    "The Rust client rejects malformed protobuf, duplicate fields, nonminimal varints, noncanonical booleans, invalid UTF-8, generation drift, method-manifest drift, cursor drift, retained-window drift, and noncanonical report order.",
+    "Announcement records and text are bounded before canonical publication.",
+    "Unknown protobuf fields do not alter semantic identity or grant authority.",
+    "A complete retained suffix grants no capability and is not an effect receipt."
   ],
   "acceptance": {
-    "source_contract_checker": "scripts/check_live_announcement_contract.py",
-    "source_qualification_wrapper": "scripts/qualify_live_announcement_generation.sh",
+    "native_receipt_contract": "architecture/dfhack_plugin_native_receipt_v1_1.json",
+    "announcement_acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
+    "announcement_evidence_journal_contract": "architecture/live_announcement_evidence_journal_v1.json",
+    "source_contract_checker": "scripts/check_live_announcements.py",
+    "native_qualification_wrapper": "scripts/qualify_dfhack_plugin_v1_1.sh",
+    "announcement_qualification_wrapper": "scripts/qualify_live_announcements.sh",
     "live_campaign_required": true,
+    "baseline_fortress_citizen_campaign_required": true,
     "exact_compatibility_promotion_required": true,
     "current_admission": "none"
   }
