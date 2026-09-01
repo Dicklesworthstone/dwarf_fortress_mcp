@@ -115,6 +115,10 @@ receipt={
    'live_acceptance_secret_scanner':digest(root/'scripts/scan_live_read_secrets.py'),
    'live_acceptance_secret_scanner_tests':digest(root/'scripts/test_scan_live_read_secrets.py'),
    'live_acceptance_wrapper':digest(root/'scripts/qualify_live_read.sh'),
+   'live_capture_plan':digest(root/'architecture/live_read_capture_plan_v1.json'),
+   'live_capture_plan_checker':digest(root/'scripts/check_live_capture_plan.py'),
+   'live_capture_guidance':digest(root/'scripts/live_read_capture_guidance.py'),
+   'live_capture_guidance_tests':digest(root/'scripts/test_live_read_capture_guidance.py'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -135,11 +139,13 @@ run_gate bridge-auth-order python3 scripts/check_bridge_auth_order.py
 run_gate live-mcp-contract python3 scripts/check_live_mcp.py
 run_gate compiled-live-read-stack-contract python3 scripts/check_live_read_stack.py
 run_gate live-acceptance-contract python3 scripts/check_live_acceptance_contract.py
+run_gate live-capture-plan python3 scripts/check_live_capture_plan.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
 run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
 run_gate live-acceptance-journal-tests python3 scripts/test_live_read_evidence_journal.py
 run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
+run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guidance.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_repository_integrity.py \
@@ -150,12 +156,15 @@ run_gate python-syntax python3 -m py_compile \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
   scripts/check_live_acceptance_contract.py \
+  scripts/check_live_capture_plan.py \
   scripts/verify_live_read_acceptance.py \
   scripts/test_live_read_acceptance.py \
   scripts/live_read_evidence_journal.py \
   scripts/test_live_read_evidence_journal.py \
   scripts/scan_live_read_secrets.py \
   scripts/test_scan_live_read_secrets.py \
+  scripts/live_read_capture_guidance.py \
+  scripts/test_live_read_capture_guidance.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
