@@ -45,7 +45,7 @@ info "Validating the compiled authenticated live-read stack"
 python3 scripts/check_live_read_stack.py
 ok "Compiled live-read stack contract"
 
-info "Validating the R2-R5 probe, journal, and evidence contract"
+info "Validating the R2-R5 probe, scanner, journal, and evidence contract"
 python3 scripts/check_live_acceptance_contract.py
 ok "Live-read acceptance contract"
 
@@ -57,6 +57,7 @@ info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
 python3 scripts/test_live_read_acceptance.py
 python3 scripts/test_live_read_evidence_journal.py
+python3 scripts/test_scan_live_read_secrets.py
 ok "Python contract tests"
 
 info "Checking script syntax"
@@ -74,6 +75,8 @@ python3 -m py_compile \
   scripts/test_live_read_acceptance.py \
   scripts/live_read_evidence_journal.py \
   scripts/test_live_read_evidence_journal.py \
+  scripts/scan_live_read_secrets.py \
+  scripts/test_scan_live_read_secrets.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
