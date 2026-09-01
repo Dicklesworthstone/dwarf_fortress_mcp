@@ -119,6 +119,18 @@ receipt={
    'live_capture_plan_checker':digest(root/'scripts/check_live_capture_plan.py'),
    'live_capture_guidance':digest(root/'scripts/live_read_capture_guidance.py'),
    'live_capture_guidance_tests':digest(root/'scripts/test_live_read_capture_guidance.py'),
+   'live_compatibility_registry':digest(root/'architecture/live_compatibility_registry_v1.json'),
+   'live_compatibility_promotion':digest(root/'scripts/promote_live_compatibility.py'),
+   'live_compatibility_promotion_checker':digest(root/'scripts/check_live_compatibility_registry.py'),
+   'live_compatibility_promotion_tests':digest(root/'scripts/test_live_compatibility_registry.py'),
+   'live_compatibility_resolution':digest(root/'scripts/resolve_live_compatibility.py'),
+   'live_compatibility_resolution_checker':digest(root/'scripts/check_live_compatibility_resolution.py'),
+   'live_compatibility_resolution_tests':digest(root/'scripts/test_live_compatibility_resolution.py'),
+   'live_server_binary_contract':digest(root/'architecture/live_server_binary_receipt_v1.json'),
+   'live_server_binary_verifier':digest(root/'scripts/verify_live_server_binary_receipt.py'),
+   'admitted_live_launcher':digest(root/'scripts/serve_admitted_live.py'),
+   'admitted_live_launcher_checker':digest(root/'scripts/check_live_server_artifact.py'),
+   'admitted_live_launcher_tests':digest(root/'scripts/test_admitted_live_launcher.py'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -140,12 +152,18 @@ run_gate live-mcp-contract python3 scripts/check_live_mcp.py
 run_gate compiled-live-read-stack-contract python3 scripts/check_live_read_stack.py
 run_gate live-acceptance-contract python3 scripts/check_live_acceptance_contract.py
 run_gate live-capture-plan python3 scripts/check_live_capture_plan.py
+run_gate live-compatibility-registry python3 scripts/check_live_compatibility_registry.py
+run_gate live-compatibility-resolution python3 scripts/check_live_compatibility_resolution.py
+run_gate live-server-artifact-admission python3 scripts/check_live_server_artifact.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
 run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
 run_gate live-acceptance-journal-tests python3 scripts/test_live_read_evidence_journal.py
 run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
 run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guidance.py
+run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibility_registry.py
+run_gate live-compatibility-resolution-tests python3 scripts/test_live_compatibility_resolution.py
+run_gate admitted-live-launcher-tests python3 scripts/test_admitted_live_launcher.py
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_repository_integrity.py \
@@ -165,12 +183,23 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_scan_live_read_secrets.py \
   scripts/live_read_capture_guidance.py \
   scripts/test_live_read_capture_guidance.py \
+  scripts/promote_live_compatibility.py \
+  scripts/check_live_compatibility_registry.py \
+  scripts/test_live_compatibility_registry.py \
+  scripts/resolve_live_compatibility.py \
+  scripts/check_live_compatibility_resolution.py \
+  scripts/test_live_compatibility_resolution.py \
+  scripts/verify_live_server_binary_receipt.py \
+  scripts/serve_admitted_live.py \
+  scripts/check_live_server_artifact.py \
+  scripts/test_admitted_live_launcher.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
   scripts/qualify_live_read.sh \
+  scripts/qualify_live_server_binary.sh \
   scripts/verify.sh \
   scripts/qualify_local.sh
 
