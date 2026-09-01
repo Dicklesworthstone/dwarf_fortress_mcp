@@ -105,6 +105,7 @@ receipt={
    'live_read_adapter':digest(root/'crates/dfmcp-adapter/src/live_adapter.rs'),
    'live_mcp_crate_root':digest(root/'crates/dfmcp-mcp/src/lib.rs'),
    'live_mcp_admission':digest(root/'crates/dfmcp-mcp/src/admission.rs'),
+   'live_mcp_agent_turn':digest(root/'crates/dfmcp-mcp/src/agent_turn.rs'),
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
    'live_binary_admission_tests':digest(root/'crates/dwarf-fortress-mcp/tests/live_admission.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
@@ -131,7 +132,16 @@ receipt={
    'live_compatibility_resolution':digest(root/'scripts/resolve_live_compatibility.py'),
    'live_compatibility_resolution_checker':digest(root/'scripts/check_live_compatibility_resolution.py'),
    'live_compatibility_resolution_tests':digest(root/'scripts/test_live_compatibility_resolution.py'),
+   'live_compatibility_floor_contract':digest(root/'architecture/live_compatibility_floor_v1.json'),
+   'live_compatibility_floor':digest(root/'scripts/live_compatibility_floor.py'),
+   'live_compatibility_floor_checker':digest(root/'scripts/check_live_compatibility_floor.py'),
+   'live_compatibility_floor_tests':digest(root/'scripts/test_live_compatibility_floor.py'),
+   'live_admission_doctor_contract':digest(root/'architecture/live_admission_doctor_v1.json'),
+   'live_admission_doctor':digest(root/'scripts/doctor_live_admission.py'),
+   'live_admission_doctor_checker':digest(root/'scripts/check_live_admission_doctor.py'),
+   'live_admission_doctor_tests':digest(root/'scripts/test_doctor_live_admission.py'),
    'live_server_binary_contract':digest(root/'architecture/live_server_binary_receipt_v1.json'),
+   'live_server_binary_qualification_tests':digest(root/'scripts/test_qualify_live_server_binary.py'),
    'live_server_binary_verifier':digest(root/'scripts/verify_live_server_binary_receipt.py'),
    'live_server_binary_verifier_tests':digest(root/'scripts/test_live_server_binary_receipt.py'),
    'admitted_live_launcher':digest(root/'scripts/serve_admitted_live.py'),
@@ -161,6 +171,8 @@ run_gate live-acceptance-contract python3 scripts/check_live_acceptance_contract
 run_gate live-capture-plan python3 scripts/check_live_capture_plan.py
 run_gate live-compatibility-registry python3 scripts/check_live_compatibility_registry.py
 run_gate live-compatibility-resolution python3 scripts/check_live_compatibility_resolution.py
+run_gate live-compatibility-floor python3 scripts/check_live_compatibility_floor.py
+run_gate live-admission-doctor python3 scripts/check_live_admission_doctor.py
 run_gate live-server-artifact-admission python3 scripts/check_live_server_artifact.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
@@ -170,6 +182,9 @@ run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_rea
 run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guidance.py
 run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibility_registry.py
 run_gate live-compatibility-resolution-tests python3 scripts/test_live_compatibility_resolution.py
+run_gate live-compatibility-floor-tests python3 scripts/test_live_compatibility_floor.py
+run_gate live-admission-doctor-tests python3 scripts/test_doctor_live_admission.py
+run_gate live-server-binary-qualification-tests python3 scripts/test_qualify_live_server_binary.py
 run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binary_receipt.py
 run_gate admitted-live-launcher-tests bash -c \
   'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
@@ -198,7 +213,14 @@ run_gate python-syntax python3 -m py_compile \
   scripts/resolve_live_compatibility.py \
   scripts/check_live_compatibility_resolution.py \
   scripts/test_live_compatibility_resolution.py \
+  scripts/live_compatibility_floor.py \
+  scripts/check_live_compatibility_floor.py \
+  scripts/test_live_compatibility_floor.py \
+  scripts/doctor_live_admission.py \
+  scripts/check_live_admission_doctor.py \
+  scripts/test_doctor_live_admission.py \
   scripts/verify_live_server_binary_receipt.py \
+  scripts/test_qualify_live_server_binary.py \
   scripts/test_live_server_binary_receipt.py \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
