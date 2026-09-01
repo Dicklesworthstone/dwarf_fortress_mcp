@@ -129,7 +129,7 @@ local_receipt=Path(os.environ['LOCAL_RECEIPT'])
 commit=os.environ['COMMIT']
 binary=Path(os.environ['BINARY'])
 maximum=module.require_positive_int(contract['binary']['maximum_bytes'], 'contract.binary.maximum_bytes')
-fd, metadata=module._open_stable_regular(binary, maximum, 'release server binary')
+fd, metadata=module.open_stable_regular(binary, maximum, 'release server binary')
 try:
     module.validate_open_metadata(metadata)
     binary_sha=module.sha256_descriptor(fd)
