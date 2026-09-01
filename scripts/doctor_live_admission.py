@@ -340,7 +340,6 @@ def diagnose(
         OSError,
         ValueError,
         promotion.PromotionError,
-        resolver.PromotionError if hasattr(resolver, "PromotionError") else resolver.ResolutionError,
         resolver.ResolutionError,
         resolver.promotion.PromotionError,
     ) as exc:
