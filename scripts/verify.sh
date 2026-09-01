@@ -77,6 +77,7 @@ python3 scripts/test_scan_live_read_secrets.py
 python3 scripts/test_live_read_capture_guidance.py
 python3 scripts/test_live_compatibility_registry.py
 python3 scripts/test_live_compatibility_resolution.py
+python3 scripts/test_live_server_binary_receipt.py
 python3 scripts/test_admitted_live_launcher.py
 ok "Python contract tests"
 
@@ -107,6 +108,7 @@ python3 -m py_compile \
   scripts/check_live_compatibility_resolution.py \
   scripts/test_live_compatibility_resolution.py \
   scripts/verify_live_server_binary_receipt.py \
+  scripts/test_live_server_binary_receipt.py \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
   scripts/test_admitted_live_launcher.py \
