@@ -17,6 +17,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v git >/dev/null 2>&1 || die "git is required"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
+[[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 COMMIT="$(git rev-parse HEAD)"
@@ -105,6 +106,7 @@ receipt={
    'live_mcp_crate_root':digest(root/'crates/dfmcp-mcp/src/lib.rs'),
    'live_mcp_admission':digest(root/'crates/dfmcp-mcp/src/admission.rs'),
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
+   'live_binary_admission_tests':digest(root/'crates/dwarf-fortress-mcp/tests/live_admission.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
    'live_read_stack_checker':digest(root/'scripts/check_live_read_stack.py'),
    'live_acceptance_probe_binary':digest(root/'crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs'),
