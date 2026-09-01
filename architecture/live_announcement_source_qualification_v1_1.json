@@ -1,0 +1,80 @@
+{
+  "schema_version": "dfmcp.live-announcement-source-qualification-contract/1",
+  "receipt_schema": "dfmcp.live-announcement-source-qualification/1",
+  "status": "normative_source_only_contract",
+  "bridge": {
+    "plugin": "dfmcp_bridge_v1_1",
+    "bridge_version": "0.2.0",
+    "protocol": "1.1"
+  },
+  "required_gates": [
+    "repository-integrity",
+    "announcement-contract",
+    "announcement-contract-tests",
+    "announcement-acceptance-tests",
+    "python-syntax",
+    "shell-syntax",
+    "cargo-metadata",
+    "rustfmt",
+    "clippy",
+    "adapter-tests",
+    "workspace-tests",
+    "rustdoc",
+    "announcement-probe-help"
+  ],
+  "required_source_digests": {
+    "cargo_lock": "Cargo.lock",
+    "workspace_manifest": "Cargo.toml",
+    "adapter_manifest": "crates/dfmcp-adapter/Cargo.toml",
+    "adapter_api": "crates/dfmcp-adapter/src/api.rs",
+    "adapter_root": "crates/dfmcp-adapter/src/lib.rs",
+    "announcement_model": "crates/dfmcp-adapter/src/live_announcements.rs",
+    "announcement_wire": "crates/dfmcp-adapter/src/announcement_wire.rs",
+    "announcement_client": "crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs",
+    "announcement_capsule": "crates/dfmcp-adapter/src/live_observation_v1_1.rs",
+    "announcement_driver": "crates/dfmcp-adapter/src/live_session_v1_1.rs",
+    "announcement_projection": "crates/dfmcp-adapter/src/live_announcement_projection.rs",
+    "combined_projection": "crates/dfmcp-adapter/src/live_projection_v1_1.rs",
+    "announcement_briefing": "crates/dfmcp-adapter/src/live_announcement_briefing.rs",
+    "announcement_source_fence": "crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs",
+    "announcement_connector": "crates/dfmcp-adapter/src/live_connect_v1_1.rs",
+    "protocol_1_0_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+    "protocol_1_0_native": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
+    "protocol_1_1_proto": "bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto",
+    "protocol_1_1_native": "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp",
+    "protocol_1_1_build_fragment": "bridge/dfhack-plugin/CMakeLists.v1_1.txt",
+    "protocol_1_1_native_qualifier": "scripts/qualify_dfhack_plugin_v1_1.sh",
+    "protocol_contract": "architecture/dfhack_read_bridge_v1_1.json",
+    "projection_contract": "architecture/live_announcement_projection_v1.json",
+    "acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
+    "source_qualification_contract": "architecture/live_announcement_source_qualification_v1_1.json",
+    "contract_checker": "scripts/check_live_announcements.py",
+    "contract_checker_tests": "scripts/test_live_announcement_contract.py",
+    "acceptance_verifier": "scripts/verify_live_announcement_acceptance.py",
+    "acceptance_verifier_tests": "scripts/test_live_announcement_acceptance.py",
+    "acceptance_wrapper": "scripts/qualify_live_announcements.sh",
+    "source_qualification_wrapper": "scripts/qualify_live_announcement_source.sh",
+    "probe_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
+    "announcement_probe": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-announcement-probe.rs",
+    "stream_documentation": "docs/LIVE_ANNOUNCEMENT_STREAM.md",
+    "implementation_status": "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md"
+  },
+  "authority": {
+    "capabilities_granted": [],
+    "mutation_capabilities": []
+  },
+  "claims_established": [
+    "the exact clean source revision passed the required static and Rust gates",
+    "the protocol-1.0 source files remained part of the source-bound digest set",
+    "the protocol-1.1 diagnostic probe compiled and rendered help"
+  ],
+  "claims_not_established": [
+    "the protocol-1.1 native plugin builds against a named DFHack revision",
+    "the protocol-1.1 plugin loads in Dwarf Fortress",
+    "any A1-A6 live behavior",
+    "any compatibility-registry admission",
+    "runtime admission",
+    "complete announcement history",
+    "mutation authority"
+  ]
+}
