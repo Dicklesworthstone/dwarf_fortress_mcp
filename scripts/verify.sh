@@ -19,7 +19,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
-info "Rejecting local-path placeholders and probe debris"
+info "Rejecting corrupted source, local-path placeholders, and probe debris"
 python3 scripts/check_repository_integrity.py
 ok "Repository integrity"
 
@@ -63,7 +63,15 @@ info "Validating registry-generation-bound compatibility resolution"
 python3 scripts/check_live_compatibility_resolution.py
 ok "Exact compatibility resolution"
 
-info "Validating receipt-, ticket-, and descriptor-bound live execution"
+info "Validating owner-private monotonic registry custody"
+python3 scripts/check_live_compatibility_floor.py
+ok "Live compatibility floor"
+
+info "Validating authority-free live-admission diagnosis"
+python3 scripts/check_live_admission_doctor.py
+ok "Live admission doctor"
+
+info "Validating floor-, receipt-, ticket-, and descriptor-bound live execution"
 python3 scripts/check_live_server_artifact.py
 ok "Live server artifact admission"
 
@@ -79,6 +87,9 @@ python3 scripts/test_scan_live_read_secrets.py
 python3 scripts/test_live_read_capture_guidance.py
 python3 scripts/test_live_compatibility_registry.py
 python3 scripts/test_live_compatibility_resolution.py
+python3 scripts/test_live_compatibility_floor.py
+python3 scripts/test_doctor_live_admission.py
+python3 scripts/test_qualify_live_server_binary.py
 python3 scripts/test_live_server_binary_receipt.py
 python3 scripts/test_admitted_live_launcher.py
 python3 scripts/test_live_admission_ticket.py
@@ -110,7 +121,14 @@ python3 -m py_compile \
   scripts/resolve_live_compatibility.py \
   scripts/check_live_compatibility_resolution.py \
   scripts/test_live_compatibility_resolution.py \
+  scripts/live_compatibility_floor.py \
+  scripts/check_live_compatibility_floor.py \
+  scripts/test_live_compatibility_floor.py \
+  scripts/doctor_live_admission.py \
+  scripts/check_live_admission_doctor.py \
+  scripts/test_doctor_live_admission.py \
   scripts/verify_live_server_binary_receipt.py \
+  scripts/test_qualify_live_server_binary.py \
   scripts/test_live_server_binary_receipt.py \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
