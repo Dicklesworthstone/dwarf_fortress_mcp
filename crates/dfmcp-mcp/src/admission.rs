@@ -2,13 +2,14 @@
 
 //! Single-use process admission for the authenticated live MCP server.
 //!
-//! The external launcher proves the exact compatibility tuple and release
-//! binary before `exec`. This module makes that launcher boundary mandatory for
-//! the Rust process: direct `serve-live` invocation fails closed unless a
-//! bounded, owner-private, process- and inode-bound ticket is consumed first.
-//! The ticket is an accidental-bypass and stale-launch fence within the stated
-//! same-host threat model; it is not a defense against a compromised account
-//! that can replace the process, launcher, and ticket together.
+//! The external launcher proves the exact compatibility tuple, monotonic
+//! registry floor, and release binary before `exec`. This module makes that
+//! launcher boundary mandatory for the Rust process: direct `serve-live`
+//! invocation fails closed unless a bounded, owner-private, process-, floor-,
+//! and inode-bound ticket is consumed first. The ticket is an accidental-bypass
+//! and stale-launch fence within the stated same-host threat model; it is not a
+//! defense against a compromised account that can replace the process,
+//! launcher, floor, executable, and ticket together.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -32,6 +33,7 @@ const TICKET_SCHEMA: &str = "dfmcp.live-admission-ticket/1";
 const AUTHORIZED_STATE: &str = "authorized_to_exec";
 const READ_ONLY_MODE: &str = "authenticated_live_read_only";
 const MAX_TICKET_BYTES: u64 = 64 * 1024;
+const MAX_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TICKET_LIFETIME_SECONDS: u64 = 300;
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const REQUIRED_CAPABILITIES: [&str; 4] = ["doctor", "observe", "query", "wait"];
@@ -44,6 +46,9 @@ pub struct AdmissionProvenance {
     compatibility_entry_id: String,
     compatibility_registry_digest: String,
     compatibility_decision_digest: String,
+    compatibility_floor_digest: String,
+    compatibility_floor_file_sha256: String,
+    compatibility_floor_sequence: u64,
     server_receipt_digest: String,
     launch_digest: String,
     server_binary_sha256: String,
@@ -68,6 +73,21 @@ impl AdmissionProvenance {
     #[must_use]
     pub fn compatibility_decision_digest(&self) -> &str {
         &self.compatibility_decision_digest
+    }
+
+    #[must_use]
+    pub fn compatibility_floor_digest(&self) -> &str {
+        &self.compatibility_floor_digest
+    }
+
+    #[must_use]
+    pub fn compatibility_floor_file_sha256(&self) -> &str {
+        &self.compatibility_floor_file_sha256
+    }
+
+    #[must_use]
+    pub const fn compatibility_floor_sequence(&self) -> u64 {
+        self.compatibility_floor_sequence
     }
 
     #[must_use]
@@ -124,6 +144,9 @@ struct AdmissionTicket {
     compatibility_entry_id: String,
     compatibility_registry_digest: String,
     compatibility_decision_digest: String,
+    compatibility_floor_digest: String,
+    compatibility_floor_file_sha256: String,
+    compatibility_floor_sequence: u64,
     server_receipt_digest: String,
     launch_digest: String,
     server_binary_sha256: String,
@@ -183,6 +206,18 @@ fn unsigned_ticket_value(ticket: &AdmissionTicket) -> Value {
     fields.insert(
         "compatibility_entry_id".to_owned(),
         Value::String(ticket.compatibility_entry_id.clone()),
+    );
+    fields.insert(
+        "compatibility_floor_digest".to_owned(),
+        Value::String(ticket.compatibility_floor_digest.clone()),
+    );
+    fields.insert(
+        "compatibility_floor_file_sha256".to_owned(),
+        Value::String(ticket.compatibility_floor_file_sha256.clone()),
+    );
+    fields.insert(
+        "compatibility_floor_sequence".to_owned(),
+        number(ticket.compatibility_floor_sequence),
     );
     fields.insert(
         "compatibility_registry_digest".to_owned(),
@@ -283,6 +318,14 @@ fn validate_ticket_semantics(
             &ticket.compatibility_decision_digest,
             "compatibility_decision_digest",
         ),
+        (
+            &ticket.compatibility_floor_digest,
+            "compatibility_floor_digest",
+        ),
+        (
+            &ticket.compatibility_floor_file_sha256,
+            "compatibility_floor_file_sha256",
+        ),
         (&ticket.server_receipt_digest, "server_receipt_digest"),
         (&ticket.launch_digest, "launch_digest"),
         (&ticket.server_binary_sha256, "server_binary_sha256"),
@@ -326,8 +369,10 @@ fn validate_ticket_semantics(
     if !ticket.mutation_capabilities.is_empty() {
         return Err(invalid("admission ticket contains mutation capability"));
     }
-    if ticket.server_binary_bytes == 0 {
-        return Err(invalid("admission ticket names an empty server binary"));
+    if ticket.server_binary_bytes == 0 || ticket.server_binary_bytes > MAX_EXECUTABLE_BYTES {
+        return Err(invalid(
+            "admission ticket server binary size is outside the admitted bound",
+        ));
     }
     validate_executable_identity(ticket, context.executable_path)
 }
@@ -394,21 +439,71 @@ fn validate_executable_identity(
     ticket: &AdmissionTicket,
     executable_path: &Path,
 ) -> Result<(), AdmissionError> {
-    let metadata = executable_path.metadata().map_err(|source| {
+    let before = symlink_metadata(executable_path).map_err(|source| {
         invalid(format!(
             "cannot inspect current executable {}: {source}",
             executable_path.display()
         ))
     })?;
-    if !metadata.is_file()
-        || metadata.dev() != ticket.server_binary_device
-        || metadata.ino() != ticket.server_binary_inode
-        || metadata.len() != ticket.server_binary_bytes
-        || metadata.mode() != ticket.server_binary_mode
-        || metadata.uid() != ticket.server_binary_owner_uid
+    if before.file_type().is_symlink() || !before.is_file() {
+        return Err(invalid(
+            "current executable must be a regular non-symbolic-link file",
+        ));
+    }
+    if before.dev() != ticket.server_binary_device
+        || before.ino() != ticket.server_binary_inode
+        || before.len() != ticket.server_binary_bytes
+        || before.mode() != ticket.server_binary_mode
+        || before.uid() != ticket.server_binary_owner_uid
     {
         return Err(invalid(
             "current executable inode does not match the admitted server binary",
+        ));
+    }
+
+    let mut file = File::open(executable_path).map_err(|source| {
+        invalid(format!(
+            "cannot open current executable {}: {source}",
+            executable_path.display()
+        ))
+    })?;
+    let opened = file.metadata().map_err(|source| {
+        invalid(format!(
+            "cannot inspect opened current executable {}: {source}",
+            executable_path.display()
+        ))
+    })?;
+    if !same_file_identity(&before, &opened) {
+        return Err(invalid(
+            "current executable changed between path inspection and open",
+        ));
+    }
+    let capacity = usize::try_from(opened.len())
+        .map_err(|_| invalid("current executable length does not fit memory bounds"))?;
+    let mut bytes = Vec::with_capacity(capacity);
+    (&mut file)
+        .take(MAX_EXECUTABLE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| invalid(format!("cannot read current executable: {source}")))?;
+    let bytes_length = u64::try_from(bytes.len())
+        .map_err(|_| invalid("current executable read length does not fit u64"))?;
+    if bytes_length > MAX_EXECUTABLE_BYTES {
+        return Err(invalid(
+            "current executable exceeded its byte bound while being read",
+        ));
+    }
+    let after = file.metadata().map_err(|source| {
+        invalid(format!(
+            "cannot reinspect opened current executable {}: {source}",
+            executable_path.display()
+        ))
+    })?;
+    if !same_file_identity(&opened, &after) || bytes_length != after.len() {
+        return Err(invalid("current executable changed while being hashed"));
+    }
+    if Digest32::of_bytes(&bytes).to_hex() != ticket.server_binary_sha256 {
+        return Err(invalid(
+            "current executable SHA-256 does not match the admitted server binary",
         ));
     }
     Ok(())
@@ -520,6 +615,9 @@ fn consume_admission_ticket_at(
         compatibility_entry_id: ticket.compatibility_entry_id,
         compatibility_registry_digest: ticket.compatibility_registry_digest,
         compatibility_decision_digest: ticket.compatibility_decision_digest,
+        compatibility_floor_digest: ticket.compatibility_floor_digest,
+        compatibility_floor_file_sha256: ticket.compatibility_floor_file_sha256,
+        compatibility_floor_sequence: ticket.compatibility_floor_sequence,
         server_receipt_digest: ticket.server_receipt_digest,
         launch_digest: ticket.launch_digest,
         server_binary_sha256: ticket.server_binary_sha256,
@@ -598,11 +696,12 @@ mod tests {
         create_dir(&root)?;
         set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
         let executable = root.join("dwarf-fortress-mcp");
+        let executable_bytes = b"fixture admitted executable";
         let mut executable_file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&executable)?;
-        executable_file.write_all(b"fixture admitted executable")?;
+        executable_file.write_all(executable_bytes)?;
         executable_file.sync_all()?;
         set_permissions(&executable, std::fs::Permissions::from_mode(0o700))?;
         let metadata = executable.metadata()?;
@@ -618,9 +717,12 @@ mod tests {
             compatibility_entry_id: Digest32::of_bytes(b"entry").to_hex(),
             compatibility_registry_digest: Digest32::of_bytes(b"registry").to_hex(),
             compatibility_decision_digest: Digest32::of_bytes(b"decision").to_hex(),
+            compatibility_floor_digest: Digest32::of_bytes(b"floor-content").to_hex(),
+            compatibility_floor_file_sha256: Digest32::of_bytes(b"floor-file").to_hex(),
+            compatibility_floor_sequence: 7,
             server_receipt_digest: Digest32::of_bytes(b"server-receipt").to_hex(),
             launch_digest: Digest32::of_bytes(b"launch").to_hex(),
-            server_binary_sha256: Digest32::of_bytes(b"binary").to_hex(),
+            server_binary_sha256: Digest32::of_bytes(executable_bytes).to_hex(),
             server_binary_device: metadata.dev(),
             server_binary_inode: metadata.ino(),
             server_binary_bytes: metadata.len(),
@@ -684,6 +786,11 @@ mod tests {
             provenance.compatibility_entry_id(),
             ticket.compatibility_entry_id
         );
+        assert_eq!(
+            provenance.compatibility_floor_digest(),
+            ticket.compatibility_floor_digest
+        );
+        assert_eq!(provenance.compatibility_floor_sequence(), 7);
         assert!(!fixture.ticket.exists());
         assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
         Ok(())
@@ -719,6 +826,29 @@ mod tests {
         ticket.server_binary_inode = ticket.server_binary_inode.saturating_add(1);
         ticket.ticket_digest = expected_ticket_digest(&ticket)?;
         write_ticket(&fixture.ticket, &ticket)?;
+        assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn floor_digest_and_same_size_binary_drift_are_rejected() -> Result<(), Box<dyn Error>> {
+        let (fixture, mut ticket) = fixture()?;
+        ticket.compatibility_floor_digest = "not-a-digest".to_owned();
+        ticket.ticket_digest = expected_ticket_digest(&ticket)?;
+        write_ticket(&fixture.ticket, &ticket)?;
+        assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        remove_file(&fixture.ticket)?;
+
+        ticket.compatibility_floor_digest = Digest32::of_bytes(b"floor-content").to_hex();
+        ticket.ticket_digest = expected_ticket_digest(&ticket)?;
+        write_ticket(&fixture.ticket, &ticket)?;
+        let mut executable = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&fixture.executable)?;
+        executable.write_all(b"fixture admitted executablE")?;
+        executable.sync_all()?;
+        set_permissions(&fixture.executable, std::fs::Permissions::from_mode(0o700))?;
         assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
         Ok(())
     }
