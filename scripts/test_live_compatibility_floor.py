@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import importlib.util
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -194,14 +192,7 @@ class CompatibilityFloorTests(unittest.TestCase):
         with temporary:
             fixture.write_registry(registry([entry("alpha")]))
             fixture.initialize()
-            changed = copy.deepcopy(entry("alpha"))
-            changed["limitations"] = [*promotion.LIMITATIONS[:-1], "changed limitation"]
-            unsigned = dict(changed)
-            unsigned.pop("entry_id", None)
-            changed["entry_id"] = promotion.sha256_bytes(
-                promotion.canonical_json(unsigned)
-            )
-            fixture.write_registry(registry([changed]))
+            fixture.write_registry(registry([entry("beta")]))
             with self.assertRaises(floor.FloorError):
                 floor.advance_floor(
                     fixture.floor_path, fixture.registry_path, fixture.file_sha256()
