@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Reject source corruption, local-path placeholders, and recovery debris."""
+"""Reject source corruption, symlinks, local placeholders, and recovery debris."""
 
 from __future__ import annotations
 
 import argparse
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,10 +73,30 @@ def expected_text_file(path: Path) -> bool:
 
 def inspect(root: Path) -> list[Failure]:
     failures: list[Failure] = []
-    for directory, names, files in os.walk(root):
-        names[:] = sorted(name for name in names if name not in IGNORED_DIRECTORIES)
+    for directory, names, files in os.walk(root, followlinks=False):
+        directory_path = Path(directory)
+        retained_directories: list[str] = []
+        for name in sorted(names):
+            if name in IGNORED_DIRECTORIES:
+                continue
+            path = directory_path / name
+            relative = path.relative_to(root).as_posix()
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                failures.append(Failure(relative, f"cannot inspect directory entry: {exc}"))
+                continue
+            if stat.S_ISLNK(metadata.st_mode):
+                failures.append(Failure(relative, "repository directory is a symbolic link"))
+                continue
+            if not stat.S_ISDIR(metadata.st_mode):
+                failures.append(Failure(relative, "repository directory entry is not a directory"))
+                continue
+            retained_directories.append(name)
+        names[:] = retained_directories
+
         for name in sorted(files):
-            path = Path(directory) / name
+            path = directory_path / name
             relative = path.relative_to(root).as_posix()
             if (
                 name in FORBIDDEN_NAMES
@@ -87,10 +108,17 @@ def inspect(root: Path) -> list[Failure]:
                 )
                 continue
             try:
-                size = path.stat().st_size
+                metadata = path.lstat()
             except OSError as exc:
-                failures.append(Failure(relative, f"cannot stat file: {exc}"))
+                failures.append(Failure(relative, f"cannot inspect file: {exc}"))
                 continue
+            if stat.S_ISLNK(metadata.st_mode):
+                failures.append(Failure(relative, "repository file is a symbolic link"))
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                failures.append(Failure(relative, "repository file is not a regular file"))
+                continue
+            size = metadata.st_size
             text_expected = expected_text_file(path)
             if text_expected and size > MAX_TEXT_BYTES:
                 failures.append(
@@ -106,6 +134,21 @@ def inspect(root: Path) -> list[Failure]:
                 raw = path.read_bytes()
             except OSError as exc:
                 failures.append(Failure(relative, f"cannot read file: {exc}"))
+                continue
+            try:
+                after = path.lstat()
+            except OSError as exc:
+                failures.append(Failure(relative, f"cannot reinspect file: {exc}"))
+                continue
+            if (
+                after.st_dev != metadata.st_dev
+                or after.st_ino != metadata.st_ino
+                or after.st_size != metadata.st_size
+                or after.st_mode != metadata.st_mode
+                or after.st_mtime_ns != metadata.st_mtime_ns
+                or after.st_ctime_ns != metadata.st_ctime_ns
+            ):
+                failures.append(Failure(relative, "repository file changed while being inspected"))
                 continue
             if text_expected and b"\x00" in raw:
                 failures.append(
@@ -157,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         for failure in failures:
             print(f"  {failure.path}: {failure.reason}", file=sys.stderr)
         return 1
-    print("repository integrity: PASS (source text is valid and no probe debris exists)")
+    print("repository integrity: PASS (regular source text is valid and no probe debris exists)")
     return 0
 
 
