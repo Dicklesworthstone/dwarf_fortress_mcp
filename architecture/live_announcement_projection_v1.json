@@ -1,0 +1,45 @@
+{
+  "schema_version": "dfmcp.live_announcement_projection/1",
+  "status": "implemented_source_contract",
+  "source": "dfmcp.live-announcement-batch.v1",
+  "entity_kind": "announcement",
+  "entity_id": {
+    "namespace": "u64 high bit set",
+    "ordinal": "report_id plus one",
+    "unit_collision": false,
+    "fortress_collision": false,
+    "negative_report_ids_allowed": false
+  },
+  "fields": [
+    "report_id",
+    "report_type",
+    "text",
+    "year",
+    "year_tick",
+    "repeat_count",
+    "continuation",
+    "unconscious",
+    "announcement"
+  ],
+  "provenance": {
+    "fact_source": "dfmcp_bridge.ReadObservation.announcement.<field>",
+    "source_digest": "canonical announcement batch SHA-256",
+    "derived_authority": false
+  },
+  "coverage": {
+    "preserves_requested_after_id": true,
+    "preserves_next_after_id": true,
+    "preserves_retained_window_bounds": true,
+    "preserves_complete_through_latest": true,
+    "preserves_gap_before_retained_window": true,
+    "may_prove_complete_history": false
+  },
+  "limits": {
+    "maximum_entities_per_batch": 512,
+    "maximum_text_bytes_per_entity": 2048
+  },
+  "authority": {
+    "capabilities_granted": [],
+    "mutation_capabilities": []
+  }
+}
