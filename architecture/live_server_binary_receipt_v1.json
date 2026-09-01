@@ -1,0 +1,52 @@
+{
+  "schema_version": "dfmcp.live-server-binary-receipt-contract/1",
+  "receipt_schema": "dfmcp.live-server-binary-qualification/1",
+  "status": "normative_runtime_artifact_contract",
+  "source_binding": {
+    "requires_clean_dfmcp_source": true,
+    "requires_passing_local_qualification_receipt": true,
+    "local_qualification_receipt_schema": "dfmcp.qualification-receipt.v1",
+    "required_source_digests": {
+      "cargo_lock": "Cargo.lock",
+      "workspace_manifest": "Cargo.toml",
+      "binary_main": "crates/dwarf-fortress-mcp/src/main.rs",
+      "mcp_live_server": "crates/dfmcp-mcp/src/live_server.rs",
+      "adapter_live_connect": "crates/dfmcp-adapter/src/live_connect.rs",
+      "adapter_live_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap.rs",
+      "adapter_live_observation": "crates/dfmcp-adapter/src/live_observation.rs",
+      "adapter_live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
+      "compatibility_registry": "architecture/live_compatibility_registry_v1.json",
+      "compatibility_resolver": "scripts/resolve_live_compatibility.py",
+      "artifact_contract": "architecture/live_server_binary_receipt_v1.json",
+      "artifact_verifier": "scripts/verify_live_server_binary_receipt.py",
+      "admitted_launcher": "scripts/serve_admitted_live.py"
+    }
+  },
+  "binary": {
+    "name": "dwarf-fortress-mcp",
+    "profile": "release",
+    "hash_algorithm": "sha256",
+    "must_be_regular_file": true,
+    "symbolic_links_allowed": false,
+    "group_or_world_writable_allowed": false,
+    "maximum_bytes": 268435456
+  },
+  "required_executable_checks": [
+    "contract",
+    "doctor",
+    "demo"
+  ],
+  "authority": {
+    "mode": "authenticated_live_read_only",
+    "mutation_capabilities": [],
+    "note": "This receipt qualifies the Rust server artifact only. It grants no bridge or game authority and does not substitute for exact-tuple R1-R5 compatibility admission."
+  },
+  "claims_not_established": [
+    "successful connection to a running DFHack process",
+    "R2-R5 disposable-fort evidence",
+    "compatibility with a tuple absent from the exact registry",
+    "live mutation correctness",
+    "host-compromise resistance",
+    "signed release provenance"
+  ]
+}
