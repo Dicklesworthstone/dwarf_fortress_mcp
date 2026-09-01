@@ -11,8 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "architecture/live_server_binary_receipt_v1.json"
 VERIFIER_PATH = ROOT / "scripts/verify_live_server_binary_receipt.py"
+VERIFIER_TEST_PATH = ROOT / "scripts/test_live_server_binary_receipt.py"
 LAUNCHER_PATH = ROOT / "scripts/serve_admitted_live.py"
-TEST_PATH = ROOT / "scripts/test_admitted_live_launcher.py"
+LAUNCHER_TEST_PATH = ROOT / "scripts/test_admitted_live_launcher.py"
 DOC_PATH = ROOT / "docs/LIVE_COMPATIBILITY_ADMISSION.md"
 
 
@@ -71,6 +72,8 @@ def check_verifier() -> None:
     for name in [
         "duplicate_rejecting_object",
         "bounded_tree",
+        "read_bytes_with_digest",
+        "read_object_with_digest",
         "validate_local_qualification_receipt",
         "open_verified_binary",
         "validate_receipt",
@@ -79,14 +82,33 @@ def check_verifier() -> None:
         require(name in names, f"server binary verifier is missing {name}")
     for marker in [
         "O_NOFOLLOW",
-        "group/world-writable",
+        "O_CLOEXEC",
+        "group- or world-writable",
+        "opened server artifact has no executable permission bit",
         "local qualification receipt",
         "source_digests",
         "mutation_capabilities",
         "st_dev",
         "st_ino",
+        "receipt_file_sha256",
     ]:
         require(marker in source, f"server binary verifier is missing marker {marker}")
+    require("os.access(" not in source, "server binary verifier must inspect the opened inode, not path access bits")
+
+    tests = VERIFIER_TEST_PATH.read_text(encoding="utf-8")
+    require(tests.count("def test_") >= 12, "server binary verifier needs at least twelve adversarial tests")
+    for name in [
+        "test_valid_receipt_opens_exact_qualified_inode",
+        "test_duplicate_json_keys_are_rejected",
+        "test_binary_without_execute_bit_is_rejected_on_opened_inode",
+        "test_group_writable_binary_is_rejected",
+        "test_symbolic_link_binary_is_rejected",
+        "test_local_qualification_receipt_mismatch_is_rejected",
+        "test_source_digest_drift_is_rejected",
+        "test_mutation_capability_contamination_is_rejected",
+        "test_normalized_receipt_digest_matches_same_parsed_bytes",
+    ]:
+        require(f"def {name}" in tests, f"server binary verifier tests omit {name}")
 
 
 def check_launcher() -> None:
@@ -118,7 +140,7 @@ def check_launcher() -> None:
     for forbidden in ["--server-sha256", "os.fexecve", "subprocess", "shell=True"]:
         require(forbidden not in source, f"admitted launcher contains forbidden path {forbidden}")
 
-    tests = TEST_PATH.read_text(encoding="utf-8")
+    tests = LAUNCHER_TEST_PATH.read_text(encoding="utf-8")
     require(tests.count("def test_") >= 10, "admitted launcher needs at least ten focused tests")
     for name in [
         "test_exact_admitted_chain_binds_opened_inode_and_receipts",
@@ -135,6 +157,7 @@ def check_wiring_and_docs() -> None:
         source = (ROOT / relative).read_text(encoding="utf-8")
         for marker in [
             "scripts/check_live_server_artifact.py",
+            "scripts/test_live_server_binary_receipt.py",
             "scripts/test_admitted_live_launcher.py",
         ]:
             require(marker in source, f"{relative} omits {marker}")
@@ -160,7 +183,7 @@ def main() -> int:
     except (OSError, SyntaxError, json.JSONDecodeError, ContractError) as exc:
         print(f"live server artifact admission: FAIL: {exc}", file=sys.stderr)
         return 1
-    print("live server artifact admission: PASS (receipt-bound descriptor-only execution)")
+    print("live server artifact admission: PASS (atomic receipt and descriptor-only execution)")
     return 0
 
 
