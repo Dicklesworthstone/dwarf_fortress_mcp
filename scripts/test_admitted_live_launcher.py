@@ -95,6 +95,10 @@ class Fixture:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.registry_path = root / "registry.json"
+        self.floor_directory = root / "floor"
+        self.floor_directory.mkdir(mode=0o700)
+        self.floor_directory.chmod(0o700)
+        self.floor_path = self.floor_directory / "compatibility-floor.json"
         self.manifest_path = root / "manifest.json"
         self.binary_path = root / "dwarf-fortress-mcp"
         self.server_receipt_path = root / "server-receipt.json"
@@ -109,6 +113,9 @@ class Fixture:
             "entries": [self.entry],
         }
         self.registry_path.write_text(json.dumps(self.registry, sort_keys=True) + "\n")
+        launcher.compatibility_floor.initialize_floor(
+            self.floor_path, self.registry_path
+        )
         self.manifest_path.write_text(json.dumps(deployment_manifest(), sort_keys=True) + "\n")
         self.binary_path.write_bytes(b"fixture-executable")
         self.binary_path.chmod(0o700)
@@ -163,6 +170,7 @@ class Fixture:
         with mock.patch.object(launcher.binary_verifier, "verify", side_effect=self.fake_verify):
             return launcher.prepare_launch(
                 self.registry_path,
+                self.floor_path,
                 self.manifest_path,
                 self.binary_path,
                 self.server_receipt_path,
@@ -187,11 +195,14 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         return temporary, Fixture(Path(temporary.name))
 
-    def test_exact_admitted_chain_binds_opened_inode_and_receipts(self) -> None:
+    def test_exact_admitted_chain_binds_floor_inode_and_receipts(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
                 opened, record = fixture.prepare()
+                floor_value, floor_file_sha256 = launcher.compatibility_floor.read_floor(
+                    fixture.floor_path
+                )
                 self.assertEqual(record["state"], "authorized_to_exec")
                 self.assertEqual(record["compatibility_entry_id"], fixture.entry["entry_id"])
                 self.assertEqual(record["required_entry_id"], fixture.entry["entry_id"])
@@ -199,6 +210,15 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                     record["compatibility_registry_digest"],
                     promotion.sha256_bytes(promotion.canonical_json(fixture.registry)),
                 )
+                self.assertEqual(
+                    record["compatibility_floor"]["floor_digest"],
+                    floor_value["floor_digest"],
+                )
+                self.assertEqual(
+                    record["compatibility_floor"]["file_sha256"],
+                    floor_file_sha256,
+                )
+                self.assertEqual(record["compatibility_floor"]["sequence"], 0)
                 self.assertEqual(record["server_binary"]["inode"], opened.inode)
                 self.assertEqual(record["server_binary"]["device"], opened.device)
                 self.assertEqual(
@@ -233,6 +253,24 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                 fixture.prepare(environment)
             self.assertEqual(fixture.opened_descriptors, [])
 
+    def test_registry_floor_mismatch_is_rejected_before_binary_verification(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.registry_path.write_text(
+                json.dumps(fixture.registry, sort_keys=True, indent=2) + "\n"
+            )
+            with self.assertRaises(launcher.compatibility_floor.FloorError):
+                fixture.prepare()
+            self.assertEqual(fixture.opened_descriptors, [])
+
+    def test_permissive_floor_custody_is_rejected_before_binary_verification(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.floor_path.chmod(0o640)
+            with self.assertRaises(launcher.compatibility_floor.FloorError):
+                fixture.prepare()
+            self.assertEqual(fixture.opened_descriptors, [])
+
     def test_required_entry_fence_is_mandatory_and_exact(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
@@ -240,6 +278,7 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                 with self.assertRaises(launcher.LaunchError):
                     launcher.prepare_launch(
                         fixture.registry_path,
+                        fixture.floor_path,
                         fixture.manifest_path,
                         fixture.binary_path,
                         fixture.server_receipt_path,
@@ -278,7 +317,36 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
             with self.assertRaises(launcher.LaunchError):
                 fixture.prepare()
 
-    def test_admitted_environment_contains_proof_bindings_but_preserves_secret_only_in_environment(self) -> None:
+    def test_generation_change_after_prepare_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                _, record = fixture.prepare()
+                fixture.registry_path.write_text(
+                    json.dumps(fixture.registry, sort_keys=True, indent=2) + "\n"
+                )
+                with self.assertRaises(launcher.compatibility_floor.FloorError):
+                    launcher.reverify_launch_generation(
+                        fixture.registry_path, fixture.floor_path, record
+                    )
+            finally:
+                fixture.close_all()
+
+    def test_same_size_binary_mutation_is_detected_before_exec(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                opened, record = fixture.prepare()
+                replacement = b"fixture-executablE"
+                self.assertEqual(len(replacement), fixture.binary_path.stat().st_size)
+                fixture.binary_path.write_bytes(replacement)
+                fixture.binary_path.chmod(0o700)
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.reverify_opened_binary(opened, record)
+            finally:
+                fixture.close_all()
+
+    def test_admitted_environment_contains_floor_and_receipt_bindings(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
@@ -290,6 +358,13 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                 self.assertEqual(environment["DFMCP_BRIDGE_TOKEN"], "x" * 32)
                 self.assertEqual(
                     environment["DFMCP_COMPATIBILITY_ENTRY_ID"], fixture.entry["entry_id"]
+                )
+                self.assertEqual(
+                    environment["DFMCP_COMPATIBILITY_FLOOR_DIGEST"],
+                    record["compatibility_floor"]["floor_digest"],
+                )
+                self.assertEqual(
+                    environment["DFMCP_COMPATIBILITY_FLOOR_SEQUENCE"], "0"
                 )
                 self.assertEqual(
                     environment["DFMCP_SERVER_RECEIPT_DIGEST"],
@@ -306,14 +381,16 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
         temporary, fixture = self.fixture()
         with temporary:
             try:
-                opened, _ = fixture.prepare()
+                opened, record = fixture.prepare()
                 with mock.patch.object(launcher.os, "supports_fd", set()):
                     with self.assertRaises(launcher.LaunchError):
-                        launcher.execute_verified_descriptor(opened, fixture.environment())
+                        launcher.execute_verified_descriptor(
+                            opened, fixture.environment(), record
+                        )
             finally:
                 fixture.close_all()
 
-    def test_cli_requires_receipts_commit_and_entry_fences(self) -> None:
+    def test_cli_requires_floor_receipts_commit_and_entry_fences(self) -> None:
         with mock.patch.object(sys, "stderr"):
             with self.assertRaises(SystemExit):
                 launcher.parse_args(["manifest.json", "--launch-record", "launch.json"])
