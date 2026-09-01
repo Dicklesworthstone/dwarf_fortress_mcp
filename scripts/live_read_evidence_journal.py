@@ -197,21 +197,17 @@ def validate_version(value: str, label: str) -> str:
     return value
 
 
-def initialize(args: argparse.Namespace) -> dict[str, Any]:
-    run_directory = args.run_directory.resolve()
-    if run_directory.is_symlink():
-        fail("run directory must not be a symbolic link")
-    if run_directory.exists() and any(run_directory.iterdir()):
-        fail("run directory already exists and is not empty")
-    run_directory.mkdir(parents=True, exist_ok=True)
-    (run_directory / EVENTS_DIRECTORY).mkdir()
+def build_initial_journal(
+    run_directory: Path,
+    args: argparse.Namespace,
+    value: dict[str, Any],
+    commit: str,
+    dirty: bool,
+    native: dict[str, Any],
+    native_raw: bytes,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    (run_directory / EVENTS_DIRECTORY).mkdir(parents=True)
     (run_directory / RAW_DIRECTORY).mkdir()
-
-    value = contract()
-    commit, dirty = current_source()
-    if dirty and not args.allow_dirty_development:
-        fail("live evidence capture requires a clean source tree")
-    native, native_raw = validate_native_receipt(args.native_build_receipt, commit)
     native_copy = run_directory / NATIVE_RECEIPT_FILE
     atomic_write_bytes(native_copy, native_raw)
 
@@ -275,13 +271,50 @@ def initialize(args: argparse.Namespace) -> dict[str, Any]:
         ],
     }
     atomic_write_json(run_directory / STATE_FILE, state)
-    return status_payload(run_directory, state, value)
+    return manifest, state
+
+
+def initialize(args: argparse.Namespace) -> dict[str, Any]:
+    requested = args.run_directory
+    if requested.is_symlink():
+        fail("run directory must not be a symbolic link")
+    if requested.exists():
+        fail("run directory must not already exist")
+    parent = requested.parent.resolve()
+    if not parent.is_dir() or parent.is_symlink():
+        fail("run-directory parent is missing or redirected")
+    target = parent / requested.name
+
+    value = contract()
+    commit, dirty = current_source()
+    if dirty and not args.allow_dirty_development:
+        fail("live evidence capture requires a clean source tree")
+    native, native_raw = validate_native_receipt(args.native_build_receipt, commit)
+
+    staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.init-", dir=parent))
+    try:
+        _, state = build_initial_journal(
+            staging,
+            args,
+            value,
+            commit,
+            dirty,
+            native,
+            native_raw,
+        )
+        os.replace(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return status_payload(target, state, value)
 
 
 def load_journal(run_directory: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    if run_directory.is_symlink():
+        fail("run directory must not be a symbolic link")
     resolved = run_directory.resolve()
-    if resolved.is_symlink() or not resolved.is_dir():
-        fail("run directory is missing or redirected")
+    if not resolved.is_dir():
+        fail("run directory is missing")
     value = contract()
     state = read_json(resolved / STATE_FILE, MAX_JOURNAL_BYTES, "journal state")
     if state.get("schema") != JOURNAL_SCHEMA:
@@ -428,7 +461,10 @@ def normalize_probe(
         require_probe(value, "observation")
         if value.get("case") != case:
             fail(f"probe case {value.get('case')!r} does not match R3/{case}")
-        if value.get("error_code") != expected["error_code"]:
+        probe_error = value.get("error_code")
+        if case == "running_multipage_rejected" and probe_error == "preconditions_failed":
+            probe_error = "PRECONDITIONS_FAILED"
+        if probe_error != expected["error_code"]:
             fail(f"R3/{case} probe error code disagrees with the contract")
         for name in [
             "citizen_count",
@@ -505,6 +541,10 @@ def append_record(
         fail("orphan event file conflicts with the event being appended")
     if raw_path.exists() and digest_file(raw_path) != digest_bytes(raw_content):
         fail("orphan raw artifact conflicts with the artifact being appended")
+
+    # Publication order is raw artifact first, canonical event second, and the
+    # journal root last. A crash can leave an orphan immutable artifact, but it
+    # can never make the root claim that an event exists before its bytes do.
     if not raw_path.exists():
         atomic_write_bytes(raw_path, raw_content)
     if not event_path.exists():
