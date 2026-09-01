@@ -283,7 +283,10 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
         with temporary:
             try:
                 _, record = fixture.prepare()
-                environment = launcher.admitted_environment(fixture.environment(), record)
+                ticket_path = fixture.root / "ticket.json"
+                environment = launcher.admitted_environment(
+                    fixture.environment(), record, ticket_path
+                )
                 self.assertEqual(environment["DFMCP_BRIDGE_TOKEN"], "x" * 32)
                 self.assertEqual(
                     environment["DFMCP_COMPATIBILITY_ENTRY_ID"], fixture.entry["entry_id"]
@@ -291,6 +294,9 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                 self.assertEqual(
                     environment["DFMCP_SERVER_RECEIPT_DIGEST"],
                     fixture.normalized["receipt_digest"],
+                )
+                self.assertEqual(
+                    environment["DFMCP_ADMISSION_TICKET"], os.fspath(ticket_path)
                 )
                 self.assertNotIn("x" * 32, json.dumps(record))
             finally:
