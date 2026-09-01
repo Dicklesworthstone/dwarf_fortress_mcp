@@ -32,11 +32,11 @@ class Fixture:
         self.root = root
         self.source_root = root / "source"
         self.source_root.mkdir()
+        repository_root = MODULE_PATH.parents[1]
         self.contract_path = self.source_root / "architecture/live_server_binary_receipt_v1.json"
         self.verifier_path = self.source_root / "scripts/verify_live_server_binary_receipt.py"
         self.contract_path.parent.mkdir(parents=True)
         self.verifier_path.parent.mkdir(parents=True)
-        repository_root = MODULE_PATH.parents[1]
         self.contract_path.write_bytes(
             repository_root.joinpath("architecture/live_server_binary_receipt_v1.json").read_bytes()
         )
@@ -51,32 +51,48 @@ class Fixture:
 
         self.commit = "1" * 40
         self.local_receipt_path = root / "local-qualification.json"
-        self.local_receipt_path.write_text(
-            json.dumps(
-                {
-                    "schema": verifier.LOCAL_RECEIPT_SCHEMA,
-                    "status": "passed",
-                    "source": {"commit": self.commit, "dirty": False},
-                    "gates": [
-                        {"name": "static-contracts", "state": "passed", "detail": None},
-                        {"name": "tests", "state": "passed", "detail": None},
-                    ],
-                },
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        self.write_local_receipt()
         self.binary_path = root / "dwarf-fortress-mcp"
         self.binary_path.write_bytes(b"qualified-fixture-server")
         self.binary_path.chmod(0o700)
         self.receipt_path = root / "server-receipt.json"
         self.write_receipt(self.receipt())
 
+    def local_receipt(self) -> dict[str, Any]:
+        return {
+            "schema": verifier.LOCAL_RECEIPT_SCHEMA,
+            "status": "passed",
+            "started_at": "2026-09-01T00:00:00Z",
+            "finished_at": "2026-09-01T00:01:00Z",
+            "source": {"commit": self.commit, "dirty": False},
+            "host": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+                "python": platform.python_version(),
+            },
+            "toolchain": {"rustc_vv": "rustc fixture", "cargo": "cargo fixture"},
+            "digests": {"fixture": digest("local-fixture-source")},
+            "gates": [
+                {"name": name, "state": "passed", "detail": None}
+                for name in self.contract["source_binding"][
+                    "required_local_qualification_gates"
+                ]
+            ],
+        }
+
+    def write_local_receipt(self, value: dict[str, Any] | None = None) -> None:
+        self.local_receipt_path.write_text(
+            json.dumps(self.local_receipt() if value is None else value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     def source_digests(self) -> dict[str, str]:
         return {
             name: verifier.sha256_file(self.source_root / relative)
-            for name, relative in self.contract["source_binding"]["required_source_digests"].items()
+            for name, relative in self.contract["source_binding"][
+                "required_source_digests"
+            ].items()
         }
 
     def receipt(self) -> dict[str, Any]:
@@ -211,18 +227,38 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
     def test_local_qualification_receipt_mismatch_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
-            local = json.loads(fixture.local_receipt_path.read_text())
+            local = fixture.local_receipt()
             local["source"]["commit"] = "2" * 40
-            fixture.local_receipt_path.write_text(json.dumps(local) + "\n")
+            fixture.write_local_receipt(local)
+            with self.assertRaises(verifier.VerificationError):
+                fixture.verify()
+
+    def test_missing_local_qualification_gate_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            local["gates"].pop()
+            fixture.write_local_receipt(local)
+            fixture.write_receipt(fixture.receipt())
+            with self.assertRaises(verifier.VerificationError):
+                fixture.verify()
+
+    def test_reordered_local_qualification_gate_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            local["gates"][0], local["gates"][1] = local["gates"][1], local["gates"][0]
+            fixture.write_local_receipt(local)
+            fixture.write_receipt(fixture.receipt())
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
     def test_skipped_local_qualification_gate_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
-            local = json.loads(fixture.local_receipt_path.read_text())
+            local = fixture.local_receipt()
             local["gates"][0]["state"] = "skipped"
-            fixture.local_receipt_path.write_text(json.dumps(local) + "\n")
+            fixture.write_local_receipt(local)
             fixture.write_receipt(fixture.receipt())
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
@@ -231,7 +267,7 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
         temporary, fixture = self.fixture()
         with temporary:
             path = fixture.source_root / "crates/dfmcp-mcp/src/live_server.rs"
-            path.write_text("drifted source\n")
+            path.write_text("drifted source\n", encoding="utf-8")
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
