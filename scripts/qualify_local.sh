@@ -16,6 +16,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v git >/dev/null 2>&1 || die "git is required"
+[[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 COMMIT="$(git rev-parse HEAD)"
@@ -101,6 +102,8 @@ receipt={
    'live_adapter_bootstrap':digest(root/'crates/dfmcp-adapter/src/live_bootstrap.rs'),
    'live_world_projection':digest(root/'crates/dfmcp-adapter/src/live_projection.rs'),
    'live_read_adapter':digest(root/'crates/dfmcp-adapter/src/live_adapter.rs'),
+   'live_mcp_crate_root':digest(root/'crates/dfmcp-mcp/src/lib.rs'),
+   'live_mcp_admission':digest(root/'crates/dfmcp-mcp/src/admission.rs'),
    'live_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server.rs'),
    'live_mcp_checker':digest(root/'scripts/check_live_mcp.py'),
    'live_read_stack_checker':digest(root/'scripts/check_live_read_stack.py'),
@@ -132,6 +135,7 @@ receipt={
    'admitted_live_launcher':digest(root/'scripts/serve_admitted_live.py'),
    'admitted_live_launcher_checker':digest(root/'scripts/check_live_server_artifact.py'),
    'admitted_live_launcher_tests':digest(root/'scripts/test_admitted_live_launcher.py'),
+   'live_admission_ticket_tests':digest(root/'scripts/test_live_admission_ticket.py'),
    'dfhack_bridge_checker':digest(root/'scripts/check_dfhack_bridge.py'),
    'dfhack_native_build_harness':digest(root/'scripts/qualify_dfhack_plugin.sh')
  },
@@ -165,7 +169,8 @@ run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guid
 run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibility_registry.py
 run_gate live-compatibility-resolution-tests python3 scripts/test_live_compatibility_resolution.py
 run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binary_receipt.py
-run_gate admitted-live-launcher-tests python3 scripts/test_admitted_live_launcher.py
+run_gate admitted-live-launcher-tests bash -c \
+  'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/check_repository_integrity.py \
@@ -196,6 +201,7 @@ run_gate python-syntax python3 -m py_compile \
   scripts/serve_admitted_live.py \
   scripts/check_live_server_artifact.py \
   scripts/test_admitted_live_launcher.py \
+  scripts/test_live_admission_ticket.py \
   scripts/check_dependency_policy.py
 run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
