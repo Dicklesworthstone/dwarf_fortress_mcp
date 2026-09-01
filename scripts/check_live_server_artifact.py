@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate source-bound server qualification and descriptor-only admitted execution."""
+"""Validate source-bound qualification and mandatory single-use live admission."""
 
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ VERIFIER_PATH = ROOT / "scripts/verify_live_server_binary_receipt.py"
 VERIFIER_TEST_PATH = ROOT / "scripts/test_live_server_binary_receipt.py"
 LAUNCHER_PATH = ROOT / "scripts/serve_admitted_live.py"
 LAUNCHER_TEST_PATH = ROOT / "scripts/test_admitted_live_launcher.py"
+TICKET_TEST_PATH = ROOT / "scripts/test_live_admission_ticket.py"
+MCP_LIB_PATH = ROOT / "crates/dfmcp-mcp/src/lib.rs"
+RUST_ADMISSION_PATH = ROOT / "crates/dfmcp-mcp/src/admission.rs"
 DOC_PATH = ROOT / "docs/LIVE_COMPATIBILITY_ADMISSION.md"
 
 
@@ -119,6 +122,10 @@ def check_launcher() -> None:
         "validate_loader_environment",
         "build_launch_record",
         "prepare_launch",
+        "ensure_private_ticket_directory",
+        "build_admission_ticket",
+        "write_admission_ticket",
+        "remove_admission_ticket",
         "admitted_environment",
         "execute_verified_descriptor",
     ]:
@@ -132,6 +139,12 @@ def check_launcher() -> None:
         "local_qualification_receipt_sha256",
         "owner_uid",
         "authorized_to_exec",
+        "dfmcp.live-admission-ticket/1",
+        ".dfmcp-admission",
+        "DFMCP_ADMISSION_TICKET",
+        "os.getpid()",
+        "os.fstat(opened_binary.descriptor)",
+        "os.urandom(32)",
         "os.execve(opened_binary.descriptor",
         "os.execve not in getattr(os, \"supports_fd\", set())",
         "dynamic-loader override variables are forbidden",
@@ -151,6 +164,53 @@ def check_launcher() -> None:
     ]:
         require(f"def {name}" in tests, f"admitted launcher tests omit {name}")
 
+    ticket_tests = TICKET_TEST_PATH.read_text(encoding="utf-8")
+    require(ticket_tests.count("def test_") >= 5, "admission ticket issuance needs at least five tests")
+    for name in [
+        "test_ticket_fields_and_digest_are_deterministic",
+        "test_ticket_file_and_directory_are_owner_private",
+        "test_admitted_environment_binds_ticket_and_preserves_secret_only_in_environment",
+        "test_permissive_existing_ticket_directory_is_rejected",
+        "test_executable_metadata_drift_is_rejected_before_ticket_issue",
+    ]:
+        require(f"def {name}" in ticket_tests, f"admission ticket tests omit {name}")
+
+
+def check_rust_admission() -> None:
+    source = RUST_ADMISSION_PATH.read_text(encoding="utf-8")
+    library = MCP_LIB_PATH.read_text(encoding="utf-8")
+    for marker in [
+        "dfmcp.live-admission-ticket/1",
+        "DFMCP_ADMISSION_TICKET",
+        "OnceLock<AdmissionProvenance>",
+        "current_exe()",
+        "std::process::id()",
+        "server_binary_device",
+        "server_binary_inode",
+        "server_binary_owner_uid",
+        "remove_file(path)",
+        "mutation_capabilities.is_empty()",
+        "std::process::exit(1)",
+        "valid_ticket_is_consumed_exactly_once",
+        "expired_and_cross_process_tickets_fail_closed",
+        "mutation_capability_and_inode_drift_are_rejected",
+        "permissive_or_symbolic_ticket_paths_are_rejected",
+    ]:
+        require(marker in source, f"Rust live admission is missing marker {marker}")
+    require(source.count("#[test]") >= 4, "Rust live admission needs at least four focused tests")
+    require("pub mod admission;" in library, "dfmcp-mcp does not compile the admission boundary")
+    require("mod live_server;" in library, "raw live server module is not private")
+    require(
+        "pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};"
+        in library,
+        "dfmcp-mcp does not export only the admitted live runner",
+    )
+    require("pub mod live_server;" not in library, "raw live server module remains publicly reachable")
+    require(
+        "pub use live_server::run_live_stdio;" not in library,
+        "raw live server runner remains publicly re-exported",
+    )
+
 
 def check_wiring_and_docs() -> None:
     for relative in ["scripts/verify.sh", "scripts/qualify_local.sh"]:
@@ -159,6 +219,8 @@ def check_wiring_and_docs() -> None:
             "scripts/check_live_server_artifact.py",
             "scripts/test_live_server_binary_receipt.py",
             "scripts/test_admitted_live_launcher.py",
+            "scripts/test_live_admission_ticket.py",
+            "crates/dfmcp-mcp/src/admission.rs",
         ]:
             require(marker in source, f"{relative} omits {marker}")
     documentation = DOC_PATH.read_text(encoding="utf-8")
@@ -170,6 +232,9 @@ def check_wiring_and_docs() -> None:
         "descriptor",
         "dynamic loader",
         "no path fallback",
+        "single-use admission ticket",
+        "process ID",
+        "executable inode",
     ]:
         require(marker.lower() in documentation.lower(), f"admission documentation omits {marker}")
 
@@ -179,11 +244,12 @@ def main() -> int:
         check_contract()
         check_verifier()
         check_launcher()
+        check_rust_admission()
         check_wiring_and_docs()
     except (OSError, SyntaxError, json.JSONDecodeError, ContractError) as exc:
         print(f"live server artifact admission: FAIL: {exc}", file=sys.stderr)
         return 1
-    print("live server artifact admission: PASS (atomic receipt and descriptor-only execution)")
+    print("live server artifact admission: PASS (receipt, ticket, and descriptor-bound execution)")
     return 0
 
 
