@@ -49,6 +49,10 @@ info "Validating the R2-R5 probe, scanner, journal, and evidence contract"
 python3 scripts/check_live_acceptance_contract.py
 ok "Live-read acceptance contract"
 
+info "Validating the agent-facing live capture plan"
+python3 scripts/check_live_capture_plan.py
+ok "Live capture plan"
+
 info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
@@ -58,6 +62,7 @@ python3 scripts/test_repository_integrity.py
 python3 scripts/test_live_read_acceptance.py
 python3 scripts/test_live_read_evidence_journal.py
 python3 scripts/test_scan_live_read_secrets.py
+python3 scripts/test_live_read_capture_guidance.py
 ok "Python contract tests"
 
 info "Checking script syntax"
@@ -71,12 +76,15 @@ python3 -m py_compile \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
   scripts/check_live_acceptance_contract.py \
+  scripts/check_live_capture_plan.py \
   scripts/verify_live_read_acceptance.py \
   scripts/test_live_read_acceptance.py \
   scripts/live_read_evidence_journal.py \
   scripts/test_live_read_evidence_journal.py \
   scripts/scan_live_read_secrets.py \
   scripts/test_scan_live_read_secrets.py \
+  scripts/live_read_capture_guidance.py \
+  scripts/test_live_read_capture_guidance.py \
   scripts/check_dependency_policy.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
