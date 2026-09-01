@@ -30,7 +30,8 @@ The script never installs into a live Dwarf Fortress/DFHack tree. It creates a d
 worktree at an exact DFHack commit, stages bridge/dfhack-plugin under DFHack's documented
 plugins/external/ seam, registers it with add_subdirectory(dfmcp_bridge), builds only the plugin
 target, fingerprints the output, and writes a machine-readable receipt. The receipt also binds
-the exact bridge-authentication and R2-R5 acceptance contracts that later live evidence must use.
+the exact bridge-authentication, probe, journal, scanner, and R2-R5 verification sources that
+later live evidence must use.
 EOF
 }
 
@@ -50,6 +51,7 @@ python3 scripts/check_repository_integrity.py
 python3 scripts/check_dfhack_bridge.py
 python3 scripts/check_bridge_auth_order.py
 python3 scripts/check_live_acceptance_contract.py
+python3 scripts/test_scan_live_read_secrets.py
 
 DFMCP_COMMIT="$(git rev-parse HEAD)"
 DFMCP_DIRTY=false
@@ -248,6 +250,9 @@ receipt={
     'proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
     'cpp':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
     'rust_wire':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
+    'rust_acceptance_probe':digest(root/'crates/dfmcp-adapter/src/dfhack_probe.rs'),
+    'acceptance_probe_binary':digest(root/'crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs'),
+    'acceptance_probe_manifest':digest(root/'crates/dwarf-fortress-mcp/Cargo.toml'),
     'capsule':digest(root/'crates/dfmcp-adapter/src/live_observation.rs'),
     'page_driver':digest(root/'crates/dfmcp-adapter/src/live_session.rs'),
     'static_checker':digest(root/'scripts/check_dfhack_bridge.py'),
@@ -255,6 +260,9 @@ receipt={
     'acceptance_contract':digest(root/'architecture/live_read_acceptance_v1.json'),
     'acceptance_contract_checker':digest(root/'scripts/check_live_acceptance_contract.py'),
     'acceptance_verifier':digest(root/'scripts/verify_live_read_acceptance.py'),
+    'acceptance_journal':digest(root/'scripts/live_read_evidence_journal.py'),
+    'acceptance_secret_scanner':digest(root/'scripts/scan_live_read_secrets.py'),
+    'acceptance_secret_scanner_tests':digest(root/'scripts/test_scan_live_read_secrets.py'),
     'external_registration':digest(Path(os.environ['EXTERNAL_CMAKE'])),
   },
   'logs':{
@@ -268,6 +276,7 @@ receipt={
   'claims_not_established':[
     'successful handshake against a running DFHack process',
     'token rejection matrix',
+    'secret non-disclosure across captured runtime artifacts',
     'read determinism against a disposable fortress',
     'pagination-invariant live capsule identity against a running game',
     'restart and partial-publication fencing against a running game',
