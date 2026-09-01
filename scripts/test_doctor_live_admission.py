@@ -263,9 +263,9 @@ class LiveAdmissionDoctorTests(unittest.TestCase):
                 "entries": [],
             }
             fixture.registry_path.write_text(json.dumps(empty, sort_keys=True) + "\n")
-            floor_sha = hashlib.sha256(fixture.floor_path.read_bytes()).hexdigest()
-            doctor.compatibility_floor.advance_floor(
-                fixture.floor_path, fixture.registry_path, floor_sha
+            fixture.floor_path.unlink()
+            doctor.compatibility_floor.initialize_floor(
+                fixture.floor_path, fixture.registry_path
             )
             report = fixture.diagnose()
             self.assertEqual(report["status"], "not_ready")
