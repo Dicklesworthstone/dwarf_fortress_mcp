@@ -14,7 +14,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMOTION_PATH = ROOT / "scripts/promote_live_compatibility.py"
+NATIVE_GENERATION_PATH = ROOT / "scripts/issue_dfhack_plugin_receipt_v1_1.py"
 DEFAULT_CONTRACT = ROOT / "architecture/live_announcement_acceptance_v1_1.json"
+DEFAULT_NATIVE_CONTRACT = ROOT / "architecture/dfhack_plugin_native_receipt_v1_1.json"
 
 SPEC = importlib.util.spec_from_file_location("promote_live_compatibility", PROMOTION_PATH)
 if SPEC is None or SPEC.loader is None:
@@ -22,6 +24,15 @@ if SPEC is None or SPEC.loader is None:
 promotion = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = promotion
 SPEC.loader.exec_module(promotion)
+
+NATIVE_SPEC = importlib.util.spec_from_file_location(
+    "issue_dfhack_plugin_receipt_v1_1", NATIVE_GENERATION_PATH
+)
+if NATIVE_SPEC is None or NATIVE_SPEC.loader is None:
+    raise RuntimeError("cannot load protocol-1.1 native receipt contract")
+native_generation = importlib.util.module_from_spec(NATIVE_SPEC)
+sys.modules[NATIVE_SPEC.name] = native_generation
+NATIVE_SPEC.loader.exec_module(native_generation)
 
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -202,8 +213,43 @@ def load_contract(path: Path) -> dict[str, Any]:
     }:
         fail("announcement bridge version or method contract drifted")
     authority = require_object(contract.get("authority"), "contract.authority")
-    if authority.get("mode") != "read_only" or authority.get("mutation_capabilities") != []:
+    require_exact_keys(
+        authority,
+        {"mode", "capabilities", "mutation_capabilities"},
+        "contract.authority",
+    )
+    if authority.get("mode") != "read_only":
+        fail("announcement acceptance contract is not read-only")
+    if authority.get("capabilities") != promotion.READ_ONLY_CAPABILITIES:
+        fail("announcement acceptance capability set or order drifted")
+    if authority.get("mutation_capabilities") != []:
         fail("announcement acceptance contract exceeds read-only authority")
+    source_binding = require_object(
+        contract.get("source_binding"), "contract.source_binding"
+    )
+    require_exact_keys(
+        source_binding,
+        {
+            "requires_clean_dfmcp_source",
+            "requires_clean_dfhack_source",
+            "requires_exact_native_receipt_bytes",
+            "requires_same_source_version_platform_for_all_events",
+            "inherits_protocol_1_0_evidence",
+            "baseline_evidence_required_for_promotion",
+        },
+        "contract.source_binding",
+    )
+    if (
+        source_binding.get("requires_clean_dfmcp_source") is not True
+        or source_binding.get("requires_clean_dfhack_source") is not True
+        or source_binding.get("requires_exact_native_receipt_bytes") is not True
+        or source_binding.get("requires_same_source_version_platform_for_all_events")
+        is not True
+        or source_binding.get("inherits_protocol_1_0_evidence") is not False
+        or source_binding.get("baseline_evidence_required_for_promotion")
+        != ["R1", "R2", "R3", "R4", "R5"]
+    ):
+        fail("announcement acceptance source-binding policy drifted")
     event_fields = require_list(contract.get("event_fields"), "contract.event_fields")
     if event_fields != [
         "schema",
@@ -229,6 +275,9 @@ def load_contract(path: Path) -> dict[str, Any]:
         "A6",
     ]:
         fail("announcement acceptance gate order drifted")
+    cases = expected_cases(contract)
+    if len(cases) != int(contract["limits"]["maximum_events"]):
+        fail("announcement acceptance case count and event bound drifted")
     return contract
 
 
@@ -275,19 +324,42 @@ def expected_cases(contract: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]
                 {"case", "required_equals", "required_artifact_digests"},
                 f"contract.{gate_name}.case",
             )
+            require_string(case.get("case"), f"contract.{gate_name}.case.case", 128)
+            require_object(
+                case.get("required_equals"),
+                f"contract.{gate_name}.case.required_equals",
+            )
+            artifact_names = require_list(
+                case.get("required_artifact_digests"),
+                f"contract.{gate_name}.case.required_artifact_digests",
+            )
+            if not artifact_names:
+                fail(f"contract.{gate_name}.case has no required artifact digest")
+            normalized_names = [
+                require_string(
+                    name,
+                    f"contract.{gate_name}.case.required_artifact_digests[]",
+                    128,
+                )
+                for name in artifact_names
+            ]
+            if len(normalized_names) != len(set(normalized_names)):
+                fail(f"contract.{gate_name}.case repeats an artifact name")
             output.append((gate_name, case))
     return output
 
 
 def validate_native_receipt(
     native_receipt_path: Path,
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> tuple[dict[str, Any], str]:
     native, native_file_sha = promotion.read_object_with_digest(
         native_receipt_path,
-        promotion.MAX_JSON_BYTES,
-        "native build receipt",
+        native_generation.MAX_JSON_BYTES,
+        "protocol-1.1 native build receipt",
     )
-    normalized = promotion.validate_native_receipt(native)
+    contract = native_generation.load_contract(native_contract_path)
+    normalized = native_generation.validate_receipt(native, contract)
     return normalized, native_file_sha
 
 
@@ -361,7 +433,7 @@ def validate_events(
         if normalized_source["dfhack_dirty"] is not False:
             fail(f"event[{index}] is not bound to clean DFHack source")
         if normalized_source["native_build_receipt_sha256"] != native_file_sha:
-            fail(f"event[{index}] names different native receipt bytes")
+            fail(f"event[{index}] names different protocol-1.1 native receipt bytes")
         if normalized_source["dfmcp_commit"] != native["source"]["dfmcp_commit"]:
             fail(f"event[{index}] dfmcp commit differs from the native receipt")
         if normalized_source["dfhack_commit"] != native["source"]["dfhack_commit"]:
@@ -393,6 +465,10 @@ def validate_events(
         }
         if normalized_version["bridge"] != "0.2.0" or normalized_version["protocol"] != "1.1":
             fail(f"event[{index}] is not exact bridge 0.2.0 protocol 1.1 evidence")
+        if native["bridge"]["bridge_version"] != normalized_version["bridge"]:
+            fail(f"event[{index}] bridge version differs from the native generation receipt")
+        if native["bridge"]["protocol"] != normalized_version["protocol"]:
+            fail(f"event[{index}] protocol differs from the native generation receipt")
 
         host = require_object(event.get("host"), f"event[{index}].host")
         require_exact_keys(host, {"system", "machine"}, f"event[{index}].host")
@@ -482,9 +558,12 @@ def verify(
     event_stream_path: Path,
     native_receipt_path: Path,
     contract_path: Path,
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> dict[str, Any]:
     contract = load_contract(contract_path)
-    native, native_file_sha = validate_native_receipt(native_receipt_path)
+    native, native_file_sha = validate_native_receipt(
+        native_receipt_path, native_contract_path
+    )
     events, stream_sha = read_event_stream(event_stream_path, contract)
     source, version, host, gates = validate_events(
         events, contract, native, native_file_sha
@@ -518,6 +597,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("events", type=Path)
     parser.add_argument("native_receipt", type=Path)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument("--native-contract", type=Path, default=DEFAULT_NATIVE_CONTRACT)
     parser.add_argument("--output", type=Path)
     return parser.parse_args(argv)
 
@@ -525,7 +605,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        receipt = verify(args.events, args.native_receipt, args.contract)
+        receipt = verify(
+            args.events,
+            args.native_receipt,
+            args.contract,
+            args.native_contract,
+        )
         if args.output is None:
             print(
                 json.dumps(
@@ -537,7 +622,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             promotion.write_atomic(args.output, receipt)
-    except (OSError, promotion.PromotionError, VerificationError) as exc:
+    except (
+        OSError,
+        promotion.PromotionError,
+        native_generation.ReceiptError,
+        VerificationError,
+    ) as exc:
         print(f"live announcement acceptance: FAIL: {exc}", file=sys.stderr)
         return 1
     return 0
