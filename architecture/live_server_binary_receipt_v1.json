@@ -18,6 +18,8 @@
       "live-capture-plan",
       "live-compatibility-registry",
       "live-compatibility-resolution",
+      "live-compatibility-floor",
+      "live-admission-doctor",
       "live-server-artifact-admission",
       "dependency-policy",
       "repository-integrity-tests",
@@ -27,6 +29,8 @@
       "live-capture-guidance-tests",
       "live-compatibility-promotion-tests",
       "live-compatibility-resolution-tests",
+      "live-compatibility-floor-tests",
+      "live-admission-doctor-tests",
       "live-server-binary-qualification-tests",
       "live-server-binary-receipt-tests",
       "admitted-live-launcher-tests",
@@ -47,6 +51,10 @@
       "cargo_lock": "Cargo.lock",
       "workspace_manifest": "Cargo.toml",
       "binary_main": "crates/dwarf-fortress-mcp/src/main.rs",
+      "binary_admission_tests": "crates/dwarf-fortress-mcp/tests/live_admission.rs",
+      "mcp_crate_root": "crates/dfmcp-mcp/src/lib.rs",
+      "mcp_admission": "crates/dfmcp-mcp/src/admission.rs",
+      "mcp_agent_turn": "crates/dfmcp-mcp/src/agent_turn.rs",
       "mcp_live_server": "crates/dfmcp-mcp/src/live_server.rs",
       "adapter_live_connect": "crates/dfmcp-adapter/src/live_connect.rs",
       "adapter_live_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap.rs",
@@ -54,6 +62,14 @@
       "adapter_live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
       "compatibility_registry": "architecture/live_compatibility_registry_v1.json",
       "compatibility_resolver": "scripts/resolve_live_compatibility.py",
+      "compatibility_floor_contract": "architecture/live_compatibility_floor_v1.json",
+      "compatibility_floor": "scripts/live_compatibility_floor.py",
+      "compatibility_floor_checker": "scripts/check_live_compatibility_floor.py",
+      "compatibility_floor_tests": "scripts/test_live_compatibility_floor.py",
+      "admission_doctor_contract": "architecture/live_admission_doctor_v1.json",
+      "admission_doctor": "scripts/doctor_live_admission.py",
+      "admission_doctor_checker": "scripts/check_live_admission_doctor.py",
+      "admission_doctor_tests": "scripts/test_doctor_live_admission.py",
       "artifact_contract": "architecture/live_server_binary_receipt_v1.json",
       "artifact_qualification": "scripts/qualify_live_server_binary.sh",
       "artifact_qualification_tests": "scripts/test_qualify_live_server_binary.py",
@@ -61,7 +77,8 @@
       "artifact_checker": "scripts/check_live_server_artifact.py",
       "artifact_verifier_tests": "scripts/test_live_server_binary_receipt.py",
       "admitted_launcher": "scripts/serve_admitted_live.py",
-      "admitted_launcher_tests": "scripts/test_admitted_live_launcher.py"
+      "admitted_launcher_tests": "scripts/test_admitted_live_launcher.py",
+      "admission_ticket_tests": "scripts/test_live_admission_ticket.py"
     }
   },
   "binary": {
@@ -81,12 +98,13 @@
   "authority": {
     "mode": "authenticated_live_read_only",
     "mutation_capabilities": [],
-    "note": "This receipt qualifies the Rust server artifact only. It grants no bridge or game authority and does not substitute for exact-tuple R1-R5 compatibility admission."
+    "note": "This receipt qualifies the Rust server artifact and its exact local admission machinery only. It grants no bridge or game authority and does not substitute for exact-tuple R1-R5 compatibility admission or monotonic-floor custody."
   },
   "claims_not_established": [
     "successful connection to a running DFHack process",
     "R2-R5 disposable-fort evidence",
     "compatibility with a tuple absent from the exact registry",
+    "presence of a trusted monotonic floor on the deployment host",
     "live mutation correctness",
     "host-compromise resistance",
     "signed release provenance"
