@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 pub mod delta_scanner;
+pub mod dfhack_probe;
 pub mod dfhack_wire;
 /// Compatibility path for callers that imported the first unqualified client
 /// module. It contains no implementation; the audited wire is the sole source.
@@ -31,6 +32,11 @@ pub mod transceiver;
 pub use delta_scanner::{
     ContinuousDeltaStreamer, DirtyChunkTracker, EntityDeltaTracker, EventRingBuffer,
     MAX_EVENT_BUFFER_CAPACITY,
+};
+pub use dfhack_probe::{
+    DfHackProbeClient, MAX_PROBE_FIELD_BYTES, MAX_PROBE_METHODS,
+    MAX_PROBE_TEXT_NOTIFICATION_BYTES, ProbeHandshakeReply, ProbeHandshakeRequest,
+    ProbeObservationReply, ProbeObservationRequest,
 };
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
