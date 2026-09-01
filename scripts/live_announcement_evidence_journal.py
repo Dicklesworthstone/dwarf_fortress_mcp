@@ -20,6 +20,7 @@ from typing import Any, Iterator
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER_PATH = ROOT / "scripts/verify_live_announcement_acceptance.py"
 DEFAULT_ACCEPTANCE = ROOT / "architecture/live_announcement_acceptance_v1_1.json"
+DEFAULT_NATIVE_CONTRACT = ROOT / "architecture/dfhack_plugin_native_receipt_v1_1.json"
 DEFAULT_JOURNAL_CONTRACT = ROOT / "architecture/live_announcement_evidence_journal_v1.json"
 JOURNAL_SCHEMA = "dfmcp.live-announcement-evidence-journal/1"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -44,11 +45,6 @@ class JournalError(ValueError):
 
 def fail(message: str) -> None:
     raise JournalError(message)
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        fail(message)
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -78,7 +74,9 @@ def ensure_path_bound(path: Path, label: str) -> None:
         fail(f"{label} path contains a NUL byte")
 
 
-def stable_regular_bytes(path: Path, maximum: int, label: str) -> tuple[bytes, os.stat_result]:
+def stable_regular_bytes(
+    path: Path, maximum: int, label: str
+) -> tuple[bytes, os.stat_result]:
     ensure_path_bound(path, label)
     if not hasattr(os, "O_NOFOLLOW"):
         fail("this platform cannot enforce no-follow evidence custody")
@@ -110,7 +108,10 @@ def stable_regular_bytes(path: Path, maximum: int, label: str) -> tuple[bytes, o
             before.st_dev != after.st_dev
             or before.st_ino != after.st_ino
             or before.st_size != after.st_size
+            or before.st_mode != after.st_mode
+            or before.st_uid != after.st_uid
             or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
             or total != before.st_size
         ):
             fail(f"{label} changed while being read")
@@ -132,13 +133,30 @@ def owner_private_mode(metadata: os.stat_result, label: str) -> None:
         fail(f"{label} is not owned by root or the effective user")
 
 
+def validate_private_parent(path: Path) -> None:
+    try:
+        metadata = os.lstat(path)
+    except OSError as exc:
+        fail(f"cannot inspect journal parent {path}: {exc}")
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        fail("journal parent must be a real directory, not a symbolic link")
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode != 0o700:
+        fail(f"journal parent must have exact mode 0700, got {mode:04o}")
+    if hasattr(os, "geteuid") and metadata.st_uid not in {0, os.geteuid()}:
+        fail("journal parent is not owned by root or the effective user")
+
+
 def read_private_object(path: Path, label: str) -> tuple[dict[str, Any], str]:
+    validate_private_parent(path.parent)
     raw, metadata = stable_regular_bytes(path, MAX_JOURNAL_BYTES, label)
     owner_private_mode(metadata, label)
     return verifier.parse_object(raw, label), sha256_bytes(raw)
 
 
-def validate_contract_file(path: Path, maximum: int, label: str) -> tuple[dict[str, Any], str]:
+def validate_contract_file(
+    path: Path, maximum: int, label: str
+) -> tuple[dict[str, Any], str]:
     raw, _ = stable_regular_bytes(path, maximum, label)
     return verifier.parse_object(raw, label), sha256_bytes(raw)
 
@@ -163,7 +181,10 @@ def load_journal_contract(path: Path) -> dict[str, Any]:
         },
         "journal_contract",
     )
-    if value.get("schema_version") != "dfmcp.live-announcement-evidence-journal-contract/1":
+    if (
+        value.get("schema_version")
+        != "dfmcp.live-announcement-evidence-journal-contract/1"
+    ):
         fail("journal contract schema is unsupported")
     if value.get("journal_schema") != JOURNAL_SCHEMA:
         fail("journal schema drifted")
@@ -171,8 +192,13 @@ def load_journal_contract(path: Path) -> dict[str, Any]:
         fail("journal contract status drifted")
     if value.get("commands") != ["init", "status", "append", "export"]:
         fail("journal command set or order drifted")
-    authority = verifier.require_object(value.get("authority"), "journal_contract.authority")
-    if authority.get("capabilities_granted") != [] or authority.get("mutation_capabilities") != []:
+    authority = verifier.require_object(
+        value.get("authority"), "journal_contract.authority"
+    )
+    if (
+        authority.get("capabilities_granted") != []
+        or authority.get("mutation_capabilities") != []
+    ):
         fail("journal contract grants authority")
     return value
 
@@ -183,11 +209,15 @@ def journal_digest(value: dict[str, Any]) -> str:
     return sha256_bytes(canonical_json(unsigned))
 
 
-def expected_case_list(contract: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+def expected_case_list(
+    contract: dict[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
     return verifier.expected_cases(contract)
 
 
-def normalized_source(native: dict[str, Any], native_file_sha256: str) -> dict[str, Any]:
+def normalized_source(
+    native: dict[str, Any], native_file_sha256: str
+) -> dict[str, Any]:
     return {
         "dfmcp_commit": native["source"]["dfmcp_commit"],
         "dfmcp_dirty": False,
@@ -206,7 +236,9 @@ def validate_version_tuple(value: dict[str, Any]) -> dict[str, Any]:
     )
     normalized = {
         "dwarf_fortress": verifier.require_string(
-            value.get("dwarf_fortress"), "journal.version_tuple.dwarf_fortress", 128
+            value.get("dwarf_fortress"),
+            "journal.version_tuple.dwarf_fortress",
+            128,
         ),
         "dfhack": verifier.require_string(
             value.get("dfhack"), "journal.version_tuple.dfhack", 128
@@ -226,8 +258,33 @@ def validate_version_tuple(value: dict[str, Any]) -> dict[str, Any]:
 def validate_host(value: dict[str, Any]) -> dict[str, Any]:
     verifier.require_exact_keys(value, {"system", "machine"}, "journal.host")
     return {
-        "system": verifier.require_string(value.get("system"), "journal.host.system", 128),
-        "machine": verifier.require_string(value.get("machine"), "journal.host.machine", 128),
+        "system": verifier.require_string(
+            value.get("system"), "journal.host.system", 128
+        ),
+        "machine": verifier.require_string(
+            value.get("machine"), "journal.host.machine", 128
+        ),
+    }
+
+
+def normalize_event_artifacts(
+    event: dict[str, Any], case: dict[str, Any], index: int
+) -> dict[str, str]:
+    artifacts = verifier.require_object(
+        event.get("artifacts"), f"journal.events[{index}].artifacts"
+    )
+    required_names = list(case["required_artifact_digests"])
+    if len(artifacts) != len(required_names) or set(artifacts) != set(required_names):
+        fail(
+            f"journal event {index} artifact key set differs: "
+            f"expected {required_names}, got {sorted(artifacts)}"
+        )
+    return {
+        name: require_hash(
+            str(artifacts.get(name)),
+            f"journal.events[{index}].artifacts.{name}",
+        )
+        for name in required_names
     }
 
 
@@ -258,22 +315,31 @@ def validate_journal(
         fail("journal schema is unsupported")
     if value.get("status") not in {"capturing", "complete"}:
         fail("journal status is unsupported")
-    if verifier.require_hash(
-        value.get("acceptance_contract_sha256"),
-        "journal.acceptance_contract_sha256",
-    ) != acceptance_contract_sha256:
+    if (
+        verifier.require_hash(
+            value.get("acceptance_contract_sha256"),
+            "journal.acceptance_contract_sha256",
+        )
+        != acceptance_contract_sha256
+    ):
         fail("journal is bound to different acceptance contract bytes")
-    if verifier.require_hash(
-        value.get("native_build_receipt_sha256"),
-        "journal.native_build_receipt_sha256",
-    ) != native_file_sha256:
+    if (
+        verifier.require_hash(
+            value.get("native_build_receipt_sha256"),
+            "journal.native_build_receipt_sha256",
+        )
+        != native_file_sha256
+    ):
         fail("journal is bound to different native receipt bytes")
-    if value.get("source") != normalized_source(native, native_file_sha256):
+    source = normalized_source(native, native_file_sha256)
+    if value.get("source") != source:
         fail("journal source identity differs from the native receipt")
     version = validate_version_tuple(
         verifier.require_object(value.get("version_tuple"), "journal.version_tuple")
     )
-    host = validate_host(verifier.require_object(value.get("host"), "journal.host"))
+    host = validate_host(
+        verifier.require_object(value.get("host"), "journal.host")
+    )
     events = verifier.require_list(value.get("events"), "journal.events")
     cases = expected_case_list(acceptance_contract)
     if len(events) > len(cases):
@@ -284,59 +350,76 @@ def validate_journal(
     expected_status = "complete" if len(events) == len(cases) else "capturing"
     if value.get("status") != expected_status:
         fail(f"journal status must be {expected_status}")
-    if verifier.require_hash(value.get("journal_digest"), "journal.journal_digest") != journal_digest(value):
+    if (
+        verifier.require_hash(value.get("journal_digest"), "journal.journal_digest")
+        != journal_digest(value)
+    ):
         fail("journal digest is not canonical")
 
     normalized_events: list[dict[str, Any]] = []
-    source = normalized_source(native, native_file_sha256)
-    for index, event in enumerate(events, 1):
+    for index, raw_event in enumerate(events, 1):
         gate, case = cases[index - 1]
+        event = verifier.require_object(raw_event, f"journal.events[{index}]")
         verifier.require_exact_keys(
-            verifier.require_object(event, f"journal.events[{index}]") ,
+            event,
             set(acceptance_contract["event_fields"]),
             f"journal.events[{index}]",
         )
         if event.get("schema") != acceptance_contract["event_schema"]:
             fail(f"journal event {index} schema drifted")
-        if event.get("sequence") != index or event.get("gate") != gate or event.get("case") != case["case"]:
+        if (
+            event.get("sequence") != index
+            or event.get("gate") != gate
+            or event.get("case") != case["case"]
+        ):
             fail(f"journal event {index} is out of contract order")
         if event.get("status") != "passed":
             fail(f"journal event {index} is not passed evidence")
-        if event.get("source") != source or event.get("version_tuple") != version or event.get("host") != host:
+        if (
+            event.get("source") != source
+            or event.get("version_tuple") != version
+            or event.get("host") != host
+        ):
             fail(f"journal event {index} crosses source, version, or platform identity")
         assertions = verifier.require_object(
             event.get("assertions"), f"journal.events[{index}].assertions"
         )
         if assertions != case["required_equals"]:
             fail(f"journal event {index} assertions drifted")
-        artifacts = verifier.require_object(
-            event.get("artifacts"), f"journal.events[{index}].artifacts"
-        )
-        if list(artifacts) != case["required_artifact_digests"]:
-            fail(f"journal event {index} artifact order drifted")
-        for name, digest in artifacts.items():
-            require_hash(str(digest), f"journal.events[{index}].artifacts.{name}")
+        artifacts = normalize_event_artifacts(event, case, index)
         evidence_digest = sha256_bytes(
             canonical_json({"assertions": assertions, "artifacts": artifacts})
         )
         if event.get("evidence_digest") != evidence_digest:
             fail(f"journal event {index} evidence digest drifted")
-        normalized_events.append(event)
+        normalized_events.append(
+            {
+                "schema": acceptance_contract["event_schema"],
+                "sequence": index,
+                "gate": gate,
+                "case": case["case"],
+                "status": "passed",
+                "source": source,
+                "version_tuple": version,
+                "host": host,
+                "assertions": assertions,
+                "artifacts": artifacts,
+                "evidence_digest": evidence_digest,
+            }
+        )
     return normalized_events
 
 
 def private_atomic_write(path: Path, value: dict[str, Any]) -> None:
     ensure_path_bound(path, "journal")
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    parent_metadata = path.parent.stat()
-    if not stat.S_ISDIR(parent_metadata.st_mode):
-        fail("journal parent is not a directory")
-    if hasattr(os, "geteuid") and parent_metadata.st_uid not in {0, os.geteuid()}:
-        fail("journal parent is not owned by root or the effective user")
+    validate_private_parent(path.parent)
     payload = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     if len(payload.encode("utf-8")) > MAX_JOURNAL_BYTES:
         fail("journal exceeds its byte bound")
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
     try:
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
@@ -344,7 +427,9 @@ def private_atomic_write(path: Path, value: dict[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        directory = os.open(
+            path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        )
         try:
             os.fsync(directory)
         finally:
@@ -359,21 +444,27 @@ def private_atomic_write(path: Path, value: dict[str, Any]) -> None:
 
 @contextmanager
 def journal_lock(path: Path) -> Iterator[None]:
+    validate_private_parent(path.parent)
     lock = path.with_name(f".{path.name}.lock")
     ensure_path_bound(lock, "journal lock")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(lock, flags, 0o600)
     except FileExistsError:
         fail("announcement evidence journal lock already exists")
+    except OSError as exc:
+        fail(f"cannot create announcement evidence journal lock: {exc}")
     try:
-        os.write(descriptor, f"pid={os.getpid()}\n".encode())
-        os.fsync(descriptor)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(f"pid={os.getpid()}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         yield
     finally:
-        os.close(descriptor)
         try:
             os.unlink(lock)
         except FileNotFoundError:
@@ -389,7 +480,7 @@ def parse_artifact_argument(raw: str) -> tuple[str, str]:
     name, separator, value = raw.partition("=")
     if not separator or not name or not value:
         fail("artifact arguments must have form name=value")
-    if any(character.isspace() or character.iscontrol() for character in name):
+    if any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F for character in name):
         fail("artifact name contains whitespace or a control character")
     return name, value
 
@@ -428,22 +519,27 @@ def initialize(
     dfhack_version: str,
     system: str,
     machine: str,
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> dict[str, Any]:
     if journal_path.exists() or journal_path.is_symlink():
         fail("journal already exists; initialization is exclusive")
     journal_contract = load_journal_contract(journal_contract_path)
     expected_acceptance = journal_contract["acceptance_contract"]
     try:
-        relative_acceptance = acceptance_path.resolve().relative_to(ROOT.resolve()).as_posix()
+        relative_acceptance = (
+            acceptance_path.resolve().relative_to(ROOT.resolve()).as_posix()
+        )
     except ValueError:
         relative_acceptance = ""
     if relative_acceptance and relative_acceptance != expected_acceptance:
         fail("journal contract names a different acceptance contract path")
-    acceptance, acceptance_sha = validate_contract_file(
+    _, acceptance_sha = validate_contract_file(
         acceptance_path, 4 * 1024 * 1024, "acceptance contract"
     )
     acceptance = verifier.load_contract(acceptance_path)
-    native, native_sha = verifier.validate_native_receipt(native_receipt_path)
+    native, native_sha = verifier.validate_native_receipt(
+        native_receipt_path, native_contract_path
+    )
     value: dict[str, Any] = {
         "schema": JOURNAL_SCHEMA,
         "status": "capturing",
@@ -476,18 +572,24 @@ def append_event(
     assertions_path: Path,
     artifact_paths: list[str],
     artifact_hashes: list[str],
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> dict[str, Any]:
     require_hash(expected_journal_sha256, "expected_journal_sha256")
     with journal_lock(journal_path):
-        acceptance, acceptance_sha = validate_contract_file(
+        _, acceptance_sha = validate_contract_file(
             acceptance_path, 4 * 1024 * 1024, "acceptance contract"
         )
         acceptance = verifier.load_contract(acceptance_path)
-        native, native_sha = verifier.validate_native_receipt(native_receipt_path)
-        journal, actual_sha = read_private_object(journal_path, "announcement evidence journal")
+        native, native_sha = verifier.validate_native_receipt(
+            native_receipt_path, native_contract_path
+        )
+        journal, actual_sha = read_private_object(
+            journal_path, "announcement evidence journal"
+        )
         if actual_sha != expected_journal_sha256:
             fail(
-                f"journal compare-and-swap fence failed: expected {expected_journal_sha256}, got {actual_sha}"
+                f"journal compare-and-swap fence failed: "
+                f"expected {expected_journal_sha256}, got {actual_sha}"
             )
         events = validate_journal(
             journal, acceptance, acceptance_sha, native, native_sha
@@ -498,11 +600,11 @@ def append_event(
         gate, case = cases[len(events)]
         assertions = read_assertions(assertions_path)
         if assertions != case["required_equals"]:
-            fail(
-                f"assertions do not satisfy next case {gate}/{case['case']}"
-            )
+            fail(f"assertions do not satisfy next case {gate}/{case['case']}")
         artifacts = resolve_artifacts(
-            list(case["required_artifact_digests"]), artifact_paths, artifact_hashes
+            list(case["required_artifact_digests"]),
+            artifact_paths,
+            artifact_hashes,
         )
         sequence = len(events) + 1
         event = {
@@ -539,18 +641,24 @@ def export_stream(
     acceptance_path: Path,
     expected_journal_sha256: str,
     output_path: Path,
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> dict[str, Any]:
     require_hash(expected_journal_sha256, "expected_journal_sha256")
     with journal_lock(journal_path):
-        acceptance, acceptance_sha = validate_contract_file(
+        _, acceptance_sha = validate_contract_file(
             acceptance_path, 4 * 1024 * 1024, "acceptance contract"
         )
         acceptance = verifier.load_contract(acceptance_path)
-        native, native_sha = verifier.validate_native_receipt(native_receipt_path)
-        journal, actual_sha = read_private_object(journal_path, "announcement evidence journal")
+        native, native_sha = verifier.validate_native_receipt(
+            native_receipt_path, native_contract_path
+        )
+        journal, actual_sha = read_private_object(
+            journal_path, "announcement evidence journal"
+        )
         if actual_sha != expected_journal_sha256:
             fail(
-                f"journal compare-and-swap fence failed: expected {expected_journal_sha256}, got {actual_sha}"
+                f"journal compare-and-swap fence failed: "
+                f"expected {expected_journal_sha256}, got {actual_sha}"
             )
         events = validate_journal(
             journal, acceptance, acceptance_sha, native, native_sha
@@ -561,22 +669,37 @@ def export_stream(
         if output_path.exists() or output_path.is_symlink():
             fail("event stream output already exists; export is create-only")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(output_path, flags, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb", closefd=True) as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            directory = os.open(
+                output_path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except BaseException:
+            try:
+                os.unlink(output_path)
+            except OSError:
+                pass
+            raise
+        receipt = verifier.verify(
             output_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
-            0o600,
+            native_receipt_path,
+            acceptance_path,
+            native_contract_path,
         )
-        try:
-            os.write(descriptor, payload)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        directory = os.open(output_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-        receipt = verifier.verify(output_path, native_receipt_path, acceptance_path)
         return {
             "output": os.fspath(output_path),
             "stream_sha256": sha256_bytes(payload),
@@ -589,14 +712,21 @@ def next_case_status(
     journal_path: Path,
     native_receipt_path: Path,
     acceptance_path: Path,
+    native_contract_path: Path = DEFAULT_NATIVE_CONTRACT,
 ) -> dict[str, Any]:
-    acceptance, acceptance_sha = validate_contract_file(
+    _, acceptance_sha = validate_contract_file(
         acceptance_path, 4 * 1024 * 1024, "acceptance contract"
     )
     acceptance = verifier.load_contract(acceptance_path)
-    native, native_sha = verifier.validate_native_receipt(native_receipt_path)
-    journal, journal_sha = read_private_object(journal_path, "announcement evidence journal")
-    events = validate_journal(journal, acceptance, acceptance_sha, native, native_sha)
+    native, native_sha = verifier.validate_native_receipt(
+        native_receipt_path, native_contract_path
+    )
+    journal, journal_sha = read_private_object(
+        journal_path, "announcement evidence journal"
+    )
+    events = validate_journal(
+        journal, acceptance, acceptance_sha, native, native_sha
+    )
     cases = expected_case_list(acceptance)
     next_case: dict[str, Any] | None = None
     if len(events) < len(cases):
@@ -619,6 +749,15 @@ def next_case_status(
     }
 
 
+def add_common_contract_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--acceptance-contract", type=Path, default=DEFAULT_ACCEPTANCE
+    )
+    parser.add_argument(
+        "--native-contract", type=Path, default=DEFAULT_NATIVE_CONTRACT
+    )
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -626,8 +765,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     init = subparsers.add_parser("init")
     init.add_argument("journal", type=Path)
     init.add_argument("--native-receipt", type=Path, required=True)
-    init.add_argument("--acceptance-contract", type=Path, default=DEFAULT_ACCEPTANCE)
-    init.add_argument("--journal-contract", type=Path, default=DEFAULT_JOURNAL_CONTRACT)
+    add_common_contract_arguments(init)
+    init.add_argument(
+        "--journal-contract", type=Path, default=DEFAULT_JOURNAL_CONTRACT
+    )
     init.add_argument("--df-version", required=True)
     init.add_argument("--dfhack-version", required=True)
     init.add_argument("--system", default=platform.system())
@@ -636,12 +777,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status = subparsers.add_parser("status")
     status.add_argument("journal", type=Path)
     status.add_argument("--native-receipt", type=Path, required=True)
-    status.add_argument("--acceptance-contract", type=Path, default=DEFAULT_ACCEPTANCE)
+    add_common_contract_arguments(status)
 
     append = subparsers.add_parser("append")
     append.add_argument("journal", type=Path)
     append.add_argument("--native-receipt", type=Path, required=True)
-    append.add_argument("--acceptance-contract", type=Path, default=DEFAULT_ACCEPTANCE)
+    add_common_contract_arguments(append)
     append.add_argument("--expected-journal-sha256", required=True)
     append.add_argument("--assertions", type=Path, required=True)
     append.add_argument("--artifact", action="append", default=[])
@@ -651,7 +792,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     export.add_argument("journal", type=Path)
     export.add_argument("output", type=Path)
     export.add_argument("--native-receipt", type=Path, required=True)
-    export.add_argument("--acceptance-contract", type=Path, default=DEFAULT_ACCEPTANCE)
+    add_common_contract_arguments(export)
     export.add_argument("--expected-journal-sha256", required=True)
     return parser.parse_args(argv)
 
@@ -669,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.dfhack_version,
                 args.system,
                 args.machine,
+                args.native_contract,
             )
             result = {
                 "status": value["status"],
@@ -677,7 +819,10 @@ def main(argv: list[str] | None = None) -> int:
             }
         elif args.command == "status":
             result = next_case_status(
-                args.journal, args.native_receipt, args.acceptance_contract
+                args.journal,
+                args.native_receipt,
+                args.acceptance_contract,
+                args.native_contract,
             )
         elif args.command == "append":
             value = append_event(
@@ -688,6 +833,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.assertions,
                 args.artifact,
                 args.artifact_sha256,
+                args.native_contract,
             )
             result = {
                 "status": value["status"],
@@ -702,12 +848,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.acceptance_contract,
                 args.expected_journal_sha256,
                 args.output,
+                args.native_contract,
             )
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     except (
         OSError,
         verifier.VerificationError,
         verifier.promotion.PromotionError,
+        verifier.native_generation.ReceiptError,
         JournalError,
     ) as exc:
         print(f"live announcement evidence journal: FAIL: {exc}", file=sys.stderr)
