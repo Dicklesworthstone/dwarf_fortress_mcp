@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use dfmcp_core::{DfmcpError, Digest32, EntityId, ErrorCode, GameTick, Result};
 use dfmcp_world::{EntityKind, EntityRecord, Fact, FactSource, Value};
 
-use crate::{
-    AnnouncementContinuity, AnnouncementRecord, LiveAnnouncementBatch,
+use crate::live_announcement_batch::{
+    AnnouncementBatchRecord, AnnouncementContinuity, LiveAnnouncementBatch,
 };
 
 const ANNOUNCEMENT_ENTITY_NAMESPACE: u64 = 1u64 << 63;
@@ -145,7 +145,7 @@ pub fn project_live_announcement_batch(
 }
 
 fn announcement_entity(
-    record: &AnnouncementRecord,
+    record: &AnnouncementBatchRecord,
     observed_at: GameTick,
     source_digest: Digest32,
     generation: u32,
@@ -206,7 +206,7 @@ fn announcement_entity(
                 value,
                 observed_at,
                 FactSource::DfhackField(format!(
-                    "dfmcp_bridge.ReadObservation.{source_field}"
+                    "dfmcp_bridge_v1_1.ReadObservation.{source_field}"
                 )),
                 source_digest,
             ),
@@ -224,7 +224,7 @@ fn announcement_entity(
 
 fn validate_entity(
     entity: &EntityRecord,
-    record: &AnnouncementRecord,
+    record: &AnnouncementBatchRecord,
     source_digest: Digest32,
 ) -> Result<()> {
     if entity.kind != EntityKind::Announcement
@@ -281,10 +281,12 @@ fn validate_entity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AnnouncementCoverage, LiveAnnouncementBatch};
+    use crate::live_announcement_batch::{
+        AnnouncementCoverage, LiveAnnouncementBatch,
+    };
 
-    fn record(report_id: i32) -> AnnouncementRecord {
-        AnnouncementRecord {
+    fn record(report_id: i32) -> AnnouncementBatchRecord {
+        AnnouncementBatchRecord {
             report_id,
             report_type: 7,
             text: format!("report-{report_id}"),
