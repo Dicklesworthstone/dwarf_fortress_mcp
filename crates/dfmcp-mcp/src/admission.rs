@@ -3,13 +3,14 @@
 //! Single-use process admission for the authenticated live MCP server.
 //!
 //! The external launcher proves the exact compatibility tuple, monotonic
-//! registry floor, and release binary before `exec`. This module makes that
-//! launcher boundary mandatory for the Rust process: direct `serve-live`
-//! invocation fails closed unless a bounded, owner-private, process-, floor-,
-//! and inode-bound ticket is consumed first. The ticket is an accidental-bypass
-//! and stale-launch fence within the stated same-host threat model; it is not a
-//! defense against a compromised account that can replace the process,
-//! launcher, floor, executable, and ticket together.
+//! registry floor, bridge protocol, and release binary before `exec`. This
+//! module makes that launcher boundary mandatory for the Rust process: direct
+//! `serve-live` invocation fails closed unless a bounded, owner-private,
+//! process-, protocol-, floor-, and inode-bound ticket is consumed first. The
+//! ticket is an accidental-bypass and stale-launch fence within the stated
+//! same-host threat model; it is not a defense against a compromised account
+//! that can replace the process, launcher, floor, executable, and ticket
+//! together.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -29,20 +30,26 @@ use serde_json::{Number, Value};
 use std::os::unix::fs::MetadataExt;
 
 const TICKET_ENVIRONMENT_VARIABLE: &str = "DFMCP_ADMISSION_TICKET";
-const TICKET_SCHEMA: &str = "dfmcp.live-admission-ticket/1";
+const ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT_VARIABLE: &str =
+    "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
+const TICKET_SCHEMA: &str = "dfmcp.live-admission-ticket/2";
 const AUTHORIZED_STATE: &str = "authorized_to_exec";
 const READ_ONLY_MODE: &str = "authenticated_live_read_only";
+const ADMITTED_BRIDGE_PROTOCOL_V1: &str = "1.0";
 const MAX_TICKET_BYTES: u64 = 64 * 1024;
 const MAX_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TICKET_LIFETIME_SECONDS: u64 = 300;
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const REQUIRED_CAPABILITIES: [&str; 4] = ["doctor", "observe", "query", "wait"];
 
+type AdmittedLiveRunner = fn();
+
 static ADMISSION_PROVENANCE: OnceLock<AdmissionProvenance> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdmissionProvenance {
     ticket_id: String,
+    bridge_protocol: String,
     compatibility_entry_id: String,
     compatibility_registry_digest: String,
     compatibility_decision_digest: String,
@@ -58,6 +65,11 @@ impl AdmissionProvenance {
     #[must_use]
     pub fn ticket_id(&self) -> &str {
         &self.ticket_id
+    }
+
+    #[must_use]
+    pub fn bridge_protocol(&self) -> &str {
+        &self.bridge_protocol
     }
 
     #[must_use]
@@ -141,6 +153,7 @@ struct AdmissionTicket {
     process_id: u32,
     created_unix_seconds: u64,
     expires_unix_seconds: u64,
+    bridge_protocol: String,
     compatibility_entry_id: String,
     compatibility_registry_digest: String,
     compatibility_decision_digest: String,
@@ -164,11 +177,21 @@ struct AdmissionTicket {
 struct AdmissionContext<'a> {
     now_unix_seconds: u64,
     process_id: u32,
+    bridge_protocol: &'a str,
     executable_path: &'a Path,
 }
 
 fn invalid(message: impl Into<String>) -> AdmissionError {
     AdmissionError::new(message)
+}
+
+fn admitted_live_runner(protocol: &str) -> Result<AdmittedLiveRunner, AdmissionError> {
+    match protocol {
+        ADMITTED_BRIDGE_PROTOCOL_V1 => Ok(crate::live_server::run_live_stdio),
+        _ => Err(invalid(format!(
+            "bridge protocol {protocol:?} has no admitted production runtime"
+        ))),
+    }
 }
 
 fn validate_hash(value: &str, field: &str) -> Result<(), AdmissionError> {
@@ -188,6 +211,10 @@ fn number(value: u64) -> Value {
 
 fn unsigned_ticket_value(ticket: &AdmissionTicket) -> Value {
     let mut fields = BTreeMap::new();
+    fields.insert(
+        "bridge_protocol".to_owned(),
+        Value::String(ticket.bridge_protocol.clone()),
+    );
     fields.insert(
         "capabilities".to_owned(),
         Value::Array(
@@ -307,6 +334,12 @@ fn validate_ticket_semantics(
     if ticket.mode != READ_ONLY_MODE {
         return Err(invalid("admission ticket does not select read-only live mode"));
     }
+    admitted_live_runner(&ticket.bridge_protocol)?;
+    if ticket.bridge_protocol != context.bridge_protocol {
+        return Err(invalid(
+            "admission ticket bridge protocol differs from the admitted execution environment",
+        ));
+    }
     for (value, field) in [
         (&ticket.ticket_id, "ticket_id"),
         (&ticket.compatibility_entry_id, "compatibility_entry_id"),
@@ -414,9 +447,9 @@ fn validate_private_ticket_path(path: &Path, metadata: &Metadata) -> Result<(), 
             "admission ticket parent must be a real directory, not a symbolic link",
         ));
     }
-    if parent_metadata.mode() & 0o077 != 0 {
+    if parent_metadata.mode() & 0o777 != 0o700 {
         return Err(invalid(
-            "admission ticket directory must deny all group and world permissions",
+            "admission ticket directory must have exact owner-only mode 0700",
         ));
     }
     if parent_metadata.uid() != metadata.uid() {
@@ -612,6 +645,7 @@ fn consume_admission_ticket_at(
     }
     Ok(AdmissionProvenance {
         ticket_id: ticket.ticket_id,
+        bridge_protocol: ticket.bridge_protocol,
         compatibility_entry_id: ticket.compatibility_entry_id,
         compatibility_registry_digest: ticket.compatibility_registry_digest,
         compatibility_decision_digest: ticket.compatibility_decision_digest,
@@ -630,6 +664,13 @@ fn consume_admission_ticket_from_environment() -> Result<AdmissionProvenance, Ad
             "{TICKET_ENVIRONMENT_VARIABLE} is required; start live mode through scripts/serve_admitted_live.py"
         ))
     })?;
+    let bridge_protocol = env::var(ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT_VARIABLE).map_err(
+        |source| {
+            invalid(format!(
+                "{ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT_VARIABLE} is required and must be valid UTF-8: {source}"
+            ))
+        },
+    )?;
     let path = PathBuf::from(raw);
     let now_unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -642,14 +683,23 @@ fn consume_admission_ticket_from_environment() -> Result<AdmissionProvenance, Ad
         &AdmissionContext {
             now_unix_seconds,
             process_id: std::process::id(),
+            bridge_protocol: &bridge_protocol,
             executable_path: &executable_path,
         },
     )
 }
 
-/// Consume the launcher's single-use ticket, then run the private live server.
+/// Consume the launcher's protocol-bound single-use ticket, then run exactly
+/// the private live server named by that ticket.
 pub fn run_live_stdio() {
     let provenance = match consume_admission_ticket_from_environment() {
+        Ok(value) => value,
+        Err(failure) => {
+            eprintln!("admitted live startup: FAIL: {failure}");
+            std::process::exit(1);
+        }
+    };
+    let runner = match admitted_live_runner(provenance.bridge_protocol()) {
         Ok(value) => value,
         Err(failure) => {
             eprintln!("admitted live startup: FAIL: {failure}");
@@ -660,7 +710,7 @@ pub fn run_live_stdio() {
         eprintln!("admitted live startup: FAIL: admission provenance was already initialized");
         std::process::exit(1);
     }
-    crate::live_server::run_live_stdio();
+    runner();
 }
 
 #[cfg(all(test, unix))]
@@ -714,6 +764,7 @@ mod tests {
             process_id: std::process::id(),
             created_unix_seconds: now.saturating_sub(1),
             expires_unix_seconds: now.saturating_add(120),
+            bridge_protocol: ADMITTED_BRIDGE_PROTOCOL_V1.to_owned(),
             compatibility_entry_id: Digest32::of_bytes(b"entry").to_hex(),
             compatibility_registry_digest: Digest32::of_bytes(b"registry").to_hex(),
             compatibility_decision_digest: Digest32::of_bytes(b"decision").to_hex(),
@@ -772,6 +823,7 @@ mod tests {
         AdmissionContext {
             now_unix_seconds: fixture.now,
             process_id: std::process::id(),
+            bridge_protocol: ADMITTED_BRIDGE_PROTOCOL_V1,
             executable_path: &fixture.executable,
         }
     }
@@ -782,6 +834,7 @@ mod tests {
         write_ticket(&fixture.ticket, &ticket)?;
         let provenance = consume_admission_ticket_at(&fixture.ticket, &context(&fixture))?;
         assert_eq!(provenance.ticket_id(), ticket.ticket_id);
+        assert_eq!(provenance.bridge_protocol(), ADMITTED_BRIDGE_PROTOCOL_V1);
         assert_eq!(
             provenance.compatibility_entry_id(),
             ticket.compatibility_entry_id
@@ -792,6 +845,28 @@ mod tests {
         );
         assert_eq!(provenance.compatibility_floor_sequence(), 7);
         assert!(!fixture.ticket.exists());
+        assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn protocol_binding_and_dispatch_are_exact() -> Result<(), Box<dyn Error>> {
+        assert!(admitted_live_runner(ADMITTED_BRIDGE_PROTOCOL_V1).is_ok());
+        assert!(admitted_live_runner("1.1").is_err());
+        let (fixture, mut ticket) = fixture()?;
+        ticket.bridge_protocol = "1.1".to_owned();
+        ticket.ticket_digest = expected_ticket_digest(&ticket)?;
+        write_ticket(&fixture.ticket, &ticket)?;
+        assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_ticket_schema_is_rejected() -> Result<(), Box<dyn Error>> {
+        let (fixture, mut ticket) = fixture()?;
+        ticket.schema = "dfmcp.live-admission-ticket/1".to_owned();
+        ticket.ticket_digest = expected_ticket_digest(&ticket)?;
+        write_ticket(&fixture.ticket, &ticket)?;
         assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
         Ok(())
     }
@@ -850,6 +925,16 @@ mod tests {
         executable.sync_all()?;
         set_permissions(&fixture.executable, std::fs::Permissions::from_mode(0o700))?;
         assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn noncanonical_owner_only_ticket_directory_is_rejected() -> Result<(), Box<dyn Error>> {
+        let (fixture, ticket) = fixture()?;
+        write_ticket(&fixture.ticket, &ticket)?;
+        set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o500))?;
+        assert!(consume_admission_ticket_at(&fixture.ticket, &context(&fixture)).is_err());
+        set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o700))?;
         Ok(())
     }
 
