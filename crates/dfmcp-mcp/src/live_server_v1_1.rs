@@ -31,8 +31,8 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32,
-    EntityId, ErrorCode, FortressId, ObservationCursor, OperationContext,
-    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
+    EntityId, ErrorCode, FortressId, OperationContext, RequestId, Result,
+    RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_world::{
     EntityKind, Fact, FactPresence, QueryOrder, Value as WorldValue,
@@ -101,6 +101,8 @@ const FORBIDDEN_ADMISSION_ENVIRONMENT: [&str; 7] = [
 type LiveMcpSourceV1_1 =
     PrimedLiveSourceV1_1<AuthenticatedLiveSourceV1_1>;
 type LiveMcpAdapterV1_1 = LiveReadAdapterV1_1<LiveMcpSourceV1_1>;
+type LiveSessionHandleV1_1 = Arc<Mutex<LiveSessionV1_1>>;
+type LiveSessionRegistryV1_1 = BTreeMap<SessionId, LiveSessionHandleV1_1>;
 
 struct LiveSessionV1_1 {
     session_id: SessionId,
@@ -157,9 +159,8 @@ impl LiveSessionV1_1 {
     }
 }
 
-static LIVE_SESSIONS_V1_1: LazyLock<
-    Mutex<BTreeMap<SessionId, Arc<Mutex<LiveSessionV1_1>>>>,
-> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static LIVE_SESSIONS_V1_1: LazyLock<Mutex<LiveSessionRegistryV1_1>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static NEXT_LIVE_SESSION_ID_V1_1: LazyLock<Mutex<u128>> =
     LazyLock::new(|| Mutex::new(SESSION_NAMESPACE_PREFIX | 1));
 
@@ -216,7 +217,7 @@ fn validate_development_runtime_environment() -> Result<()> {
     Ok(())
 }
 
-fn sessions() -> Result<MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LiveSessionV1_1>>>>> {
+fn sessions() -> Result<MutexGuard<'static, LiveSessionRegistryV1_1>> {
     LIVE_SESSIONS_V1_1.lock().map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -274,7 +275,7 @@ fn parse_session_id(value: &str) -> Result<SessionId> {
     Ok(SessionId::new(parsed))
 }
 
-fn resolve_session(value: Option<String>) -> Result<Arc<Mutex<LiveSessionV1_1>>> {
+fn resolve_session(value: Option<String>) -> Result<LiveSessionHandleV1_1> {
     let raw = value.ok_or_else(|| {
         error(
             ErrorCode::InvalidRequest,
@@ -291,7 +292,7 @@ fn resolve_session(value: Option<String>) -> Result<Arc<Mutex<LiveSessionV1_1>>>
 }
 
 fn lock_session(
-    session: &Arc<Mutex<LiveSessionV1_1>>,
+    session: &LiveSessionHandleV1_1,
 ) -> Result<MutexGuard<'_, LiveSessionV1_1>> {
     session.lock().map_err(|_| {
         error(
@@ -910,6 +911,7 @@ fn response_byte_limit(session: &LiveSessionV1_1) -> usize {
     byte_budget.min(token_budget)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attach_turn(
     session: &LiveSessionV1_1,
     operation: &str,
@@ -1075,6 +1077,7 @@ fn unbound_error(operation: &str, phase: AgentPhase, failure: &DfmcpError) -> St
         .attach(error_payload(operation, failure))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn session_error(
     session: &LiveSessionV1_1,
     operation: &str,
