@@ -6,7 +6,7 @@ create compatibility evidence or runtime authority.
 ## Current status
 
 **Implemented in source through a separately named, explicitly unadmitted development MCP runtime;
-still unqualified and unadmitted.**
+still unqualified, still unadmitted, and not admitted by the production protocol map.**
 
 The checked-in compatibility registry remains empty. No protocol-1.1 source revision, native plugin
 binary, Dwarf Fortress/DFHack tuple, platform, server binary, monotonic floor, or running process is
@@ -21,12 +21,11 @@ DfmcpBridgeV1_1.proto
 → dfmcp_bridge_v1_1.cpp
 → DfHackRpcClientV1_1
 → LiveObservationSourceV1_1
-→ complete citizen-page assembly
-→ bounded retained-announcement page
-→ transactional multi-page announcement publication
+→ transactional citizen pagination × announcement continuation
 → LiveObservationCapsuleV1_1
-→ combined citizen + announcement projection
+→ combined citizen + announcement world projection
 → LiveReadAdapterV1_1
+→ single-publication bootstrap with primed replay
 → read-only GameAdapter observe/query/doctor surface
 → isolated eleven-tool development MCP server
 ```
@@ -66,9 +65,9 @@ The native bridge:
 The cursor-ahead refusal is important: returning an accepted empty “complete” result for a cursor
 beyond the bridge high-water would create false absence evidence.
 
-## Canonical model and publication
+## Canonical model and transactional publication
 
-`LiveAnnouncementBatch` validates and canonically hashes:
+`LiveAnnouncementBatch` is the **canonical batch** for the retained suffix. It validates and hashes:
 
 - exact observation generation, pause state, clock, and site;
 - requested cursor and retained bounds;
@@ -103,6 +102,25 @@ same observation.
 The canonical ceiling is 512 retained announcements per published capsule. A larger retained suffix
 fails with `budget_exceeded` and an explicit next cursor; it is not silently truncated or published
 as complete.
+
+## Single-publication bootstrap
+
+The old two-read bootstrap shape could derive a fortress identity from one observation and then
+initialize the adapter from a second observation. Protocol 1.1 now uses a **single-publication
+bootstrap**. It acquires one complete combined capsule, derives fortress identity and source digest
+from that capsule, and primes the adapter so bootstrap consumes the same capsule **without another
+underlying bridge read**.
+
+The primed source replays the complete **two-dimensional** request space:
+
+```text
+citizen pagination × announcement continuation
+```
+
+It checks citizen offsets, announcement cursors, page limits, projection policy, source manifest,
+and final world projection. Cursor, projection, or manifest drift fails closed. No bootstrap result
+is admitted merely because replay succeeds; this layer is implemented and tested in source but is
+still unadmitted.
 
 ## Read-only protocol-1.1 adapter
 
@@ -146,11 +164,12 @@ DFMCP_BRIDGE_TOKEN='<32..256-byte loopback secret>' \
 cargo run --locked --bin dfmcp-live-v1-1-dev-server
 ```
 
-This process is an **unadmitted development** runtime. It cannot consume the protocol-1.0
-production admission ticket and refuses every production-admission environment marker, including
-entry, registry, decision, floor, receipt, launch, and ticket identities. Session identifiers use a
-distinct `0x11` high-byte namespace so a protocol-1.0 session handle cannot alias a protocol-1.1
-session.
+This process is an **unadmitted development** runtime. It cannot consume the V2 production admission
+ticket and refuses every production-admission environment marker, including
+`DFMCP_ADMITTED_BRIDGE_PROTOCOL`, entry, registry, decision, floor, receipt, launch, and ticket
+identities. The public `dfmcp-mcp` development wrapper performs the protocol-marker refusal before
+entering the private server. Session identifiers use a distinct `0x11` high-byte namespace so a
+protocol-1.0 session handle cannot alias a protocol-1.1 session.
 
 The runtime preserves the frozen eleven-tool MCP waist. Read-only operations use the protocol-1.1
 adapter; mutation-stage operations stay registered and fail closed. `fortress.query` accepts only
@@ -170,14 +189,24 @@ The Agent Turn also includes exact combined-capsule and announcement-batch refer
 retained-suffix versus historical coverage, bounded announcement attention, and certified-derived
 report-ID changes. Development execution deliberately exposes no production admission provenance.
 
-A future admitted protocol-1.1 runtime requires a new, source-bound server receipt and a separately
-reviewed admission generation. It must not reinterpret this development binary as admitted.
+## Production protocol dispatch
+
+The machine boundary is `architecture/live_admission_ticket_v2.json`. Its production map currently
+contains only protocol `1.0`. The launcher binds the exact bridge protocol from the deployment
+manifest into the launch record, single-use ticket, `DFMCP_ADMITTED_BRIDGE_PROTOCOL` environment,
+Rust admission provenance, Agent Turn provenance, and final runner selection. Both launch and ticket
+digests cover the protocol.
+
+Protocol `1.1`, unknown protocols, a mismatched environment, and legacy V1 tickets fail closed before
+server startup. A future admitted protocol-1.1 runtime requires explicit widening of that production
+map after its full evidence chain; the development binary cannot consume or impersonate the
+protocol-1.0 admission path.
 
 ## Projection and agent semantics
 
 Announcement records become deterministic event entities in the same `WorldSnapshot` as fortress
-and citizens. The projection binds source batch digest, combined capsule digest, bridge generation,
-snapshot anchor, and explicit coverage.
+and citizens. The world projection binds source batch digest, combined capsule digest, bridge
+generation, snapshot anchor, and explicit coverage.
 
 Coverage distinguishes:
 
@@ -203,8 +232,9 @@ architecture/live_announcement_source_qualification_v1_1.json
 
 It binds the exact adapter API/root, V1 and V1.1 bridge source, wire client, batch model, citizen
 assembler, transactional publisher, read-only adapter, projection, briefing, source fence,
-connector, development MCP contract/server/binary/process tests, probe, contracts, checkers, tests,
-and documentation.
+connector, single-publication bootstrap, development MCP contract/server/binary/process tests,
+production admission contract, diagnostic probe, contracts, all specialized checkers, tests, and
+documentation.
 
 A source qualification run must pass repository integrity, protocol checks, contract and acceptance
 tests, development-MCP contract and process tests, Python/shell syntax, locked offline Cargo
@@ -225,10 +255,11 @@ Before protocol 1.1 can be admitted, the same exact source and binary identities
 6. an exact compatibility-registry entry;
 7. deployment-host monotonic-floor advancement;
 8. authority-free artifact preflight;
-9. a fresh protocol-1.1 single-use process admission ticket and descriptor-only launch.
+9. a reviewed production-protocol-map addition and a fresh protocol-bound V2 single-use process
+   ticket followed by descriptor-only launch.
 
-The normal admitted MCP server remains protocol 1.0. The new protocol-1.1 binary is only a bounded
-source and live-evidence surface; it cannot consume or impersonate protocol-1.0 admission state.
+The normal admitted MCP server remains protocol 1.0. The protocol-1.1 binary is only a bounded source
+and live-evidence surface.
 
 ## Explicitly not established
 
