@@ -182,7 +182,7 @@ fn development_opt_in_value(value: Option<&str>) -> Result<()> {
 fn forbidden_admission_environment_name(name: &str) -> bool {
     FORBIDDEN_ADMISSION_ENVIRONMENT.iter().any(|candidate| {
         name == *candidate
-            || (candidate.ends_with('_') && name.starts_with(candidate))
+            || (candidate.ends_with('_') && name.starts_with(*candidate))
     })
 }
 
@@ -250,11 +250,13 @@ fn next_session_id() -> Result<SessionId> {
 
 fn parse_session_id(value: &str) -> Result<SessionId> {
     if value.len() != U128_HEX_ID_BYTES
-        || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
+        })
     {
         return Err(error(
             ErrorCode::InvalidRequest,
-            "session_id must be the 32-character hexadecimal identifier returned by fortress.open_session",
+            "session_id must be the canonical lowercase 32-character hexadecimal identifier returned by fortress.open_session",
         ));
     }
     let parsed = u128::from_str_radix(value, 16).map_err(|_| {
@@ -926,7 +928,12 @@ fn attach_turn(
         .session_id(session.session_id.to_string())
         .turn_id(format!("live-v1-1-turn-{request_id}"))
         .request_id(request_id.to_string())
-        .continuity(continuity, basis.map(anchor_json), None, reset_reason)
+        .continuity(
+            continuity,
+            basis.map(anchor_json),
+            None,
+            reset_reason.clone(),
+        )
         .profile(profile)
         .briefing(briefing_json(session))
         .changes(changes)
@@ -954,6 +961,9 @@ fn attach_turn(
         .briefing(json!({
             "implementation_phase": LIVE_IMPLEMENTATION_PHASE,
             "runtime": "unadmitted_development",
+            "compatibility_admitted": false,
+            "server_artifact_qualified": false,
+            "runtime_admitted": false,
             "read_only": true,
             "response_reduced": true,
         }))
@@ -1351,7 +1361,7 @@ pub fn fortress_open_session(
     };
     let environment_max_citizens = match env_u32(
         "DFMCP_BRIDGE_MAX_CITIZENS",
-        u32::try_from(MAX_CAPSULE_CITIZENS).unwrap_or(u32::MAX),
+        hard_citizens,
         0,
         hard_citizens,
     ) {
@@ -2415,6 +2425,7 @@ mod tests {
         let session = SessionId::new(SESSION_NAMESPACE_PREFIX | 17);
         assert_eq!(parse_session_id(&session.to_string())?, session);
         assert!(parse_session_id("80000000000000000000000000000011").is_err());
+        assert!(parse_session_id("1100000000000000000000000000000A").is_err());
         assert!(parse_session_id("11").is_err());
         assert!(parse_session_id("00000000000000000000000000000000").is_err());
         Ok(())
