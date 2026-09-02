@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+BASE_PROTO = ROOT / "bridge/dfhack-plugin/proto/DfmcpBridge.proto"
+BASE_NATIVE = ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge.cpp"
+BASE_WIRE = ROOT / "crates/dfmcp-adapter/src/dfhack_wire.rs"
+BASE_SESSION = ROOT / "crates/dfmcp-adapter/src/live_session.rs"
 BRIDGE_CONTRACT = ROOT / "architecture/dfhack_read_bridge_v1_1.json"
 PROJECTION_CONTRACT = ROOT / "architecture/live_announcement_projection_v1.json"
 SOURCE_CONTRACT = ROOT / "architecture/live_announcement_source_qualification_v1_1.json"
@@ -41,6 +45,8 @@ RETIRED_PATHS = [
     ROOT / "scripts/check_live_announcement_contract.py",
     ROOT / "scripts/check_live_announcement_stack.py",
     ROOT / "scripts/qualify_live_announcement_generation.sh",
+    ROOT / "crates/dfmcp-adapter/src/live_announcements.rs",
+    ROOT / "crates/dfmcp-adapter/tests/live_announcements.rs",
 ]
 EXPECTED_SOURCE_GATES = [
     "repository-integrity",
@@ -81,12 +87,82 @@ def require_markers(path: Path, markers: list[str]) -> str:
     return source
 
 
+def rpc_comments(source: str) -> list[str]:
+    return re.findall(r"// RPC\s+(\w+)\s*:", source)
+
+
+def check_protocol_isolation() -> None:
+    base_proto = require_markers(
+        BASE_PROTO,
+        [
+            "package dfmcp.bridge.v1;",
+            "// Plugin: dfmcp_bridge",
+            "// RPC Handshake",
+            "// RPC ReadObservation",
+        ],
+    )
+    require(
+        rpc_comments(base_proto) == ["Handshake", "ReadObservation"],
+        "protocol 1.0 protobuf surface is not citizen-only",
+    )
+    for forbidden in ["ReadAnnouncements", "announcement_after_id", "AnnouncementRecord"]:
+        require(forbidden not in base_proto, f"protocol 1.0 protobuf contains {forbidden}")
+
+    base_native = require_markers(
+        BASE_NATIVE,
+        [
+            'DFHACK_PLUGIN("dfmcp_bridge")',
+            "constexpr std::uint32_t PROTOCOL_MINOR = 0;",
+            'constexpr const char *BRIDGE_VERSION = "0.1.0";',
+            'out->add_supported_methods("Handshake")',
+            'out->add_supported_methods("ReadObservation")',
+        ],
+    )
+    for forbidden in [
+        "ReadAnnouncements",
+        "publish_announcements",
+        "df::global::world->status.reports",
+        'add_supported_methods("ReadAnnouncements")',
+    ]:
+        require(forbidden not in base_native, f"protocol 1.0 native plugin contains {forbidden}")
+
+    base_wire = BASE_WIRE.read_text(encoding="utf-8")
+    for forbidden in [
+        "ANNOUNCEMENT_PROTOCOL_MINOR",
+        "ANNOUNCEMENT_METHOD",
+        "ReadAnnouncements",
+        "AnnouncementPage",
+        "read_announcements",
+    ]:
+        require(forbidden not in base_wire, f"protocol 1.0 Rust wire contains {forbidden}")
+
+    base_session = BASE_SESSION.read_text(encoding="utf-8")
+    for forbidden in [
+        "LiveAnnouncementSource",
+        "AnnouncementWindowAssembler",
+        "read_complete_announcement_window",
+    ]:
+        require(forbidden not in base_session, f"protocol 1.0 session driver contains {forbidden}")
+
+    library = ADAPTER_LIB.read_text(encoding="utf-8")
+    for forbidden in [
+        "pub mod live_announcements;",
+        "AnnouncementPage, AnnouncementRecord",
+        "AnnouncementWindowAssembler",
+        "LiveAnnouncementSource",
+        "read_complete_announcement_window",
+    ]:
+        require(forbidden not in library, f"adapter root retains legacy announcement API {forbidden}")
+    for retired in RETIRED_PATHS:
+        require(
+            not retired.exists() and not retired.is_symlink(),
+            f"retired standalone announcement path remains: {retired.relative_to(ROOT)}",
+        )
+
+
 def check_bridge_contract() -> None:
     value = read_json(BRIDGE_CONTRACT)
-    require(
-        value.get("schema_version") == "dfmcp.dfhack_read_bridge/1.1",
-        "bridge schema drifted",
-    )
+    require(value.get("schema_version") == "dfmcp.dfhack_read_bridge/1.1", "bridge schema drifted")
     require(
         value.get("status") == "implemented_unadmitted_live_read_generation",
         "protocol 1.1 must remain implemented but explicitly unadmitted",
@@ -97,14 +173,8 @@ def check_bridge_contract() -> None:
     require(transport.get("plugin_protocol_minor") == 1, "protocol minor drifted")
     require(transport.get("bridge_version") == "0.2.0", "bridge version drifted")
     require(transport.get("plugin") == "dfmcp_bridge_v1_1", "plugin generation drifted")
-    require(
-        transport.get("protobuf_package") == "dfmcp.bridge.v1_1",
-        "protobuf package drifted",
-    )
-    require(
-        value.get("method_manifest") == ["Handshake", "ReadObservation"],
-        "protocol-1.1 method waist widened",
-    )
+    require(transport.get("protobuf_package") == "dfmcp.bridge.v1_1", "protobuf package drifted")
+    require(value.get("method_manifest") == ["Handshake", "ReadObservation"], "method waist widened")
     methods = value.get("methods", [])
     require(isinstance(methods, list), "bridge methods must be an array")
     require(
@@ -117,8 +187,7 @@ def check_bridge_contract() -> None:
     extension = observation.get("announcement_extension", {})
     require(isinstance(extension, dict), "announcement extension must be an object")
     require(
-        extension.get("request_fields")
-        == ["announcement_after_id", "max_announcements"],
+        extension.get("request_fields") == ["announcement_after_id", "max_announcements"],
         "announcement request extension drifted",
     )
     require(
@@ -135,54 +204,37 @@ def check_bridge_contract() -> None:
     )
     compatibility = value.get("compatibility", {})
     require(isinstance(compatibility, dict), "compatibility must be an object")
-    require(
-        compatibility.get("inherits_protocol_1_0_admission") is False,
-        "protocol 1.1 must not inherit protocol 1.0 admission",
-    )
+    require(compatibility.get("inherits_protocol_1_0_admission") is False, "V1.1 inherits V1.0 admission")
     require(
         compatibility.get("method_manifest_alone_does_not_identify_generation") is True,
-        "same method manifest must not collapse protocol generations",
+        "same method manifest collapses protocol generations",
     )
     acceptance = value.get("acceptance", {})
     require(isinstance(acceptance, dict), "acceptance must be an object")
-    require(
-        acceptance.get("current_admission") == "none",
-        "protocol 1.1 is overclaimed as admitted",
-    )
+    require(acceptance.get("current_admission") == "none", "protocol 1.1 is overclaimed as admitted")
     require(
         acceptance.get("baseline_fortress_citizen_campaign_required") is True,
-        "protocol 1.1 must re-execute the baseline fortress/citizen campaign",
+        "protocol 1.1 does not require a fresh baseline campaign",
     )
 
 
 def check_source_contract() -> None:
     value = read_json(SOURCE_CONTRACT)
     require(
-        value.get("schema_version")
-        == "dfmcp.live-announcement-source-qualification-contract/1",
+        value.get("schema_version") == "dfmcp.live-announcement-source-qualification-contract/1",
         "source qualification contract schema drifted",
     )
     require(
         value.get("receipt_schema") == "dfmcp.live-announcement-source-qualification/1",
         "source qualification receipt schema drifted",
     )
-    require(
-        value.get("status") == "normative_source_only_contract",
-        "source qualification contract status drifted",
-    )
+    require(value.get("status") == "normative_source_only_contract", "source contract status drifted")
     require(
         value.get("bridge")
-        == {
-            "plugin": "dfmcp_bridge_v1_1",
-            "bridge_version": "0.2.0",
-            "protocol": "1.1",
-        },
+        == {"plugin": "dfmcp_bridge_v1_1", "bridge_version": "0.2.0", "protocol": "1.1"},
         "source qualification bridge identity drifted",
     )
-    require(
-        value.get("required_gates") == EXPECTED_SOURCE_GATES,
-        "source qualification gate set or order drifted",
-    )
+    require(value.get("required_gates") == EXPECTED_SOURCE_GATES, "source gate set or order drifted")
     expected_sources = {
         "adapter_root": "crates/dfmcp-adapter/src/lib.rs",
         "announcement_batch": "crates/dfmcp-adapter/src/live_announcement_batch.rs",
@@ -195,6 +247,8 @@ def check_source_contract() -> None:
         "announcement_briefing": "crates/dfmcp-adapter/src/live_announcement_briefing.rs",
         "announcement_source_fence": "crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs",
         "announcement_connector": "crates/dfmcp-adapter/src/live_connect_v1_1.rs",
+        "protocol_1_0_proto": "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+        "protocol_1_0_native": "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
         "protocol_1_1_proto": "bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto",
         "protocol_1_1_native": "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp",
         "protocol_contract": "architecture/dfhack_read_bridge_v1_1.json",
@@ -225,28 +279,12 @@ def check_projection_contract() -> None:
         value.get("schema_version") == "dfmcp.live_announcement_projection/1",
         "announcement projection schema drifted",
     )
-    require(
-        value.get("status") == "implemented_source_contract",
-        "projection is not marked as implemented source",
-    )
-    require(
-        value.get("source") == "dfmcp.live-announcement-batch.v1",
-        "projection source identity drifted",
-    )
+    require(value.get("status") == "implemented_source_contract", "projection status drifted")
+    require(value.get("source") == "dfmcp.live-announcement-batch.v1", "projection source drifted")
     coverage = value.get("coverage", {})
-    require(isinstance(coverage, dict), "projection coverage must be an object")
-    require(
-        coverage.get("preserves_gap_before_retained_window") is True,
-        "projection drops gap evidence",
-    )
-    require(
-        coverage.get("preserves_complete_through_latest") is True,
-        "projection drops suffix completeness",
-    )
-    require(
-        coverage.get("may_prove_complete_history") is False,
-        "projection overclaims complete history",
-    )
+    require(coverage.get("preserves_gap_before_retained_window") is True, "projection drops gap evidence")
+    require(coverage.get("preserves_complete_through_latest") is True, "projection drops suffix completeness")
+    require(coverage.get("may_prove_complete_history") is False, "projection overclaims history")
     authority = value.get("authority", {})
     require(authority.get("capabilities_granted") == [], "projection grants capability")
     require(authority.get("mutation_capabilities") == [], "projection grants mutation")
@@ -255,18 +293,13 @@ def check_projection_contract() -> None:
 def check_evidence_contracts() -> None:
     native = read_json(NATIVE_RECEIPT_CONTRACT)
     require(
-        native.get("schema_version")
-        == "dfmcp.dfhack-plugin-native-qualification-contract/1.1",
+        native.get("schema_version") == "dfmcp.dfhack-plugin-native-qualification-contract/1.1",
         "native qualification contract schema drifted",
     )
     bridge = native.get("bridge", {})
-    require(isinstance(bridge, dict), "native bridge contract must be an object")
     require(bridge.get("plugin") == "dfmcp_bridge_v1_1", "native plugin identity drifted")
     require(bridge.get("protocol") == "1.1", "native protocol identity drifted")
-    require(
-        bridge.get("rpc_methods") == ["Handshake", "ReadObservation"],
-        "native RPC waist widened",
-    )
+    require(bridge.get("rpc_methods") == ["Handshake", "ReadObservation"], "native RPC waist widened")
     require(bridge.get("mutation_rpc_methods") == [], "native contract admits mutation")
 
     acceptance = read_json(ACCEPTANCE_CONTRACT)
@@ -287,8 +320,7 @@ def check_evidence_contracts() -> None:
         if isinstance(gate, dict) and isinstance(gate.get("cases"), list)
     )
     require(case_count == 43, "A1-A6 case count drifted")
-    limits = acceptance.get("limits", {})
-    require(limits.get("maximum_events") == case_count, "A1-A6 event bound drifted")
+    require(acceptance.get("limits", {}).get("maximum_events") == case_count, "event bound drifted")
     authority = acceptance.get("authority", {})
     require(
         authority.get("capabilities") == ["doctor", "observe", "query", "wait"],
@@ -298,8 +330,7 @@ def check_evidence_contracts() -> None:
 
     journal = read_json(JOURNAL_CONTRACT)
     require(
-        journal.get("acceptance_contract")
-        == "architecture/live_announcement_acceptance_v1_1.json",
+        journal.get("acceptance_contract") == "architecture/live_announcement_acceptance_v1_1.json",
         "announcement journal names the wrong acceptance contract",
     )
     journal_authority = journal.get("authority", {})
@@ -326,11 +357,7 @@ def check_proto_and_native() -> None:
             "repeated AnnouncementRecord announcements = 25;",
         ],
     )
-    require(
-        re.findall(r"// RPC\s+(\w+)\s*:", proto)
-        == ["Handshake", "ReadObservation"],
-        "protocol-1.1 protobuf RPC surface widened",
-    )
+    require(rpc_comments(proto) == ["Handshake", "ReadObservation"], "V1.1 protobuf RPC waist widened")
     require("ReadAnnouncements" not in proto, "standalone announcement RPC returned to V1.1")
 
     native = require_markers(
@@ -395,7 +422,10 @@ def check_rust_stack() -> None:
         ],
     )
     require(wire.count("#[test]") >= 11, "announcement extension wire needs eleven tests")
-    require("use crate::{\n    AnnouncementContinuity" not in wire, "wire imports legacy announcement record")
+    require(
+        "use crate::live_announcement_batch" in wire,
+        "announcement wire is not bound to the canonical batch module",
+    )
 
     client = require_markers(
         CLIENT,
@@ -420,11 +450,11 @@ def check_rust_stack() -> None:
         [
             "pub struct LiveObservationCapsuleV1_1",
             "pub struct ObservationAssemblerV1_1",
-            "announcement_fields_identical_across_pages",
+            "announcement_drift_between_pages_is_transactionally_rejected",
             "protocol-1.1 citizen and announcement evidence describe different observation instants",
         ],
     )
-    require(capsule.count("#[test]") >= 5, "protocol-1.1 capsule needs focused tests")
+    require(capsule.count("#[test]") >= 6, "protocol-1.1 capsule needs focused tests")
 
     driver = require_markers(
         DRIVER,
@@ -442,7 +472,7 @@ def check_rust_stack() -> None:
         [
             "pub struct FencedLiveSourceV1_1",
             "protocol-1.1 live source is permanently fenced after failure",
-            "poisons_after_first_failed_read",
+            "first_failure_permanently_fences_the_transport",
         ],
     )
     require(fence.count("#[test]") >= 3, "protocol-1.1 fence needs focused tests")
@@ -463,7 +493,7 @@ def check_rust_stack() -> None:
             "AnnouncementBatchRecord",
             "pub struct LiveAnnouncementProjection",
             "pub fn project_live_announcement_batch",
-            "announcement entity namespace collided",
+            "announcement projection produced a duplicate entity ID",
             "retained_window_gap_survives_projection",
         ],
     )
@@ -513,6 +543,7 @@ def check_rust_stack() -> None:
         "AnnouncementBatchRecord",
         "AnnouncementReplyContext",
         "LiveAnnouncementBatch",
+        "MAX_ANNOUNCEMENT_TEXT_BYTES",
         "BridgeCredentialsV1_1",
         "DfHackRpcClientV1_1",
         "FencedLiveSourceV1_1",
@@ -522,7 +553,7 @@ def check_rust_stack() -> None:
         "project_live_capsule_v1_1",
         "build_live_announcement_briefing",
     ]:
-        require(exported in library, f"adapter root omits protocol-1.1 export {exported}")
+        require(exported in library, f"adapter root omits V1.1 export {exported}")
 
     probe = require_markers(
         PROBE,
@@ -575,18 +606,14 @@ def check_qualification_and_docs() -> None:
         "diagnostic probe",
         "a1-a6",
         "mutation",
+        "standalone `readannouncements`",
     ]:
         require(marker in status, f"announcement implementation status omits {marker}")
-
-    for retired in RETIRED_PATHS:
-        require(
-            not retired.exists() and not retired.is_symlink(),
-            f"retired standalone announcement design remains: {retired.relative_to(ROOT)}",
-        )
 
 
 def main() -> int:
     try:
+        check_protocol_isolation()
         check_bridge_contract()
         check_source_contract()
         check_projection_contract()
@@ -599,7 +626,7 @@ def main() -> int:
         return 1
     print(
         "live announcement contract: PASS "
-        "(integrated protocol 1.1 is bounded, read-only, isolated, and explicitly unadmitted)"
+        "(protocol 1.0 isolated; integrated 1.1 bounded, read-only, and unadmitted)"
     )
     return 0
 
