@@ -195,7 +195,7 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         return temporary, Fixture(Path(temporary.name))
 
-    def test_exact_admitted_chain_binds_floor_inode_and_receipts(self) -> None:
+    def test_exact_admitted_chain_binds_protocol_floor_inode_and_receipts(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
@@ -203,7 +203,13 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                 floor_value, floor_file_sha256 = launcher.compatibility_floor.read_floor(
                     fixture.floor_path
                 )
+                self.assertEqual(record["schema"], launcher.LAUNCH_SCHEMA)
                 self.assertEqual(record["state"], "authorized_to_exec")
+                self.assertEqual(record["bridge_protocol"], "1.0")
+                self.assertEqual(
+                    record["bridge_protocol"],
+                    record["deployment_manifest"]["version_tuple"]["protocol"],
+                )
                 self.assertEqual(record["compatibility_entry_id"], fixture.entry["entry_id"])
                 self.assertEqual(record["required_entry_id"], fixture.entry["entry_id"])
                 self.assertEqual(
@@ -291,6 +297,33 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                     )
             self.assertEqual(fixture.opened_descriptors, [])
 
+    def test_unadmitted_protocol_is_rejected_before_binary_verification(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            manifest = deployment_manifest()
+            manifest["version_tuple"]["protocol"] = "1.1"
+            fixture.manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+            with self.assertRaises(
+                (launcher.LaunchError, launcher.resolver.ResolutionError)
+            ):
+                fixture.prepare()
+            self.assertEqual(fixture.opened_descriptors, [])
+            with self.assertRaises(launcher.LaunchError):
+                launcher.validate_admitted_bridge_protocol(
+                    "1.1", "test.bridge_protocol"
+                )
+
+    def test_launch_protocol_mismatch_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                _, record = fixture.prepare()
+                record["deployment_manifest"]["version_tuple"]["protocol"] = "1.1"
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.launch_bridge_protocol(record)
+            finally:
+                fixture.close_all()
+
     def test_server_receipt_source_mismatch_closes_opened_descriptor(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
@@ -346,7 +379,7 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
             finally:
                 fixture.close_all()
 
-    def test_admitted_environment_contains_floor_and_receipt_bindings(self) -> None:
+    def test_admitted_environment_contains_protocol_floor_and_receipt_bindings(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
@@ -356,6 +389,9 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
                     fixture.environment(), record, ticket_path
                 )
                 self.assertEqual(environment["DFMCP_BRIDGE_TOKEN"], "x" * 32)
+                self.assertEqual(
+                    environment[launcher.ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT], "1.0"
+                )
                 self.assertEqual(
                     environment["DFMCP_COMPATIBILITY_ENTRY_ID"], fixture.entry["entry_id"]
                 )
@@ -382,10 +418,13 @@ class AdmittedLiveLauncherTests(unittest.TestCase):
         with temporary:
             try:
                 opened, record = fixture.prepare()
+                environment = launcher.admitted_environment(
+                    fixture.environment(), record, fixture.root / "ticket.json"
+                )
                 with mock.patch.object(launcher.os, "supports_fd", set()):
                     with self.assertRaises(launcher.LaunchError):
                         launcher.execute_verified_descriptor(
-                            opened, fixture.environment(), record
+                            opened, environment, record
                         )
             finally:
                 fixture.close_all()
