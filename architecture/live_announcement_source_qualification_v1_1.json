@@ -28,7 +28,7 @@
     "adapter_manifest": "crates/dfmcp-adapter/Cargo.toml",
     "adapter_api": "crates/dfmcp-adapter/src/api.rs",
     "adapter_root": "crates/dfmcp-adapter/src/lib.rs",
-    "announcement_model": "crates/dfmcp-adapter/src/live_announcements.rs",
+    "announcement_batch": "crates/dfmcp-adapter/src/live_announcement_batch.rs",
     "announcement_wire": "crates/dfmcp-adapter/src/announcement_wire.rs",
     "announcement_client": "crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs",
     "announcement_capsule": "crates/dfmcp-adapter/src/live_observation_v1_1.rs",
