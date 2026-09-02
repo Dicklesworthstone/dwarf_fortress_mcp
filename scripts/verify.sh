@@ -95,6 +95,7 @@ python3 scripts/test_read_stable_repository_file_loader.py
 python3 scripts/test_source_bundle.py
 python3 scripts/test_source_bundle_output_location.py
 python3 scripts/test_live_announcement_contract.py
+python3 scripts/test_live_mcp_v1_1.py
 python3 scripts/test_live_announcement_acceptance.py
 python3 scripts/test_live_announcement_evidence_journal.py
 python3 scripts/test_dfhack_plugin_receipt_v1_1.py
@@ -128,7 +129,12 @@ python3 -m py_compile \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_announcements.py \
+  scripts/check_live_announcements_core.py \
+  scripts/check_live_announcement_publication.py \
+  scripts/check_live_announcement_bootstrap.py \
   scripts/test_live_announcement_contract.py \
+  scripts/check_live_mcp_v1_1.py \
+  scripts/test_live_mcp_v1_1.py \
   scripts/verify_live_announcement_acceptance.py \
   scripts/test_live_announcement_acceptance.py \
   scripts/live_announcement_evidence_journal.py \
