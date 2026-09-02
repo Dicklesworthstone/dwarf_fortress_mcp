@@ -33,6 +33,8 @@
     "announcement_client": "crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs",
     "announcement_capsule": "crates/dfmcp-adapter/src/live_observation_v1_1.rs",
     "announcement_driver": "crates/dfmcp-adapter/src/live_session_v1_1.rs",
+    "announcement_publication": "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs",
+    "announcement_adapter": "crates/dfmcp-adapter/src/live_adapter_v1_1.rs",
     "announcement_projection": "crates/dfmcp-adapter/src/live_announcement_projection.rs",
     "combined_projection": "crates/dfmcp-adapter/src/live_projection_v1_1.rs",
     "announcement_briefing": "crates/dfmcp-adapter/src/live_announcement_briefing.rs",
@@ -49,6 +51,7 @@
     "acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
     "source_qualification_contract": "architecture/live_announcement_source_qualification_v1_1.json",
     "contract_checker": "scripts/check_live_announcements.py",
+    "publication_checker": "scripts/check_live_announcement_publication.py",
     "contract_checker_tests": "scripts/test_live_announcement_contract.py",
     "acceptance_verifier": "scripts/verify_live_announcement_acceptance.py",
     "acceptance_verifier_tests": "scripts/test_live_announcement_acceptance.py",
@@ -66,7 +69,8 @@
   "claims_established": [
     "the exact clean source revision passed the required static and Rust gates",
     "the protocol-1.0 source files remained part of the source-bound digest set",
-    "the protocol-1.1 diagnostic probe compiled and rendered help"
+    "the protocol-1.1 diagnostic probe compiled and rendered help",
+    "transactional protocol-1.1 publication and the read-only GameAdapter passed their source gates"
   ],
   "claims_not_established": [
     "the protocol-1.1 native plugin builds against a named DFHack revision",
