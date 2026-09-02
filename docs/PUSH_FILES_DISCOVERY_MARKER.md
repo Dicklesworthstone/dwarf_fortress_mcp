@@ -1,1 +1,0 @@
-This marker should be removed before closeout.
