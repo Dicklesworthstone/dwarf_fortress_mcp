@@ -182,6 +182,18 @@ impl AnnouncementCoverage {
                 "announcement retained bounds must use the same empty sentinel",
             ));
         }
+        if retained_empty && self.requested_after_id != -1 {
+            return Err(error(
+                ErrorCode::CursorGap,
+                "announcement cursor is ahead of an empty retained report window",
+            ));
+        }
+        if !retained_empty && self.requested_after_id > self.latest_available_id {
+            return Err(error(
+                ErrorCode::CursorGap,
+                "announcement cursor is ahead of the retained report high-water mark",
+            ));
+        }
         if usize::try_from(self.returned).ok() != Some(records.len()) {
             return Err(error(
                 ErrorCode::AdapterRejected,
@@ -584,6 +596,47 @@ mod tests {
             Vec::new(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cursor_ahead_of_retained_high_water_is_rejected() {
+        let retained = LiveAnnouncementBatch::new(
+            42,
+            true,
+            105,
+            12_345,
+            7,
+            AnnouncementCoverage {
+                requested_after_id: 12,
+                oldest_available_id: 1,
+                latest_available_id: 11,
+                returned: 0,
+                complete_through_latest: true,
+                continuity: AnnouncementContinuity::CompleteSuffix,
+                next_after_id: 12,
+            },
+            Vec::new(),
+        );
+        assert!(retained.is_err());
+
+        let empty = LiveAnnouncementBatch::new(
+            42,
+            true,
+            105,
+            12_345,
+            7,
+            AnnouncementCoverage {
+                requested_after_id: 0,
+                oldest_available_id: -1,
+                latest_available_id: -1,
+                returned: 0,
+                complete_through_latest: true,
+                continuity: AnnouncementContinuity::CompleteSuffix,
+                next_after_id: 0,
+            },
+            Vec::new(),
+        );
+        assert!(empty.is_err());
     }
 
     #[test]
