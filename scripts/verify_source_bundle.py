@@ -26,7 +26,10 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_STRING_BYTES = 16 * 1024
 MAX_DEPTH = 64
-MAX_COLLECTION_ITEMS = 131072
+MAX_COLLECTION_ITEMS = 131_072
+MAX_GIT_ENTRIES = 65_536
+MAX_GIT_ENTRY_BYTES = 64 * 1024 * 1024
+MAX_GIT_CONTENT_BYTES = 512 * 1024 * 1024
 ALLOWED_MODES = {"100644", "100755"}
 CLAIMS_NOT_ESTABLISHED = [
     "successful compilation",
@@ -239,13 +242,15 @@ def load_contract(path: Path) -> dict[str, Any]:
         fail("source bundle archive format drifted")
     if archive.get("hash_algorithm") != "sha256":
         fail("source bundle hash algorithm drifted")
-    for field in [
-        "maximum_bytes",
-        "maximum_entries",
-        "maximum_entry_bytes",
-        "maximum_total_content_bytes",
-    ]:
-        require_positive_int(archive.get(field), f"contract.archive.{field}")
+    expected_limits = {
+        "maximum_bytes": 268_435_456,
+        "maximum_entries": MAX_GIT_ENTRIES,
+        "maximum_entry_bytes": MAX_GIT_ENTRY_BYTES,
+        "maximum_total_content_bytes": MAX_GIT_CONTENT_BYTES,
+    }
+    for field, expected in expected_limits.items():
+        if require_positive_int(archive.get(field), f"contract.archive.{field}") != expected:
+            fail(f"source bundle {field} drifted")
     if archive.get("required_prefix") != "dwarf_fortress_mcp-<40-hex-commit>/":
         fail("source bundle required prefix drifted")
     if archive.get("allowed_entry_types") != ["directory", "regular_file"]:
@@ -485,27 +490,49 @@ def validate_manifest(
     )
 
 
-def validate_tar_member_name(name: str, prefix: str) -> tuple[str, bool]:
+def validate_tar_member_name(name: str, prefix: str) -> str:
     if not name or len(name.encode("utf-8")) > 8192:
         fail("source archive contains an empty or overlong member path")
     if "\\" in name or name.startswith("/") or "//" in name:
         fail(f"source archive member path is not canonical: {name!r}")
     if any(ord(character) < 0x20 for character in name):
         fail("source archive member path contains a control character")
-    parts = PurePosixPath(name).parts
-    if any(part in {"", ".", ".."} for part in parts):
-        fail(f"source archive member path contains dot or parent traversal: {name!r}")
-    if not name.startswith(prefix):
+    normalized = name[:-1] if name.endswith("/") else name
+    prefix_root = prefix.rstrip("/")
+    if normalized == prefix_root:
+        return ""
+    if not normalized.startswith(prefix):
         fail(f"source archive member lies outside the required prefix: {name!r}")
-    if name == prefix.rstrip("/") or name == prefix:
-        return "", True
-    relative = name[len(prefix) :]
-    is_directory_syntax = relative.endswith("/")
-    relative = relative.rstrip("/")
+    relative = normalized[len(prefix) :]
     if not relative:
-        return "", True
-    validate_relative_path(relative, "source_archive.member.relative_path")
-    return relative, is_directory_syntax
+        return ""
+    return validate_relative_path(relative, "source_archive.member.relative_path")
+
+
+def expected_archive_members(manifest: dict[str, Any]) -> list[tuple[str, str]]:
+    directories = {""}
+    for entry in manifest["entries"]:
+        parts = PurePosixPath(entry["path"]).parts
+        for length in range(1, len(parts)):
+            directories.add("/".join(parts[:length]))
+    members = [(path, "directory") for path in directories]
+    members.extend((entry["path"], "regular_file") for entry in manifest["entries"])
+    members.sort(key=lambda item: item[0].encode("utf-8"))
+    return members
+
+
+def validate_pax_headers(
+    headers: dict[str, str],
+    commit: str,
+    member_name: str | None,
+) -> None:
+    allowed = {"comment"} if member_name is None else {"comment", "path"}
+    if set(headers) - allowed:
+        fail("source archive contains unsupported PAX metadata")
+    if headers.get("comment") != commit:
+        fail("source archive PAX comment is not the exact commit identity")
+    if "path" in headers and headers["path"] != member_name:
+        fail("source archive PAX path differs from the decoded member name")
 
 
 def verify_archive(
@@ -531,9 +558,7 @@ def verify_archive(
         fail("source archive SHA-256 differs from the manifest")
 
     expected_entries = {entry["path"]: entry for entry in manifest["entries"]}
-    observed_files: set[str] = set()
-    observed_member_names: set[str] = set()
-    observed_directories: set[str] = set()
+    expected_members = expected_archive_members(manifest)
     maximum_entries = require_positive_int(
         contract["archive"]["maximum_entries"],
         "contract.archive.maximum_entries",
@@ -546,8 +571,13 @@ def verify_archive(
         contract["archive"]["maximum_total_content_bytes"],
         "contract.archive.maximum_total_content_bytes",
     )
+    if len(expected_members) > maximum_entries:
+        fail("source archive's canonical directory/file set exceeds the member-count bound")
+
+    observed_members: list[tuple[str, str]] = []
+    observed_semantic_paths: set[tuple[str, str]] = set()
     total_content_bytes = 0
-    member_count = 0
+    common_mtime: int | None = None
     prefix = manifest["archive"]["prefix"]
 
     try:
@@ -555,15 +585,12 @@ def verify_archive(
     except tarfile.TarError as exc:
         fail(f"cannot parse source archive: {exc}")
     with archive:
+        validate_pax_headers(archive.pax_headers, manifest["commit"], None)
         try:
-            for member in archive:
-                member_count += 1
-                if member_count > maximum_entries:
+            for member_index, member in enumerate(archive):
+                if member_index >= maximum_entries:
                     fail("source archive exceeds the member-count bound")
-                if member.name in observed_member_names:
-                    fail(f"source archive repeats member path {member.name!r}")
-                observed_member_names.add(member.name)
-                relative, directory_syntax = validate_tar_member_name(member.name, prefix)
+                relative = validate_tar_member_name(member.name, prefix)
                 if member.issym():
                     fail(f"source archive contains symbolic link {member.name!r}")
                 if member.islnk():
@@ -571,39 +598,65 @@ def verify_archive(
                 if member.isdev() or member.isfifo():
                     fail(f"source archive contains special file {member.name!r}")
                 if member.isdir():
-                    if not directory_syntax and relative:
-                        fail(f"source archive directory lacks canonical trailing slash: {member.name!r}")
-                    observed_directories.add(relative)
-                    continue
-                if not member.isfile():
+                    kind = "directory"
+                elif member.isfile():
+                    kind = "regular_file"
+                else:
                     fail(f"source archive contains unsupported member type {member.name!r}")
-                if directory_syntax or not relative:
-                    fail(f"source archive regular file has invalid path {member.name!r}")
+                semantic_key = (relative, kind)
+                if semantic_key in observed_semantic_paths:
+                    fail(f"source archive repeats canonical member {relative!r} ({kind})")
+                observed_semantic_paths.add(semantic_key)
+                observed_members.append(semantic_key)
+
+                validate_pax_headers(member.pax_headers, manifest["commit"], member.name)
+                if member.uid != 0 or member.gid != 0:
+                    fail(f"source archive member {member.name!r} has nonzero owner IDs")
+                if member.uname != "root" or member.gname != "root":
+                    fail(f"source archive member {member.name!r} has noncanonical owner names")
+                if member.linkname:
+                    fail(f"source archive member {member.name!r} has a nonempty link target")
+                if member.devmajor != 0 or member.devminor != 0:
+                    fail(f"source archive member {member.name!r} has nonzero device metadata")
+                if isinstance(member.mtime, bool) or not isinstance(member.mtime, int) or member.mtime < 0:
+                    fail(f"source archive member {member.name!r} has invalid modification time")
+                if common_mtime is None:
+                    common_mtime = member.mtime
+                elif member.mtime != common_mtime:
+                    fail("source archive members do not share one deterministic commit time")
+
+                if kind == "directory":
+                    if member.mode != 0o755 or member.size != 0:
+                        fail(f"source archive directory {member.name!r} has noncanonical metadata")
+                    continue
+
                 expected = expected_entries.get(relative)
                 if expected is None:
                     fail(f"source archive contains unmanifested file {relative!r}")
-                if relative in observed_files:
-                    fail(f"source archive repeats file {relative!r}")
                 if member.size < 0 or member.size > maximum_entry_bytes:
                     fail(f"source archive member {relative!r} exceeds its size bound")
                 if member.size != expected["bytes"]:
                     fail(f"source archive member {relative!r} size differs from the manifest")
                 expected_mode = 0o755 if expected["mode"] == "100755" else 0o644
-                if member.mode & 0o777 != expected_mode:
+                if member.mode != expected_mode:
                     fail(f"source archive member {relative!r} mode differs from the manifest")
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     fail(f"cannot read source archive member {relative!r}")
                 digest = hashlib.sha256()
                 read_bytes = 0
-                while True:
-                    chunk = extracted.read(min(1024 * 1024, maximum_entry_bytes + 1 - read_bytes))
-                    if not chunk:
-                        break
-                    read_bytes += len(chunk)
-                    if read_bytes > maximum_entry_bytes:
-                        fail(f"source archive member {relative!r} grew beyond its bound")
-                    digest.update(chunk)
+                with extracted:
+                    while True:
+                        remaining = maximum_entry_bytes + 1 - read_bytes
+                        if remaining <= 0:
+                            fail(f"source archive member {relative!r} grew beyond its bound")
+                        chunk = extracted.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        read_bytes += len(chunk)
+                        if read_bytes > maximum_entry_bytes:
+                            fail(f"source archive member {relative!r} grew beyond its bound")
+                        digest.update(chunk)
                 if read_bytes != member.size:
                     fail(f"source archive member {relative!r} ended at the wrong length")
                 if digest.hexdigest() != expected["sha256"]:
@@ -611,25 +664,23 @@ def verify_archive(
                 total_content_bytes += read_bytes
                 if total_content_bytes > maximum_total_bytes:
                     fail("source archive exceeds the total content-byte bound")
-                observed_files.add(relative)
         except (tarfile.TarError, OSError) as exc:
             fail(f"cannot read source archive: {exc}")
+        archive_end = archive.offset
 
-    missing = sorted(set(expected_entries) - observed_files)
-    if missing:
-        fail("source archive omits manifested files: " + ", ".join(missing[:16]))
-    for directory in observed_directories:
-        if not directory:
-            continue
-        prefix_path = directory + "/"
-        if not any(path.startswith(prefix_path) for path in expected_entries):
-            fail(f"source archive contains orphan directory {directory!r}")
+    if observed_members != expected_members:
+        fail(
+            "source archive member order or canonical directory/file set differs from the manifest"
+        )
+    if any(stable.content[archive_end:]):
+        fail("source archive contains nonzero trailing data after the canonical end marker")
     return {
         "file_sha256": stable.sha256,
         "bytes": stable.size,
-        "member_count": member_count,
-        "regular_file_count": len(observed_files),
+        "member_count": len(observed_members),
+        "regular_file_count": len(expected_entries),
         "total_content_bytes": total_content_bytes,
+        "common_mtime": common_mtime,
     }
 
 
@@ -667,6 +718,8 @@ def git_entries(source_root: Path, commit: str) -> tuple[str, list[dict[str, Any
     for index, record in enumerate(listing.split(b"\0")):
         if not record:
             continue
+        if len(entries) >= MAX_GIT_ENTRIES:
+            fail("Git source tree exceeds the entry-count reconciliation bound")
         try:
             metadata, raw_path = record.split(b"\t", 1)
             mode_raw, kind_raw, object_raw = metadata.split(b" ", 2)
@@ -686,9 +739,11 @@ def git_entries(source_root: Path, commit: str) -> tuple[str, list[dict[str, Any
         content = run_git(source_root, ["cat-file", "blob", object_id], binary=True)
         if not isinstance(content, bytes):
             fail("Git blob unexpectedly returned text output")
+        if len(content) > MAX_GIT_ENTRY_BYTES:
+            fail(f"Git source entry {canonical_path!r} exceeds its reconciliation bound")
         total_bytes += len(content)
-        if total_bytes > 1024 * 1024 * 1024:
-            fail("Git source tree exceeds the one-GiB reconciliation bound")
+        if total_bytes > MAX_GIT_CONTENT_BYTES:
+            fail("Git source tree exceeds the total content-byte reconciliation bound")
         entries.append(
             {
                 "path": canonical_path,
@@ -717,12 +772,12 @@ def verify_checkout(
     head = require_commit(head_raw.strip(), "git.head")
     if head != manifest["commit"]:
         fail("source checkout HEAD differs from the bundle manifest commit")
-    if require_clean:
-        status = run_git(source_root, ["status", "--porcelain=v1", "--untracked-files=all"])
-        if not isinstance(status, str):
-            fail("Git status unexpectedly returned binary output")
-        if status:
-            fail("source checkout is not clean")
+    status = run_git(source_root, ["status", "--porcelain=v1", "--untracked-files=all"])
+    if not isinstance(status, str):
+        fail("Git status unexpectedly returned binary output")
+    clean = not bool(status)
+    if require_clean and not clean:
+        fail("source checkout is not clean")
     tree, entries = git_entries(source_root, manifest["commit"])
     if tree != manifest["tree"]:
         fail("source checkout tree differs from the bundle manifest tree")
@@ -731,7 +786,8 @@ def verify_checkout(
     return {
         "head": head,
         "tree": tree,
-        "clean": require_clean,
+        "clean": clean,
+        "clean_required": require_clean,
         "entry_count": len(entries),
         "entries_digest": sha256_bytes(canonical_json(entries)),
     }
@@ -807,6 +863,8 @@ def write_atomic(path: Path, value: dict[str, Any]) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        if path.exists() or path.is_symlink():
+            fail("source bundle verification output already exists")
         os.replace(temporary, path)
         directory = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
