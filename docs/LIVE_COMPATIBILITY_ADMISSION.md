@@ -1,38 +1,43 @@
-# Live compatibility admission
+# Live compatibility and process admission
 
-A successful RPC, a Rust unit test, a native plugin build, a disposable-fort campaign, a qualified
-server binary, and an admitted process launch are different kinds of evidence. No one rung
-substitutes for another.
+A successful RPC, a Rust unit test, a native plugin build, a disposable-fort campaign, a source
+qualification receipt, a server-binary receipt, and an admitted process launch are different kinds
+of evidence. No rung substitutes for another.
 
-## Current registry status
+## Current operational status
 
-The checked-in machine registry is:
+The checked-in compatibility registry is:
 
 ```text
 architecture/live_compatibility_registry_v1.json
 ```
 
-It currently has status `no_admitted_live_tuples` and contains no entries. The live-read source is
-substantial, but no current source/binary/version/platform tuple is admitted merely because the
-code exists. Until an exact R1-R5 campaign is promoted, the runtime launcher must fail closed.
+It currently has status `no_admitted_live_tuples` and contains no entries. The repository contains a
+substantial protocol-1.0 read-only live stack and an implemented protocol-1.1 announcement
+generation, but source presence does not admit either one. Until exact evidence is promoted, the
+production launcher fails closed.
 
-## Complete proof chain
+Protocol 1.1 is available only through the separately named, explicitly unadmitted development
+binary. It cannot consume a production ticket or appear in production admission provenance.
 
-An exact read-only tuple is admitted only through:
+## Evidence ladder
+
+One exact read-only tuple requires:
 
 ```text
 clean dwarf_fortress_mcp source revision
   + exact DFHack source revision
   + exact native plugin binary digest
-  + R1 native-build receipt
-  + R2 authenticated handshake matrix
+  + exact bridge protocol and implementation version
+  + R1 native build and method inventory
+  + R2 authentication and non-disclosure matrix
   + R3 deterministic complete-read matrix
   + R4 restart, drift, gap, and partial-publication fencing
   + R5 cold-agent semantic orientation
-  → one experimental exact-tuple registry entry
+  → one reviewed exact-tuple registry entry
 ```
 
-Starting a process adds separate custody and executable proof:
+Starting a production process adds separate custody and executable proof:
 
 ```text
 reviewed registry generation
@@ -40,16 +45,17 @@ reviewed registry generation
   + exact deployment manifest
   + required compatibility entry ID
   + deterministic compatibility decision
+  + exact bridge protocol selected by that decision
   + passing local qualification receipt
   + source-bound release-server receipt
   + opened executable device, inode, size, mode, owner, and SHA-256
   + sanitized dynamic-loader environment
-  + single-use process- and executable-bound ticket
-  → descriptor-only exec of authenticated read-only live MCP
+  + protocol-bound V2 single-use process ticket
+  → descriptor-only execution of the exact admitted runtime
 ```
 
-Compatibility admission, local anti-rollback custody, artifact qualification, diagnosis, and
-runtime admission remain separate. Passing one does not imply the others.
+Compatibility admission, local anti-rollback custody, artifact qualification, readiness diagnosis,
+and runtime admission remain separate.
 
 ## Machine boundaries
 
@@ -57,6 +63,7 @@ runtime admission remain separate. Passing one does not imply the others.
 architecture/live_compatibility_registry_v1.json
 architecture/live_compatibility_floor_v1.json
 architecture/live_admission_doctor_v1.json
+architecture/live_admission_ticket_v2.json
 architecture/live_server_binary_receipt_v1.json
 scripts/promote_live_compatibility.py
 scripts/resolve_live_compatibility.py
@@ -67,18 +74,19 @@ scripts/serve_admitted_live.py
 crates/dfmcp-mcp/src/admission.rs
 ```
 
-The raw Rust live-server runner is private to `dfmcp-mcp`. The public entrypoint consumes and
-deletes a valid single-use ticket before it starts the MCP transport. Direct
-`dwarf-fortress-mcp serve-live` invocation without that ticket fails closed.
+The raw production live-server implementation is private to `dfmcp-mcp`. The public production
+entrypoint consumes a valid single-use ticket before starting MCP. Direct
+`dwarf-fortress-mcp serve-live` invocation without the exact ticket and protocol environment fails
+closed.
 
-## Exact tuple
+## Exact tuple identity
 
 A registry entry binds:
 
 - Dwarf Fortress version;
 - DFHack version;
 - bridge implementation and protocol versions;
-- host operating system and machine architecture;
+- operating system and machine architecture;
 - exact `dwarf_fortress_mcp` Git commit;
 - exact DFHack Git commit;
 - native plugin SHA-256;
@@ -87,16 +95,17 @@ A registry entry binds:
 - exact capabilities, coverage, omissions, limitations, and evidence locator.
 
 Changing any component creates a different tuple. Compatibility never flows automatically across
-patch releases, platforms, compilers, source revisions, plugin binaries, or registry generations.
+patch releases, protocols, platforms, compilers, source revisions, plugin binaries, or registry
+generations.
 
-A compatibility decision also binds the canonical digest of the complete registry object and the
-explicitly required entry ID. Selecting the same entry from a different registry generation
-therefore produces a different decision identity.
+The resolver also binds the canonical digest of the complete registry object and the explicitly
+required entry ID. Selecting the same-looking entry from different registry bytes produces a
+different decision identity.
 
-## Support and authority
+## Support and authority ceiling
 
-R1-R5 promotion creates an `experimental` entry, never a `supported` or `production` entry. The V1
-authority ceiling is:
+R1-R5 promotion creates an `experimental` entry, never a `supported` or `production` entry. The
+current read-only capability ceiling is:
 
 ```text
 doctor
@@ -105,33 +114,22 @@ query
 wait
 ```
 
-The mutation-capability set is empty. The native receipt must prove that the plugin exports exactly:
+The mutation-capability set is empty. Protocol 1.0 and protocol 1.1 both retain a two-method native
+waist:
 
 ```text
 Handshake
 ReadObservation
 ```
 
-No pause, command, Lua, keyboard, designation, filesystem, arbitrary RPC, or mutation path is
-admitted.
+Protocol 1.1 adds bounded retained-announcement fields inside `ReadObservation`; it does not add a
+standalone RPC or mutation path. No pause, command, Lua, keyboard, designation, filesystem,
+arbitrary forwarding, or game mutation route is admitted.
 
-The complete V1 observation domains are fortress identity, clock, pause state, and complete citizen
-roster. Citizen names are conditional on the requested projection. Items, jobs, map state, economy,
-detailed welfare, military, and history remain omitted. An empty result cannot prove absence in an
-omitted domain.
+## Compatibility promotion
 
-## Promotion
-
-Produce clean native and live receipts:
-
-```bash
-scripts/qualify_dfhack_plugin.sh /path/to/dfhack-source
-scripts/qualify_live_read.sh \
-  /path/to/events.jsonl \
-  /path/to/dfhack-plugin-qualification.json
-```
-
-Create a proposed registry generation without mutating the checked-in root:
+Produce clean native and live receipts for one exact generation, then create a proposed registry
+without mutating the checked-in root:
 
 ```bash
 python3 scripts/promote_live_compatibility.py \
@@ -142,8 +140,7 @@ python3 scripts/promote_live_compatibility.py \
   --output /tmp/live_compatibility_registry_v1.json
 ```
 
-After reviewing the proposed entry and its evidence, an authoritative in-place promotion is a
-compare-and-swap operation:
+After independent review, authoritative in-place promotion is compare-and-swap fenced:
 
 ```bash
 REGISTRY_SHA256="$(sha256sum architecture/live_compatibility_registry_v1.json | awk '{print $1}')"
@@ -161,12 +158,12 @@ reordered, mutation-bearing, duplicate, traversal-bearing, or stale-generation e
 
 ## Monotonic floor and anti-rollback custody
 
-The registry is versioned source evidence. A deployment additionally needs trusted local custody so
-an older, still-well-formed registry cannot silently replace a newer accepted generation. The
-**monotonic floor** is an owner-only local record of the last accepted registry bytes and ordered
-entry IDs.
+The versioned registry is source evidence. A deployment host additionally needs trusted local
+custody so an older but structurally valid registry cannot silently replace a newer accepted
+generation. The monotonic floor records the last accepted exact registry bytes and ordered entry
+IDs.
 
-Create a private directory and initialize the floor exactly once:
+Initialize it only in an owner-private location:
 
 ```bash
 install -d -m 0700 /private/dfmcp
@@ -175,7 +172,7 @@ python3 scripts/live_compatibility_floor.py init \
   --registry architecture/live_compatibility_registry_v1.json
 ```
 
-Verify custody and exact registry equality:
+Verify exact equality:
 
 ```bash
 python3 scripts/live_compatibility_floor.py verify \
@@ -183,7 +180,7 @@ python3 scripts/live_compatibility_floor.py verify \
   --registry architecture/live_compatibility_registry_v1.json
 ```
 
-After reviewing a newer append-only registry generation, advance through compare-and-swap:
+Advance only through compare-and-swap after reviewing a newer append-only generation:
 
 ```bash
 FLOOR_SHA256="$(sha256sum /private/dfmcp/live-compatibility-floor.json | awk '{print $1}')"
@@ -193,20 +190,18 @@ python3 scripts/live_compatibility_floor.py advance \
   --expected-floor-sha256 "$FLOOR_SHA256"
 ```
 
-Custody requires an absolute path, a real owner-only `0700` parent directory, a regular
-non-symbolic-link `0600` file, and ownership by root or the effective user. Initialization is
-exclusive. Advancement is locked, atomic, fsynced, digest-chained, and compare-and-swap fenced.
-Every prior entry ID must remain present. Formatting-only byte changes are explicit generations
-because the floor binds both file SHA-256 and canonical registry digest.
+Custody requires an absolute path, a real exact-mode `0700` parent directory, a regular
+non-symbolic-link exact-mode `0600` file, and ownership by root or the effective user.
+Initialization is exclusive. Advancement is locked, atomic, fsynced, digest-chained, and
+compare-and-swap fenced. Every prior entry ID must remain present.
 
-The floor is local anti-rollback custody. It does not admit a tuple, create compatibility evidence,
-grant authority, implement distributed consensus, or defend against compromise of the owner/root
-account. Silent entry removal is forbidden; an explicit evidence-bearing revocation schema is a
-future separate design problem.
+The floor is local anti-rollback custody. It is not compatibility evidence, distributed consensus,
+revocation, or protection against simultaneous compromise of the owner/root account and all local
+artifacts.
 
 ## Authority-free admission doctor
 
-Before handling a bridge secret or attempting execution, run the deterministic **admission doctor**:
+Before handling a bridge secret or attempting execution, run the deterministic admission doctor:
 
 ```bash
 python3 scripts/doctor_live_admission.py \
@@ -216,7 +211,7 @@ python3 scripts/doctor_live_admission.py \
   --require-entry-id <64-hex-entry-id>
 ```
 
-The doctor checks, in fixed order:
+The fixed stage order is:
 
 ```text
 registry
@@ -225,29 +220,12 @@ exact_tuple_resolution
 server_artifact
 ```
 
-Without artifact inputs, a successful report is `compatibility_ready`. Supplying the complete
-artifact input set can produce `artifact_preflight_ready`:
+Without artifact inputs, success is `compatibility_ready`. Supplying the complete artifact set can
+produce `artifact_preflight_ready`. The doctor does not execute the server, connect to DFHack, read
+the bearer token, alter the registry or floor, or grant capabilities. A doctor report is diagnosis,
+not authority.
 
-```bash
-python3 scripts/doctor_live_admission.py \
-  /path/to/live-deployment-manifest.json \
-  --registry architecture/live_compatibility_registry_v1.json \
-  --compatibility-floor /private/dfmcp/live-compatibility-floor.json \
-  --require-entry-id <64-hex-entry-id> \
-  --binary /path/to/qualified/dwarf-fortress-mcp \
-  --server-receipt /path/to/live-server-binary-receipt.json \
-  --local-qualification-receipt /path/to/qualification-receipt.json \
-  --binary-contract architecture/live_server_binary_receipt_v1.json \
-  --source-root /path/to/exact/source \
-  --expected-dfmcp-commit <40-hex-source-commit>
-```
-
-The doctor is authority-free. It does not execute the server, connect to DFHack, read the bridge
-token, alter the registry or floor, or grant capabilities. Reports contain no runtime timestamps;
-identical input bytes produce the same canonical report digest. `artifact_preflight_ready` remains
-preflight, not launch evidence.
-
-## Local and server-artifact qualification
+## Source-bound server qualification
 
 Qualify the exact clean source revision:
 
@@ -255,7 +233,7 @@ Qualify the exact clean source revision:
 ./scripts/qualify_local.sh
 ```
 
-Then build and qualify the release server artifact:
+Then qualify the release executable separately:
 
 ```bash
 scripts/qualify_live_server_binary.sh \
@@ -263,14 +241,52 @@ scripts/qualify_live_server_binary.sh \
   target/live-server-binary-qualification/<run>
 ```
 
-The server receipt binds the clean source commit, exact passing gate order, floor and doctor source,
-Rust admission consumer, Agent Turn provenance projection, executable checks, platform, source-file
-digests, binary size, and binary SHA-256. It grants no bridge or game authority and does not prove
-that a trusted floor exists on the deployment host.
+The server receipt binds the clean source commit, canonical local gate order, source-file digests,
+platform, toolchain, executable checks, binary size, and binary SHA-256. The source map includes the
+V2 admission-ticket contract, launcher, Rust ticket consumer, Agent Turn projection, and focused
+launcher/ticket tests.
+
+A server receipt qualifies one executable. It does not admit a Dwarf Fortress/DFHack/plugin tuple,
+prove a trusted floor exists, connect to DFHack, or grant game authority.
+
+## Protocol-bound V2 process admission
+
+The normative contract is:
+
+```text
+architecture/live_admission_ticket_v2.json
+```
+
+The bridge protocol is not inferred after launch. It is copied from the exact deployment manifest
+and must agree across:
+
+```text
+compatibility decision
+→ launch record bridge_protocol
+→ ticket bridge_protocol
+→ DFMCP_ADMITTED_BRIDGE_PROTOCOL
+→ Rust admission context and retained provenance
+→ final private server runner
+```
+
+Both the launch digest and ticket digest cover `bridge_protocol`. The Rust consumer rejects the
+legacy `dfmcp.live-admission-ticket/1` schema, a protocol mismatch, an unknown protocol, or a
+protocol without a reviewed production runner.
+
+The production protocol map currently contains only:
+
+```text
+protocol 1.0 → dwarf-fortress-mcp serve-live → private protocol-1.0 runner
+```
+
+Protocol 1.1 remains `implemented_unadmitted_development_only`. Even if a malformed or prematurely
+promoted manifest names protocol 1.1, the launcher and Rust dispatcher refuse it before live-server
+startup. Admitting protocol 1.1 requires its complete independent source, native, A1-A6, baseline
+R2-R5, registry, floor, server-artifact, and runtime-dispatch evidence.
 
 ## Admitted launch
 
-Only after all prior rungs pass:
+Only after every prior rung passes:
 
 ```bash
 export DFMCP_BRIDGE_TOKEN='<32..256-byte loopback secret>'
@@ -289,40 +305,37 @@ python3 scripts/serve_admitted_live.py \
 
 The launcher:
 
-1. validates the secret shape and rejects dynamic-loader override variables;
-2. reads the registry and owner-only floor independently and requires exact generation equality;
+1. validates secret shape and rejects dynamic-loader overrides;
+2. reads the registry and owner-private floor independently and requires exact generation equality;
 3. resolves the manifest under the required entry fence;
-4. verifies the source-bound server receipt and opens the exact executable without following a
-   symlink;
-5. checks executable owner, mode, device, inode, length, and SHA-256;
-6. re-reads the registry and floor after artifact verification;
-7. writes the launch record;
-8. re-hashes the already-open descriptor before issuing the ticket;
-9. creates an owner-only `.dfmcp-admission` directory and `0600` single-use ticket;
-10. re-reads the floor and registry immediately before execution;
-11. re-hashes the opened descriptor immediately before descriptor-only `execve`.
+4. rejects any bridge protocol absent from the production map;
+5. verifies the source-bound server receipt and opens the executable without following a symlink;
+6. checks executable owner, mode, device, inode, length, and SHA-256;
+7. re-reads the registry and floor after artifact verification;
+8. writes a protocol-bound launch record;
+9. re-hashes the already-open descriptor before issuing the ticket;
+10. creates a real exact-mode `0700` ticket directory and exact-mode `0600` single-use ticket;
+11. re-reads the floor and registry immediately before execution;
+12. verifies protocol equality and re-hashes the descriptor immediately before descriptor-only
+    `execve`.
 
-The ticket contains no bridge token. It binds the process ID, expiry, exact entry, registry,
-decision, monotonic-floor file/content/sequence, server receipt, launch record, executable identity,
-read-only capability list, and an empty mutation list.
+The ticket contains no bridge token. It binds process ID, expiry, bridge protocol, exact entry,
+registry, decision, monotonic-floor file/content/sequence, server receipt, launch record, executable
+identity, read-only capability list, and an empty mutation list.
 
-The Rust process rejects permissive or symbolic custody, verifies the canonical ticket digest,
-process and expiry, reopens and hashes the current executable bytes, deletes the ticket, proves its
-absence, retains the admitted provenance for every live Agent Turn, and only then starts MCP. A
-restart requires a fresh launch decision and fresh ticket. No path-based execution fallback exists.
+The Rust process verifies canonical ticket digest, process, expiry, protocol, capabilities,
+registry/decision/floor/receipt/launch identities, executable inode and SHA-256, then deletes the
+ticket and proves its absence before starting the selected private server. A restart requires a new
+decision and ticket. No path-based execution fallback exists.
 
-This protects against accidental bypass, stale tickets, registry rollback relative to the trusted
-floor, cross-process ticket reuse, and same-inode executable byte substitution inside the stated
-local threat model. It is not protection against simultaneous compromise of the owning account,
-launcher, floor, source, executable, and process.
+Every admitted Agent Turn exposes the retained bridge protocol alongside ticket, entry, registry,
+decision, floor, receipt, launch, and executable identities. Presentation explains authority; it
+cannot create or widen it.
 
-## Determinism and failure posture
-
-Registry entry IDs are SHA-256 digests of all canonical entry fields except the identifier itself.
-The promotion tool publishes atomically and never launches Dwarf Fortress, executes shell commands,
-downloads artifacts, or weakens source gates.
+## Failure posture
 
 Absence from the current registry means not admitted. Presence means experimental only for the
 exact bytes and evidence named by the entry. Missing floor custody, stale floor bytes, a different
-entry ID, dirty source, source-receipt mismatch, platform drift, permissive files, symlinks, loader
-injection, executable replacement, or direct `serve-live` invocation all fail closed.
+entry ID, dirty source, source-receipt mismatch, platform drift, protocol mismatch, permissive
+files, symbolic links, loader injection, executable replacement, legacy tickets, unknown protocol,
+or direct `serve-live` invocation all fail closed.
