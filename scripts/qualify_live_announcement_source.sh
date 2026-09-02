@@ -153,6 +153,7 @@ run_gate python-syntax python3 -m py_compile \
   scripts/check_live_announcements.py \
   scripts/check_live_announcements_core.py \
   scripts/check_live_announcement_publication.py \
+  scripts/check_live_announcement_bootstrap.py \
   scripts/test_live_announcement_contract.py \
   scripts/verify_live_announcement_acceptance.py \
   scripts/test_live_announcement_acceptance.py \
