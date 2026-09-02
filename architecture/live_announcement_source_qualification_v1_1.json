@@ -35,6 +35,7 @@
     "announcement_driver": "crates/dfmcp-adapter/src/live_session_v1_1.rs",
     "announcement_publication": "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs",
     "announcement_adapter": "crates/dfmcp-adapter/src/live_adapter_v1_1.rs",
+    "announcement_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap_v1_1.rs",
     "announcement_adapter_transaction_tests": "crates/dfmcp-adapter/tests/live_adapter_v1_1_transactional.rs",
     "announcement_projection": "crates/dfmcp-adapter/src/live_announcement_projection.rs",
     "combined_projection": "crates/dfmcp-adapter/src/live_projection_v1_1.rs",
@@ -72,7 +73,8 @@
     "the exact clean source revision passed the required static and Rust gates",
     "the protocol-1.0 source files remained part of the source-bound digest set",
     "the protocol-1.1 diagnostic probe compiled and rendered help",
-    "transactional protocol-1.1 publication and the read-only GameAdapter passed their source gates"
+    "transactional protocol-1.1 publication and the read-only GameAdapter passed their source gates",
+    "single-publication bootstrap preserved the exact first combined capsule without a duplicate underlying bridge read"
   ],
   "claims_not_established": [
     "the protocol-1.1 native plugin builds against a named DFHack revision",
