@@ -12,7 +12,6 @@
 #include "Console.h"
 #include "DfmcpBridge.pb.h"
 #include "Export.h"
-#include "MiscUtils.h"
 #include "PluginManager.h"
 #include "RemoteServer.h"
 #include "VersionInfo.h"
@@ -21,10 +20,7 @@
 #include "modules/World.h"
 
 #include "df/coord.h"
-#include "df/global_objects.h"
-#include "df/report.h"
 #include "df/unit.h"
-#include "df/world.h"
 
 using namespace DFHack;
 namespace wire = dfmcp::bridge::v1;
@@ -34,9 +30,8 @@ DFHACK_PLUGIN("dfmcp_bridge");
 namespace {
 
 constexpr std::uint32_t PROTOCOL_MAJOR = 1;
-constexpr std::uint32_t CITIZEN_PROTOCOL_MINOR = 0;
-constexpr std::uint32_t ANNOUNCEMENT_PROTOCOL_MINOR = 1;
-constexpr const char *BRIDGE_VERSION = "0.2.0";
+constexpr std::uint32_t PROTOCOL_MINOR = 0;
+constexpr const char *BRIDGE_VERSION = "0.1.0";
 constexpr std::size_t MIN_TOKEN_BYTES = 32;
 constexpr std::size_t MAX_TOKEN_BYTES = 256;
 constexpr std::size_t MIN_NONCE_BYTES = 16;
@@ -45,13 +40,10 @@ constexpr std::size_t MAX_CLIENT_NAME_BYTES = 128;
 constexpr std::size_t MAX_CLIENT_VERSION_BYTES = 64;
 constexpr std::uint32_t DEFAULT_MAX_CITIZENS = 256;
 constexpr std::uint32_t HARD_MAX_CITIZENS = 4096;
-constexpr std::uint32_t DEFAULT_MAX_ANNOUNCEMENTS = 256;
-constexpr std::uint32_t HARD_MAX_ANNOUNCEMENTS = 4096;
 constexpr std::size_t MAX_UNIT_NAME_BYTES = 256;
 constexpr std::size_t MAX_RACE_NAME_BYTES = 128;
 constexpr std::size_t MAX_WORLD_NAME_BYTES = 256;
 constexpr std::size_t MAX_WORLD_FOLDER_BYTES = 512;
-constexpr std::size_t MAX_ANNOUNCEMENT_TEXT_BYTES = 2048;
 constexpr std::uint32_t TICKS_PER_DAY = 1200;
 constexpr std::uint32_t DAYS_PER_MONTH = 28;
 constexpr std::uint32_t MONTHS_PER_YEAR = 12;
@@ -176,34 +168,14 @@ bool authenticate(const std::string &presented, std::string &failure_code,
     return true;
 }
 
-bool supported_protocol(std::uint32_t major, std::uint32_t minor)
-{
-    return major == PROTOCOL_MAJOR &&
-        (minor == CITIZEN_PROTOCOL_MINOR ||
-         minor == ANNOUNCEMENT_PROTOCOL_MINOR);
-}
-
 bool validate_protocol(std::uint32_t major, std::uint32_t minor,
                        std::string &failure_code,
                        std::string &failure_message)
 {
-    if (!supported_protocol(major, minor))
+    if (major != PROTOCOL_MAJOR || minor != PROTOCOL_MINOR)
     {
         failure_code = "PROTOCOL_MISMATCH";
-        failure_message = "bridge protocol must be exactly 1.0 or 1.1";
-        return false;
-    }
-    return true;
-}
-
-bool validate_announcement_protocol(std::uint32_t major, std::uint32_t minor,
-                                    std::string &failure_code,
-                                    std::string &failure_message)
-{
-    if (major != PROTOCOL_MAJOR || minor != ANNOUNCEMENT_PROTOCOL_MINOR)
-    {
-        failure_code = "PROTOCOL_MISMATCH";
-        failure_message = "ReadAnnouncements requires bridge protocol 1.1";
+        failure_message = "bridge protocol must be exactly 1.0";
         return false;
     }
     return true;
@@ -215,17 +187,13 @@ std::string df_version()
     return version_info ? version_info->getVersion() : std::string("unknown");
 }
 
-void initialize_handshake_reply(wire::HandshakeReply *out,
-                                std::uint32_t requested_minor)
+void initialize_handshake_reply(wire::HandshakeReply *out)
 {
     out->set_accepted(false);
     out->set_failure_code("");
     out->set_failure_message("");
     out->set_protocol_major(PROTOCOL_MAJOR);
-    out->set_protocol_minor(
-        supported_protocol(PROTOCOL_MAJOR, requested_minor)
-            ? requested_minor
-            : CITIZEN_PROTOCOL_MINOR);
+    out->set_protocol_minor(PROTOCOL_MINOR);
     out->set_bridge_version("");
     out->set_dfhack_version("");
     out->set_df_version("");
@@ -235,8 +203,7 @@ void initialize_handshake_reply(wire::HandshakeReply *out,
     out->set_bridge_generation(0);
 }
 
-void publish_handshake_manifest(wire::HandshakeReply *out,
-                                std::uint32_t protocol_minor)
+void publish_handshake_manifest(wire::HandshakeReply *out)
 {
     out->set_bridge_version(BRIDGE_VERSION);
     out->set_dfhack_version(Version::dfhack_version());
@@ -247,14 +214,12 @@ void publish_handshake_manifest(wire::HandshakeReply *out,
     out->set_bridge_generation(BRIDGE_GENERATION);
     out->add_supported_methods("Handshake");
     out->add_supported_methods("ReadObservation");
-    if (protocol_minor == ANNOUNCEMENT_PROTOCOL_MINOR)
-        out->add_supported_methods("ReadAnnouncements");
 }
 
 command_result Handshake(color_ostream &, const wire::HandshakeRequest *in,
                          wire::HandshakeReply *out)
 {
-    initialize_handshake_reply(out, in->protocol_minor());
+    initialize_handshake_reply(out);
 
     std::string failure_code;
     std::string failure_message;
@@ -280,22 +245,18 @@ command_result Handshake(color_ostream &, const wire::HandshakeRequest *in,
         return CR_OK;
     }
 
-    publish_handshake_manifest(out, in->protocol_minor());
+    publish_handshake_manifest(out);
     out->set_accepted(true);
     return CR_OK;
 }
 
-void initialize_observation_reply(wire::ReadObservationReply *out,
-                                  std::uint32_t requested_minor)
+void initialize_observation_reply(wire::ReadObservationReply *out)
 {
     out->set_accepted(false);
     out->set_failure_code("");
     out->set_failure_message("");
     out->set_protocol_major(PROTOCOL_MAJOR);
-    out->set_protocol_minor(
-        supported_protocol(PROTOCOL_MAJOR, requested_minor)
-            ? requested_minor
-            : CITIZEN_PROTOCOL_MINOR);
+    out->set_protocol_minor(PROTOCOL_MINOR);
     out->set_client_nonce("");
     out->set_bridge_generation(0);
     out->set_world_loaded(false);
@@ -315,7 +276,7 @@ command_result ReadObservation(color_ostream &,
                                const wire::ReadObservationRequest *in,
                                wire::ReadObservationReply *out)
 {
-    initialize_observation_reply(out, in->protocol_minor());
+    initialize_observation_reply(out);
 
     std::string failure_code;
     std::string failure_message;
@@ -370,7 +331,7 @@ command_result ReadObservation(color_ostream &,
     {
         out->set_failure_code("INTERNAL_FAILURE");
         out->set_failure_message(
-            "fortress clock or site identity is outside the canonical domain");
+            "fortress clock or site identity is outside the V1 canonical domain");
         return CR_OK;
     }
 
@@ -395,7 +356,7 @@ command_result ReadObservation(color_ostream &,
     if (citizens.size() > std::numeric_limits<std::uint32_t>::max())
     {
         out->set_failure_code("INTERNAL_FAILURE");
-        out->set_failure_message("citizen roster exceeds the count domain");
+        out->set_failure_message("citizen roster exceeds the V1 count domain");
         return CR_OK;
     }
     std::sort(citizens.begin(), citizens.end(),
@@ -454,206 +415,13 @@ command_result ReadObservation(color_ostream &,
         record->set_sane(Units::isSane(unit));
         record->set_active(Units::isActive(unit));
         record->set_visible(Units::isVisible(unit));
-        record->set_citizen(Units::isCitizen(unit, false));
-        record->set_resident(Units::isResident(unit));
+        record->set_citizen(true);
+        record->set_resident(Units::isResident(unit, false));
         record->set_baby(Units::isBaby(unit));
         record->set_child(Units::isChild(unit));
         record->set_adult(Units::isAdult(unit));
     }
 
-    out->set_accepted(true);
-    return CR_OK;
-}
-
-void initialize_announcement_reply(wire::ReadAnnouncementsReply *out)
-{
-    out->set_accepted(false);
-    out->set_failure_code("");
-    out->set_failure_message("");
-    out->set_protocol_major(PROTOCOL_MAJOR);
-    out->set_protocol_minor(ANNOUNCEMENT_PROTOCOL_MINOR);
-    out->set_client_nonce("");
-    out->set_bridge_generation(0);
-    out->set_requested_after_report_id(-1);
-    out->set_oldest_retained_report_id(-1);
-    out->set_latest_retained_report_id(-1);
-    out->set_window_latest_report_id(-1);
-    out->set_next_after_report_id(-1);
-    out->set_history_truncated(false);
-    out->set_complete(false);
-}
-
-bool is_retained_announcement(const df::report *report)
-{
-    return report && report->id >= 0 && report->flags.bits.announcement;
-}
-
-command_result ReadAnnouncements(color_ostream &,
-                                 const wire::ReadAnnouncementsRequest *in,
-                                 wire::ReadAnnouncementsReply *out)
-{
-    initialize_announcement_reply(out);
-
-    std::string failure_code;
-    std::string failure_message;
-    if (in->client_nonce().size() < MIN_NONCE_BYTES ||
-        in->client_nonce().size() > MAX_NONCE_BYTES)
-    {
-        out->set_failure_code("INVALID_BOUND");
-        out->set_failure_message("client nonce violates the 16..64 byte policy");
-        return CR_OK;
-    }
-    out->set_client_nonce(in->client_nonce());
-    out->set_bridge_generation(BRIDGE_GENERATION);
-    if (!validate_announcement_protocol(
-            in->protocol_major(), in->protocol_minor(),
-            failure_code, failure_message) ||
-        !authenticate(in->bearer_token(), failure_code, failure_message))
-    {
-        out->set_failure_code(failure_code);
-        out->set_failure_message(failure_message);
-        return CR_OK;
-    }
-
-    const std::int32_t after =
-        in->has_after_report_id() ? in->after_report_id() : -1;
-    const std::int32_t through =
-        in->has_through_report_id() ? in->through_report_id() : -1;
-    const std::uint32_t requested = in->has_max_announcements()
-        ? in->max_announcements()
-        : DEFAULT_MAX_ANNOUNCEMENTS;
-    out->set_requested_after_report_id(after);
-    out->set_next_after_report_id(after);
-    if (after < -1 || through < -1 ||
-        (through >= 0 && through < after) ||
-        requested == 0 || requested > HARD_MAX_ANNOUNCEMENTS)
-    {
-        out->set_failure_code("INVALID_BOUND");
-        out->set_failure_message(
-            "announcement cursors or page size violate protocol 1.1 bounds");
-        return CR_OK;
-    }
-
-    if (!Core::getInstance().isWorldLoaded())
-    {
-        out->set_failure_code("WORLD_NOT_LOADED");
-        out->set_failure_message("no Dwarf Fortress world is loaded");
-        return CR_OK;
-    }
-    if (!World::isFortressMode())
-    {
-        out->set_failure_code("NOT_FORTRESS_MODE");
-        out->set_failure_message("the loaded world is not in fortress mode");
-        return CR_OK;
-    }
-    if (!df::global::world)
-    {
-        out->set_failure_code("INTERNAL_FAILURE");
-        out->set_failure_message("the Dwarf Fortress world global is unavailable");
-        return CR_OK;
-    }
-
-    std::vector<const df::report *> reports;
-    reports.reserve(df::global::world->status.reports.size());
-    for (const df::report *report : df::global::world->status.reports)
-    {
-        if (is_retained_announcement(report))
-            reports.push_back(report);
-    }
-    std::sort(reports.begin(), reports.end(),
-              [](const df::report *left, const df::report *right) {
-                  return left->id < right->id;
-              });
-    reports.erase(
-        std::unique(reports.begin(), reports.end(),
-                    [](const df::report *left, const df::report *right) {
-                        return left->id == right->id;
-                    }),
-        reports.end());
-
-    if (reports.empty())
-    {
-        if (after >= 0 || through >= 0)
-        {
-            out->set_failure_code("STALE_ANCHOR");
-            out->set_failure_message(
-                "the requested announcement cursor is not retained in this world");
-            return CR_OK;
-        }
-        out->set_accepted(true);
-        out->set_complete(true);
-        return CR_OK;
-    }
-
-    const std::int32_t oldest = reports.front()->id;
-    const std::int32_t latest = reports.back()->id;
-    const std::int32_t high_water = through < 0 ? latest : through;
-    out->set_oldest_retained_report_id(oldest);
-    out->set_latest_retained_report_id(latest);
-    out->set_window_latest_report_id(high_water);
-
-    if (after > latest || high_water > latest)
-    {
-        out->set_failure_code("STALE_ANCHOR");
-        out->set_failure_message(
-            "the requested announcement cursor exceeds the retained high-water mark");
-        return CR_OK;
-    }
-
-    const bool history_truncated = after >= 0 &&
-        after < oldest - 1;
-    out->set_history_truncated(history_truncated);
-
-    std::size_t returned = 0;
-    bool more_in_window = false;
-    std::int32_t next_after = after;
-    for (const df::report *report : reports)
-    {
-        if (report->id <= after || report->id > high_water)
-            continue;
-        if (returned >= requested)
-        {
-            more_in_window = true;
-            break;
-        }
-        if (report->year < 0 || report->time < 0 ||
-            static_cast<std::uint32_t>(report->time) >= TICKS_PER_YEAR ||
-            report->repeat_count < 0)
-        {
-            out->clear_announcements();
-            out->set_next_after_report_id(after);
-            out->set_complete(false);
-            out->set_failure_code("INTERNAL_FAILURE");
-            out->set_failure_message(
-                "a retained announcement is outside the canonical numeric domain");
-            return CR_OK;
-        }
-
-        auto *record = out->add_announcements();
-        record->set_report_id(report->id);
-        record->set_announcement_type(
-            static_cast<std::int32_t>(report->type));
-        record->set_text(bounded_utf8_prefix(
-            DF2UTF(report->text), MAX_ANNOUNCEMENT_TEXT_BYTES));
-        record->set_year(static_cast<std::uint32_t>(report->year));
-        record->set_year_tick(static_cast<std::uint32_t>(report->time));
-        const bool has_position = report->pos.x >= 0 &&
-            report->pos.y >= 0 && report->pos.z >= 0;
-        record->set_has_position(has_position);
-        record->set_x(has_position ? report->pos.x : 0);
-        record->set_y(has_position ? report->pos.y : 0);
-        record->set_z(has_position ? report->pos.z : 0);
-        record->set_repeat_count(
-            static_cast<std::uint32_t>(report->repeat_count));
-        record->set_continuation(report->flags.bits.continuation);
-        record->set_unconscious(report->flags.bits.unconscious);
-        record->set_announcement(report->flags.bits.announcement);
-        next_after = report->id;
-        ++returned;
-    }
-
-    out->set_next_after_report_id(next_after);
-    out->set_complete(!more_in_window);
     out->set_accepted(true);
     return CR_OK;
 }
@@ -666,13 +434,13 @@ command_result bridge_status(color_ostream &out,
         configured ? std::string_view(configured).size() : 0;
     const bool token_configured = configured_size >= MIN_TOKEN_BYTES &&
         configured_size <= MAX_TOKEN_BYTES;
-    out.print("dfmcp_bridge {} protocols 1.0, 1.1\n", BRIDGE_VERSION);
+    out.print("dfmcp_bridge {} protocol {}.{}\n", BRIDGE_VERSION,
+              PROTOCOL_MAJOR, PROTOCOL_MINOR);
     out.print("token policy satisfied: {}\n",
               token_configured ? "yes" : "no");
     out.print("world loaded: {}\n",
               Core::getInstance().isWorldLoaded() ? "yes" : "no");
-    out.print(
-        "RPC methods: Handshake, ReadObservation, ReadAnnouncements\n");
+    out.print("RPC methods: Handshake, ReadObservation\n");
     return token_configured ? CR_OK : CR_FAILURE;
 }
 
@@ -694,7 +462,6 @@ DFhackCExport RPCService *plugin_rpcconnect(color_ostream &)
     auto *service = new RPCService();
     service->addFunction("Handshake", Handshake, 0);
     service->addFunction("ReadObservation", ReadObservation, 0);
-    service->addFunction("ReadAnnouncements", ReadAnnouncements, 0);
     return service;
 }
 

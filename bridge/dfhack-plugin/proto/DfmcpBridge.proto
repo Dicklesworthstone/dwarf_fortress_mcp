@@ -7,7 +7,6 @@ option optimize_for = LITE_RUNTIME;
 // Plugin: dfmcp_bridge
 // RPC Handshake : HandshakeRequest -> HandshakeReply
 // RPC ReadObservation : ReadObservationRequest -> ReadObservationReply
-// RPC ReadAnnouncements : ReadAnnouncementsRequest -> ReadAnnouncementsReply
 
 message HandshakeRequest {
   required uint32 protocol_major = 1;
@@ -85,49 +84,4 @@ message ReadObservationReply {
   required uint32 citizen_offset = 17;
   required bool complete = 18;
   repeated CitizenRecord citizens = 19;
-}
-
-message ReadAnnouncementsRequest {
-  required uint32 protocol_major = 1;
-  required uint32 protocol_minor = 2;
-  required bytes client_nonce = 3;
-  required bytes bearer_token = 4;
-  optional sint32 after_report_id = 5 [default = -1];
-  optional sint32 through_report_id = 6 [default = -1];
-  optional uint32 max_announcements = 7 [default = 256];
-}
-
-message AnnouncementRecord {
-  required sint32 report_id = 1;
-  required sint32 announcement_type = 2;
-  required string text = 3;
-  required uint32 year = 4;
-  required uint32 year_tick = 5;
-  required bool has_position = 6;
-  required sint32 x = 7;
-  required sint32 y = 8;
-  required sint32 z = 9;
-  required uint32 repeat_count = 10;
-  required bool continuation = 11;
-  required bool unconscious = 12;
-  required bool announcement = 13;
-}
-
-message ReadAnnouncementsReply {
-  required bool accepted = 1;
-  required string failure_code = 2;
-  required string failure_message = 3;
-  required uint32 protocol_major = 4;
-  required uint32 protocol_minor = 5;
-  required bytes client_nonce = 6;
-  required uint64 bridge_generation = 7;
-
-  required sint32 requested_after_report_id = 8;
-  required sint32 oldest_retained_report_id = 9;
-  required sint32 latest_retained_report_id = 10;
-  required sint32 window_latest_report_id = 11;
-  required sint32 next_after_report_id = 12;
-  required bool history_truncated = 13;
-  required bool complete = 14;
-  repeated AnnouncementRecord announcements = 15;
 }

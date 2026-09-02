@@ -23,7 +23,6 @@ pub mod live_adapter;
 pub mod live_announcement_batch;
 pub mod live_announcement_briefing;
 pub mod live_announcement_projection;
-pub mod live_announcements;
 pub mod live_bootstrap;
 pub mod live_briefing;
 pub mod live_compatibility;
@@ -87,7 +86,7 @@ pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
 pub use live_announcement_batch::{
     AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
     AnnouncementReplyContext, LiveAnnouncementBatch, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_CANONICAL_ANNOUNCEMENT_BATCH_BYTES,
+    MAX_ANNOUNCEMENT_TEXT_BYTES, MAX_CANONICAL_ANNOUNCEMENT_BATCH_BYTES,
 };
 pub use live_announcement_briefing::{
     AnnouncementAttentionItem, AnnouncementAttentionSeverity, LiveAnnouncementBriefing,
@@ -98,12 +97,6 @@ pub use live_announcement_briefing::{
 pub use live_announcement_projection::{
     LiveAnnouncementProjection, announcement_entity_id_to_report_id,
     project_live_announcement_batch, report_id_to_announcement_entity_id,
-};
-pub use live_announcements::{
-    AnnouncementPage, AnnouncementRecord, AnnouncementSourceIdentity,
-    AnnouncementWindowAssembler, LiveAnnouncementWindow, MAX_ANNOUNCEMENTS_PER_PAGE,
-    MAX_ANNOUNCEMENT_TEXT_BYTES, MAX_ANNOUNCEMENT_WINDOW_RECORDS,
-    MAX_CANONICAL_ANNOUNCEMENT_BYTES,
 };
 pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
@@ -143,8 +136,7 @@ pub use live_projection_v1_1::{
     project_live_capsule_v1_1,
 };
 pub use live_session::{
-    LiveAnnouncementSource, LiveObservationSource, read_complete_announcement_window,
-    read_complete_observation, read_complete_observation_bounded,
+    LiveObservationSource, read_complete_observation, read_complete_observation_bounded,
 };
 pub use live_session_v1_1::{
     LiveObservationSourceV1_1, read_complete_observation_v1_1,
