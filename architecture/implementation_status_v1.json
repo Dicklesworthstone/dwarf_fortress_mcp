@@ -1,0 +1,110 @@
+{
+  "schema_version": "dfmcp.implementation-status-contract/1",
+  "status": "normative_current_evidence_posture",
+  "phase": "0D-R0+1A-source",
+  "compatibility_registry": {
+    "path": "architecture/live_compatibility_registry_v1.json",
+    "schema_version": "dfmcp.live-compatibility-registry/1",
+    "required_status": "no_admitted_live_tuples",
+    "required_entry_count": 0
+  },
+  "production_admission": {
+    "path": "architecture/live_admission_ticket_v2.json",
+    "schema_version": "dfmcp.live-admission-ticket-contract/2",
+    "launch_schema": "dfmcp.admitted-live-launch/2",
+    "ticket_schema": "dfmcp.live-admission-ticket/2",
+    "admitted_protocols": {
+      "1.0": {
+        "binary_command": "serve-live",
+        "rust_runner": "crate::live_server::run_live_stdio"
+      }
+    },
+    "protocol_1_1_status": "implemented_unadmitted_development_only",
+    "unknown_protocol_policy": "fail_closed_before_server_startup"
+  },
+  "development_runtime": {
+    "path": "architecture/live_mcp_server_v1_1.json",
+    "schema_version": "dfmcp.live-mcp-server/1.1",
+    "required_status": "implemented_source_contract_unadmitted_runtime",
+    "binary": "dfmcp-live-v1-1-dev-server",
+    "exact_opt_in": {
+      "DFMCP_ALLOW_UNADMITTED_LIVE_V1_1": "1"
+    },
+    "production_protocol_dispatch_allowed": false,
+    "compatibility_admitted": false,
+    "server_artifact_qualified": false,
+    "runtime_admitted": false
+  },
+  "bridge_generations": [
+    {
+      "protocol": "1.0",
+      "path": "architecture/dfhack_read_bridge_v1.json",
+      "method_manifest": [
+        "Handshake",
+        "ReadObservation"
+      ],
+      "mutation_capabilities": []
+    },
+    {
+      "protocol": "1.1",
+      "path": "architecture/dfhack_read_bridge_v1_1.json",
+      "method_manifest": [
+        "Handshake",
+        "ReadObservation"
+      ],
+      "mutation_capabilities": [],
+      "required_status": "implemented_unadmitted_live_read_generation"
+    }
+  ],
+  "authoritative_documents": {
+    "IMPLEMENTATION_STATUS.md": [
+      "No live tuple is currently admitted",
+      "protocol 1.0",
+      "protocol 1.1",
+      "development runtime",
+      "protocol-bound V2",
+      "No live mutation RPC",
+      "No fresh full latest-nightly qualification receipt is checked in"
+    ],
+    "README.md": [
+      "compatibility registry is **empty**",
+      "protocol 1.1 is not in the production runner map",
+      "no live mutation RPC exists"
+    ],
+    "CHANGELOG.md": [
+      "Current evidence status",
+      "no admitted live tuple",
+      "protocol 1.1 remains explicitly unadmitted development source",
+      "No live mutation RPC or capability exists"
+    ],
+    "ROADMAP.md": [
+      "The checked-in compatibility registry is empty",
+      "production V2 protocol map",
+      "protocol 1.1 has an explicitly unadmitted development runtime"
+    ],
+    "SECURITY.md": [
+      "The checked-in compatibility registry has no admitted entries",
+      "The production map currently contains only protocol 1.0",
+      "Development execution is not compatibility or runtime admission"
+    ]
+  },
+  "forbidden_tracked_evidence_basenames": [
+    "qualification-receipt.json",
+    "live-server-binary-receipt.json",
+    "live-read-acceptance-receipt.json",
+    "live-announcement-acceptance-receipt.json",
+    "live-admission-ticket.json",
+    "live-compatibility-floor.json",
+    "admitted-live-launch.json"
+  ],
+  "authority": {
+    "grants_capabilities": [],
+    "mutation_capabilities": []
+  },
+  "limitations": [
+    "this contract records checked-in source and evidence posture only",
+    "passing this contract does not qualify Rust source, a native plugin, a live tuple, a server binary, or a process",
+    "generated evidence outside the repository may exist without changing checked-in status",
+    "changing the evidence posture requires a reviewed update to this contract and every authoritative document"
+  ]
+}
