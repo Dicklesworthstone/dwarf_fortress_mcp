@@ -18,19 +18,24 @@ what should happen next, and how certain those answers are. The normative operat
 
 ## Current evidence posture
 
-The current phase is **Phase 0D-R0**:
+The current phase is **Phase 0D-R0 with an implemented but unadmitted Phase-1 announcement read
+slice**:
 
-- substantial authenticated read-only DFHack source exists;
-- canonical live observations and an agent-oriented read-only MCP source exist;
-- exact compatibility, monotonic-floor, artifact-receipt, and single-use launch machinery exist;
+- substantial authenticated protocol-1.0 read-only DFHack source exists;
+- canonical live citizen observations and an agent-oriented read-only MCP source exist;
+- exact compatibility, monotonic-floor, artifact-receipt, and V2 process-admission machinery exist;
+- protocol-1.1 retained-announcement source, transactional publication, single-read bootstrap, and
+  an explicitly unadmitted development MCP runtime exist;
+- the V2 production runner map contains protocol 1.0 only;
 - the checked-in compatibility registry is empty;
 - no current live tuple is admitted;
 - no live mutation RPC or capability exists;
-- the final current head does not yet have a fresh full latest-nightly qualification receipt.
+- the final current head does not yet have a newly checked-in full latest-nightly qualification
+  receipt.
 
-Never convert source presence, old evidence, a unit test, a static-only run, or a workflow badge into
-an admission or support claim. `IMPLEMENTATION_STATUS.md`, the current registry, exact receipts, and
-local floor bytes are authoritative.
+Never convert source presence, development execution, old evidence, a unit test, a static-only run,
+or a workflow badge into an admission or support claim. `IMPLEMENTATION_STATUS.md`, the current
+registry, exact receipts, the production protocol map, and local floor bytes are authoritative.
 
 ## Required reading order
 
@@ -38,21 +43,25 @@ local floor bytes are authoritative.
 2. `README.md`
 3. `docs/AGENT_OPERATING_MODEL.md`
 4. `docs/LIVE_DFHACK_READ_PATH.md`
-5. `docs/LIVE_COMPATIBILITY_ADMISSION.md`
-6. `docs/LOCAL_QUALIFICATION_AND_RELEASE.md`
-7. `SECURITY.md`
-8. `FRANKENSTACK_DEEP_DIVE.md`
-9. `COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md`
-10. `ARCHITECTURE.md`
-11. `ROADMAP.md`
-12. `docs/WORLD_STATE_MVCC.md`
-13. `docs/FORTRESS_GRAPH_ALGORITHMS.md`
-14. `docs/ATP_STATE_AND_EVIDENCE_PLANE.md`
-15. `docs/DEPENDENCY_POLICY.md`
-16. `MCP_SURFACE.md`
-17. `docs/FASTMCP_INTEGRATION.md`
-18. `docs/DOGFOODING_FASTMCP.md`
-19. relevant machine registries under `architecture/` and `design/registries/`
+5. `docs/LIVE_ANNOUNCEMENT_STREAM.md`
+6. `docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md`
+7. `docs/LIVE_COMPATIBILITY_ADMISSION.md`
+8. `architecture/live_admission_ticket_v2.json`
+9. `docs/LOCAL_QUALIFICATION_AND_RELEASE.md`
+10. `docs/SOURCE_BUNDLE.md`
+11. `SECURITY.md`
+12. `FRANKENSTACK_DEEP_DIVE.md`
+13. `COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md`
+14. `ARCHITECTURE.md`
+15. `ROADMAP.md`
+16. `docs/WORLD_STATE_MVCC.md`
+17. `docs/FORTRESS_GRAPH_ALGORITHMS.md`
+18. `docs/ATP_STATE_AND_EVIDENCE_PLANE.md`
+19. `docs/DEPENDENCY_POLICY.md`
+20. `MCP_SURFACE.md`
+21. `docs/FASTMCP_INTEGRATION.md`
+22. `docs/DOGFOODING_FASTMCP.md`
+23. relevant machine registries under `architecture/` and `design/registries/`
 
 Read all of a governing file, not snippets, before modifying a boundary it defines.
 
@@ -79,74 +88,115 @@ Read all of a governing file, not snippets, before modifying a boundary it defin
   carries explicit context and authority.
 - No direct memory scraping or C/C++ FFI in the Rust trust domain. DFHack integration is an
   out-of-process, bounded, versioned bridge using supported DFHack facilities.
-- No arbitrary shell, Lua, DFHack command, keyboard injection, bridge method, native address, or
-  client-selected path through the default MCP surface.
+- No arbitrary shell, Lua, DFHack command, keyboard injection, bridge method, native address,
+  protocol selector, or client-selected path through the default MCP surface.
 - No GitHub-hosted Action is correctness, performance, compatibility, or release authority.
   Workflow files are portable specifications for local/self-hosted execution, including
   `doodlestein_self_releaser`.
 
 ## Evidence and status rules
 
-Use this evidence ladder explicitly:
+Use this ladder explicitly:
 
 ```text
 source present
 → static/Python checked
 → full Rust-qualified
 → native R1-qualified
-→ live R2-R5-qualified
+→ live campaign qualified
 → registry-admitted
 → deployment-floor accepted
 → server-artifact qualified
+→ protocol runner admitted
 → runtime admitted
 ```
 
 Rules:
 
-- Evidence applies only to the exact source, binary, platform, versions, and inputs it names.
-- A higher rung never silently transfers to a later commit or rebuilt binary.
+- Evidence applies only to the exact source, binary, protocol, platform, versions, and inputs it
+  names.
+- A higher rung never silently transfers to a later commit, rebuilt binary, or another protocol.
 - An empty registry means no admitted live tuple.
 - A registry entry grants only the exact capabilities and coverage encoded in that entry.
 - A local monotonic floor is anti-rollback custody, not compatibility evidence or distributed
   consensus.
 - An admission-doctor report is deterministic diagnosis, not authority.
 - A server receipt qualifies one executable, not a bridge session or game state.
-- A single-use ticket authorizes one exact process start and grants no game mutation capability.
+- A production protocol runner must be explicitly present in the V2 runner map.
+- A single-use ticket authorizes one exact process and protocol start and grants no game mutation
+  capability.
+- A development runtime is never production admission.
 - Negative evidence may reject a claim but cannot certify success.
 - Update `IMPLEMENTATION_STATUS.md` and `CHANGELOG.md` whenever implementation or evidence posture
   materially changes.
 
-## Compatibility and launch rules
+## Bridge generation rules
 
-The current read-only protocol must retain exactly two native methods until a separately versioned
-and qualified protocol says otherwise:
+The current read-only protocols retain exactly two native methods:
 
 ```text
 Handshake
 ReadObservation
 ```
 
-Any new bridge method changes protocol identity and requires new wire tests, source digests, R1-R5
-evidence, registry admission, floor advancement, server qualification, and launch evidence.
+Protocol 1.1 adds fields inside `ReadObservation`; it does not add a standalone announcement method.
+Method names alone do not identify a generation. Protocol version, bridge version, plugin bytes,
+source revisions, and platform all participate in exact identity.
 
-Admitted live startup must preserve the complete chain:
+Any new bridge method or semantic field generation requires new wire tests, canonicalization,
+source digests, native evidence, live evidence, registry admission, floor advancement, server
+qualification, production runner review, and process evidence.
+
+Do not modify protocol 1.0 in place to add protocol-1.1 behavior. Do not infer protocol-1.1 admission
+from protocol-1.0 evidence.
+
+## Protocol-1.1 development isolation
+
+`dfmcp-live-v1-1-dev-server` is an explicitly unadmitted source and evidence-capture surface. It:
+
+- requires `DFMCP_ALLOW_UNADMITTED_LIVE_V1_1` to equal exactly `1`;
+- uses a distinct session-ID namespace;
+- preserves the frozen eleven-tool waist;
+- exposes read-only behavior only;
+- rejects production ticket, protocol, entry, registry, decision, floor, receipt, and launch
+  environment state;
+- cannot consume a production admission ticket;
+- cannot expose production admission provenance.
+
+Its public `dfmcp-mcp` API wrapper must reject `DFMCP_ADMITTED_BRIDGE_PROTOCOL` before entering the
+private development server. The production V2 contract must continue to mark protocol 1.1
+`implemented_unadmitted_development_only` until the complete evidence chain exists.
+
+## Compatibility and V2 launch rules
+
+Admitted startup must preserve:
 
 ```text
 exact registry bytes
 + owner-private monotonic floor
-+ exact manifest
++ exact deployment manifest
 + required entry ID
++ exact bridge protocol
 + source-bound server receipt
 + opened executable identity and SHA-256
 + sanitized loader environment
-+ single-use process ticket
++ protocol-bound single-use ticket
++ reviewed private runner
 + descriptor-only exec
 ```
 
-Do not add a path-based fallback. Re-read the registry and floor after artifact verification and
+The bridge protocol must agree across the deployment manifest, compatibility decision, launch
+record, ticket, `DFMCP_ADMITTED_BRIDGE_PROTOCOL`, Rust admission context/provenance, and runner
+lookup. Both launch and ticket digests cover it. Unknown protocols, mismatches, legacy V1 tickets,
+and protocols absent from the production map fail before server startup.
+
+The current production map admits protocol 1.0 only. Widening it is an evidence-bearing source
+change, not an environment or configuration toggle.
+
+Do not add a path-based execution fallback. Re-read registry/floor after artifact verification and
 immediately before execution. Re-hash the already-open executable before ticket issuance and before
-`exec`. The Rust consumer must revalidate and hash the current executable before deleting the
-ticket and starting MCP.
+`exec`. The Rust consumer repeats semantic and executable checks before deleting the ticket and
+starting MCP.
 
 The floor must remain:
 
@@ -158,7 +208,10 @@ The floor must remain:
 - advanced only through lock + expected-file-digest compare-and-swap + atomic fsynced replacement;
 - monotonic in sequence, digest chain, and accepted entry IDs.
 
-Silent entry removal is not revocation. Design an explicit evidence-bearing revocation schema before
+The ticket must remain a regular non-symlink exact-mode `0600` file under a real exact-mode `0700`
+directory. Owner-only but noncanonical modes such as `0500` or `0400` are not equivalent.
+
+Silent entry removal is not revocation. Design explicit evidence-bearing revocation before
 supporting removal.
 
 ## State and transaction rules
@@ -179,23 +232,35 @@ supporting removal.
 - Derived graph, search, and index generations are immutable. Publish children first, validate
   them, and swap the tiny root last. Partial publication is not a generation.
 
+## Observation-generation rules
+
+- Transport pagination is never canonical state.
+- Citizen pagination and announcement continuation are one protocol-1.1 publication transaction.
+- A combined capsule is published only after every required page agrees on observation identity,
+  summary, source manifest, retained bounds, projection, and continuation.
+- Complete retained-announcement suffix and complete fortress history are distinct claims.
+- `gap_before_window` is evidence that older history is unknown, not a warning that may be hidden.
+- Bootstrap must derive identity and initialize the adapter from one exact combined capsule. Do not
+  reintroduce a second underlying bridge read.
+- Primed replay preserves citizen offset, announcement cursor, limits, projection policy, source
+  manifest, and final snapshot identity.
+
 ## Effects, obligations, and evidence
 
 - A transport acknowledgment is not game mutation success, and game mutation success is not goal
   completion.
 - Mutations use prepare, revalidate, commit, observe, and prove.
-- Every mutating request has a stable idempotency key and an effect-journal identity.
+- Every mutating request has a stable idempotency key and effect-journal identity.
 - Two-phase effects apply to bridge mutation, observation publication, evidence publication, and
   checkpoint publication where partial completion would be ambiguous.
-- Long-running work is a bounded obligation with terminal and failure predicates, game-time
-  deadline, cadence, stability requirement, evidence, and cancellation policy.
+- Long-running work is a bounded obligation with terminal/failure predicates, game-time deadline,
+  cadence, stability requirement, evidence, and cancellation policy.
 - Cancellation is request, measurable drain progress, and finalize. It is not forgetting an
   operation.
 - Indeterminate effects remain indeterminate until reconciled.
 - ATP may move checkpoints, evidence, immutable generations, and state deltas. It may never become
   alternate mutation authority.
-- The current live protocol is read-only. Do not smuggle pause, command, or any other effect into
-  protocol V1.
+- Current live protocols are read-only. Do not smuggle pause, command, or any effect into them.
 
 ## Determinism and graph rules
 
@@ -205,66 +270,58 @@ supporting removal.
 - Load-bearing graph decisions emit complexity and decision-path witnesses.
 - Adaptive policies are clamped, sample-gated, circuit-breakable, and replayable. They may tune
   cost or attention, never weaken safety, authorization, conflict detection, compatibility,
-  custody, or proof rules.
+  protocol identity, custody, or proof rules.
 - Use immutable structural sharing and zero-copy views only after measuring the copy or boundary
   cost they remove. Preserve epoch, ordering, lifetime, and mutation semantics exactly.
 - Hash canonical bytes, not incidental serialization. When a file digest is evidence, hash the
-  exact bytes that were parsed or executed.
+  exact bytes parsed or executed.
 
 ## Agent-facing synthesis rules
 
 - Preserve the frozen eleven-tool waist. Improve ergonomics through shared schemas, profiles,
   affordances, typed handles, and progressive disclosure rather than top-level tool growth.
-- Every success and error response converges on the canonical Agent Turn Packet. New fields remain
-  additive unless a versioned contract explicitly changes the schema.
-- Every response binds one complete anchor. State continuity as bootstrap, continuous, heartbeat,
-  partial, gap, reset, stale, or indeterminate.
+- Every success and error converges on the canonical Agent Turn Packet.
+- Every response binds one complete anchor and states continuity explicitly.
 - Make active plans, actions, obligations, drains, confirmations, and indeterminate effects visible
-  without requiring transcript memory.
+  without transcript memory.
 - Separate `observed`, `certified_derived`, `inferred`, `predicted`, `assumed`, `stale`, `unknown`,
   `contradicted`, and `indeterminate`. Confidence never substitutes for epistemic class.
 - Only observed and eligible certified-derived facts may satisfy mutation preconditions.
-- Expose legal semantic affordances with capability, risk, precondition, cost, reversibility, and
-  disabled-reason metadata. Affordances suggest; they do not authorize.
-- Recommendations are structured protocol next steps with evidence, expected utility, expected
-  information value, cost, risk, invalidators, and confirmation requirements. Return none rather
-  than inventing busywork.
-- Prefer value-of-information inspection: acquire a fact only when it can change a material
-  decision enough to justify tokens, latency, bridge work, and game-time exposure.
-- `pulse`, `briefing`, `tactical`, and `forensic` are semantic observation contracts, not vague
-  verbosity settings. Safety, continuity, active work, uncertainty, and recovery survive every
-  budget.
-- An empty result proves absence only with a complete-domain coverage witness.
-- Compare predicted and observed effects. Material divergence emits a surprise record.
-- Memory, imported text, attention, recommendations, and counterfactuals never grant authority or
-  satisfy a live precondition.
-- A handoff packet must let a fresh agent resume safely without reconstructing the full transcript
-  or trusting unverifiable prose.
-- Non-MCP automation surfaces are machine-first, structured, bounded, and versioned. Keep stdout
-  and stderr separate and prefer deterministic NDJSON where streaming applies.
+- Affordances suggest; they do not authorize.
+- Recommendations are structured protocol next steps with evidence, utility, information value,
+  cost, risk, reversibility, invalidators, and confirmation requirements.
+- Prefer value-of-information inspection.
+- Observation profiles are semantic contracts, not vague verbosity settings.
+- Empty results prove absence only with complete-domain coverage.
+- Material prediction divergence emits a surprise record.
+- Memory, imported text, attention, recommendations, and counterfactuals never grant authority.
+- A handoff packet must let a fresh agent resume safely without reconstructing the transcript.
+- Non-MCP automation is machine-first, structured, bounded, and versioned. Keep stdout and stderr
+  separate and prefer deterministic NDJSON where streaming applies.
 
 ## Coding guidance
 
 Prefer small pure state-transition functions around an injected effect shell. Use ordered
 collections whenever iteration order is observable. Bound every untrusted collection, nesting
-level, string, frame, path, file, and output. Preserve unknown wire values where the protocol
-requires forward compatibility. Do not use `unwrap`, `expect`, `panic`, `todo`, or `unimplemented`
-in production code.
+level, string, frame, path, file, and output. Preserve unknown wire values where forward
+compatibility requires it. Do not use `unwrap`, `expect`, `panic`, `todo`, or `unimplemented` in
+production code.
 
 Expected source and contract text must be valid UTF-8, contain no NUL bytes, and remain within the
-repository integrity bound. A text file that cannot be imported or parsed is a repository-integrity
-failure, not a later test failure.
+repository integrity bound. Reject symbolic links, special files, machine-local placeholders,
+probe markers, and unstable reads.
 
-When changing a sealed gate, source-digest map, or schema:
+When changing a sealed gate, source-digest map, schema, or production protocol map:
 
 1. update the machine contract;
 2. update the implementation’s exact expected list;
 3. update receipt generation;
 4. update independent verification;
-5. update focused tests and aggregate checkers;
-6. update qualification wiring;
-7. update documentation and status;
-8. verify the lists are byte-for-byte semantically identical.
+5. update focused positive and mutation tests;
+6. update aggregate checkers and qualification wiring;
+7. update source-digest inventories;
+8. update documentation, changelog, and status;
+9. verify the representations are semantically identical.
 
 ## Qualification and release
 
@@ -275,13 +332,25 @@ Run:
 ./scripts/qualify_local.sh
 ```
 
-A full qualification requires a clean source revision, locked/offline dependency resolution,
-rustfmt, warning-denied Clippy, debug and release tests, warning-denied rustdoc, executable checks,
-and every repository, bridge, acceptance, compatibility, floor, doctor, receipt, launcher, and
-ticket gate. `DFMCP_STATIC_ONLY=1`, `DFMCP_ALLOW_MISSING_RUST=1`, or dirty-tree escape hatches create
-development evidence only and must never be described as release qualification.
+A full qualification requires a stable exact clean source revision, locked/offline dependency
+resolution, rustfmt, warning-denied Clippy, debug/release tests, warning-denied rustdoc, executable
+checks, and every repository, bridge, publication, bootstrap, MCP, acceptance, compatibility, floor,
+doctor, receipt, launcher, and ticket gate.
 
-Qualify the release server separately with:
+`DFMCP_STATIC_ONLY=1`, `DFMCP_ALLOW_MISSING_RUST=1`, or dirty-tree escape hatches create development
+evidence only. A dirty run must not produce a receipt whose status is indistinguishable from a clean
+release-admissible `passed` receipt.
+
+Protocol 1.1 has a separate source-only qualifier:
+
+```bash
+scripts/qualify_live_announcement_source.sh
+```
+
+It does not establish native build, A1-A6, baseline R2-R5, registry, floor, artifact, production-map,
+or runtime evidence.
+
+Qualify the protocol-1.0 release server separately with:
 
 ```bash
 scripts/qualify_live_server_binary.sh \
@@ -289,15 +358,15 @@ scripts/qualify_live_server_binary.sh \
   target/live-server-binary-qualification/<run>
 ```
 
-A release additionally requires exact asset contracts, checksums, signatures, SBOMs, install and
-rollback evidence, and named platform/compatibility receipts.
+A release additionally requires exact source bundles, asset contracts, checksums, signatures, SBOMs,
+install/rollback evidence, and named platform/compatibility receipts.
 
 ## Definition of done
 
-A feature is done only when its semantics, capability requirements, effect classification,
-determinism classification, failure and recovery behavior, witness model, Agent Turn behavior,
-epistemic and coverage semantics, compatibility and custody impact, registries, tests, benchmarks,
-documentation, and acceptance evidence are explicit.
+A feature is done only when semantics, capability requirements, effect classification, determinism,
+failure/recovery behavior, witness model, Agent Turn behavior, epistemic and coverage semantics,
+protocol/compatibility/custody impact, registries, tests, benchmarks, documentation, and acceptance
+evidence are explicit.
 
-“The command ran,” “the code compiles,” “the test passed,” and “the source exists” are each useful
-facts. None is sufficient by itself.
+“The command ran,” “the code compiles,” “the test passed,” and “the source exists” are useful facts.
+None is sufficient by itself.
