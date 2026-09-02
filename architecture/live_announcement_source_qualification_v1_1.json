@@ -35,6 +35,7 @@
     "announcement_driver": "crates/dfmcp-adapter/src/live_session_v1_1.rs",
     "announcement_publication": "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs",
     "announcement_adapter": "crates/dfmcp-adapter/src/live_adapter_v1_1.rs",
+    "announcement_adapter_transaction_tests": "crates/dfmcp-adapter/tests/live_adapter_v1_1_transactional.rs",
     "announcement_projection": "crates/dfmcp-adapter/src/live_announcement_projection.rs",
     "combined_projection": "crates/dfmcp-adapter/src/live_projection_v1_1.rs",
     "announcement_briefing": "crates/dfmcp-adapter/src/live_announcement_briefing.rs",
