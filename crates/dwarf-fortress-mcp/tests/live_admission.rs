@@ -16,6 +16,7 @@ fn direct_serve_live_without_ticket_fails_closed() -> Result<(), Box<dyn Error>>
     let output = server_command()
         .arg("serve-live")
         .env_remove("DFMCP_ADMISSION_TICKET")
+        .env_remove("DFMCP_ADMITTED_BRIDGE_PROTOCOL")
         .output()?;
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr)?;
@@ -35,10 +36,31 @@ fn nonexistent_ticket_path_fails_before_live_server_startup() -> Result<(), Box<
     let output = server_command()
         .arg("serve-live")
         .env("DFMCP_ADMISSION_TICKET", &missing)
+        .env("DFMCP_ADMITTED_BRIDGE_PROTOCOL", "1.0")
         .output()?;
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr)?;
     assert!(stderr.contains("cannot inspect admission ticket"));
+    assert!(!stderr.contains("dwarf-fortress-mcp-live"));
+    Ok(())
+}
+
+#[test]
+fn missing_protocol_environment_fails_before_ticket_inspection() -> Result<(), Box<dyn Error>> {
+    let ordinal = NEXT_MISSING_TICKET.fetch_add(1, Ordering::Relaxed);
+    let missing = env::temp_dir().join(format!(
+        "dfmcp-missing-protocol-ticket-{}-{ordinal}.json",
+        std::process::id()
+    ));
+    let _ignored = std::fs::remove_file(&missing);
+    let output = server_command()
+        .arg("serve-live")
+        .env("DFMCP_ADMISSION_TICKET", &missing)
+        .env_remove("DFMCP_ADMITTED_BRIDGE_PROTOCOL")
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("DFMCP_ADMITTED_BRIDGE_PROTOCOL is required"));
     assert!(!stderr.contains("dwarf-fortress-mcp-live"));
     Ok(())
 }
