@@ -21,8 +21,10 @@ BINARY_VERIFIER_PATH = ROOT / "scripts/verify_live_server_binary_receipt.py"
 DEFAULT_REGISTRY = ROOT / "architecture/live_compatibility_registry_v1.json"
 DEFAULT_BINARY = ROOT / "target/release/dwarf-fortress-mcp"
 DEFAULT_BINARY_CONTRACT = ROOT / "architecture/live_server_binary_receipt_v1.json"
-LAUNCH_SCHEMA = "dfmcp.admitted-live-launch/1"
-TICKET_SCHEMA = "dfmcp.live-admission-ticket/1"
+LAUNCH_SCHEMA = "dfmcp.admitted-live-launch/2"
+TICKET_SCHEMA = "dfmcp.live-admission-ticket/2"
+ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT = "DFMCP_ADMITTED_BRIDGE_PROTOCOL"
+ADMITTED_PROTOCOL_COMMANDS = {"1.0": "serve-live"}
 TICKET_DIRECTORY_NAME = ".dfmcp-admission"
 TICKET_TTL_SECONDS = 120
 MAX_TICKET_BYTES = 64 * 1024
@@ -85,6 +87,46 @@ def validate_loader_environment(environment: dict[str, str]) -> None:
         )
 
 
+def validate_admitted_bridge_protocol(value: object, field: str) -> str:
+    protocol = promotion.require_string(value, field, 16)
+    if protocol not in ADMITTED_PROTOCOL_COMMANDS:
+        fail(
+            f"bridge protocol {protocol!r} has no admitted production runtime; "
+            "protocol 1.1 remains an explicitly unadmitted development generation"
+        )
+    return protocol
+
+
+def decision_bridge_protocol(compatibility_decision: dict[str, Any]) -> str:
+    try:
+        value = compatibility_decision["manifest"]["version_tuple"]["protocol"]
+    except (KeyError, TypeError):
+        fail("compatibility decision does not contain a bridge protocol")
+    return validate_admitted_bridge_protocol(
+        value, "compatibility_decision.manifest.version_tuple.protocol"
+    )
+
+
+def launch_bridge_protocol(record: dict[str, Any]) -> str:
+    if record.get("schema") != LAUNCH_SCHEMA:
+        fail("admitted launch record schema is unsupported")
+    protocol = validate_admitted_bridge_protocol(
+        record.get("bridge_protocol"), "launch.bridge_protocol"
+    )
+    try:
+        manifest_protocol = record["deployment_manifest"]["version_tuple"]["protocol"]
+    except (KeyError, TypeError):
+        fail("admitted launch record does not contain a deployment bridge protocol")
+    normalized_manifest_protocol = promotion.require_string(
+        manifest_protocol,
+        "launch.deployment_manifest.version_tuple.protocol",
+        16,
+    )
+    if protocol != normalized_manifest_protocol:
+        fail("admitted launch record protocol differs from its deployment manifest")
+    return protocol
+
+
 def read_launch_generation(
     registry_path: Path, floor_path: Path
 ) -> tuple[dict[str, Any], dict[str, Any], str, dict[str, Any]]:
@@ -114,6 +156,7 @@ def build_launch_record(
         fail("compatibility decision is not bound to the trusted monotonic floor generation")
     if compatibility_decision.get("entry_id") not in floor_value["entry_ids"]:
         fail("admitted compatibility entry is absent from the trusted monotonic floor")
+    bridge_protocol = decision_bridge_protocol(compatibility_decision)
     source_commit = compatibility_decision["manifest"]["source"]["dfmcp_commit"]
     if normalized_server_receipt["source"]["dfmcp_commit"] != source_commit:
         fail("server binary receipt and compatibility decision name different source commits")
@@ -128,6 +171,7 @@ def build_launch_record(
     unsigned: dict[str, Any] = {
         "schema": LAUNCH_SCHEMA,
         "state": "authorized_to_exec",
+        "bridge_protocol": bridge_protocol,
         "compatibility_entry_id": compatibility_decision["entry_id"],
         "required_entry_id": compatibility_decision["required_entry_id"],
         "compatibility_decision_digest": compatibility_decision["decision_digest"],
@@ -230,6 +274,7 @@ def prepare_launch(
     decision = resolver.resolve(registry, manifest, required_entry_id)
     if decision["admitted"] is not True:
         fail("deployment manifest has no exact admitted compatibility entry")
+    decision_bridge_protocol(decision)
     expected_commit = promotion.require_commit(
         expected_dfmcp_commit, "expected_dfmcp_commit"
     )
@@ -298,6 +343,7 @@ def build_admission_ticket(
         fail("admission ticket creation time must not be negative")
     if pid <= 0 or pid > 0xFFFF_FFFF:
         fail("admission ticket process ID is outside the u32 domain")
+    bridge_protocol = launch_bridge_protocol(record)
     metadata = reverify_opened_binary(opened_binary, record)
     unsigned: dict[str, Any] = {
         "schema": TICKET_SCHEMA,
@@ -306,6 +352,7 @@ def build_admission_ticket(
         "process_id": pid,
         "created_unix_seconds": now,
         "expires_unix_seconds": now + TICKET_TTL_SECONDS,
+        "bridge_protocol": bridge_protocol,
         "compatibility_entry_id": record["compatibility_entry_id"],
         "compatibility_registry_digest": record["compatibility_registry_digest"],
         "compatibility_decision_digest": record["compatibility_decision_digest"],
@@ -398,7 +445,9 @@ def admitted_environment(
     record: dict[str, Any],
     ticket_path: Path,
 ) -> dict[str, str]:
+    bridge_protocol = launch_bridge_protocol(record)
     environment = dict(source)
+    environment[ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT] = bridge_protocol
     environment["DFMCP_COMPATIBILITY_ENTRY_ID"] = record["compatibility_entry_id"]
     environment["DFMCP_COMPATIBILITY_DECISION_DIGEST"] = record[
         "compatibility_decision_digest"
@@ -429,13 +478,17 @@ def execute_verified_descriptor(
     environment: dict[str, str],
     record: dict[str, Any],
 ) -> NoReturn:
+    bridge_protocol = launch_bridge_protocol(record)
+    if environment.get(ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT) != bridge_protocol:
+        fail("admitted execution environment protocol differs from the launch record")
     if os.execve not in getattr(os, "supports_fd", set()):
         fail(
             "this Python runtime cannot execute an opened descriptor; "
             "refusing a path-based live-execution fallback"
         )
     reverify_opened_binary(opened_binary, record)
-    arguments = [opened_binary.path.name, "serve-live"]
+    command = ADMITTED_PROTOCOL_COMMANDS[bridge_protocol]
+    arguments = [opened_binary.path.name, command]
     os.execve(opened_binary.descriptor, arguments, environment)
     fail("descriptor-based exec returned unexpectedly")
 
