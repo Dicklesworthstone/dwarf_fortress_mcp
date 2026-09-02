@@ -1,0 +1,59 @@
+{
+  "schema_version": "dfmcp.source-bundle-contract/1",
+  "manifest_schema": "dfmcp.source-bundle/1",
+  "status": "normative_release_source_bundle_contract",
+  "archive": {
+    "format": "ustar_or_pax_tar_from_git_archive",
+    "hash_algorithm": "sha256",
+    "maximum_bytes": 268435456,
+    "maximum_entries": 65536,
+    "maximum_entry_bytes": 67108864,
+    "maximum_total_content_bytes": 536870912,
+    "required_prefix": "dwarf_fortress_mcp-<40-hex-commit>/",
+    "allowed_entry_types": [
+      "directory",
+      "regular_file"
+    ],
+    "symbolic_links_allowed": false,
+    "hard_links_allowed": false,
+    "special_files_allowed": false,
+    "duplicate_paths_allowed": false,
+    "absolute_paths_allowed": false,
+    "parent_traversal_allowed": false
+  },
+  "source": {
+    "must_be_clean_git_commit": true,
+    "submodules_allowed": false,
+    "symbolic_links_allowed": false,
+    "tracked_regular_files_only": true,
+    "entry_order": "strict_utf8_path_byte_order",
+    "file_modes": [
+      "100644",
+      "100755"
+    ],
+    "content_digest": "sha256_of_canonical_entries_array"
+  },
+  "manifest": {
+    "timestamps_allowed": false,
+    "absolute_paths_allowed": false,
+    "machine_local_paths_allowed": false,
+    "digest_covers": "all fields except manifest_digest",
+    "archive_name_must_be_basename": true
+  },
+  "authority": {
+    "executes_project_code": false,
+    "modifies_source": false,
+    "network_access": false,
+    "grants_capabilities": [],
+    "mutation_capabilities": []
+  },
+  "claims_not_established": [
+    "successful compilation",
+    "test or qualification success",
+    "DFHack compatibility",
+    "compatibility-registry admission",
+    "binary reproducibility",
+    "release signature authenticity",
+    "host-compromise resistance"
+  ]
+}
