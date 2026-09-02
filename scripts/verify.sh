@@ -16,6 +16,7 @@ warn() { printf '%bWARN%b %s\n' "$YELLOW" "$RESET" "$*"; }
 die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
+[[ -f architecture/live_admission_ticket_v2.json ]] || die "Protocol-bound V2 admission ticket contract is missing"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
@@ -79,7 +80,7 @@ info "Validating authority-free live-admission diagnosis"
 python3 scripts/check_live_admission_doctor.py
 ok "Live admission doctor"
 
-info "Validating floor-, receipt-, ticket-, and descriptor-bound live execution"
+info "Validating protocol-, floor-, receipt-, ticket-, and descriptor-bound live execution"
 python3 scripts/check_live_server_artifact.py
 ok "Live server artifact admission"
 
