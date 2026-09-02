@@ -28,6 +28,7 @@ fn attach_live_admission_provenance(briefing: &mut Value) {
         json!({
             "state": "admitted",
             "mode": "authenticated_live_read_only",
+            "bridge_protocol": provenance.bridge_protocol(),
             "ticket_id": provenance.ticket_id(),
             "compatibility_entry_id": provenance.compatibility_entry_id(),
             "compatibility_registry_digest": provenance.compatibility_registry_digest(),
