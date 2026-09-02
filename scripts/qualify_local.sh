@@ -16,6 +16,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v git >/dev/null 2>&1 || die "git is required"
+[[ -f architecture/live_admission_ticket_v2.json ]] || die "Protocol-bound V2 admission ticket contract is missing"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
@@ -180,6 +181,7 @@ receipt={
    'live_compatibility_floor_checker':digest(root/'scripts/check_live_compatibility_floor.py'),
    'live_compatibility_floor_tests':digest(root/'scripts/test_live_compatibility_floor.py'),
    'live_admission_doctor_contract':digest(root/'architecture/live_admission_doctor_v1.json'),
+   'live_admission_ticket_contract':digest(root/'architecture/live_admission_ticket_v2.json'),
    'live_admission_doctor':digest(root/'scripts/doctor_live_admission.py'),
    'live_admission_doctor_checker':digest(root/'scripts/check_live_admission_doctor.py'),
    'live_admission_doctor_tests':digest(root/'scripts/test_doctor_live_admission.py'),
