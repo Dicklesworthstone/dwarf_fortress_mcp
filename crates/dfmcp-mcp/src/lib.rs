@@ -37,6 +37,21 @@ pub use http_transport::{
     MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,
 };
-pub use live_server_v1_1::run_live_v1_1_development_stdio;
 pub use server::validate_localhost_bind;
 pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_action_task};
+
+/// Run the explicitly unadmitted protocol-1.1 development server.
+///
+/// The public seam rejects the production protocol marker before entering the
+/// private runtime so external callers cannot accidentally combine development
+/// execution with a production-looking admission environment.
+pub fn run_live_v1_1_development_stdio() {
+    const ADMITTED_PROTOCOL_ENVIRONMENT: &str = "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
+    if std::env::var_os(ADMITTED_PROTOCOL_ENVIRONMENT).is_some() {
+        eprintln!(
+            "unadmitted protocol-1.1 development runtime refuses production admission environment: {ADMITTED_PROTOCOL_ENVIRONMENT}"
+        );
+        std::process::exit(1);
+    }
+    live_server_v1_1::run_live_v1_1_development_stdio();
+}
