@@ -280,19 +280,21 @@
           ]
         },
         {
-          "case": "cursor_beyond_latest",
+          "case": "cursor_beyond_latest_rejected",
           "required_equals": {
-            "record_count": 0,
-            "complete_through_latest": true,
-            "cursor_regression_invented": false
+            "accepted": false,
+            "failure_class": "cursor_gap",
+            "failure_code": "ANNOUNCEMENT_CURSOR_AHEAD",
+            "partial_state_published": false
           },
           "required_artifact_digests": [
-            "canonical_batch"
+            "rejection_transcript"
           ]
         },
         {
           "case": "empty_retained_window",
           "required_equals": {
+            "requested_after_id": -1,
             "record_count": 0,
             "retained_window_empty": true,
             "complete_history_claimed": false
@@ -599,7 +601,7 @@
   "claims_established": [
     "the named clean protocol-1.1 source and native plugin passed every A1-A6 case on the named platform",
     "announcement records are canonical, bounded, cursor-addressed retained suffix evidence",
-    "retained-window gaps and partial suffixes remain explicit to a cold agent",
+    "retained-window gaps, rejected future cursors, and partial suffixes remain explicit to a cold agent",
     "announcement evidence grants no mutation capability"
   ],
   "claims_not_established": [
