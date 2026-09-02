@@ -52,6 +52,7 @@
     "acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
     "source_qualification_contract": "architecture/live_announcement_source_qualification_v1_1.json",
     "contract_checker": "scripts/check_live_announcements.py",
+    "contract_checker_core": "scripts/check_live_announcements_core.py",
     "publication_checker": "scripts/check_live_announcement_publication.py",
     "contract_checker_tests": "scripts/test_live_announcement_contract.py",
     "acceptance_verifier": "scripts/verify_live_announcement_acceptance.py",
