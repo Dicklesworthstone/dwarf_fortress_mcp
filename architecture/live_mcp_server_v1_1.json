@@ -10,6 +10,7 @@
     },
     "forbidden_admission_environment_prefixes": [
       "DFMCP_ADMISSION_TICKET",
+      "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
       "DFMCP_COMPATIBILITY_ENTRY_ID",
       "DFMCP_COMPATIBILITY_DECISION_DIGEST",
       "DFMCP_COMPATIBILITY_REGISTRY_DIGEST",
@@ -17,7 +18,7 @@
       "DFMCP_SERVER_RECEIPT_DIGEST",
       "DFMCP_ADMITTED_LAUNCH_DIGEST"
     ],
-    "note": "This binary is intentionally unable to consume a production admission ticket. A future admitted protocol-1.1 runner requires a separate ticket schema, launcher, server receipt generation, registry entry, and floor acceptance."
+    "note": "This binary cannot consume a production admission ticket. The V2 ticket contract admits only protocol 1.0 today; protocol 1.1 requires its own completed native, live, registry, floor, server-receipt, and explicit runtime-dispatch evidence before the production map may be widened."
   },
   "mcp": {
     "protocol": "2026-07-28",
