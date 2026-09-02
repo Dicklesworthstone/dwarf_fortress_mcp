@@ -618,19 +618,19 @@ mod tests {
 
     #[test]
     fn future_records_are_rejected_against_the_observation_clock() {
-        let mut later_year = record(10);
+        let mut later_year = record(11);
         later_year.year = 106;
-        assert!(batch(vec![later_year]).is_err());
+        assert!(batch(vec![record(10), later_year]).is_err());
 
-        let mut later_tick = record(10);
+        let mut later_tick = record(11);
         later_tick.year = 105;
         later_tick.year_tick = 12_346;
-        assert!(batch(vec![later_tick]).is_err());
+        assert!(batch(vec![record(10), later_tick]).is_err());
 
-        let mut current_tick = record(10);
+        let mut current_tick = record(11);
         current_tick.year = 105;
         current_tick.year_tick = 12_345;
-        assert!(batch(vec![current_tick]).is_ok());
+        assert!(batch(vec![record(10), current_tick]).is_ok());
     }
 
     #[test]
