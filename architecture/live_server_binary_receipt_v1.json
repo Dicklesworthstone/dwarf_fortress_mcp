@@ -67,6 +67,7 @@
       "compatibility_floor_checker": "scripts/check_live_compatibility_floor.py",
       "compatibility_floor_tests": "scripts/test_live_compatibility_floor.py",
       "admission_doctor_contract": "architecture/live_admission_doctor_v1.json",
+      "admission_ticket_contract": "architecture/live_admission_ticket_v2.json",
       "admission_doctor": "scripts/doctor_live_admission.py",
       "admission_doctor_checker": "scripts/check_live_admission_doctor.py",
       "admission_doctor_tests": "scripts/test_doctor_live_admission.py",
