@@ -13,6 +13,7 @@ NATIVE = ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp"
 BATCH = ROOT / "crates/dfmcp-adapter/src/live_announcement_batch.rs"
 PUBLICATION = ROOT / "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs"
 ADAPTER = ROOT / "crates/dfmcp-adapter/src/live_adapter_v1_1.rs"
+REGRESSION_TEST = ROOT / "crates/dfmcp-adapter/tests/live_adapter_v1_1_transactional.rs"
 LIBRARY = ROOT / "crates/dfmcp-adapter/src/lib.rs"
 STATUS = ROOT / "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md"
 
@@ -143,19 +144,28 @@ def check_read_only_adapter() -> None:
         "over_ceiling_suffix_leaves_adapter_unbootstrapped",
         "retained_window_gap_is_visible_but_history_is_not_upgraded",
         "bridge_restart_advances_epoch",
-        "candidate_over_budget_does_not_advance_anchor",
         "pinned_query_returns_announcement_entities_with_evidence",
         "mutation_surface_remains_absent",
         "hard_configuration_bounds_are_rejected",
     ]:
         require(f"fn {name}" in source, f"protocol-1.1 adapter tests omit {name}")
-    candidate_test = source.split("fn candidate_over_budget_does_not_advance_anchor", 1)[1].split(
-        "#[test]", 1
-    )[0]
+
+    regression = require_markers(
+        REGRESSION_TEST,
+        [
+            "fn larger_candidate_over_budget_does_not_advance_anchor",
+            "page(12_345, &[])?",
+            "page(12_346, &[10])?",
+            "max_entities: 2",
+            "adapter.observe(&request, &context(prior))",
+            "assert_eq!(failure.code, ErrorCode::BudgetExceeded)",
+            "assert_eq!(adapter.current_anchor(), Some(prior))",
+            "assert_eq!(current.snapshot.graph.entities.len(), 2)",
+        ],
+    )
     require(
-        "complete_page(42, 12_345, &[0], &[])" in candidate_test
-        and "complete_page(42, 12_346, &[0], &[10])" in candidate_test,
-        "candidate-over-budget test does not isolate growth beyond an already-admitted snapshot",
+        regression.count("#[test]") == 1,
+        "black-box transactional budget regression must remain one focused test",
     )
 
 
@@ -185,6 +195,7 @@ def check_crate_and_source_identity() -> None:
         "announcement_batch": "crates/dfmcp-adapter/src/live_announcement_batch.rs",
         "announcement_publication": "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs",
         "announcement_adapter": "crates/dfmcp-adapter/src/live_adapter_v1_1.rs",
+        "announcement_adapter_transaction_tests": "crates/dfmcp-adapter/tests/live_adapter_v1_1_transactional.rs",
         "publication_checker": "scripts/check_live_announcement_publication.py",
     }
     for name, relative in expected.items():
