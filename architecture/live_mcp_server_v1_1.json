@@ -1,0 +1,166 @@
+{
+  "schema_version": "dfmcp.live-mcp-server/1.1",
+  "status": "implemented_source_contract_unadmitted_runtime",
+  "purpose": "Expose the protocol-1.1 citizen plus retained-announcement adapter through the frozen eleven-tool MCP waist for controlled development and evidence capture without implying compatibility admission.",
+  "binary": {
+    "name": "dfmcp-live-v1-1-dev-server",
+    "entrypoint": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-v1-1-dev-server.rs",
+    "required_opt_in_environment": {
+      "DFMCP_ALLOW_UNADMITTED_LIVE_V1_1": "1"
+    },
+    "forbidden_admission_environment_prefixes": [
+      "DFMCP_ADMISSION_TICKET",
+      "DFMCP_COMPATIBILITY_ENTRY_ID",
+      "DFMCP_COMPATIBILITY_DECISION_DIGEST",
+      "DFMCP_COMPATIBILITY_REGISTRY_DIGEST",
+      "DFMCP_COMPATIBILITY_FLOOR_",
+      "DFMCP_SERVER_RECEIPT_DIGEST",
+      "DFMCP_ADMITTED_LAUNCH_DIGEST"
+    ],
+    "note": "This binary is intentionally unable to consume a production admission ticket. A future admitted protocol-1.1 runner requires a separate ticket schema, launcher, server receipt generation, registry entry, and floor acceptance."
+  },
+  "mcp": {
+    "protocol": "2026-07-28",
+    "transport": "stdio",
+    "implementation": "owned fastmcp_rust exact revision",
+    "server_name": "dwarf-fortress-mcp-live-v1-1-development",
+    "tools": [
+      "fortress.open_session",
+      "fortress.observe",
+      "fortress.query",
+      "fortress.plan",
+      "fortress.commit",
+      "fortress.wait",
+      "fortress.cancel",
+      "fortress.checkpoint",
+      "fortress.restore",
+      "fortress.explain",
+      "fortress.doctor"
+    ],
+    "read_only_capabilities": [
+      "doctor",
+      "observe",
+      "query",
+      "wait"
+    ],
+    "mutation_capabilities": [],
+    "query_modes": [
+      "summary",
+      "citizens",
+      "announcements",
+      "all"
+    ]
+  },
+  "bridge": {
+    "protocol": "1.1",
+    "version": "0.2.0",
+    "plugin": "dfmcp_bridge_v1_1",
+    "methods": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "mutation_methods": [],
+    "source": "connect_authenticated_live_source_v1_1",
+    "bootstrap": "bootstrap_live_read_adapter_v1_1",
+    "adapter": "LiveReadAdapterV1_1"
+  },
+  "session": {
+    "maximum_concurrent_sessions": 32,
+    "session_id_prefix_hex_byte": "11",
+    "wrong_generation_session_ids_rejected": true,
+    "maximum_capability_requests": 8,
+    "source_poisoning_is_permanent_per_session": true,
+    "mutation_tools_remain_registered_and_fail_closed": true
+  },
+  "environment": {
+    "DFMCP_BRIDGE_ENDPOINT": {
+      "default": "127.0.0.1:5000",
+      "constraint": "numeric loopback IP and port"
+    },
+    "DFMCP_BRIDGE_TOKEN": {
+      "constraint": "32..256 UTF-8 bytes",
+      "exposed_as_mcp_argument": false
+    },
+    "DFMCP_BRIDGE_CONNECT_MILLIS": {
+      "default": 2000,
+      "minimum": 1,
+      "maximum": 60000
+    },
+    "DFMCP_BRIDGE_READ_MILLIS": {
+      "default": 5000,
+      "minimum": 1,
+      "maximum": 60000
+    },
+    "DFMCP_BRIDGE_WRITE_MILLIS": {
+      "default": 5000,
+      "minimum": 1,
+      "maximum": 60000
+    },
+    "DFMCP_BRIDGE_PAGE_SIZE": {
+      "default": 4096,
+      "minimum": 1,
+      "maximum": 4096
+    },
+    "DFMCP_BRIDGE_MAX_CITIZENS": {
+      "default": 100000,
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "DFMCP_BRIDGE_INCLUDE_NAMES": {
+      "default": true
+    },
+    "DFMCP_BRIDGE_ANNOUNCEMENT_AFTER_ID": {
+      "default": -1,
+      "minimum": -1,
+      "maximum": 2147483647
+    },
+    "DFMCP_BRIDGE_ANNOUNCEMENT_PAGE_SIZE": {
+      "default": 128,
+      "minimum": 1,
+      "maximum": 512
+    },
+    "DFMCP_BRIDGE_MAX_ANNOUNCEMENTS": {
+      "default": 512,
+      "minimum": 1,
+      "maximum": 512
+    }
+  },
+  "agent_semantics": {
+    "agent_turn_required_on_success_and_failure": true,
+    "announcement_attention_source": "build_live_announcement_briefing",
+    "announcement_change_source": "summarize_live_announcement_change",
+    "retained_suffix_and_history_coverage_are_distinct": true,
+    "complete_history_may_be_claimed": false,
+    "development_and_unadmitted_state_explicit_in_every_turn": true,
+    "admission_provenance_may_be_projected": false
+  },
+  "authority": {
+    "compatibility_admitted": false,
+    "server_artifact_qualified": false,
+    "runtime_admitted": false,
+    "grants_capabilities": [],
+    "mutation_capabilities": [],
+    "note": "The development runtime can perform authenticated read-only bridge observations after explicit operator opt-in. Source presence or successful execution does not admit any tuple."
+  },
+  "acceptance": {
+    "source_checker": "scripts/check_live_mcp_v1_1.py",
+    "source_tests": "scripts/test_live_mcp_v1_1.py",
+    "source_qualification_contract": "architecture/live_announcement_source_qualification_v1_1.json",
+    "native_receipt_contract": "architecture/dfhack_plugin_native_receipt_v1_1.json",
+    "live_acceptance_contract": "architecture/live_announcement_acceptance_v1_1.json",
+    "baseline_r2_r5_reexecution_required": true,
+    "separate_admitted_runtime_generation_required": true
+  },
+  "claims_not_established": [
+    "compatibility with any Dwarf Fortress or DFHack version",
+    "a passing native plugin build",
+    "a passing A1-A6 disposable-fort campaign",
+    "a passing baseline R2-R5 campaign under protocol 1.1",
+    "a qualified protocol-1.1 server binary",
+    "a protocol-1.1 compatibility-registry entry",
+    "monotonic-floor acceptance",
+    "runtime admission",
+    "complete fortress announcement history",
+    "mutation correctness or authority"
+  ]
+}
