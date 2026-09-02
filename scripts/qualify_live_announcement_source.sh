@@ -20,8 +20,10 @@ Usage:
   scripts/qualify_live_announcement_source.sh [OUTPUT_DIR]
 
 Produces a source-only protocol-1.1 qualification receipt for the exact clean
-Git revision. This proves static and Rust gates only. It does not prove a native
-DFHack build, live A1-A6 behavior, compatibility admission, or runtime launch.
+Git revision. This proves static and Rust gates, including the separately named
+unadmitted development MCP runtime. It does not prove a native DFHack build,
+live A1-A6 behavior, compatibility admission, server-artifact qualification,
+or admitted runtime launch.
 EOF
 }
 
@@ -145,13 +147,17 @@ run_gate repository-integrity python3 scripts/check_repository_integrity.py
 run_gate announcement-contract python3 scripts/check_live_announcements.py
 run_gate announcement-contract-tests python3 scripts/test_live_announcement_contract.py
 run_gate announcement-acceptance-tests python3 scripts/test_live_announcement_acceptance.py
+run_gate announcement-mcp-contract python3 scripts/check_live_mcp_v1_1.py
+run_gate announcement-mcp-contract-tests python3 scripts/test_live_mcp_v1_1.py
 run_gate python-syntax python3 -m py_compile \
   scripts/check_live_announcements.py \
   scripts/check_live_announcements_core.py \
   scripts/check_live_announcement_publication.py \
   scripts/test_live_announcement_contract.py \
   scripts/verify_live_announcement_acceptance.py \
-  scripts/test_live_announcement_acceptance.py
+  scripts/test_live_announcement_acceptance.py \
+  scripts/check_live_mcp_v1_1.py \
+  scripts/test_live_mcp_v1_1.py
 run_gate shell-syntax bash -n \
   scripts/qualify_dfhack_plugin_v1_1.sh \
   scripts/qualify_live_announcements.sh \
@@ -160,6 +166,7 @@ run_gate cargo-metadata cargo metadata --locked --offline --format-version 1
 run_gate rustfmt cargo fmt --all -- --check
 run_gate clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 run_gate adapter-tests cargo test --locked -p dfmcp-adapter
+run_gate announcement-mcp-process-tests cargo test --locked -p dwarf-fortress-mcp --test live_v1_1_development_admission
 run_gate workspace-tests cargo test --locked --workspace --all-targets --all-features
 run_gate rustdoc env RUSTDOCFLAGS=-Dwarnings cargo doc --locked --workspace --all-features --no-deps
 run_gate announcement-probe-help cargo run --locked --quiet --bin dfmcp-live-announcement-probe -- help
