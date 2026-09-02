@@ -18,9 +18,9 @@ use crate::{
     LiveAnnouncementBatch, LiveObservationCapsuleV1_1,
     LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
     LiveReadAdapterConfigV1_1, LiveReadAdapterV1_1,
-    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_CAPSULE_CITIZENS,
-    MAX_V1_1_CITIZENS_PER_PAGE, ObservationPageV1_1,
-    derive_live_fortress_id, read_publishable_observation_v1_1,
+    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_V1_1_CITIZENS_PER_PAGE,
+    ObservationPageV1_1, derive_live_fortress_id,
+    read_publishable_observation_v1_1,
 };
 
 pub const DEFAULT_MAX_LIVE_ANNOUNCEMENTS: u32 = 512;
