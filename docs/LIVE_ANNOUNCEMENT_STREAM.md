@@ -56,6 +56,25 @@ The publication boundary acquires all required pages first and constructs one co
 after both the citizen roster and configured retained-announcement suffix are complete. Transport
 pagination is therefore not canonical state.
 
+## Single-publication bootstrap
+
+Bootstrap must not read one capsule to derive fortress identity and then read a different capsule to
+initialize the adapter. `bootstrap_live_read_adapter_v1_1` acquires exactly one complete combined
+capsule, derives the fortress identity and source digest from it, and wraps the source in a primed
+replay layer. The adapter consumes that same verified capsule without another underlying bridge
+read.
+
+Primed replay preserves the full two-dimensional transport surface:
+
+```text
+citizen pagination × announcement continuation
+```
+
+It verifies the exact citizen offset, announcement cursor, requested limits, name projection,
+summary fields, source manifest, and projected snapshot. Cursor drift, projection drift, manifest
+drift, or an attempt to begin an announcement continuation at a nonzero citizen offset fails closed.
+The bootstrap remains source-tested and still unadmitted.
+
 ## Coverage semantics
 
 The announcement domain is one of:
@@ -102,9 +121,10 @@ cargo run --locked --bin dfmcp-live-v1-1-dev-server
 ```
 
 The runtime requires the opt-in value to be exactly `1`. It refuses production admission
-environment markers, uses a protocol-1.1-specific session namespace, and never consumes a
-production admission ticket. It is intentionally unable to represent itself as an admitted
-process.
+environment markers, including `DFMCP_ADMITTED_BRIDGE_PROTOCOL`, uses a protocol-1.1-specific
+session namespace, and never consumes a production admission ticket. The public MCP API wrapper
+performs the protocol-marker refusal before entering the private server implementation, so external
+callers cannot make the development runtime look production-admitted.
 
 Read-only tool behavior is:
 
@@ -132,6 +152,12 @@ This is bridge protocol `1.1` and bridge implementation `0.2.0`. Any historical 
 admission remains immutable for its exact source and plugin bytes. It does not admit this source
 generation, this plugin, this development binary, or this process.
 
+The production process boundary is `architecture/live_admission_ticket_v2.json`. Its **production
+protocol map** currently contains only protocol `1.0`. The deployment manifest protocol is copied
+into the launch record, ticket, environment, Rust admission provenance, and final runner selection;
+each representation must agree and both canonical digests cover it. Unknown protocols and protocol
+`1.1` fail before live-server startup. Legacy V1 tickets are rejected.
+
 Protocol 1.1 requires:
 
 1. fresh source qualification, including the development MCP contract and process tests;
@@ -142,9 +168,11 @@ Protocol 1.1 requires:
 6. an exact protocol-1.1 compatibility-registry entry;
 7. deployment-floor acceptance;
 8. an authority-free artifact preflight;
-9. a separately versioned protocol-1.1 admission ticket and descriptor-only launch.
+9. a reviewed addition to the V2 production protocol map followed by a fresh protocol-bound,
+   single-use ticket and descriptor-only launch.
 
-The development runtime cannot substitute for any of these rungs.
+The development runtime cannot substitute for any of these rungs, and source presence cannot widen
+the production protocol map.
 
 ## Authority
 
