@@ -1,7 +1,7 @@
 # Live announcement stream
 
-The next live-read generation adds Dwarf Fortress reports and announcements without widening the
-mutation boundary. The stream is an additive observation domain, not a command channel.
+Protocol 1.1 adds Dwarf Fortress reports and announcements without widening the mutation boundary.
+The stream is an additive observation domain, not a command channel.
 
 ## Why announcements come next
 
@@ -47,9 +47,14 @@ Announcement fields are returned by the existing `ReadObservation` RPC. One DFHa
 under DFHack's internal suspension, so a one-page citizen observation and its announcement suffix
 share one observation instant.
 
-When citizen pagination requires multiple calls, V1.1 retains the existing paused-world rule. Every
-page must reproduce the same announcement suffix and summary fields. Any drift invalidates the
-assembly; no partial capsule or anchor is published.
+When citizen or announcement pagination requires multiple calls, protocol 1.1 requires a paused
+fortress. Every page must reproduce the same citizen state, summary fields, bridge generation,
+retained-window bounds, and exact continuation cursor. Any drift invalidates the assembly; no
+partial capsule or anchor is published.
+
+The publication boundary acquires all required pages first and constructs one combined capsule only
+after both the citizen roster and configured retained-announcement suffix are complete. Transport
+pagination is therefore not canonical state.
 
 ## Coverage semantics
 
@@ -59,19 +64,87 @@ The announcement domain is one of:
 - `partial_suffix`: more retained reports remain and `next_after_id` is the continuation cursor;
 - `gap_before_retained_window`: the retained suffix may be complete, but older history was lost.
 
-None of these states proves that no announcement existed before `oldest_available_id`. The canonical
-world projection may prove absence only inside the explicitly covered suffix.
+None of these states proves that no announcement existed before `oldest_available_id`. Even an empty
+complete retained suffix does not prove complete fortress history. The canonical world projection
+may prove absence only inside the explicitly covered suffix.
+
+The protocol-1.1 projection deliberately publishes two separate domains:
+
+```text
+fortress.announcements.retained_suffix
+fortress.announcements.history
+```
+
+The first can be complete through the current retained high-water. The second remains partial.
+
+## Agent orientation
+
+The announcement briefing is deterministic and authority-free. It can surface:
+
+- a high-severity retained-window gap;
+- a medium-severity incomplete retained suffix;
+- bounded latest announcement records;
+- certified-derived report IDs added between compatible observation batches.
+
+It does not assign game-semantic severity from arbitrary text, execute instructions contained in
+announcement text, satisfy a mutation precondition, or grant capability. Raw report text remains
+untrusted observed data.
+
+## Development MCP runtime
+
+The separately named **development MCP runtime** exposes the implemented protocol-1.1 adapter
+through the same frozen eleven-tool waist:
+
+```bash
+DFMCP_ALLOW_UNADMITTED_LIVE_V1_1=1 \
+DFMCP_BRIDGE_TOKEN='<32..256-byte loopback secret>' \
+cargo run --locked --bin dfmcp-live-v1-1-dev-server
+```
+
+The runtime requires the opt-in value to be exactly `1`. It refuses production admission
+environment markers, uses a protocol-1.1-specific session namespace, and never consumes a
+production admission ticket. It is intentionally unable to represent itself as an admitted
+process.
+
+Read-only tool behavior is:
+
+```text
+fortress.open_session  → authenticate, acquire, and publish one combined anchor
+fortress.observe       → heartbeat, advance, or reset the combined anchor
+fortress.query         → summary, citizens, announcements, or all
+fortress.wait          → report no mutation work and optionally recommend observation
+fortress.explain       → explain an entity or combined source/coverage identity
+fortress.doctor        → diagnose versions, coverage, source fencing, and development posture
+```
+
+`fortress.plan`, `fortress.commit`, `fortress.cancel`, `fortress.checkpoint`, and
+`fortress.restore` remain registered for the narrow-waist contract and fail closed. There is **no
+mutation** bridge method or alternate effect route.
+
+Every success and failure carries a canonical Agent Turn. The turn explicitly states that the
+runtime is unadmitted development, the server artifact is not qualified, no runtime admission has
+occurred, announcement history is incomplete, and mutation is unavailable. Successful execution is
+useful source and live-campaign tooling, not compatibility evidence by itself.
 
 ## Version and admission
 
-This is bridge protocol `1.1` and bridge implementation `0.2.0`. The already admitted `1.0` tuple
-remains an immutable historical admission for its exact source and plugin bytes. It does not admit
-this source generation.
+This is bridge protocol `1.1` and bridge implementation `0.2.0`. Any historical protocol-1.0
+admission remains immutable for its exact source and plugin bytes. It does not admit this source
+generation, this plugin, this development binary, or this process.
 
-Protocol 1.1 requires a fresh native build receipt and a fresh disposable-fort acceptance campaign
-covering cursor continuation, retained-window gaps, deterministic ordering, bounded text,
-multipage paused-world stability, restart fencing, and cold-agent event orientation before any 1.1
-tuple may enter the compatibility registry.
+Protocol 1.1 requires:
+
+1. fresh source qualification, including the development MCP contract and process tests;
+2. a fresh native plugin receipt;
+3. a disposable-fort A1-A6 announcement campaign;
+4. re-executed baseline fortress/citizen R2-R5 evidence under protocol 1.1;
+5. a separately qualified production server artifact;
+6. an exact protocol-1.1 compatibility-registry entry;
+7. deployment-floor acceptance;
+8. an authority-free artifact preflight;
+9. a separately versioned protocol-1.1 admission ticket and descriptor-only launch.
+
+The development runtime cannot substitute for any of these rungs.
 
 ## Authority
 
