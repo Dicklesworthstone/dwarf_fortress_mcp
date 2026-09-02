@@ -16,15 +16,27 @@ FILES = [
     CHECKER,
     ROOT / "architecture/dfhack_read_bridge_v1_1.json",
     ROOT / "architecture/live_announcement_projection_v1.json",
+    ROOT / "architecture/live_announcement_source_qualification_v1_1.json",
     ROOT / "architecture/dfhack_plugin_native_receipt_v1_1.json",
     ROOT / "architecture/live_announcement_acceptance_v1_1.json",
     ROOT / "architecture/live_announcement_evidence_journal_v1.json",
     ROOT / "bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto",
     ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp",
-    ROOT / "crates/dfmcp-adapter/src/live_announcements.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_announcement_batch.rs",
     ROOT / "crates/dfmcp-adapter/src/announcement_wire.rs",
+    ROOT / "crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_observation_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_session_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_connect_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_announcement_projection.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_projection_v1_1.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_announcement_briefing.rs",
     ROOT / "crates/dfmcp-adapter/src/lib.rs",
+    ROOT / "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-announcement-probe.rs",
+    ROOT / "scripts/qualify_live_announcement_source.sh",
     ROOT / "docs/LIVE_ANNOUNCEMENT_STREAM.md",
+    ROOT / "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md",
 ]
 
 
@@ -48,53 +60,68 @@ class LiveAnnouncementContractTests(unittest.TestCase):
             shutil.copy2(source, destination)
         return temporary, root
 
+    def assert_checker_rejects_json_mutation(
+        self,
+        relative: str,
+        mutate: callable,
+    ) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            path = root / relative
+            value = json.loads(path.read_text(encoding="utf-8"))
+            mutate(value)
+            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
     def test_repository_contract_passes(self) -> None:
         result = self.run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_standalone_method_or_inherited_admission_is_rejected(self) -> None:
-        temporary, root = self.fixture()
-        with temporary:
-            path = root / "architecture/dfhack_read_bridge_v1_1.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["method_manifest"].append("ReadAnnouncements")
-            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
-            self.assertNotEqual(self.run_checker(root).returncode, 0)
-
-            temporary2, root2 = self.fixture()
-            with temporary2:
-                path2 = root2 / "architecture/dfhack_read_bridge_v1_1.json"
-                value2 = json.loads(path2.read_text(encoding="utf-8"))
-                value2["compatibility"]["inherits_protocol_1_0_admission"] = True
-                path2.write_text(json.dumps(value2) + "\n", encoding="utf-8")
-                self.assertNotEqual(self.run_checker(root2).returncode, 0)
+        self.assert_checker_rejects_json_mutation(
+            "architecture/dfhack_read_bridge_v1_1.json",
+            lambda value: value["method_manifest"].append("ReadAnnouncements"),
+        )
+        self.assert_checker_rejects_json_mutation(
+            "architecture/dfhack_read_bridge_v1_1.json",
+            lambda value: value["compatibility"].update(
+                {"inherits_protocol_1_0_admission": True}
+            ),
+        )
 
     def test_projection_history_overclaim_is_rejected(self) -> None:
-        temporary, root = self.fixture()
-        with temporary:
-            path = root / "architecture/live_announcement_projection_v1.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["coverage"]["may_prove_complete_history"] = True
-            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
-            self.assertNotEqual(self.run_checker(root).returncode, 0)
+        self.assert_checker_rejects_json_mutation(
+            "architecture/live_announcement_projection_v1.json",
+            lambda value: value["coverage"].update(
+                {"may_prove_complete_history": True}
+            ),
+        )
 
     def test_acceptance_case_loss_is_rejected(self) -> None:
-        temporary, root = self.fixture()
-        with temporary:
-            path = root / "architecture/live_announcement_acceptance_v1_1.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["gates"][-1]["cases"].pop()
-            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
-            self.assertNotEqual(self.run_checker(root).returncode, 0)
+        self.assert_checker_rejects_json_mutation(
+            "architecture/live_announcement_acceptance_v1_1.json",
+            lambda value: value["gates"][-1]["cases"].pop(),
+        )
 
     def test_native_receipt_mutation_authority_is_rejected(self) -> None:
-        temporary, root = self.fixture()
-        with temporary:
-            path = root / "architecture/dfhack_plugin_native_receipt_v1_1.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["bridge"]["mutation_rpc_methods"] = ["Pause"]
-            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
-            self.assertNotEqual(self.run_checker(root).returncode, 0)
+        self.assert_checker_rejects_json_mutation(
+            "architecture/dfhack_plugin_native_receipt_v1_1.json",
+            lambda value: value["bridge"].update(
+                {"mutation_rpc_methods": ["Pause"]}
+            ),
+        )
+
+    def test_source_contract_must_bind_batch_and_complete_gate_order(self) -> None:
+        self.assert_checker_rejects_json_mutation(
+            "architecture/live_announcement_source_qualification_v1_1.json",
+            lambda value: value["required_source_digests"].pop(
+                "announcement_batch"
+            ),
+        )
+        self.assert_checker_rejects_json_mutation(
+            "architecture/live_announcement_source_qualification_v1_1.json",
+            lambda value: value["required_gates"].reverse(),
+        )
 
     def test_protobuf_method_waist_widening_is_rejected(self) -> None:
         temporary, root = self.fixture()
@@ -123,6 +150,26 @@ class LiveAnnouncementContractTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
+    def test_batch_bound_and_crate_wiring_drift_are_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            batch = root / "crates/dfmcp-adapter/src/live_announcement_batch.rs"
+            source = batch.read_text(encoding="utf-8").replace(
+                "MAX_ANNOUNCEMENTS_PER_BATCH: usize = 512",
+                "MAX_ANNOUNCEMENTS_PER_BATCH: usize = 513",
+            )
+            batch.write_text(source, encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+        temporary, root = self.fixture()
+        with temporary:
+            library = root / "crates/dfmcp-adapter/src/lib.rs"
+            source = library.read_text(encoding="utf-8").replace(
+                "pub mod live_announcement_batch;\n", ""
+            )
+            library.write_text(source, encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
     def test_announcement_gap_documentation_loss_is_rejected(self) -> None:
         temporary, root = self.fixture()
         with temporary:
@@ -131,6 +178,13 @@ class LiveAnnouncementContractTests(unittest.TestCase):
                 "gap_before_window", "removed_gap_marker"
             )
             path.write_text(source, encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+    def test_resurrected_retired_contract_is_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            retired = root / "architecture/live_announcement_read_v1.json"
+            retired.write_text("{}\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
 
