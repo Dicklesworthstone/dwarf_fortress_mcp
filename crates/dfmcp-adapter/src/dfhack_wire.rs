@@ -5,9 +5,11 @@
 //!
 //! DFHack remote RPC is not gRPC. On supported little-endian targets it uses a
 //! 12-byte native-layout handshake followed by eight-byte native-layout RPC
-//! headers and protobuf-Lite payloads. Protocol 1.0 remains the admitted
-//! citizen-only path. Protocol 1.1 is an explicit opt-in generation that adds
-//! bounded retained-window announcement reads without mutation authority.
+//! headers and protobuf-Lite payloads. This module implements only the exact
+//! messages required by `BindMethod`, `Handshake`, and `ReadObservation`.
+//! Socket ownership, deadlines, cancellation, and retry policy remain outside
+//! this codec: callers supply an already-connected bounded `Read + Write`
+//! stream owned by their structured-concurrency region.
 
 #[cfg(not(target_endian = "little"))]
 compile_error!("the admitted DFHack native RPC wire currently requires a little-endian target");
@@ -18,15 +20,9 @@ use std::io::{Read, Write};
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
-use crate::{
-    AnnouncementPage, AnnouncementRecord, AnnouncementSourceIdentity,
-    MAX_ANNOUNCEMENTS_PER_PAGE, MAX_ANNOUNCEMENT_TEXT_BYTES,
-};
-
 pub const DFHACK_RPC_VERSION: i32 = 1;
 pub const BRIDGE_PROTOCOL_MAJOR: u32 = 1;
 pub const BRIDGE_PROTOCOL_MINOR: u32 = 0;
-pub const ANNOUNCEMENT_PROTOCOL_MINOR: u32 = 1;
 pub const MAX_RPC_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_TEXT_NOTIFICATION_BYTES: usize = 64 * 1024;
 pub const MAX_TEXT_NOTIFICATIONS_PER_CALL: u32 = 64;
@@ -57,13 +53,10 @@ const FIRST_PLUGIN_METHOD_ID: i16 = 2;
 const PLUGIN_NAME: &str = "dfmcp_bridge";
 const HANDSHAKE_METHOD: &str = "Handshake";
 const OBSERVATION_METHOD: &str = "ReadObservation";
-const ANNOUNCEMENT_METHOD: &str = "ReadAnnouncements";
 const HANDSHAKE_INPUT_TYPE: &str = "dfmcp.bridge.v1.HandshakeRequest";
 const HANDSHAKE_OUTPUT_TYPE: &str = "dfmcp.bridge.v1.HandshakeReply";
 const OBSERVATION_INPUT_TYPE: &str = "dfmcp.bridge.v1.ReadObservationRequest";
 const OBSERVATION_OUTPUT_TYPE: &str = "dfmcp.bridge.v1.ReadObservationReply";
-const ANNOUNCEMENT_INPUT_TYPE: &str = "dfmcp.bridge.v1.ReadAnnouncementsRequest";
-const ANNOUNCEMENT_OUTPUT_TYPE: &str = "dfmcp.bridge.v1.ReadAnnouncementsReply";
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
@@ -92,21 +85,6 @@ fn validate_len(value: &[u8], field: &str, minimum: usize, maximum: usize) -> Re
 
 fn validate_text(value: &str, field: &str, maximum: usize) -> Result<()> {
     validate_len(value.as_bytes(), field, 1, maximum)
-}
-
-fn citizen_methods() -> BTreeSet<String> {
-    BTreeSet::from([
-        HANDSHAKE_METHOD.to_owned(),
-        OBSERVATION_METHOD.to_owned(),
-    ])
-}
-
-fn announcement_methods() -> BTreeSet<String> {
-    BTreeSet::from([
-        ANNOUNCEMENT_METHOD.to_owned(),
-        HANDSHAKE_METHOD.to_owned(),
-        OBSERVATION_METHOD.to_owned(),
-    ])
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -175,20 +153,17 @@ impl BridgeManifest {
                 "bridge generation zero is reserved",
             ));
         }
-        if self.supported_methods != citizen_methods()
-            && self.supported_methods != announcement_methods()
-        {
+        let expected = BTreeSet::from([
+            HANDSHAKE_METHOD.to_owned(),
+            OBSERVATION_METHOD.to_owned(),
+        ]);
+        if self.supported_methods != expected {
             return Err(error(
                 ErrorCode::VersionMismatch,
-                "bridge method set does not match protocol 1.0 or 1.1",
+                "bridge method set does not match protocol 1.0",
             ));
         }
         Ok(())
-    }
-
-    #[must_use]
-    pub fn supports_announcements(&self) -> bool {
-        self.supported_methods == announcement_methods()
     }
 }
 
@@ -276,11 +251,6 @@ impl ProtoWriter {
         self.varint(u64::from(value));
     }
 
-    fn uint64(&mut self, field: u32, value: u64) {
-        self.key(field, WireType::Varint);
-        self.varint(value);
-    }
-
     fn sint32(&mut self, field: u32, value: i32) {
         self.key(field, WireType::Varint);
         let zigzag = ((value as u32) << 1) ^ ((value >> 31) as u32);
@@ -303,7 +273,7 @@ impl ProtoWriter {
         let length = u64::try_from(value.len()).map_err(|_| {
             error(
                 ErrorCode::BudgetExceeded,
-                "protobuf field length does not fit u64",
+                "protobuf field length does not fit in u64",
             )
         })?;
         self.varint(length);
@@ -395,7 +365,7 @@ impl<'a> ProtoReader<'a> {
         let field = u32::try_from(key >> 3).map_err(|_| {
             error(
                 ErrorCode::AdapterRejected,
-                "protobuf field number does not fit u32",
+                "protobuf field number does not fit in u32",
             )
         })?;
         if field == 0 {
@@ -601,7 +571,6 @@ fn encode_handshake_request(
     credentials: &BridgeCredentials,
     client_name: &str,
     client_version: &str,
-    protocol_minor: u32,
 ) -> Result<Vec<u8>> {
     validate_text(client_name, "bridge client name", MAX_CLIENT_NAME_BYTES)?;
     validate_text(
@@ -611,7 +580,7 @@ fn encode_handshake_request(
     )?;
     let mut writer = ProtoWriter::default();
     writer.uint32(1, BRIDGE_PROTOCOL_MAJOR);
-    writer.uint32(2, protocol_minor);
+    writer.uint32(2, BRIDGE_PROTOCOL_MINOR);
     writer.string(3, client_name)?;
     writer.string(4, client_version)?;
     writer.bytes(5, credentials.nonce())?;
@@ -621,7 +590,6 @@ fn encode_handshake_request(
 
 fn encode_observation_request(
     credentials: &BridgeCredentials,
-    protocol_minor: u32,
     offset: u32,
     maximum: u32,
     include_names: bool,
@@ -636,7 +604,7 @@ fn encode_observation_request(
     }
     let mut writer = ProtoWriter::default();
     writer.uint32(1, BRIDGE_PROTOCOL_MAJOR);
-    writer.uint32(2, protocol_minor);
+    writer.uint32(2, BRIDGE_PROTOCOL_MINOR);
     writer.bytes(3, credentials.nonce())?;
     writer.bytes(4, credentials.token())?;
     writer.uint32(5, offset);
@@ -645,49 +613,12 @@ fn encode_observation_request(
     Ok(writer.finish())
 }
 
-fn encode_announcement_request(
-    credentials: &BridgeCredentials,
-    after_report_id: i32,
-    through_report_id: i32,
-    maximum: u32,
-) -> Result<Vec<u8>> {
-    if after_report_id < -1 || through_report_id < -1 {
-        return Err(error(
-            ErrorCode::InvalidRequest,
-            "announcement cursors must be -1 or nonnegative report IDs",
-        ));
-    }
-    if through_report_id >= 0 && through_report_id < after_report_id {
-        return Err(error(
-            ErrorCode::InvalidRequest,
-            "announcement high-water mark precedes the caller cursor",
-        ));
-    }
-    if maximum == 0 || maximum > MAX_ANNOUNCEMENTS_PER_PAGE {
-        return Err(error(
-            ErrorCode::BudgetExceeded,
-            format!(
-                "requested announcement page size must be in 1..={MAX_ANNOUNCEMENTS_PER_PAGE}"
-            ),
-        ));
-    }
-    let mut writer = ProtoWriter::default();
-    writer.uint32(1, BRIDGE_PROTOCOL_MAJOR);
-    writer.uint32(2, ANNOUNCEMENT_PROTOCOL_MINOR);
-    writer.bytes(3, credentials.nonce())?;
-    writer.bytes(4, credentials.token())?;
-    writer.sint32(5, after_report_id);
-    writer.sint32(6, through_report_id);
-    writer.uint32(7, maximum);
-    Ok(writer.finish())
-}
-
-fn validate_protocol(major: u32, minor: u32, expected_minor: u32) -> Result<()> {
-    if major != BRIDGE_PROTOCOL_MAJOR || minor != expected_minor {
+fn validate_protocol(major: u32, minor: u32) -> Result<()> {
+    if major != BRIDGE_PROTOCOL_MAJOR || minor != BRIDGE_PROTOCOL_MINOR {
         return Err(error(
             ErrorCode::VersionMismatch,
             format!(
-                "bridge protocol {major}.{minor} does not match required {BRIDGE_PROTOCOL_MAJOR}.{expected_minor}"
+                "bridge protocol {major}.{minor} does not match required {BRIDGE_PROTOCOL_MAJOR}.{BRIDGE_PROTOCOL_MINOR}"
             ),
         ));
     }
@@ -706,11 +637,7 @@ fn reject_bridge(failure_code: String, failure_message: String) -> DfmcpError {
     .with_detail("bridge_failure_code", failure_code)
 }
 
-fn decode_handshake_reply(
-    bytes: &[u8],
-    expected_nonce: &[u8],
-    expected_minor: u32,
-) -> Result<BridgeManifest> {
+fn decode_handshake_reply(bytes: &[u8], expected_nonce: &[u8]) -> Result<BridgeManifest> {
     let mut reader = ProtoReader::new(bytes)?;
     let mut accepted = None;
     let mut failure_code = None;
@@ -797,7 +724,6 @@ fn decode_handshake_reply(
     validate_protocol(
         required(major, "protocol_major")?,
         required(minor, "protocol_minor")?,
-        expected_minor,
     )?;
     if required(nonce, "client_nonce")? != expected_nonce {
         return Err(error(
@@ -812,22 +738,6 @@ fn decode_handshake_reply(
         return Err(error(
             ErrorCode::AdapterRejected,
             "accepted bridge handshake carries failure details",
-        ));
-    }
-    let expected_methods = if expected_minor == BRIDGE_PROTOCOL_MINOR {
-        citizen_methods()
-    } else if expected_minor == ANNOUNCEMENT_PROTOCOL_MINOR {
-        announcement_methods()
-    } else {
-        return Err(error(
-            ErrorCode::VersionMismatch,
-            "client requested an unsupported protocol minor generation",
-        ));
-    };
-    if methods != expected_methods {
-        return Err(error(
-            ErrorCode::VersionMismatch,
-            "bridge method manifest does not match the requested protocol generation",
         ));
     }
     let manifest = BridgeManifest {
@@ -923,12 +833,10 @@ fn decode_citizen(bytes: &[u8]) -> Result<CitizenRecord> {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn decode_observation_reply(
     bytes: &[u8],
     expected_nonce: &[u8],
     expected_generation: u64,
-    expected_minor: u32,
     requested_offset: u32,
     requested_maximum: u32,
     include_names: bool,
@@ -1049,7 +957,6 @@ fn decode_observation_reply(
     validate_protocol(
         required(major, "protocol_major")?,
         required(minor, "protocol_minor")?,
-        expected_minor,
     )?;
     if required(nonce, "client_nonce")? != expected_nonce {
         return Err(error(
@@ -1151,245 +1058,6 @@ fn decode_observation_reply(
     })
 }
 
-fn decode_announcement_record(bytes: &[u8]) -> Result<AnnouncementRecord> {
-    let mut reader = ProtoReader::new(bytes)?;
-    let mut report_id = None;
-    let mut announcement_type = None;
-    let mut text = None;
-    let mut year = None;
-    let mut year_tick = None;
-    let mut has_position = None;
-    let mut x = None;
-    let mut y = None;
-    let mut z = None;
-    let mut repeat_count = None;
-    let mut continuation = None;
-    let mut unconscious = None;
-    let mut announcement = None;
-    while let Some((field, wire)) = reader.next_key()? {
-        match field {
-            1 => set_once(&mut report_id, reader.sint32(wire, field)?, "report_id")?,
-            2 => set_once(
-                &mut announcement_type,
-                reader.sint32(wire, field)?,
-                "announcement_type",
-            )?,
-            3 => set_once(
-                &mut text,
-                reader.string(wire, field, MAX_ANNOUNCEMENT_TEXT_BYTES)?,
-                "text",
-            )?,
-            4 => set_once(&mut year, reader.uint32(wire, field)?, "year")?,
-            5 => set_once(
-                &mut year_tick,
-                reader.uint32(wire, field)?,
-                "year_tick",
-            )?,
-            6 => set_once(
-                &mut has_position,
-                reader.boolean(wire, field)?,
-                "has_position",
-            )?,
-            7 => set_once(&mut x, reader.sint32(wire, field)?, "x")?,
-            8 => set_once(&mut y, reader.sint32(wire, field)?, "y")?,
-            9 => set_once(&mut z, reader.sint32(wire, field)?, "z")?,
-            10 => set_once(
-                &mut repeat_count,
-                reader.uint32(wire, field)?,
-                "repeat_count",
-            )?,
-            11 => set_once(
-                &mut continuation,
-                reader.boolean(wire, field)?,
-                "continuation",
-            )?,
-            12 => set_once(
-                &mut unconscious,
-                reader.boolean(wire, field)?,
-                "unconscious",
-            )?,
-            13 => set_once(
-                &mut announcement,
-                reader.boolean(wire, field)?,
-                "announcement",
-            )?,
-            _ => reader.skip(wire, field)?,
-        }
-    }
-    let record = AnnouncementRecord {
-        report_id: required(report_id, "report_id")?,
-        announcement_type: required(announcement_type, "announcement_type")?,
-        text: required(text, "text")?,
-        year: required(year, "year")?,
-        year_tick: required(year_tick, "year_tick")?,
-        has_position: required(has_position, "has_position")?,
-        x: required(x, "x")?,
-        y: required(y, "y")?,
-        z: required(z, "z")?,
-        repeat_count: required(repeat_count, "repeat_count")?,
-        continuation: required(continuation, "continuation")?,
-        unconscious: required(unconscious, "unconscious")?,
-        announcement: required(announcement, "announcement")?,
-    };
-    record.validate()?;
-    Ok(record)
-}
-
-fn decode_announcement_reply(
-    bytes: &[u8],
-    expected_nonce: &[u8],
-    expected_generation: u64,
-    requested_after_report_id: i32,
-    requested_maximum: u32,
-) -> Result<AnnouncementPage> {
-    let mut reader = ProtoReader::new(bytes)?;
-    let mut accepted = None;
-    let mut failure_code = None;
-    let mut failure_message = None;
-    let mut major = None;
-    let mut minor = None;
-    let mut nonce = None;
-    let mut generation = None;
-    let mut reply_after = None;
-    let mut oldest = None;
-    let mut latest = None;
-    let mut window_latest = None;
-    let mut next_after = None;
-    let mut history_truncated = None;
-    let mut complete = None;
-    let mut announcements = Vec::new();
-    let maximum_usize = usize::try_from(requested_maximum).map_err(|_| {
-        error(
-            ErrorCode::InternalInvariantViolation,
-            "validated announcement page size does not fit usize",
-        )
-    })?;
-
-    while let Some((field, wire)) = reader.next_key()? {
-        match field {
-            1 => set_once(&mut accepted, reader.boolean(wire, field)?, "accepted")?,
-            2 => set_once(
-                &mut failure_code,
-                reader.string(wire, field, 64)?,
-                "failure_code",
-            )?,
-            3 => set_once(
-                &mut failure_message,
-                reader.string(wire, field, 1024)?,
-                "failure_message",
-            )?,
-            4 => set_once(&mut major, reader.uint32(wire, field)?, "protocol_major")?,
-            5 => set_once(&mut minor, reader.uint32(wire, field)?, "protocol_minor")?,
-            6 => set_once(
-                &mut nonce,
-                reader
-                    .length_delimited(wire, field, MAX_NONCE_BYTES)?
-                    .to_vec(),
-                "client_nonce",
-            )?,
-            7 => set_once(
-                &mut generation,
-                reader.uint64(wire, field)?,
-                "bridge_generation",
-            )?,
-            8 => set_once(
-                &mut reply_after,
-                reader.sint32(wire, field)?,
-                "requested_after_report_id",
-            )?,
-            9 => set_once(
-                &mut oldest,
-                reader.sint32(wire, field)?,
-                "oldest_retained_report_id",
-            )?,
-            10 => set_once(
-                &mut latest,
-                reader.sint32(wire, field)?,
-                "latest_retained_report_id",
-            )?,
-            11 => set_once(
-                &mut window_latest,
-                reader.sint32(wire, field)?,
-                "window_latest_report_id",
-            )?,
-            12 => set_once(
-                &mut next_after,
-                reader.sint32(wire, field)?,
-                "next_after_report_id",
-            )?,
-            13 => set_once(
-                &mut history_truncated,
-                reader.boolean(wire, field)?,
-                "history_truncated",
-            )?,
-            14 => set_once(&mut complete, reader.boolean(wire, field)?, "complete")?,
-            15 => {
-                if announcements.len() >= maximum_usize {
-                    return Err(error(
-                        ErrorCode::BudgetExceeded,
-                        "announcement reply exceeds the requested page size",
-                    ));
-                }
-                let nested = reader.length_delimited(wire, field, MAX_RPC_PAYLOAD_BYTES)?;
-                announcements.push(decode_announcement_record(nested)?);
-            }
-            _ => reader.skip(wire, field)?,
-        }
-    }
-
-    let accepted = required(accepted, "accepted")?;
-    let failure_code = required(failure_code, "failure_code")?;
-    let failure_message = required(failure_message, "failure_message")?;
-    validate_protocol(
-        required(major, "protocol_major")?,
-        required(minor, "protocol_minor")?,
-        ANNOUNCEMENT_PROTOCOL_MINOR,
-    )?;
-    if required(nonce, "client_nonce")? != expected_nonce {
-        return Err(error(
-            ErrorCode::AdapterRejected,
-            "announcement nonce does not match the negotiated client nonce",
-        ));
-    }
-    let generation = required(generation, "bridge_generation")?;
-    if generation != expected_generation {
-        return Err(error(
-            ErrorCode::StaleAnchor,
-            "DFHack bridge generation changed during announcement pagination",
-        ));
-    }
-    if !accepted {
-        return Err(reject_bridge(failure_code, failure_message));
-    }
-    if !failure_code.is_empty() || !failure_message.is_empty() {
-        return Err(error(
-            ErrorCode::AdapterRejected,
-            "accepted announcement reply carries failure details",
-        ));
-    }
-    let reply_after = required(reply_after, "requested_after_report_id")?;
-    if reply_after != requested_after_report_id {
-        return Err(error(
-            ErrorCode::AdapterRejected,
-            "announcement reply cursor differs from the request cursor",
-        ));
-    }
-    let page = AnnouncementPage {
-        bridge_generation: generation,
-        requested_after_report_id: reply_after,
-        requested_maximum,
-        oldest_retained_report_id: required(oldest, "oldest_retained_report_id")?,
-        latest_retained_report_id: required(latest, "latest_retained_report_id")?,
-        window_latest_report_id: required(window_latest, "window_latest_report_id")?,
-        next_after_report_id: required(next_after, "next_after_report_id")?,
-        history_truncated: required(history_truncated, "history_truncated")?,
-        complete: required(complete, "complete")?,
-        announcements,
-    };
-    page.validate()?;
-    Ok(page)
-}
-
 fn encode_handshake_header(magic: &[u8; 8]) -> [u8; HANDSHAKE_HEADER_BYTES] {
     let mut header = [0u8; HANDSHAKE_HEADER_BYTES];
     header[..8].copy_from_slice(magic);
@@ -1415,58 +1083,17 @@ pub struct DfHackRpcClient<S> {
     stream: S,
     credentials: BridgeCredentials,
     manifest: BridgeManifest,
-    protocol_minor: u32,
     handshake_method_id: i16,
     observation_method_id: i16,
-    announcement_method_id: Option<i16>,
 }
 
 impl<S: Read + Write> DfHackRpcClient<S> {
     pub fn negotiate(
-        stream: S,
-        credentials: BridgeCredentials,
-        client_name: &str,
-        client_version: &str,
-    ) -> Result<Self> {
-        Self::negotiate_generation(
-            stream,
-            credentials,
-            client_name,
-            client_version,
-            BRIDGE_PROTOCOL_MINOR,
-        )
-    }
-
-    pub fn negotiate_with_announcements(
-        stream: S,
-        credentials: BridgeCredentials,
-        client_name: &str,
-        client_version: &str,
-    ) -> Result<Self> {
-        Self::negotiate_generation(
-            stream,
-            credentials,
-            client_name,
-            client_version,
-            ANNOUNCEMENT_PROTOCOL_MINOR,
-        )
-    }
-
-    fn negotiate_generation(
         mut stream: S,
         credentials: BridgeCredentials,
         client_name: &str,
         client_version: &str,
-        protocol_minor: u32,
     ) -> Result<Self> {
-        if protocol_minor != BRIDGE_PROTOCOL_MINOR
-            && protocol_minor != ANNOUNCEMENT_PROTOCOL_MINOR
-        {
-            return Err(error(
-                ErrorCode::VersionMismatch,
-                "unsupported bridge protocol minor generation",
-            ));
-        }
         stream
             .write_all(&encode_handshake_header(REQUEST_MAGIC))
             .map_err(|source| io_error("handshake write", &source))?;
@@ -1506,50 +1133,24 @@ impl<S: Read + Write> DfHackRpcClient<S> {
             OBSERVATION_INPUT_TYPE,
             OBSERVATION_OUTPUT_TYPE,
         )?;
-        let announcement_method_id = if protocol_minor == ANNOUNCEMENT_PROTOCOL_MINOR {
-            Some(Self::bind_method(
-                &mut stream,
-                ANNOUNCEMENT_METHOD,
-                ANNOUNCEMENT_INPUT_TYPE,
-                ANNOUNCEMENT_OUTPUT_TYPE,
-            )?)
-        } else {
-            None
-        };
-        let mut ids = BTreeSet::from([handshake_method_id, observation_method_id]);
-        if let Some(id) = announcement_method_id
-            && !ids.insert(id)
-        {
+        if handshake_method_id == observation_method_id {
             return Err(error(
                 ErrorCode::AdapterRejected,
                 "DFHack assigned the same ID to two bridge methods",
             ));
         }
-        if ids.len() != if announcement_method_id.is_some() { 3 } else { 2 } {
-            return Err(error(
-                ErrorCode::AdapterRejected,
-                "DFHack assigned duplicate bridge method identifiers",
-            ));
-        }
 
-        let handshake_request = encode_handshake_request(
-            &credentials,
-            client_name,
-            client_version,
-            protocol_minor,
-        )?;
+        let handshake_request =
+            encode_handshake_request(&credentials, client_name, client_version)?;
         let handshake_reply = Self::call(&mut stream, handshake_method_id, &handshake_request)?;
-        let manifest =
-            decode_handshake_reply(&handshake_reply, credentials.nonce(), protocol_minor)?;
+        let manifest = decode_handshake_reply(&handshake_reply, credentials.nonce())?;
 
         Ok(Self {
             stream,
             credentials,
             manifest,
-            protocol_minor,
             handshake_method_id,
             observation_method_id,
-            announcement_method_id,
         })
     }
 
@@ -1674,40 +1275,8 @@ impl<S: Read + Write> DfHackRpcClient<S> {
     }
 
     #[must_use]
-    pub const fn protocol_minor(&self) -> u32 {
-        self.protocol_minor
-    }
-
-    #[must_use]
     pub const fn method_ids(&self) -> (i16, i16) {
         (self.handshake_method_id, self.observation_method_id)
-    }
-
-    #[must_use]
-    pub const fn announcement_method_id(&self) -> Option<i16> {
-        self.announcement_method_id
-    }
-
-    pub fn announcement_source_identity(&self) -> Result<AnnouncementSourceIdentity> {
-        if self.protocol_minor != ANNOUNCEMENT_PROTOCOL_MINOR
-            || self.announcement_method_id.is_none()
-            || !self.manifest.supports_announcements()
-        {
-            return Err(error(
-                ErrorCode::CompatibilityUnknown,
-                "the negotiated bridge generation does not support announcements",
-            ));
-        }
-        let identity = AnnouncementSourceIdentity {
-            bridge_version: self.manifest.bridge_version.clone(),
-            dfhack_version: self.manifest.dfhack_version.clone(),
-            dwarf_fortress_version: self.manifest.df_version.clone(),
-            protocol_major: BRIDGE_PROTOCOL_MAJOR,
-            protocol_minor: self.protocol_minor,
-            bridge_generation: self.manifest.bridge_generation,
-        };
-        identity.validate()?;
-        Ok(identity)
     }
 
     pub fn read_observation(
@@ -1716,58 +1285,16 @@ impl<S: Read + Write> DfHackRpcClient<S> {
         maximum: u32,
         include_names: bool,
     ) -> Result<ObservationPage> {
-        let request = encode_observation_request(
-            &self.credentials,
-            self.protocol_minor,
-            offset,
-            maximum,
-            include_names,
-        )?;
+        let request =
+            encode_observation_request(&self.credentials, offset, maximum, include_names)?;
         let response = Self::call(&mut self.stream, self.observation_method_id, &request)?;
         decode_observation_reply(
             &response,
             self.credentials.nonce(),
             self.manifest.bridge_generation,
-            self.protocol_minor,
             offset,
             maximum,
             include_names,
-        )
-    }
-
-    pub fn read_announcements(
-        &mut self,
-        after_report_id: i32,
-        through_report_id: i32,
-        maximum: u32,
-    ) -> Result<AnnouncementPage> {
-        if self.protocol_minor != ANNOUNCEMENT_PROTOCOL_MINOR
-            || !self.manifest.supports_announcements()
-        {
-            return Err(error(
-                ErrorCode::CompatibilityUnknown,
-                "the negotiated bridge generation does not support announcements",
-            ));
-        }
-        let method_id = self.announcement_method_id.ok_or_else(|| {
-            error(
-                ErrorCode::InternalInvariantViolation,
-                "announcement-capable manifest has no bound announcement method",
-            )
-        })?;
-        let request = encode_announcement_request(
-            &self.credentials,
-            after_report_id,
-            through_report_id,
-            maximum,
-        )?;
-        let response = Self::call(&mut self.stream, method_id, &request)?;
-        decode_announcement_reply(
-            &response,
-            self.credentials.nonce(),
-            self.manifest.bridge_generation,
-            after_report_id,
-            maximum,
         )
     }
 
@@ -1842,25 +1369,23 @@ mod tests {
         rpc_result(&writer.finish())
     }
 
-    fn handshake_reply(nonce: &[u8], generation: u64, minor: u32) -> Result<Vec<u8>> {
+    fn handshake_reply(nonce: &[u8], generation: u64) -> Result<Vec<u8>> {
         let mut writer = ProtoWriter::default();
         writer.boolean(1, true);
         writer.string(2, "")?;
         writer.string(3, "")?;
         writer.uint32(4, BRIDGE_PROTOCOL_MAJOR);
-        writer.uint32(5, minor);
-        writer.string(6, if minor == 0 { "0.1.0" } else { "0.2.0" })?;
+        writer.uint32(5, BRIDGE_PROTOCOL_MINOR);
+        writer.string(6, "0.1.0")?;
         writer.string(7, "0.51.11-r1")?;
         writer.string(8, "0.51.11")?;
         writer.boolean(9, true);
         writer.boolean(10, true);
         writer.bytes(11, nonce)?;
-        writer.uint64(12, generation);
+        writer.key(12, WireType::Varint);
+        writer.varint(generation);
         writer.string(13, HANDSHAKE_METHOD)?;
         writer.string(13, OBSERVATION_METHOD)?;
-        if minor == ANNOUNCEMENT_PROTOCOL_MINOR {
-            writer.string(13, ANNOUNCEMENT_METHOD)?;
-        }
         rpc_result(&writer.finish())
     }
 
@@ -1874,7 +1399,7 @@ mod tests {
         writer.sint32(6, 20);
         writer.sint32(7, 30);
         for field in 8..=16 {
-            writer.boolean(field, field != 13);
+            writer.boolean(field, true);
         }
         Ok(writer.finish())
     }
@@ -1882,7 +1407,6 @@ mod tests {
     fn observation_reply(
         nonce: &[u8],
         generation: u64,
-        minor: u32,
         ids: &[i32],
         include_names: bool,
     ) -> Result<Vec<u8>> {
@@ -1891,26 +1415,21 @@ mod tests {
         writer.string(2, "")?;
         writer.string(3, "")?;
         writer.uint32(4, BRIDGE_PROTOCOL_MAJOR);
-        writer.uint32(5, minor);
+        writer.uint32(5, BRIDGE_PROTOCOL_MINOR);
         writer.bytes(6, nonce)?;
-        writer.uint64(7, generation);
+        writer.key(7, WireType::Varint);
+        writer.varint(generation);
         writer.boolean(8, true);
         writer.boolean(9, true);
         writer.boolean(10, true);
         writer.uint32(11, 105);
-        writer.uint32(12, 12_345);
+        writer.uint32(12, 12345);
         writer.string(13, "The Balanced Realm")?;
         writer.string(14, "region1")?;
         writer.sint32(15, 7);
-        writer.uint32(
-            16,
-            u32::try_from(ids.len()).map_err(|_| {
-                error(
-                    ErrorCode::BudgetExceeded,
-                    "test citizen count does not fit u32",
-                )
-            })?,
-        );
+        writer.uint32(16, u32::try_from(ids.len()).map_err(|_| {
+            error(ErrorCode::BudgetExceeded, "test citizen count does not fit u32")
+        })?);
         writer.uint32(17, 0);
         writer.boolean(18, true);
         for id in ids {
@@ -1924,75 +1443,22 @@ mod tests {
         rpc_result(&writer.finish())
     }
 
-    fn announcement(report_id: i32) -> Result<Vec<u8>> {
-        let mut writer = ProtoWriter::default();
-        writer.sint32(1, report_id);
-        writer.sint32(2, 9);
-        writer.string(3, &format!("report-{report_id}"))?;
-        writer.uint32(4, 105);
-        writer.uint32(5, 12_345);
-        writer.boolean(6, false);
-        writer.sint32(7, 0);
-        writer.sint32(8, 0);
-        writer.sint32(9, 0);
-        writer.uint32(10, 0);
-        writer.boolean(11, false);
-        writer.boolean(12, false);
-        writer.boolean(13, true);
-        Ok(writer.finish())
-    }
-
-    fn announcement_reply(
-        nonce: &[u8],
-        generation: u64,
-        after: i32,
-        ids: &[i32],
-    ) -> Result<Vec<u8>> {
-        let mut writer = ProtoWriter::default();
-        writer.boolean(1, true);
-        writer.string(2, "")?;
-        writer.string(3, "")?;
-        writer.uint32(4, BRIDGE_PROTOCOL_MAJOR);
-        writer.uint32(5, ANNOUNCEMENT_PROTOCOL_MINOR);
-        writer.bytes(6, nonce)?;
-        writer.uint64(7, generation);
-        writer.sint32(8, after);
-        writer.sint32(9, 10);
-        writer.sint32(10, 13);
-        writer.sint32(11, 13);
-        writer.sint32(12, ids.last().copied().unwrap_or(after));
-        writer.boolean(13, false);
-        writer.boolean(14, true);
-        for id in ids {
-            writer.bytes(15, &announcement(*id)?)?;
-        }
-        rpc_result(&writer.finish())
-    }
-
     fn scripted_session(
         nonce: &[u8],
         ids: &[i32],
         include_names: bool,
-        minor: u32,
     ) -> Result<ScriptedIo> {
         let generation = 42;
         let mut reads = encode_handshake_header(RESPONSE_MAGIC).to_vec();
         reads.extend_from_slice(&bind_reply(41)?);
         reads.extend_from_slice(&bind_reply(42)?);
-        if minor == ANNOUNCEMENT_PROTOCOL_MINOR {
-            reads.extend_from_slice(&bind_reply(43)?);
-        }
-        reads.extend_from_slice(&handshake_reply(nonce, generation, minor)?);
+        reads.extend_from_slice(&handshake_reply(nonce, generation)?);
         reads.extend_from_slice(&observation_reply(
             nonce,
             generation,
-            minor,
             ids,
             include_names,
         )?);
-        if minor == ANNOUNCEMENT_PROTOCOL_MINOR {
-            reads.extend_from_slice(&announcement_reply(nonce, generation, 9, &[10, 11, 12, 13])?);
-        }
         Ok(ScriptedIo::new(reads))
     }
 
@@ -2015,153 +1481,85 @@ mod tests {
     }
 
     #[test]
-    fn protocol_1_0_remains_citizen_only() -> Result<()> {
+    fn negotiate_and_read_a_canonical_page() -> Result<()> {
         let nonce = vec![9; MIN_NONCE_BYTES];
         let credentials = BridgeCredentials::new(vec![7; MIN_BRIDGE_TOKEN_BYTES], nonce.clone())?;
-        let stream = scripted_session(&nonce, &[1, 2], true, BRIDGE_PROTOCOL_MINOR)?;
+        let stream = scripted_session(&nonce, &[1, 2], true)?;
         let mut client = DfHackRpcClient::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
-        assert_eq!(client.protocol_minor(), 0);
         assert_eq!(client.method_ids(), (41, 42));
-        assert_eq!(client.announcement_method_id(), None);
-        assert!(!client.manifest().supports_announcements());
+        assert_eq!(client.manifest().bridge_generation, 42);
         let page = client.read_observation(0, 2, true)?;
         assert!(page.complete);
-        assert_eq!(page.citizens.len(), 2);
-        assert!(client.read_announcements(9, -1, 4).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn protocol_1_1_reads_a_bounded_announcement_page() -> Result<()> {
-        let nonce = vec![9; MIN_NONCE_BYTES];
-        let credentials = BridgeCredentials::new(vec![7; MIN_BRIDGE_TOKEN_BYTES], nonce.clone())?;
-        let stream = scripted_session(&nonce, &[1, 2], true, ANNOUNCEMENT_PROTOCOL_MINOR)?;
-        let mut client = DfHackRpcClient::negotiate_with_announcements(
-            stream,
-            credentials,
-            "dfmcp",
-            "0.0.1",
-        )?;
-        assert_eq!(client.protocol_minor(), 1);
-        assert_eq!(client.announcement_method_id(), Some(43));
-        assert!(client.manifest().supports_announcements());
-        let page = client.read_observation(0, 2, true)?;
-        assert_eq!(page.citizens.len(), 2);
-        let announcements = client.read_announcements(9, -1, 4)?;
-        assert!(announcements.complete);
-        assert_eq!(announcements.window_latest_report_id, 13);
-        assert_eq!(announcements.next_after_report_id, 13);
-        assert_eq!(announcements.announcements.len(), 4);
-        let identity = client.announcement_source_identity()?;
-        assert_eq!(identity.protocol_minor, 1);
-        assert_eq!(identity.bridge_generation, 42);
+        assert_eq!(page.citizen_count_total, 2);
+        assert_eq!(page.citizens[0].unit_id, 1);
+        assert_eq!(page.citizens[1].unit_id, 2);
         Ok(())
     }
 
     #[test]
     fn names_omitted_projection_rejects_returned_names() -> Result<()> {
         let nonce = vec![9; MIN_NONCE_BYTES];
-        let payload = observation_reply(&nonce, 42, 0, &[1], true)?;
-        let reply = &payload[MESSAGE_HEADER_BYTES..];
-        assert!(decode_observation_reply(reply, &nonce, 42, 0, 0, 1, false).is_err());
+        let credentials = BridgeCredentials::new(vec![7; MIN_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[1], true)?;
+        let mut client = DfHackRpcClient::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
+        assert!(client.read_observation(0, 1, false).is_err());
         Ok(())
     }
 
     #[test]
-    fn duplicate_announcement_scalar_is_rejected() -> Result<()> {
+    fn nonce_mismatch_is_rejected() -> Result<()> {
+        let expected = vec![9; MIN_NONCE_BYTES];
+        let response_nonce = vec![8; MIN_NONCE_BYTES];
+        let credentials =
+            BridgeCredentials::new(vec![7; MIN_BRIDGE_TOKEN_BYTES], expected.clone())?;
+        let generation = 42;
+        let mut reads = encode_handshake_header(RESPONSE_MAGIC).to_vec();
+        reads.extend_from_slice(&bind_reply(41)?);
+        reads.extend_from_slice(&bind_reply(42)?);
+        reads.extend_from_slice(&handshake_reply(&response_nonce, generation)?);
+        let result = DfHackRpcClient::negotiate(
+            ScriptedIo::new(reads),
+            credentials,
+            "dfmcp",
+            "0.0.1",
+        );
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn noncanonical_citizen_order_is_rejected() -> Result<()> {
         let nonce = vec![9; MIN_NONCE_BYTES];
-        let payload = announcement_reply(&nonce, 42, 9, &[10])?;
-        let mut reply = payload[MESSAGE_HEADER_BYTES..].to_vec();
-        let mut duplicate = ProtoWriter::default();
-        duplicate.sint32(8, 9);
-        reply.extend_from_slice(&duplicate.finish());
-        assert!(decode_announcement_reply(&reply, &nonce, 42, 9, 1).is_err());
+        let credentials = BridgeCredentials::new(vec![7; MIN_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[2, 1], true)?;
+        let mut client = DfHackRpcClient::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
+        assert!(client.read_observation(0, 2, true).is_err());
         Ok(())
     }
 
     #[test]
-    fn reordered_announcement_records_are_rejected() -> Result<()> {
-        let nonce = vec![9; MIN_NONCE_BYTES];
-        let payload = announcement_reply(&nonce, 42, 9, &[11, 10])?;
-        let reply = &payload[MESSAGE_HEADER_BYTES..];
-        assert!(decode_announcement_reply(reply, &nonce, 42, 9, 2).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn announcement_generation_and_nonce_drift_fail_closed() -> Result<()> {
-        let nonce = vec![9; MIN_NONCE_BYTES];
-        let payload = announcement_reply(&nonce, 42, 9, &[10])?;
-        let reply = &payload[MESSAGE_HEADER_BYTES..];
-        assert!(decode_announcement_reply(reply, &[8; MIN_NONCE_BYTES], 42, 9, 1).is_err());
-        assert!(decode_announcement_reply(reply, &nonce, 43, 9, 1).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn announcement_request_bounds_fail_before_io() -> Result<()> {
-        let credentials = BridgeCredentials::new(
-            vec![7; MIN_BRIDGE_TOKEN_BYTES],
-            vec![9; MIN_NONCE_BYTES],
-        )?;
-        assert!(encode_announcement_request(&credentials, -2, -1, 1).is_err());
-        assert!(encode_announcement_request(&credentials, 10, 9, 1).is_err());
-        assert!(encode_announcement_request(&credentials, -1, -1, 0).is_err());
-        assert!(encode_announcement_request(
-            &credentials,
-            -1,
-            -1,
-            MAX_ANNOUNCEMENTS_PER_PAGE + 1,
-        )
-        .is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn duplicate_method_manifest_entries_are_rejected() -> Result<()> {
-        let nonce = vec![9; MIN_NONCE_BYTES];
+    fn duplicate_required_field_is_rejected() {
         let mut writer = ProtoWriter::default();
-        writer.boolean(1, true);
-        writer.string(2, "")?;
-        writer.string(3, "")?;
-        writer.uint32(4, 1);
-        writer.uint32(5, 1);
-        writer.string(6, "0.2.0")?;
-        writer.string(7, "0.51.11-r1")?;
-        writer.string(8, "0.51.11")?;
-        writer.boolean(9, true);
-        writer.boolean(10, true);
-        writer.bytes(11, &nonce)?;
-        writer.uint64(12, 42);
-        writer.string(13, HANDSHAKE_METHOD)?;
-        writer.string(13, HANDSHAKE_METHOD)?;
-        assert!(decode_handshake_reply(&writer.finish(), &nonce, 1).is_err());
+        writer.uint32(1, 5);
+        writer.uint32(1, 6);
+        assert!(decode_bind_reply(&writer.finish()).is_err());
+    }
+
+    #[test]
+    fn overlong_varint_is_rejected() -> Result<()> {
+        let mut reader = ProtoReader::new(&[0x80, 0x00])?;
+        assert!(reader.varint().is_err());
         Ok(())
     }
 
     #[test]
-    fn nonminimal_varints_are_rejected() {
-        let mut reader = ProtoReader::new(&[0x80, 0x00]).ok();
-        assert!(reader.as_mut().is_some_and(|value| value.varint().is_err()));
-    }
-
-    #[test]
-    fn invalid_utf8_announcement_text_is_rejected() -> Result<()> {
-        let mut record = ProtoWriter::default();
-        record.sint32(1, 10);
-        record.sint32(2, 9);
-        record.bytes(3, &[0xff])?;
-        record.uint32(4, 105);
-        record.uint32(5, 12_345);
-        record.boolean(6, false);
-        record.sint32(7, 0);
-        record.sint32(8, 0);
-        record.sint32(9, 0);
-        record.uint32(10, 0);
-        record.boolean(11, false);
-        record.boolean(12, false);
-        record.boolean(13, true);
-        assert!(decode_announcement_record(&record.finish()).is_err());
+    fn text_notification_budget_is_enforced() -> Result<()> {
+        let mut reads = Vec::new();
+        for _ in 0..=MAX_TEXT_NOTIFICATIONS_PER_CALL {
+            reads.extend_from_slice(&rpc_reply(RPC_REPLY_TEXT, b"x")?);
+        }
+        let mut stream = ScriptedIo::new(reads);
+        assert!(DfHackRpcClient::call(&mut stream, 2, b"").is_err());
         Ok(())
     }
 }
