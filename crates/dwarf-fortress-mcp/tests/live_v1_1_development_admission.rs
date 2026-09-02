@@ -40,8 +40,7 @@ fn protocol_1_1_development_server_requires_exact_opt_in() -> Result<(), Box<dyn
 }
 
 #[test]
-fn protocol_1_1_development_server_rejects_production_admission_state(
-) -> Result<(), Box<dyn Error>> {
+fn protocol_1_1_development_server_rejects_production_admission_state() -> Result<(), Box<dyn Error>> {
     let mut command = server_command();
     clean_admission_environment(&mut command);
     let output = command
@@ -57,8 +56,7 @@ fn protocol_1_1_development_server_rejects_production_admission_state(
 }
 
 #[test]
-fn protocol_1_1_development_server_rejects_protocol_bound_admission_state(
-) -> Result<(), Box<dyn Error>> {
+fn protocol_1_1_development_server_rejects_protocol_bound_admission_state() -> Result<(), Box<dyn Error>> {
     let mut command = server_command();
     clean_admission_environment(&mut command);
     let output = command
