@@ -328,6 +328,13 @@ bool publish_announcements(const wire::ReadObservationRequest *in,
 
     if (reports.empty())
     {
+        if (requested_after >= 0)
+        {
+            out->set_failure_code("ANNOUNCEMENT_CURSOR_AHEAD");
+            out->set_failure_message(
+                "announcement cursor is ahead of the empty retained report window");
+            return false;
+        }
         out->set_announcement_complete_through_latest(true);
         return true;
     }
@@ -337,6 +344,13 @@ bool publish_announcements(const wire::ReadObservationRequest *in,
     {
         out->set_failure_code("INTERNAL_FAILURE");
         out->set_failure_message("retained report IDs are outside the canonical domain");
+        return false;
+    }
+    if (requested_after > latest)
+    {
+        out->set_failure_code("ANNOUNCEMENT_CURSOR_AHEAD");
+        out->set_failure_message(
+            "announcement cursor is ahead of the retained report high-water mark");
         return false;
     }
     out->set_announcement_oldest_available_id(oldest);
