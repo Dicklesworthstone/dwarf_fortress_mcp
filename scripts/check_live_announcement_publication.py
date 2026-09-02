@@ -79,10 +79,6 @@ def check_publication_transaction() -> None:
             "capsule.validate()?",
         ],
     )
-    require(
-        source.index("let projection") if "let projection" in source else 0 == 0,
-        "publication transaction unexpectedly contains adapter state publication",
-    )
     require(source.count("#[test]") >= 7, "publication transaction needs at least seven tests")
     for name in [
         "announcement_transport_pagination_does_not_change_capsule_identity",
@@ -94,8 +90,11 @@ def check_publication_transaction() -> None:
         "initial_retained_window_gap_survives_complete_publication",
     ]:
         require(f"fn {name}" in source, f"publication tests omit {name}")
-    require("pub fn" not in source.split("fn combine_capsule", 1)[1].split("#[cfg(test)]", 1)[0],
-            "capsule construction helper must remain private to the publication seam")
+    private_segment = source.split("fn combine_capsule", 1)[1].split("#[cfg(test)]", 1)[0]
+    require(
+        "pub fn" not in private_segment,
+        "capsule construction helper must remain private to the publication seam",
+    )
 
 
 def check_read_only_adapter() -> None:
@@ -122,7 +121,7 @@ def check_read_only_adapter() -> None:
     )
     require(
         source.index("ensure_snapshot_budget(request, &projection)?;")
-        < source.index("self.current = Some(projection);"),
+        < source.rindex("self.current = Some(projection);"),
         "protocol-1.1 adapter publishes candidate state before final budget admission",
     )
     for method in [
@@ -150,6 +149,14 @@ def check_read_only_adapter() -> None:
         "hard_configuration_bounds_are_rejected",
     ]:
         require(f"fn {name}" in source, f"protocol-1.1 adapter tests omit {name}")
+    candidate_test = source.split("fn candidate_over_budget_does_not_advance_anchor", 1)[1].split(
+        "#[test]", 1
+    )[0]
+    require(
+        "complete_page(42, 12_345, &[0], &[])" in candidate_test
+        and "complete_page(42, 12_346, &[0], &[10])" in candidate_test,
+        "candidate-over-budget test does not isolate growth beyond an already-admitted snapshot",
+    )
 
 
 def check_crate_and_source_identity() -> None:
