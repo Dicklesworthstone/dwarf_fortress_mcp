@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts/check_live_announcements.py"
@@ -20,6 +21,10 @@ FILES = [
     ROOT / "architecture/dfhack_plugin_native_receipt_v1_1.json",
     ROOT / "architecture/live_announcement_acceptance_v1_1.json",
     ROOT / "architecture/live_announcement_evidence_journal_v1.json",
+    ROOT / "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+    ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
+    ROOT / "crates/dfmcp-adapter/src/dfhack_wire.rs",
+    ROOT / "crates/dfmcp-adapter/src/live_session.rs",
     ROOT / "bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto",
     ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp",
     ROOT / "crates/dfmcp-adapter/src/live_announcement_batch.rs",
@@ -63,7 +68,7 @@ class LiveAnnouncementContractTests(unittest.TestCase):
     def assert_checker_rejects_json_mutation(
         self,
         relative: str,
-        mutate: callable,
+        mutate: Callable[[dict[str, Any]], None],
     ) -> None:
         temporary, root = self.fixture()
         with temporary:
@@ -76,6 +81,27 @@ class LiveAnnouncementContractTests(unittest.TestCase):
     def test_repository_contract_passes(self) -> None:
         result = self.run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_protocol_1_0_announcement_resurrection_is_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            proto = root / "bridge/dfhack-plugin/proto/DfmcpBridge.proto"
+            proto.write_text(
+                proto.read_text(encoding="utf-8")
+                + "\n// RPC ReadAnnouncements : ReadObservationRequest -> ReadObservationReply\n",
+                encoding="utf-8",
+            )
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+        temporary, root = self.fixture()
+        with temporary:
+            session = root / "crates/dfmcp-adapter/src/live_session.rs"
+            session.write_text(
+                session.read_text(encoding="utf-8")
+                + "\npub trait LiveAnnouncementSource {}\n",
+                encoding="utf-8",
+            )
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
 
     def test_standalone_method_or_inherited_admission_is_rejected(self) -> None:
         self.assert_checker_rejects_json_mutation(
@@ -180,11 +206,17 @@ class LiveAnnouncementContractTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
-    def test_resurrected_retired_contract_is_rejected(self) -> None:
+    def test_resurrected_retired_contract_or_model_is_rejected(self) -> None:
         temporary, root = self.fixture()
         with temporary:
             retired = root / "architecture/live_announcement_read_v1.json"
             retired.write_text("{}\n", encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+        temporary, root = self.fixture()
+        with temporary:
+            retired = root / "crates/dfmcp-adapter/src/live_announcements.rs"
+            retired.write_text("pub struct AnnouncementWindowAssembler;\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
 
