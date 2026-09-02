@@ -69,7 +69,10 @@ def read_json(path: Path) -> dict[str, object]:
 
 def check_contract() -> None:
     value = read_json(CONTRACT)
-    require(value.get("schema_version") == "dfmcp.live-mcp-server/1.1", "runtime contract schema drifted")
+    require(
+        value.get("schema_version") == "dfmcp.live-mcp-server/1.1",
+        "runtime contract schema drifted",
+    )
     require(
         value.get("status") == "implemented_source_contract_unadmitted_runtime",
         "protocol-1.1 runtime must remain explicitly unadmitted",
@@ -106,23 +109,41 @@ def check_contract() -> None:
     require(bridge.get("protocol") == "1.1", "runtime protocol generation drifted")
     require(bridge.get("version") == "0.2.0", "runtime bridge version drifted")
     require(bridge.get("plugin") == "dfmcp_bridge_v1_1", "runtime plugin generation drifted")
-    require(bridge.get("methods") == ["Handshake", "ReadObservation"], "runtime bridge method waist widened")
+    require(
+        bridge.get("methods") == ["Handshake", "ReadObservation"],
+        "runtime bridge method waist widened",
+    )
     require(bridge.get("mutation_methods") == [], "runtime bridge contract grants mutation")
     session = value.get("session", {})
     require(isinstance(session, dict), "runtime session contract must be an object")
     require(session.get("session_id_prefix_hex_byte") == "11", "runtime session namespace drifted")
-    require(session.get("wrong_generation_session_ids_rejected") is True, "wrong-generation sessions are accepted")
+    require(
+        session.get("wrong_generation_session_ids_rejected") is True,
+        "wrong-generation sessions are accepted",
+    )
     semantics = value.get("agent_semantics", {})
     require(isinstance(semantics, dict), "runtime Agent Turn contract must be an object")
-    require(semantics.get("complete_history_may_be_claimed") is False, "runtime may overclaim complete history")
-    require(semantics.get("development_and_unadmitted_state_explicit_in_every_turn") is True, "runtime hides development status")
-    require(semantics.get("admission_provenance_may_be_projected") is False, "development runtime may project admission provenance")
+    require(
+        semantics.get("complete_history_may_be_claimed") is False,
+        "runtime may overclaim complete history",
+    )
+    require(
+        semantics.get("development_and_unadmitted_state_explicit_in_every_turn") is True,
+        "runtime hides development status",
+    )
+    require(
+        semantics.get("admission_provenance_may_be_projected") is False,
+        "development runtime may project admission provenance",
+    )
     authority = value.get("authority", {})
     require(isinstance(authority, dict), "runtime authority contract must be an object")
     for field in ["compatibility_admitted", "server_artifact_qualified", "runtime_admitted"]:
         require(authority.get(field) is False, f"runtime contract overclaims {field}")
     require(authority.get("grants_capabilities") == [], "runtime contract grants capabilities")
-    require(authority.get("mutation_capabilities") == [], "runtime contract grants mutation capability")
+    require(
+        authority.get("mutation_capabilities") == [],
+        "runtime contract grants mutation capability",
+    )
 
 
 def check_server_source() -> None:
@@ -132,7 +153,7 @@ def check_server_source() -> None:
         'const SESSION_NAMESPACE_PREFIX: u128 = 0x11u128 << 120;',
         "validate_development_runtime_environment",
         "forbidden_admission_environment_name",
-        "runtime": "unadmitted_development",
+        '"runtime": "unadmitted_development"',
         '"compatibility_admitted": false',
         '"server_artifact_qualified": false',
         '"runtime_admitted": false',
@@ -147,15 +168,19 @@ def check_server_source() -> None:
         "final protocol-1.1 Agent Turn exceeded the negotiated response budget",
         "protocol 1.1 is read-only and registers no mutation methods",
         "run_live_v1_1_development_stdio",
-        'ServerBuilder::new(\n        "dwarf-fortress-mcp-live-v1-1-development"',
+        "dwarf-fortress-mcp-live-v1-1-development",
         ".tool(FortressOpenSession)",
         ".tool(FortressDoctor)",
     ]:
         require(marker in source, f"protocol-1.1 MCP server omits marker {marker}")
-    require(source.count("#[tool(") == 11, "protocol-1.1 MCP server does not expose exactly eleven tools")
+    for name in EXPECTED_FORBIDDEN_ENVIRONMENT:
+        require(name in source, f"protocol-1.1 MCP server does not reject {name}")
+    require(
+        source.count("#[tool(") == 11,
+        "protocol-1.1 MCP server does not expose exactly eleven tools",
+    )
     for forbidden in [
         "current_admission_provenance",
-        "DFMCP_ADMISSION_TICKET\"",
         ".adapter.prepare(",
         ".adapter.commit(",
         ".adapter.request_cancel(",
@@ -165,17 +190,26 @@ def check_server_source() -> None:
         "RunLua",
         "shell=True",
     ]:
-        require(forbidden not in source, f"protocol-1.1 MCP server contains forbidden path {forbidden}")
+        require(
+            forbidden not in source,
+            f"protocol-1.1 MCP server contains forbidden path {forbidden}",
+        )
 
 
 def check_binary_and_exports() -> None:
     library = MCP_ROOT.read_text(encoding="utf-8")
-    require("mod live_server_v1_1;" in library, "MCP crate does not compile the protocol-1.1 server")
+    require(
+        "mod live_server_v1_1;" in library,
+        "MCP crate does not compile the protocol-1.1 server",
+    )
     require(
         "pub use live_server_v1_1::run_live_v1_1_development_stdio;" in library,
         "MCP crate does not export the development runner",
     )
-    require("pub mod live_server_v1_1;" not in library, "raw protocol-1.1 tool module is public")
+    require(
+        "pub mod live_server_v1_1;" not in library,
+        "raw protocol-1.1 tool module is public",
+    )
 
     binary = BINARY.read_text(encoding="utf-8")
     require(
@@ -217,7 +251,10 @@ def check_source_qualification_binding() -> None:
     digests = contract.get("required_source_digests", {})
     require(isinstance(digests, dict), "source qualification digests must be an object")
     for name, relative in EXPECTED_SOURCE_DIGESTS.items():
-        require(digests.get(name) == relative, f"source qualification omits runtime digest {name}")
+        require(
+            digests.get(name) == relative,
+            f"source qualification omits runtime digest {name}",
+        )
     claims = contract.get("claims_established", [])
     require(isinstance(claims, list), "source qualification claims must be an array")
     require(
@@ -225,7 +262,10 @@ def check_source_qualification_binding() -> None:
         "source qualification does not state the runtime source claim",
     )
     not_established = contract.get("claims_not_established", [])
-    require(isinstance(not_established, list), "source qualification nonclaims must be an array")
+    require(
+        isinstance(not_established, list),
+        "source qualification nonclaims must be an array",
+    )
     require(
         any("admitted protocol-1.1 MCP process" in str(claim) for claim in not_established),
         "source qualification does not refuse runtime-admission overclaim",
