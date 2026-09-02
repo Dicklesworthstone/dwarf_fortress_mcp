@@ -18,7 +18,6 @@ TESTS = ROOT / "scripts/test_source_bundle.py"
 VERIFY = ROOT / "scripts/verify.sh"
 QUALIFY = ROOT / "scripts/qualify_local.sh"
 SERVER_CONTRACT = ROOT / "architecture/live_server_binary_receipt_v1.json"
-SERVER_VERIFIER = ROOT / "scripts/verify_live_server_binary_receipt.py"
 DOC = ROOT / "docs/SOURCE_BUNDLE.md"
 
 
@@ -226,41 +225,31 @@ def check_gate_wiring() -> None:
 
     qualify = QUALIFY.read_text(encoding="utf-8")
     for marker in [
-        "run_gate source-bundle-contract python3 scripts/check_source_bundle.py",
-        "run_gate source-bundle-tests python3 scripts/test_source_bundle.py",
+        "python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py",
+        "python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py",
         "'source_bundle_contract':digest(root/'architecture/source_bundle_v1.json')",
+        "'source_bundle_stable_reader':digest(root/'scripts/read_stable_repository_file.py')",
         "'source_bundle_creator':digest(root/'scripts/create_source_bundle.py')",
+        "'source_bundle_wrapper':digest(root/'scripts/create_source_bundle.sh')",
         "'source_bundle_verifier':digest(root/'scripts/verify_source_bundle.py')",
+        "'source_bundle_checker':digest(root/'scripts/check_source_bundle.py')",
         "'source_bundle_tests':digest(root/'scripts/test_source_bundle.py')",
+        "'source_bundle_documentation':digest(root/'docs/SOURCE_BUNDLE.md')",
     ]:
         require(marker in qualify, f"qualify_local.sh omits source bundle marker {marker}")
 
     server_contract = json.loads(SERVER_CONTRACT.read_text(encoding="utf-8"))
     binding = server_contract.get("source_binding", {})
     gates = binding.get("required_local_qualification_gates", [])
-    require("source-bundle-contract" in gates, "server receipt omits source-bundle-contract gate")
-    require("source-bundle-tests" in gates, "server receipt omits source-bundle-tests gate")
+    require(
+        "source-bundle-contract" not in gates and "source-bundle-tests" not in gates,
+        "source packaging incorrectly widened the live-server receipt gate schema",
+    )
     digests = binding.get("required_source_digests", {})
-    expected_digests = {
-        "source_bundle_contract": "architecture/source_bundle_v1.json",
-        "source_bundle_stable_reader": "scripts/read_stable_repository_file.py",
-        "source_bundle_creator": "scripts/create_source_bundle.py",
-        "source_bundle_wrapper": "scripts/create_source_bundle.sh",
-        "source_bundle_verifier": "scripts/verify_source_bundle.py",
-        "source_bundle_checker": "scripts/check_source_bundle.py",
-        "source_bundle_tests": "scripts/test_source_bundle.py",
-    }
-    for name, relative in expected_digests.items():
-        require(digests.get(name) == relative, f"server receipt source map omits {name}")
-
-    server_verifier = SERVER_VERIFIER.read_text(encoding="utf-8")
-    for marker in [
-        '"source-bundle-contract"',
-        '"source-bundle-tests"',
-        '"source_bundle_contract": "architecture/source_bundle_v1.json"',
-        '"source_bundle_tests": "scripts/test_source_bundle.py"',
-    ]:
-        require(marker in server_verifier, f"server verifier omits source bundle marker {marker}")
+    require(
+        not any(name.startswith("source_bundle_") for name in digests),
+        "source packaging incorrectly widened live-server executable identity",
+    )
 
 
 def check_docs() -> None:
@@ -274,6 +263,8 @@ def check_docs() -> None:
         "pax",
         "does not prove compilation",
         "does not prove",
+        "release packaging boundary",
+        "live-server binary receipt",
     ]:
         require(marker in source, f"source bundle documentation omits {marker}")
 
