@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, BinaryIO, NoReturn
+from typing import Any, NoReturn
 
 MODULE_PATH = Path(__file__).with_name("verify_source_bundle.py")
 SPEC = importlib.util.spec_from_file_location("verify_source_bundle", MODULE_PATH)
@@ -139,6 +139,8 @@ def stream_git_archive(
                 "git",
                 "-C",
                 os.fspath(source_root),
+                "-c",
+                "tar.umask=0022",
                 "archive",
                 "--format=tar",
                 f"--prefix={prefix}",
@@ -295,7 +297,7 @@ def create_bundle(
             archive_path,
             contract_path,
             source,
-            False,
+            True,
         )
         write_json(verification_path, verification)
         require_clean_source(source)
