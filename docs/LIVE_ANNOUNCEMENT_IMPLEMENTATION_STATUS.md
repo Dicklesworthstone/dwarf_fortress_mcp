@@ -5,16 +5,16 @@ create compatibility evidence or runtime authority.
 
 ## Current status
 
-**Implemented in source, integrated through the protocol-1.1 read-only `GameAdapter`, and still
-unadmitted.**
+**Implemented in source through a separately named, explicitly unadmitted development MCP runtime;
+still unqualified and unadmitted.**
 
 The checked-in compatibility registry remains empty. No protocol-1.1 source revision, native plugin
 binary, Dwarf Fortress/DFHack tuple, platform, server binary, monotonic floor, or running process is
-admitted merely because the implementation exists.
+admitted merely because the implementation exists or a development read succeeds.
 
 ## Implemented source path
 
-The isolated protocol-1.1 stack now contains:
+The protocol-1.1 stack now contains:
 
 ```text
 DfmcpBridgeV1_1.proto
@@ -28,12 +28,13 @@ DfmcpBridgeV1_1.proto
 → combined citizen + announcement projection
 → LiveReadAdapterV1_1
 → read-only GameAdapter observe/query/doctor surface
+→ isolated eleven-tool development MCP server
 ```
 
 Protocol 1.0 remains separate and citizen-only. Protocol 1.1 uses a distinct protobuf package,
 plugin name, bridge version, native qualifier, source qualification contract, A1-A6 evidence
-contract, and diagnostic probe. It inherits no compatibility or runtime admission from protocol
-1.0.
+contract, diagnostic probe, MCP contract, server module, process-test suite, and binary. It inherits
+no compatibility or runtime admission from protocol 1.0.
 
 ## Native boundary
 
@@ -45,8 +46,8 @@ ReadObservation
 ```
 
 Announcement fields are embedded in `ReadObservation`; there is no standalone `ReadAnnouncements`
-method. The plugin exposes no mutation, command, Lua, keyboard, arbitrary forwarding, client-selected
-method, filesystem, or memory-write route.
+method. The plugin exposes no mutation, command, Lua, keyboard, arbitrary forwarding,
+client-selected method, filesystem, or memory-write route.
 
 The native bridge:
 
@@ -80,7 +81,7 @@ beyond the bridge high-water would create false absence evidence.
 It rejects cursors ahead of the retained high-water and rejects nonnegative cursors against an empty
 retained set.
 
-`read_publishable_observation_v1_1` adds the missing publication transaction. A single bridge call
+`read_publishable_observation_v1_1` supplies the publication transaction. A single bridge call
 proves one complete citizen roster plus one bounded announcement page. When more announcement pages
 are required, the publisher:
 
@@ -99,9 +100,9 @@ Any failure returns no capsule. Transport pagination therefore cannot become par
 state, and one-page versus multi-page transport produces the same final capsule identity for the
 same observation.
 
-The current canonical ceiling is 512 retained announcements per published capsule. A larger retained
-suffix fails with `budget_exceeded` and an explicit next cursor; it is not silently truncated or
-published as complete.
+The canonical ceiling is 512 retained announcements per published capsule. A larger retained suffix
+fails with `budget_exceeded` and an explicit next cursor; it is not silently truncated or published
+as complete.
 
 ## Read-only protocol-1.1 adapter
 
@@ -129,6 +130,49 @@ ceiling define one complete publishable retained suffix. Wider or incremental ru
 separately reviewed server/session contract; it must not reinterpret a partial bridge page as a
 canonical world snapshot.
 
+## Development MCP runtime
+
+The separately named binary is:
+
+```text
+dfmcp-live-v1-1-dev-server
+```
+
+It starts only under exact explicit opt-in:
+
+```bash
+DFMCP_ALLOW_UNADMITTED_LIVE_V1_1=1 \
+DFMCP_BRIDGE_TOKEN='<32..256-byte loopback secret>' \
+cargo run --locked --bin dfmcp-live-v1-1-dev-server
+```
+
+This process is an **unadmitted development** runtime. It cannot consume the protocol-1.0
+production admission ticket and refuses every production-admission environment marker, including
+entry, registry, decision, floor, receipt, launch, and ticket identities. Session identifiers use a
+distinct `0x11` high-byte namespace so a protocol-1.0 session handle cannot alias a protocol-1.1
+session.
+
+The runtime preserves the frozen eleven-tool MCP waist. Read-only operations use the protocol-1.1
+adapter; mutation-stage operations stay registered and fail closed. `fortress.query` accepts only
+`summary, citizens, announcements, or all`.
+
+Every success and failure carries an Agent Turn that says:
+
+```text
+runtime = unadmitted_development
+compatibility_admitted = false
+server_artifact_qualified = false
+runtime_admitted = false
+mutation_admissible = false
+```
+
+The Agent Turn also includes exact combined-capsule and announcement-batch references,
+retained-suffix versus historical coverage, bounded announcement attention, and certified-derived
+report-ID changes. Development execution deliberately exposes no production admission provenance.
+
+A future admitted protocol-1.1 runtime requires a new, source-bound server receipt and a separately
+reviewed admission generation. It must not reinterpret this development binary as admitted.
+
 ## Projection and agent semantics
 
 Announcement records become deterministic event entities in the same `WorldSnapshot` as fortress
@@ -145,7 +189,7 @@ fortress.announcements.history
 The retained suffix may be complete through the observed high-water while history remains partial.
 No empty result proves that no older announcement ever existed.
 
-The announcement briefing layer can rank bounded attention and summarize newly observed report IDs,
+The announcement briefing layer ranks bounded attention and summarizes newly observed report IDs,
 but attention and briefing are derived presentation. They grant no capability and satisfy no
 mutation precondition.
 
@@ -159,11 +203,13 @@ architecture/live_announcement_source_qualification_v1_1.json
 
 It binds the exact adapter API/root, V1 and V1.1 bridge source, wire client, batch model, citizen
 assembler, transactional publisher, read-only adapter, projection, briefing, source fence,
-connector, probe, contracts, checkers, tests, and documentation.
+connector, development MCP contract/server/binary/process tests, probe, contracts, checkers, tests,
+and documentation.
 
 A source qualification run must pass repository integrity, protocol checks, contract and acceptance
-tests, Python/shell syntax, locked offline Cargo metadata, rustfmt, warning-denied Clippy, adapter and
-workspace tests, warning-denied rustdoc, and diagnostic-probe help for one exact clean commit.
+tests, development-MCP contract and process tests, Python/shell syntax, locked offline Cargo
+metadata, rustfmt, warning-denied Clippy, adapter and workspace tests, warning-denied rustdoc, and
+diagnostic-probe help for one exact clean commit.
 
 No fresh passing source qualification receipt is implied by this document or by the latest commits.
 
@@ -175,24 +221,24 @@ Before protocol 1.1 can be admitted, the same exact source and binary identities
 2. a native plugin receipt against one named DFHack source revision;
 3. a real disposable-fort A1-A6 campaign;
 4. a re-executed baseline fortress/citizen campaign under protocol 1.1;
-5. a protocol-1.1 server binary and source-bound receipt;
+5. a protocol-1.1 production server binary and source-bound receipt;
 6. an exact compatibility-registry entry;
 7. deployment-host monotonic-floor advancement;
 8. authority-free artifact preflight;
-9. a fresh single-use process admission ticket and descriptor-only launch.
+9. a fresh protocol-1.1 single-use process admission ticket and descriptor-only launch.
 
-The current normal admitted MCP server is still protocol 1.0. Integrating protocol 1.1 into a
-runnable server requires a separate reviewed server configuration and receipt generation. It must
-not reuse a protocol-1.0 registry entry, floor acceptance, server receipt, or ticket.
+The normal admitted MCP server remains protocol 1.0. The new protocol-1.1 binary is only a bounded
+source and live-evidence surface; it cannot consume or impersonate protocol-1.0 admission state.
 
 ## Explicitly not established
 
+- no current protocol-1.1 source qualification receipt;
 - no current protocol-1.1 native build receipt;
 - no current A1-A6 live receipt;
 - no current baseline R2-R5 receipt under protocol 1.1;
 - no compatibility-registry entry;
 - no deployment-floor acceptance;
-- no qualified protocol-1.1 server binary;
+- no qualified protocol-1.1 production server binary;
 - no runtime-admitted protocol-1.1 MCP process;
 - no complete announcement-history claim;
 - no mutation authority.
