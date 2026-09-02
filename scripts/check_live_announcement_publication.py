@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_CONTRACT = ROOT / "architecture/live_announcement_source_qualification_v1_1.json"
+ACCEPTANCE_CONTRACT = ROOT / "architecture/live_announcement_acceptance_v1_1.json"
 NATIVE = ROOT / "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp"
 BATCH = ROOT / "crates/dfmcp-adapter/src/live_announcement_batch.rs"
 PUBLICATION = ROOT / "crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs"
@@ -32,6 +33,72 @@ def require_markers(path: Path, markers: list[str]) -> str:
     for marker in markers:
         require(marker in source, f"{path.relative_to(ROOT)} omits {marker}")
     return source
+
+
+def check_acceptance_cursor_contract() -> None:
+    value = json.loads(ACCEPTANCE_CONTRACT.read_text(encoding="utf-8"))
+    gates = value.get("gates")
+    require(isinstance(gates, list), "announcement acceptance gates must be an array")
+    a3 = next(
+        (
+            gate
+            for gate in gates
+            if isinstance(gate, dict) and gate.get("gate") == "A3"
+        ),
+        None,
+    )
+    require(isinstance(a3, dict), "announcement acceptance contract omits A3")
+    cases = a3.get("cases")
+    require(isinstance(cases, list), "announcement A3 cases must be an array")
+    cursor_case = next(
+        (
+            case
+            for case in cases
+            if isinstance(case, dict)
+            and case.get("case") == "cursor_beyond_latest_rejected"
+        ),
+        None,
+    )
+    require(
+        isinstance(cursor_case, dict),
+        "announcement A3 omits cursor_beyond_latest_rejected",
+    )
+    require(
+        cursor_case.get("required_equals")
+        == {
+            "accepted": False,
+            "failure_class": "cursor_gap",
+            "failure_code": "ANNOUNCEMENT_CURSOR_AHEAD",
+            "partial_state_published": False,
+        },
+        "announcement A3 cursor-ahead rejection semantics drifted",
+    )
+    require(
+        cursor_case.get("required_artifact_digests") == ["rejection_transcript"],
+        "announcement A3 cursor-ahead rejection evidence drifted",
+    )
+    require(
+        not any(
+            isinstance(case, dict) and case.get("case") == "cursor_beyond_latest"
+            for case in cases
+        ),
+        "announcement A3 retains the obsolete false-complete cursor case",
+    )
+    empty_case = next(
+        (
+            case
+            for case in cases
+            if isinstance(case, dict) and case.get("case") == "empty_retained_window"
+        ),
+        None,
+    )
+    require(isinstance(empty_case, dict), "announcement A3 omits empty_retained_window")
+    empty_equals = empty_case.get("required_equals")
+    require(isinstance(empty_equals, dict), "empty retained-window assertions must be an object")
+    require(
+        empty_equals.get("requested_after_id") == -1,
+        "empty retained-window success is not fenced to the initial cursor",
+    )
 
 
 def check_native_and_batch_cursor_fences() -> None:
@@ -120,9 +187,12 @@ def check_read_only_adapter() -> None:
             "announcement coverage is a retained suffix, never complete fortress history",
         ],
     )
+    refresh = source.split("fn refresh(", 1)[1].split(
+        "\n}\n\nfn ensure_snapshot_budget", 1
+    )[0]
     require(
-        source.index("ensure_snapshot_budget(request, &projection)?;")
-        < source.rindex("self.current = Some(projection);"),
+        refresh.index("ensure_snapshot_budget(request, &projection)?;")
+        < refresh.index("self.current = Some(projection);"),
         "protocol-1.1 adapter publishes candidate state before final budget admission",
     )
     for method in [
@@ -226,6 +296,7 @@ def check_status() -> None:
 
 def main() -> int:
     try:
+        check_acceptance_cursor_contract()
         check_native_and_batch_cursor_fences()
         check_publication_transaction()
         check_read_only_adapter()
