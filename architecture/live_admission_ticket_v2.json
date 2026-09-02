@@ -1,0 +1,51 @@
+{
+  "schema_version": "dfmcp.live-admission-ticket-contract/2",
+  "launch_schema": "dfmcp.admitted-live-launch/2",
+  "ticket_schema": "dfmcp.live-admission-ticket/2",
+  "status": "normative_protocol_bound_process_admission",
+  "runtime_dispatch": {
+    "source_field": "deployment_manifest.version_tuple.protocol",
+    "launch_field": "bridge_protocol",
+    "ticket_field": "bridge_protocol",
+    "environment_field": "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
+    "admitted_protocols": {
+      "1.0": {
+        "binary_command": "serve-live",
+        "rust_runner": "crate::live_server::run_live_stdio"
+      }
+    },
+    "protocol_1_1_status": "implemented_unadmitted_development_only",
+    "unknown_or_unadmitted_protocol_policy": "fail_closed_before_server_startup"
+  },
+  "canonical_binding": {
+    "launch_digest_covers_bridge_protocol": true,
+    "ticket_digest_covers_bridge_protocol": true,
+    "exact_equality_required_across_decision_launch_ticket_environment_and_dispatch": true,
+    "legacy_ticket_schema_accepted": false
+  },
+  "custody": {
+    "ticket_directory_mode": "0700",
+    "ticket_file_mode": "0600",
+    "symbolic_links_allowed": false,
+    "single_use": true,
+    "maximum_ticket_bytes": 65536,
+    "maximum_lifetime_seconds": 300
+  },
+  "authority": {
+    "mode": "authenticated_live_read_only",
+    "capabilities": [
+      "doctor",
+      "observe",
+      "query",
+      "wait"
+    ],
+    "mutation_capabilities": []
+  },
+  "claims_not_established": [
+    "compatibility for a protocol absent from admitted_protocols",
+    "protocol 1.1 production admission",
+    "successful DFHack connection",
+    "game mutation authority",
+    "host-compromise resistance"
+  ]
+}
