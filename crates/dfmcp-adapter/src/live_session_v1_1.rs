@@ -4,9 +4,11 @@
 //! canonical announcement suffix.
 //!
 //! The same announcement cursor and limit are sent with every citizen page.
-//! The assembler requires byte-identical announcement evidence across pages,
-//! so drift aborts without publishing a capsule. Partial announcement suffixes
-//! are allowed only with an explicit continuation cursor in their coverage.
+//! The driver independently revalidates the echoed cursor and actual returned
+//! record count before the page reaches assembly. The assembler then requires
+//! byte-identical announcement evidence across pages, so drift aborts without
+//! publishing a capsule. Partial announcement suffixes are allowed only with
+//! an explicit continuation cursor in their coverage.
 
 use std::io::{Read, Write};
 
@@ -189,6 +191,30 @@ pub fn read_complete_observation_v1_1_bounded<T: LiveObservationSourceV1_1>(
                 "bridge returned an empty nonterminal protocol-1.1 citizen page",
             ));
         }
+        if page.announcement_batch.coverage.requested_after_id != announcement_after_id {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                format!(
+                    "bridge echoed announcement cursor {}, expected {announcement_after_id}",
+                    page.announcement_batch.coverage.requested_after_id
+                ),
+            ));
+        }
+        let returned_announcements =
+            u32::try_from(page.announcement_batch.announcements.len()).map_err(|_| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "returned announcement count does not fit u32",
+                )
+            })?;
+        if returned_announcements > max_announcements {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                format!(
+                    "bridge returned {returned_announcements} announcements, exceeding the caller ceiling of {max_announcements}"
+                ),
+            ));
+        }
         assembler.push_page(page)?;
         if assembler.is_complete() {
             return assembler.finalize();
@@ -277,9 +303,9 @@ mod tests {
         }
     }
 
-    fn announcements(text: &str) -> Result<LiveAnnouncementBatch> {
-        let record = AnnouncementBatchRecord {
-            report_id: 10,
+    fn announcement(report_id: i32, text: &str) -> AnnouncementBatchRecord {
+        AnnouncementBatchRecord {
+            report_id,
             report_type: 7,
             text: text.to_owned(),
             year: 105,
@@ -288,7 +314,19 @@ mod tests {
             continuation: false,
             unconscious: false,
             announcement: true,
-        };
+        }
+    }
+
+    fn announcements(text: &str) -> Result<LiveAnnouncementBatch> {
+        announcement_batch(9, vec![announcement(10, text)], true)
+    }
+
+    fn announcement_batch(
+        requested_after_id: i32,
+        records: Vec<AnnouncementBatchRecord>,
+        complete_through_latest: bool,
+    ) -> Result<LiveAnnouncementBatch> {
+        let latest_available_id = records.last().map_or(requested_after_id, |record| record.report_id);
         LiveAnnouncementBatch::new(
             42,
             true,
@@ -296,15 +334,20 @@ mod tests {
             12_345,
             7,
             AnnouncementCoverage {
-                requested_after_id: 9,
-                oldest_available_id: 1,
-                latest_available_id: 10,
-                returned: 1,
-                complete_through_latest: true,
+                requested_after_id,
+                oldest_available_id: records.first().map_or(-1, |record| record.report_id),
+                latest_available_id,
+                returned: u32::try_from(records.len()).map_err(|_| {
+                    error(
+                        ErrorCode::BudgetExceeded,
+                        "test announcement count does not fit u32",
+                    )
+                })?,
+                complete_through_latest,
                 continuity: AnnouncementContinuity::CompleteSuffix,
-                next_after_id: 10,
+                next_after_id: latest_available_id,
             },
-            vec![record],
+            records,
         )
     }
 
@@ -442,6 +485,46 @@ mod tests {
             )
             .is_err()
         );
+        assert_eq!(source.calls, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn caller_announcement_ceiling_aborts_after_first_page() -> Result<()> {
+        let batch = announcement_batch(
+            9,
+            vec![announcement(10, "first"), announcement(11, "second")],
+            true,
+        )?;
+        let mut source = source(vec![page(0, 1, &[1], true, batch)]);
+        let failure = read_complete_observation_v1_1_bounded(
+            &mut source,
+            1,
+            true,
+            1,
+            9,
+            1,
+        )
+        .expect_err("the returned vector exceeds the caller announcement ceiling");
+        assert_eq!(failure.code, ErrorCode::BudgetExceeded);
+        assert_eq!(source.calls, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn echoed_announcement_cursor_must_match_the_request() -> Result<()> {
+        let batch = announcement_batch(8, vec![announcement(10, "wrong cursor")], true)?;
+        let mut source = source(vec![page(0, 1, &[1], true, batch)]);
+        let failure = read_complete_observation_v1_1_bounded(
+            &mut source,
+            1,
+            true,
+            1,
+            9,
+            128,
+        )
+        .expect_err("the source echoed a different announcement cursor");
+        assert_eq!(failure.code, ErrorCode::AdapterRejected);
         assert_eq!(source.calls, 1);
         Ok(())
     }
