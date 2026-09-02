@@ -24,8 +24,7 @@ use crate::{
     CancelReceipt, CheckpointReceipt, CommitReceipt, CompatibilityLevel,
     GameAdapter, HealthStatus, LiveObservationCapsuleV1_1,
     LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
-    LiveWorldProjectionV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE, ObservationFrame,
+    LiveWorldProjectionV1_1, MAX_CAPSULE_CITIZENS, ObservationFrame,
     ObservationPayload, ObservationRequest, PrepareReceipt, Projection,
     QueryRequest, QueryResponse, QueryRow, RestoreReceipt,
     project_live_capsule_v1_1, read_publishable_observation_v1_1,
@@ -764,14 +763,17 @@ mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
     use dfmcp_core::{
-        CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget,
+        CapabilityGrant, CapabilityScope, CoverageStatus, RequestId, SessionId,
+        WorkBudget,
     };
-    use dfmcp_world::{QueryOrder, WorldQuery};
+    use dfmcp_world::{EntityKind, QueryOrder, WorldQuery};
 
     use super::*;
     use crate::{
         AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-        CitizenRecord, InterestSet, LiveAnnouncementBatch, ObservationPageV1_1,
+        CitizenRecord, InterestSet, LiveAnnouncementBatch,
+        MAX_ANNOUNCEMENTS_PER_BATCH, MAX_V1_1_CITIZENS_PER_PAGE,
+        ObservationPageV1_1,
     };
 
     #[derive(Clone)]
@@ -1009,7 +1011,16 @@ mod tests {
         assert_eq!(projection.snapshot.cursor.epoch, 3);
         assert_eq!(projection.snapshot.cursor.sequence, 0);
         assert_eq!(projection.snapshot.graph.entities.len(), 5);
-        assert_eq!(projection.announcements.announcement_entities.len(), 2);
+        assert_eq!(
+            projection
+                .snapshot
+                .graph
+                .entities
+                .values()
+                .filter(|entity| entity.kind == EntityKind::Event)
+                .count(),
+            2
+        );
         assert!(projection.snapshot.hash_is_valid());
         Ok(())
     }
@@ -1102,7 +1113,16 @@ mod tests {
             adapter_config,
         )?;
         let projection = adapter.bootstrap()?;
-        assert_eq!(projection.announcements.announcement_entities.len(), 3);
+        assert_eq!(
+            projection
+                .snapshot
+                .graph
+                .entities
+                .values()
+                .filter(|entity| entity.kind == EntityKind::Event)
+                .count(),
+            3
+        );
         assert!(
             adapter
                 .last_capsule()
@@ -1170,8 +1190,15 @@ mod tests {
         assert_eq!(
             adapter
                 .current_projection()
-                .and_then(|projection| projection.receipt.coverage("fortress.announcements.history")),
-            Some(crate::LiveCoverageStatus::Partial)
+                .and_then(|projection| {
+                    projection
+                        .receipt
+                        .coverage()
+                        .domains
+                        .get("fortress.announcements.history")
+                        .map(|domain| domain.status)
+                }),
+            Some(CoverageStatus::Partial)
         );
         let frame = adapter.observe(
             &observation_request(Some(anchor.cursor)),
@@ -1286,8 +1313,9 @@ mod tests {
         assert!(invalid.validate().is_err());
 
         let mut invalid = config();
-        invalid.max_total_announcements =
-            u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH).unwrap_or(u32::MAX).saturating_add(1);
+        invalid.max_total_announcements = u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH)
+            .map_or(u32::MAX, |value| value)
+            .saturating_add(1);
         assert!(invalid.validate().is_err());
     }
 }
