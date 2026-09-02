@@ -147,6 +147,8 @@ run_gate announcement-contract-tests python3 scripts/test_live_announcement_cont
 run_gate announcement-acceptance-tests python3 scripts/test_live_announcement_acceptance.py
 run_gate python-syntax python3 -m py_compile \
   scripts/check_live_announcements.py \
+  scripts/check_live_announcements_core.py \
+  scripts/check_live_announcement_publication.py \
   scripts/test_live_announcement_contract.py \
   scripts/verify_live_announcement_acceptance.py \
   scripts/test_live_announcement_acceptance.py
