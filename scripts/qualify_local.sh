@@ -119,13 +119,29 @@ receipt={
    'announcement_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs'),
    'announcement_capsule':digest(root/'crates/dfmcp-adapter/src/live_observation_v1_1.rs'),
    'announcement_driver':digest(root/'crates/dfmcp-adapter/src/live_session_v1_1.rs'),
+   'announcement_publication':digest(root/'crates/dfmcp-adapter/src/live_observation_publication_v1_1.rs'),
+   'announcement_adapter':digest(root/'crates/dfmcp-adapter/src/live_adapter_v1_1.rs'),
+   'announcement_bootstrap':digest(root/'crates/dfmcp-adapter/src/live_bootstrap_v1_1.rs'),
+   'announcement_adapter_transaction_tests':digest(root/'crates/dfmcp-adapter/tests/live_adapter_v1_1_transactional.rs'),
    'announcement_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs'),
    'announcement_connector':digest(root/'crates/dfmcp-adapter/src/live_connect_v1_1.rs'),
    'announcement_projection':digest(root/'crates/dfmcp-adapter/src/live_announcement_projection.rs'),
    'announcement_combined_projection':digest(root/'crates/dfmcp-adapter/src/live_projection_v1_1.rs'),
    'announcement_briefing':digest(root/'crates/dfmcp-adapter/src/live_announcement_briefing.rs'),
    'announcement_checker':digest(root/'scripts/check_live_announcements.py'),
+   'announcement_checker_core':digest(root/'scripts/check_live_announcements_core.py'),
+   'announcement_publication_checker':digest(root/'scripts/check_live_announcement_publication.py'),
+   'announcement_bootstrap_checker':digest(root/'scripts/check_live_announcement_bootstrap.py'),
    'announcement_checker_tests':digest(root/'scripts/test_live_announcement_contract.py'),
+   'announcement_mcp_contract':digest(root/'architecture/live_mcp_server_v1_1.json'),
+   'announcement_production_admission_contract':digest(root/'architecture/live_admission_ticket_v2.json'),
+   'announcement_mcp_server':digest(root/'crates/dfmcp-mcp/src/live_server_v1_1.rs'),
+   'announcement_mcp_root':digest(root/'crates/dfmcp-mcp/src/lib.rs'),
+   'announcement_mcp_binary_manifest':digest(root/'crates/dwarf-fortress-mcp/Cargo.toml'),
+   'announcement_mcp_binary':digest(root/'crates/dwarf-fortress-mcp/src/bin/dfmcp-live-v1-1-dev-server.rs'),
+   'announcement_mcp_process_tests':digest(root/'crates/dwarf-fortress-mcp/tests/live_v1_1_development_admission.rs'),
+   'announcement_mcp_checker':digest(root/'scripts/check_live_mcp_v1_1.py'),
+   'announcement_mcp_checker_tests':digest(root/'scripts/test_live_mcp_v1_1.py'),
    'announcement_acceptance_verifier':digest(root/'scripts/verify_live_announcement_acceptance.py'),
    'announcement_acceptance_tests':digest(root/'scripts/test_live_announcement_acceptance.py'),
    'announcement_journal':digest(root/'scripts/live_announcement_evidence_journal.py'),
@@ -224,7 +240,7 @@ run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests bash -c \
   'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_read_stable_repository_file_loader.py'
 run_gate live-acceptance-tests bash -c \
-  'python3 scripts/test_live_read_acceptance.py && python3 scripts/test_live_announcement_contract.py && python3 scripts/test_live_announcement_acceptance.py && python3 scripts/test_dfhack_plugin_receipt_v1_1.py'
+  'python3 scripts/test_live_read_acceptance.py && python3 scripts/test_live_announcement_contract.py && python3 scripts/test_live_mcp_v1_1.py && python3 scripts/test_live_announcement_acceptance.py && python3 scripts/test_dfhack_plugin_receipt_v1_1.py'
 run_gate live-acceptance-journal-tests bash -c \
   'python3 scripts/test_live_read_evidence_journal.py && python3 scripts/test_live_announcement_evidence_journal.py'
 run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
@@ -252,7 +268,12 @@ run_gate python-syntax python3 -m py_compile \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_announcements.py \
+  scripts/check_live_announcements_core.py \
+  scripts/check_live_announcement_publication.py \
+  scripts/check_live_announcement_bootstrap.py \
   scripts/test_live_announcement_contract.py \
+  scripts/check_live_mcp_v1_1.py \
+  scripts/test_live_mcp_v1_1.py \
   scripts/verify_live_announcement_acceptance.py \
   scripts/test_live_announcement_acceptance.py \
   scripts/live_announcement_evidence_journal.py \
