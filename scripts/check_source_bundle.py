@@ -15,6 +15,7 @@ CREATOR = ROOT / "scripts/create_source_bundle.py"
 WRAPPER = ROOT / "scripts/create_source_bundle.sh"
 VERIFIER = ROOT / "scripts/verify_source_bundle.py"
 TESTS = ROOT / "scripts/test_source_bundle.py"
+OUTPUT_TESTS = ROOT / "scripts/test_source_bundle_output_location.py"
 VERIFY = ROOT / "scripts/verify.sh"
 QUALIFY = ROOT / "scripts/qualify_local.sh"
 SERVER_CONTRACT = ROOT / "architecture/live_server_binary_receipt_v1.json"
@@ -110,6 +111,7 @@ def check_creator() -> None:
     source = CREATOR.read_text(encoding="utf-8")
     for name in [
         "require_clean_source",
+        "nearest_existing_parent",
         "validate_output_location",
         "stream_git_archive",
         "build_manifest",
@@ -125,6 +127,9 @@ def check_creator() -> None:
         "os.replace(staging, destination)",
         "fsync_directory(destination.parent)",
         "source bundle output directory already exists",
+        "source bundle output path contains a symbolic-link parent",
+        "source bundle output parent changed while being prepared",
+        "lexical.parent.mkdir(mode=0o755, parents=True, exist_ok=True)",
         '"mutation_capabilities": [],',
     ]:
         require(marker in source, f"source bundle creator omits {marker}")
@@ -210,15 +215,29 @@ def check_tests() -> None:
     ]:
         require(marker in source, f"source bundle tests omit adversary {marker}")
 
+    output_tests = OUTPUT_TESTS.read_text(encoding="utf-8")
+    require(
+        output_tests.count("def test_") >= 3,
+        "source bundle destination handling needs at least three tests",
+    )
+    for name in [
+        "test_default_ignored_parent_is_created_and_verified",
+        "test_symbolic_link_parent_is_rejected_without_external_write",
+        "test_unignored_missing_parent_inside_source_is_not_created",
+    ]:
+        require(f"def {name}" in output_tests, f"source bundle output tests omit {name}")
+
 
 def check_gate_wiring() -> None:
     verify = VERIFY.read_text(encoding="utf-8")
     for marker in [
         "python3 scripts/check_source_bundle.py",
         "python3 scripts/test_source_bundle.py",
+        "python3 scripts/test_source_bundle_output_location.py",
         "scripts/create_source_bundle.py",
         "scripts/verify_source_bundle.py",
         "scripts/test_source_bundle.py",
+        "scripts/test_source_bundle_output_location.py",
         "scripts/check_source_bundle.py",
     ]:
         require(marker in verify, f"verify.sh omits source bundle gate marker {marker}")
@@ -226,14 +245,15 @@ def check_gate_wiring() -> None:
     qualify = QUALIFY.read_text(encoding="utf-8")
     for marker in [
         "python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py",
-        "python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py",
+        "python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py",
         "'source_bundle_contract':digest(root/'architecture/source_bundle_v1.json')",
-        "'source_bundle_stable_reader':digest(root/'scripts/read_stable_repository_file.py')",
+        "'stable_repository_reader':digest(root/'scripts/read_stable_repository_file.py')",
         "'source_bundle_creator':digest(root/'scripts/create_source_bundle.py')",
         "'source_bundle_wrapper':digest(root/'scripts/create_source_bundle.sh')",
         "'source_bundle_verifier':digest(root/'scripts/verify_source_bundle.py')",
         "'source_bundle_checker':digest(root/'scripts/check_source_bundle.py')",
         "'source_bundle_tests':digest(root/'scripts/test_source_bundle.py')",
+        "'source_bundle_output_tests':digest(root/'scripts/test_source_bundle_output_location.py')",
         "'source_bundle_documentation':digest(root/'docs/SOURCE_BUNDLE.md')",
     ]:
         require(marker in qualify, f"qualify_local.sh omits source bundle marker {marker}")
