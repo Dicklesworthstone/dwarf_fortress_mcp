@@ -208,15 +208,32 @@ class SourceBundleTests(unittest.TestCase):
     def test_tracked_gitlink_is_rejected_without_publication(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
-            commit = run_git(fixture.repository, "rev-parse", "HEAD")
+            nested = fixture.repository / "vendor" / "submodule"
+            nested.mkdir(parents=True)
+            run_git(nested, "init", "-q")
+            run_git(nested, "config", "user.email", "source-bundle@example.invalid")
+            run_git(nested, "config", "user.name", "Source Bundle Tests")
+            (nested / "README.md").write_text("nested repository\n", encoding="utf-8")
+            run_git(nested, "add", ".")
+            run_git(nested, "commit", "-q", "-m", "nested fixture")
+            nested_commit = run_git(nested, "rev-parse", "HEAD")
             run_git(
                 fixture.repository,
                 "update-index",
                 "--add",
                 "--cacheinfo",
-                f"160000,{commit},vendor/submodule",
+                f"160000,{nested_commit},vendor/submodule",
             )
             run_git(fixture.repository, "commit", "-q", "-m", "add gitlink")
+            self.assertEqual(
+                run_git(
+                    fixture.repository,
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                ),
+                "",
+            )
             destination = (fixture.outputs / "gitlink").resolve()
             with self.assertRaises(
                 (creator.SourceBundleCreationError, verifier.SourceBundleError)
