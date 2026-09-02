@@ -279,8 +279,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementContinuity, AnnouncementCoverage, AnnouncementRecord, BridgeManifest,
-        CitizenRecord, LiveAnnouncementBatch, ObservationAssemblerV1_1, ObservationPageV1_1,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
+        BridgeManifest, CitizenRecord, LiveAnnouncementBatch,
+        ObservationAssemblerV1_1, ObservationPageV1_1,
     };
 
     fn manifest() -> BridgeManifest {
@@ -323,7 +324,7 @@ mod tests {
         complete: bool,
         continuity: AnnouncementContinuity,
     ) -> Result<LiveAnnouncementBatch> {
-        let records = vec![AnnouncementRecord {
+        let records = vec![AnnouncementBatchRecord {
             report_id: 10,
             report_type: 7,
             text: "A caravan has arrived".to_owned(),
