@@ -24,6 +24,7 @@ pub mod live_announcement_batch;
 pub mod live_announcement_briefing;
 pub mod live_announcement_projection;
 pub mod live_bootstrap;
+pub mod live_bootstrap_v1_1;
 pub mod live_briefing;
 pub mod live_compatibility;
 pub mod live_connect;
@@ -104,6 +105,11 @@ pub use live_announcement_projection::{
 pub use live_bootstrap::{
     DEFAULT_MAX_LIVE_CITIZENS, LiveReadBootstrapConfig, PrimedLiveSource,
     bootstrap_live_read_adapter,
+};
+pub use live_bootstrap_v1_1::{
+    DEFAULT_LIVE_ANNOUNCEMENT_PAGE_SIZE, DEFAULT_MAX_LIVE_ANNOUNCEMENTS,
+    LiveReadBootstrapConfigV1_1, PrimedLiveSourceV1_1,
+    bootstrap_live_read_adapter_v1_1,
 };
 pub use live_briefing::{
     CitizenStatusCounts, LiveAttentionItem, LiveAttentionSeverity, LiveChangeSummary,
