@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "architecture/live_mcp_server_v1_1.json"
+ADMISSION_CONTRACT = ROOT / "architecture/live_admission_ticket_v2.json"
 SERVER = ROOT / "crates/dfmcp-mcp/src/live_server_v1_1.rs"
 MCP_ROOT = ROOT / "crates/dfmcp-mcp/src/lib.rs"
 BINARY = ROOT / "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-v1-1-dev-server.rs"
@@ -33,6 +34,7 @@ EXPECTED_TOOLS = [
 ]
 EXPECTED_FORBIDDEN_ENVIRONMENT = [
     "DFMCP_ADMISSION_TICKET",
+    "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
     "DFMCP_COMPATIBILITY_ENTRY_ID",
     "DFMCP_COMPATIBILITY_DECISION_DIGEST",
     "DFMCP_COMPATIBILITY_REGISTRY_DIGEST",
@@ -40,8 +42,14 @@ EXPECTED_FORBIDDEN_ENVIRONMENT = [
     "DFMCP_SERVER_RECEIPT_DIGEST",
     "DFMCP_ADMITTED_LAUNCH_DIGEST",
 ]
+PRIVATE_SERVER_FORBIDDEN_ENVIRONMENT = [
+    value
+    for value in EXPECTED_FORBIDDEN_ENVIRONMENT
+    if value != "DFMCP_ADMITTED_BRIDGE_PROTOCOL"
+]
 EXPECTED_SOURCE_DIGESTS = {
     "announcement_mcp_contract": "architecture/live_mcp_server_v1_1.json",
+    "production_admission_ticket_contract": "architecture/live_admission_ticket_v2.json",
     "announcement_mcp_server": "crates/dfmcp-mcp/src/live_server_v1_1.rs",
     "announcement_mcp_root": "crates/dfmcp-mcp/src/lib.rs",
     "announcement_mcp_binary_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
@@ -89,6 +97,15 @@ def check_contract() -> None:
         binary.get("forbidden_admission_environment_prefixes")
         == EXPECTED_FORBIDDEN_ENVIRONMENT,
         "runtime admission-environment refusal set drifted",
+    )
+    require(
+        binary.get("production_admission_contract")
+        == "architecture/live_admission_ticket_v2.json",
+        "development runtime does not name the production admission contract it refuses",
+    )
+    require(
+        binary.get("production_protocol_dispatch_allowed") is False,
+        "development runtime is allowed to enter production protocol dispatch",
     )
     mcp = value.get("mcp", {})
     require(isinstance(mcp, dict), "runtime MCP contract must be an object")
@@ -146,6 +163,36 @@ def check_contract() -> None:
     )
 
 
+def check_production_admission_isolation() -> None:
+    value = read_json(ADMISSION_CONTRACT)
+    require(
+        value.get("schema_version") == "dfmcp.live-admission-ticket-contract/2",
+        "production admission contract schema drifted",
+    )
+    dispatch = value.get("runtime_dispatch", {})
+    require(isinstance(dispatch, dict), "production runtime dispatch must be an object")
+    require(
+        dispatch.get("admitted_protocols")
+        == {
+            "1.0": {
+                "binary_command": "serve-live",
+                "rust_runner": "crate::live_server::run_live_stdio",
+            }
+        },
+        "production protocol map widened without a protocol-1.1 evidence generation",
+    )
+    require(
+        dispatch.get("protocol_1_1_status")
+        == "implemented_unadmitted_development_only",
+        "production admission contract no longer marks protocol 1.1 unadmitted",
+    )
+    require(
+        dispatch.get("unknown_or_unadmitted_protocol_policy")
+        == "fail_closed_before_server_startup",
+        "production admission no longer fails closed for unadmitted protocols",
+    )
+
+
 def check_server_source() -> None:
     source = SERVER.read_text(encoding="utf-8")
     for marker in [
@@ -173,7 +220,7 @@ def check_server_source() -> None:
         ".tool(FortressDoctor)",
     ]:
         require(marker in source, f"protocol-1.1 MCP server omits marker {marker}")
-    for name in EXPECTED_FORBIDDEN_ENVIRONMENT:
+    for name in PRIVATE_SERVER_FORBIDDEN_ENVIRONMENT:
         require(name in source, f"protocol-1.1 MCP server does not reject {name}")
     require(
         source.count("#[tool(") == 11,
@@ -203,8 +250,19 @@ def check_binary_and_exports() -> None:
         "MCP crate does not compile the protocol-1.1 server",
     )
     require(
-        "pub use live_server_v1_1::run_live_v1_1_development_stdio;" in library,
-        "MCP crate does not export the development runner",
+        "pub fn run_live_v1_1_development_stdio()" in library,
+        "MCP crate does not expose the guarded development runner",
+    )
+    for marker in [
+        'const ADMITTED_PROTOCOL_ENVIRONMENT: &str = "DFMCP_ADMITTED_BRIDGE_PROTOCOL";',
+        "std::env::var_os(ADMITTED_PROTOCOL_ENVIRONMENT).is_some()",
+        "refuses production admission environment",
+        "live_server_v1_1::run_live_v1_1_development_stdio();",
+    ]:
+        require(marker in library, f"development API guard omits {marker}")
+    require(
+        "pub use live_server_v1_1::run_live_v1_1_development_stdio;" not in library,
+        "unguarded development runner remains publicly re-exported",
     )
     require(
         "pub mod live_server_v1_1;" not in library,
@@ -215,7 +273,7 @@ def check_binary_and_exports() -> None:
     require(
         binary.strip()
         == '#![forbid(unsafe_code)]\n\nfn main() {\n    dfmcp_mcp::run_live_v1_1_development_stdio();\n}',
-        "development binary contains logic outside the reviewed MCP runner",
+        "development binary contains logic outside the reviewed MCP API seam",
     )
     manifest = BINARY_MANIFEST.read_text(encoding="utf-8")
     for marker in [
@@ -225,14 +283,16 @@ def check_binary_and_exports() -> None:
         require(marker in manifest, f"binary manifest omits {marker}")
 
     tests = PROCESS_TESTS.read_text(encoding="utf-8")
-    require(tests.count("#[test]") >= 3, "development runtime needs at least three process tests")
+    require(tests.count("#[test]") >= 4, "development runtime needs at least four process tests")
     for marker in [
         "CARGO_BIN_EXE_dfmcp-live-v1-1-dev-server",
         "protocol_1_1_development_server_requires_exact_opt_in",
         "protocol_1_1_development_server_rejects_production_admission_state",
+        "protocol_1_1_development_server_rejects_protocol_bound_admission_state",
         "near_miss_opt_in_values_fail_before_bridge_configuration",
         'env_remove("DFMCP_ALLOW_UNADMITTED_LIVE_V1_1")',
         'env("DFMCP_COMPATIBILITY_ENTRY_ID"',
+        'env("DFMCP_ADMITTED_BRIDGE_PROTOCOL", "1.1")',
         "DFMCP_BRIDGE_TOKEN is required",
     ]:
         require(marker in tests, f"development runtime process tests omit {marker}")
@@ -281,6 +341,7 @@ def check_documentation() -> None:
         "unadmitted development",
         "summary, citizens, announcements, or all",
         "cannot consume",
+        "dfmcp_admitted_bridge_protocol",
     ]:
         require(marker in status, f"announcement implementation status omits {marker}")
     for marker in [
@@ -288,6 +349,7 @@ def check_documentation() -> None:
         "fortress.query",
         "complete fortress history",
         "no mutation",
+        "production protocol map",
     ]:
         require(marker in stream, f"announcement stream documentation omits {marker}")
 
@@ -295,6 +357,7 @@ def check_documentation() -> None:
 def main() -> int:
     try:
         check_contract()
+        check_production_admission_isolation()
         check_server_source()
         check_binary_and_exports()
         check_source_qualification_binding()
@@ -304,7 +367,7 @@ def main() -> int:
         return 1
     print(
         "protocol-1.1 MCP runtime: PASS "
-        "(eleven-tool, announcement-aware, read-only, and explicitly unadmitted)"
+        "(eleven-tool, announcement-aware, read-only, production-isolated, and explicitly unadmitted)"
     )
     return 0
 
