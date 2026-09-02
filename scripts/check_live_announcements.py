@@ -18,6 +18,14 @@ CHECKERS = [
         "live_announcement_publication",
         ROOT / "scripts/check_live_announcement_publication.py",
     ),
+    (
+        "live_announcement_bootstrap",
+        ROOT / "scripts/check_live_announcement_bootstrap.py",
+    ),
+    (
+        "live_announcement_mcp",
+        ROOT / "scripts/check_live_mcp_v1_1.py",
+    ),
 ]
 
 
@@ -56,7 +64,7 @@ def main() -> int:
         return 1
     print(
         "live announcement aggregate: PASS "
-        "(isolated protocol, transactional publication, and read-only adapter)"
+        "(isolated protocol, transactional publication, single-read bootstrap, and development MCP)"
     )
     return 0
 
