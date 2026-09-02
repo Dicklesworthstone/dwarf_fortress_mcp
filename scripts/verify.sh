@@ -23,6 +23,10 @@ info "Rejecting corrupted source, symlinks, local-path placeholders, and probe d
 python3 scripts/check_repository_integrity.py
 ok "Repository integrity"
 
+info "Validating deterministic clean-commit source bundles"
+python3 scripts/check_source_bundle.py
+ok "Source bundle contract"
+
 info "Validating repository contracts"
 python3 scripts/validate_repo.py
 ok "Repository contracts"
@@ -31,9 +35,13 @@ info "Validating the agent operating-model contract"
 python3 scripts/check_agent_contract.py
 ok "Agent operating-model contract"
 
-info "Validating the authenticated read-only DFHack bridge"
+info "Validating the authenticated protocol-1.0 read-only DFHack bridge"
 python3 scripts/check_dfhack_bridge.py
-ok "DFHack read-only bridge contract"
+ok "DFHack protocol-1.0 bridge contract"
+
+info "Validating isolated protocol-1.1 announcement reads"
+python3 scripts/check_live_announcements.py
+ok "Protocol-1.1 announcement contract"
 
 info "Validating native bridge authentication ordering"
 python3 scripts/check_bridge_auth_order.py
@@ -82,6 +90,13 @@ ok "Dependency policy"
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
 python3 scripts/test_read_stable_repository_file.py
+python3 scripts/test_read_stable_repository_file_loader.py
+python3 scripts/test_source_bundle.py
+python3 scripts/test_source_bundle_output_location.py
+python3 scripts/test_live_announcement_contract.py
+python3 scripts/test_live_announcement_acceptance.py
+python3 scripts/test_live_announcement_evidence_journal.py
+python3 scripts/test_dfhack_plugin_receipt_v1_1.py
 python3 scripts/test_live_read_acceptance.py
 python3 scripts/test_live_read_evidence_journal.py
 python3 scripts/test_scan_live_read_secrets.py
@@ -103,8 +118,22 @@ python3 -m py_compile \
   scripts/check_repository_integrity.py \
   scripts/test_repository_integrity.py \
   scripts/test_read_stable_repository_file.py \
+  scripts/test_read_stable_repository_file_loader.py \
+  scripts/create_source_bundle.py \
+  scripts/verify_source_bundle.py \
+  scripts/check_source_bundle.py \
+  scripts/test_source_bundle.py \
+  scripts/test_source_bundle_output_location.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_live_announcements.py \
+  scripts/test_live_announcement_contract.py \
+  scripts/verify_live_announcement_acceptance.py \
+  scripts/test_live_announcement_acceptance.py \
+  scripts/live_announcement_evidence_journal.py \
+  scripts/test_live_announcement_evidence_journal.py \
+  scripts/issue_dfhack_plugin_receipt_v1_1.py \
+  scripts/test_dfhack_plugin_receipt_v1_1.py \
   scripts/check_bridge_auth_order.py \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
@@ -142,7 +171,10 @@ bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
+  scripts/qualify_dfhack_plugin_v1_1.sh \
   scripts/qualify_live_read.sh \
+  scripts/qualify_live_announcements.sh \
+  scripts/qualify_live_announcement_source.sh \
   scripts/qualify_live_server_binary.sh \
   scripts/qualify_local.sh \
   scripts/verify.sh
@@ -168,6 +200,10 @@ info "Running workspace tests"
 cargo test --locked --workspace --all-targets --all-features
 ok "Workspace tests"
 
+info "Running release-mode workspace tests"
+cargo test --locked --release --workspace --all-targets --all-features
+ok "Release workspace tests"
+
 info "Building warning-free API documentation"
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps
 ok "API documentation"
@@ -177,6 +213,7 @@ cargo run --locked --quiet --bin dwarf-fortress-mcp -- contract >/dev/null
 cargo run --locked --quiet --bin dwarf-fortress-mcp -- doctor >/dev/null
 cargo run --locked --quiet --bin dwarf-fortress-mcp -- demo >/dev/null
 cargo run --locked --quiet --bin dfmcp-live-probe -- help >/dev/null
+cargo run --locked --quiet --bin dfmcp-live-announcement-probe -- help >/dev/null
 ok "Executable contract checks"
 
 printf '%bAll verification gates passed.%b\n' "$GREEN" "$RESET"
