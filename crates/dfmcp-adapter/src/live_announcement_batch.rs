@@ -106,6 +106,34 @@ impl AnnouncementBatchRecord {
         }
         Ok(())
     }
+
+    fn validate_at(&self, current_year: u32, current_year_tick: u32) -> Result<()> {
+        self.validate()?;
+        let observed_year = i32::try_from(current_year).map_err(|_| {
+            error(
+                ErrorCode::AdapterRejected,
+                "announcement observation year does not fit the report-year domain",
+            )
+        })?;
+        let observed_tick = i32::try_from(current_year_tick).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "validated observation year tick does not fit i32",
+            )
+        })?;
+        if self.year > observed_year
+            || (self.year == observed_year && self.year_tick > observed_tick)
+        {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                format!(
+                    "announcement report {} is dated after the observation clock",
+                    self.report_id
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,15 +286,22 @@ impl LiveAnnouncementBatch {
                 "announcement bridge generation zero is reserved",
             ));
         }
-        if current_year_tick >= u32::try_from(TICKS_PER_YEAR).map_err(|_| {
+        let ticks_per_year = u32::try_from(TICKS_PER_YEAR).map_err(|_| {
             error(
                 ErrorCode::InternalInvariantViolation,
                 "ticks-per-year constant does not fit u32",
             )
-        })? {
+        })?;
+        if current_year_tick >= ticks_per_year {
             return Err(error(
                 ErrorCode::AdapterRejected,
                 "announcement observation year tick is outside the Dwarf Fortress year",
+            ));
+        }
+        if i32::try_from(current_year).is_err() {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "announcement observation year does not fit the report-year domain",
             ));
         }
         if site_id < 0 {
@@ -284,6 +319,9 @@ impl LiveAnnouncementBatch {
             ));
         }
         coverage.validate(&announcements)?;
+        for record in &announcements {
+            record.validate_at(current_year, current_year_tick)?;
+        }
         let canonical_bytes = canonical_bytes(
             bridge_generation,
             paused,
@@ -324,12 +362,15 @@ impl LiveAnnouncementBatch {
                 "announcement bridge generation zero is reserved",
             ));
         }
-        if self.current_year_tick >= u32::try_from(TICKS_PER_YEAR).map_err(|_| {
+        let ticks_per_year = u32::try_from(TICKS_PER_YEAR).map_err(|_| {
             error(
                 ErrorCode::InternalInvariantViolation,
                 "ticks-per-year constant does not fit u32",
             )
-        })? || self.site_id < 0
+        })?;
+        if self.current_year_tick >= ticks_per_year
+            || self.site_id < 0
+            || i32::try_from(self.current_year).is_err()
         {
             return Err(error(
                 ErrorCode::CorruptLedger,
@@ -345,6 +386,9 @@ impl LiveAnnouncementBatch {
             ));
         }
         self.coverage.validate(&self.announcements)?;
+        for record in &self.announcements {
+            record.validate_at(self.current_year, self.current_year_tick)?;
+        }
         let reproduced = canonical_bytes(
             self.bridge_generation,
             self.paused,
@@ -573,10 +617,31 @@ mod tests {
     }
 
     #[test]
+    fn future_records_are_rejected_against_the_observation_clock() {
+        let mut later_year = record(10);
+        later_year.year = 106;
+        assert!(batch(vec![later_year]).is_err());
+
+        let mut later_tick = record(10);
+        later_tick.year = 105;
+        later_tick.year_tick = 12_346;
+        assert!(batch(vec![later_tick]).is_err());
+
+        let mut current_tick = record(10);
+        current_tick.year = 105;
+        current_tick.year_tick = 12_345;
+        assert!(batch(vec![current_tick]).is_ok());
+    }
+
+    #[test]
     fn tampering_breaks_canonical_validation() -> Result<()> {
         let mut structured = batch(vec![record(10), record(11)])?;
         structured.announcements[0].text = "tampered".to_owned();
         assert!(structured.validate().is_err());
+
+        let mut future = batch(vec![record(10), record(11)])?;
+        future.announcements[0].year = 106;
+        assert!(future.validate().is_err());
 
         let mut bytes = batch(vec![record(10), record(11)])?;
         bytes.canonical_bytes.push(0);
