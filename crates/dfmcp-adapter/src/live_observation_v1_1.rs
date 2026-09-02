@@ -212,7 +212,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementContinuity, AnnouncementCoverage, AnnouncementRecord, CitizenRecord,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
+        CitizenRecord,
     };
 
     fn manifest() -> BridgeManifest {
@@ -252,7 +253,7 @@ mod tests {
     }
 
     fn announcement_batch(after: i32, text: &str) -> Result<LiveAnnouncementBatch> {
-        let record = AnnouncementRecord {
+        let record = AnnouncementBatchRecord {
             report_id: 10,
             report_type: 7,
             text: text.to_owned(),
