@@ -18,6 +18,8 @@
       "DFMCP_SERVER_RECEIPT_DIGEST",
       "DFMCP_ADMITTED_LAUNCH_DIGEST"
     ],
+    "production_admission_contract": "architecture/live_admission_ticket_v2.json",
+    "production_protocol_dispatch_allowed": false,
     "note": "This binary cannot consume a production admission ticket. The V2 ticket contract admits only protocol 1.0 today; protocol 1.1 requires its own completed native, live, registry, floor, server-receipt, and explicit runtime-dispatch evidence before the production map may be widened."
   },
   "mcp": {
