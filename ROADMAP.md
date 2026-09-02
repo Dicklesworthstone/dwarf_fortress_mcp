@@ -2,24 +2,25 @@
 
 Progress is gate-based. Dates are intentionally absent: evidence matters more than calendar theater.
 
-The current source generation is at **Phase 0D-R0**: a substantial authenticated read-only live
-path and exact admission machinery exist, but the checked-in compatibility registry is empty and
-the final head does not yet have a fresh full Rust qualification receipt. See
-[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
+The current source generation is at **Phase 0D-R0**, with an implemented but unadmitted Phase-1
+retained-announcement slice. The checked-in compatibility registry is empty. Protocol 1.0 is the
+only runner in the production V2 protocol map; protocol 1.1 has an explicitly unadmitted development
+runtime. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
 
 ## Evidence notation
 
 - **Source** — implementation and tests are checked in.
-- **Static** — repository/Python gates passed for the exact commit.
-- **Rust** — latest-nightly format, Clippy, debug/release tests, and rustdoc passed.
+- **Static** — repository/Python gates passed for one exact commit.
+- **Rust** — latest-nightly formatting, Clippy, debug/release tests, and rustdoc passed.
 - **Native** — exact DFHack plugin passed R1.
-- **Live** — exact tuple passed R2-R5 against a disposable fortress.
-- **Admitted** — receipts were promoted into the current registry.
+- **Live** — exact tuple passed its required disposable-fort campaign.
+- **Admitted** — reviewed receipts were promoted into the current registry.
 - **Floor** — deployment host accepted those exact registry bytes into its monotonic floor.
 - **Artifact** — exact release server received a source-bound qualification receipt.
-- **Launched** — floor-bound descriptor launcher and single-use Rust ticket completed.
+- **Dispatched** — the V2 production map contains the exact protocol runner.
+- **Launched** — protocol-bound descriptor launcher and single-use Rust ticket completed.
 
-A milestone is not complete merely because its source exists.
+A milestone is not complete merely because its source exists or a development process runs.
 
 ## Phase 0A — Executable semantic laboratory
 
@@ -50,44 +51,44 @@ Delivered:
 
 - synthetic agent control loop;
 - continuity, briefing, changes, attention, active work, affordances, recommendations, uncertainty,
-  coverage, budget, references, and structured recovery;
+  coverage, budget, references, and typed recovery;
 - authority-free presentation semantics;
 - heartbeat and reset classification;
-- exact admitted-launch provenance projected into live Agent Turns;
+- exact admitted-launch provenance, including bridge protocol, projected into live Agent Turns;
 - bounded session and output behavior.
 
 Remaining:
 
 - durable handoff resources;
 - empirical cost, value-of-information, and confidence models;
-- full objective decomposition and candidate comparison;
+- complete objective decomposition and candidate comparison;
 - durable surprise and evidence-gated learning loop;
-- profile semantics backed by wider live coverage.
+- wider live coverage behind exact protocol generations.
 
-## Phase 0C — Authenticated live read-only path
+## Phase 0C — Protocol-1.0 authenticated live reads
 
-**Source implemented; current tuple not admitted.**
+**Source implemented; no current tuple admitted.**
 
 Delivered:
 
 - real DFHack plugin source using supported native protobuf RPC;
-- exactly `Handshake` and `ReadObservation` in protocol V1;
-- loopback bearer-token authentication and bounded nonce/version manifest;
-- safe-Rust DFHack wire codec with canonical protobuf validation;
+- exactly `Handshake` and `ReadObservation`;
+- loopback bearer authentication and exact protocol/version manifest;
+- safe-Rust wire codec with canonical protobuf validation;
 - complete bounded citizen-roster observation;
 - optional name projection;
-- pagination-independent immutable observation capsule;
+- pagination-independent immutable capsules;
 - fortress/citizen graph projection with fact provenance and explicit coverage;
 - live identity, version, generation, epoch, sequence, heartbeat, restart, and drift fencing;
-- read-only live MCP tools for open, observe, query, wait, explain, and doctor;
+- read-only live MCP tools;
 - mutation-stage tools fail closed.
 
-Required gate to move from source to an admitted experimental configuration:
+Required evidence:
 
 ```text
 exact current source
 + exact DFHack source
-+ exact plugin bytes
++ exact protocol-1.0 plugin bytes
 + R1
 + R2
 + R3
@@ -104,88 +105,139 @@ The current registry has zero entries.
 
 Delivered:
 
-- canonical exact-tuple compatibility registry;
-- deterministic promotion with source/binary/evidence equality checks;
+- canonical exact-tuple registry and deterministic promotion;
 - expected-registry compare-and-swap and single-writer lock;
-- deterministic resolver binding the full registry digest and required entry ID;
-- owner-private monotonic compatibility floor with:
-  - absolute path;
-  - exact `0700` parent and `0600` file;
-  - root/effective-user ownership;
-  - no-follow opens;
-  - exclusive initialization;
-  - atomic fsynced compare-and-swap advancement;
-  - monotonic sequence and digest chain;
-  - prior entry IDs cannot disappear;
-- authority-free admission doctor with fixed registry/floor/tuple/artifact stages;
-- source-bound release-server receipt contract;
-- hardened receipt verifier and repository source-text corruption detector;
-- descriptor-bound Python launcher with repeated floor/registry and executable SHA checks;
-- owner-private, short-lived, single-use process ticket;
-- Rust ticket consumer that revalidates process, floor, receipt, executable metadata, and executable
-  bytes before starting the private live server;
+- exact resolver binding full registry digest and required entry ID;
+- owner-private monotonic floor with exact `0700`/`0600` custody, no-follow reads, atomic fsynced
+  advancement, sequence/digest chain, and prior-entry preservation;
+- authority-free admission doctor;
+- source-bound server receipt and hardened verifier;
+- descriptor-bound launcher with loader-environment rejection and repeated registry/floor/binary
+  verification;
+- protocol-bound V2 launch and ticket contract;
+- exact protocol agreement across manifest, decision, launch, ticket, environment, Rust provenance,
+  and final runner lookup;
+- production runner map containing protocol 1.0 only;
+- legacy V1 ticket, unknown protocol, protocol mismatch, and protocol-1.1 production refusal;
+- real exact-mode `0700` ticket directory and exact-mode `0600` single-use file;
+- Rust ticket consumer that revalidates protocol, process, custody, capabilities, and executable
+  bytes before starting the private server;
 - direct `serve-live` bypass fails closed.
 
-### Immediate D0 gate: current-head qualification
+### D0 gate: current-head qualification
 
 1. Run `./scripts/verify.sh` on the controlled latest-nightly toolchain.
-2. Run `./scripts/qualify_local.sh` on a clean checkout with no static-only escape.
+2. Run `./scripts/qualify_local.sh` on a clean checkout without static-only escape.
 3. Fix every source-integrity, schema, shell, format, compile, Clippy, test, release-test, and rustdoc
    failure.
-4. Retain the exact qualification receipt with its commit and source digests.
+4. Retain the exact qualification receipt and source digests.
 
-### D1 gate: current server artifact
+### D1 gate: protocol-1.0 server artifact
 
 1. Build the exact release binary from the qualified clean commit.
 2. Run `scripts/qualify_live_server_binary.sh`.
-3. Independently verify the source mapping, local receipt, executable checks, inode, size, mode,
-   owner, and SHA-256.
+3. Independently verify source map, local receipt, executable checks, inode, size, mode, owner, and
+   SHA-256.
 
-### D2 gate: first current exact live tuple
+### D2 gate: first exact protocol-1.0 live tuple
 
-1. Build and qualify the native plugin against one exact DFHack source revision.
-2. Run the full R2-R5 disposable-fort campaign.
-3. Review receipts and promote one exact entry into the checked-in registry.
-4. Do not infer compatibility for adjacent versions or platforms.
+1. Build and qualify the native plugin against one exact DFHack revision.
+2. Run the complete R2-R5 disposable-fort campaign.
+3. Review receipts and promote one exact entry.
+4. Do not infer compatibility for adjacent versions, protocols, or platforms.
 
-### D3 gate: trusted deployment admission
+### D3 gate: trusted protocol-1.0 launch
 
-1. Initialize or advance the deployment host’s monotonic floor to the reviewed registry bytes.
+1. Initialize or advance the deployment floor to the reviewed registry bytes.
 2. Run the authority-free doctor to `artifact_preflight_ready`.
-3. Start only through `scripts/serve_admitted_live.py`.
-4. Retain the secret-free launch record and consumed-ticket provenance.
-5. Verify live Agent Turns report the exact floor, registry, decision, receipt, launch, ticket, and
-   executable identities.
+3. Verify the V2 production map resolves the entry’s protocol to the reviewed protocol-1.0 runner.
+4. Start only through `scripts/serve_admitted_live.py`.
+5. Retain the secret-free launch record and consumed-ticket provenance.
+6. Verify Agent Turns expose the exact bridge protocol, floor, registry, decision, receipt, launch,
+   ticket, and executable identities.
 
-## Phase 1 — Wider live observation
+## Phase 1A — Protocol-1.1 retained announcements
 
-Begins only after one current read-only tuple is admitted and launched.
+**Implemented in source through an explicitly unadmitted development MCP runtime. No source, native,
+live, registry, floor, artifact, dispatch, or launch evidence is implied for the current head.**
 
-Each domain is a separate protocol, canonicalization, coverage, acceptance, and compatibility
-generation. Preferred order:
+Delivered in source:
 
-1. **Announcements and reports**
-   - bounded stable ordering and continuation semantics;
-   - explicit truncation and historical coverage;
-   - no global hidden cursor shared across clients.
-2. **Jobs and work orders**
+- distinct protocol-1.1 protobuf package, plugin, bridge version, contracts, and probe;
+- retained-announcement fields inside `ReadObservation`; no new method;
+- canonical bounded batch with strict IDs, cursor, retained bounds, gap evidence, and
+  complete-through-latest semantics;
+- transactional citizen-pagination × announcement-continuation publication;
+- complete retained suffix versus partial historical coverage;
+- deterministic world projection, briefing, attention, and report-ID changes;
+- read-only adapter integration;
+- single-publication bootstrap with no duplicate underlying bridge read;
+- two-dimensional primed replay with cursor, projection, manifest, and snapshot checks;
+- exact-opt-in eleven-tool development MCP runtime with distinct session namespace;
+- rejection of production admission environment state at the public API seam;
+- A1-A6 contract, journal, native receipt issuer, source qualifier, aggregate checker, and mutation
+  suites;
+- complete local qualification digest coverage of the publication/bootstrap/MCP/isolation graph.
+
+### A0 gate: protocol-1.1 source qualification
+
+1. Run `scripts/qualify_live_announcement_source.sh` on one exact clean commit.
+2. Require every core, publication, bootstrap, MCP-isolation, mutation, Rust, and rustdoc gate.
+3. Retain the source-only receipt. Do not call it native or live evidence.
+
+### A1 gate: native protocol-1.1 plugin
+
+1. Build `dfmcp_bridge_v1_1` against one exact DFHack source revision.
+2. Verify the exact two-method inventory and absence of mutation/command symbols.
+3. Issue and independently validate the native receipt.
+
+### A2 gate: live protocol-1.1 evidence
+
+1. Run all 43 A1-A6 cases against disposable forts.
+2. Re-run the complete baseline citizen R2-R5 campaign under protocol 1.1.
+3. Bind both evidence sets to the same source, native plugin, versions, and platform.
+4. Preserve secret-free append-only journals and canonical receipts.
+
+### A3 gate: compatibility and artifact
+
+1. Qualify a protocol-1.1 production server artifact separate from the development binary.
+2. Review a proposed exact protocol-1.1 registry entry.
+3. Promote only after source, native, A1-A6, and baseline evidence agree exactly.
+4. Advance the deployment floor to that reviewed generation.
+
+### A4 gate: production dispatch
+
+1. Add a protocol-1.1 private runner only after A0-A3 are complete.
+2. Widen `architecture/live_admission_ticket_v2.json` through reviewed source changes and fresh
+   server-artifact qualification.
+3. Add protocol-confusion and cross-runner process tests.
+4. Launch only through a fresh V2 ticket whose protocol agrees at every representation.
+
+The development server can never substitute for A3 or A4.
+
+## Phase 1B — Wider live observation
+
+After at least one exact read-only tuple is admitted, add each domain as a separate protocol,
+canonicalization, coverage, acceptance, and compatibility generation. Preferred order:
+
+1. **Jobs and work orders**
    - stable identities and worker/building/item references;
    - complete versus filtered coverage;
    - dependency graph and blockage evidence.
-3. **Items and inventories**
+2. **Items and inventories**
    - stable item identity, stack/material/ownership/container semantics;
    - bounded inventory and stock aggregates;
    - no absence claim without complete-domain witness.
-4. **Buildings, stockpiles, zones, burrows, and squads**
+3. **Buildings, stockpiles, zones, burrows, and squads**
    - typed graph relationships;
    - exact spatial extents and assignments.
-5. **Bounded map state**
+4. **Bounded map state**
    - chunk/range witnesses;
    - generation-fenced dirty scans;
    - canonical map-block identities;
    - explicit hidden/redacted/omitted semantics.
-6. **Welfare, health, military, economy, and history**
-   - only after the underlying DFHack semantics are understood and bounded.
+5. **Welfare, health, military, economy, and history**
+   - only after underlying DFHack semantics are understood and bounded.
 
 Acceptance for every domain:
 
@@ -197,14 +249,14 @@ canonical bytes independent of transport pagination
 + restart and drift fencing
 + malformed response rejection
 + disposable-fort evidence
-+ exact compatibility generation
++ exact protocol/compatibility generation
 ```
 
 ## Phase 2 — First live mutation: pause/resume
 
-Begins only after Phase 1 provides enough read coverage to witness and reconcile the effect.
+Begins only after live reads provide enough coverage to witness and reconcile the effect.
 
-Required design:
+Required chain:
 
 ```text
 semantic intent
@@ -219,20 +271,12 @@ semantic intent
 → unknown-outcome reconciliation
 ```
 
-Required failures:
+Required failures include stale anchor, expired/reused token, insufficient capability, wrong fortress,
+bridge restart, transport loss before/after effect, duplicate delivery, missing postcondition, and
+indeterminate effect requiring lookup rather than blind retry.
 
-- stale anchor;
-- expired or reused token;
-- insufficient capability;
-- wrong fortress identity;
-- bridge restart;
-- transport loss before/after effect;
-- duplicate delivery;
-- postcondition not observed;
-- indeterminate effect requiring lookup, never blind retry.
-
-Pause/resume must be a new bridge protocol generation and a new exact compatibility campaign. It
-must not be smuggled into read-only V1.
+Pause/resume must be a new bridge protocol generation and exact evidence campaign. It must not be
+smuggled into read-only protocol 1.0 or 1.1.
 
 ## Phase 3 — Safe action families
 
@@ -242,7 +286,7 @@ Add actions one family at a time only after pause/resume proves the mutation pro
 2. labor, burrow, and squad assignments;
 3. stockpile and work-order configuration;
 4. construction and designation with terrain postconditions;
-5. military and emergency actions under stricter confirmation and checkpoint policy.
+5. military and emergency actions under stricter confirmation/checkpoint policy.
 
 Every family needs typed preconditions, postconditions, compensation where possible, operation
 lookup, cancellation semantics, and disposable-fort fault campaigns.
@@ -258,8 +302,8 @@ Admit the Franken substrate behind existing semantic traits:
 - retained checkpoints and exact restore epochs;
 - bounded compaction without authority loss.
 
-No durable backend is “done” until restart and corruption campaigns reproduce canonical state and
-correctly preserve indeterminate effects.
+No durable backend is complete until restart and corruption campaigns reproduce canonical state and
+preserve indeterminate effects correctly.
 
 ## Phase 5 — Search, graph, and cognition
 
@@ -289,6 +333,7 @@ All cognition remains derived and revocable. It never gains direct mutation auth
 - macOS/Wine exploratory support only after evidence;
 - long-horizon performance and leak campaigns;
 - fuzzing and fault injection;
+- canonical source bundles;
 - signed local/self-hosted release evidence;
 - exact binary/source/receipt manifests;
 - install, upgrade, rollback, and uninstall verification.
@@ -298,7 +343,7 @@ local and self-hosted receipts define release evidence.
 
 ## Success condition
 
-A future release is successful only when an agent can manage a long-lived fortress through exact
-semantic state, bounded authority, idempotent effects, durable evidence, deterministic recovery,
-and honest uncertainty—without the operator having to trust hidden retries, brittle screen
-automation, or unverifiable claims.
+A future release succeeds only when an agent can manage a long-lived fortress through exact semantic
+state, bounded authority, protocol-bound execution, idempotent effects, durable evidence,
+deterministic recovery, and honest uncertainty—without trusting hidden retries, brittle screen
+automation, development-only paths, or unverifiable compatibility claims.
