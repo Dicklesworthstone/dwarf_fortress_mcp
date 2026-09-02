@@ -89,11 +89,54 @@ receipt={
    'agent_contract_checker':digest(root/'scripts/check_agent_contract.py'),
    'repository_integrity_checker':digest(root/'scripts/check_repository_integrity.py'),
    'repository_integrity_tests':digest(root/'scripts/test_repository_integrity.py'),
+   'stable_repository_reader':digest(root/'scripts/read_stable_repository_file.py'),
+   'stable_repository_reader_tests':digest(root/'scripts/test_read_stable_repository_file.py'),
+   'stable_repository_reader_loader_tests':digest(root/'scripts/test_read_stable_repository_file_loader.py'),
+   'source_bundle_contract':digest(root/'architecture/source_bundle_v1.json'),
+   'source_bundle_creator':digest(root/'scripts/create_source_bundle.py'),
+   'source_bundle_wrapper':digest(root/'scripts/create_source_bundle.sh'),
+   'source_bundle_verifier':digest(root/'scripts/verify_source_bundle.py'),
+   'source_bundle_checker':digest(root/'scripts/check_source_bundle.py'),
+   'source_bundle_tests':digest(root/'scripts/test_source_bundle.py'),
+   'source_bundle_output_tests':digest(root/'scripts/test_source_bundle_output_location.py'),
+   'source_bundle_documentation':digest(root/'docs/SOURCE_BUNDLE.md'),
    'dfhack_read_bridge_contract':digest(root/'architecture/dfhack_read_bridge_v1.json'),
    'dfhack_bridge_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridge.proto'),
    'dfhack_bridge_plugin':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge.cpp'),
    'dfhack_wire_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire.rs'),
    'dfhack_acceptance_probe':digest(root/'crates/dfmcp-adapter/src/dfhack_probe.rs'),
+   'announcement_protocol_contract':digest(root/'architecture/dfhack_read_bridge_v1_1.json'),
+   'announcement_projection_contract':digest(root/'architecture/live_announcement_projection_v1.json'),
+   'announcement_source_contract':digest(root/'architecture/live_announcement_source_qualification_v1_1.json'),
+   'announcement_native_contract':digest(root/'architecture/dfhack_plugin_native_receipt_v1_1.json'),
+   'announcement_acceptance_contract':digest(root/'architecture/live_announcement_acceptance_v1_1.json'),
+   'announcement_journal_contract':digest(root/'architecture/live_announcement_evidence_journal_v1.json'),
+   'announcement_proto':digest(root/'bridge/dfhack-plugin/proto/DfmcpBridgeV1_1.proto'),
+   'announcement_native':digest(root/'bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp'),
+   'announcement_batch':digest(root/'crates/dfmcp-adapter/src/live_announcement_batch.rs'),
+   'announcement_wire':digest(root/'crates/dfmcp-adapter/src/announcement_wire.rs'),
+   'announcement_client':digest(root/'crates/dfmcp-adapter/src/dfhack_wire_v1_1.rs'),
+   'announcement_capsule':digest(root/'crates/dfmcp-adapter/src/live_observation_v1_1.rs'),
+   'announcement_driver':digest(root/'crates/dfmcp-adapter/src/live_session_v1_1.rs'),
+   'announcement_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs'),
+   'announcement_connector':digest(root/'crates/dfmcp-adapter/src/live_connect_v1_1.rs'),
+   'announcement_projection':digest(root/'crates/dfmcp-adapter/src/live_announcement_projection.rs'),
+   'announcement_combined_projection':digest(root/'crates/dfmcp-adapter/src/live_projection_v1_1.rs'),
+   'announcement_briefing':digest(root/'crates/dfmcp-adapter/src/live_announcement_briefing.rs'),
+   'announcement_checker':digest(root/'scripts/check_live_announcements.py'),
+   'announcement_checker_tests':digest(root/'scripts/test_live_announcement_contract.py'),
+   'announcement_acceptance_verifier':digest(root/'scripts/verify_live_announcement_acceptance.py'),
+   'announcement_acceptance_tests':digest(root/'scripts/test_live_announcement_acceptance.py'),
+   'announcement_journal':digest(root/'scripts/live_announcement_evidence_journal.py'),
+   'announcement_journal_tests':digest(root/'scripts/test_live_announcement_evidence_journal.py'),
+   'announcement_native_receipt_issuer':digest(root/'scripts/issue_dfhack_plugin_receipt_v1_1.py'),
+   'announcement_native_receipt_tests':digest(root/'scripts/test_dfhack_plugin_receipt_v1_1.py'),
+   'announcement_source_qualifier':digest(root/'scripts/qualify_live_announcement_source.sh'),
+   'announcement_native_qualifier':digest(root/'scripts/qualify_dfhack_plugin_v1_1.sh'),
+   'announcement_live_qualifier':digest(root/'scripts/qualify_live_announcements.sh'),
+   'announcement_probe':digest(root/'crates/dwarf-fortress-mcp/src/bin/dfmcp-live-announcement-probe.rs'),
+   'announcement_documentation':digest(root/'docs/LIVE_ANNOUNCEMENT_STREAM.md'),
+   'announcement_implementation_status':digest(root/'docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md'),
    'bridge_auth_order_checker':digest(root/'scripts/check_bridge_auth_order.py'),
    'live_connection_admission':digest(root/'crates/dfmcp-adapter/src/live_connect.rs'),
    'live_source_fence':digest(root/'crates/dfmcp-adapter/src/fenced_live_source.rs'),
@@ -161,7 +204,8 @@ PY
 trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>&1 || true; fi' EXIT
 
 run_gate repository-integrity python3 scripts/check_repository_integrity.py
-run_gate static-contracts python3 scripts/validate_repo.py
+run_gate static-contracts bash -c \
+  'python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py && python3 scripts/check_live_announcements.py'
 run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
 run_gate bridge-auth-order python3 scripts/check_bridge_auth_order.py
@@ -175,9 +219,12 @@ run_gate live-compatibility-floor python3 scripts/check_live_compatibility_floor
 run_gate live-admission-doctor python3 scripts/check_live_admission_doctor.py
 run_gate live-server-artifact-admission python3 scripts/check_live_server_artifact.py
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
-run_gate repository-integrity-tests python3 scripts/test_repository_integrity.py
-run_gate live-acceptance-tests python3 scripts/test_live_read_acceptance.py
-run_gate live-acceptance-journal-tests python3 scripts/test_live_read_evidence_journal.py
+run_gate repository-integrity-tests bash -c \
+  'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_read_stable_repository_file_loader.py'
+run_gate live-acceptance-tests bash -c \
+  'python3 scripts/test_live_read_acceptance.py && python3 scripts/test_live_announcement_contract.py && python3 scripts/test_live_announcement_acceptance.py && python3 scripts/test_dfhack_plugin_receipt_v1_1.py'
+run_gate live-acceptance-journal-tests bash -c \
+  'python3 scripts/test_live_read_evidence_journal.py && python3 scripts/test_live_announcement_evidence_journal.py'
 run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
 run_gate live-capture-guidance-tests python3 scripts/test_live_read_capture_guidance.py
 run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibility_registry.py
@@ -190,10 +237,26 @@ run_gate admitted-live-launcher-tests bash -c \
   'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
 run_gate python-syntax python3 -m py_compile \
   scripts/validate_repo.py \
+  scripts/read_stable_repository_file.py \
   scripts/check_repository_integrity.py \
   scripts/test_repository_integrity.py \
+  scripts/test_read_stable_repository_file.py \
+  scripts/test_read_stable_repository_file_loader.py \
+  scripts/create_source_bundle.py \
+  scripts/verify_source_bundle.py \
+  scripts/check_source_bundle.py \
+  scripts/test_source_bundle.py \
+  scripts/test_source_bundle_output_location.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/check_live_announcements.py \
+  scripts/test_live_announcement_contract.py \
+  scripts/verify_live_announcement_acceptance.py \
+  scripts/test_live_announcement_acceptance.py \
+  scripts/live_announcement_evidence_journal.py \
+  scripts/test_live_announcement_evidence_journal.py \
+  scripts/issue_dfhack_plugin_receipt_v1_1.py \
+  scripts/test_dfhack_plugin_receipt_v1_1.py \
   scripts/check_bridge_auth_order.py \
   scripts/check_live_mcp.py \
   scripts/check_live_read_stack.py \
@@ -231,7 +294,10 @@ run_gate shell-syntax bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \
   scripts/qualify_dfhack_plugin.sh \
+  scripts/qualify_dfhack_plugin_v1_1.sh \
   scripts/qualify_live_read.sh \
+  scripts/qualify_live_announcements.sh \
+  scripts/qualify_live_announcement_source.sh \
   scripts/qualify_live_server_binary.sh \
   scripts/verify.sh \
   scripts/qualify_local.sh
@@ -256,7 +322,8 @@ run_gate rustdoc env RUSTDOCFLAGS=-Dwarnings cargo doc --locked --workspace --al
 run_gate contract cargo run --locked --quiet --bin dwarf-fortress-mcp -- contract
 run_gate doctor cargo run --locked --quiet --bin dwarf-fortress-mcp -- doctor
 run_gate demo cargo run --locked --quiet --bin dwarf-fortress-mcp -- demo
-run_gate live-probe-help cargo run --locked --quiet --bin dfmcp-live-probe -- help
+run_gate live-probe-help bash -c \
+  'cargo run --locked --quiet --bin dfmcp-live-probe -- help && cargo run --locked --quiet --bin dfmcp-live-announcement-probe -- help'
 
 write_receipt passed
 trap - EXIT
