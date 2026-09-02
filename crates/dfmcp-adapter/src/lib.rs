@@ -19,6 +19,7 @@ pub mod fenced_live_source_v1_1;
 pub mod ipc;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
+pub mod live_adapter_v1_1;
 pub mod live_announcement_batch;
 pub mod live_announcement_briefing;
 pub mod live_announcement_projection;
@@ -84,6 +85,7 @@ pub use ipc::{
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
+pub use live_adapter_v1_1::{LiveReadAdapterConfigV1_1, LiveReadAdapterV1_1};
 pub use live_announcement_batch::{
     AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
     AnnouncementReplyContext, LiveAnnouncementBatch, MAX_ANNOUNCEMENTS_PER_BATCH,
