@@ -749,7 +749,7 @@ mod tests {
             failure
                 .details
                 .iter()
-                .any(|detail| detail.key == "next_announcement_after_id" && detail.value == "2")
+                .any(|(key, value)| key == "next_announcement_after_id" && value == "2")
         );
         Ok(())
     }
