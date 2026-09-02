@@ -90,12 +90,40 @@ def path_is_within(path: Path, parent: Path) -> bool:
     return True
 
 
+def nearest_existing_parent(path: Path) -> tuple[Path, tuple[str, ...]]:
+    cursor = path
+    missing: list[str] = []
+    while True:
+        if cursor.is_symlink():
+            fail("source bundle output path contains a symbolic-link parent")
+        if cursor.exists():
+            if not cursor.is_dir():
+                fail("source bundle output parent is not a directory")
+            return cursor.resolve(strict=True), tuple(reversed(missing))
+        parent = cursor.parent
+        if parent == cursor:
+            fail("source bundle output path has no existing directory ancestor")
+        missing.append(cursor.name)
+        cursor = parent
+
+
 def validate_output_location(source_root: Path, output_dir: Path) -> Path:
     if not output_dir.is_absolute():
         fail("output directory path must be absolute")
+    raw = os.fspath(output_dir)
+    if not raw or len(os.fsencode(raw)) > 4096:
+        fail("output directory path is empty or exceeds its byte bound")
+    if any(ord(character) < 0x20 for character in raw):
+        fail("output directory path contains a control character")
+
     source = source_root.resolve(strict=True)
-    parent = output_dir.parent.resolve(strict=True)
-    candidate = parent / output_dir.name
+    lexical = Path(os.path.abspath(raw))
+    if lexical.exists() or lexical.is_symlink():
+        fail("source bundle output directory already exists")
+
+    existing, missing = nearest_existing_parent(lexical.parent)
+    expected_parent = existing.joinpath(*missing)
+    candidate = expected_parent / lexical.name
     if candidate == source or path_is_within(candidate, source / ".git"):
         fail("source bundle output cannot be the source root or lie inside .git")
     if path_is_within(candidate, source):
@@ -107,7 +135,7 @@ def validate_output_location(source_root: Path, output_dir: Path) -> Path:
                 "check-ignore",
                 "-q",
                 "--no-index",
-                os.fspath(candidate),
+                os.fspath(lexical),
             ],
             check=False,
             stdout=subprocess.DEVNULL,
@@ -115,8 +143,18 @@ def validate_output_location(source_root: Path, output_dir: Path) -> Path:
         )
         if probe.returncode != 0:
             fail("an output directory inside the source root must be ignored by Git")
+
+    lexical.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if lexical.parent.is_symlink():
+        fail("source bundle output path contains a symbolic-link parent")
+    actual_parent = lexical.parent.resolve(strict=True)
+    if actual_parent != expected_parent:
+        fail("source bundle output parent changed while being prepared")
+    candidate = actual_parent / lexical.name
     if candidate.exists() or candidate.is_symlink():
         fail("source bundle output directory already exists")
+    if candidate == source or path_is_within(candidate, source / ".git"):
+        fail("source bundle output cannot be the source root or lie inside .git")
     return candidate
 
 
