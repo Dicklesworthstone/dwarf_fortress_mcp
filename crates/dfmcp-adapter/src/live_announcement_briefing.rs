@@ -2,17 +2,18 @@
 
 //! Agent-facing, authority-free orientation over canonical announcement batches.
 //!
-//! The bridge does not expose a stable semantic taxonomy for every report type
-//! in protocol 1.1, so this layer does not guess. It surfaces bounded recent
-//! records, cursor continuity, retained-window gaps, and mechanical attention
-//! items. It never turns text into a mutation recommendation or claims that the
-//! retained suffix is complete history.
+//! Protocol 1.1 does not claim a stable semantic taxonomy for every raw report
+//! type. This layer therefore surfaces bounded records and mechanical
+//! continuity findings without interpreting text as authority or claiming that
+//! the retained suffix is complete fortress history.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
-use crate::{AnnouncementRecord, LiveAnnouncementBatch};
+use crate::live_announcement_batch::{
+    AnnouncementBatchRecord, LiveAnnouncementBatch,
+};
 
 pub const MAX_ANNOUNCEMENT_BRIEFING_RECORDS: usize = 64;
 pub const MAX_ANNOUNCEMENT_ATTENTION_ITEMS: usize = 66;
@@ -83,7 +84,7 @@ pub struct LiveAnnouncementBriefing {
     pub gap_before_retained_window: bool,
     pub complete_history: bool,
     pub records_truncated_for_briefing: bool,
-    pub latest_records: Vec<AnnouncementRecord>,
+    pub latest_records: Vec<AnnouncementBatchRecord>,
     pub attention: Vec<AnnouncementAttentionItem>,
 }
 
@@ -130,7 +131,7 @@ pub fn build_live_announcement_briefing(
             source_digest: batch.content_digest,
         });
     }
-    if !batch.coverage.complete_through_latest {
+    if batch.coverage.needs_continuation() {
         attention.push(AnnouncementAttentionItem {
             attention_id: "live.announcements.partial_suffix".to_owned(),
             severity: AnnouncementAttentionSeverity::Medium,
@@ -217,7 +218,7 @@ pub fn summarize_live_announcement_change(
             ids_truncated: false,
             cursor_advanced: false,
             retained_window_gap_introduced: false,
-            continuation_required: !target.coverage.complete_through_latest,
+            continuation_required: target.coverage.needs_continuation(),
         });
     }
 
@@ -266,17 +267,19 @@ pub fn summarize_live_announcement_change(
         ids_truncated,
         cursor_advanced: target.coverage.next_after_id > basis.coverage.next_after_id,
         retained_window_gap_introduced: !basis.coverage.has_gap() && target.coverage.has_gap(),
-        continuation_required: !target.coverage.complete_through_latest,
+        continuation_required: target.coverage.needs_continuation(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AnnouncementContinuity, AnnouncementCoverage};
+    use crate::live_announcement_batch::{
+        AnnouncementContinuity, AnnouncementCoverage,
+    };
 
-    fn record(report_id: i32, text: &str, announcement: bool) -> AnnouncementRecord {
-        AnnouncementRecord {
+    fn record(report_id: i32, text: &str, announcement: bool) -> AnnouncementBatchRecord {
+        AnnouncementBatchRecord {
             report_id,
             report_type: 7,
             text: text.to_owned(),
@@ -291,10 +294,10 @@ mod tests {
 
     fn batch(
         requested_after_id: i32,
-        records: Vec<AnnouncementRecord>,
+        records: Vec<AnnouncementBatchRecord>,
         latest: i32,
         complete: bool,
-        continuity: crate::AnnouncementContinuity,
+        continuity: AnnouncementContinuity,
     ) -> Result<LiveAnnouncementBatch> {
         let oldest = records.first().map_or(-1, |record| record.report_id);
         let next = records
@@ -347,8 +350,14 @@ mod tests {
             AnnouncementContinuity::GapBeforeRetainedWindow,
         )?;
         let briefing = build_live_announcement_briefing(&batch)?;
-        assert_eq!(briefing.attention[0].severity, AnnouncementAttentionSeverity::High);
-        assert_eq!(briefing.attention[1].severity, AnnouncementAttentionSeverity::Medium);
+        assert_eq!(
+            briefing.attention[0].severity,
+            AnnouncementAttentionSeverity::High
+        );
+        assert_eq!(
+            briefing.attention[1].severity,
+            AnnouncementAttentionSeverity::Medium
+        );
         assert!(briefing.needs_continuation());
         Ok(())
     }
@@ -367,9 +376,18 @@ mod tests {
         )?;
         let briefing = build_live_announcement_briefing(&batch)?;
         assert!(briefing.records_truncated_for_briefing);
-        assert_eq!(briefing.latest_records.len(), MAX_ANNOUNCEMENT_BRIEFING_RECORDS);
+        assert_eq!(
+            briefing.latest_records.len(),
+            MAX_ANNOUNCEMENT_BRIEFING_RECORDS
+        );
         assert_eq!(briefing.latest_records[0].report_id, 100);
-        assert_eq!(briefing.latest_records.last().map(|record| record.report_id), Some(37));
+        assert_eq!(
+            briefing
+                .latest_records
+                .last()
+                .map(|record| record.report_id),
+            Some(37)
+        );
         Ok(())
     }
 
@@ -425,8 +443,15 @@ mod tests {
             true,
             AnnouncementContinuity::CompleteSuffix,
         )?;
-        let mut target = basis.clone();
+        let mut target = batch(
+            10,
+            vec![record(11, "second", true)],
+            11,
+            true,
+            AnnouncementContinuity::CompleteSuffix,
+        )?;
         target.bridge_generation = 43;
+        target.canonical_bytes[0] ^= 1;
         assert!(summarize_live_announcement_change(&basis, &target).is_err());
         Ok(())
     }
