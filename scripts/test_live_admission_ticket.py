@@ -35,6 +35,7 @@ def launch_record(binary_path: Path, metadata: os.stat_result) -> dict[str, Any]
     return {
         "schema": launcher.LAUNCH_SCHEMA,
         "state": "authorized_to_exec",
+        "bridge_protocol": "1.0",
         "compatibility_entry_id": digest("entry"),
         "required_entry_id": digest("entry"),
         "compatibility_decision_digest": digest("decision"),
@@ -48,7 +49,7 @@ def launch_record(binary_path: Path, metadata: os.stat_result) -> dict[str, Any]
             "entry_count": 1,
         },
         "support_level": "experimental",
-        "deployment_manifest": {},
+        "deployment_manifest": {"version_tuple": {"protocol": "1.0"}},
         "server_receipt": {
             "file_sha256": digest("receipt-file"),
             "content_digest": digest("receipt-content"),
@@ -124,6 +125,7 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 self.assertEqual(first, second)
                 self.assertEqual(first["schema"], launcher.TICKET_SCHEMA)
                 self.assertEqual(first["process_id"], 1234)
+                self.assertEqual(first["bridge_protocol"], "1.0")
                 self.assertEqual(first["compatibility_floor_sequence"], 7)
                 self.assertEqual(
                     first["compatibility_floor_digest"],
@@ -156,13 +158,14 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 self.assertFalse(stat.S_ISLNK(ticket_metadata.st_mode))
                 value = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(value["process_id"], os.getpid())
+                self.assertEqual(value["bridge_protocol"], "1.0")
                 self.assertEqual(value["server_binary_inode"], fixture.opened.inode)
                 self.assertEqual(value["compatibility_floor_sequence"], 7)
                 self.assertNotIn("DFMCP_BRIDGE_TOKEN", path.read_text(encoding="utf-8"))
             finally:
                 fixture.close()
 
-    def test_admitted_environment_binds_floor_ticket_and_secret_only_in_environment(self) -> None:
+    def test_admitted_environment_binds_protocol_floor_ticket_and_secret_only_in_environment(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             try:
@@ -176,6 +179,9 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                 )
                 self.assertEqual(environment["DFMCP_BRIDGE_TOKEN"], "x" * 32)
                 self.assertEqual(environment["DFMCP_ADMISSION_TICKET"], os.fspath(path))
+                self.assertEqual(
+                    environment[launcher.ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT], "1.0"
+                )
                 self.assertEqual(
                     environment["DFMCP_COMPATIBILITY_ENTRY_ID"],
                     fixture.record["compatibility_entry_id"],
@@ -191,6 +197,32 @@ class LiveAdmissionTicketTests(unittest.TestCase):
             finally:
                 fixture.close()
 
+    def test_legacy_or_mismatched_protocol_records_are_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                legacy = dict(fixture.record)
+                legacy["schema"] = "dfmcp.admitted-live-launch/1"
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.build_admission_ticket(legacy, fixture.opened)
+
+                mismatched = dict(fixture.record)
+                mismatched["deployment_manifest"] = {
+                    "version_tuple": {"protocol": "1.1"}
+                }
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.build_admission_ticket(mismatched, fixture.opened)
+
+                unsupported = dict(fixture.record)
+                unsupported["bridge_protocol"] = "1.1"
+                unsupported["deployment_manifest"] = {
+                    "version_tuple": {"protocol": "1.1"}
+                }
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.build_admission_ticket(unsupported, fixture.opened)
+            finally:
+                fixture.close()
+
     def test_permissive_existing_ticket_directory_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
@@ -203,6 +235,21 @@ class LiveAdmissionTicketTests(unittest.TestCase):
                         directory, fixture.record, fixture.opened
                     )
             finally:
+                fixture.close()
+
+    def test_noncanonical_owner_only_ticket_directory_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            try:
+                directory = fixture.root / launcher.TICKET_DIRECTORY_NAME
+                directory.mkdir(mode=0o500)
+                directory.chmod(0o500)
+                with self.assertRaises(launcher.LaunchError):
+                    launcher.write_admission_ticket(
+                        directory, fixture.record, fixture.opened
+                    )
+            finally:
+                directory.chmod(0o700)
                 fixture.close()
 
     def test_executable_metadata_drift_is_rejected_before_ticket_issue(self) -> None:
