@@ -2,16 +2,18 @@
 
 //! Protobuf-Lite extension codec for bridge protocol 1.1 announcements.
 //!
-//! The existing DFHack RPC transport continues to carry one
-//! `ReadObservation` request and reply. Protocol 1.1 appends request fields 8-9
-//! and reply fields 20-25. Keeping this codec independent makes the additive
-//! wire generation testable without weakening the audited protocol-1.0 parser.
+//! Protocol 1.1 keeps the two-method `Handshake`/`ReadObservation` waist and
+//! appends request fields 8-9 plus reply fields 20-25. This codec parses the
+//! complete observation payload but publishes only a bounded canonical
+//! announcement batch. Unknown protobuf fields are ignored semantically and
+//! can never grant authority.
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
-use crate::{
-    AnnouncementContinuity, AnnouncementCoverage, AnnouncementRecord, LiveAnnouncementBatch,
-    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_ANNOUNCEMENT_TEXT_BYTES,
+use crate::live_announcement_batch::{
+    AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
+    AnnouncementReplyContext, LiveAnnouncementBatch, MAX_ANNOUNCEMENTS_PER_BATCH,
+    MAX_ANNOUNCEMENT_TEXT_BYTES,
 };
 
 pub const ANNOUNCEMENT_AFTER_ID_FIELD: u32 = 8;
@@ -25,6 +27,8 @@ pub const ANNOUNCEMENT_RECORD_FIELD: u32 = 25;
 
 const MAX_PROTO_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PROTO_FIELDS: u32 = 1_000_000;
+const MAX_PROTO_FIELD_NUMBER: u32 = 536_870_911;
+const MAX_ANNOUNCEMENT_RECORD_BYTES: usize = 64 * 1024;
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
@@ -189,10 +193,10 @@ impl<'a> ProtoReader<'a> {
                 "protobuf field number does not fit u32",
             )
         })?;
-        if field == 0 {
+        if field == 0 || field > MAX_PROTO_FIELD_NUMBER {
             return Err(error(
                 ErrorCode::AdapterRejected,
-                "protobuf field zero is invalid",
+                "protobuf field number is outside the canonical domain",
             ));
         }
         Ok(Some((field, WireType::from_u8((key & 7) as u8)?)))
@@ -374,7 +378,7 @@ fn validate_request(after_report_id: i32, maximum: u32) -> Result<()> {
 }
 
 /// Encode only the protocol-1.1 extension fields for `ReadObservationRequest`.
-/// The caller appends these bytes to the canonical protocol-1.0 request.
+/// The caller appends these bytes to the canonical request fields 1-7.
 pub fn encode_announcement_request_fields(
     after_report_id: i32,
     maximum: u32,
@@ -386,7 +390,7 @@ pub fn encode_announcement_request_fields(
     Ok(writer.finish())
 }
 
-fn decode_record(bytes: &[u8]) -> Result<AnnouncementRecord> {
+fn decode_record(bytes: &[u8]) -> Result<AnnouncementBatchRecord> {
     let mut reader = ProtoReader::new(bytes)?;
     let mut report_id = None;
     let mut report_type = None;
@@ -439,7 +443,7 @@ fn decode_record(bytes: &[u8]) -> Result<AnnouncementRecord> {
             _ => reader.skip(wire, field)?,
         }
     }
-    let record = AnnouncementRecord {
+    let record = AnnouncementBatchRecord {
         report_id: required(report_id, "report_id")?,
         report_type: required(report_type, "report_type")?,
         text: required(text, "text")?,
@@ -454,20 +458,12 @@ fn decode_record(bytes: &[u8]) -> Result<AnnouncementRecord> {
     Ok(record)
 }
 
-/// Decode announcement extension fields from a complete
-/// `ReadObservationReply` payload. Summary fields are supplied from the already
-/// validated protocol-1.0 reply and become part of the canonical batch.
-#[allow(clippy::too_many_arguments)]
+/// Decode announcement extension fields from a complete observation payload.
 pub fn decode_announcement_reply_fields(
     payload: &[u8],
-    expected_after_report_id: i32,
-    bridge_generation: u64,
-    paused: bool,
-    current_year: u32,
-    current_year_tick: u32,
-    site_id: i32,
+    context: AnnouncementReplyContext,
 ) -> Result<LiveAnnouncementBatch> {
-    if expected_after_report_id < -1 {
+    if context.expected_after_report_id < -1 {
         return Err(error(
             ErrorCode::InvalidRequest,
             "expected announcement cursor must be -1 or nonnegative",
@@ -514,18 +510,20 @@ pub fn decode_announcement_reply_fields(
                         "announcement reply exceeds the record-count ceiling",
                     ));
                 }
-                let nested = reader.length_delimited(wire, field, MAX_PROTO_PAYLOAD_BYTES)?;
+                let nested =
+                    reader.length_delimited(wire, field, MAX_ANNOUNCEMENT_RECORD_BYTES)?;
                 records.push(decode_record(nested)?);
             }
             _ => reader.skip(wire, field)?,
         }
     }
     let requested = required(requested, "announcement_requested_after_id")?;
-    if requested != expected_after_report_id {
+    if requested != context.expected_after_report_id {
         return Err(error(
             ErrorCode::AdapterRejected,
             format!(
-                "announcement reply cursor {requested} does not match requested cursor {expected_after_report_id}"
+                "announcement reply cursor {requested} does not match requested cursor {}",
+                context.expected_after_report_id
             ),
         ));
     }
@@ -540,13 +538,13 @@ pub fn decode_announcement_reply_fields(
             "announcement record count does not fit u32",
         )
     })?;
-    let next_after_id = records.last().map_or(requested, |value| value.report_id);
+    let next_after_id = records.last().map_or(requested, |record| record.report_id);
     LiveAnnouncementBatch::new(
-        bridge_generation,
-        paused,
-        current_year,
-        current_year_tick,
-        site_id,
+        context.bridge_generation,
+        context.paused,
+        context.current_year,
+        context.current_year_tick,
+        context.site_id,
         AnnouncementCoverage {
             requested_after_id: requested,
             oldest_available_id: required(oldest, "announcement_oldest_available_id")?,
@@ -566,6 +564,17 @@ pub fn decode_announcement_reply_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn context(after: i32) -> AnnouncementReplyContext {
+        AnnouncementReplyContext {
+            expected_after_report_id: after,
+            bridge_generation: 42,
+            paused: true,
+            current_year: 105,
+            current_year_tick: 12_400,
+            site_id: 7,
+        }
+    }
 
     fn record_bytes(id: i32, text: &str) -> Result<Vec<u8>> {
         let mut writer = ProtoWriter::default();
@@ -616,9 +625,7 @@ mod tests {
     #[test]
     fn complete_suffix_decodes_to_canonical_batch() -> Result<()> {
         let payload = reply(9, 1, 11, &[10, 11], false, true)?;
-        let batch = decode_announcement_reply_fields(
-            &payload, 9, 42, true, 105, 12_400, 7,
-        )?;
+        let batch = decode_announcement_reply_fields(&payload, context(9))?;
         assert_eq!(batch.coverage.next_after_id, 11);
         assert!(batch.coverage.complete_through_latest);
         assert!(!batch.coverage.has_gap());
@@ -629,9 +636,7 @@ mod tests {
     #[test]
     fn retained_window_gap_is_preserved() -> Result<()> {
         let payload = reply(1, 10, 11, &[10, 11], true, true)?;
-        let batch = decode_announcement_reply_fields(
-            &payload, 1, 42, true, 105, 12_400, 7,
-        )?;
+        let batch = decode_announcement_reply_fields(&payload, context(1))?;
         assert!(batch.coverage.has_gap());
         Ok(())
     }
@@ -639,73 +644,111 @@ mod tests {
     #[test]
     fn cursor_mismatch_is_rejected() -> Result<()> {
         let payload = reply(9, 1, 10, &[10], false, true)?;
-        assert!(decode_announcement_reply_fields(
-            &payload, 8, 42, true, 105, 12_400, 7,
-        )
-        .is_err());
+        assert!(decode_announcement_reply_fields(&payload, context(8)).is_err());
         Ok(())
     }
 
     #[test]
     fn duplicate_required_extension_field_is_rejected() -> Result<()> {
-        let mut payload = reply(9, 1, 10, &[10], false, true)?;
+        let mut payload = reply(9, 1, 9, &[], false, true)?;
         let mut duplicate = ProtoWriter::default();
-        duplicate.sint32(ANNOUNCEMENT_REQUESTED_AFTER_ID_FIELD, 9);
+        duplicate.sint32(ANNOUNCEMENT_LATEST_AVAILABLE_ID_FIELD, 9);
         payload.extend_from_slice(&duplicate.finish());
-        assert!(decode_announcement_reply_fields(
-            &payload, 9, 42, true, 105, 12_400, 7,
-        )
-        .is_err());
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_nested_scalar_is_rejected() -> Result<()> {
+        let mut nested = record_bytes(10, "A report")?;
+        let mut duplicate = ProtoWriter::default();
+        duplicate.sint32(1, 10);
+        nested.extend_from_slice(&duplicate.finish());
+        let mut payload = reply(9, 1, 10, &[], false, true)?;
+        let mut record = ProtoWriter::default();
+        record.bytes(ANNOUNCEMENT_RECORD_FIELD, &nested)?;
+        payload.extend_from_slice(&record.finish());
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn nonminimal_varint_is_rejected() -> Result<()> {
+        let mut payload = reply(9, 1, 9, &[], false, true)?;
+        payload.extend_from_slice(&[0x80, 0x00]);
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
         Ok(())
     }
 
     #[test]
     fn noncanonical_boolean_is_rejected() -> Result<()> {
-        let mut payload = ProtoWriter::default();
-        payload.sint32(ANNOUNCEMENT_OLDEST_AVAILABLE_ID_FIELD, -1);
-        payload.sint32(ANNOUNCEMENT_LATEST_AVAILABLE_ID_FIELD, -1);
-        payload.sint32(ANNOUNCEMENT_REQUESTED_AFTER_ID_FIELD, -1);
-        payload.key(ANNOUNCEMENT_GAP_BEFORE_WINDOW_FIELD, WireType::Varint);
-        payload.varint(2);
-        payload.boolean(ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD, true);
-        assert!(decode_announcement_reply_fields(
-            &payload.finish(), -1, 42, false, 105, 12_400, 7,
-        )
-        .is_err());
+        let mut payload = reply(9, 1, 9, &[], false, true)?;
+        let key = u8::try_from(ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD << 3)
+            .map_err(|_| error(ErrorCode::InternalInvariantViolation, "test key overflow"))?;
+        payload.extend_from_slice(&[key, 2]);
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_utf8_is_rejected() -> Result<()> {
+        let mut nested = ProtoWriter::default();
+        nested.sint32(1, 10);
+        nested.sint32(2, 7);
+        nested.bytes(3, &[0xff])?;
+        nested.sint32(4, 105);
+        nested.sint32(5, 12_345);
+        nested.sint32(6, 0);
+        nested.boolean(7, false);
+        nested.boolean(8, false);
+        nested.boolean(9, true);
+        let mut payload = reply(9, 1, 10, &[], false, true)?;
+        let mut record = ProtoWriter::default();
+        record.bytes(ANNOUNCEMENT_RECORD_FIELD, &nested.finish())?;
+        payload.extend_from_slice(&record.finish());
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
         Ok(())
     }
 
     #[test]
     fn oversized_text_is_rejected_before_allocation_growth() -> Result<()> {
-        let text = "x".repeat(MAX_ANNOUNCEMENT_TEXT_BYTES + 1);
-        let mut payload = ProtoWriter::default();
-        payload.sint32(ANNOUNCEMENT_OLDEST_AVAILABLE_ID_FIELD, 10);
-        payload.sint32(ANNOUNCEMENT_LATEST_AVAILABLE_ID_FIELD, 10);
-        payload.sint32(ANNOUNCEMENT_REQUESTED_AFTER_ID_FIELD, 9);
-        payload.boolean(ANNOUNCEMENT_GAP_BEFORE_WINDOW_FIELD, false);
-        payload.boolean(ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD, true);
-        payload.bytes(ANNOUNCEMENT_RECORD_FIELD, &record_bytes(10, &text)?)?;
-        assert!(decode_announcement_reply_fields(
-            &payload.finish(), 9, 42, true, 105, 12_400, 7,
-        )
-        .is_err());
+        let mut nested = ProtoWriter::default();
+        nested.sint32(1, 10);
+        nested.sint32(2, 7);
+        nested.key(3, WireType::LengthDelimited);
+        nested.varint(
+            u64::try_from(MAX_ANNOUNCEMENT_TEXT_BYTES + 1).map_err(|_| {
+                error(ErrorCode::InternalInvariantViolation, "test length overflow")
+            })?,
+        );
+        let mut payload = reply(9, 1, 10, &[], false, true)?;
+        let mut record = ProtoWriter::default();
+        record.bytes(ANNOUNCEMENT_RECORD_FIELD, &nested.finish())?;
+        payload.extend_from_slice(&record.finish());
+        assert!(decode_announcement_reply_fields(&payload, context(9)).is_err());
         Ok(())
     }
 
     #[test]
     fn unknown_fields_are_skipped_without_changing_identity() -> Result<()> {
         let baseline = reply(9, 1, 10, &[10], false, true)?;
-        let mut extended = baseline.clone();
+        let first = decode_announcement_reply_fields(&baseline, context(9))?;
+        let mut extended = baseline;
         let mut unknown = ProtoWriter::default();
         unknown.uint32(99, 7);
         extended.extend_from_slice(&unknown.finish());
-        let first = decode_announcement_reply_fields(
-            &baseline, 9, 42, true, 105, 12_400, 7,
-        )?;
-        let second = decode_announcement_reply_fields(
-            &extended, 9, 42, true, 105, 12_400, 7,
-        )?;
+        let second = decode_announcement_reply_fields(&extended, context(9))?;
         assert_eq!(first.content_digest, second.content_digest);
+        assert_eq!(first.canonical_bytes, second.canonical_bytes);
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_and_reordered_records_fail_closed() -> Result<()> {
+        let duplicate = reply(9, 1, 10, &[10, 10], false, true)?;
+        let reordered = reply(9, 1, 11, &[11, 10], false, true)?;
+        assert!(decode_announcement_reply_fields(&duplicate, context(9)).is_err());
+        assert!(decode_announcement_reply_fields(&reordered, context(9)).is_err());
         Ok(())
     }
 }
