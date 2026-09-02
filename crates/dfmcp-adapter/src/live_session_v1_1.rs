@@ -207,8 +207,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementContinuity, AnnouncementCoverage, AnnouncementRecord, CitizenRecord,
-        LiveAnnouncementBatch,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
+        CitizenRecord, LiveAnnouncementBatch,
     };
 
     #[derive(Clone)]
@@ -278,7 +278,7 @@ mod tests {
     }
 
     fn announcements(text: &str) -> Result<LiveAnnouncementBatch> {
-        let record = AnnouncementRecord {
+        let record = AnnouncementBatchRecord {
             report_id: 10,
             report_type: 7,
             text: text.to_owned(),
