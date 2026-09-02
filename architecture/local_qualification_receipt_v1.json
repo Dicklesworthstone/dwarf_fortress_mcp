@@ -1,0 +1,54 @@
+{
+  "schema_version": "dfmcp.local-qualification-receipt-contract/1",
+  "receipt_schema": "dfmcp.qualification-receipt.v1",
+  "snapshot_schema": "dfmcp.qualification-source-snapshot/1",
+  "status": "normative_two_phase_local_qualification",
+  "gate_contract": "architecture/live_server_binary_receipt_v1.json",
+  "source": {
+    "clean_required_for_passed": true,
+    "head_must_remain_exact": true,
+    "tree_must_remain_exact": true,
+    "worktree_status_must_remain_exact": true,
+    "tracked_inventory_must_remain_exact": true,
+    "tracked_entry_modes": [
+      "100644",
+      "100755"
+    ],
+    "symbolic_links_allowed": false,
+    "gitlinks_allowed": false,
+    "maximum_entries": 65536,
+    "maximum_entry_bytes": 268435456,
+    "maximum_total_bytes": 1073741824,
+    "hash_algorithm": "sha256"
+  },
+  "receipt_statuses": {
+    "passed": "all canonical gates passed against one exact clean source snapshot",
+    "development_dirty": "all canonical gates passed against one stable but dirty source snapshot; never release-admissible",
+    "static_only": "static gates ran but Rust qualification was unavailable or deliberately skipped; never release-admissible",
+    "failed": "qualification stopped before every canonical gate passed; never release-admissible"
+  },
+  "publication": {
+    "snapshot_create_only": true,
+    "receipt_create_only": true,
+    "temporary_file_fsync": true,
+    "atomic_replace_after_lock": true,
+    "parent_directory_fsync": true,
+    "reverify_source_after_receipt_publication": true
+  },
+  "authority": {
+    "executes_project_code": false,
+    "modifies_source": false,
+    "network_access": false,
+    "grants_capabilities": [],
+    "mutation_capabilities": []
+  },
+  "limitations": [
+    "a local qualification receipt does not establish a native DFHack build",
+    "a local qualification receipt does not establish disposable-fort live evidence",
+    "a local qualification receipt does not create a compatibility-registry entry",
+    "a local qualification receipt does not advance a deployment floor",
+    "a local qualification receipt does not qualify a release server binary",
+    "a local qualification receipt does not authorize a process launch",
+    "two-phase source snapshots detect endpoint drift but do not prove that no transient modification was reverted during gate execution"
+  ]
+}
