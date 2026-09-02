@@ -46,6 +46,7 @@
     "announcement_source_fence": "crates/dfmcp-adapter/src/fenced_live_source_v1_1.rs",
     "announcement_connector": "crates/dfmcp-adapter/src/live_connect_v1_1.rs",
     "announcement_mcp_contract": "architecture/live_mcp_server_v1_1.json",
+    "production_admission_ticket_contract": "architecture/live_admission_ticket_v2.json",
     "announcement_mcp_server": "crates/dfmcp-mcp/src/live_server_v1_1.rs",
     "announcement_mcp_root": "crates/dfmcp-mcp/src/lib.rs",
     "announcement_mcp_binary_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
@@ -66,6 +67,7 @@
     "contract_checker": "scripts/check_live_announcements.py",
     "contract_checker_core": "scripts/check_live_announcements_core.py",
     "publication_checker": "scripts/check_live_announcement_publication.py",
+    "bootstrap_checker": "scripts/check_live_announcement_bootstrap.py",
     "contract_checker_tests": "scripts/test_live_announcement_contract.py",
     "acceptance_verifier": "scripts/verify_live_announcement_acceptance.py",
     "acceptance_verifier_tests": "scripts/test_live_announcement_acceptance.py",
@@ -86,7 +88,7 @@
     "the protocol-1.1 diagnostic probe compiled and rendered help",
     "transactional protocol-1.1 publication and the read-only GameAdapter passed their source gates",
     "single-publication bootstrap preserved the exact first combined capsule without a duplicate underlying bridge read",
-    "the separately named protocol-1.1 development MCP runtime preserved the frozen eleven-tool waist, exposed announcement-aware read-only orientation, required explicit opt-in, and rejected production admission state"
+    "the separately named protocol-1.1 development MCP runtime preserved the frozen eleven-tool waist, exposed announcement-aware read-only orientation, required explicit opt-in, rejected production admission state, and remained outside the production protocol dispatch map"
   ],
   "claims_not_established": [
     "the protocol-1.1 native plugin builds against a named DFHack revision",
