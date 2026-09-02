@@ -15,6 +15,7 @@ CHECKER = ROOT / "scripts/check_live_mcp_v1_1.py"
 FILES = [
     CHECKER,
     ROOT / "architecture/live_mcp_server_v1_1.json",
+    ROOT / "architecture/live_admission_ticket_v2.json",
     ROOT / "crates/dfmcp-mcp/src/live_server_v1_1.rs",
     ROOT / "crates/dfmcp-mcp/src/lib.rs",
     ROOT / "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-v1-1-dev-server.rs",
@@ -70,12 +71,36 @@ class LiveMcpV1_1ContractTests(unittest.TestCase):
             path.write_text(json.dumps(value) + "\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
+    def test_production_protocol_map_widening_is_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            path = root / "architecture/live_admission_ticket_v2.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["runtime_dispatch"]["admitted_protocols"]["1.1"] = {
+                "binary_command": "serve-live-v1-1",
+                "rust_runner": "crate::live_server_v1_1::run_live_v1_1_development_stdio",
+            }
+            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
     def test_admission_provenance_dependency_is_rejected(self) -> None:
         temporary, root = self.fixture()
         with temporary:
             path = root / "crates/dfmcp-mcp/src/live_server_v1_1.rs"
             source = path.read_text(encoding="utf-8")
             source += "\n// current_admission_provenance must remain unreachable here\n"
+            path.write_text(source, encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+    def test_public_development_guard_loss_is_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            path = root / "crates/dfmcp-mcp/src/lib.rs"
+            source = path.read_text(encoding="utf-8").replace(
+                "std::env::var_os(ADMITTED_PROTOCOL_ENVIRONMENT).is_some()",
+                "false",
+                1,
+            )
             path.write_text(source, encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
@@ -96,8 +121,8 @@ class LiveMcpV1_1ContractTests(unittest.TestCase):
                 / "crates/dwarf-fortress-mcp/tests/live_v1_1_development_admission.rs"
             )
             source = path.read_text(encoding="utf-8").replace(
-                "protocol_1_1_development_server_rejects_production_admission_state",
-                "removed_production_admission_test",
+                "protocol_1_1_development_server_rejects_protocol_bound_admission_state",
+                "removed_protocol_bound_admission_test",
             )
             path.write_text(source, encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
@@ -108,7 +133,7 @@ class LiveMcpV1_1ContractTests(unittest.TestCase):
             path = root / "architecture/live_announcement_source_qualification_v1_1.json"
             value = json.loads(path.read_text(encoding="utf-8"))
             value["required_gates"].remove("announcement-mcp-contract")
-            del value["required_source_digests"]["announcement_mcp_server"]
+            del value["required_source_digests"]["production_admission_ticket_contract"]
             path.write_text(json.dumps(value) + "\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
