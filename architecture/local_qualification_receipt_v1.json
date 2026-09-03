@@ -10,6 +10,10 @@
     "tree_must_remain_exact": true,
     "worktree_status_must_remain_exact": true,
     "tracked_inventory_must_remain_exact": true,
+    "working_tree_bytes_must_match_head_blobs_for_clean_passed": true,
+    "working_tree_executable_semantics_must_match_head_on_unix": true,
+    "git_environment_must_be_sanitized": true,
+    "git_object_format": "sha1",
     "tracked_entry_modes": [
       "100644",
       "100755"
@@ -22,18 +26,26 @@
     "hash_algorithm": "sha256"
   },
   "receipt_statuses": {
-    "passed": "all canonical gates passed against one exact clean source snapshot",
-    "development_dirty": "all canonical gates passed against one stable but dirty source snapshot; never release-admissible",
+    "passed": "all canonical gates passed against one exact clean source snapshot whose tracked bytes and executable semantics match HEAD",
+    "development_dirty": "all canonical gates passed against one stable but dirty or HEAD-divergent source snapshot; never release-admissible",
     "static_only": "static gates ran but Rust qualification was unavailable or deliberately skipped; never release-admissible",
     "failed": "qualification stopped before every canonical gate passed; never release-admissible"
   },
   "publication": {
+    "run_directory_create_only": true,
+    "run_directory_final_component_symbolic_links_allowed": false,
+    "unix_run_directory_mode": "0700",
+    "run_directory_owner_must_match_effective_user_when_available": true,
+    "gate_journal_mode": "0600",
     "snapshot_create_only": true,
+    "snapshot_mode": "0600",
     "receipt_create_only": true,
+    "receipt_mode": "0600",
     "temporary_file_fsync": true,
-    "atomic_replace_after_lock": true,
+    "atomic_no_replace_hard_link": true,
     "parent_directory_fsync": true,
-    "reverify_source_after_receipt_publication": true
+    "reverify_source_after_receipt_publication": true,
+    "invalid_evidence_removed_and_absence_verified": true
   },
   "authority": {
     "executes_project_code": false,
@@ -49,6 +61,7 @@
     "a local qualification receipt does not advance a deployment floor",
     "a local qualification receipt does not qualify a release server binary",
     "a local qualification receipt does not authorize a process launch",
-    "two-phase source snapshots detect endpoint drift but do not prove that no transient modification was reverted during gate execution"
+    "two-phase source snapshots detect endpoint drift but do not prove that no transient modification was reverted during gate execution",
+    "ignored untracked files are not included in the tracked source snapshot and must not influence qualified builds"
   ]
 }
