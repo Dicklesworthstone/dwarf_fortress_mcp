@@ -10,9 +10,10 @@ import os
 import platform
 import re
 import stat
+import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,14 +22,18 @@ RECEIPT_SCHEMA = "dfmcp.live-server-binary-qualification/1"
 LOCAL_RECEIPT_SCHEMA = "dfmcp.qualification-receipt.v1"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-MAX_JSON_BYTES = 8 * 1024 * 1024
+MAX_JSON_BYTES = 128 * 1024 * 1024
 MAX_HASHED_FILE_BYTES = 256 * 1024 * 1024
+MAX_SOURCE_ENTRIES = 65_536
+MAX_SOURCE_TOTAL_BYTES = 1024 * 1024 * 1024
 MAX_STRING_BYTES = 16 * 1024
-MAX_COLLECTION_ITEMS = 4096
+MAX_COLLECTION_ITEMS = 65_536
 MAX_DEPTH = 64
 
 EXPECTED_LOCAL_QUALIFICATION_GATES = [
     "repository-integrity",
+    "local-qualification-receipt",
+    "implementation-status",
     "static-contracts",
     "agent-contract",
     "dfhack-read-bridge-contract",
@@ -44,6 +49,8 @@ EXPECTED_LOCAL_QUALIFICATION_GATES = [
     "live-server-artifact-admission",
     "dependency-policy",
     "repository-integrity-tests",
+    "local-qualification-receipt-tests",
+    "implementation-status-tests",
     "live-acceptance-tests",
     "live-acceptance-journal-tests",
     "live-acceptance-secret-scanner-tests",
@@ -81,6 +88,16 @@ EXPECTED_SOURCE_DIGESTS = {
     "adapter_live_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap.rs",
     "adapter_live_observation": "crates/dfmcp-adapter/src/live_observation.rs",
     "adapter_live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
+    "stable_repository_reader": "scripts/read_stable_repository_file.py",
+    "local_qualification_contract": "architecture/local_qualification_receipt_v1.json",
+    "local_qualification_writer": "scripts/write_local_qualification_receipt.py",
+    "local_qualification_checker": "scripts/check_local_qualification_receipt.py",
+    "local_qualification_tests": "scripts/test_local_qualification_receipt.py",
+    "local_qualification_wrapper": "scripts/qualify_local.sh",
+    "implementation_status_contract": "architecture/implementation_status_v1.json",
+    "implementation_status_checker": "scripts/check_implementation_status.py",
+    "implementation_status_tests": "scripts/test_implementation_status.py",
+    "verification_wrapper": "scripts/verify.sh",
     "compatibility_registry": "architecture/live_compatibility_registry_v1.json",
     "compatibility_resolver": "scripts/resolve_live_compatibility.py",
     "compatibility_floor_contract": "architecture/live_compatibility_floor_v1.json",
@@ -143,6 +160,17 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def git_blob_object_id(value: bytes) -> str:
+    header = f"blob {len(value)}\0".encode("ascii")
+    try:
+        digest = hashlib.sha1(usedforsecurity=False)
+    except TypeError:
+        digest = hashlib.sha1()
+    digest.update(header)
+    digest.update(value)
+    return digest.hexdigest()
+
+
 def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
     return (
         left.st_dev == right.st_dev
@@ -150,6 +178,7 @@ def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
         and left.st_size == right.st_size
         and left.st_mode == right.st_mode
         and left.st_uid == right.st_uid
+        and left.st_gid == right.st_gid
         and left.st_mtime_ns == right.st_mtime_ns
         and left.st_ctime_ns == right.st_ctime_ns
     )
@@ -159,6 +188,8 @@ def open_stable_regular(
     path: Path,
     maximum_bytes: int,
     label: str,
+    *,
+    allow_empty: bool = False,
 ) -> tuple[int, os.stat_result]:
     raw = os.fspath(path)
     if not raw or len(os.fsencode(raw)) > 4096:
@@ -167,42 +198,54 @@ def open_stable_regular(
         fail(f"{label} path contains a control character")
     if not hasattr(os, "O_NOFOLLOW"):
         fail("this platform cannot enforce no-follow artifact opening")
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        fail(f"cannot inspect {label}: {exc}")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        fail(f"{label} must be a regular non-symbolic-link file")
+    minimum = 0 if allow_empty else 1
+    if before.st_size < minimum or before.st_size > maximum_bytes:
+        fail(f"{label} must contain {minimum}..={maximum_bytes} bytes")
     flags = os.O_RDONLY | os.O_NOFOLLOW
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
-        fail(f"cannot open {label}: {exc}")
+        fail(f"cannot open {label} without following symbolic links: {exc}")
     try:
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            fail(f"{label} must be a regular file")
-        if metadata.st_size <= 0 or metadata.st_size > maximum_bytes:
-            fail(
-                f"{label} must contain 1..={maximum_bytes} bytes, got {metadata.st_size}"
-            )
+        if not same_identity(before, metadata):
+            fail(f"{label} changed between path inspection and open")
         return descriptor, metadata
     except BaseException:
         os.close(descriptor)
         raise
 
 
-def read_bytes_with_digest(
+def read_stable_bytes_with_metadata(
     path: Path,
     label: str,
     maximum_bytes: int = MAX_JSON_BYTES,
-) -> tuple[bytes, str]:
-    descriptor, before = open_stable_regular(path, maximum_bytes, label)
+    *,
+    allow_empty: bool = False,
+) -> tuple[bytes, str, os.stat_result]:
+    descriptor, before = open_stable_regular(
+        path,
+        maximum_bytes,
+        label,
+        allow_empty=allow_empty,
+    )
     try:
         digest = hashlib.sha256()
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(
-                descriptor,
-                min(1024 * 1024, maximum_bytes + 1 - total),
-            )
+            remaining = maximum_bytes + 1 - total
+            if remaining <= 0:
+                fail(f"{label} grew beyond its byte bound while being read")
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
             if not chunk:
                 break
             total += len(chunk)
@@ -213,9 +256,25 @@ def read_bytes_with_digest(
         after = os.fstat(descriptor)
         if not same_identity(before, after) or total != after.st_size:
             fail(f"{label} changed while being read")
-        return b"".join(chunks), digest.hexdigest()
+        return b"".join(chunks), digest.hexdigest(), after
     finally:
         os.close(descriptor)
+
+
+def read_bytes_with_digest(
+    path: Path,
+    label: str,
+    maximum_bytes: int = MAX_JSON_BYTES,
+    *,
+    allow_empty: bool = False,
+) -> tuple[bytes, str]:
+    raw, digest, _ = read_stable_bytes_with_metadata(
+        path,
+        label,
+        maximum_bytes,
+        allow_empty=allow_empty,
+    )
+    return raw, digest
 
 
 def sha256_file(path: Path) -> str:
@@ -223,6 +282,7 @@ def sha256_file(path: Path) -> str:
         path,
         "source-bound file",
         MAX_HASHED_FILE_BYTES,
+        allow_empty=True,
     )
     return digest
 
@@ -342,7 +402,7 @@ def require_hash(value: Any, path: str) -> str:
 def require_commit(value: Any, path: str) -> str:
     text = require_string(value, path, 40)
     if HEX40.fullmatch(text) is None:
-        fail(f"{path} must be a lowercase 40-character Git commit")
+        fail(f"{path} must be a lowercase 40-character Git object ID")
     return text
 
 
@@ -355,11 +415,13 @@ def require_positive_int(value: Any, path: str, maximum: int | None = None) -> i
 
 
 def validate_relative_path(value: Any, path: str) -> str:
-    text = require_string(value, path, 1024)
-    candidate = Path(text)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        fail(f"{path} must be a traversal-free relative path")
-    if text.startswith("./") or "//" in text or candidate.as_posix() != text:
+    text = require_string(value, path, 4096)
+    if "\\" in text or text.startswith("/") or text.endswith("/") or "//" in text:
+        fail(f"{path} must be a canonical repository-relative POSIX path")
+    candidate = PurePosixPath(text)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+        fail(f"{path} contains an absolute, empty, dot, or parent component")
+    if candidate.as_posix() != text:
         fail(f"{path} is not in canonical relative-path form")
     return text
 
@@ -476,8 +538,144 @@ def load_contract(path: Path) -> dict[str, Any]:
     return contract
 
 
+def sanitized_git_environment() -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+    }
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["LC_ALL"] = "C"
+    return environment
+
+
+def run_git(source_root: Path, arguments: list[str]) -> bytes:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", os.fspath(source_root), *arguments],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=sanitized_git_environment(),
+        )
+    except OSError as exc:
+        fail(f"cannot execute Git while verifying local qualification source: {exc}")
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace")
+        fail(f"Git source verification failed: {detail.strip()[:2048]}")
+    if len(completed.stdout) > MAX_JSON_BYTES:
+        fail("Git source verification output exceeds its byte bound")
+    return completed.stdout
+
+
+def git_text(source_root: Path, arguments: list[str], label: str) -> str:
+    try:
+        return run_git(source_root, arguments).decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        fail(f"{label} is not valid UTF-8: {exc}")
+
+
+def executable_semantics_match(git_mode: str, worktree_mode: int) -> bool:
+    if os.name != "posix":
+        return True
+    return bool(worktree_mode & 0o111) == (git_mode == "100755")
+
+
+def collect_head_equivalent_source_inventory(
+    source_root: Path,
+    expected_commit: str,
+) -> tuple[str, dict[str, str]]:
+    source = source_root.resolve(strict=True)
+    if not source.is_dir():
+        fail("local qualification source root is not a directory")
+    top_level = Path(
+        git_text(source, ["rev-parse", "--show-toplevel"], "Git top-level path")
+    ).resolve(strict=True)
+    if top_level != source:
+        fail("local qualification source root is not the exact Git top-level directory")
+    object_format = git_text(source, ["rev-parse", "--show-object-format"], "Git object format")
+    if object_format != "sha1":
+        fail("local qualification source repository does not use the admitted SHA-1 object format")
+    commit = require_commit(
+        git_text(source, ["rev-parse", "HEAD"], "Git HEAD"),
+        "source.git_commit",
+    )
+    expected = require_commit(expected_commit, "expected_commit")
+    if commit != expected:
+        fail("local qualification receipt source commit differs from current source HEAD")
+    tree = require_commit(
+        git_text(source, ["rev-parse", "HEAD^{tree}"], "Git HEAD tree"),
+        "source.git_tree",
+    )
+    status = run_git(
+        source,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )
+    if status:
+        fail("local qualification receipt source worktree is not clean")
+    listing = run_git(source, ["ls-tree", "-rz", "--full-tree", commit])
+    entries: list[tuple[str, str]] = []
+    total_bytes = 0
+    for record in listing.split(b"\0"):
+        if not record:
+            continue
+        if len(entries) >= MAX_SOURCE_ENTRIES:
+            fail("local qualification source inventory exceeds its entry-count bound")
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            raw_mode, raw_kind, raw_object = metadata.split(b" ", 2)
+            mode = raw_mode.decode("ascii")
+            kind = raw_kind.decode("ascii")
+            object_id = raw_object.decode("ascii")
+            relative = raw_path.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            fail(f"cannot parse local qualification source entry: {exc}")
+        path = validate_relative_path(relative, "local_receipt.digests.path")
+        if kind != "blob" or mode not in {"100644", "100755"}:
+            fail(
+                f"local qualification source entry {path!r} has unsupported mode {mode!r} and kind {kind!r}"
+            )
+        expected_blob = require_commit(object_id, f"local source entry {path}.git_blob")
+        candidate = source / PurePosixPath(path)
+        resolved = candidate.resolve(strict=True)
+        if resolved != candidate.absolute() or source not in resolved.parents:
+            fail(f"local qualification source entry {path!r} traverses a symbolic-link component")
+        raw, digest, metadata_after = read_stable_bytes_with_metadata(
+            candidate,
+            f"local qualification source entry {path}",
+            MAX_HASHED_FILE_BYTES,
+            allow_empty=True,
+        )
+        if git_blob_object_id(raw) != expected_blob:
+            fail(f"local qualification source bytes differ from HEAD for {path}")
+        if not executable_semantics_match(mode, stat.S_IMODE(metadata_after.st_mode)):
+            fail(f"local qualification source executable semantics differ from HEAD for {path}")
+        total_bytes += len(raw)
+        if total_bytes > MAX_SOURCE_TOTAL_BYTES:
+            fail("local qualification source inventory exceeds its total byte bound")
+        entries.append((path, digest))
+    entries.sort(key=lambda item: item[0].encode("utf-8"))
+    if not entries:
+        fail("local qualification source inventory is empty")
+    if require_commit(
+        git_text(source, ["rev-parse", "HEAD"], "Git HEAD after source verification"),
+        "source.git_commit_after",
+    ) != commit:
+        fail("local qualification source HEAD changed while being verified")
+    if require_commit(
+        git_text(source, ["rev-parse", "HEAD^{tree}"], "Git tree after source verification"),
+        "source.git_tree_after",
+    ) != tree:
+        fail("local qualification source tree changed while being verified")
+    if run_git(source, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]):
+        fail("local qualification source worktree changed while being verified")
+    return tree, dict(entries)
+
+
 def validate_local_qualification_receipt(
     path: Path,
+    source_root: Path,
     expected_commit: str,
     expected_sha256: str,
     expected_gates: list[str] | None = None,
@@ -510,14 +708,61 @@ def validate_local_qualification_receipt(
     require_string(receipt.get("started_at"), "local_receipt.started_at", 128)
     require_string(receipt.get("finished_at"), "local_receipt.finished_at", 128)
     source = require_object(receipt.get("source"), "local_receipt.source")
-    require_exact_keys(source, {"commit", "dirty"}, "local_receipt.source")
-    if source.get("commit") != expected_commit:
+    require_exact_keys(
+        source,
+        {"commit", "dirty", "head_equivalent", "tree", "snapshot_digest"},
+        "local_receipt.source",
+    )
+    commit = require_commit(source.get("commit"), "local_receipt.source.commit")
+    if commit != expected_commit:
         fail("local qualification receipt names a different source commit")
     if source.get("dirty") is not False:
         fail("local qualification receipt is not bound to a clean source tree")
+    if source.get("head_equivalent") is not True:
+        fail("local qualification receipt is not bound to HEAD-equivalent source")
+    declared_tree = require_commit(source.get("tree"), "local_receipt.source.tree")
+    require_hash(source.get("snapshot_digest"), "local_receipt.source.snapshot_digest")
     require_object(receipt.get("host"), "local_receipt.host")
     require_object(receipt.get("toolchain"), "local_receipt.toolchain")
-    require_object(receipt.get("digests"), "local_receipt.digests")
+
+    digests = require_object(receipt.get("digests"), "local_receipt.digests")
+    if not digests or len(digests) > MAX_SOURCE_ENTRIES:
+        fail("local qualification receipt digest inventory is empty or exceeds its bound")
+    declared_paths = list(digests)
+    if declared_paths != sorted(declared_paths, key=lambda value: value.encode("utf-8")):
+        fail("local qualification receipt digest paths are not in canonical UTF-8 byte order")
+    normalized_digests: dict[str, str] = {}
+    for raw_path, raw_digest in digests.items():
+        relative = validate_relative_path(raw_path, "local_receipt.digests.path")
+        normalized_digests[relative] = require_hash(
+            raw_digest,
+            f"local_receipt.digests.{relative}",
+        )
+    current_tree, current_digests = collect_head_equivalent_source_inventory(
+        source_root,
+        commit,
+    )
+    if declared_tree != current_tree:
+        fail("local qualification receipt tree differs from current source HEAD")
+    if normalized_digests != current_digests:
+        missing = sorted(set(current_digests) - set(normalized_digests))
+        extra = sorted(set(normalized_digests) - set(current_digests))
+        changed = sorted(
+            path
+            for path in set(current_digests) & set(normalized_digests)
+            if current_digests[path] != normalized_digests[path]
+        )
+        details = []
+        if missing:
+            details.append("missing=" + ",".join(missing[:8]))
+        if extra:
+            details.append("extra=" + ",".join(extra[:8]))
+        if changed:
+            details.append("changed=" + ",".join(changed[:8]))
+        fail(
+            "local qualification receipt digest inventory differs from current HEAD-equivalent source"
+            + (": " + "; ".join(details) if details else "")
+        )
 
     required_gates = (
         EXPECTED_LOCAL_QUALIFICATION_GATES
@@ -606,8 +851,9 @@ def validate_receipt(
         source.get("local_qualification_receipt_sha256"),
         "server_receipt.source.local_qualification_receipt_sha256",
     )
-    validate_local_qualification_receipt(
+    local_receipt = validate_local_qualification_receipt(
         local_qualification_receipt,
+        source_root,
         commit,
         local_receipt_sha,
         contract["source_binding"]["required_local_qualification_gates"],
@@ -656,7 +902,7 @@ def validate_receipt(
         binary.get("relative_path"),
         "server_receipt.binary.relative_path",
     )
-    if Path(relative_path).name not in {
+    if PurePosixPath(relative_path).name not in {
         "dwarf-fortress-mcp",
         "dwarf-fortress-mcp.exe",
     }:
@@ -726,10 +972,19 @@ def validate_receipt(
             relative,
             f"contract.source_binding.required_source_digests.{name}",
         )
-        actual = sha256_file(source_root / canonical_relative)
+        actual = sha256_file(source_root / PurePosixPath(canonical_relative))
         if declared != actual:
             fail(f"server receipt source digest differs for {canonical_relative}")
         normalized_digests[name] = declared
+
+    final_tree, final_inventory = collect_head_equivalent_source_inventory(
+        source_root,
+        commit,
+    )
+    if final_tree != local_receipt["source"]["tree"]:
+        fail("server receipt source tree changed after local receipt verification")
+    if final_inventory != local_receipt["digests"]:
+        fail("server receipt source inventory changed after local receipt verification")
 
     if receipt.get("mutation_capabilities") != []:
         fail("server receipt must carry no mutation capabilities")
