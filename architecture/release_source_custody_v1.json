@@ -1,0 +1,77 @@
+{
+  "schema_version": "dfmcp.release-source-custody/1",
+  "status": "normative_tracked_source_and_artifact_custody",
+  "local_qualification": {
+    "contract": "architecture/local_qualification_receipt_v1.json",
+    "issuer": "scripts/write_local_qualification_receipt.py",
+    "wrapper": "scripts/qualify_local.sh",
+    "checker": "scripts/check_local_qualification_receipt.py",
+    "adversarial_tests": "scripts/test_local_qualification_receipt.py",
+    "receipt_schema": "dfmcp.qualification-receipt.v1",
+    "clean_success_status": "passed",
+    "non_release_statuses": [
+      "development_dirty",
+      "static_only",
+      "failed"
+    ]
+  },
+  "server_artifact": {
+    "contract": "architecture/live_server_binary_receipt_v1.json",
+    "verifier": "scripts/verify_live_server_binary_receipt.py",
+    "qualifier": "scripts/qualify_live_server_binary.sh",
+    "verifier_tests": "scripts/test_live_server_binary_receipt.py",
+    "qualifier_tests": "scripts/test_qualify_live_server_binary.py",
+    "receipt_schema": "dfmcp.live-server-binary-qualification/1"
+  },
+  "tracked_source": {
+    "git_object_format": "sha1",
+    "hash_algorithm": "sha256",
+    "complete_tracked_inventory_required": true,
+    "working_tree_bytes_must_match_head_blobs": true,
+    "working_tree_executable_semantics_must_match_head_on_unix": true,
+    "porcelain_status_must_remain_exact": true,
+    "inherited_git_environment_is_sanitized": true,
+    "assume_unchanged_and_skip_worktree_must_not_hide_drift": true,
+    "empty_tracked_files_are_bound": true,
+    "symbolic_links_and_gitlinks_are_rejected": true
+  },
+  "custody": {
+    "run_directory_mode": "0700",
+    "evidence_file_mode": "0600",
+    "effective_user_ownership_required_when_available": true,
+    "final_component_symbolic_links_allowed": false,
+    "publication": "same-directory hard-link no-replace after file fsync",
+    "parent_directory_fsync_required": true,
+    "invalid_published_evidence_removed_and_absence_verified": true
+  },
+  "verification_sequence": [
+    "capture exact tracked-source snapshot before local gates",
+    "reconstruct the same snapshot before local receipt publication",
+    "publish the local receipt create-only",
+    "reconstruct the same snapshot after local receipt publication",
+    "independently replay the complete receipt inventory before server build",
+    "replay the inventory after server build and executable checks",
+    "publish the server receipt create-only",
+    "independently replay source and executable identity before accepting the server receipt"
+  ],
+  "gate_wiring": {
+    "static_checker_gate": "live-server-artifact-admission",
+    "adversarial_test_gate": "live-server-binary-qualification-tests",
+    "top_level_verification": "scripts/verify.sh"
+  },
+  "authority": {
+    "executes_live_bridge": false,
+    "creates_compatibility_entry": false,
+    "advances_monotonic_floor": false,
+    "authorizes_process": false,
+    "grants_capabilities": [],
+    "mutation_capabilities": []
+  },
+  "limitations": [
+    "tracked-source and artifact custody does not establish a native DFHack build",
+    "tracked-source and artifact custody does not establish disposable-fort behavior",
+    "tracked-source and artifact custody does not make an empty compatibility registry admit a tuple",
+    "tracked-source and artifact custody is not a hostile-root sandbox",
+    "ignored build outputs and host toolchain configuration remain part of the controlled-host qualification assumptions until isolated build-root custody is implemented"
+  ]
+}
