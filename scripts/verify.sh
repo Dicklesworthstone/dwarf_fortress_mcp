@@ -19,6 +19,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f architecture/live_admission_ticket_v2.json ]] || die "Protocol-bound V2 admission ticket contract is missing"
 [[ -f architecture/local_qualification_receipt_v1.json ]] || die "Local qualification receipt contract is missing"
+[[ -f architecture/release_source_custody_v1.json ]] || die "Release source custody contract is missing"
 [[ -f architecture/implementation_status_v1.json ]] || die "Implementation-status contract is missing"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
@@ -34,6 +35,10 @@ ok "Local qualification receipt"
 info "Validating machine-checked implementation and evidence status"
 python3 scripts/check_implementation_status.py
 ok "Implementation status"
+
+info "Validating tracked-source custody through server artifact qualification"
+python3 scripts/check_release_source_custody.py
+ok "Release source custody"
 
 info "Validating deterministic clean-commit source bundles"
 python3 scripts/check_source_bundle.py
@@ -107,6 +112,7 @@ python3 scripts/test_source_bundle.py
 python3 scripts/test_source_bundle_output_location.py
 python3 scripts/test_local_qualification_receipt.py
 python3 scripts/test_implementation_status.py
+python3 scripts/test_release_source_custody.py
 python3 scripts/test_live_announcement_contract.py
 python3 scripts/test_live_mcp_v1_1.py
 python3 scripts/test_live_announcement_acceptance.py
@@ -144,6 +150,8 @@ python3 -m py_compile \
   scripts/test_local_qualification_receipt.py \
   scripts/check_implementation_status.py \
   scripts/test_implementation_status.py \
+  scripts/check_release_source_custody.py \
+  scripts/test_release_source_custody.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_announcements.py \
