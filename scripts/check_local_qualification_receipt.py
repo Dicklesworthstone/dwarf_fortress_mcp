@@ -208,6 +208,7 @@ def check_wrapper() -> None:
     source = WRAPPER.read_text(encoding="utf-8")
     for marker in [
         "umask 077",
+        "export PYTHONDONTWRITEBYTECODE=1",
         'RECEIPT_WRITER="$ROOT/scripts/write_local_qualification_receipt.py"',
         'LOCAL_RECEIPT_CONTRACT="$ROOT/architecture/local_qualification_receipt_v1.json"',
         'SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"',
@@ -224,6 +225,9 @@ def check_wrapper() -> None:
         "scripts/test_local_qualification_receipt.py",
         "scripts/check_implementation_status.py",
         "scripts/test_implementation_status.py",
+        "architecture/release_source_custody_v1.json",
+        "scripts/check_release_source_custody.py",
+        "scripts/test_release_source_custody.py",
     ]:
         require(marker in source, f"qualify_local.sh omits {marker}")
     for forbidden in [
@@ -248,6 +252,9 @@ def check_gate_and_server_binding() -> None:
         "scripts/test_local_qualification_receipt.py",
         "scripts/check_implementation_status.py",
         "scripts/test_implementation_status.py",
+        "architecture/release_source_custody_v1.json",
+        "scripts/check_release_source_custody.py",
+        "scripts/test_release_source_custody.py",
     ]:
         require(marker in verify, f"verify.sh omits local receipt marker {marker}")
 
@@ -292,6 +299,10 @@ def check_gate_and_server_binding() -> None:
         '"tree"',
         '"snapshot_digest"',
         "local qualification receipt is not bound to HEAD-equivalent source",
+        "local qualification receipt digest inventory differs from current HEAD-equivalent source",
+        "directory must have exact owner-only mode 0700",
+        "must have exact owner-read/write mode 0600",
+        "server receipt source inventory changed after local receipt verification",
     ]:
         require(marker in verifier, f"server receipt verifier omits {marker}")
 
