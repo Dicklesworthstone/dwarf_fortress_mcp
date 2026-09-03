@@ -338,12 +338,7 @@ def bounded_tree(value: Any, path: str = "$", depth: int = 1) -> None:
     fail(f"{path} contains unsupported JSON type {type(value).__name__}")
 
 
-def read_object_with_digest(
-    path: Path,
-    label: str,
-    maximum_bytes: int = MAX_JSON_BYTES,
-) -> tuple[dict[str, Any], str]:
-    raw, digest = read_bytes_with_digest(path, label, maximum_bytes)
+def parse_json_object_bytes(raw: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(
             raw.decode("utf-8"),
@@ -354,7 +349,16 @@ def read_object_with_digest(
     if not isinstance(value, dict):
         fail(f"{label} must be a JSON object")
     bounded_tree(value)
-    return value, digest
+    return value
+
+
+def read_object_with_digest(
+    path: Path,
+    label: str,
+    maximum_bytes: int = MAX_JSON_BYTES,
+) -> tuple[dict[str, Any], str]:
+    raw, digest = read_bytes_with_digest(path, label, maximum_bytes)
+    return parse_json_object_bytes(raw, label), digest
 
 
 def read_object(
@@ -582,6 +586,52 @@ def executable_semantics_match(git_mode: str, worktree_mode: int) -> bool:
     return bool(worktree_mode & 0o111) == (git_mode == "100755")
 
 
+def validate_private_evidence_directory(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        fail(f"{label} directory must be absolute")
+    absolute = Path(os.path.abspath(path))
+    try:
+        before = os.lstat(absolute)
+    except OSError as exc:
+        fail(f"cannot inspect {label} directory {absolute}: {exc}")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+        fail(f"{label} directory must be a real directory, not a symbolic link")
+    resolved = absolute.resolve(strict=True)
+    try:
+        after = os.stat(resolved, follow_symlinks=False)
+    except OSError as exc:
+        fail(f"cannot inspect resolved {label} directory {resolved}: {exc}")
+    if not stat.S_ISDIR(after.st_mode):
+        fail(f"resolved {label} path is not a directory")
+    if os.name == "posix":
+        if stat.S_IMODE(after.st_mode) != 0o700:
+            fail(f"{label} directory must have exact owner-only mode 0700")
+        if hasattr(os, "geteuid") and after.st_uid != os.geteuid():
+            fail(f"{label} directory is not owned by the effective user")
+    return resolved
+
+
+def read_private_local_receipt(path: Path) -> tuple[dict[str, Any], str]:
+    if not path.is_absolute():
+        fail("local qualification receipt path must be absolute")
+    parent = validate_private_evidence_directory(
+        path.parent,
+        "local qualification receipt",
+    )
+    candidate = parent / path.name
+    raw, digest, metadata = read_stable_bytes_with_metadata(
+        candidate,
+        "local qualification receipt",
+        MAX_JSON_BYTES,
+    )
+    if os.name == "posix":
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            fail("local qualification receipt must have exact owner-read/write mode 0600")
+        if hasattr(os, "geteuid") and metadata.st_uid != os.geteuid():
+            fail("local qualification receipt is not owned by the effective user")
+    return parse_json_object_bytes(raw, "local qualification receipt"), digest
+
+
 def collect_head_equivalent_source_inventory(
     source_root: Path,
     expected_commit: str,
@@ -680,10 +730,7 @@ def validate_local_qualification_receipt(
     expected_sha256: str,
     expected_gates: list[str] | None = None,
 ) -> dict[str, Any]:
-    receipt, actual_sha256 = read_object_with_digest(
-        path,
-        "local qualification receipt",
-    )
+    receipt, actual_sha256 = read_private_local_receipt(path)
     if actual_sha256 != expected_sha256:
         fail("local qualification receipt bytes do not match the server receipt binding")
     require_exact_keys(
