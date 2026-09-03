@@ -113,6 +113,7 @@ class Fixture:
             json.dumps(self.local_receipt() if value is None else value, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        self.local_receipt_path.chmod(0o600)
 
     def source_digests(self) -> dict[str, str]:
         return {
@@ -253,6 +254,32 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
             fixture.binary_path.write_bytes(b"substituted-server-bytes")
             fixture.binary_path.chmod(0o700)
             with self.assertRaises(verifier.VerificationError):
+                fixture.verify()
+
+    @unittest.skipUnless(os.name == "posix", "Unix evidence custody required")
+    def test_local_receipt_requires_private_directory_and_file_modes(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.local_receipt_path.chmod(0o644)
+            with self.assertRaisesRegex(verifier.VerificationError, "mode 0600"):
+                fixture.verify()
+
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.root.chmod(0o755)
+            with self.assertRaisesRegex(verifier.VerificationError, "mode 0700"):
+                fixture.verify()
+
+    def test_symbolic_local_receipt_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            real = fixture.root / "real-local-qualification.json"
+            fixture.local_receipt_path.replace(real)
+            try:
+                fixture.local_receipt_path.symlink_to(real)
+            except OSError:
+                self.skipTest("symbolic links are unavailable")
+            with self.assertRaisesRegex(verifier.VerificationError, "non-symbolic-link"):
                 fixture.verify()
 
     def test_local_qualification_receipt_mismatch_is_rejected(self) -> None:
