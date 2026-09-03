@@ -49,7 +49,7 @@ def manifest() -> dict[str, Any]:
     }
 
 
-def entry() -> dict[str, Any]:
+def entry(label: str = "base") -> dict[str, Any]:
     unsigned: dict[str, Any] = {
         "support_level": "experimental",
         "version_tuple": manifest()["version_tuple"],
@@ -57,22 +57,22 @@ def entry() -> dict[str, Any]:
         "source": {
             **manifest()["source"],
             "dfmcp_dirty": False,
-            "native_build_receipt_sha256": digest("native-receipt"),
-            "live_acceptance_receipt_sha256": digest("live-receipt-file"),
-            "live_acceptance_receipt_digest": digest("live-receipt-content"),
+            "native_build_receipt_sha256": digest(f"native-receipt-{label}"),
+            "live_acceptance_receipt_sha256": digest(f"live-receipt-file-{label}"),
+            "live_acceptance_receipt_digest": digest(f"live-receipt-content-{label}"),
         },
         "gates": [
             {
                 "gate": "R1",
                 "status": "passed",
-                "receipt_sha256": digest("native-receipt"),
+                "receipt_sha256": digest(f"native-receipt-{label}"),
             },
             *[
                 {
                     "gate": gate,
                     "status": "passed",
                     "case_count": count,
-                    "evidence_digest": digest(f"gate-{gate}"),
+                    "evidence_digest": digest(f"gate-{gate}-{label}"),
                 }
                 for gate, count in promotion.EXPECTED_LIVE_CASE_COUNTS.items()
             ],
@@ -82,31 +82,38 @@ def entry() -> dict[str, Any]:
         "observed_domains": promotion.OBSERVED_DOMAINS,
         "conditional_domains": promotion.CONDITIONAL_DOMAINS,
         "omitted_domains": promotion.OMITTED_DOMAINS,
-        "evidence_locator": "qualification/fixture/live-read-acceptance-receipt.json",
+        "evidence_locator": f"qualification/{label}/live-read-acceptance-receipt.json",
         "limitations": promotion.LIMITATIONS,
     }
     return {"entry_id": promotion.sha256_bytes(promotion.canonical_json(unsigned)), **unsigned}
 
 
 def different_entry(label: str) -> dict[str, Any]:
-    value = copy.deepcopy(entry())
+    value = copy.deepcopy(entry(label))
     value["version_tuple"]["dfhack"] = f"0.51.11-r1-{label}"
     value["source"]["dfmcp_commit"] = digest(f"commit-{label}")[:40]
     value["source"]["plugin_sha256"] = digest(f"plugin-{label}")
-    value["evidence_locator"] = f"qualification/{label}/receipt.json"
     unsigned = dict(value)
     del unsigned["entry_id"]
     value["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
     return value
 
 
-def registry(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    ordered = sorted(entries, key=lambda item: item["entry_id"])
-    return {
-        "schema_version": promotion.REGISTRY_SCHEMA,
-        "status": "admitted_live_tuples" if ordered else "no_admitted_live_tuples",
-        "entries": ordered,
-    }
+def revocation(item: dict[str, Any], label: str = "revoked") -> dict[str, Any]:
+    return promotion.build_revocation(
+        item["entry_id"],
+        "evidence_invalidated",
+        f"The evidence for {label} no longer supports runtime admission.",
+        f"qualification/revocation/{label}.json",
+        digest(f"revocation-{label}"),
+    )
+
+
+def registry(
+    entries: list[dict[str, Any]],
+    revocations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return promotion.build_registry(entries, [] if revocations is None else revocations)
 
 
 class CompatibilityResolutionTests(unittest.TestCase):
@@ -115,13 +122,22 @@ class CompatibilityResolutionTests(unittest.TestCase):
         first = resolver.resolve(value, manifest())
         second = resolver.resolve(value, manifest())
         self.assertEqual(first, second)
+        self.assertEqual(first["schema"], resolver.DECISION_SCHEMA)
         self.assertTrue(first["admitted"])
         self.assertEqual(first["entry_id"], entry()["entry_id"])
         self.assertEqual(first["support_level"], "experimental")
         self.assertEqual(first["mutation_capabilities"], [])
+        self.assertEqual(first["matching_entry_ids"], [entry()["entry_id"]])
+        self.assertEqual(first["matching_revocations"], [])
+        self.assertEqual(first["registry_active_entry_count"], 1)
+        self.assertEqual(first["registry_revocation_count"], 0)
         self.assertEqual(
             first["registry_digest"],
             promotion.sha256_bytes(promotion.canonical_json(value)),
+        )
+        self.assertEqual(
+            first["registry_revocations_digest"],
+            promotion.sha256_bytes(promotion.canonical_json([])),
         )
         unsigned = dict(first)
         del unsigned["decision_digest"]
@@ -137,6 +153,62 @@ class CompatibilityResolutionTests(unittest.TestCase):
         self.assertEqual(decision["capabilities"], [])
         self.assertTrue(decision["reasons"])
         self.assertEqual(decision["registry_status"], "no_admitted_live_tuples")
+        self.assertEqual(decision["registry_active_entry_count"], 0)
+        self.assertEqual(decision["registry_revocation_count"], 0)
+
+    def test_revoked_exact_tuple_fails_closed_with_evidence(self) -> None:
+        item = entry()
+        revoked = revocation(item)
+        decision = resolver.resolve(registry([item], [revoked]), manifest())
+        self.assertFalse(decision["admitted"])
+        self.assertIsNone(decision["entry_id"])
+        self.assertEqual(decision["capabilities"], [])
+        self.assertEqual(decision["matching_entry_ids"], [item["entry_id"]])
+        self.assertEqual(decision["matching_revocations"], [revoked])
+        self.assertEqual(decision["registry_active_entry_count"], 0)
+        self.assertEqual(decision["registry_revocation_count"], 1)
+        self.assertTrue(any("revoked" in reason for reason in decision["reasons"]))
+        self.assertTrue(any("evidence_invalidated" in reason for reason in decision["reasons"]))
+
+    def test_required_revoked_entry_cannot_fall_through_to_active_requalification(self) -> None:
+        historical = entry("historical")
+        replacement = entry("replacement")
+        revoked = revocation(historical, "historical")
+        value = registry([historical, replacement], [revoked])
+        unfenced = resolver.resolve(value, manifest())
+        self.assertTrue(unfenced["admitted"])
+        self.assertEqual(unfenced["entry_id"], replacement["entry_id"])
+        fenced = resolver.resolve(value, manifest(), historical["entry_id"])
+        self.assertFalse(fenced["admitted"])
+        self.assertIsNone(fenced["entry_id"])
+        self.assertTrue(any("explicitly required" in reason for reason in fenced["reasons"]))
+
+    def test_required_active_requalification_is_admitted(self) -> None:
+        historical = entry("historical")
+        replacement = entry("replacement")
+        value = registry([historical, replacement], [revocation(historical)])
+        decision = resolver.resolve(value, manifest(), replacement["entry_id"])
+        self.assertTrue(decision["admitted"])
+        self.assertEqual(decision["entry_id"], replacement["entry_id"])
+        self.assertEqual(decision["registry_active_entry_count"], 1)
+
+    def test_revocation_changes_decision_identity_for_unrelated_active_entry(self) -> None:
+        target = entry()
+        other = different_entry("other")
+        without = resolver.resolve(registry([target, other]), manifest(), target["entry_id"])
+        with_revocation = resolver.resolve(
+            registry([target, other], [revocation(other, "other")]),
+            manifest(),
+            target["entry_id"],
+        )
+        self.assertTrue(without["admitted"])
+        self.assertTrue(with_revocation["admitted"])
+        self.assertEqual(without["entry_id"], with_revocation["entry_id"])
+        self.assertNotEqual(
+            without["registry_revocations_digest"],
+            with_revocation["registry_revocations_digest"],
+        )
+        self.assertNotEqual(without["decision_digest"], with_revocation["decision_digest"])
 
     def test_same_versions_with_different_binary_are_not_admitted(self) -> None:
         deployment = manifest()
@@ -182,7 +254,7 @@ class CompatibilityResolutionTests(unittest.TestCase):
         self.assertTrue(first["admitted"])
         self.assertTrue(second["admitted"])
         self.assertEqual(first["entry_id"], second["entry_id"])
-        self.assertEqual(first["registry_entry_count"], second["registry_entry_count"])
+        self.assertEqual(first["registry_historical_entry_count"], second["registry_historical_entry_count"])
         self.assertNotEqual(first["registry_digest"], second["registry_digest"])
         self.assertNotEqual(first["decision_digest"], second["decision_digest"])
 
@@ -205,17 +277,34 @@ class CompatibilityResolutionTests(unittest.TestCase):
             "schema_version": promotion.REGISTRY_SCHEMA,
             "status": "admitted_live_tuples",
             "entries": [damaged],
+            "revocations": [],
+        }
+        with self.assertRaises((promotion.PromotionError, resolver.promotion.PromotionError)):
+            resolver.resolve(value, manifest())
+
+    def test_tampered_revocation_is_rejected(self) -> None:
+        item = entry()
+        revoked = revocation(item)
+        revoked["reason"] = "tampered after identity"
+        value = {
+            "schema_version": promotion.REGISTRY_SCHEMA,
+            "status": "all_live_tuples_revoked",
+            "entries": [item],
+            "revocations": [revoked],
         }
         with self.assertRaises((promotion.PromotionError, resolver.promotion.PromotionError)):
             resolver.resolve(value, manifest())
 
     def test_decision_lists_do_not_alias_registry_lists(self) -> None:
-        value = registry([entry()])
+        item = entry()
+        revoked = revocation(item)
+        value = registry([item], [revoked])
+        original_reason = value["revocations"][0]["reason"]
         decision = resolver.resolve(value, manifest())
-        decision["capabilities"].append("pause")
-        decision["omitted_domains"].clear()
-        self.assertEqual(value["entries"][0]["capabilities"], promotion.READ_ONLY_CAPABILITIES)
-        self.assertEqual(value["entries"][0]["omitted_domains"], promotion.OMITTED_DOMAINS)
+        decision["matching_entry_ids"].clear()
+        decision["matching_revocations"][0]["reason"] = "mutated presentation"
+        self.assertEqual(value["revocations"][0]["reason"], original_reason)
+        self.assertNotEqual(value["revocations"][0]["reason"], "mutated presentation")
 
 
 if __name__ == "__main__":

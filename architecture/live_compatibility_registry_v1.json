@@ -1,5 +1,6 @@
 {
-  "schema_version": "dfmcp.live-compatibility-registry/1",
+  "schema_version": "dfmcp.live-compatibility-registry/2",
   "status": "no_admitted_live_tuples",
-  "entries": []
+  "entries": [],
+  "revocations": []
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Maintain one owner-private monotonic floor for live compatibility registry generations."""
+"""Maintain one owner-private monotonic floor for compatibility policy generations."""
 
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from typing import Any, Iterator, NoReturn
 ROOT = Path(__file__).resolve().parents[1]
 PROMOTION_PATH = ROOT / "scripts/promote_live_compatibility.py"
 DEFAULT_REGISTRY = ROOT / "architecture/live_compatibility_registry_v1.json"
-FLOOR_SCHEMA = "dfmcp.live-compatibility-floor/1"
+FLOOR_SCHEMA = "dfmcp.live-compatibility-floor/2"
+LEGACY_FLOOR_SCHEMA = "dfmcp.live-compatibility-floor/1"
 MAX_FLOOR_BYTES = 1024 * 1024
 MAX_SEQUENCE = (1 << 64) - 1
 
@@ -39,12 +40,7 @@ def fail(message: str) -> NoReturn:
 
 
 def require_nonnegative_int(value: Any, path: str, maximum: int = MAX_SEQUENCE) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value < 0
-        or value > maximum
-    ):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > maximum:
         fail(f"{path} must be an integer in 0..={maximum}")
     return value
 
@@ -55,6 +51,8 @@ def require_absolute_path(path: Path, label: str) -> Path:
     raw = os.fspath(path)
     if not raw or len(os.fsencode(raw)) > 4096:
         fail(f"{label} path is empty or exceeds its byte bound")
+    if any(ord(character) < 0x20 for character in raw):
+        fail(f"{label} path contains a control character")
     return path
 
 
@@ -91,6 +89,7 @@ def same_identity(left: os.stat_result, right: os.stat_result) -> bool:
         and left.st_size == right.st_size
         and left.st_mode == right.st_mode
         and left.st_uid == right.st_uid
+        and left.st_gid == right.st_gid
         and left.st_mtime_ns == right.st_mtime_ns
         and left.st_ctime_ns == right.st_ctime_ns
     )
@@ -127,7 +126,10 @@ def read_private_bytes(path: Path) -> tuple[bytes, str]:
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(descriptor, min(1024 * 1024, MAX_FLOOR_BYTES + 1 - total))
+            remaining = MAX_FLOOR_BYTES + 1 - total
+            if remaining <= 0:
+                fail("compatibility floor exceeded its byte bound while being read")
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
             if not chunk:
                 break
             total += len(chunk)
@@ -144,22 +146,35 @@ def read_private_bytes(path: Path) -> tuple[bytes, str]:
         os.close(descriptor)
 
 
+def validate_ordered_hashes(value: Any, path: str) -> list[str]:
+    raw_values = promotion.require_list(value, path)
+    values: list[str] = []
+    previous = ""
+    for index, raw in enumerate(raw_values):
+        item = promotion.require_hash(raw, f"{path}[{index}]")
+        if previous and item <= previous:
+            fail(f"{path} is not in strict canonical order")
+        values.append(item)
+        previous = item
+    return values
+
+
 def validate_floor(value: dict[str, Any]) -> dict[str, Any]:
-    promotion.require_exact_keys(
-        value,
-        {
-            "schema",
-            "sequence",
-            "registry_file_sha256",
-            "registry_digest",
-            "entry_ids",
-            "previous_floor_digest",
-            "floor_digest",
-        },
-        "compatibility_floor",
-    )
-    if value.get("schema") != FLOOR_SCHEMA:
+    schema = value.get("schema")
+    if schema == LEGACY_FLOOR_SCHEMA:
+        expected_keys = {
+            "schema", "sequence", "registry_file_sha256", "registry_digest",
+            "entry_ids", "previous_floor_digest", "floor_digest",
+        }
+    elif schema == FLOOR_SCHEMA:
+        expected_keys = {
+            "schema", "sequence", "registry_file_sha256", "registry_digest",
+            "entry_ids", "revocation_ids", "revoked_entry_ids", "active_entry_ids",
+            "previous_floor_digest", "floor_digest",
+        }
+    else:
         fail("compatibility floor schema is unsupported")
+    promotion.require_exact_keys(value, expected_keys, "compatibility_floor")
     sequence = require_nonnegative_int(value.get("sequence"), "compatibility_floor.sequence")
     registry_file_sha256 = promotion.require_hash(
         value.get("registry_file_sha256"), "compatibility_floor.registry_file_sha256"
@@ -167,15 +182,34 @@ def validate_floor(value: dict[str, Any]) -> dict[str, Any]:
     registry_digest = promotion.require_hash(
         value.get("registry_digest"), "compatibility_floor.registry_digest"
     )
-    raw_entry_ids = promotion.require_list(value.get("entry_ids"), "compatibility_floor.entry_ids")
-    entry_ids: list[str] = []
-    previous = ""
-    for index, raw in enumerate(raw_entry_ids):
-        entry_id = promotion.require_hash(raw, f"compatibility_floor.entry_ids[{index}]")
-        if previous and entry_id <= previous:
-            fail("compatibility floor entry IDs are not in strict canonical order")
-        entry_ids.append(entry_id)
-        previous = entry_id
+    entry_ids = validate_ordered_hashes(value.get("entry_ids"), "compatibility_floor.entry_ids")
+    if schema == FLOOR_SCHEMA:
+        revocation_ids = validate_ordered_hashes(
+            value.get("revocation_ids"), "compatibility_floor.revocation_ids"
+        )
+        revoked_entry_ids = validate_ordered_hashes(
+            value.get("revoked_entry_ids"), "compatibility_floor.revoked_entry_ids"
+        )
+        active_entry_ids = validate_ordered_hashes(
+            value.get("active_entry_ids"), "compatibility_floor.active_entry_ids"
+        )
+        historical = set(entry_ids)
+        active = set(active_entry_ids)
+        revoked = set(revoked_entry_ids)
+        if not active.issubset(historical):
+            fail("compatibility floor active entry IDs are absent from historical entry IDs")
+        if not revoked.issubset(historical):
+            fail("compatibility floor revoked entry IDs are absent from historical entry IDs")
+        if active & revoked:
+            fail("compatibility floor active and revoked entry IDs overlap")
+        if active | revoked != historical:
+            fail("compatibility floor active and revoked entries do not partition history")
+        if len(revocation_ids) != len(revoked_entry_ids):
+            fail("compatibility floor revocation and revoked-entry cardinalities differ")
+    else:
+        revocation_ids = []
+        revoked_entry_ids = []
+        active_entry_ids = list(entry_ids)
     previous_floor_digest = value.get("previous_floor_digest")
     if sequence == 0:
         if previous_floor_digest is not None:
@@ -187,15 +221,17 @@ def validate_floor(value: dict[str, Any]) -> dict[str, Any]:
     declared = promotion.require_hash(value.get("floor_digest"), "compatibility_floor.floor_digest")
     unsigned = dict(value)
     del unsigned["floor_digest"]
-    expected = promotion.sha256_bytes(promotion.canonical_json(unsigned))
-    if declared != expected:
+    if declared != promotion.sha256_bytes(promotion.canonical_json(unsigned)):
         fail("compatibility floor digest does not reproduce its canonical fields")
     return {
-        "schema": FLOOR_SCHEMA,
+        "schema": schema,
         "sequence": sequence,
         "registry_file_sha256": registry_file_sha256,
         "registry_digest": registry_digest,
         "entry_ids": entry_ids,
+        "revocation_ids": revocation_ids,
+        "revoked_entry_ids": revoked_entry_ids,
+        "active_entry_ids": active_entry_ids,
         "previous_floor_digest": previous_floor_digest,
         "floor_digest": declared,
     }
@@ -204,9 +240,7 @@ def validate_floor(value: dict[str, Any]) -> dict[str, Any]:
 def read_floor(path: Path) -> tuple[dict[str, Any], str]:
     raw, file_sha256 = read_private_bytes(path)
     try:
-        value = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=promotion.duplicate_rejecting_object
-        )
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=promotion.duplicate_rejecting_object)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         fail(f"cannot parse compatibility floor: {exc}")
     if not isinstance(value, dict):
@@ -218,14 +252,16 @@ def read_floor(path: Path) -> tuple[dict[str, Any], str]:
 def registry_generation_from_value(
     registry: dict[str, Any], registry_file_sha256: str
 ) -> dict[str, Any]:
-    file_sha256 = promotion.require_hash(
-        registry_file_sha256, "registry_file_sha256"
-    )
-    entries = promotion.validate_registry(registry)
+    file_sha256 = promotion.require_hash(registry_file_sha256, "registry_file_sha256")
+    entries, revocations = promotion.validate_registry_components(registry)
+    revoked = {item["entry_id"] for item in revocations}
     return {
         "registry_file_sha256": file_sha256,
         "registry_digest": promotion.sha256_bytes(promotion.canonical_json(registry)),
         "entry_ids": [entry["entry_id"] for entry in entries],
+        "revocation_ids": [item["revocation_id"] for item in revocations],
+        "revoked_entry_ids": sorted(revoked),
+        "active_entry_ids": [entry["entry_id"] for entry in entries if entry["entry_id"] not in revoked],
     }
 
 
@@ -237,30 +273,29 @@ def registry_generation(registry_path: Path) -> dict[str, Any]:
 
 
 def build_floor(
-    generation: dict[str, Any],
-    sequence: int,
-    previous_floor_digest: str | None,
+    generation: dict[str, Any], sequence: int, previous_floor_digest: str | None
 ) -> dict[str, Any]:
-    normalized_sequence = require_nonnegative_int(sequence, "compatibility_floor.sequence")
     unsigned: dict[str, Any] = {
         "schema": FLOOR_SCHEMA,
-        "sequence": normalized_sequence,
+        "sequence": require_nonnegative_int(sequence, "compatibility_floor.sequence"),
         "registry_file_sha256": generation["registry_file_sha256"],
         "registry_digest": generation["registry_digest"],
         "entry_ids": list(generation["entry_ids"]),
+        "revocation_ids": list(generation["revocation_ids"]),
+        "revoked_entry_ids": list(generation["revoked_entry_ids"]),
+        "active_entry_ids": list(generation["active_entry_ids"]),
         "previous_floor_digest": previous_floor_digest,
     }
-    return {
-        **unsigned,
-        "floor_digest": promotion.sha256_bytes(promotion.canonical_json(unsigned)),
-    }
+    return {**unsigned, "floor_digest": promotion.sha256_bytes(promotion.canonical_json(unsigned))}
 
 
 def generation_matches(floor_value: dict[str, Any], generation: dict[str, Any]) -> bool:
-    return (
-        floor_value["registry_file_sha256"] == generation["registry_file_sha256"]
-        and floor_value["registry_digest"] == generation["registry_digest"]
-        and floor_value["entry_ids"] == generation["entry_ids"]
+    return all(
+        floor_value[field] == generation[field]
+        for field in [
+            "registry_file_sha256", "registry_digest", "entry_ids",
+            "revocation_ids", "revoked_entry_ids", "active_entry_ids",
+        ]
     )
 
 
@@ -270,8 +305,7 @@ def verify_generation(floor_value: dict[str, Any], generation: dict[str, Any]) -
 
 
 def verify_floor(
-    floor_path: Path,
-    registry_path: Path | None = None,
+    floor_path: Path, registry_path: Path | None = None
 ) -> tuple[dict[str, Any], str]:
     floor_value, floor_file_sha256 = read_floor(floor_path)
     if registry_path is not None:
@@ -280,10 +314,7 @@ def verify_floor(
 
 
 def fsync_directory(path: Path) -> None:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_DIRECTORY"):
-        flags |= os.O_DIRECTORY
-    descriptor = os.open(path, flags)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(descriptor)
     finally:
@@ -300,11 +331,9 @@ def payload_bytes(value: dict[str, Any]) -> bytes:
 def write_private_exclusive(path: Path, value: dict[str, Any]) -> None:
     absolute = validate_floor_path(path)
     payload = payload_bytes(value)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(absolute, flags, 0o600)
     except OSError as exc:
@@ -350,11 +379,9 @@ def write_private_atomic(path: Path, value: dict[str, Any]) -> None:
 def floor_lock(path: Path) -> Iterator[None]:
     absolute = validate_floor_path(path)
     lock_path = absolute.with_name(f".{absolute.name}.lock")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(lock_path, flags, 0o600)
     except FileExistsError:
@@ -379,41 +406,38 @@ def floor_lock(path: Path) -> Iterator[None]:
 
 
 def initialize_floor(floor_path: Path, registry_path: Path) -> dict[str, Any]:
-    generation = registry_generation(registry_path)
-    floor_value = build_floor(generation, 0, None)
+    floor_value = build_floor(registry_generation(registry_path), 0, None)
     with floor_lock(floor_path):
         write_private_exclusive(floor_path, floor_value)
     return floor_value
 
 
 def advance_floor(
-    floor_path: Path,
-    registry_path: Path,
-    expected_floor_file_sha256: str,
+    floor_path: Path, registry_path: Path, expected_floor_file_sha256: str
 ) -> tuple[dict[str, Any], bool]:
-    expected = promotion.require_hash(
-        expected_floor_file_sha256, "expected_floor_file_sha256"
-    )
+    expected = promotion.require_hash(expected_floor_file_sha256, "expected_floor_file_sha256")
     with floor_lock(floor_path):
         current, actual_file_sha256 = read_floor(floor_path)
         if actual_file_sha256 != expected:
             fail("compatibility floor changed since the caller selected its expected generation")
         generation = registry_generation(registry_path)
-        missing = sorted(set(current["entry_ids"]) - set(generation["entry_ids"]))
-        if missing:
+        missing_entries = sorted(set(current["entry_ids"]) - set(generation["entry_ids"]))
+        if missing_entries:
             fail(
-                "candidate compatibility registry rolls back prior admitted entry IDs: "
-                + ", ".join(missing)
+                "candidate compatibility registry rolls back prior historical entry IDs: "
+                + ", ".join(missing_entries)
             )
-        if generation_matches(current, generation):
+        missing_revocations = sorted(set(current["revocation_ids"]) - set(generation["revocation_ids"]))
+        if missing_revocations:
+            fail(
+                "candidate compatibility registry rolls back prior revocation IDs: "
+                + ", ".join(missing_revocations)
+            )
+        if current["schema"] == FLOOR_SCHEMA and generation_matches(current, generation):
             return current, False
         if current["sequence"] == MAX_SEQUENCE:
             fail("compatibility floor sequence space is exhausted")
-        candidate = build_floor(
-            generation,
-            current["sequence"] + 1,
-            current["floor_digest"],
-        )
+        candidate = build_floor(generation, current["sequence"] + 1, current["floor_digest"])
         write_private_atomic(floor_path, candidate)
         return candidate, True
 
@@ -425,20 +449,16 @@ def emit(value: dict[str, Any]) -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-
     initialize = subparsers.add_parser("init")
     initialize.add_argument("--floor", type=Path, required=True)
     initialize.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
-
     verify = subparsers.add_parser("verify")
     verify.add_argument("--floor", type=Path, required=True)
     verify.add_argument("--registry", type=Path)
-
     advance = subparsers.add_parser("advance")
     advance.add_argument("--floor", type=Path, required=True)
     advance.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     advance.add_argument("--expected-floor-sha256", required=True)
-
     return parser.parse_args(argv)
 
 
@@ -450,23 +470,12 @@ def main(argv: list[str] | None = None) -> int:
             emit({"status": "initialized", "floor": floor_value})
         elif args.command == "verify":
             floor_value, file_sha256 = verify_floor(args.floor, args.registry)
-            emit(
-                {
-                    "status": "verified",
-                    "floor_file_sha256": file_sha256,
-                    "floor": floor_value,
-                }
-            )
+            emit({"status": "verified", "floor_file_sha256": file_sha256, "floor": floor_value})
         elif args.command == "advance":
             floor_value, changed = advance_floor(
                 args.floor, args.registry, args.expected_floor_sha256
             )
-            emit(
-                {
-                    "status": "advanced" if changed else "unchanged",
-                    "floor": floor_value,
-                }
-            )
+            emit({"status": "advanced" if changed else "unchanged", "floor": floor_value})
         else:
             fail("unsupported compatibility floor command")
     except (FloorError, promotion.PromotionError, OSError) as exc:

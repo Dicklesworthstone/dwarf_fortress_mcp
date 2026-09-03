@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Validate the exact live compatibility registry and its promotion boundary."""
+"""Validate exact promotion plus evidence-bearing append-only revocation."""
 
 from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -16,26 +17,22 @@ DOC_PATH = ROOT / "docs/LIVE_COMPATIBILITY_ADMISSION.md"
 
 SPEC = importlib.util.spec_from_file_location("promote_live_compatibility", PROMOTION_PATH)
 if SPEC is None or SPEC.loader is None:
-    raise RuntimeError("cannot load live compatibility promotion module")
+    raise RuntimeError("cannot load compatibility mutation module")
 promotion = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = promotion
 SPEC.loader.exec_module(promotion)
 
 
-class RegistryError(ValueError):
+class ContractError(ValueError):
     pass
-
-
-def fail(message: str) -> None:
-    raise RegistryError(message)
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
-        fail(message)
+        raise ContractError(message)
 
 
-def function_names(source: str) -> set[str]:
+def functions(source: str) -> set[str]:
     tree = ast.parse(source)
     return {
         node.name
@@ -44,81 +41,113 @@ def function_names(source: str) -> set[str]:
     }
 
 
-def check_source_contracts() -> None:
+def check_registry() -> None:
+    registry = promotion.read_object(
+        REGISTRY_PATH,
+        promotion.MAX_JSON_BYTES,
+        "checked-in compatibility registry",
+    )
+    entries, revocations = promotion.validate_registry_components(registry)
+    require(registry.get("schema_version") == promotion.REGISTRY_SCHEMA, "registry schema drifted")
+    require(registry.get("status") == "no_admitted_live_tuples", "checked-in registry unexpectedly admits or revokes a tuple")
+    require(entries == [], "checked-in registry unexpectedly contains historical entries")
+    require(revocations == [], "checked-in registry unexpectedly contains revocations")
+    require(promotion.active_entries(registry) == [], "empty registry unexpectedly has active entries")
+    require(
+        promotion.revocations_digest(registry)
+        == promotion.sha256_bytes(promotion.canonical_json([])),
+        "empty revocation digest drifted",
+    )
+
+
+def check_implementation() -> None:
     source = PROMOTION_PATH.read_text(encoding="utf-8")
-    names = function_names(source)
-    for function in [
-        "duplicate_rejecting_object",
-        "bounded_tree",
-        "read_object_with_digest",
+    names = functions(source)
+    for name in [
         "validate_live_receipt",
         "validate_native_receipt",
-        "validate_registry",
+        "compatibility_key",
+        "validate_registry_components",
+        "registry_revocations",
+        "revoked_entry_ids",
+        "active_entries",
+        "revocations_digest",
+        "build_registry",
+        "build_entry",
+        "build_revocation",
+        "_promote",
+        "promote",
+        "_revoke",
+        "revoke",
         "registry_lock",
         "write_atomic",
     ]:
-        require(function in names, f"promotion script is missing boundary {function}")
+        require(name in names, f"compatibility mutation implementation omits {name}")
     for marker in [
-        'receipt.get("status") != "qualified"',
-        'plugin.get("mutation_rpc_methods") != []',
-        'plugin.get("strings_inventory") != "passed"',
-        'plugin.get("symbols_inventory") != "passed"',
-        "EXPECTED_LIVE_CASE_COUNTS",
+        'REGISTRY_SCHEMA = "dfmcp.live-compatibility-registry/2"',
+        'REVOCATION_SCOPE = "runtime_admission"',
+        '"compatibility_regression"',
+        '"evidence_invalidated"',
+        '"operational_withdrawal"',
+        '"security_incident"',
+        "without rewriting history",
+        "already revoked",
+        "cannot revoke an entry absent",
         "expected_registry_sha256",
-        "compatibility registry promotion lock already exists",
-        "the exact source/binary/version/platform tuple already has",
-        "os.O_NOFOLLOW",
-        "os.fsync",
-        "--in-place",
-        "--output",
+        '"revocations"',
+        '"partially_revoked_live_tuples"',
+        '"all_live_tuples_revoked"',
+        "--revoke-entry-id",
+        "--reason-code",
+        "--evidence-sha256",
     ]:
-        require(marker in source, f"promotion script is missing contract marker {marker}")
-    require("subprocess" not in source, "promotion boundary must not execute external commands")
-    require("requests" not in source, "promotion boundary must not introduce an HTTP dependency")
+        require(marker in source, f"compatibility mutation implementation omits {marker}")
+    for forbidden in ["subprocess", "requests", "urllib", "shell=True"]:
+        require(forbidden not in source, f"compatibility mutation implementation contains forbidden dependency {forbidden}")
 
-    tests = TEST_PATH.read_text(encoding="utf-8")
-    required_tests = [
+
+def check_tests() -> None:
+    source = TEST_PATH.read_text(encoding="utf-8")
+    require(source.count("def test_") >= 23, "compatibility registry needs at least twenty-three focused tests")
+    for name in [
         "test_qualified_receipts_promote_deterministically",
-        "test_duplicate_json_keys_are_rejected",
         "test_expected_registry_digest_is_a_compare_and_swap_fence",
-        "test_self_digested_but_structurally_invalid_existing_entry_is_rejected",
-        "test_lock_prevents_concurrent_in_place_promotion",
-        "test_candidate_identity_is_returned_independently_of_sort_position",
-    ]
-    require(tests.count("def test_") >= 14, "compatibility promotion needs at least fourteen focused tests")
-    for name in required_tests:
-        require(f"def {name}" in tests, f"compatibility promotion tests omit {name}")
+        "test_lock_prevents_concurrent_in_place_mutation",
+        "test_revocation_is_deterministic_content_addressed_and_history_preserving",
+        "test_absent_entry_and_duplicate_revocation_are_rejected",
+        "test_revocation_requires_supported_reason_and_exact_evidence",
+        "test_revocation_compare_and_swap_fence_is_enforced",
+        "test_revocation_cannot_target_missing_history_or_be_reordered",
+        "test_same_exact_tuple_can_be_requalified_only_after_revocation",
+        "test_multiple_active_entries_for_same_tuple_are_rejected",
+        "test_status_cannot_disagree_with_active_and_revoked_counts",
+        "test_cli_modes_are_mutually_exclusive_and_complete",
+    ]:
+        require(f"def {name}" in source, f"compatibility tests omit {name}")
 
-    documentation = DOC_PATH.read_text(encoding="utf-8")
+
+def check_docs() -> None:
+    text = DOC_PATH.read_text(encoding="utf-8").casefold()
     for marker in [
-        "R1",
-        "R2",
-        "R3",
-        "R4",
-        "R5",
-        "experimental",
-        "exact tuple",
-        "no mutation",
-        "registry generation",
+        "evidence-bearing revocation",
+        "future process",
+        "historical entry",
+        "does not terminate",
         "compare-and-swap",
     ]:
-        require(
-            marker.lower() in documentation.lower(),
-            f"compatibility admission documentation omits {marker}",
-        )
+        require(marker.casefold() in text, f"compatibility documentation omits {marker}")
 
 
 def main() -> int:
     try:
-        registry = promotion.read_object(
-            REGISTRY_PATH, promotion.MAX_JSON_BYTES, "compatibility registry"
-        )
-        entries = promotion.validate_registry(registry)
-        check_source_contracts()
-    except (OSError, SyntaxError, promotion.PromotionError, RegistryError) as exc:
+        check_registry()
+        check_implementation()
+        check_tests()
+        check_docs()
+    except (OSError, SyntaxError, json.JSONDecodeError, promotion.PromotionError, ContractError) as exc:
         print(f"live compatibility registry: FAIL: {exc}", file=sys.stderr)
         return 1
-    print(f"live compatibility registry: PASS ({len(entries)} exact admitted tuple(s))")
+    print("live compatibility registry: PASS (exact admission plus append-only evidence-bearing revocation)")
     return 0
 
 

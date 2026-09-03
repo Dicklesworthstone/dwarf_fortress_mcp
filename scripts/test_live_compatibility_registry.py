@@ -34,18 +34,7 @@ class Fixture:
         self.dfmcp_commit = "1" * 40
         self.dfhack_commit = "2" * 40
         self.plugin_sha256 = digest("plugin")
-        self.registry_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": promotion.REGISTRY_SCHEMA,
-                    "status": "no_admitted_live_tuples",
-                    "entries": [],
-                },
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        self.write_registry(promotion.build_registry([], []))
         self.write_native(self.native_receipt())
         self.write_live(self.live_receipt())
 
@@ -109,6 +98,9 @@ class Fixture:
             "receipt_digest": promotion.sha256_bytes(promotion.canonical_json(unsigned)),
         }
 
+    def write_registry(self, value: dict[str, Any]) -> None:
+        self.registry_path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+
     def write_native(self, value: dict[str, Any]) -> None:
         self.native_path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -124,6 +116,22 @@ class Fixture:
             expected_registry_sha256,
         )
 
+    def admitted_registry(self) -> dict[str, Any]:
+        value = self.promote()
+        self.write_registry(value)
+        return value
+
+    def revoke(self, entry_id: str, expected_registry_sha256: str | None = None) -> dict[str, Any]:
+        return promotion.revoke(
+            self.registry_path,
+            entry_id,
+            "compatibility_regression",
+            "The exact tuple failed a post-admission deterministic-read regression campaign.",
+            "qualification/revocation/regression-report.json",
+            digest("revocation-evidence"),
+            expected_registry_sha256,
+        )
+
 
 class CompatibilityPromotionTests(unittest.TestCase):
     def fixture(self) -> tuple[tempfile.TemporaryDirectory[str], Fixture]:
@@ -136,19 +144,15 @@ class CompatibilityPromotionTests(unittest.TestCase):
             first = fixture.promote()
             second = fixture.promote()
             self.assertEqual(first, second)
+            self.assertEqual(first["schema_version"], promotion.REGISTRY_SCHEMA)
             self.assertEqual(first["status"], "admitted_live_tuples")
+            self.assertEqual(first["revocations"], [])
             entry = first["entries"][0]
             unsigned = dict(entry)
             del unsigned["entry_id"]
-            self.assertEqual(
-                entry["entry_id"],
-                promotion.sha256_bytes(promotion.canonical_json(unsigned)),
-            )
+            self.assertEqual(entry["entry_id"], promotion.sha256_bytes(promotion.canonical_json(unsigned)))
             self.assertEqual(entry["mutation_capabilities"], [])
-            self.assertEqual(
-                [gate["gate"] for gate in entry["gates"]],
-                ["R1", "R2", "R3", "R4", "R5"],
-            )
+            self.assertEqual([gate["gate"] for gate in entry["gates"]], ["R1", "R2", "R3", "R4", "R5"])
 
     def test_development_or_synthetic_status_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
@@ -197,11 +201,10 @@ class CompatibilityPromotionTests(unittest.TestCase):
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
-    def test_duplicate_exact_tuple_is_rejected(self) -> None:
+    def test_duplicate_exact_tuple_is_rejected_while_active(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
-            first = fixture.promote()
-            fixture.registry_path.write_text(json.dumps(first, sort_keys=True) + "\n", encoding="utf-8")
+            fixture.admitted_registry()
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
@@ -210,7 +213,7 @@ class CompatibilityPromotionTests(unittest.TestCase):
         with temporary:
             registry = fixture.promote()
             registry["entries"][0]["entry_id"] = digest("wrong-entry")
-            fixture.registry_path.write_text(json.dumps(registry, sort_keys=True) + "\n", encoding="utf-8")
+            fixture.write_registry(registry)
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
@@ -229,9 +232,9 @@ class CompatibilityPromotionTests(unittest.TestCase):
         temporary, fixture = self.fixture()
         with temporary:
             fixture.registry_path.write_text(
-                '{"schema_version":"dfmcp.live-compatibility-registry/1",'
+                '{"schema_version":"dfmcp.live-compatibility-registry/2",'
                 '"status":"no_admitted_live_tuples","status":"admitted_live_tuples",'
-                '"entries":[]}\n',
+                '"entries":[],"revocations":[]}\n',
                 encoding="utf-8",
             )
             with self.assertRaises(promotion.PromotionError):
@@ -249,16 +252,16 @@ class CompatibilityPromotionTests(unittest.TestCase):
         temporary, fixture = self.fixture()
         with temporary:
             registry = fixture.promote()
-            entry = registry["entries"][0]
-            entry["unexpected_authority"] = "pause"
-            unsigned = dict(entry)
+            item = registry["entries"][0]
+            item["unexpected_authority"] = "pause"
+            unsigned = dict(item)
             del unsigned["entry_id"]
-            entry["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
-            fixture.registry_path.write_text(json.dumps(registry, sort_keys=True) + "\n", encoding="utf-8")
+            item["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+            fixture.write_registry(registry)
             with self.assertRaises(promotion.PromotionError):
                 fixture.promote()
 
-    def test_lock_prevents_concurrent_in_place_promotion(self) -> None:
+    def test_lock_prevents_concurrent_in_place_mutation(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             with promotion.registry_lock(fixture.registry_path):
@@ -287,18 +290,7 @@ class CompatibilityPromotionTests(unittest.TestCase):
                     break
             else:
                 self.fail("could not construct a lexicographically later valid entry")
-            fixture.registry_path.write_text(
-                json.dumps(
-                    {
-                        "schema_version": promotion.REGISTRY_SCHEMA,
-                        "status": "admitted_live_tuples",
-                        "entries": [existing],
-                    },
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            fixture.write_registry(promotion.build_registry([existing], []))
             output, returned = promotion._promote(
                 fixture.registry_path,
                 fixture.live_path,
@@ -308,6 +300,175 @@ class CompatibilityPromotionTests(unittest.TestCase):
             self.assertEqual(returned, candidate_id)
             self.assertIn(candidate_id, [entry["entry_id"] for entry in output["entries"]])
             self.assertNotEqual(output["entries"][-1]["entry_id"], candidate_id)
+
+    def test_revocation_is_deterministic_content_addressed_and_history_preserving(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            first = fixture.revoke(entry_id)
+            second = fixture.revoke(entry_id)
+            self.assertEqual(first, second)
+            self.assertEqual(first["status"], "all_live_tuples_revoked")
+            self.assertEqual(first["entries"], admitted["entries"])
+            self.assertEqual(len(first["revocations"]), 1)
+            revocation = first["revocations"][0]
+            unsigned = dict(revocation)
+            del unsigned["revocation_id"]
+            self.assertEqual(
+                revocation["revocation_id"],
+                promotion.sha256_bytes(promotion.canonical_json(unsigned)),
+            )
+            self.assertEqual(revocation["entry_id"], entry_id)
+            self.assertEqual(revocation["scope"], promotion.REVOCATION_SCOPE)
+            self.assertEqual(promotion.active_entries(first), [])
+
+    def test_absent_entry_and_duplicate_revocation_are_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            with self.assertRaises(promotion.PromotionError):
+                fixture.revoke(digest("absent"))
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            revoked = fixture.revoke(entry_id)
+            fixture.write_registry(revoked)
+            with self.assertRaises(promotion.PromotionError):
+                fixture.revoke(entry_id)
+
+    def test_revocation_requires_supported_reason_and_exact_evidence(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            with self.assertRaises(promotion.PromotionError):
+                promotion.revoke(
+                    fixture.registry_path,
+                    entry_id,
+                    "because_i_said_so",
+                    "Unsupported reason code.",
+                    "qualification/revocation/evidence.json",
+                    digest("evidence"),
+                )
+            with self.assertRaises(promotion.PromotionError):
+                promotion.revoke(
+                    fixture.registry_path,
+                    entry_id,
+                    "security_incident",
+                    "Evidence locator traverses outside the custody root.",
+                    "../outside/evidence.json",
+                    digest("evidence"),
+                )
+            with self.assertRaises(promotion.PromotionError):
+                promotion.revoke(
+                    fixture.registry_path,
+                    entry_id,
+                    "security_incident",
+                    "Malformed evidence digest.",
+                    "qualification/revocation/evidence.json",
+                    "not-a-digest",
+                )
+
+    def test_revocation_compare_and_swap_fence_is_enforced(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            current = promotion.sha256_file(fixture.registry_path)
+            self.assertEqual(fixture.revoke(entry_id, current)["status"], "all_live_tuples_revoked")
+            with self.assertRaises(promotion.PromotionError):
+                fixture.revoke(entry_id, digest("stale"))
+
+    def test_revocation_cannot_target_missing_history_or_be_reordered(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            revoked = fixture.revoke(entry_id)
+            invalid_target = copy.deepcopy(revoked)
+            invalid_target["revocations"][0]["entry_id"] = digest("missing-entry")
+            unsigned = dict(invalid_target["revocations"][0])
+            del unsigned["revocation_id"]
+            invalid_target["revocations"][0]["revocation_id"] = promotion.sha256_bytes(
+                promotion.canonical_json(unsigned)
+            )
+            with self.assertRaises(promotion.PromotionError):
+                promotion.validate_registry(invalid_target)
+
+    def test_same_exact_tuple_can_be_requalified_only_after_revocation(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            revoked = fixture.revoke(entry_id)
+            fixture.write_registry(revoked)
+            live = fixture.live_receipt()
+            live["run_id"] = "compatibility-fixture-002"
+            live["source"]["source_digests"] = {"fixture": digest("requalified-source")}
+            unsigned = dict(live)
+            unsigned.pop("receipt_digest", None)
+            live["receipt_digest"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+            fixture.write_live(live)
+            replacement = fixture.promote()
+            self.assertEqual(replacement["status"], "partially_revoked_live_tuples")
+            self.assertEqual(len(replacement["entries"]), 2)
+            self.assertEqual(len(replacement["revocations"]), 1)
+            self.assertEqual(len(promotion.active_entries(replacement)), 1)
+            self.assertEqual(
+                promotion.compatibility_key(promotion.active_entries(replacement)[0]),
+                promotion.compatibility_key(admitted["entries"][0]),
+            )
+
+    def test_multiple_active_entries_for_same_tuple_are_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            first = fixture.promote()["entries"][0]
+            second = copy.deepcopy(first)
+            second["evidence_locator"] = "qualification/other/receipt.json"
+            unsigned = dict(second)
+            unsigned.pop("entry_id", None)
+            second["entry_id"] = promotion.sha256_bytes(promotion.canonical_json(unsigned))
+            value = {
+                "schema_version": promotion.REGISTRY_SCHEMA,
+                "status": "admitted_live_tuples",
+                "entries": sorted([first, second], key=lambda item: item["entry_id"]),
+                "revocations": [],
+            }
+            with self.assertRaises(promotion.PromotionError):
+                promotion.validate_registry(value)
+
+    def test_status_cannot_disagree_with_active_and_revoked_counts(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            admitted = fixture.admitted_registry()
+            entry_id = admitted["entries"][0]["entry_id"]
+            revoked = fixture.revoke(entry_id)
+            revoked["status"] = "admitted_live_tuples"
+            with self.assertRaises(promotion.PromotionError):
+                promotion.validate_registry(revoked)
+
+    def test_cli_modes_are_mutually_exclusive_and_complete(self) -> None:
+        with self.assertRaises(SystemExit):
+            promotion.parse_args(["--output", "/tmp/out.json"])
+        with self.assertRaises(SystemExit):
+            promotion.parse_args(
+                [
+                    "--live-receipt", "live.json",
+                    "--native-receipt", "native.json",
+                    "--revoke-entry-id", digest("entry"),
+                    "--evidence-locator", "qualification/evidence.json",
+                    "--output", "/tmp/out.json",
+                ]
+            )
+        with self.assertRaises(SystemExit):
+            promotion.parse_args(
+                [
+                    "--revoke-entry-id", digest("entry"),
+                    "--reason-code", "security_incident",
+                    "--reason", "Missing evidence digest.",
+                    "--evidence-locator", "qualification/evidence.json",
+                    "--output", "/tmp/out.json",
+                ]
+            )
 
 
 if __name__ == "__main__":
