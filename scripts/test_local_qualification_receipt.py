@@ -42,7 +42,8 @@ class Fixture:
         self.repository = root / "repository"
         self.output = root / "output"
         self.repository.mkdir()
-        self.output.mkdir()
+        self.output.mkdir(mode=0o700)
+        self.output.chmod(0o700)
         run_git(self.repository, "init", "-q")
         run_git(self.repository, "config", "user.email", "qualification@example.invalid")
         run_git(self.repository, "config", "user.name", "Qualification Tests")
@@ -91,6 +92,7 @@ class Fixture:
         self.gates.write_text(
             "".join("\t".join(row) + "\n" for row in rows), encoding="utf-8"
         )
+        self.gates.chmod(0o600)
 
     def finish(self, requested_status: str = "passed") -> dict[str, Any]:
         return issuer.finish(
@@ -128,15 +130,17 @@ class LocalQualificationReceiptTests(unittest.TestCase):
             second = fixture.begin(snapshot=second_path)
             self.assertEqual(fixture.snapshot.read_bytes(), second_path.read_bytes())
             self.assertEqual(first["snapshot_digest"], second["snapshot_digest"])
+            self.assertTrue(first["head_equivalent"])
             fixture.passing_gates()
             receipt = fixture.finish()
             self.assertEqual(receipt["schema"], issuer.RECEIPT_SCHEMA)
             self.assertEqual(receipt["status"], "passed")
-            self.assertEqual(receipt["source"], {"commit": fixture.commit, "dirty": False})
-            self.assertEqual(
-                list(receipt["digests"]), ["qualify.sh", "src/lib.rs"]
-            )
+            self.assertEqual(receipt["source"]["commit"], fixture.commit)
+            self.assertEqual(receipt["source"]["dirty"], False)
+            self.assertEqual(receipt["source"]["head_equivalent"], True)
+            self.assertEqual(list(receipt["digests"]), ["qualify.sh", "src/lib.rs"])
             self.assertTrue(all(len(value) == 64 for value in receipt["digests"].values()))
+            self.assertEqual(stat.S_IMODE(fixture.output.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(fixture.snapshot.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(fixture.receipt.stat().st_mode), 0o600)
 
@@ -182,11 +186,71 @@ class LocalQualificationReceiptTests(unittest.TestCase):
             )
             with self.assertRaises(issuer.QualificationReceiptError):
                 fixture.begin()
-            fixture.begin(allow_dirty=True)
+            result = fixture.begin(allow_dirty=True)
+            self.assertTrue(result["dirty"])
+            self.assertFalse(result["head_equivalent"])
             fixture.passing_gates()
             receipt = fixture.finish()
             self.assertEqual(receipt["status"], "development_dirty")
             self.assertTrue(receipt["source"]["dirty"])
+            self.assertFalse(receipt["source"]["head_equivalent"])
+
+    def test_assume_unchanged_cannot_hide_head_divergent_bytes(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            run_git(fixture.repository, "update-index", "--assume-unchanged", "src/lib.rs")
+            (fixture.repository / "src/lib.rs").write_text(
+                "pub fn answer() -> u32 { 99 }\n", encoding="utf-8"
+            )
+            self.assertEqual(run_git(fixture.repository, "status", "--porcelain=v1"), "")
+            with self.assertRaises(issuer.QualificationReceiptError):
+                fixture.begin()
+            result = fixture.begin(allow_dirty=True)
+            self.assertTrue(result["dirty"])
+            self.assertFalse(result["head_equivalent"])
+
+    @unittest.skipUnless(os.name == "posix", "Unix executable semantics required")
+    def test_executable_mode_drift_cannot_hide_behind_core_filemode_false(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            run_git(fixture.repository, "config", "core.fileMode", "false")
+            path = fixture.repository / "src/lib.rs"
+            path.chmod(0o755)
+            self.assertEqual(run_git(fixture.repository, "status", "--porcelain=v1"), "")
+            with self.assertRaises(issuer.QualificationReceiptError):
+                fixture.begin()
+            result = fixture.begin(allow_dirty=True)
+            self.assertFalse(result["head_equivalent"])
+
+    def test_inherited_git_directory_override_is_ignored(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            other = fixture.root / "other"
+            other.mkdir()
+            run_git(other, "init", "-q")
+            run_git(other, "config", "user.email", "other@example.invalid")
+            run_git(other, "config", "user.name", "Other")
+            (other / "other.txt").write_text("other\n", encoding="utf-8")
+            run_git(other, "add", ".")
+            run_git(other, "commit", "-q", "-m", "other")
+            with mock.patch.dict(os.environ, {"GIT_DIR": os.fspath(other / ".git")}, clear=False):
+                result = fixture.begin()
+            self.assertEqual(result["commit"], fixture.commit)
+
+    def test_empty_tracked_file_is_bound_without_false_failure(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            empty = fixture.repository / "EMPTY"
+            empty.write_bytes(b"")
+            run_git(fixture.repository, "add", "EMPTY")
+            run_git(fixture.repository, "commit", "-q", "-m", "empty")
+            fixture.commit = run_git(fixture.repository, "rev-parse", "HEAD")
+            result = fixture.begin()
+            self.assertTrue(result["head_equivalent"])
+            snapshot = json.loads(fixture.snapshot.read_text(encoding="utf-8"))
+            entry = next(item for item in snapshot["entries"] if item["path"] == "EMPTY")
+            self.assertEqual(entry["bytes"], 0)
+            self.assertEqual(entry["sha256"], issuer.sha256_bytes(b""))
 
     def test_static_only_accepts_only_a_passing_canonical_prefix(self) -> None:
         temporary, fixture = self.fixture()
@@ -257,6 +321,62 @@ class LocalQualificationReceiptTests(unittest.TestCase):
             with self.assertRaises(issuer.QualificationReceiptError):
                 fixture.finish()
             self.assertEqual(fixture.receipt.read_bytes(), receipt_before)
+
+    def test_destination_race_cannot_overwrite_an_existing_file(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            destination = fixture.output / "raced.json"
+            real_link = os.link
+
+            def race(source: str, target: Path, **kwargs: Any) -> None:
+                Path(target).write_bytes(b"racer-owned\n")
+                Path(target).chmod(0o600)
+                real_link(source, target, **kwargs)
+
+            with mock.patch.object(issuer.os, "link", side_effect=race):
+                with self.assertRaises(issuer.QualificationReceiptError):
+                    issuer.write_atomic_create_only(destination.resolve(), {"safe": True})
+            self.assertEqual(destination.read_bytes(), b"racer-owned\n")
+
+    @unittest.skipUnless(os.name == "posix", "Unix custody modes required")
+    def test_private_run_directory_and_gate_journal_modes_are_required(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            permissive = fixture.root / "permissive"
+            permissive.mkdir(mode=0o755)
+            permissive.chmod(0o755)
+            with self.assertRaises(issuer.QualificationReceiptError):
+                fixture.begin(snapshot=permissive / "snapshot.json")
+
+            fixture.begin()
+            fixture.passing_gates()
+            fixture.gates.chmod(0o644)
+            with self.assertRaises(issuer.QualificationReceiptError):
+                fixture.finish()
+
+    def test_evidence_files_must_share_one_private_run_directory(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.begin()
+            fixture.passing_gates()
+            other = fixture.root / "other-output"
+            other.mkdir(mode=0o700)
+            other.chmod(0o700)
+            other_gates = other / "gates.tsv"
+            other_gates.write_bytes(fixture.gates.read_bytes())
+            other_gates.chmod(0o600)
+            with self.assertRaises(issuer.QualificationReceiptError):
+                issuer.finish(
+                    fixture.repository.resolve(),
+                    issuer.DEFAULT_CONTRACT,
+                    fixture.gate_contract.resolve(),
+                    fixture.snapshot.resolve(),
+                    other_gates.resolve(),
+                    fixture.receipt.resolve(),
+                    fixture.commit,
+                    "2026-09-02T12:00:00Z",
+                    "passed",
+                )
 
     def test_tracked_symbolic_link_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
