@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -17,12 +18,22 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f architecture/live_admission_ticket_v2.json ]] || die "Protocol-bound V2 admission ticket contract is missing"
+[[ -f architecture/local_qualification_receipt_v1.json ]] || die "Local qualification receipt contract is missing"
+[[ -f architecture/implementation_status_v1.json ]] || die "Implementation-status contract is missing"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
 info "Rejecting corrupted source, symlinks, local-path placeholders, and probe debris"
 python3 scripts/check_repository_integrity.py
 ok "Repository integrity"
+
+info "Validating HEAD-exact, source-stable local qualification receipts"
+python3 scripts/check_local_qualification_receipt.py
+ok "Local qualification receipt"
+
+info "Validating machine-checked implementation and evidence status"
+python3 scripts/check_implementation_status.py
+ok "Implementation status"
 
 info "Validating deterministic clean-commit source bundles"
 python3 scripts/check_source_bundle.py
@@ -80,7 +91,7 @@ info "Validating authority-free live-admission diagnosis"
 python3 scripts/check_live_admission_doctor.py
 ok "Live admission doctor"
 
-info "Validating protocol-, floor-, receipt-, ticket-, and descriptor-bound live execution"
+info "Validating protocol-, source-, floor-, receipt-, ticket-, and descriptor-bound live execution"
 python3 scripts/check_live_server_artifact.py
 ok "Live server artifact admission"
 
@@ -94,6 +105,8 @@ python3 scripts/test_read_stable_repository_file.py
 python3 scripts/test_read_stable_repository_file_loader.py
 python3 scripts/test_source_bundle.py
 python3 scripts/test_source_bundle_output_location.py
+python3 scripts/test_local_qualification_receipt.py
+python3 scripts/test_implementation_status.py
 python3 scripts/test_live_announcement_contract.py
 python3 scripts/test_live_mcp_v1_1.py
 python3 scripts/test_live_announcement_acceptance.py
@@ -126,6 +139,11 @@ python3 -m py_compile \
   scripts/check_source_bundle.py \
   scripts/test_source_bundle.py \
   scripts/test_source_bundle_output_location.py \
+  scripts/write_local_qualification_receipt.py \
+  scripts/check_local_qualification_receipt.py \
+  scripts/test_local_qualification_receipt.py \
+  scripts/check_implementation_status.py \
+  scripts/test_implementation_status.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_announcements.py \
