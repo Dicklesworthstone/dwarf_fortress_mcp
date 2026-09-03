@@ -7,11 +7,13 @@ import importlib.util
 import json
 import os
 import platform
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 MODULE_PATH = Path(__file__).with_name("verify_live_server_binary_receipt.py")
 SPEC = importlib.util.spec_from_file_location("verify_live_server_binary_receipt", MODULE_PATH)
@@ -25,6 +27,17 @@ SPEC.loader.exec_module(verifier)
 def digest(value: bytes | str) -> str:
     raw = value.encode() if isinstance(value, str) else value
     return hashlib.sha256(raw).hexdigest()
+
+
+def run_git(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", os.fspath(root), *arguments],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return completed.stdout.strip()
 
 
 class Fixture:
@@ -48,8 +61,16 @@ class Fixture:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"fixture source for {relative}\n", encoding="utf-8")
-
-        self.commit = "1" * 40
+        run_git(self.source_root, "init", "-q")
+        run_git(self.source_root, "config", "user.email", "fixture@example.invalid")
+        run_git(self.source_root, "config", "user.name", "Fixture")
+        run_git(self.source_root, "add", ".")
+        run_git(self.source_root, "commit", "-q", "-m", "fixture")
+        self.commit = run_git(self.source_root, "rev-parse", "HEAD")
+        self.tree, self.inventory = verifier.collect_head_equivalent_source_inventory(
+            self.source_root,
+            self.commit,
+        )
         self.local_receipt_path = root / "local-qualification.json"
         self.write_local_receipt()
         self.binary_path = root / "dwarf-fortress-mcp"
@@ -64,7 +85,13 @@ class Fixture:
             "status": "passed",
             "started_at": "2026-09-01T00:00:00Z",
             "finished_at": "2026-09-01T00:01:00Z",
-            "source": {"commit": self.commit, "dirty": False},
+            "source": {
+                "commit": self.commit,
+                "dirty": False,
+                "head_equivalent": True,
+                "tree": self.tree,
+                "snapshot_digest": digest("fixture-source-snapshot"),
+            },
             "host": {
                 "system": platform.system(),
                 "release": platform.release(),
@@ -72,7 +99,7 @@ class Fixture:
                 "python": platform.python_version(),
             },
             "toolchain": {"rustc_vv": "rustc fixture", "cargo": "cargo fixture"},
-            "digests": {"fixture": digest("local-fixture-source")},
+            "digests": dict(self.inventory),
             "gates": [
                 {"name": name, "state": "passed", "detail": None}
                 for name in self.contract["source_binding"][
@@ -137,6 +164,10 @@ class Fixture:
         self.receipt_path.write_text(
             json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
         )
+
+    def rebind_local_receipt(self, value: dict[str, Any]) -> None:
+        self.write_local_receipt(value)
+        self.write_receipt(self.receipt())
 
     def verify(self) -> tuple[dict[str, Any], Any]:
         return verifier.verify(
@@ -229,8 +260,48 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
         with temporary:
             local = fixture.local_receipt()
             local["source"]["commit"] = "2" * 40
-            fixture.write_local_receipt(local)
-            with self.assertRaises(verifier.VerificationError):
+            fixture.rebind_local_receipt(local)
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "different source commit",
+            ):
+                fixture.verify()
+
+    def test_non_head_equivalent_local_receipt_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            local["source"]["head_equivalent"] = False
+            fixture.rebind_local_receipt(local)
+            with self.assertRaisesRegex(verifier.VerificationError, "HEAD-equivalent"):
+                fixture.verify()
+
+    def test_local_receipt_tree_mismatch_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            local["source"]["tree"] = "2" * 40
+            fixture.rebind_local_receipt(local)
+            with self.assertRaisesRegex(verifier.VerificationError, "tree differs"):
+                fixture.verify()
+
+    def test_local_receipt_inventory_path_or_digest_drift_is_rejected(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            removed = next(iter(local["digests"]))
+            del local["digests"][removed]
+            fixture.rebind_local_receipt(local)
+            with self.assertRaisesRegex(verifier.VerificationError, "digest inventory differs"):
+                fixture.verify()
+
+        temporary, fixture = self.fixture()
+        with temporary:
+            local = fixture.local_receipt()
+            path = next(iter(local["digests"]))
+            local["digests"][path] = digest("wrong")
+            fixture.rebind_local_receipt(local)
+            with self.assertRaisesRegex(verifier.VerificationError, "digest inventory differs"):
                 fixture.verify()
 
     def test_missing_local_qualification_gate_is_rejected(self) -> None:
@@ -238,8 +309,7 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
         with temporary:
             local = fixture.local_receipt()
             local["gates"].pop()
-            fixture.write_local_receipt(local)
-            fixture.write_receipt(fixture.receipt())
+            fixture.rebind_local_receipt(local)
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
@@ -248,8 +318,7 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
         with temporary:
             local = fixture.local_receipt()
             local["gates"][0], local["gates"][1] = local["gates"][1], local["gates"][0]
-            fixture.write_local_receipt(local)
-            fixture.write_receipt(fixture.receipt())
+            fixture.rebind_local_receipt(local)
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
@@ -258,8 +327,7 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
         with temporary:
             local = fixture.local_receipt()
             local["gates"][0]["state"] = "skipped"
-            fixture.write_local_receipt(local)
-            fixture.write_receipt(fixture.receipt())
+            fixture.rebind_local_receipt(local)
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
@@ -270,6 +338,45 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
             path.write_text("drifted source\n", encoding="utf-8")
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
+
+    def test_assume_unchanged_cannot_hide_source_drift_after_local_qualification(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            relative = "crates/dfmcp-mcp/src/live_server.rs"
+            run_git(fixture.source_root, "update-index", "--assume-unchanged", relative)
+            (fixture.source_root / relative).write_text("hidden drift\n", encoding="utf-8")
+            self.assertEqual(run_git(fixture.source_root, "status", "--porcelain=v1"), "")
+            with self.assertRaisesRegex(verifier.VerificationError, "bytes differ from HEAD"):
+                fixture.verify()
+
+    @unittest.skipUnless(os.name == "posix", "Unix executable semantics required")
+    def test_core_filemode_false_cannot_hide_source_mode_drift(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            relative = "crates/dfmcp-mcp/src/live_server.rs"
+            run_git(fixture.source_root, "config", "core.fileMode", "false")
+            (fixture.source_root / relative).chmod(0o755)
+            self.assertEqual(run_git(fixture.source_root, "status", "--porcelain=v1"), "")
+            with self.assertRaisesRegex(verifier.VerificationError, "executable semantics differ"):
+                fixture.verify()
+
+    def test_inherited_git_directory_override_is_ignored(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            other = fixture.root / "other"
+            other.mkdir()
+            run_git(other, "init", "-q")
+            run_git(other, "config", "user.email", "other@example.invalid")
+            run_git(other, "config", "user.name", "Other")
+            (other / "other.txt").write_text("other\n", encoding="utf-8")
+            run_git(other, "add", ".")
+            run_git(other, "commit", "-q", "-m", "other")
+            with mock.patch.dict(os.environ, {"GIT_DIR": os.fspath(other / ".git")}, clear=False):
+                normalized, opened = fixture.verify()
+            try:
+                self.assertEqual(normalized["source"]["dfmcp_commit"], fixture.commit)
+            finally:
+                os.close(opened.descriptor)
 
     def test_mutation_capability_contamination_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
