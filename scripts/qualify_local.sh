@@ -19,6 +19,7 @@ die() { printf '%bERROR%b %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v git >/dev/null 2>&1 || die "git is required"
 [[ -f architecture/live_admission_ticket_v2.json ]] || die "Protocol-bound V2 admission ticket contract is missing"
+[[ -f architecture/release_source_custody_v1.json ]] || die "Release source custody contract is missing"
 [[ -f crates/dfmcp-mcp/src/admission.rs ]] || die "Rust live admission boundary is missing"
 [[ -f crates/dwarf-fortress-mcp/tests/live_admission.rs ]] || die "Binary live admission tests are missing"
 
@@ -115,7 +116,8 @@ run_gate live-compatibility-registry python3 scripts/check_live_compatibility_re
 run_gate live-compatibility-resolution python3 scripts/check_live_compatibility_resolution.py
 run_gate live-compatibility-floor python3 scripts/check_live_compatibility_floor.py
 run_gate live-admission-doctor python3 scripts/check_live_admission_doctor.py
-run_gate live-server-artifact-admission python3 scripts/check_live_server_artifact.py
+run_gate live-server-artifact-admission bash -c \
+  'python3 scripts/check_live_server_artifact.py && python3 scripts/check_release_source_custody.py'
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests bash -c \
   'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_read_stable_repository_file_loader.py'
@@ -131,7 +133,8 @@ run_gate live-compatibility-promotion-tests python3 scripts/test_live_compatibil
 run_gate live-compatibility-resolution-tests python3 scripts/test_live_compatibility_resolution.py
 run_gate live-compatibility-floor-tests python3 scripts/test_live_compatibility_floor.py
 run_gate live-admission-doctor-tests python3 scripts/test_doctor_live_admission.py
-run_gate live-server-binary-qualification-tests python3 scripts/test_qualify_live_server_binary.py
+run_gate live-server-binary-qualification-tests bash -c \
+  'python3 scripts/test_qualify_live_server_binary.py && python3 scripts/test_release_source_custody.py'
 run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binary_receipt.py
 run_gate admitted-live-launcher-tests bash -c \
   'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
@@ -152,6 +155,8 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_local_qualification_receipt.py \
   scripts/check_implementation_status.py \
   scripts/test_implementation_status.py \
+  scripts/check_release_source_custody.py \
+  scripts/test_release_source_custody.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
   scripts/check_live_announcements.py \
