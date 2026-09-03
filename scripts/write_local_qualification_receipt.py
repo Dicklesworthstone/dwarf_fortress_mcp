@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
-from read_stable_repository_file import StableReadError, read_stable_regular_file
+from read_stable_repository_file import StableFile, StableReadError, read_stable_regular_file
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "architecture/local_qualification_receipt_v1.json"
@@ -53,6 +54,17 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def git_blob_object_id(value: bytes) -> str:
+    header = f"blob {len(value)}\0".encode("ascii")
+    try:
+        digest = hashlib.sha1(usedforsecurity=False)
+    except TypeError:
+        digest = hashlib.sha1()
+    digest.update(header)
+    digest.update(value)
+    return digest.hexdigest()
+
+
 def duplicate_rejecting_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for key, value in pairs:
@@ -62,11 +74,10 @@ def duplicate_rejecting_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return output
 
 
-def read_json_object(path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, Any]:
-    stable = read_stable_regular_file(path, maximum_bytes, label)
+def read_json_bytes(raw: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(
-            stable.content.decode("utf-8"),
+            raw.decode("utf-8"),
             object_pairs_hook=duplicate_rejecting_object,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -74,6 +85,11 @@ def read_json_object(path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES
     if not isinstance(value, dict):
         fail(f"{label} must be a JSON object")
     return value
+
+
+def read_json_object(path: Path, label: str, maximum_bytes: int = MAX_JSON_BYTES) -> dict[str, Any]:
+    stable = read_stable_regular_file(path, maximum_bytes, label)
+    return read_json_bytes(stable.content, label)
 
 
 def require_exact_keys(value: dict[str, Any], expected: set[str], path: str) -> None:
@@ -110,7 +126,15 @@ def require_positive_int(value: Any, path: str) -> int:
     return value
 
 
-def validate_relative_path(value: str, path: str) -> str:
+def require_nonnegative_int(value: Any, path: str, maximum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        fail(f"{path} must be a nonnegative integer")
+    if maximum is not None and value > maximum:
+        fail(f"{path} must be <= {maximum}")
+    return value
+
+
+def validate_relative_path(value: Any, path: str) -> str:
     text = require_string(value, path, 4096)
     if "\\" in text or text.startswith("/") or text.endswith("/") or "//" in text:
         fail(f"{path} is not a canonical relative POSIX path")
@@ -122,34 +146,40 @@ def validate_relative_path(value: str, path: str) -> str:
     return text
 
 
-def run_git(source_root: Path, arguments: list[str], *, binary: bool = False) -> bytes | str:
-    environment = os.environ.copy()
+def sanitized_git_environment() -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+    }
     environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["LC_ALL"] = "C"
+    return environment
+
+
+def run_git(source_root: Path, arguments: list[str], *, binary: bool = False) -> bytes | str:
     try:
         completed = subprocess.run(
             ["git", "-C", os.fspath(source_root), *arguments],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=not binary,
-            env=environment,
+            env=sanitized_git_environment(),
         )
     except OSError as exc:
         fail(f"cannot execute Git: {exc}")
     if completed.returncode != 0:
-        stderr = completed.stderr
-        detail = (
-            stderr.decode("utf-8", errors="replace")
-            if isinstance(stderr, bytes)
-            else stderr
-        )
+        detail = completed.stderr.decode("utf-8", errors="replace")
         fail(f"Git command failed: {detail.strip()[:2048]}")
-    stdout = completed.stdout
-    if isinstance(stdout, bytes) and len(stdout) > MAX_JSON_BYTES:
+    if len(completed.stdout) > MAX_JSON_BYTES:
         fail("Git output exceeds its byte bound")
-    if isinstance(stdout, str) and len(stdout.encode("utf-8")) > MAX_JSON_BYTES:
-        fail("Git output exceeds its byte bound")
-    return stdout
+    if binary:
+        return completed.stdout
+    try:
+        return completed.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail(f"Git output is not valid UTF-8: {exc}")
 
 
 def git_identity(source_root: Path) -> tuple[str, str]:
@@ -204,6 +234,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         fail("local qualification contract status drifted")
     if contract.get("gate_contract") != "architecture/live_server_binary_receipt_v1.json":
         fail("local qualification gate contract drifted")
+
     source = contract.get("source")
     if not isinstance(source, dict):
         fail("contract.source must be an object")
@@ -215,6 +246,10 @@ def load_contract(path: Path) -> dict[str, Any]:
             "tree_must_remain_exact",
             "worktree_status_must_remain_exact",
             "tracked_inventory_must_remain_exact",
+            "working_tree_bytes_must_match_head_blobs_for_clean_passed",
+            "working_tree_executable_semantics_must_match_head_on_unix",
+            "git_environment_must_be_sanitized",
+            "git_object_format",
             "tracked_entry_modes",
             "symbolic_links_allowed",
             "gitlinks_allowed",
@@ -231,9 +266,14 @@ def load_contract(path: Path) -> dict[str, Any]:
         "tree_must_remain_exact",
         "worktree_status_must_remain_exact",
         "tracked_inventory_must_remain_exact",
+        "working_tree_bytes_must_match_head_blobs_for_clean_passed",
+        "working_tree_executable_semantics_must_match_head_on_unix",
+        "git_environment_must_be_sanitized",
     ]:
         if source.get(field) is not True:
             fail(f"contract.source.{field} must remain true")
+    if source.get("git_object_format") != "sha1":
+        fail("local qualification Git object format drifted")
     if source.get("tracked_entry_modes") != ["100644", "100755"]:
         fail("local qualification tracked mode set drifted")
     if source.get("symbolic_links_allowed") is not False:
@@ -244,6 +284,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         require_positive_int(source.get(field), f"contract.source.{field}")
     if source.get("hash_algorithm") != "sha256":
         fail("local qualification hash algorithm drifted")
+
     statuses = contract.get("receipt_statuses")
     if not isinstance(statuses, dict) or list(statuses) != [
         "passed",
@@ -252,6 +293,54 @@ def load_contract(path: Path) -> dict[str, Any]:
         "failed",
     ]:
         fail("local qualification receipt status set or order drifted")
+
+    publication = contract.get("publication")
+    if not isinstance(publication, dict):
+        fail("contract.publication must be an object")
+    require_exact_keys(
+        publication,
+        {
+            "run_directory_create_only",
+            "run_directory_final_component_symbolic_links_allowed",
+            "unix_run_directory_mode",
+            "run_directory_owner_must_match_effective_user_when_available",
+            "gate_journal_mode",
+            "snapshot_create_only",
+            "snapshot_mode",
+            "receipt_create_only",
+            "receipt_mode",
+            "temporary_file_fsync",
+            "atomic_no_replace_hard_link",
+            "parent_directory_fsync",
+            "reverify_source_after_receipt_publication",
+            "invalid_evidence_removed_and_absence_verified",
+        },
+        "contract.publication",
+    )
+    for field in [
+        "run_directory_create_only",
+        "run_directory_owner_must_match_effective_user_when_available",
+        "snapshot_create_only",
+        "receipt_create_only",
+        "temporary_file_fsync",
+        "atomic_no_replace_hard_link",
+        "parent_directory_fsync",
+        "reverify_source_after_receipt_publication",
+        "invalid_evidence_removed_and_absence_verified",
+    ]:
+        if publication.get(field) is not True:
+            fail(f"contract.publication.{field} must remain true")
+    if publication.get("run_directory_final_component_symbolic_links_allowed") is not False:
+        fail("local qualification evidence directory may be a symbolic link")
+    for field, expected in [
+        ("unix_run_directory_mode", "0700"),
+        ("gate_journal_mode", "0600"),
+        ("snapshot_mode", "0600"),
+        ("receipt_mode", "0600"),
+    ]:
+        if publication.get(field) != expected:
+            fail(f"contract.publication.{field} drifted")
+
     authority = contract.get("authority")
     if not isinstance(authority, dict):
         fail("contract.authority must be an object")
@@ -282,6 +371,12 @@ def load_required_gates(path: Path) -> list[str]:
     return gates
 
 
+def executable_semantics_match(git_mode: str, worktree_mode: int) -> bool:
+    if os.name != "posix":
+        return True
+    return bool(worktree_mode & 0o111) == (git_mode == "100755")
+
+
 def collect_source_snapshot(
     source_root: Path,
     contract: dict[str, Any],
@@ -309,6 +404,7 @@ def collect_source_snapshot(
     )
     entries: list[dict[str, Any]] = []
     total_bytes = 0
+    head_equivalent = True
     for record in listing.split(b"\0"):
         if not record:
             continue
@@ -328,7 +424,7 @@ def collect_source_snapshot(
             fail(
                 f"tracked source entry {path!r} has unsupported mode {mode!r} and kind {kind!r}"
             )
-        require_commit(object_id, f"tracked_source[{path}].object_id")
+        object_id = require_commit(object_id, f"tracked_source[{path}].git_blob")
         candidate = source / PurePosixPath(path)
         resolved = candidate.resolve(strict=True)
         if resolved != candidate.absolute() or source not in resolved.parents:
@@ -337,7 +433,12 @@ def collect_source_snapshot(
             candidate,
             maximum_entry_bytes,
             f"tracked source entry {path}",
+            allow_empty=True,
         )
+        actual_object_id = git_blob_object_id(stable.content)
+        mode_matches = executable_semantics_match(mode, stable.mode)
+        if actual_object_id != object_id or not mode_matches:
+            head_equivalent = False
         total_bytes += stable.size
         if total_bytes > maximum_total_bytes:
             fail("tracked source inventory exceeds its total byte bound")
@@ -345,6 +446,8 @@ def collect_source_snapshot(
             {
                 "path": path,
                 "mode": mode,
+                "git_blob": object_id,
+                "worktree_mode": stable.mode,
                 "bytes": stable.size,
                 "sha256": stable.sha256,
             }
@@ -358,12 +461,14 @@ def collect_source_snapshot(
         fail("source commit or tree changed while collecting the qualification snapshot")
     if after_status != before_status:
         fail("worktree status changed while collecting the qualification snapshot")
+    dirty = bool(before_status) or not head_equivalent
     unsigned: dict[str, Any] = {
         "schema": SNAPSHOT_SCHEMA,
         "source": {
             "commit": before_commit,
             "tree": before_tree,
-            "dirty": bool(before_status),
+            "dirty": dirty,
+            "head_equivalent": head_equivalent,
             "status_sha256": sha256_bytes(before_status),
         },
         "entries": entries,
@@ -383,11 +488,19 @@ def validate_snapshot(value: dict[str, Any]) -> dict[str, Any]:
     source = value.get("source")
     if not isinstance(source, dict):
         fail("snapshot.source must be an object")
-    require_exact_keys(source, {"commit", "tree", "dirty", "status_sha256"}, "snapshot.source")
+    require_exact_keys(
+        source,
+        {"commit", "tree", "dirty", "head_equivalent", "status_sha256"},
+        "snapshot.source",
+    )
     require_commit(source.get("commit"), "snapshot.source.commit")
     require_commit(source.get("tree"), "snapshot.source.tree")
     if not isinstance(source.get("dirty"), bool):
         fail("snapshot.source.dirty must be Boolean")
+    if not isinstance(source.get("head_equivalent"), bool):
+        fail("snapshot.source.head_equivalent must be Boolean")
+    if source["head_equivalent"] is False and source["dirty"] is not True:
+        fail("a HEAD-divergent snapshot must be marked dirty")
     require_hash(source.get("status_sha256"), "snapshot.source.status_sha256")
     entries = value.get("entries")
     if not isinstance(entries, list) or not entries:
@@ -397,7 +510,11 @@ def validate_snapshot(value: dict[str, Any]) -> dict[str, Any]:
     for index, raw in enumerate(entries):
         if not isinstance(raw, dict):
             fail(f"snapshot.entries[{index}] must be an object")
-        require_exact_keys(raw, {"path", "mode", "bytes", "sha256"}, f"snapshot.entries[{index}]")
+        require_exact_keys(
+            raw,
+            {"path", "mode", "git_blob", "worktree_mode", "bytes", "sha256"},
+            f"snapshot.entries[{index}]",
+        )
         path = validate_relative_path(raw.get("path"), f"snapshot.entries[{index}].path")
         encoded = path.encode("utf-8")
         if previous is not None and encoded <= previous:
@@ -406,11 +523,25 @@ def validate_snapshot(value: dict[str, Any]) -> dict[str, Any]:
         mode = require_string(raw.get("mode"), f"snapshot.entries[{index}].mode", 6)
         if mode not in {"100644", "100755"}:
             fail(f"snapshot.entries[{index}].mode is unsupported")
-        size = raw.get("bytes")
-        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-            fail(f"snapshot.entries[{index}].bytes must be a nonnegative integer")
         normalized.append(
-            {"path": path, "mode": mode, "bytes": size, "sha256": require_hash(raw.get("sha256"), f"snapshot.entries[{index}].sha256")}
+            {
+                "path": path,
+                "mode": mode,
+                "git_blob": require_commit(
+                    raw.get("git_blob"), f"snapshot.entries[{index}].git_blob"
+                ),
+                "worktree_mode": require_nonnegative_int(
+                    raw.get("worktree_mode"),
+                    f"snapshot.entries[{index}].worktree_mode",
+                    0o7777,
+                ),
+                "bytes": require_nonnegative_int(
+                    raw.get("bytes"), f"snapshot.entries[{index}].bytes"
+                ),
+                "sha256": require_hash(
+                    raw.get("sha256"), f"snapshot.entries[{index}].sha256"
+                ),
+            }
         )
     if value.get("entries_digest") != sha256_bytes(canonical_json(normalized)):
         fail("qualification snapshot entries do not reproduce entries_digest")
@@ -422,8 +553,74 @@ def validate_snapshot(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-def parse_gates(path: Path, required: list[str], requested_status: str) -> list[dict[str, Any]]:
-    stable = read_stable_regular_file(path, MAX_GATE_BYTES, "qualification gate journal")
+def validate_private_evidence_directory(path: Path) -> Path:
+    if not path.is_absolute():
+        fail("qualification evidence directory must be absolute")
+    absolute = Path(os.path.abspath(path))
+    try:
+        before = os.lstat(absolute)
+    except OSError as exc:
+        fail(f"cannot inspect qualification evidence directory {absolute}: {exc}")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+        fail("qualification evidence directory must be a real directory, not a symbolic link")
+    resolved = absolute.resolve(strict=True)
+    try:
+        after = os.stat(resolved, follow_symlinks=False)
+    except OSError as exc:
+        fail(f"cannot inspect resolved qualification evidence directory {resolved}: {exc}")
+    if not stat.S_ISDIR(after.st_mode):
+        fail("resolved qualification evidence path is not a directory")
+    if os.name == "posix":
+        if stat.S_IMODE(after.st_mode) != 0o700:
+            fail("qualification evidence directory must have exact owner-only mode 0700")
+        if hasattr(os, "geteuid") and after.st_uid != os.geteuid():
+            fail("qualification evidence directory is not owned by the effective user")
+    return resolved
+
+
+def private_evidence_candidate(path: Path, expected_parent: Path | None = None) -> tuple[Path, Path]:
+    if not path.is_absolute():
+        fail("qualification evidence path must be absolute")
+    if not path.name or path.name in {".", ".."} or any(ord(ch) < 0x20 for ch in path.name):
+        fail("qualification evidence filename is invalid")
+    parent = validate_private_evidence_directory(path.parent)
+    if expected_parent is not None and parent != expected_parent:
+        fail("qualification evidence files must share one private run directory")
+    return parent / path.name, parent
+
+
+def validate_private_evidence_file(stable: StableFile, label: str) -> None:
+    if os.name == "posix":
+        if stable.mode != 0o600:
+            fail(f"{label} must have exact owner-read/write mode 0600")
+        if hasattr(os, "geteuid") and stable.owner_uid != os.geteuid():
+            fail(f"{label} is not owned by the effective user")
+
+
+def read_private_evidence_file(
+    path: Path,
+    maximum_bytes: int,
+    label: str,
+    expected_parent: Path | None = None,
+) -> StableFile:
+    candidate, _ = private_evidence_candidate(path, expected_parent)
+    stable = read_stable_regular_file(candidate, maximum_bytes, label)
+    validate_private_evidence_file(stable, label)
+    return stable
+
+
+def parse_gates(
+    path: Path,
+    required: list[str],
+    requested_status: str,
+    expected_parent: Path | None = None,
+) -> list[dict[str, Any]]:
+    stable = read_private_evidence_file(
+        path,
+        MAX_GATE_BYTES,
+        "qualification gate journal",
+        expected_parent,
+    )
     try:
         text = stable.content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -485,42 +682,67 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def write_atomic_create_only(path: Path, value: dict[str, Any]) -> None:
-    if not path.is_absolute():
-        fail("qualification evidence path must be absolute")
-    parent = path.parent.resolve(strict=True)
-    if not parent.is_dir():
-        fail("qualification evidence parent is not a directory")
-    destination = parent / path.name
-    if destination.exists() or destination.is_symlink():
-        fail(f"qualification evidence already exists: {destination}")
-    lock = parent / f".{path.name}.lock"
-    lock_descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+def write_atomic_create_only(path: Path, value: dict[str, Any]) -> Path:
+    destination, parent = private_evidence_candidate(path)
+    payload = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
     temporary: str | None = None
+    published = False
     try:
         descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
-        payload = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        if destination.exists() or destination.is_symlink():
-            fail(f"qualification evidence appeared during publication: {destination}")
-        os.replace(temporary, destination)
+        try:
+            os.link(temporary, destination, follow_symlinks=False)
+        except FileExistsError:
+            fail(f"qualification evidence already exists: {destination}")
+        except OSError as exc:
+            fail(f"cannot publish qualification evidence without replacement: {exc}")
+        published = True
+        os.unlink(temporary)
         temporary = None
         fsync_directory(parent)
+        stable = read_stable_regular_file(destination, len(payload), "published qualification evidence")
+        validate_private_evidence_file(stable, "published qualification evidence")
+        if stable.content != payload:
+            fail("published qualification evidence bytes differ from the prepared payload")
+        return destination
+    except BaseException:
+        if published:
+            try:
+                os.unlink(destination)
+                fsync_directory(parent)
+            except OSError:
+                pass
+        raise
     finally:
-        os.close(lock_descriptor)
         if temporary is not None:
             try:
                 os.unlink(temporary)
+                fsync_directory(parent)
             except OSError:
                 pass
-        try:
-            os.unlink(lock)
-        except OSError:
-            pass
-        fsync_directory(parent)
+
+
+def remove_published_evidence(path: Path, label: str) -> None:
+    candidate, parent = private_evidence_candidate(path)
+    try:
+        os.unlink(candidate)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        fail(f"cannot remove invalid {label}: {exc}")
+    fsync_directory(parent)
+    try:
+        os.lstat(candidate)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        fail(f"cannot verify invalid {label} removal: {exc}")
+    fail(f"invalid {label} still exists after removal")
 
 
 def begin(
@@ -531,17 +753,16 @@ def begin(
     allow_dirty: bool,
 ) -> dict[str, Any]:
     contract = load_contract(contract_path)
+    private_evidence_candidate(snapshot_path)
     snapshot = collect_source_snapshot(source_root, contract, expected_commit)
     if snapshot["source"]["dirty"] and not allow_dirty:
-        fail("clean local qualification refuses a dirty or untracked worktree")
-    write_atomic_create_only(snapshot_path, snapshot)
+        fail(
+            "clean local qualification refuses a dirty, untracked, mode-divergent, or HEAD-divergent worktree"
+        )
+    published = write_atomic_create_only(snapshot_path, snapshot)
     current = collect_source_snapshot(source_root, contract, expected_commit)
     if current != snapshot:
-        try:
-            snapshot_path.unlink()
-            fsync_directory(snapshot_path.parent)
-        except OSError:
-            pass
+        remove_published_evidence(published, "qualification source snapshot")
         fail("source changed while publishing the qualification snapshot")
     return {
         "schema": "dfmcp.qualification-source-snapshot-result/1",
@@ -549,10 +770,11 @@ def begin(
         "commit": snapshot["source"]["commit"],
         "tree": snapshot["source"]["tree"],
         "dirty": snapshot["source"]["dirty"],
+        "head_equivalent": snapshot["source"]["head_equivalent"],
         "entry_count": len(snapshot["entries"]),
         "entries_digest": snapshot["entries_digest"],
         "snapshot_digest": snapshot["snapshot_digest"],
-        "snapshot": os.fspath(snapshot_path),
+        "snapshot": os.fspath(published),
     }
 
 
@@ -570,25 +792,41 @@ def finish(
     contract = load_contract(contract_path)
     expected = require_commit(expected_commit, "expected_commit")
     started = require_string(started_at, "started_at", 128)
-    snapshot = validate_snapshot(read_json_object(snapshot_path, "qualification source snapshot"))
+    output_candidate, private_parent = private_evidence_candidate(output_path)
+    snapshot_stable = read_private_evidence_file(
+        snapshot_path,
+        MAX_JSON_BYTES,
+        "qualification source snapshot",
+        private_parent,
+    )
+    snapshot = validate_snapshot(
+        read_json_bytes(snapshot_stable.content, "qualification source snapshot")
+    )
     if snapshot["source"]["commit"] != expected:
         fail("qualification snapshot commit differs from the expected commit")
     current = collect_source_snapshot(source_root, contract, expected)
     if current != snapshot:
         fail("source snapshot changed during local qualification")
     required_gates = load_required_gates(gate_contract_path)
-    gates = parse_gates(gates_path, required_gates, requested_status)
+    gates = parse_gates(gates_path, required_gates, requested_status, private_parent)
     dirty = snapshot["source"]["dirty"]
+    head_equivalent = snapshot["source"]["head_equivalent"]
     final_status = "development_dirty" if requested_status == "passed" and dirty else requested_status
-    if final_status == "passed" and dirty:
-        fail("a clean passing qualification receipt cannot name dirty source")
+    if final_status == "passed" and (dirty or not head_equivalent):
+        fail("a clean passing qualification receipt must be HEAD-equivalent")
     digests = {entry["path"]: entry["sha256"] for entry in snapshot["entries"]}
     receipt = {
         "schema": RECEIPT_SCHEMA,
         "status": final_status,
         "started_at": started,
         "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": {"commit": expected, "dirty": dirty},
+        "source": {
+            "commit": expected,
+            "dirty": dirty,
+            "head_equivalent": head_equivalent,
+            "tree": snapshot["source"]["tree"],
+            "snapshot_digest": snapshot["snapshot_digest"],
+        },
         "host": {
             "system": platform.system(),
             "release": platform.release(),
@@ -605,14 +843,10 @@ def finish(
     current_before_publish = collect_source_snapshot(source_root, contract, expected)
     if current_before_publish != snapshot:
         fail("source changed while preparing the qualification receipt")
-    write_atomic_create_only(output_path, receipt)
+    published = write_atomic_create_only(output_candidate, receipt)
     current_after_publish = collect_source_snapshot(source_root, contract, expected)
     if current_after_publish != snapshot:
-        try:
-            output_path.unlink()
-            fsync_directory(output_path.parent)
-        except OSError:
-            pass
+        remove_published_evidence(published, "qualification receipt")
         fail("source changed while publishing the qualification receipt")
     return receipt
 
