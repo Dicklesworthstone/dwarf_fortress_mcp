@@ -99,6 +99,11 @@ readiness.
 
 ### Changed
 
+- Migrated the pinned FastMCP dependency to `180a7c88890705217bb8e202d19555adabf24187`
+  and published Asupersync 0.5.0. Four modern-only stdio entry points now retain an
+  explicit runtime owner and preserve inherited caller context restrictions.
+  The existing real subprocess harness has bounded response waits and joined
+  reader cleanup; conformance validation is tracked in `dfmcp-k2y`.
 - Closed a protocol-confusion defect in process admission: an admitted compatibility decision can no
   longer execute an implicitly selected protocol-1.0 server. Production startup now requires exact
   protocol agreement at every representation and an explicit runner in the V2 production map.

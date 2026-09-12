@@ -35,6 +35,13 @@ implementation source exists
 
 No live mutation RPC or mutation capability is implemented or admitted.
 
+The Asupersync 0.5.0 consumer migration (`dfmcp-k2y`) advances the exact FastMCP
+pin to `180a7c88890705217bb8e202d19555adabf24187` and gives all four stdio
+composition roots explicit runtime ownership. Its scoped Rust and subprocess
+validation is in progress. It does not create a fresh full qualification receipt
+or admit a live tuple; historical conformance findings remain recorded in
+`docs/DOGFOODING_FASTMCP.md`.
+
 ## Evidence hierarchy
 
 Implementation claims must identify their evidence rung:

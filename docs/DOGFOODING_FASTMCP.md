@@ -55,8 +55,14 @@ which upstream regression forced it.
 | 2026-08-29 | `bd41e69070f5604d6dbb24185dcabaef591a01e1` (main @ adoption) | v0.0.1 initial integration | — | modern-only profile (`default-features = false`, `tasks`); first stdio laboratory slice |
 | 2026-08-29 | `6481d49a6f9282f8161015323283fb7764dcf2f7` (main: fixes #59, #60) | v0.0.1 first integration | #59, #60 | modern-only profile compiles end to end (transport + facade + tasks); #61 (feature-less server build) open upstream, does not affect the admitted profile |
 | 2026-08-30 | `12d3469df8081ffdb663019ee4936324fedc98d5` (tags/v0.8.0) | v0.0.1 v0.8.0 preflight | v0.8.0 release | Restructured sse.rs (legacy SSE removed upstream), non-legacy warning fixes (3a82c30), modern-only profile verified |
+| 2026-09-12 | `180a7c88890705217bb8e202d19555adabf24187` (main) | v0.0.1 / `dfmcp-k2y` | Upstream range `12d3469..180a7c8`; Asupersync 0.5.0 migration | Keeps modern-only `tasks`; replaces the removed implicit stdio entry with explicit owned runtime/context calls. Current conformance execution is pending; historical failures below are retained. |
 
 ## Conformance status
+
+The current pin is `180a7c8`, using published Asupersync 0.5.0. The migration
+retains the existing wire assertions and adds bounded response waits with owned
+reader cleanup. Neither the pin bump nor its compilation resolves the historical
+findings below without executing their corresponding real subprocess tests.
 
 As of 2026-08-31, the v0.8.0 pin (`12d3469`) **fails the modern handshake
 golden tests in CI**: `test_negative_era_refusal_and_marker_validations`

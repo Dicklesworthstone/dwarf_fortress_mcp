@@ -60,6 +60,16 @@ dfmcp-lab (now) → DFHack bridge (later phases)
 `dfmcp/0` semantic negotiation remains authoritative above MCP negotiation: a client that speaks
 MCP but refuses `dfmcp/0` gets a session that can observe and plan nothing.
 
+The current framework pin uses published Asupersync 0.5.0 and explicit
+`run_stdio_with_cx` startup. The four stdio composition roots share one private
+runtime owner in `dfmcp-mcp`: one scheduler worker, a platform reactor, and at
+most sixteen on-demand blocking workers. The blocking pool keeps the receive
+pump off the scheduler worker. An inherited caller context retains its identity,
+drivers, cancellation, budget, and capability restrictions; startup creates a
+fresh root only when no caller context exists. These process-owning synchronous
+entries do not promise nested operation inside a borrowed current-thread runtime.
+They do not change production tickets, protocol dispatch, or DFHack admission.
+
 ## 4. Tool mapping
 
 Logical registry names keep their dots (`fortress.open_session`); MCP wire names render the dot

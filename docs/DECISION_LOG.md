@@ -136,6 +136,32 @@ revision bumps, each recorded with a conformance note in `docs/DOGFOODING_FASTMC
 **Rollback/reversal:** remove `dfmcp-mcp` and revert the allowlist classes; the scaffold compiles
 without the transport, as it did before adoption.
 
+## ADR-014 — Explicit runtime ownership for the Asupersync 0.5 MCP entry
+
+**Status:** source migration under `dfmcp-k2y` (2026-09-12)
+**Decision:** consume FastMCP main `180a7c88890705217bb8e202d19555adabf24187`
+through the existing Git dependency. Retain ADR-013's modern-only `tasks` profile.
+The four stdio composition roots use the framework's explicit context entry and
+one private runtime owner in the existing MCP crate.
+**Context:** the newer framework removed implicit runtime startup. A runtime with
+its default disabled blocking pool can run a blocking receive pump on a scheduler
+worker and prevent request-owned children from progressing.
+**Security:** capture an existing context before bootstrap and pass it unchanged;
+neither a new runtime nor ambient installation grants removed capabilities.
+No transport context becomes a fortress semantic grant or a production ticket.
+**Counterexamples:** a denied spawn becoming admitted, lost parent cancellation,
+a detached pump, or a modern-only protocol failure blocks this migration.
+Arbitrary nested synchronous entry inside a borrowed current-thread runtime is
+not claimed.
+**Affected registries:** only the exact `mcp_transport.pin` advances. The
+dependency classes, feature allowset, eleven tools, and production protocol map
+remain unchanged.
+**Testing/evidence:** real subprocess lifecycle and original negative fixtures,
+plus native runtime ownership and inherited-restriction tests. Pin history and
+execution status live in `docs/DOGFOODING_FASTMCP.md`; a pending test is not a pass.
+**Rollback/reversal:** an incompatible upstream result requires an explicit pin
+history entry and a matched entry-API revision, preserving all prior evidence.
+
 ## ADR template
 
 ```markdown
