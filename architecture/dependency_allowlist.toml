@@ -1,6 +1,6 @@
 schema = "dfmcp.dependency-allowlist.v1"
 policy = "closed-universe"
-toolchain = "nightly"
+toolchain = "nightly-2026-08-31"
 edition = "2024"
 unsafe_code = "forbid"
 

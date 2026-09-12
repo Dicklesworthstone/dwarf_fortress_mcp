@@ -183,8 +183,10 @@ def main() -> int:
     if edition != "2024":
         failures.append(f"workspace edition must be 2024, got {edition!r}")
     toolchain = load_toml(ROOT / "rust-toolchain.toml").get("toolchain", {})
-    if toolchain.get("channel") != "nightly":
-        failures.append("rust-toolchain.toml must track the latest nightly channel")
+    if toolchain.get("channel") != "nightly-2026-08-31":
+        failures.append("rust-toolchain.toml must use the approved fleet pin nightly-2026-08-31")
+    if policy.get("toolchain") != "nightly-2026-08-31":
+        failures.append("dependency policy must declare the approved fleet pin nightly-2026-08-31")
     lint = root_manifest.get("workspace", {}).get("lints", {}).get("rust", {}).get("unsafe_code")
     if lint != "forbid":
         failures.append('workspace must set unsafe_code = "forbid"')
