@@ -2363,7 +2363,7 @@ pub fn run_live_v1_1_development_stdio() {
         eprintln!("protocol-1.1 development startup: FAIL: {failure}");
         std::process::exit(1);
     }
-    ServerBuilder::new(
+    let server = ServerBuilder::new(
         "dwarf-fortress-mcp-live-v1-1-development",
         env!("CARGO_PKG_VERSION"),
     )
@@ -2389,8 +2389,8 @@ pub fn run_live_v1_1_development_stdio() {
          citizens, announcements, and all. Every result carries an Agent Turn with exact anchor, \
          retained-window coverage, explicit historical uncertainty, authority, and recovery.",
     )
-    .build()
-    .run_stdio();
+    .build();
+    crate::run_modern_stdio(server);
 }
 
 #[cfg(test)]

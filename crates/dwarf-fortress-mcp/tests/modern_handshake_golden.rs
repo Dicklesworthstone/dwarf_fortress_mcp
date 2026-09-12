@@ -13,14 +13,19 @@
 //! silent regression in a downstream agent's plan/commit flow.
 
 use std::error::Error;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{Receiver, sync_channel};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 struct StdioClient {
     child: Child,
-    reader: BufReader<std::process::ChildStdout>,
+    responses: Option<Receiver<Result<Value, String>>>,
+    reader: Option<JoinHandle<()>>,
+    deadline: Instant,
 }
 
 impl StdioClient {
@@ -32,12 +37,58 @@ impl StdioClient {
             .stderr(Stdio::inherit())
             .spawn()?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or("failed to capture stdout from child process")?;
-        let reader = BufReader::new(stdout);
-        Ok(Self { child, reader })
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("failed to capture stdout from child process".into());
+            }
+        };
+        let (sender, responses) = sync_channel(1);
+        let reader = match std::thread::Builder::new()
+            .name("dfmcp-stdio-test-reader".to_owned())
+            .spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                loop {
+                    const MAX_FRAME_BYTES: u64 = 8 * 1024 * 1024;
+                    let mut line = Vec::new();
+                    let result = match (&mut reader)
+                        .take(MAX_FRAME_BYTES + 1)
+                        .read_until(b'\n', &mut line)
+                    {
+                        Ok(0) => Err("child stdout closed before a JSON-RPC response".to_owned()),
+                        Ok(length) if length as u64 > MAX_FRAME_BYTES => {
+                            Err("child response exceeded the frame bound".to_owned())
+                        }
+                        Ok(_) => match std::str::from_utf8(&line) {
+                            Ok(line) if line.trim().starts_with('{') => {
+                                serde_json::from_str(line).map_err(|error| error.to_string())
+                            }
+                            Ok(_) => continue,
+                            Err(error) => Err(error.to_string()),
+                        },
+                        Err(error) => Err(error.to_string()),
+                    };
+                    let terminal = result.is_err();
+                    if sender.send(result).is_err() || terminal {
+                        break;
+                    }
+                }
+            }) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.into());
+            }
+        };
+        Ok(Self {
+            child,
+            responses: Some(responses),
+            reader: Some(reader),
+            deadline: Instant::now() + Duration::from_secs(45),
+        })
     }
 
     fn send(&mut self, request: &Value) -> Result<Value, Box<dyn Error>> {
@@ -47,16 +98,17 @@ impl StdioClient {
         stdin.write_all(b"\n")?;
         stdin.flush()?;
 
-        let mut response_line = String::new();
-        while self.reader.read_line(&mut response_line)? > 0 {
-            let trimmed = response_line.trim();
-            if trimmed.starts_with('{') {
-                let parsed: Value = serde_json::from_str(trimmed)?;
-                return Ok(parsed);
-            }
-            response_line.clear();
-        }
-        Err("child process stdout closed without emitting JSON-RPC line".into())
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .ok_or("stdio lifecycle exceeded its independent 45-second deadline")?;
+        let response = self
+            .responses
+            .as_ref()
+            .ok_or("stdio response reader unavailable")?
+            .recv_timeout(remaining.min(Duration::from_secs(10)))
+            .map_err(|error| format!("stdio response deadline/channel failure: {error}"))??;
+        Ok(response)
     }
 }
 
@@ -64,6 +116,11 @@ impl Drop for StdioClient {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // A full response slot must not keep the owned reader blocked in send.
+        drop(self.responses.take());
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 

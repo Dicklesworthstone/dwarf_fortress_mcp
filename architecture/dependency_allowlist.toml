@@ -25,7 +25,7 @@ external_runtime_dependencies = []
 # bump ships with a conformance note in docs/DOGFOODING_FASTMCP.md.
 crate = "fastmcp-rust"
 repository = "https://github.com/Dicklesworthstone/fastmcp_rust"
-pin = "12d3469df8081ffdb663019ee4936324fedc98d5"
+pin = "180a7c88890705217bb8e202d19555adabf24187"
 profile = "modern-only-mcp-2026-07-28"
 required_features = ["tasks"]
 forbidden_features = [
@@ -48,7 +48,7 @@ forbidden_features = [
 # Each exception names the owned path that pulls it and must never appear as
 # a direct declaration in any workspace manifest.
 #
-# prost: transitive of asupersync v0.4.9 (owned runtime; internal OTLP
+# prost: admitted only as a transitive of asupersync (owned runtime; internal OTLP
 # evidence mapping). The dfmcp trust domain never references prost; the
 # DFHack bridge protocol remains a design artifact in proto/dfmcp.proto.
 lock_exceptions = ["prost"]

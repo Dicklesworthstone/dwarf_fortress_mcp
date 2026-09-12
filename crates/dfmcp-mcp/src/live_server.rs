@@ -1935,7 +1935,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
 
 /// Run the authenticated, read-only, modern MCP 2026-07-28 server on stdio.
 pub fn run_live_stdio() {
-    ServerBuilder::new("dwarf-fortress-mcp-live", env!("CARGO_PKG_VERSION"))
+    let server = ServerBuilder::new("dwarf-fortress-mcp-live", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession)
         .tool(FortressObserve)
         .tool(FortressQuery)
@@ -1956,8 +1956,8 @@ pub fn run_live_stdio() {
              Every result includes an agent_turn packet with an exact canonical anchor, coverage, \
              omissions, authority, continuity, and the minimum safe next step.",
         )
-        .build()
-        .run_stdio();
+        .build();
+    crate::run_modern_stdio(server);
 }
 
 #[cfg(test)]

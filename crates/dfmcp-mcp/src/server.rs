@@ -1280,7 +1280,7 @@ pub fn validate_localhost_bind(bind_addr: &str) -> Result<()> {
 
 /// Run the modern-only MCP 2026-07-28 server on stdio.
 pub fn run_stdio() {
-    ServerBuilder::new("dwarf-fortress-mcp", env!("CARGO_PKG_VERSION"))
+    let server = ServerBuilder::new("dwarf-fortress-mcp", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession)
         .tool(FortressObserve)
         .tool(FortressQuery)
@@ -1301,8 +1301,8 @@ pub fn run_stdio() {
              from the negotiated grants. Dispatch success is never goal success: only \
              evidence-backed postcondition verification counts.",
         )
-        .build()
-        .run_stdio();
+        .build();
+    crate::run_modern_stdio(server);
 }
 
 #[cfg(test)]

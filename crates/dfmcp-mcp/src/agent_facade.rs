@@ -1067,7 +1067,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
 
 /// Run the modern-only MCP 2026-07-28 server with the agent-oriented facade.
 pub fn run_stdio() {
-    ServerBuilder::new("dwarf-fortress-mcp", env!("CARGO_PKG_VERSION"))
+    let server = ServerBuilder::new("dwarf-fortress-mcp", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession)
         .tool(FortressObserve)
         .tool(FortressQuery)
@@ -1089,8 +1089,8 @@ pub fn run_stdio() {
              success; only authoritative observation and postcondition proof count. The current \
              adapter is process-local and does not claim live Dwarf Fortress or DFHack control.",
         )
-        .build()
-        .run_stdio();
+        .build();
+    crate::run_modern_stdio(server);
 }
 
 #[cfg(test)]
