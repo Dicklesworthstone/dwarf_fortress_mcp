@@ -80,7 +80,7 @@ const fn encode_process_scoped_live_session(process_scope: u64, raw: u128) -> u1
     let sequence = raw & LIVE_SESSION_SEQUENCE_MASK;
     LIVE_SESSION_NAMESPACE
         | PROCESS_SCOPED_SESSION_MARKER
-        | (u128::from(process_scope) << LIVE_SESSION_SEQUENCE_BITS)
+        | ((process_scope as u128) << LIVE_SESSION_SEQUENCE_BITS)
         | sequence
 }
 
