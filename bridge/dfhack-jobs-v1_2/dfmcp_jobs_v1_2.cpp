@@ -126,13 +126,14 @@ command_result ReadObservation(color_ostream &, const wire::Request *in, wire::R
     out->set_failure_code(4);
     if (!Core::getInstance().isWorldLoaded() || !World::isFortressMode() ||
         !df::global::world || !df::global::job_next_id) return CR_OK;
-    const auto year = World::ReadCurrentYear();
+    const auto year = static_cast<std::int64_t>(World::ReadCurrentYear());
     const auto year_tick = World::ReadCurrentTick();
     const auto site = World::GetCurrentSiteId();
     const auto next_id = *df::global::job_next_id;
     const std::string folder = World::ReadWorldFolder();
     out->set_failure_code(5);
-    if (year < 0 || year_tick >= 403200 || site < 0 || next_id < 0 ||
+    if (year < 0 || year > std::numeric_limits<std::uint32_t>::max() ||
+        year_tick >= 403200 || site < 0 || next_id < 0 ||
         !valid_utf8(folder, 512, false)) return CR_OK;
 
     // RPC functions registered with flags=0 execute under DFHack's suspension.

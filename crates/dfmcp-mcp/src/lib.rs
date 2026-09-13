@@ -18,6 +18,7 @@ pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
+pub mod live_jobs_server;
 mod live_server;
 mod live_server_v1_1;
 pub mod server;

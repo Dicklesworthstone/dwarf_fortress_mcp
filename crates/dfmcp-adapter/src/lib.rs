@@ -31,6 +31,8 @@ pub mod live_connect;
 pub mod live_connect_v1_1;
 pub mod live_evidence;
 pub mod live_identity;
+pub mod live_jobs;
+pub mod live_jobs_rpc;
 pub mod live_observation;
 pub mod live_observation_publication_v1_1;
 pub mod live_observation_v1_1;
