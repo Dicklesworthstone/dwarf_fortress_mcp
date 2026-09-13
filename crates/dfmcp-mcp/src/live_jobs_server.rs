@@ -103,8 +103,10 @@ fn resolve(id: Option<String>) -> Result<Arc<Mutex<JobSession>>> {
     }
     let value = u128::from_str_radix(&raw, 16).map_err(|_| error(ErrorCode::InvalidRequest, "invalid jobs session handle"))?;
     let id = SessionId::new(value);
-    if !id.is_process_scoped_live() || (id.get() & ((1u128 << 62) - 1)) >> 60 != 1 {
-        return Err(error(ErrorCode::InvalidRequest, "session belongs to a different runtime"));
+    // Parsing may not mint a process-scoped identity from an untrusted raw ID.
+    if value != id.get() || !id.is_process_scoped_live()
+        || (id.get() & ((1u128 << 62) - 1)) >> 60 != 1 {
+        return Err(error(ErrorCode::InvalidRequest, "session belongs to a different runtime or is not an encoded handle"));
     }
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(|| error(ErrorCode::SessionNotFound, "jobs session not found"))
 }
@@ -495,6 +497,8 @@ mod tests {
         assert!(allowed_environment("DFMCP_JOBS_TOKEN"));
         assert!(read_capabilities(Some(vec!["control_clock".to_owned()])).is_err());
         assert!(resolve(Some("11000000000000000000000000000001".to_owned())).is_err());
+        let raw_alias = format!("{:032x}",(1u128 << 127) | FAMILY | 1);
+        assert!(matches!(resolve(Some(raw_alias)),Err(failure) if failure.code==ErrorCode::InvalidRequest));
     }
     #[test]
     fn unbound_error_does_not_claim_complete_job_coverage()->Result<()> {
