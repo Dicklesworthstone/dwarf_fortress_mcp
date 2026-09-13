@@ -36,6 +36,7 @@ pub mod live_jobs_rpc;
 pub mod live_observation;
 pub mod live_observation_publication_v1_1;
 pub mod live_observation_v1_1;
+pub mod live_operations;
 pub mod live_projection;
 pub mod live_projection_v1_1;
 pub mod live_session;
@@ -116,8 +117,8 @@ pub use live_bootstrap_v1_1::{
 pub use live_briefing::{
     CitizenStatusCounts, LiveAttentionItem, LiveAttentionSeverity, LiveChangeSummary,
     LiveCoverageDomain, LiveCoverageEntry, LiveCoverageStatus, LiveFortressBriefing,
-    MAX_BRIEFING_ATTENTION_ITEMS, MAX_BRIEFING_CHANGE_IDS, build_live_briefing,
-    summarize_live_change,
+    MAX_BRIEFING_ATTENTION_ITEMS, MAX_BRIEFING_CHANGE_IDS,
+    build_live_briefing, summarize_live_change,
 };
 pub use live_compatibility::{LiveCompatibilityPolicy, LiveCompatibilityVerdict};
 pub use live_connect::{
