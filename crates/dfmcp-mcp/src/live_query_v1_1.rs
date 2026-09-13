@@ -1,5 +1,5 @@
-//! Protocol-1.1 query tool integration. Session ownership and bridge state stay
-//! in the parent server; query execution never refreshes or mutates the game.
+//! Protocol-1.1 query integration over session-owned canonical state.
+//! Only await_watch explicitly refreshes the read-only bridge, at most once.
 
 use super::*;
 
@@ -7,6 +7,8 @@ use super::*;
 mod semantic_query;
 #[path = "query_response.rs"]
 mod query_response;
+#[path = "watch_refresh.rs"]
+mod watch_refresh;
 
 use query_response::QueryResponseProjection;
 
@@ -15,7 +17,7 @@ pub(super) fn query(
     mode: Option<String>,
     limit: Option<u32>,
     continuation: Option<String>,
-    query: Option<JsonValue>,
+    mut query: Option<JsonValue>,
 ) -> String {
     let operation = "fortress.query";
     let session = match resolve_session(session_id) {
@@ -26,24 +28,67 @@ pub(super) fn query(
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let anchor = match guard.current_anchor() {
+    let basis = match guard.current_anchor() {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let (request_id, context) = match guard.next_context() {
+    let (request_id, mut context) = match guard.next_context() {
         Ok(value) => value,
         Err(failure) => {
             return session_error(&guard, operation, AgentPhase::Inspect,
-                ObservationProfile::Tactical, RequestId::NIL, anchor,
+                ObservationProfile::Tactical, RequestId::NIL, basis,
                 ContinuityStatus::Continuous, &failure);
         }
     };
     let outcome = (|| -> Result<String> {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-        if guard.source_poisoned() {
-            return Err(error(ErrorCode::AdapterFailure,
-                "query source is poisoned; open a new session instead of treating cached data as fresh"));
+        if query.is_some() && (mode.is_some() || limit.is_some() || continuation.is_some()) {
+            return Err(error(ErrorCode::InvalidRequest,
+                "do not mix mode/limit/continuation with query; put structured options inside query.query"));
         }
+        let kind = query.as_ref().and_then(|input| input.get("query"))
+            .and_then(|input| input.get("kind")).and_then(JsonValue::as_str);
+        let awaiting = kind == Some("await_watch");
+        let metadata_only = matches!(kind, Some("watches" | "cancel_watch" | "release_watch"))
+            || (query.is_none() && mode.as_deref() == Some("schema"));
+        let needs_read = if awaiting {
+            let projection = guard.adapter.current_projection().ok_or_else(|| {
+                error(ErrorCode::InternalInvariantViolation, "condition wait has no canonical projection")
+            })?;
+            let input = query.as_ref().ok_or_else(|| {
+                error(ErrorCode::InternalInvariantViolation, "condition wait lost its request")
+            })?;
+            semantic_query::prepare_await(&projection.snapshot, &context, input)?
+        } else { false };
+        if guard.source_poisoned() && !metadata_only && !(awaiting && !needs_read) {
+            return Err(error(ErrorCode::AdapterFailure,
+                "query source is poisoned; only watch listing/cancellation/release and schema discovery remain available"));
+        }
+        let refresh = if needs_read {
+            let observation = watch_refresh::once(&context, |request, ctx| {
+                guard.adapter.observe(request, ctx)
+            })?;
+            if guard.current_anchor()? != observation.anchor {
+                return Err(error(ErrorCode::InternalInvariantViolation,
+                    "condition wait reader and published adapter disagree on the target anchor"));
+            }
+            context.anchor = observation.anchor;
+            // A read can advance beyond a grant's expiry. Recheck at the new
+            // anchor before evaluating or publishing any watch transition.
+            context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            Some(observation.summary)
+        } else { None };
+        if awaiting {
+            let input = query.as_mut().ok_or_else(|| {
+                error(ErrorCode::InternalInvariantViolation, "condition wait lost its request")
+            })?;
+            input["query"]["kind"] = json!("poll_watch");
+            // The client's expected anchor was checked before the read. The
+            // internal poll intentionally consumes the newly published anchor.
+            input["expected_anchor"] = anchor_json(context.anchor);
+        }
+        let anchor = guard.current_anchor()?;
+        let source_stale = guard.source_poisoned();
         let view = QueryResponseProjection {
             session_id: guard.session_id.to_string(),
             request_id: request_id.to_string(),
@@ -72,8 +117,9 @@ pub(super) fn query(
                 "anchor": anchor_json(anchor),
                 "truncated": false,
                 "continuation": null,
+                "source_stale": source_stale,
                 "query_schema": query_schema()?,
-                "usage": "Pass an envelope conforming to query_schema in the query argument; omit mode, limit and continuation at the top level.",
+                "usage": "Pass an envelope conforming to query_schema in the query argument; omit mode, limit and continuation at the top level. await_watch performs one authorized observation; other queries do not refresh.",
                 "example": {
                     "schema": "dfmcp.query/1",
                     "query": {
@@ -86,10 +132,6 @@ pub(super) fn query(
                 },
             })
         } else if let Some(input) = query {
-            if mode.is_some() || limit.is_some() || continuation.is_some() {
-                return Err(error(ErrorCode::InvalidRequest,
-                    "do not mix mode/limit/continuation with query; put structured options inside query.query"));
-            }
             let projection = guard.adapter.current_projection().ok_or_else(|| {
                 error(ErrorCode::InternalInvariantViolation,
                     "structured query has no published canonical projection")
@@ -98,6 +140,14 @@ pub(super) fn query(
                 &projection.snapshot, &result_context, &input, |mut result| {
                     add_field_catalogs(&projection.snapshot, &mut result, result_bytes)?;
                     result["mode"] = json!("structured");
+                    result["source_stale"] = json!(source_stale);
+                    if awaiting {
+                        result["kind"] = json!("await_watch");
+                        result["observation_refresh"] = refresh.unwrap_or_else(|| json!({
+                            "kind":"skipped_terminal_watch","read_calls":0,"advanced_game":false,
+                            "basis":anchor_json(basis),"target":anchor_json(anchor),"reset":false
+                        }));
+                    }
                     view.finish(result)
                 },
             );
@@ -120,7 +170,8 @@ pub(super) fn query(
                 max_output_tokens: budget.max_output_tokens,
                 continuation,
             };
-            let response = guard.adapter.query(&request, &result_context)?;
+            let narrowed = semantic_query::result_context(&result_context)?;
+            let response = guard.adapter.query(&request, &narrowed)?;
             if response.anchor != anchor {
                 return Err(error(ErrorCode::InternalInvariantViolation,
                     "query adapter changed its anchor while producing a page"));
@@ -151,14 +202,33 @@ pub(super) fn query(
                 "score_ledger": response.score_ledger,
             })
         };
-        view.finish(payload)
+        semantic_query::publish_with_active_work(&result_context, payload, |value| view.finish(value))
     })();
     match outcome {
         Ok(encoded) => encoded,
-        Err(failure) => session_error(&guard, operation, AgentPhase::Inspect,
-            ObservationProfile::Tactical, request_id, anchor,
-            if guard.source_poisoned() { ContinuityStatus::Stale } else { ContinuityStatus::Continuous },
-            &failure),
+        Err(failure) => {
+            let current = guard.current_anchor().unwrap_or(basis);
+            let continuity = if guard.source_poisoned() { ContinuityStatus::Stale }
+                else if current.cursor.epoch != basis.cursor.epoch { ContinuityStatus::Reset }
+                else { ContinuityStatus::Continuous };
+            let raw = session_error(&guard, operation, AgentPhase::Inspect,
+                ObservationProfile::Tactical, request_id, basis, continuity, &failure);
+            context.anchor = current;
+            // Disclose retained work on authorized error paths too. Failure to
+            // render this additive projection cannot mutate or discard work.
+            let decorated = semantic_query::publish_with_active_work(&context, json!({}), |metadata| {
+                let mut payload: JsonValue = serde_json::from_str(&raw).map_err(|_| {
+                    error(ErrorCode::InternalInvariantViolation,"query error packet is not JSON")
+                })?;
+                payload["agent_turn"]["active_work"]["obligations"] = metadata["_condition_watch_work"].clone();
+                let encoded = payload.to_string();
+                if encoded.len() > response_byte_limit(&guard) {
+                    return Err(error(ErrorCode::BudgetExceeded,"query error and active work exceed the response budget"));
+                }
+                Ok(encoded)
+            });
+            decorated.unwrap_or(raw)
+        }
     }
 }
 
@@ -176,8 +246,6 @@ fn add_field_catalogs(
     if !matches!(payload.get("kind").and_then(JsonValue::as_str), Some("entities" | "inspect")) {
         return Ok(());
     }
-    // Catalogs are optional discovery, not requested facts. Reserve a small
-    // disclosure record before adding them, and never consume the result page.
     let size = serde_json::to_vec(payload).map_err(|_| {
         error(ErrorCode::InternalInvariantViolation, "cannot measure query field catalogs")
     })?.len();
@@ -260,7 +328,8 @@ mod tests {
             variant["properties"]["kind"]["const"].as_str()
         }).collect::<Vec<_>>();
         assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies", "aggregate", "search",
-            "capture", "changes", "baselines", "release_baseline"]);
+            "capture", "changes", "baselines", "release_baseline", "watch", "poll_watch", "await_watch",
+            "watches", "cancel_watch", "release_watch"]);
         Ok(())
     }
 

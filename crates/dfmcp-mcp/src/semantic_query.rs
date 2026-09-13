@@ -1,6 +1,5 @@
 //! Typed query dispatch over the exact session-owned canonical projection.
-//! Pure queries remain stateless. Query baselines use a publisher boundary so
-//! retained state never advances before the complete Agent Turn can be rendered.
+//! Stateful foreground reads publish only after the complete Agent Turn fits.
 
 #[path = "semantic_query_core.rs"]
 mod core_query;
@@ -8,13 +7,15 @@ mod core_query;
 mod operational_query;
 #[path = "query_history.rs"]
 mod query_history;
+#[path = "query_watch.rs"]
+mod query_watch;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
 
-use dfmcp_core::{OperationContext, Result};
+use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier};
 use dfmcp_world::WorldSnapshot;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub fn execute(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
     match input.get("query").and_then(|query| query.get("kind")).and_then(Value::as_str) {
@@ -23,15 +24,74 @@ pub fn execute(snapshot: &WorldSnapshot, context: &OperationContext, input: &Val
     }
 }
 
-/// Render before publishing any process-local query baseline state. The callback
-/// must enforce the complete response budget, including the Agent Turn packet.
+/// Validate an await handle and its pre-refresh anchor without sampling a watch.
+/// The bounded metadata query retains the same session/authority checks as polling.
+pub fn prepare_await(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<bool> {
+    let invalid = || DfmcpError::new(ErrorCode::InvalidRequest,"invalid await_watch envelope or handle");
+    let object = input.as_object().ok_or_else(invalid)?;
+    if object.len()>3 || object.keys().any(|key| !matches!(key.as_str(),"schema"|"expected_anchor"|"query"))
+        || input["schema"]!="dfmcp.query/1" { return Err(invalid()); }
+    let request = input["query"].as_object().ok_or_else(invalid)?;
+    if request.len()!=2 || input["query"]["kind"]!="await_watch" { return Err(invalid()); }
+    let handle = input["query"]["watch"].as_str().ok_or_else(invalid)?;
+    let hash = handle.strip_prefix("watch:").ok_or_else(invalid)?;
+    if hash.len()!=64 || !hash.bytes().all(|byte|byte.is_ascii_digit()||(b'a'..=b'f').contains(&byte)) {
+        return Err(invalid());
+    }
+    if input.get("expected_anchor").filter(|value|!value.is_null())
+        .is_some_and(|value|value!=&core_query::anchor_json(context.anchor)) {
+        return Err(DfmcpError::new(ErrorCode::StaleAnchor,"await_watch expected_anchor differs from the pre-refresh anchor"));
+    }
+    let mut needs_observation = false;
+    query_watch::execute(snapshot,context,&json!({"schema":"dfmcp.query/1","query":{"kind":"watches"}}),|metadata| {
+        let record = metadata["records"].as_array().and_then(|records|records.iter()
+            .find(|record|record["watch"].as_str()==Some(handle))).ok_or_else(invalid)?;
+        needs_observation = !record["terminal"].as_bool().ok_or_else(invalid)?;
+        Ok(String::new())
+    })?;
+    Ok(needs_observation)
+}
+
+/// Reserve active-work bytes before allowing a stateless result to fill the page.
+pub fn result_context(context: &OperationContext) -> Result<OperationContext> {
+    context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
+    let mut reserved = 0u64;
+    query_watch::with_active_work(context,json!({}),|metadata| {
+        reserved = u64::try_from(metadata.to_string().len()).map_err(|_| {
+            DfmcpError::new(ErrorCode::BudgetExceeded,"watch projection byte count cannot be represented")
+        })?.saturating_add(32);
+        Ok(String::new())
+    })?;
+    let mut narrowed = context.clone();
+    narrowed.budget.max_bytes = context.budget.max_bytes
+        .min(u64::from(context.budget.max_output_tokens).saturating_mul(4))
+        .checked_sub(reserved).filter(|bytes|*bytes>0).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded,"active watches leave no room for query results")
+        })?;
+    Ok(narrowed)
+}
+
+pub fn publish_with_active_work<F>(context: &OperationContext, value: Value, publish: F) -> Result<String>
+where F: FnOnce(Value) -> Result<String> {
+    context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
+    query_watch::with_active_work(context,value,publish)
+}
+
+/// No watch/baseline mutation is visible before the full response is accepted.
 pub fn execute_with_publisher<F>(snapshot: &WorldSnapshot, context: &OperationContext,
     input: &Value, publish: F) -> Result<String>
 where F: FnOnce(Value) -> Result<String> {
     match input.get("query").and_then(|query| query.get("kind")).and_then(Value::as_str) {
-        Some("capture" | "changes" | "baselines" | "release_baseline") => {
-            query_history::execute(snapshot, context, input, publish)
+        Some("watch" | "poll_watch" | "watches" | "cancel_watch" | "release_watch") => {
+            query_watch::execute(snapshot,context,input,publish)
         }
-        _ => publish(execute(snapshot, context, input)?),
+        Some("capture" | "changes" | "baselines" | "release_baseline") => {
+            let narrowed = result_context(context)?;
+            query_history::execute(snapshot,&narrowed,input,|value|publish_with_active_work(context,value,publish))
+        }
+        _ => {
+            let narrowed = result_context(context)?;
+            publish_with_active_work(context,execute(snapshot,&narrowed,input)?,publish)
+        }
     }
 }
