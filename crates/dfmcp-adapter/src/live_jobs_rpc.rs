@@ -3,6 +3,9 @@
 //! Closed, authenticated transport for the experimental jobs-only DFHack profile.
 //! No method name, plugin name, protobuf type, command, or path comes from a client.
 
+#[path = "live_operations_rpc.rs"]
+pub mod operations;
+
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -227,7 +230,6 @@ fn request(token: &[u8], nonce: &[u8], max_jobs: u32) -> Vec<u8> {
     number(&mut out, 3, 1); number(&mut out, 4, 2); number(&mut out, 5, u64::from(max_jobs));
     out
 }
-
 pub struct DeadlineStream { stream: TcpStream, deadline: Instant }
 fn checked_timeout(timeout: Duration) -> Result<Duration> {
     if timeout < Duration::from_millis(1) || timeout > Duration::from_secs(60) {
