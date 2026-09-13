@@ -5,6 +5,8 @@
 mod semantic_query;
 #[path = "query_response.rs"]
 mod query_response;
+#[path = "operations_production.rs"]
+mod production;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -301,7 +303,7 @@ fn finish_query(view:&QueryResponseProjection,value:Value)->Result<String> {
     let encoded=value.to_string();
     if encoded.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"operations packet overflow"));}Ok(encoded)
 }
-#[tool(description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items. Inventory membership is not usable supply.")]
+#[tool(description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production. Structured production_diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String {
     with_session(session_id,"fortress.query",Capability::Query,|session,mut context| {
         if mode.is_some() && query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}
@@ -310,6 +312,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
             Some(input)=>input,
             None=>match mode.as_deref() {
                 None|Some("summary"|"schema")=>json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}}),
+                Some("production")=>json!({"schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"}}),
                 Some("jobs")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["job"],"fields":["type_key","suspended","holder_native_id"]}}),
                 Some("buildings")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["building"],"fields":["type_key","build_stage","max_build_stage"]}}),
                 Some("items")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["item"],"fields":["type_key","stack_size","forbidden","in_job","container","holder_building"],"limit":1}}),
@@ -338,11 +341,15 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         let view=query_view(session,&context)?;
         let mut narrowed=context.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
         if schema {
-            let schema:Value=serde_json::from_str(include_str!("../../../schemas/mcp_query_v1.json"))
-                .map_err(|_|error(ErrorCode::InternalInvariantViolation,"invalid embedded schema"))?;
+            let schema=production::query_schema()?;
             return semantic_query::publish_with_active_work(&context,json!({"query_schema":schema,"mode":"schema",
                 "profile":"operations/1.3","source_stale":session.source.poisoned(),"truncated":false,"continuation":null}),
                 |value|finish_query(&view,value));
+        }
+        if production::handles(&input) {
+            let result_context=semantic_query::result_context(&narrowed)?;
+            let value=production::execute(&session.state,&result_context,&input)?;
+            return semantic_query::publish_with_active_work(&narrowed,value,|value|finish_query(&view,value));
         }
         let snapshot=session.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"snapshot missing"))?;
         semantic_query::execute_with_publisher(snapshot,&narrowed,&input,|mut value| {
@@ -359,7 +366,9 @@ pub fn fortress_explain(session_id:Option<String>)->String {
             "relations":{"contained_in":"job holder, item container, or item building holder","uses":"an observed job-item attachment, not requirement satisfaction"},
             "unknown":["material suitability","accessible inventory","labor eligibility","why suspended","completed successfully"],
             "item_position":"raw item.pos; use containment edges to inspect holders",
-            "inspection":"Use query kind inspect with entity_id, generation and selected fields."}),
+            "inspection":"Use query kind inspect with entity_id, generation and selected fields.",
+            "production_analysis":{"diagnose":"production_diagnosis","allocate":"inventory_plan",
+                "scope":"observed conditions and declared stack-unit models only","reservation_created":false}}),
             |value|packet(Some(session),Some(&context),"fortress.explain",value))
     })
 }
@@ -391,7 +400,7 @@ pub fn run_stdio() {
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan)
         .tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint)
         .tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor).request_timeout(60)
-        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. Use schema mode for structured requests.")
+        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. production_diagnosis joins observed job/input conditions; inventory_plan returns a conditional allocation and shortage certificate, not game feasibility or a reservation. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. Use schema mode for structured requests.")
         .build();
     crate::run_modern_stdio(server);
 }
