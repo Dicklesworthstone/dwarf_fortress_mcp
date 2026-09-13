@@ -160,6 +160,9 @@ fn query_schema() -> Result<JsonValue> {
 }
 
 fn add_field_catalogs(snapshot: &dfmcp_world::WorldSnapshot, payload: &mut JsonValue) {
+    if !matches!(payload.get("kind").and_then(JsonValue::as_str), Some("entities" | "inspect")) {
+        return;
+    }
     let add = |row: &mut JsonValue| {
         let Some(id) = row.get("entity_id").and_then(JsonValue::as_str)
             .and_then(|id| id.parse::<u64>().ok()) else { return; };
@@ -218,7 +221,7 @@ mod tests {
         let kinds = variants.iter().filter_map(|variant| {
             variant["properties"]["kind"]["const"].as_str()
         }).collect::<Vec<_>>();
-        assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies"]);
+        assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies", "aggregate", "search"]);
         Ok(())
     }
 
