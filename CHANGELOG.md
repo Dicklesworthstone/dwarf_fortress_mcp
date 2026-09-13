@@ -8,6 +8,19 @@ readiness.
 
 ### Added
 
+- Bounded `dfmcp_world::graph_query` reference APIs for canonical multi-source BFS,
+  outgoing/incoming/undirected traversal, edge-revision path witnesses, explicit
+  depth frontiers, and bounded path reconstruction.
+- Iterative strongly connected components, prerequisite-first condensation order,
+  cycle-member/dependent blocker diagnosis, and deterministic longest unweighted
+  dependency chains for acyclic projections. Results retain exact source and
+  authorization-scope identities without granting authority or claiming game
+  walkability, complete-world absence, or timed production scheduling.
+- Twenty-one query/graph Rust regression tests, including exhaustive directed
+  three-vertex graph checks against independent closure/distance oracles, plus
+  executable pagination coverage in the existing query truth-table suite.
+- Query and graph execution contract documentation in `docs/QUERY_EXECUTION.md`
+  and `docs/GRAPH_QUERY_EXECUTION.md`.
 - Protocol-bound V2 production admission contract
   (`architecture/live_admission_ticket_v2.json`). The exact bridge protocol now travels from the
   deployment manifest through the compatibility decision, launch record, single-use ticket,
@@ -16,7 +29,7 @@ readiness.
   protocol 1.0; protocol 1.1 and unknown protocols fail before live-server startup.
 - Protocol-1.1 retained-announcement read generation with a distinct protobuf package, plugin,
   bridge version, source qualification contract, native receipt contract, A1-A6 acceptance
-  contract, evidence journal, diagnostic probe, and development MCP runtime.
+  contract, evidence journal, diagnostic probe, source qualification contract, and development MCP runtime.
 - Canonical retained-announcement batches with strict report-ID ordering, bounded UTF-8 text,
   retained-window oldest/latest identities, explicit gap evidence, continuation progress, and
   complete-through-latest semantics without a complete-history claim.
@@ -99,6 +112,13 @@ readiness.
 
 ### Changed
 
+- Public world query execution now uses `q1` continuations binding the exact
+  fortress, epoch, sequence, game tick, state hash, selector set, predicate tree,
+  and ordering. This closes cross-query and same-cursor-fork reuse. Legacy query
+  cursors require restart; delta encoding remains unchanged. Page width and byte
+  budget can vary without changing query identity. Digests are not authentication.
+- Query execution verifies the snapshot hash and bounds combined scan/predicate
+  work, aggregate identity bytes, and nested kind names before evaluation.
 - Migrated the pinned FastMCP dependency to `180a7c88890705217bb8e202d19555adabf24187`
   and published Asupersync 0.5.0. Four modern-only stdio entry points now retain an
   explicit runtime owner and preserve inherited caller context restrictions.
@@ -156,6 +176,11 @@ readiness.
 
 ### Current evidence status
 
+- The query/graph tranche includes an independent Python design check over 512
+  exhaustive graphs and 200 seeded multigraphs. Rust compilation, rustfmt, Clippy,
+  Rust tests, repository qualification, and live-game execution were unavailable
+  in the editing environment and are not claimed. Graph MCP modes remain
+  unfinished; the new graph functionality is exposed as Rust library APIs.
 - The checked-in compatibility registry remains `no_admitted_live_tuples` with zero entries.
 - Protocol 1.0 and protocol 1.1 source are not currently admitted by that empty registry.
 - The V2 production runtime map contains protocol 1.0 only; protocol 1.1 remains explicitly

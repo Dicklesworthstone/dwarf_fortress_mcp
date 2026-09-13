@@ -65,6 +65,40 @@ commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
 
+### Bounded query and graph execution
+
+The 2026-09-13 query/graph additions are source-present functionality, not a fresh
+qualification or admission. See `docs/QUERY_EXECUTION.md` and
+`docs/GRAPH_QUERY_EXECUTION.md` for the contracts and limitations.
+
+- Public world query entry points now bind continuation offsets to the exact
+  fortress, epoch, sequence, game tick, state hash, filters, and ordering.
+  Existing adapter callers use this path. Legacy query cursors require restarting;
+  delta cursors are unchanged. Page width and byte budget may change between pages.
+- Combined scan/predicate-work and aggregate query-identity limits prevent otherwise
+  individually legal inputs from multiplying into unbounded evaluation work.
+  Cursor digests are not authentication; every adapter request still needs authority.
+- `dfmcp_world::graph_query` provides bounded deterministic multi-source traversal,
+  outgoing/incoming/undirected interpretations, shortest-path edge witnesses,
+  explicit depth frontiers, and bounded path reconstruction.
+- Iterative SCC analysis identifies dependency cycles and their dependent blockers,
+  orders the condensation prerequisite-first, and returns a stable entity order
+  and longest unweighted dependency chain only when acyclic.
+- Graph results carry exact source anchors, caller-supplied scope identities,
+  projection/decision digests, and operation counters. They describe observed
+  authorized projections, not complete-world absence, game walkability, timed
+  production schedules, or permission to mutate.
+- Twenty-one added Rust regression tests include an exhaustive directed
+  three-vertex graph oracle. An independent Python design oracle passed 512
+  exhaustive graphs and 200 seeded multigraphs in the editing environment.
+
+No Rust compiler, Cargo, or rustfmt was available in that editing environment.
+The Rust tests, workspace gates, native plugin, and live-game campaign were not
+executed for these changes. The Python design check is not repository-gate or
+Rust-execution evidence. MCP graph-query modes and broader live projection
+coverage are still separate unfinished integration work. The eleven-tool waist,
+production protocol map, dependency pins, and migration bead status are unchanged.
+
 ### Agent-facing MCP
 
 - Modern-only MCP 2026-07-28 through the exact-revision-pinned owned `fastmcp_rust` sibling.
@@ -256,7 +290,7 @@ binary or live configuration.
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
-| World | canonical snapshots, facts, deltas, graph/query/search/Merkle/checkpoint/ATP laboratories | admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
+| World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, MCP graph modes, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
 | Intent | semantic actions, sealed plans, witnesses, idempotency, obligations, lab pause effect | any qualified live mutation family |
 | Security | safe Rust, closed deps, secret scan, loader refusal, source/archive integrity, protocol-confusion defense | hostile-host resistance, signed provenance, external review |
 | Release | local qualification, source bundles, server receipts, DSR specifications | current signed cross-platform release assets and install/rollback evidence |
