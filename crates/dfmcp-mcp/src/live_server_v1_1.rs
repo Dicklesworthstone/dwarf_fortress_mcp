@@ -8,6 +8,9 @@
 //! marker so execution cannot be confused with compatibility or artifact
 //! admission.
 
+#[path = "live_query_v1_1.rs"]
+mod structured_query;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -57,6 +60,7 @@ const SESSION_NAMESPACE_MASK: u128 = 0xffu128 << 120;
 const SESSION_NAMESPACE_PREFIX: u128 = 0x11u128 << 120;
 const MIN_RESPONSE_BYTES: u64 = 8 * 1024;
 const MIN_RESPONSE_TOKENS: u32 = 2 * 1024;
+const DEFAULT_RESPONSE_TOKENS: u32 = 8 * 1024;
 const LIVE_BUDGET_CEILING: WorkBudget = WorkBudget {
     max_wall_millis: 60_000,
     max_game_ticks: 1_000_000,
@@ -404,8 +408,7 @@ fn requested_budget(
         max_entities: max_entities
             .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities),
         max_bytes: max_bytes.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes),
-        max_output_tokens: max_output_tokens
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_output_tokens),
+        max_output_tokens: max_output_tokens.map_or(DEFAULT_RESPONSE_TOKENS, |value| value),
         max_actions: max_actions
             .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions),
     };
@@ -926,6 +929,20 @@ fn attach_turn(
     recommendations: Vec<JsonValue>,
     payload: JsonValue,
 ) -> String {
+    let mut coverage = coverage_json(session);
+    if operation == "fortress.query"
+        && payload.get("truncated").and_then(JsonValue::as_bool) == Some(true)
+    {
+        coverage["status"] = json!("partial");
+        coverage["continuation"] = payload.get("continuation").cloned()
+            .map_or(JsonValue::Null, |value| value);
+        if let Some(domains) = coverage["partial_domains"].as_array_mut() {
+            domains.push(json!({
+                "domain": "query.result",
+                "reason": "query output is bounded by a page or graph depth; continue or narrow explicitly",
+            }));
+        }
+    }
     let mut builder = AgentTurnBuilder::new(operation, phase)
         .session_id(session.session_id.to_string())
         .turn_id(format!("live-v1-1-turn-{request_id}"))
@@ -944,7 +961,7 @@ fn attach_turn(
         .affordances(affordances_json(session))
         .recommendations(recommendations)
         .uncertainty(uncertainties_json(session))
-        .coverage(coverage_json(session))
+        .coverage(coverage)
         .budget(budget_json(session.budget))
         .references(references_json(session));
     if let Ok(anchor) = session.current_anchor() {
@@ -954,7 +971,7 @@ fn attach_turn(
     if encoded.len() <= response_byte_limit(session) {
         return encoded;
     }
-    AgentTurnBuilder::new(operation, phase)
+    let mut reduced = AgentTurnBuilder::new(operation, phase)
         .session_id(session.session_id.to_string())
         .turn_id(format!("live-v1-1-turn-{request_id}"))
         .request_id(request_id.to_string())
@@ -970,23 +987,26 @@ fn attach_turn(
             "response_reduced": true,
         }))
         .active_work(empty_active_work())
-        .budget(budget_json(session.budget))
-        .attach(json!({
-            "ok": false,
-            "error": {
-                "operation": operation,
-                "code": ErrorCode::BudgetExceeded.as_str(),
-                "message": "final protocol-1.1 Agent Turn exceeded the negotiated response budget",
-                "retryable": false,
-                "details": [],
-                "recovery": recovery_guidance(
-                    RecoveryClass::NeverUnchanged,
-                    None,
-                    "open a new development session with a larger output budget or request a narrower query",
-                    json!({}),
-                ),
-            },
-        }))
+        .budget(budget_json(session.budget));
+    if let Ok(anchor) = session.current_anchor() {
+        reduced = reduced.anchor(anchor_json(anchor));
+    }
+    reduced.attach(json!({
+        "ok": false,
+        "error": {
+            "operation": operation,
+            "code": ErrorCode::BudgetExceeded.as_str(),
+            "message": "final protocol-1.1 Agent Turn exceeded the negotiated response budget",
+            "retryable": false,
+            "details": [],
+            "recovery": recovery_guidance(
+                RecoveryClass::NeverUnchanged,
+                None,
+                "open a new development session with a larger output budget or request a narrower query",
+                json!({}),
+            ),
+        },
+    }))
 }
 
 fn recovery_class(code: ErrorCode) -> RecoveryClass {
@@ -1818,123 +1838,16 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Query the current protocol-1.1 canonical snapshot. mode is summary, citizens, announcements, or all. Querying never refreshes state."
+    description = "Query the current protocol-1.1 snapshot without refreshing. Use mode=summary/citizens/announcements/all with limit and continuation, or query={schema:dfmcp.query/1,query:{kind:entities/inspect/traverse/dependencies,...}} for typed filters, selected facts, generation-safe inspection, paths, and dependency diagnosis."
 )]
-pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
-    let operation = "fortress.query";
-    let mode = mode.unwrap_or_else(|| "summary".to_owned());
-    if mode.is_empty() || mode.len() > MAX_MODE_BYTES {
-        return unbound_error(
-            operation,
-            AgentPhase::Inspect,
-            &error(
-                ErrorCode::InvalidRequest,
-                "query mode violates its byte bound",
-            ),
-        );
-    }
-    let session = match resolve_session(session_id) {
-        Ok(value) => value,
-        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
-    };
-    let mut guard = match lock_session(&session) {
-        Ok(value) => value,
-        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
-    };
-    let anchor = match guard.current_anchor() {
-        Ok(value) => value,
-        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
-    };
-    let (request_id, context) = match guard.next_context() {
-        Ok(value) => value,
-        Err(failure) => {
-            return session_error(
-                &guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                RequestId::NIL,
-                anchor,
-                ContinuityStatus::Continuous,
-                &failure,
-            );
-        }
-    };
-    let kinds = match query_kinds(&mode) {
-        Ok(value) => value,
-        Err(failure) => {
-            return session_error(
-                &guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                request_id,
-                anchor,
-                ContinuityStatus::Continuous,
-                &failure,
-            );
-        }
-    };
-    let response = match guard.adapter.query(
-        &QueryRequest {
-            anchor,
-            query: WorldQuery {
-                kinds,
-                predicate: None,
-                order: QueryOrder::EntityIdAscending,
-                limit: guard.budget.max_entities,
-                continuation: None,
-            },
-            max_output_tokens: guard.budget.max_output_tokens,
-            continuation: None,
-        },
-        &context,
-    ) {
-        Ok(value) => value,
-        Err(failure) => {
-            return session_error(
-                &guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                request_id,
-                anchor,
-                ContinuityStatus::Continuous,
-                &failure,
-            );
-        }
-    };
-    attach_turn(
-        &guard,
-        operation,
-        AgentPhase::Inspect,
-        ObservationProfile::Tactical,
-        request_id,
-        ContinuityStatus::Continuous,
-        Some(anchor),
-        None,
-        Vec::new(),
-        announcement_attention(&guard),
-        Vec::new(),
-        json!({
-            "ok": true,
-            "session_id": guard.session_id.to_string(),
-            "request_id": request_id.to_string(),
-            "mode": mode,
-            "anchor": anchor_json(response.anchor),
-            "matched": response.matched,
-            "returned": response.rows.len(),
-            "truncated": response.truncated,
-            "continuation": response.continuation,
-            "rows": response.rows.iter().map(|row| json!({
-                "entity_id": row.entity_id.to_string(),
-                "revision": row.revision,
-                "fields": row.fields,
-                "evidence": row.evidence.iter().map(|value| value.digest.to_string()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-            "score_ledger": response.score_ledger,
-        }),
-    )
+pub fn fortress_query(
+    session_id: Option<String>,
+    mode: Option<String>,
+    limit: Option<u32>,
+    continuation: Option<String>,
+    query: Option<serde_json::Value>,
+) -> String {
+    structured_query::query(session_id, mode, limit, continuation, query)
 }
 
 fn read_only_tool_error(
@@ -2386,8 +2299,12 @@ pub fn run_live_v1_1_development_stdio() {
          are process configuration, never tool arguments. Call fortress.open_session first. \
          The frozen eleven-tool waist is preserved; Handshake and ReadObservation are the only \
          bridge methods; all mutation-stage tools fail closed. Query modes are summary, \
-         citizens, announcements, and all. Every result carries an Agent Turn with exact anchor, \
-         retained-window coverage, explicit historical uncertainty, authority, and recovery.",
+         citizens, announcements, and all, with limit and continuation for resumable pages. \
+         Alternatively pass a dfmcp.query/1 query object for typed entity filters, selected \
+         facts, generation-safe inspection, graph traversal, and dependency diagnosis. \
+         Queries inspect the current snapshot and never refresh it. Every result carries \
+         an Agent Turn with exact anchor, retained-window coverage, explicit historical \
+         uncertainty, authority, and recovery.",
     )
     .build();
     crate::run_modern_stdio(server);
