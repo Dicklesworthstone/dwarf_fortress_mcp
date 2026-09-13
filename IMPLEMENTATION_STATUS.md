@@ -67,6 +67,40 @@ commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
 
+### Observed production diagnosis and declared inventory allocation
+
+The operations/1.3 `fortress.query` source now integrates `production_diagnosis`
+and `inventory_plan`, with `mode=production` as a diagnostic shortcut. The complete
+contract and example workflow are in `docs/PRODUCTION_ANALYSIS.md`.
+
+- Production diagnosis joins jobs, holders, actual attached items and memoized
+  container ancestry. It exposes flags, unassigned workers, holder stages,
+  unindexed filters and shared inputs with generation-checked drill-downs.
+  Repeated attachment roles do not multiply distinct-item counts. Findings remain
+  observed conditions, not causal blocker proofs or a claim that a job is ready.
+- Declared stack-unit demands use exact type/subtype/raw material selectors and
+  conservative ancestry-aware exclusions. The bounded integral allocator uses
+  residual rerouting, never double-counts shared supply, and checks flow/min-cut
+  equality plus a joint shortage witness when the declared model is deficient.
+- Inventory results are conditional on the supplied model and exclusion policy.
+  They do not infer native recipes, full material eligibility, path access,
+  reservations, executable plans, or permission to mutate the game.
+- Both query modes retain the full Agent Turn and active watches, paginate complete
+  rows with session/query/policy/snapshot-bound continuations, and reject poisoned
+  sources, changed handles, missing authority, malformed input and exhausted budgets.
+  Only operations schema discovery gains the two variants; the other sixteen
+  variants, eleven tool names and native acquisition bounds are preserved.
+
+Twenty-two Rust tests are registered: seven allocator, eight model, and seven
+actual-handler scenarios. Rust compilation, tests, rustfmt, Clippy, stdio and live
+execution remain unverified because no Rust toolchain was available. An independent
+Python design oracle passed 1,568 exhaustive and 1,000 seeded allocation models;
+90 schema-extension cases (38 accepted, 52 rejected) and three documentation
+examples passed. Those checks are not Rust execution or repository qualification.
+Native producer/wire bytes, dependency pins, production admission and the active
+migration bead are unchanged. Full native requirement matching, map reachability,
+large-roster acquisition paging, durable supervision and live effects remain absent.
+
 ### Coherent operations/1.3 development read path
 
 The operations profile adds source integration from one suspended native read of
@@ -319,8 +353,7 @@ reply fields inside `ReadObservation`. It does not add `ReadAnnouncements` or an
 
 Implemented source includes:
 
-- distinct protocol package, plugin name, bridge version, and native build path;
-- canonical retained-announcement batch with strict report-ID order, text and count limits,
+- distinct protocol package, plugin name, bridge version, text and count limits,
   retained-window bounds, gap evidence, and complete-through-latest semantics;
 - safe-Rust extension codec with canonical protobuf validation;
 - combined citizen and announcement capsule assembly;
@@ -429,7 +462,8 @@ Agent Turn projection, and focused tests.
 - Atomic sibling-directory publication after complete verification.
 - Stable no-follow repository-file reader.
 - Repository integrity rejection for symbolic links, special files, invalid UTF-8, NUL corruption,
-  oversized source text, machine-local placeholders, and unstable reads.
+  oversized source text, machine-local placeholders, recovery debris, and files that
+  change while being inspected.
 - Local qualification and DSR release specifications.
 
 A source bundle proves source/archive identity only. It does not prove compilation, tests,
@@ -468,7 +502,7 @@ binary or live configuration.
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
-| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, snapshot paging, material/path feasibility, admission |
+| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring, production diagnosis, declared inventory allocation and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, snapshot paging, native material/path feasibility, admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
 | World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
