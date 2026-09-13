@@ -6,6 +6,7 @@ mod canonical;
 mod checkpoint;
 mod delta;
 pub mod franken_fs;
+pub mod graph_query;
 mod ledger;
 pub mod merkle;
 mod model;
