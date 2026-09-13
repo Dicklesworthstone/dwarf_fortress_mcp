@@ -22,12 +22,15 @@ pub(super) struct QueryResponseProjection {
 }
 
 impl QueryResponseProjection {
-    /// The longest admitted continuation is included twice (payload and coverage).
-    /// A small margin covers the structured-mode tag and JSON punctuation. This is
-    /// reserved from the existing ceiling, never added to the caller's authority.
+    /// Reserve the largest supported metadata shape, including the endpoint
+    /// comparison summary and duplicated continuation. This narrows the result
+    /// budget; it never increases the caller's admitted response ceiling.
     pub fn result_byte_budget(&self) -> Result<usize> {
-        let sample = json!({"mode":"structured","truncated":true,
-            "continuation":"x".repeat(256)});
+        let sample = json!({"mode":"structured", "kind":"changes", "truncated":true,
+            "continuation":"x".repeat(256), "baseline":format!("qb1:{}", "x".repeat(64)),
+            "basis":self.anchor, "anchor_advanced":true, "change_count":u64::MAX,
+            "returned":u64::MAX, "basis_result_digest":"x".repeat(64),
+            "target_result_digest":"x".repeat(64)});
         let overhead = self.render(sample).len().checked_add(64).ok_or_else(|| {
             DfmcpError::new(ErrorCode::BudgetExceeded,"query packet overhead overflow")
         })?;
@@ -72,7 +75,28 @@ impl QueryResponseProjection {
         payload["query_help"] = json!({"tool":"fortress.query","arguments":{
             "session_id":self.session_id,"mode":"schema"}});
         let partial = payload.get("truncated").and_then(Value::as_bool) == Some(true);
-        let continuity = if partial { ContinuityStatus::Partial } else { ContinuityStatus::Continuous };
+        let comparison = payload.get("kind").and_then(Value::as_str) == Some("changes");
+        let interval_unknown = comparison && payload.get("anchor_advanced").and_then(Value::as_bool) == Some(true);
+        let continuity = if partial || interval_unknown {
+            ContinuityStatus::Partial
+        } else if comparison {
+            ContinuityStatus::Heartbeat
+        } else {
+            ContinuityStatus::Continuous
+        };
+        let basis = if comparison {
+            payload.get("basis").cloned().unwrap_or_else(|| self.anchor.clone())
+        } else {
+            self.anchor.clone()
+        };
+        let changes = if comparison {
+            vec![json!({"kind":"query_endpoint_comparison", "baseline":payload.get("baseline"),
+                "change_count":payload.get("change_count"), "returned":payload.get("returned"),
+                "evidence":[payload.get("basis_result_digest"), payload.get("target_result_digest")],
+                "detail_path":"changes", "intermediate_history_proven":false})]
+        } else {
+            Vec::new()
+        };
         let mut coverage = self.coverage.clone();
         if partial {
             coverage["status"] = json!("partial");
@@ -82,15 +106,21 @@ impl QueryResponseProjection {
                     "reason":"query output is page- or depth-bounded; continue or narrow explicitly"}));
             }
         }
+        if interval_unknown {
+            coverage["status"] = json!("partial");
+            coverage["query_temporal_coverage"] = json!({"status":"endpoint_comparison_only",
+                "intermediate_observations_retained":false,
+                "absence_proven":false});
+        }
         AgentTurnBuilder::new("fortress.query",AgentPhase::Inspect)
             .session_id(self.session_id.clone())
             .request_id(self.request_id.clone())
             .turn_id(format!("live-v1-1-turn-{}",self.request_id))
             .anchor(self.anchor.clone())
-            .continuity(continuity,Some(self.anchor.clone()),None,None)
+            .continuity(continuity,Some(basis),None,None)
             .profile(ObservationProfile::Tactical)
             .briefing(self.briefing.clone())
-            .changes(Vec::new())
+            .changes(changes)
             .attention(self.attention.clone())
             .active_work(empty_active_work())
             .affordances(self.affordances.clone())

@@ -8,6 +8,9 @@ mod core_query;
 mod operational_query;
 #[path = "query_history.rs"]
 mod query_history;
+#[cfg(test)]
+#[path = "query_history_tests.rs"]
+mod history_tests;
 
 use dfmcp_core::{OperationContext, Result};
 use dfmcp_world::WorldSnapshot;
