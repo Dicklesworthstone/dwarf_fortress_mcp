@@ -1,0 +1,26 @@
+syntax = "proto2";
+package dfmcp.jobs.v1_2;
+option optimize_for = LITE_RUNTIME;
+
+// Both methods accept this closed message. No caller-selected command or path.
+message Request {
+  required bytes bearer_token = 1;
+  required bytes client_nonce = 2;
+  required uint32 protocol_major = 3;
+  required uint32 protocol_minor = 4;
+  required uint32 max_jobs = 5;
+}
+message Reply {
+  required bool accepted = 1;
+  // 0 success, 1 authentication, 2 protocol, 3 bounds, 4 no fortress, 5 invalid source.
+  required uint32 failure_code = 2;
+  required bytes client_nonce = 3;
+  required uint32 protocol_major = 4;
+  required uint32 protocol_minor = 5;
+  required uint64 bridge_generation = 6;
+  required string df_version = 7;
+  required string dfhack_version = 8;
+  // Present only after a successful ReadObservation. Exact DFMJ1200 binary
+  // payload, specified in docs/LIVE_JOBS.md and decoded by live_jobs.rs.
+  optional bytes observation = 9;
+}
