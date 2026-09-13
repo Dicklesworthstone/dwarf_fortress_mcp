@@ -6,8 +6,8 @@ actually establish.
 
 ## Current phase
 
-**Phase 0D-R0 with implemented but unadmitted announcement and jobs-only development read slices.
-No live tuple is currently admitted.**
+**Phase 0D-R0 with implemented but unadmitted announcement, jobs-only, and coherent operations
+development read slices. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -17,6 +17,7 @@ The repository contains:
 - an implemented protocol-1.1 retained-announcement extension;
 - an explicitly unadmitted protocol-1.1 development MCP runtime;
 - a separate jobs-only protocol-1.2 native plugin, Rust client, projection, and development MCP binary;
+- an operations/1.3 native producer, client, coherent jobs/buildings/items graph, and development MCP binary;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map currently contains only
   protocol 1.0.
 
@@ -65,6 +66,53 @@ A higher rung applies only to the exact identities it names. It never transfers 
 commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
+
+### Coherent operations/1.3 development read path
+
+The operations profile adds source integration from one suspended native read of
+jobs, buildings, inventory and their relationships through the common agent query
+and foreground-monitoring engines. See `docs/LIVE_OPERATIONS.md`.
+
+- A separate authenticated plugin observes complete bounded native rosters and
+  actual container, building-holder and job-item attachment references in one RPC.
+  It never merges independently timed citizen, announcement, or jobs snapshots.
+- Canonical decoding validates exact type/count/identity bounds, same-roster
+  reference endpoints, attachment counts and containment acyclicity before atomic
+  multi-domain publication. Every fact and edge shares one source digest/anchor.
+- Stable entity namespaces and semantic edge IDs support real graph traversal.
+  Observed retirement/reappearance advances generation; native job, building or
+  item ID-horizon regression resets the shared epoch. Invisible reuse is not claimed.
+- `dfmcp-live-operations-dev-server` is registered with its independently gated
+  public entry and the existing owned runtime. It retains eleven tools and only
+  Observe/Query/Doctor authority. Its own token, opt-in and process-scoped session
+  family keep it separate from existing profiles and production admission.
+- Typed inventory/building/job queries, grouping, lexical search, relation paths,
+  baselines and condition watches use the combined projection. One await refresh
+  can update an inventory baseline and construction watch at the same anchor.
+  Authority is rechecked after refresh, terminal watch retry skips I/O, and source
+  failure preserves the prior anchor with explicitly stale local management.
+- Full roster/payload bounds are 4,096 jobs, 4,096 buildings, 32,768 items,
+  65,536 attachments and 2 MiB. Oversized acquisition refuses rather than paging
+  or publishing a partial domain. Native snapshot paging is not implemented.
+- Raw material IDs, flags, stack counts, stage values and attachments are not
+  material-eligibility, accessibility, blocker-cause or successful-completion proofs.
+  No placeholder citizen entities or speculative requirements are introduced.
+
+The actual native producer compiled against mock DFHack/protobuf interfaces with
+both GCC and Clang, C++17 and warning-denied flags. Each run passed 135 checks and
+matched an independent Python encoder's 423-byte golden frame. Exact source
+SHA-256: `ecb555296d3b84111f2acd5290c48797027c12a830d7bb4d2ffdec4e3aa4acb7`.
+The reproducible harness is `scripts/test_live_operations_native_mock.py`.
+
+Eighteen new Rust tests are registered but not executed: nine codec/model tests,
+four RPC tests and five actual-handler scenarios. No Rust compiler, Cargo or
+rustfmt was available. No Clippy, stdio, full repository gate, real generated DF
+headers, protobuf generation/linking, actual native loading, live-game behavior
+or production qualification has been established. Mock compilation is not native
+qualification. Existing native profiles, dependency pins, production map and
+migration bead are unchanged; the shared framing module gained client registration.
+Citizen/announcement integration, map/path observations, requirement evaluation,
+durable history and live mutations remain unfinished.
 
 ### Jobs-only protocol 1.2 development read path
 
@@ -236,6 +284,7 @@ pins, and migration bead status are unchanged.
 - Authenticated protocol-1.0 read-only production server source.
 - Explicitly unadmitted protocol-1.1 development server source.
 - Separately gated jobs-only protocol-1.2 development server source.
+- Separately gated coherent operations/1.3 development server source.
 - Canonical Agent Turn Packet with identity, anchor, continuity, briefing, changes, attention,
   active work, affordances, recommendations, uncertainty, coverage, budgets, references, and typed
   recovery.
@@ -402,7 +451,7 @@ Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;
 - the production launcher cannot authorize a process from the checked-in registry;
-- protocol 1.1 and the jobs-only 1.2 profile cannot enter the production runner map;
+- protocol 1.1, jobs-only 1.2 and operations/1.3 profiles cannot enter the production runner map;
 - an empty-registry floor correctly preserves “no admissions”;
 - old or external receipts do not qualify the current source generation unless they match every
   exact identity and are reviewed and promoted.
@@ -415,10 +464,11 @@ binary or live configuration.
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches, jobs-profile integration | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
+| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches, jobs/operations profile integration | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
+| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, snapshot paging, material/path feasibility, admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
 | World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
@@ -430,7 +480,7 @@ binary or live configuration.
 
 - no current admitted live tuple;
 - no current supported or production compatibility claim;
-- no admitted protocol-1.1 or jobs-only protocol-1.2 runtime;
+- no admitted protocol-1.1, jobs-only protocol-1.2 or operations/1.3 runtime;
 - no live mutation RPC;
 - no pause/resume, dig, construction, labor, burrow, stockpile, work-order, military, keyboard, Lua,
   arbitrary command, arbitrary filesystem, or arbitrary network effect;
@@ -451,8 +501,8 @@ binary or live configuration.
 6. Qualify a protocol-1.1 production server artifact and review a protocol-1.1 compatibility entry.
 7. Only after all protocol-1.1 evidence exists, add an explicit production runner to the V2 protocol
    map, advance the floor, and execute through a fresh protocol-bound ticket.
-8. Validate the jobs-only 1.2 source against Rust and a real DFHack build; expand items, buildings,
-   and bounded map state under separately versioned coherent observation contracts.
+8. Validate jobs-only 1.2 and operations/1.3 against Rust and a real DFHack build; expand citizen,
+   map/path and requirement coverage only under separately versioned coherent observation contracts.
 9. Design pause/resume only after the widened read path is stable; mutation must be separately
    versioned, witnessed, idempotent, reconciled, and disposable-fort qualified.
 
