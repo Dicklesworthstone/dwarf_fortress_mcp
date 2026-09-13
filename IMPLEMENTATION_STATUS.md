@@ -6,8 +6,8 @@ actually establish.
 
 ## Current phase
 
-**Phase 0D-R0 with an implemented but unadmitted Phase-1 announcement read slice. No live tuple is
-currently admitted.**
+**Phase 0D-R0 with implemented but unadmitted announcement and jobs-only development read slices.
+No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -16,6 +16,7 @@ The repository contains:
 - exact compatibility, anti-rollback, artifact, and process-admission machinery;
 - an implemented protocol-1.1 retained-announcement extension;
 - an explicitly unadmitted protocol-1.1 development MCP runtime;
+- a separate jobs-only protocol-1.2 native plugin, Rust client, projection, and development MCP binary;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map currently contains only
   protocol 1.0.
 
@@ -64,6 +65,54 @@ A higher rung applies only to the exact identities it names. It never transfers 
 commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
+
+### Jobs-only protocol 1.2 development read path
+
+The independent jobs profile now has source integration from native DFHack reads
+through MCP queries and foreground monitoring. `docs/LIVE_JOBS.md` describes its
+build path, entry, fields, examples, binary layout, and limitations.
+
+- `dfmcp_jobs_v1_2` is a separate authenticated plugin with exactly Handshake and
+  ReadObservation. It collects the complete bounded global job list in one RPC;
+  oversized, cyclic, malformed, or partial source rosters are rejected.
+- Records contain job type/reaction, suspension/repeat flags, position, native
+  worker/holder identities, raw completion timer, and item-reference/filter counts.
+  They do not establish material availability, path access, blocker causes, or
+  successful job completion. No placeholder citizen/building entities are created.
+- The owned Rust RPC client pins plugin/type/method/protocol identities, bounds
+  protobuf and binary input, validates nonce/version/generation, and fences failed
+  streams. Numeric-loopback TCP uses an absolute whole-call deadline across
+  fragments and notifications; bootstrap and first observation are separate calls.
+- Canonical job snapshots have source digests, generation tracking, immutable
+  publication, exact heartbeats, ordinary sequence advancement, and epoch resets
+  on source-generation, clock, or next-job-ID regression. Observed retirement and
+  reappearance advance generation; invisible same-ID reuse is not claimed detected.
+- `dfmcp-live-jobs-dev-server` is registered as an automatically discovered Cargo
+  binary. Its independently gated public entry uses the existing owned modern MCP
+  runtime and preserves the eleven tool names. Only Observe, Query, and Doctor
+  grants are available; all game-mutation tools refuse without an effect.
+- Shared entity queries, aggregates, lexical search, baselines, and condition
+  watches operate on the job projection. The jobs runtime's observe/wait refreshes
+  one roster; await_watch validates ownership before refreshing and terminal retry
+  skips I/O. Source failure still permits local watch management with stale coverage.
+- The jobs profile has its own token, opt-in, session namespace, and explicit
+  jobs-only coverage. It is not a citizen/announcement superset, does not merge
+  independently timed worlds, and is absent from the production protocol map.
+
+The actual native plugin source was compiled against **mock DFHack/protobuf types**
+with both GCC and Clang, C++17, and warning-denied flags. Each run passed 95 checks
+and matched an independent Python encoder's 153-byte golden frame. The exact
+source SHA-256 was `0458b5548e5bb9891083d29f192bccd3be510107722795f96257855d0c3a7960`.
+The reproducible test is `scripts/test_live_jobs_native_mock.py` and the golden
+frame is retained for Rust decoder/query tests.
+
+Nineteen new Rust tests are registered but **not executed**. No Rust compiler,
+Cargo, or rustfmt was available in the editing environment. Real generated DF
+headers, protobuf generation/linking, native DFHack loading, stdio execution,
+live-game behavior, full repository gates, and production admission have not been
+established. Mock compilation is not native qualification or a live success claim.
+The existing 1.0/1.1 bridges, production map, dependency pins, and migration bead
+status are unchanged.
 
 ### Foreground condition watches and one-observation waits
 
@@ -186,6 +235,7 @@ pins, and migration bead status are unchanged.
 - Deterministic laboratory mode with process-local pause-state effects.
 - Authenticated protocol-1.0 read-only production server source.
 - Explicitly unadmitted protocol-1.1 development server source.
+- Separately gated jobs-only protocol-1.2 development server source.
 - Canonical Agent Turn Packet with identity, anchor, continuity, briefing, changes, attention,
   active work, affordances, recommendations, uncertainty, coverage, budgets, references, and typed
   recovery.
@@ -352,7 +402,7 @@ Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;
 - the production launcher cannot authorize a process from the checked-in registry;
-- protocol 1.1 cannot enter the production runner map;
+- protocol 1.1 and the jobs-only 1.2 profile cannot enter the production runner map;
 - an empty-registry floor correctly preserves “no admissions”;
 - old or external receipts do not qualify the current source generation unless they match every
   exact identity and are reviewed and promoted.
@@ -365,9 +415,10 @@ binary or live configuration.
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
+| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches, jobs-profile integration | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
+| Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
 | World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
@@ -379,7 +430,7 @@ binary or live configuration.
 
 - no current admitted live tuple;
 - no current supported or production compatibility claim;
-- no admitted protocol-1.1 runtime;
+- no admitted protocol-1.1 or jobs-only protocol-1.2 runtime;
 - no live mutation RPC;
 - no pause/resume, dig, construction, labor, burrow, stockpile, work-order, military, keyboard, Lua,
   arbitrary command, arbitrary filesystem, or arbitrary network effect;
@@ -400,8 +451,8 @@ binary or live configuration.
 6. Qualify a protocol-1.1 production server artifact and review a protocol-1.1 compatibility entry.
 7. Only after all protocol-1.1 evidence exists, add an explicit production runner to the V2 protocol
    map, advance the floor, and execute through a fresh protocol-bound ticket.
-8. Expand read coverage next through jobs, items, buildings, and bounded map state, each as a
-   separate protocol and evidence generation.
+8. Validate the jobs-only 1.2 source against Rust and a real DFHack build; expand items, buildings,
+   and bounded map state under separately versioned coherent observation contracts.
 9. Design pause/resume only after the widened read path is stable; mutation must be separately
    versioned, witnessed, idempotent, reconciled, and disposable-fort qualified.
 
