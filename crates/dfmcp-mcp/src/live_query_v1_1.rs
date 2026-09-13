@@ -94,10 +94,13 @@ pub(super) fn query(
                 error(ErrorCode::InternalInvariantViolation,
                     "structured query has no published canonical projection")
             })?;
-            let mut result = semantic_query::execute(&projection.snapshot, &result_context, &input)?;
-            add_field_catalogs(&projection.snapshot, &mut result, result_bytes)?;
-            result["mode"] = json!("structured");
-            result
+            return semantic_query::execute_with_publisher(
+                &projection.snapshot, &result_context, &input, |mut result| {
+                    add_field_catalogs(&projection.snapshot, &mut result, result_bytes)?;
+                    result["mode"] = json!("structured");
+                    view.finish(result)
+                },
+            );
         } else {
             let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
             if mode.is_empty() || mode.len() > MAX_MODE_BYTES {
@@ -256,7 +259,8 @@ mod tests {
         let kinds = variants.iter().filter_map(|variant| {
             variant["properties"]["kind"]["const"].as_str()
         }).collect::<Vec<_>>();
-        assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies", "aggregate", "search"]);
+        assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies", "aggregate", "search",
+            "capture", "changes", "baselines", "release_baseline"]);
         Ok(())
     }
 

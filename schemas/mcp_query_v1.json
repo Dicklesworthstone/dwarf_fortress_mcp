@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:dfmcp:query:1",
   "title": "Structured canonical query envelope",
-  "description": "Value of the query argument on protocol-1.1 fortress.query. Omit top-level mode/limit/continuation. Runtime additionally checks UTF-8 byte lengths, bounded shapes and work, unique metric names, group cardinality, exact anchors, authorization and complete response budgets.",
+  "description": "Value of the query argument on protocol-1.1 fortress.query. Omit top-level mode/limit/continuation. Runtime additionally checks UTF-8 byte lengths, bounded shapes and work, unique metric names, group cardinality, exact anchors, authorization and complete response budgets. Capture/changes are bounded foreground endpoint comparisons, not background watchers or durable history.",
   "type": "object", "additionalProperties": false, "required": ["schema", "query"],
   "properties": {
     "schema": {"const": "dfmcp.query/1"},
@@ -56,6 +56,16 @@
       "properties": {"name": {"$ref": "#/$defs/name"}, "field": {"$ref": "#/$defs/name"}, "numeric_type": {"enum": ["i64", "u64", "fixed"]}, "scale": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 4294967295}, {"type": "null"}]}},
       "allOf": [{"if": {"properties": {"numeric_type": {"const": "fixed"}}}, "then": {"required": ["scale"], "properties": {"scale": {"type": "integer", "minimum": 0, "maximum": 4294967295}}}, "else": {"properties": {"scale": {"type": "null"}}}}]
     },
+    "baseline": {"type":"string", "pattern":"^qb1:[0-9a-f]{64}$", "description":"Session-owned immutable baseline handle, never mutation authority."},
+    "capture_selection": {
+      "type":"object", "additionalProperties":false, "required":["kind"],
+      "properties": {
+        "kind":{"const":"entities"}, "kinds":{"type":"array", "items":{"$ref":"#/$defs/entity_kind"}, "maxItems":32},
+        "where":{"anyOf":[{"$ref":"#/$defs/filter"},{"type":"null"}]},
+        "fields":{"type":"array", "items":{"$ref":"#/$defs/name"}, "maxItems":32},
+        "order":{"anyOf":[{"enum":["id_ascending","id_descending","label_ascending","revision_descending"]},{"type":"null"}]}
+      }
+    },
     "query": {"oneOf": [
       {
         "type": "object", "additionalProperties": false, "required": ["kind"],
@@ -98,6 +108,28 @@
           "include_labels": {"anyOf": [{"type": "boolean"}, {"type": "null"}]}, "match_mode": {"anyOf": [{"enum": ["all", "any"]}, {"type": "null"}]},
           "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]}, "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
         }
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind","key","select","max_game_ticks"],
+        "properties":{"kind":{"const":"capture"}, "key":{"type":"string", "pattern":"^[A-Za-z0-9._-]{1,64}$"},
+          "select":{"$ref":"#/$defs/capture_selection"}, "max_game_ticks":{"type":"integer", "minimum":1, "maximum":18446744073709551615}},
+        "description":"Capture a complete selected result of at most 256 rows, bounded by the session lifetime budget. No bridge refresh occurs."
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind","baseline"],
+        "properties":{"kind":{"const":"changes"}, "baseline":{"$ref":"#/$defs/baseline"},
+          "limit":{"anyOf":[{"type":"integer", "minimum":1, "maximum":256},{"type":"null"}]},
+          "continuation":{"anyOf":[{"type":"string", "maxLength":128},{"type":"null"}]}},
+        "description":"Compare the current published projection with an immutable baseline. Refresh via observe/wait before the first page, never between continuation pages."
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind"],
+        "properties":{"kind":{"const":"baselines"}}, "description":"List this session's retained baselines, including expired or epoch-invalidated entries."
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind","baseline"],
+        "properties":{"kind":{"const":"release_baseline"}, "baseline":{"$ref":"#/$defs/baseline"}},
+        "description":"Explicitly release process-local baseline storage. Does not change any game, save, or action state."
       }
     ]}
   }
