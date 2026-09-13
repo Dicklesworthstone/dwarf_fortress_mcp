@@ -40,7 +40,30 @@ pub(super) fn query(
             return Err(error(ErrorCode::AdapterFailure,
                 "query source is poisoned; open a new session instead of treating cached data as fresh"));
         }
-        let mut payload = if let Some(input) = query {
+        let mut payload = if query.is_none() && mode.as_deref() == Some("schema") {
+            if limit.is_some() || continuation.is_some() {
+                return Err(error(ErrorCode::InvalidRequest,
+                    "schema discovery does not accept pagination arguments"));
+            }
+            json!({
+                "mode": "schema",
+                "anchor": anchor_json(anchor),
+                "truncated": false,
+                "continuation": null,
+                "query_schema": query_schema()?,
+                "usage": "Pass an envelope conforming to query_schema in the query argument; omit mode, limit and continuation at the top level.",
+                "example": {
+                    "schema": "dfmcp.query/1",
+                    "query": {
+                        "kind": "entities", "kinds": ["unit"],
+                        "fields": ["name", "profession", "position", "sane"],
+                        "limit": 4,
+                        "where": {"op": "compare", "field": "sane", "comparison": "eq",
+                            "value": {"type": "bool", "value": false}},
+                    },
+                },
+            })
+        } else if let Some(input) = query {
             if mode.is_some() || limit.is_some() || continuation.is_some() {
                 return Err(error(ErrorCode::InvalidRequest,
                     "do not mix mode/limit/continuation with query; put structured options inside query.query"));
@@ -50,6 +73,7 @@ pub(super) fn query(
                     "structured query has no published canonical projection")
             })?;
             let mut result = semantic_query::execute(&projection.snapshot, &context, &input)?;
+            add_field_catalogs(&projection.snapshot, &mut result);
             result["mode"] = json!("structured");
             result
         } else {
@@ -106,6 +130,9 @@ pub(super) fn query(
         payload["session_id"] = json!(guard.session_id.to_string());
         payload["request_id"] = json!(request_id.to_string());
         payload["source_evidence"] = json!(references_json(&guard));
+        payload["query_help"] = json!({"tool": "fortress.query", "arguments": {
+            "session_id": guard.session_id.to_string(), "mode": "schema"
+        }});
         Ok(payload)
     })();
     match outcome {
@@ -124,6 +151,28 @@ pub(super) fn query(
             if guard.source_poisoned() { ContinuityStatus::Stale } else { ContinuityStatus::Continuous },
             &failure),
     }
+}
+
+fn query_schema() -> Result<JsonValue> {
+    serde_json::from_str(include_str!("../../../schemas/mcp_query_v1.json"))
+        .map_err(|failure| error(ErrorCode::InternalInvariantViolation,
+            format!("embedded query schema is invalid: {failure}")))
+}
+
+fn add_field_catalogs(snapshot: &dfmcp_world::WorldSnapshot, payload: &mut JsonValue) {
+    let add = |row: &mut JsonValue| {
+        let Some(id) = row.get("entity_id").and_then(JsonValue::as_str)
+            .and_then(|id| id.parse::<u64>().ok()) else { return; };
+        let Some(entity) = snapshot.graph.entities.get(&EntityId::new(id)) else { return; };
+        let fields = entity.fields.keys().filter(|field| field.len() <= 128)
+            .take(128).collect::<Vec<_>>();
+        row["available_fields_truncated"] = json!(fields.len() != entity.fields.len());
+        row["available_fields"] = json!(fields);
+    };
+    if let Some(rows) = payload.get_mut("rows").and_then(JsonValue::as_array_mut) {
+        for row in rows { add(row); }
+    }
+    if let Some(row) = payload.get_mut("row") { add(row); }
 }
 
 #[cfg(test)]
@@ -156,6 +205,42 @@ mod tests {
         assert_eq!(result["ok"], false);
         assert_eq!(result["error"]["code"], ErrorCode::InvalidRequest.as_str());
         assert!(result.get("components").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn embedded_schema_lists_every_executable_query_variant() -> Result<()> {
+        let schema = query_schema()?;
+        assert_eq!(schema["properties"]["schema"]["const"], "dfmcp.query/1");
+        let variants = schema["$defs"]["query"]["oneOf"].as_array().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "query variants missing")
+        })?;
+        let kinds = variants.iter().filter_map(|variant| {
+            variant["properties"]["kind"]["const"].as_str()
+        }).collect::<Vec<_>>();
+        assert_eq!(kinds, vec!["entities", "inspect", "traverse", "dependencies"]);
+        Ok(())
+    }
+
+    #[test]
+    fn registered_query_function_keeps_missing_session_errors_structured() -> Result<()> {
+        let raw = super::super::fortress_query(None, None, Some(1), None, None);
+        let result: JsonValue = serde_json::from_str(&raw).map_err(|failure| {
+            error(ErrorCode::InternalInvariantViolation, failure.to_string())
+        })?;
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["agent_turn"]["operation"], "fortress.query");
+        Ok(())
+    }
+
+    #[test]
+    fn defaults_leave_room_for_the_spine_without_widening_explicit_budgets() -> Result<()> {
+        let default = requested_budget(None, None, None, None, None, None)?;
+        assert_eq!(default.max_output_tokens, DEFAULT_RESPONSE_TOKENS);
+        assert!(default.max_output_tokens >= MIN_RESPONSE_TOKENS);
+        let explicit = requested_budget(None, None, None, None, Some(MIN_RESPONSE_TOKENS), None)?;
+        assert_eq!(explicit.max_output_tokens, MIN_RESPONSE_TOKENS);
+        assert!(requested_budget(None, None, None, None, Some(1_500), None).is_err());
         Ok(())
     }
 }
