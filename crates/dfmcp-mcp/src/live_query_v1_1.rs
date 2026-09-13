@@ -5,6 +5,10 @@ use super::*;
 
 #[path = "semantic_query.rs"]
 mod semantic_query;
+#[path = "query_response.rs"]
+mod query_response;
+
+use query_response::QueryResponseProjection;
 
 pub(super) fn query(
     session_id: Option<String>,
@@ -34,13 +38,31 @@ pub(super) fn query(
                 ContinuityStatus::Continuous, &failure);
         }
     };
-    let outcome = (|| -> Result<JsonValue> {
+    let outcome = (|| -> Result<String> {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if guard.source_poisoned() {
             return Err(error(ErrorCode::AdapterFailure,
                 "query source is poisoned; open a new session instead of treating cached data as fresh"));
         }
-        let mut payload = if query.is_none() && mode.as_deref() == Some("schema") {
+        let view = QueryResponseProjection {
+            session_id: guard.session_id.to_string(),
+            request_id: request_id.to_string(),
+            anchor: anchor_json(anchor),
+            briefing: briefing_json(&guard),
+            attention: announcement_attention(&guard),
+            affordances: affordances_json(&guard),
+            uncertainty: uncertainties_json(&guard),
+            coverage: coverage_json(&guard),
+            budget: budget_json(guard.budget),
+            references: references_json(&guard),
+            maximum_bytes: response_byte_limit(&guard),
+        };
+        let result_bytes = view.result_byte_budget()?;
+        let mut result_context = context.clone();
+        result_context.budget.max_bytes = u64::try_from(result_bytes).map_err(|_| {
+            error(ErrorCode::BudgetExceeded, "remaining query budget cannot be represented")
+        })?;
+        let payload = if query.is_none() && mode.as_deref() == Some("schema") {
             if limit.is_some() || continuation.is_some() {
                 return Err(error(ErrorCode::InvalidRequest,
                     "schema discovery does not accept pagination arguments"));
@@ -72,8 +94,8 @@ pub(super) fn query(
                 error(ErrorCode::InternalInvariantViolation,
                     "structured query has no published canonical projection")
             })?;
-            let mut result = semantic_query::execute(&projection.snapshot, &context, &input)?;
-            add_field_catalogs(&projection.snapshot, &mut result);
+            let mut result = semantic_query::execute(&projection.snapshot, &result_context, &input)?;
+            add_field_catalogs(&projection.snapshot, &mut result, result_bytes)?;
             result["mode"] = json!("structured");
             result
         } else {
@@ -95,7 +117,7 @@ pub(super) fn query(
                 max_output_tokens: budget.max_output_tokens,
                 continuation,
             };
-            let response = guard.adapter.query(&request, &context)?;
+            let response = guard.adapter.query(&request, &result_context)?;
             if response.anchor != anchor {
                 return Err(error(ErrorCode::InternalInvariantViolation,
                     "query adapter changed its anchor while producing a page"));
@@ -126,26 +148,10 @@ pub(super) fn query(
                 "score_ledger": response.score_ledger,
             })
         };
-        payload["ok"] = json!(true);
-        payload["session_id"] = json!(guard.session_id.to_string());
-        payload["request_id"] = json!(request_id.to_string());
-        payload["source_evidence"] = json!(references_json(&guard));
-        payload["query_help"] = json!({"tool": "fortress.query", "arguments": {
-            "session_id": guard.session_id.to_string(), "mode": "schema"
-        }});
-        Ok(payload)
+        view.finish(payload)
     })();
     match outcome {
-        Ok(payload) => {
-            let continuity = if payload.get("truncated").and_then(JsonValue::as_bool) == Some(true) {
-                ContinuityStatus::Partial
-            } else {
-                ContinuityStatus::Continuous
-            };
-            attach_turn(&guard, operation, AgentPhase::Inspect, ObservationProfile::Tactical,
-                request_id, continuity, Some(anchor), None, Vec::new(),
-                announcement_attention(&guard), Vec::new(), payload)
-        }
+        Ok(encoded) => encoded,
         Err(failure) => session_error(&guard, operation, AgentPhase::Inspect,
             ObservationProfile::Tactical, request_id, anchor,
             if guard.source_poisoned() { ContinuityStatus::Stale } else { ContinuityStatus::Continuous },
@@ -159,23 +165,52 @@ fn query_schema() -> Result<JsonValue> {
             format!("embedded query schema is invalid: {failure}")))
 }
 
-fn add_field_catalogs(snapshot: &dfmcp_world::WorldSnapshot, payload: &mut JsonValue) {
+fn add_field_catalogs(
+    snapshot: &dfmcp_world::WorldSnapshot,
+    payload: &mut JsonValue,
+    byte_limit: usize,
+) -> Result<()> {
     if !matches!(payload.get("kind").and_then(JsonValue::as_str), Some("entities" | "inspect")) {
-        return;
+        return Ok(());
     }
-    let add = |row: &mut JsonValue| {
+    // Catalogs are optional discovery, not requested facts. Reserve a small
+    // disclosure record before adding them, and never consume the result page.
+    let size = serde_json::to_vec(payload).map_err(|_| {
+        error(ErrorCode::InternalInvariantViolation, "cannot measure query field catalogs")
+    })?.len();
+    let Some(mut remaining) = byte_limit.checked_sub(size.saturating_add(160)) else {
+        return Ok(());
+    };
+    let mut omitted = false;
+    let mut add = |row: &mut JsonValue| -> Result<()> {
         let Some(id) = row.get("entity_id").and_then(JsonValue::as_str)
-            .and_then(|id| id.parse::<u64>().ok()) else { return; };
-        let Some(entity) = snapshot.graph.entities.get(&EntityId::new(id)) else { return; };
+            .and_then(|id| id.parse::<u64>().ok()) else { return Ok(()); };
+        let Some(entity) = snapshot.graph.entities.get(&EntityId::new(id)) else { return Ok(()); };
         let fields = entity.fields.keys().filter(|field| field.len() <= 128)
             .take(128).collect::<Vec<_>>();
-        row["available_fields_truncated"] = json!(fields.len() != entity.fields.len());
-        row["available_fields"] = json!(fields);
+        let addition = json!({"available_fields":fields,
+            "available_fields_truncated":fields.len() != entity.fields.len()});
+        let added_bytes = serde_json::to_vec(&addition).map_err(|_| {
+            error(ErrorCode::InternalInvariantViolation, "cannot measure query field catalog")
+        })?.len();
+        if added_bytes > remaining {
+            omitted = true;
+            return Ok(());
+        }
+        remaining -= added_bytes;
+        if let (Some(row), Some(addition)) = (row.as_object_mut(), addition.as_object()) {
+            row.extend(addition.iter().map(|(key, value)| (key.clone(), value.clone())));
+        }
+        Ok(())
     };
     if let Some(rows) = payload.get_mut("rows").and_then(JsonValue::as_array_mut) {
-        for row in rows { add(row); }
+        for row in rows { add(row)?; }
     }
-    if let Some(row) = payload.get_mut("row") { add(row); }
+    if let Some(row) = payload.get_mut("row") { add(row)?; }
+    if omitted {
+        payload["field_catalogs_omitted_for_budget"] = json!(true);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
