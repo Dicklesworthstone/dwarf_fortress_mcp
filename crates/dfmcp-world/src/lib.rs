@@ -7,6 +7,7 @@ mod checkpoint;
 mod delta;
 pub mod franken_fs;
 pub mod graph_query;
+pub mod inventory_allocation;
 mod ledger;
 pub mod merkle;
 mod model;
