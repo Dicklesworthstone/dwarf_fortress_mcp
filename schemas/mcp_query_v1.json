@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dfmcp:query:1",
+  "title": "Structured canonical query envelope",
+  "description": "Value of the query argument on the protocol-1.1 fortress.query tool. Do not combine with top-level mode/limit/continuation. Runtime additionally enforces UTF-8 byte limits, 4096 input nodes, depth 24, total input cost, authority, exact anchors and response budgets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "query"],
+  "properties": {
+    "schema": {"const": "dfmcp.query/1"},
+    "expected_anchor": {"anyOf": [{"$ref": "#/$defs/anchor"}, {"type": "null"}]},
+    "query": {"$ref": "#/$defs/query"}
+  },
+  "$defs": {
+    "entity_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,19}$",
+      "description": "Canonical positive decimal u64; the runtime also checks numeric overflow."
+    },
+    "name": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\u0000]+$"},
+    "entity_kind": {
+      "oneOf": [
+        {"enum": ["fortress", "unit", "item", "building", "job", "work_order", "stockpile", "zone", "burrow", "squad", "military_order", "tile_feature", "plant", "creature", "historical_figure", "civilization", "announcement", "syndrome"]},
+        {"type": "string", "pattern": "^other:.+$", "maxLength": 128}
+      ]
+    },
+    "edge_kind": {
+      "oneOf": [
+        {"enum": ["located_at", "contained_in", "assigned_to", "member_of", "performs", "requires", "produces", "uses", "supports", "threatens", "ordered_by", "parent_of"]},
+        {"type": "string", "pattern": "^custom:.+$", "maxLength": 128}
+      ]
+    },
+    "anchor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fortress_id", "epoch", "sequence", "game_tick", "state_hash"],
+      "properties": {
+        "fortress_id": {"$ref": "#/$defs/entity_id"},
+        "epoch": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "sequence": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "game_tick": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "state_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "literal": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "null"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "bool"}, "value": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "i64"}, "value": {"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "u64"}, "value": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "text"}, "value": {"type": "string", "maxLength": 65536}}},
+        {
+          "type": "object", "additionalProperties": false, "required": ["type", "value"],
+          "properties": {
+            "type": {"const": "fixed"},
+            "value": {
+              "type": "object", "additionalProperties": false, "required": ["units", "scale"],
+              "properties": {
+                "units": {"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807},
+                "scale": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+              }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["type", "value"],
+          "properties": {
+            "type": {"const": "coord"},
+            "value": {
+              "type": "object", "additionalProperties": false, "required": ["x", "y", "z"],
+              "properties": {
+                "x": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+                "y": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+                "z": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
+              }
+            }
+          }
+        },
+        {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"const": "entity"}, "value": {"$ref": "#/$defs/entity_id"}}}
+      ]
+    },
+    "filter": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["op", "args"],
+          "properties": {"op": {"const": "all"}, "args": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "maxItems": 4096, "minItems": 0}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["op", "args"],
+          "properties": {"op": {"const": "any"}, "args": {"type": "array", "items": {"$ref": "#/$defs/filter"}, "maxItems": 4096, "minItems": 0}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["op", "arg"],
+          "properties": {"op": {"const": "not"}, "arg": {"$ref": "#/$defs/filter"}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["op", "field", "comparison", "value"],
+          "properties": {
+            "op": {"const": "compare"}, "field": {"$ref": "#/$defs/name"},
+            "comparison": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]}, "value": {"$ref": "#/$defs/literal"}
+          }
+        }
+      ]
+    },
+    "query": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind"],
+          "properties": {
+            "kind": {"const": "entities"},
+            "kinds": {"type": "array", "items": {"$ref": "#/$defs/entity_kind"}, "maxItems": 32, "minItems": 0},
+            "where": {"anyOf": [{"$ref": "#/$defs/filter"}, {"type": "null"}]},
+            "fields": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32, "minItems": 0},
+            "order": {"anyOf": [{"enum": ["id_ascending", "id_descending", "label_ascending", "revision_descending"]}, {"type": "null"}]},
+            "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 512}, {"type": "null"}]},
+            "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "entity_id", "generation"],
+          "properties": {
+            "kind": {"const": "inspect"}, "entity_id": {"$ref": "#/$defs/entity_id"},
+            "generation": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+            "fields": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32, "minItems": 0}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "roots", "max_depth"],
+          "properties": {
+            "kind": {"const": "traverse"},
+            "roots": {"type": "array", "items": {"$ref": "#/$defs/entity_id"}, "maxItems": 64, "minItems": 1},
+            "edge_kinds": {"type": "array", "items": {"$ref": "#/$defs/edge_kind"}, "maxItems": 32, "minItems": 0},
+            "direction": {"anyOf": [{"enum": ["outgoing", "incoming", "undirected"]}, {"type": "null"}]},
+            "max_depth": {"type": "integer", "minimum": 0, "maximum": 1024},
+            "target": {"anyOf": [{"$ref": "#/$defs/entity_id"}, {"type": "null"}]}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "edge_kinds"],
+          "properties": {
+            "kind": {"const": "dependencies"},
+            "edge_kinds": {"type": "array", "items": {"$ref": "#/$defs/edge_kind"}, "maxItems": 32, "minItems": 1}
+          }
+        }
+      ]
+    }
+  }
+}
