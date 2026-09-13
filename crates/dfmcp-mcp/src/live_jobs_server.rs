@@ -50,8 +50,8 @@ trait JobSource: Send {
 }
 impl JobSource for JobsRpcClient<DeadlineStream> {
     fn read(&mut self, timeout: Duration) -> Result<LiveJobObservation> { self.refresh(timeout) }
-    fn poisoned(&self) -> bool { self.poisoned() }
-    fn fence(&mut self) { self.fence(); }
+    fn poisoned(&self) -> bool { JobsRpcClient::poisoned(self) }
+    fn fence(&mut self) { JobsRpcClient::fence(self); }
 }
 struct JobSession {
     id: SessionId,
@@ -76,6 +76,7 @@ impl JobSession {
     fn refresh(&mut self, context: &OperationContext) -> Result<JobPublication> {
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if context.anchor != self.anchor()? { return Err(error(ErrorCode::StaleAnchor, "jobs refresh context is stale")); }
+        if self.source.poisoned() { return Err(error(ErrorCode::AdapterUnavailable,"jobs source is fenced; reopen the session")); }
         let result = self.source.read(Duration::from_millis(context.budget.max_wall_millis))
             .and_then(|observation| {
                 if observation.jobs.len().saturating_add(1) > context.budget.max_entities as usize
@@ -152,7 +153,7 @@ fn tool_packet(session: Option<&JobSession>, context: Option<&OperationContext>,
     }
     let mut builder = AgentTurnBuilder::new(operation, if operation == "fortress.observe" {
         AgentPhase::Orient
-    } else { AgentPhase::Inspect }).profile(ObservationProfile::Briefing).active_work(work).coverage(coverage());
+    } else { AgentPhase::Inspect }).profile(ObservationProfile::Briefing).active_work(work);
     let mut limit = 8192;
     if let (Some(session), Some(context)) = (session, context) {
         limit = packet_limit(session.budget);
@@ -165,12 +166,14 @@ fn tool_packet(session: Option<&JobSession>, context: Option<&OperationContext>,
         payload["session_id"] = json!(session.id.to_string());
         payload["anchor"] = anchor_json(anchor);
         builder = builder.session_id(session.id.to_string()).request_id(context.request_id.to_string())
-            .anchor(anchor_json(anchor)).briefing(briefing(session))
+            .anchor(anchor_json(anchor)).briefing(briefing(session)).coverage(coverage())
             .continuity(continuity, Some(anchor_json(context.anchor)), None,
                 reset.then(|| "jobs_bridge_clock_or_identity_horizon_reset".to_owned()));
     } else {
         builder = builder.briefing(json!({"runtime":"unadmitted_development","observation_profile":"jobs-only",
-            "runtime_admitted":false,"mutation_admissible":false,"fortress_loaded":false}));
+            "runtime_admitted":false,"mutation_admissible":false,"fortress_loaded":false}))
+            .coverage(json!({"status":"unknown","complete_domains":[],"partial_domains":[],
+                "omitted_domains":["fortress.jobs"],"continuation":null}));
     }
     let encoded = builder.attach(payload);
     if encoded.len() > limit { return Err(error(ErrorCode::BudgetExceeded, "complete jobs response exceeds output budget")); }
@@ -254,9 +257,17 @@ pub fn fortress_open_session(max_jobs: Option<u32>, max_output_tokens: Option<u3
 fn observe(id: Option<String>, operation: &str) -> String {
     with_session(id,operation,Capability::Observe,|session,context| {
         let outcome = session.refresh(&context)?;
-        tool_packet(Some(session),Some(&context),operation,json!({"ok":true,
+        let payload = json!({"ok":true,
             "kind":if outcome==JobPublication::Heartbeat {"heartbeat"} else {"snapshot"},
-            "reset":outcome==JobPublication::Reset,"game_clock_controlled":false}))
+            "reset":outcome==JobPublication::Reset,"game_clock_controlled":false});
+        let mut current = context.clone();
+        current.anchor = session.anchor()?;
+        if current.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok() {
+            semantic_query::publish_with_active_work(&current,payload,
+                |result|tool_packet(Some(session),Some(&context),operation,result))
+        } else {
+            tool_packet(Some(session),Some(&context),operation,payload)
+        }
     })
 }
 #[tool(description = "Read and atomically publish one complete bounded job roster. A disappearing job is not proof of completion. Never unpauses the game.")]
@@ -433,9 +444,48 @@ mod tests {
         assert_eq!(capture["ok"],true);
         assert_eq!(decode(&fortress_wait(handle.clone()))?["ok"],true);
         let changes=decode(&fortress_query(handle,None,Some(json!({"schema":"dfmcp.query/1","query":{
-            "kind":"changes","baseline":capture["baseline"]}}))))?;
+            "kind":"changes","baseline":capture["captured"]["baseline"]}}))))?;
         assert_eq!(changes["ok"],true);assert_eq!(changes["change_count"],1);
         assert_eq!(changes["agent_turn"]["continuity"]["status"],"partial");
+        lock(&SESSIONS)?.remove(&id);Ok(())
+    }
+    #[test]
+    fn await_watch_consumes_one_job_observation_and_terminal_retry_skips_io()->Result<()> {
+        let id=register()?;let handle=Some(id.to_string());
+        let deadline=105u64*403_200+50;
+        let created=decode(&fortress_query(handle.clone(),None,Some(json!({"schema":"dfmcp.query/1","query":{
+            "kind":"watch","key":"resume-dig","label":"Observe unsuspended job",
+            "condition":{"op":"field","entity_id":"2","generation":1,"field":"suspended",
+                "comparison":"eq","value":{"type":"bool","value":false}},
+            "deadline_tick":deadline,"poll_interval_ticks":1,"stable_observations":1}}))))?;
+        assert_eq!(created["ok"],true);
+        assert_eq!(created["record"]["terminal"],false);
+        let request=json!({"schema":"dfmcp.query/1","query":{"kind":"await_watch","watch":created["record"]["watch"]}});
+        let satisfied=decode(&fortress_query(handle.clone(),None,Some(request.clone())))?;
+        assert_eq!(satisfied["ok"],true);assert_eq!(satisfied["record"]["terminal"],true);
+        assert_eq!(satisfied["observation_refresh"]["kind"],"snapshot");
+        let repeated=decode(&fortress_query(handle.clone(),None,Some(request)))?;
+        assert_eq!(repeated["ok"],true);assert_eq!(repeated["record"],satisfied["record"]);
+        assert!(repeated["observation_refresh"].is_null());
+        assert_eq!(decode(&fortress_doctor(handle))?["status"],"read_only_unadmitted");
+        lock(&SESSIONS)?.remove(&id);Ok(())
+    }
+    #[test]
+    fn local_watch_cancellation_remains_available_after_source_failure()->Result<()> {
+        let id=register()?;let handle=Some(id.to_string());
+        let created=decode(&fortress_query(handle.clone(),None,Some(json!({"schema":"dfmcp.query/1","query":{
+            "kind":"watch","key":"pending-clock","label":"Wait for later tick",
+            "condition":{"op":"tick_at_least","value":105u64*403_200+20},
+            "deadline_tick":105u64*403_200+50,"poll_interval_ticks":1,"stable_observations":1}}))))?;
+        assert_eq!(created["ok"],true);
+        let observed=decode(&fortress_observe(handle.clone()))?;
+        assert_eq!(observed["ok"],true);
+        assert!(observed["agent_turn"]["active_work"]["obligations"].as_array().is_some_and(|work|!work.is_empty()));
+        assert_eq!(decode(&fortress_observe(handle.clone()))?["ok"],false);
+        let cancelled=decode(&fortress_query(handle,None,Some(json!({"schema":"dfmcp.query/1","query":{
+            "kind":"cancel_watch","watch":created["record"]["watch"]}}))))?;
+        assert_eq!(cancelled["ok"],true);assert_eq!(cancelled["record"]["terminal"],true);
+        assert_eq!(cancelled["agent_turn"]["continuity"]["status"],"stale");
         lock(&SESSIONS)?.remove(&id);Ok(())
     }
     #[test]
@@ -445,5 +495,13 @@ mod tests {
         assert!(allowed_environment("DFMCP_JOBS_TOKEN"));
         assert!(read_capabilities(Some(vec!["control_clock".to_owned()])).is_err());
         assert!(resolve(Some("11000000000000000000000000000001".to_owned())).is_err());
+    }
+    #[test]
+    fn unbound_error_does_not_claim_complete_job_coverage()->Result<()> {
+        let result=decode(&fortress_query(None,None,None))?;
+        assert_eq!(result["ok"],false);
+        assert_eq!(result["agent_turn"]["coverage"]["complete_domains"],json!([]));
+        assert_eq!(result["agent_turn"]["briefing"]["fortress_loaded"],false);
+        Ok(())
     }
 }
