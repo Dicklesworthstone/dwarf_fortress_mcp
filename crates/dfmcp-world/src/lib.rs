@@ -49,8 +49,8 @@ pub use model::{
 };
 pub use query::{
     CompareOp, Predicate, QueryCost, QueryOrder, QueryPlanCost, QueryResult, WorldQuery, evaluate,
-    execute_bounded_query, execute_query,
 };
+pub use query_page::{execute_bounded_query, execute_query};
 pub use sqlite_ledger::{
     CapsuleRow, DeltaRow, SnapshotRow, SqliteLedgerConfig, SqliteProductionLedger,
 };

@@ -341,7 +341,17 @@ fn test_query_budget_enforcement_and_continuations() -> Result<(), Box<dyn Error
     assert_eq!(res_limit.entities.len(), 2);
     assert_eq!(res_limit.matched, 3);
     assert!(res_limit.truncated);
-    assert_eq!(res_limit.continuation.as_deref(), Some("cont:1:0:0:2"));
+    assert!(
+        res_limit.continuation.as_deref().is_some_and(|token| token.starts_with("q1:2:"))
+    );
+    let next_query = WorldQuery {
+        continuation: res_limit.continuation,
+        ..q_limit
+    };
+    let next = execute_query(&snapshot, &next_query, 100)?;
+    assert_eq!(next.entities.iter().map(|entity| entity.id.get()).collect::<Vec<_>>(), vec![3]);
+    assert!(!next.truncated);
+    assert!(next.continuation.is_none());
 
     // 2. Byte limit bounding: set byte limit small enough to fit only 1 entity
     let one_entity_bytes = snapshot.graph.entities[&EntityId::new(1)]
@@ -362,9 +372,8 @@ fn test_query_budget_enforcement_and_continuations() -> Result<(), Box<dyn Error
     )?;
     assert_eq!(res_byte_bounded.entities.len(), 1);
     assert!(res_byte_bounded.truncated);
-    assert_eq!(
-        res_byte_bounded.continuation.as_deref(),
-        Some("cont:1:0:0:1")
+    assert!(
+        res_byte_bounded.continuation.as_deref().is_some_and(|token| token.starts_with("q1:1:"))
     );
 
     Ok(())
