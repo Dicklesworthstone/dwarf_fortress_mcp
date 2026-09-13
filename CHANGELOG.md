@@ -8,6 +8,22 @@ readiness.
 
 ### Added
 
+- Foreground condition watches integrated into protocol-1.1 `fortress.query`:
+  `watch`, `poll_watch`, `await_watch`, `watches`, `cancel_watch`, and
+  `release_watch`. Typed predicates retain generation fences, failure guards,
+  game-tick deadlines, sampling cadence, distinct-observation stability, and
+  immutable terminal evidence. Unknown facts never become false under negation.
+- A one-observation await path with pre-I/O handle/anchor validation, Query plus
+  Observe authorization, and post-refresh reauthorization. It performs at most
+  one adapter observation, never controls game time, and skips terminal reads.
+- Active-watch projection in query Agent Turns, output-budget reservation,
+  render-before-publication state changes, and source-stale metadata/cancellation
+  after bridge poisoning. This is not background work or durable mutation state.
+- Twenty-five registered Rust watch/refresh/packet scenarios, including an
+  8192-byte integrated response path. JSON Schema validation passed 73 local
+  cases and preserved every prior definition and ten original query variants;
+  the embedded schema now has sixteen variants. Rust execution remains unverified.
+- The condition-watch workflow and limitations in `docs/CONDITION_WATCHES.md`.
 - Foreground query baselines and endpoint change monitoring through the existing
   protocol-1.1 `fortress.query` tool: `capture`, `changes`, `baselines`, and
   `release_baseline`. Captures retain complete bounded entity selections, carry
@@ -23,7 +39,7 @@ readiness.
   deadline fences, retention bounds, and failed-publication recovery. These tests
   have not been compiled or executed in the editing environment.
 - Foreground monitoring workflow and limits in `docs/QUERY_HISTORY.md`; embedded
-  query-schema discovery includes all ten structured query variants.
+  query-schema discovery includes the original ten structured query variants.
 - Bounded `dfmcp_world::graph_query` reference APIs for canonical multi-source BFS,
   outgoing/incoming/undirected traversal, edge-revision path witnesses, explicit
   depth frontiers, and bounded path reconstruction.
@@ -192,6 +208,11 @@ readiness.
 
 ### Current evidence status
 
+- Condition-watch schema checks passed 73 local cases (34 accepted, 39 rejected),
+  plus three documentation examples. The 25 Rust scenarios are registered but
+  unexecuted: no Rust compiler, Cargo, or rustfmt is available in this editing
+  environment. These checks do not establish Rust, stdio, native/live-game,
+  repository qualification, or admission evidence.
 - The foreground-history tranche is source-present, including ten registered
   regression scenarios. No Rust compiler, Cargo, or rustfmt was available;
   compilation, Rust tests, Clippy, repository qualification, stdio execution, and

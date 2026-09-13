@@ -65,6 +65,45 @@ commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
 
+### Foreground condition watches and one-observation waits
+
+Protocol-1.1 `fortress.query` now integrates `watch`, `poll_watch`, `await_watch`,
+`watches`, `cancel_watch`, and `release_watch`. The workflow and exact limitations
+are described in `docs/CONDITION_WATCHES.md`.
+
+- Watches retain bounded typed success/failure predicates, entity generations,
+  game-tick deadlines, sampling cadence, and distinct-observation stability.
+- Duplicate anchors cannot manufacture completion. Unknown, incompatible, stale,
+  inferred, or unsupported facts cannot satisfy a field condition, including
+  under negation. Known failure wins; unknown failure blocks success.
+- Missing entities remain unknown. Reused generations, epoch changes, time or
+  sequence regressions, and same-cursor forks invalidate nonterminal records.
+  Skipped observation sequences reset stability rather than proving continuity.
+- `await_watch` validates the session-owned handle before I/O, requires Query and
+  Observe authority, performs at most one bounded adapter observation, then
+  reauthorizes at the published target before evaluating. Its adapter observation
+  may internally require multiple bounded native pages. It never unpauses or
+  controls game time. Terminal awaits skip the read entirely.
+- Active watches are projected into successful protocol-1.1 query Agent Turns.
+  Authorized query errors include them when the complete packet fits. Source
+  poisoning still permits local watch listing, cancellation, and terminal release,
+  with explicitly stale source continuity.
+- Registration, evaluation, cancellation, and release publish only after the full
+  response renders within budget. A failed render leaves watch state unchanged,
+  although a preceding bridge read may already have published a newer observation.
+- Retention is bounded to eight records per session and 128 per process. Terminal
+  evidence is immutable; explicit release cannot resurrect an old watch handle.
+
+This tranche adds 25 registered Rust scenarios but remains **source present**:
+Rust compilation, Rust tests, rustfmt, Clippy, stdio, native DFHack, and live-game
+execution were not available in the editing environment. The self-contained JSON
+Schema passed 73 local cases (34 accepted, 39 rejected), preserving all ten prior
+query variants; three documentation JSON examples also validated. Those checks
+are not Rust or repository qualification. Watches are foreground-only and not
+durable, continuous-history proofs, mutation obligations, or admission evidence.
+The separate `fortress.wait` tool, other runtimes, bridge methods, dependency pins,
+production protocol map, and migration bead status are unchanged.
+
 ### Structured live queries and foreground change monitoring
 
 The protocol-1.1 development `fortress.query` implementation now exposes typed
@@ -326,7 +365,7 @@ binary or live configuration.
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries and endpoint change monitoring | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
+| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
