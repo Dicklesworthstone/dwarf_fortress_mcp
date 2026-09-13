@@ -65,6 +65,46 @@ commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
 
+### Structured live queries and foreground change monitoring
+
+The protocol-1.1 development `fortress.query` implementation now exposes typed
+entity filtering, generation-checked inspection, graph traversal/dependency
+analysis, grouped aggregates, lexical search, and embedded schema discovery.
+These operate on the session's current published projection, not arbitrary
+DFHack objects. Other runtime query surfaces are not implicitly upgraded.
+
+The subsequent foreground-history slice adds four query variants behind the same
+tool: `capture`, `changes`, `baselines`, and `release_baseline`. Its complete
+contract and example workflow are in `docs/QUERY_HISTORY.md`.
+
+- Capture collects the complete selected entity set across bounded pages at one
+  exact anchor; no partial page is accepted as a baseline.
+- Immutable baselines are process-local and session-owned, with explicit
+  idempotent capture keys, game-tick deadlines, 256-row/256-KiB retained-row bounds,
+  eight entries per session and 128 entries per process.
+- Later queries return deterministic, generation-aware entered/left/changed result
+  rows with before/after facts. Leaving a filter is not classified as death or
+  deletion. Presence, epistemic class, source kind, and selected values remain
+  significant; observation-bookkeeping-only refreshes are counted separately.
+- Change pages bind the baseline and exact target snapshot. Reading or retrying a
+  page never advances or consumes the baseline. Session, epoch, fork, regression,
+  deadline, input, scan, row, and response-budget violations fail explicitly.
+- The actual live query route renders the complete Agent Turn before publishing a
+  capture or release. Failed response construction leaves retained state unchanged.
+- Agent Turns expose the true comparison basis and a compact change summary.
+  Advanced endpoint comparisons are explicitly partial temporal coverage, never
+  proof of continuous intervening history. Required warnings and source coverage
+  remain in the response budget.
+- Ten registered Rust regression scenarios exercise the public query dispatcher,
+  including an 8192-byte full Agent Turn path with multi-page changes.
+
+This slice is **source present**. Rust compilation, Rust tests, rustfmt, Clippy,
+repository qualification, stdio execution, and live-game execution were not run
+in its editing environment, which had no Rust toolchain. No fresh receipt or
+admission is claimed. Baselines are not durable, background watchers, obligations,
+complete fortress history, or mutation authority. The bridge methods, dependency
+pins, eleven-tool waist, and production protocol map are unchanged.
+
 ### Bounded query and graph execution
 
 The 2026-09-13 query/graph additions are source-present functionality, not a fresh
@@ -95,9 +135,10 @@ qualification or admission. See `docs/QUERY_EXECUTION.md` and
 No Rust compiler, Cargo, or rustfmt was available in that editing environment.
 The Rust tests, workspace gates, native plugin, and live-game campaign were not
 executed for these changes. The Python design check is not repository-gate or
-Rust-execution evidence. MCP graph-query modes and broader live projection
-coverage are still separate unfinished integration work. The eleven-tool waist,
-production protocol map, dependency pins, and migration bead status are unchanged.
+Rust-execution evidence. Graph query modes subsequently gained protocol-1.1
+MCP source integration as described above; broader live projection coverage
+remains unfinished. The eleven-tool waist, production protocol map, dependency
+pins, and migration bead status are unchanged.
 
 ### Agent-facing MCP
 
@@ -285,12 +326,12 @@ binary or live configuration.
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
+| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries and endpoint change monitoring | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
-| World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, MCP graph modes, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
+| World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
 | Intent | semantic actions, sealed plans, witnesses, idempotency, obligations, lab pause effect | any qualified live mutation family |
 | Security | safe Rust, closed deps, secret scan, loader refusal, source/archive integrity, protocol-confusion defense | hostile-host resistance, signed provenance, external review |
 | Release | local qualification, source bundles, server receipts, DSR specifications | current signed cross-platform release assets and install/rollback evidence |

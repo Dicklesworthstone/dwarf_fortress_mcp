@@ -8,6 +8,22 @@ readiness.
 
 ### Added
 
+- Foreground query baselines and endpoint change monitoring through the existing
+  protocol-1.1 `fortress.query` tool: `capture`, `changes`, `baselines`, and
+  `release_baseline`. Captures retain complete bounded entity selections, carry
+  exact anchors and game-time deadlines, and are isolated by session.
+- Generation-aware entered/left/changed results with before/after facts, immutable
+  baselines, target-bound whole-change pagination, explicit endpoint-only history
+  coverage, and separate accounting for selected-view provenance refreshes.
+- Transactional response rendering before baseline creation or release. Failed
+  full Agent Turn construction does not create, consume, advance, or release a
+  baseline. Agent Turns carry the true comparison basis and compact change summary.
+- Ten registered public-dispatcher history tests, including full 8192-byte response
+  pagination, filtering, generation reuse, presence changes, retries, session/epoch/
+  deadline fences, retention bounds, and failed-publication recovery. These tests
+  have not been compiled or executed in the editing environment.
+- Foreground monitoring workflow and limits in `docs/QUERY_HISTORY.md`; embedded
+  query-schema discovery includes all ten structured query variants.
 - Bounded `dfmcp_world::graph_query` reference APIs for canonical multi-source BFS,
   outgoing/incoming/undirected traversal, edge-revision path witnesses, explicit
   depth frontiers, and bounded path reconstruction.
@@ -176,11 +192,15 @@ readiness.
 
 ### Current evidence status
 
-- The query/graph tranche includes an independent Python design check over 512
-  exhaustive graphs and 200 seeded multigraphs. Rust compilation, rustfmt, Clippy,
-  Rust tests, repository qualification, and live-game execution were unavailable
-  in the editing environment and are not claimed. Graph MCP modes remain
-  unfinished; the new graph functionality is exposed as Rust library APIs.
+- The foreground-history tranche is source-present, including ten registered
+  regression scenarios. No Rust compiler, Cargo, or rustfmt was available;
+  compilation, Rust tests, Clippy, repository qualification, stdio execution, and
+  live-game execution have not been established for it.
+- The initial query/graph tranche includes an independent Python design check over
+  512 exhaustive graphs and 200 seeded multigraphs. That is not Rust-execution or
+  qualification evidence. Graph modes subsequently gained protocol-1.1 MCP source
+  integration alongside typed inspection, aggregate/search queries, and baselines;
+  broader live observation domains remain unfinished.
 - The checked-in compatibility registry remains `no_admitted_live_tuples` with zero entries.
 - Protocol 1.0 and protocol 1.1 source are not currently admitted by that empty registry.
 - The V2 production runtime map contains protocol 1.0 only; protocol 1.1 remains explicitly
