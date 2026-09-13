@@ -10,6 +10,7 @@ mod ledger;
 pub mod merkle;
 mod model;
 mod query;
+pub mod query_page;
 pub mod rebase;
 pub mod search;
 pub mod spatial_index;
