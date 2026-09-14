@@ -9,6 +9,7 @@ pub mod franken_fs;
 pub mod graph_query;
 pub mod inventory_allocation;
 mod ledger;
+pub mod map_region;
 pub mod merkle;
 mod model;
 mod query;
@@ -54,5 +55,5 @@ pub use query::{
 };
 pub use query_page::{execute_bounded_query, execute_query};
 pub use sqlite_ledger::{
-    CapsuleRow, DeltaRow, SnapshotRow, SqliteLedgerConfig, SqliteProductionLedger,
+    CapsuleRow, DeltaRow, SnapshotRow, SqliteProductionLedger, SqliteLedgerConfig,
 };
