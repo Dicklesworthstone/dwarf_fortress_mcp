@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "start", "goal"],
+  "properties": {
+    "kind": {"const": "map_route"},
+    "start": {
+      "type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 32767},
+      "minItems": 3, "maxItems": 3
+    },
+    "goal": {
+      "type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 32767},
+      "minItems": 3, "maxItems": 3
+    },
+    "limit": {"type": "integer", "minimum": 1, "maximum": 256},
+    "max_work": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "continuation": {"oneOf": [
+      {"type": "null"},
+      {"type": "string", "maxLength": 128, "pattern": "^mr1:[1-9][0-9]*:[0-9a-f]{64}$"}
+    ]}
+  }
+}
