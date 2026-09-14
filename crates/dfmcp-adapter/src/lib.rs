@@ -43,6 +43,7 @@ pub mod live_session;
 pub mod live_session_v1_1;
 pub mod live_version;
 pub mod operations_analysis;
+pub mod operations_journal;
 pub mod transceiver;
 
 pub use announcement_wire::{
