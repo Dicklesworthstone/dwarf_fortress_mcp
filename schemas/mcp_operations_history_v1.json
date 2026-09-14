@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Operations durable history variants",
+  "description": "Merged into the operations query schema only. No client-selected storage path, repair flag, restored grants, or game effect is accepted.",
+  "oneOf": [
+    {
+      "type": "object", "additionalProperties": false, "required": ["kind"],
+      "properties": {
+        "kind": {"const": "history"},
+        "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 64}, {"type": "null"}]},
+        "continuation": {"anyOf": [{"type": "string", "maxLength": 128}, {"type": "null"}]}
+      },
+      "description": "List this session's durable committed observation records. Continuations bind the journal head and current session anchor. History is observed endpoints, not complete game history."
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "record", "record_digest", "query"],
+      "properties": {
+        "kind": {"const": "historical_query"},
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "query": {
+          "allOf": [
+            {"$ref": "#/$defs/query"},
+            {"type": "object", "required": ["kind"], "properties": {"kind": {"enum": ["entities", "inspect", "traverse", "dependencies", "aggregate", "search"]}}}
+          ]
+        }
+      },
+      "description": "Verify and replay an exact committed record, then run a stateless query without bridge I/O. Authorization is checked at the present session anchor. The result names the historical anchor and explicitly does not claim current freshness."
+    }
+  ]
+}

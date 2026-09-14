@@ -59,7 +59,7 @@ fn discovered_operations_schema_extends_but_does_not_rewrite_other_profiles()->R
         .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"base variants"))?;
     let variants=result["query_schema"]["$defs"]["query"]["oneOf"].as_array()
         .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"extended variants"))?;
-    assert_eq!(base.len(),16);assert_eq!(variants.len(),18);
+    assert_eq!(base.len(),16);assert_eq!(variants.len(),20);
     assert_eq!(&variants[..16],base.as_slice());
     assert_eq!(variants[16]["properties"]["kind"]["const"],"production_diagnosis");
     assert_eq!(variants[17]["properties"]["kind"]["const"],"inventory_plan");

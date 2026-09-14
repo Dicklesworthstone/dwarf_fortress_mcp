@@ -32,7 +32,7 @@ fn register(tokens:u32,granted:Vec<Capability>)->Result<Registered> {
     let fortress=state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"test snapshot"))?.fortress_id;
     let calls=Arc::new(AtomicUsize::new(0));let limits=OperationsLimits::default();
     let session=OperationsSession {id,source:Box::new(Script {observations:VecDeque::from([second]),fenced:false,calls:Arc::clone(&calls)}),
-        state,limits,budget:WorkBudget {max_entities:limits.entity_limit(),max_bytes:MAX_OPERATIONS_BYTES as u64,
+        state,journal:None,limits,budget:WorkBudget {max_entities:limits.entity_limit(),max_bytes:MAX_OPERATIONS_BYTES as u64,
             max_output_tokens:tokens,..WorkBudget::default()},
         grants:granted.into_iter().map(|capability|CapabilityGrant {capability,
             scope:CapabilityScope {fortress_id:Some(fortress),..CapabilityScope::default()},
@@ -64,7 +64,7 @@ fn connected_operations_queries_inspect_real_items_buildings_and_paths()->Result
     assert_eq!(session.calls.load(Ordering::SeqCst),0);
     let schema=decode(&fortress_query(session.handle(),Some("schema".to_owned()),None))?;
     assert_eq!(schema["ok"],true);
-    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(18));
+    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(20));
     Ok(())
 }
 
@@ -148,4 +148,9 @@ fn complete_operations_queries_respect_the_minimum_packet_budget()->Result<()> {
 
 mod production_cases {
     include!("operations_production_tests.rs");
+}
+
+#[cfg(unix)]
+mod history_cases {
+    include!("operations_history_tests.rs");
 }
