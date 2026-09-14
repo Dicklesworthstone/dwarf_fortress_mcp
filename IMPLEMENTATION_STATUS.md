@@ -67,6 +67,40 @@ commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
 
+### Durable operations observations and historical replay
+
+The operations/1.3 development runtime now has an optional synced observation
+journal integrated into authenticated bootstrap and live publication. See
+`docs/OPERATIONS_HISTORY.md` for configuration, queries and the recovery contract.
+
+- Canonical sources, complete anchors and predecessor digests are persisted before
+  a changed observation becomes visible. Restart replays the exact version and
+  generation chain; heartbeats do not add duplicate records.
+- Private Unix storage uses an exclusive writer lock, exact directory/file modes,
+  regular-file/link/identity checks and file/directory fsync. Operator paths and
+  explicit incomplete-tail repair are environment configuration, never MCP input.
+- Failed writes/syncs fence publication. Default recovery preserves all bytes and
+  refuses incomplete tails; explicit repair truncates only a verified incomplete
+  suffix. Complete corrupt frames, invalid length checksums and nonreproducible
+  projection anchors refuse instead of silently accepting a shorter history.
+- `history` lists committed observations with bound whole-row pagination.
+  `historical_query` replays an exact record and executes only stateless queries.
+  Archived anchors/evidence are explicit, current Query authority is required,
+  current active watches remain current, and neither live state nor watches or
+  baselines are mutated by a historical read.
+- Journal retention defaults to 64 MiB/1,024 records, with no automatic pruning.
+  This is a bounded observation archive, not the FrankenSQLite MVCC backend,
+  effect journal, game checkpoint, durable watches/baselines, signed provenance,
+  anti-rollback floor, complete game history or an admitted production feature.
+
+Fifteen new Rust scenarios are registered but not executed. The independent
+Python framing-design oracle passed 5,833 checks; it treats semantic anchors as
+opaque and is not Rust execution or projector verification. The new schema passed
+JSON Schema meta-validation. No Rust compiler, Cargo or rustfmt was available;
+Clippy, stdio, real filesystem crash behavior, live DFHack and full repository
+qualification remain unestablished. Existing bridge bytes, dependency pins,
+production admission and the active migration bead are unchanged.
+
 ### Observed production diagnosis and declared inventory allocation
 
 The operations/1.3 `fortress.query` source now integrates `production_diagnosis`
@@ -146,7 +180,7 @@ or production qualification has been established. Mock compilation is not native
 qualification. Existing native profiles, dependency pins, production map and
 migration bead are unchanged; the shared framing module gained client registration.
 Citizen/announcement integration, map/path observations, requirement evaluation,
-durable history and live mutations remain unfinished.
+durable monitoring and live mutations remain unfinished.
 
 ### Jobs-only protocol 1.2 development read path
 
@@ -502,7 +536,7 @@ binary or live configuration.
 | Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
 | Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
-| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring, production diagnosis, declared inventory allocation and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, snapshot paging, native material/path feasibility, admission |
+| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring, production diagnosis, declared inventory allocation, optional synced observation archive, historical queries and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, snapshot paging, native material/path feasibility, admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
 | World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
@@ -519,7 +553,7 @@ binary or live configuration.
 - no pause/resume, dig, construction, labor, burrow, stockpile, work-order, military, keyboard, Lua,
   arbitrary command, arbitrary filesystem, or arbitrary network effect;
 - no proof that the final current head passed every Rust qualification gate;
-- no durable production MVCC/WAL, checkpoint custody, crash recovery, or ATP deployment;
+- no admitted production MVCC/WAL, effect-journal crash recovery, game-checkpoint custody or ATP deployment;
 - no signed release provenance or hostile-host security claim.
 
 ## Next executable milestones
