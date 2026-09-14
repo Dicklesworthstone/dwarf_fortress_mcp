@@ -2,6 +2,9 @@
 //! existing bounded framing, canonical protobuf reader, and absolute-deadline
 //! stream are reused without exposing arbitrary plugin or method selection.
 
+#[path = "live_operations_paged_rpc.rs"]
+pub mod paged;
+
 use super::{Message, JobsManifest, DeadlineStream, bytes, number, call,
     checked_timeout, io_failure};
 use std::io::{Read, Write};
