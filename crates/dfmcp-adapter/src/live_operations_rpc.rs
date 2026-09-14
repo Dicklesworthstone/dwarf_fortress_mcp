@@ -4,6 +4,8 @@
 
 #[path = "live_operations_paged_rpc.rs"]
 pub mod paged;
+#[path = "live_map_rpc.rs"]
+pub mod map;
 
 use super::{Message, JobsManifest, DeadlineStream, bytes, number, call,
     checked_timeout, io_failure};
