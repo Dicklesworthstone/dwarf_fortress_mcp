@@ -9,13 +9,15 @@ use dfmcp_core::{DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, ObservationC
 use dfmcp_world::{EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence,
     FactSource, Value, WorldSnapshot};
 use crate::live_jobs::{JobPublication, LiveJobObservation, LiveJobsState, MAX_JOB_FRAME_BYTES};
+#[path = "operations_profile.rs"]
+mod profile;
+pub use profile::OperationsProfile;
 
 pub const MAX_BUILDINGS: usize = 4096;
 pub const MAX_ITEMS: usize = 32768;
 pub const MAX_ATTACHMENTS: usize = 65536;
 pub const MAX_OPERATIONS_BYTES: usize = MAX_JOB_FRAME_BYTES;
 const MAX_IDENTITIES: usize = 131072;
-const MAGIC: &[u8; 8] = b"DFMO1300";
 const BUILDING_NAMESPACE: u64 = 1 << 40;
 const ITEM_NAMESPACE: u64 = 2 << 40;
 const ITEM_FLAGS: u32 = 0x1ff;
@@ -70,9 +72,11 @@ pub struct LiveOperationsObservation {
 }
 
 impl LiveOperationsObservation {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> { self.validate_profile(OperationsProfile::V1_3) }
+
+    pub fn validate_profile(&self, profile: OperationsProfile) -> Result<()> {
         self.jobs.validate()?;
-        if self.buildings.len() > MAX_BUILDINGS || self.items.len() > MAX_ITEMS
+        if self.buildings.len() > MAX_BUILDINGS || self.items.len() > profile.maximum_items()
             || self.attachments.len() > MAX_ATTACHMENTS {
             return Err(exhausted("operations roster exceeds its count bounds"));
         }
@@ -142,10 +146,12 @@ impl LiveOperationsObservation {
         Ok(())
     }
 
-    pub fn encode_payload(&self) -> Result<Vec<u8>> {
-        self.validate()?;
+    pub fn encode_payload(&self) -> Result<Vec<u8>> { self.encode_profile(OperationsProfile::V1_3) }
+
+    pub fn encode_profile(&self, profile: OperationsProfile) -> Result<Vec<u8>> {
+        self.validate_profile(profile)?;
         let jobs = self.jobs.encode_payload()?;
-        let mut out = MAGIC.to_vec();
+        let mut out = profile.magic().to_vec();
         put(&mut out, jobs.len() as u32); out.extend_from_slice(&jobs);
         put(&mut out, self.next_building_id); put(&mut out, self.next_item_id);
         put(&mut out, self.buildings.len() as u32);
@@ -167,14 +173,18 @@ impl LiveOperationsObservation {
             put(&mut out,v.job_native_id); put(&mut out,v.item_native_id);
             signed(&mut out,v.role); signed(&mut out,v.filter_index);
         }
-        if out.len() > MAX_OPERATIONS_BYTES { return Err(exhausted("operations payload exceeds its byte bound")); }
+        if out.len() > profile.maximum_bytes() { return Err(exhausted("operations payload exceeds its byte bound")); }
         Ok(out)
     }
 
     pub fn decode_payload(bytes: &[u8], generation: u64, df: String, dfhack: String) -> Result<Self> {
-        if bytes.len() > MAX_OPERATIONS_BYTES { return Err(exhausted("operations payload exceeds its byte bound")); }
+        Self::decode_profile(bytes, generation, df, dfhack, OperationsProfile::V1_3)
+    }
+
+    pub fn decode_profile(bytes: &[u8], generation: u64, df: String, dfhack: String, profile: OperationsProfile) -> Result<Self> {
+        if bytes.len() > profile.maximum_bytes() { return Err(exhausted("operations payload exceeds its byte bound")); }
         let mut r = Reader { bytes, offset: 0 };
-        if r.take(8)? != MAGIC { return Err(invalid("unsupported operations payload schema")); }
+        if r.take(8)? != profile.magic() { return Err(invalid("unsupported operations payload schema")); }
         let length = r.number()? as usize;
         let jobs = LiveJobObservation::decode_payload(r.take(length)?,generation,df,dfhack)?;
         let next_building_id = r.number()?; let next_item_id = r.number()?;
@@ -185,7 +195,7 @@ impl LiveOperationsObservation {
             x1:r.signed()?,y1:r.signed()?,x2:r.signed()?,y2:r.signed()?,z:r.signed()?,
             build_stage:r.signed()?,max_build_stage:r.signed()?,
         }); }
-        let count = r.count(MAX_ITEMS)?;
+        let count = r.count(profile.maximum_items())?;
         let mut items = Vec::with_capacity(count);
         for _ in 0..count { items.push(LiveItem {
             native_id:r.number()?,item_type:r.signed()?,type_key:r.text()?,
@@ -200,14 +210,16 @@ impl LiveOperationsObservation {
         }); }
         if r.offset != bytes.len() { return Err(invalid("trailing operations payload bytes")); }
         let value = Self { jobs,next_building_id,next_item_id,buildings,items,attachments };
-        value.validate()?;
+        value.validate_profile(profile)?;
         Ok(value)
     }
 
-    pub fn source_digest(&self) -> Result<Digest32> {
-        let mut bytes = b"dfmcp-operations-source-1.3\0".to_vec();
+    pub fn source_digest(&self) -> Result<Digest32> { self.source_digest_profile(OperationsProfile::V1_3) }
+
+    pub fn source_digest_profile(&self, profile: OperationsProfile) -> Result<Digest32> {
+        let mut bytes = profile.source_domain().to_vec();
         bytes.extend_from_slice(self.jobs.source_digest()?.as_bytes());
-        bytes.extend_from_slice(&self.encode_payload()?);
+        bytes.extend_from_slice(&self.encode_profile(profile)?);
         Ok(Digest32::of_bytes(&bytes))
     }
 }
@@ -263,19 +275,25 @@ pub fn item_entity_id(id:u32)->EntityId { EntityId::new(ITEM_NAMESPACE+u64::from
 
 #[derive(Clone, Debug, Default)]
 pub struct LiveOperationsState {
+    profile:OperationsProfile,
     observation:Option<LiveOperationsObservation>,
     snapshot:Option<WorldSnapshot>,
     generations:BTreeMap<EntityId,u32>,
 }
 impl LiveOperationsState {
+    pub fn with_profile(profile: OperationsProfile) -> Self { Self { profile, ..Self::default() } }
+    pub fn profile(&self) -> OperationsProfile { self.profile }
+    pub fn source_digest(&self) -> Result<Digest32> {
+        self.observation.as_ref().ok_or_else(||invalid("operations source absent"))?.source_digest_profile(self.profile)
+    }
     #[must_use]
     pub fn snapshot(&self)->Option<&WorldSnapshot> { self.snapshot.as_ref() }
     #[must_use]
     pub fn observation(&self)->Option<&LiveOperationsObservation> { self.observation.as_ref() }
 
     pub fn publish(&mut self, observation:LiveOperationsObservation)->Result<JobPublication> {
-        observation.validate()?;
-        let source=observation.source_digest()?;
+        observation.validate_profile(self.profile)?;
+        let source=observation.source_digest_profile(self.profile)?;
         let fortress=observation.jobs.fortress_id()?;
         let tick=observation.jobs.tick();
         let mut cursor=ObservationCursor::ORIGIN;
@@ -298,9 +316,10 @@ impl LiveOperationsState {
         // Reuse the jobs projection, not an independently observed job snapshot.
         let mut jobs=LiveJobsState::default(); jobs.publish(observation.jobs.clone())?;
         let mut graph=jobs.snapshot().ok_or_else(||invalid("jobs projection absent"))?.graph.clone();
-        let fact=|field:&str,value| Fact::known(value,tick,FactSource::DfhackField(format!("operations/1.3.{field}")),source);
+        let prefix=self.profile.fact_prefix();
+        let fact=|field:&str,value| Fact::known(value,tick,FactSource::DfhackField(format!("{prefix}{field}")),source);
         let absent=|field:&str| Fact::with_presence(FactPresence::Absent,tick,
-            FactSource::DfhackField(format!("operations/1.3.{field}")),source);
+            FactSource::DfhackField(format!("{prefix}{field}")),source);
         if let Some(root)=graph.entities.get_mut(&EntityId::new(1)) {
             root.label="Fortress operations".to_owned();
             root.fields.insert("building_count".to_owned(),fact("buildings.all.size",Value::U64(observation.buildings.len() as u64)));
@@ -342,6 +361,8 @@ impl LiveOperationsState {
                 label:format!("{} #{}",v.type_key,v.native_id),fields});
         }
         let mut add_edge=|kind:EdgeKind,from:EntityId,to:EntityId,extra:Option<(i32,i32)>,fields:BTreeMap<String,Fact>| -> Result<()> {
+            // Stable relationship keys are shared across profiles; source facts
+            // and the full snapshot anchor still bind the exact profile.
             let mut identity=b"dfmcp-operations-edge-1.3\0".to_vec();
             text(&mut identity,kind.as_str());
             identity.extend_from_slice(&from.get().to_be_bytes());
@@ -391,7 +412,7 @@ impl LiveOperationsState {
             for value in entity.fields.values_mut() {
                 value.source_digest=source;
                 if let FactSource::DfhackField(name)=&mut value.source {
-                    if name.starts_with("jobs/1.2.") { *name=name.replacen("jobs/1.2.","operations/1.3.",1); }
+                    if name.starts_with("jobs/1.2.") { *name=name.replacen("jobs/1.2.",prefix,1); }
                 }
             }
         }
