@@ -1,5 +1,5 @@
-//! Explicitly unadmitted operations/1.3 runtime. One native observation covers
-//! jobs, buildings, items and relationships, never independently timed domains.
+//! Shared explicitly unadmitted operations handlers. Fixed bootstrap entries
+//! choose 1.3 single-frame or 1.4 immutable-page acquisition, never agent queries.
 
 #[path = "semantic_query.rs"]
 mod semantic_query;
@@ -9,6 +9,8 @@ mod query_response;
 mod production;
 #[path = "operations_history.rs"]
 mod history;
+#[path = "live_operations_paged_server.rs"]
+pub mod paged;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -16,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use dfmcp_adapter::live_jobs::JobPublication;
 use dfmcp_adapter::live_jobs_rpc::{DeadlineStream, operations::{OperationsLimits, OperationsRpcClient}};
-use dfmcp_adapter::live_operations::{LiveOperationsObservation, LiveOperationsState, MAX_OPERATIONS_BYTES};
+use dfmcp_adapter::live_operations::{LiveOperationsObservation, LiveOperationsState, OperationsProfile, MAX_OPERATIONS_BYTES};
 use dfmcp_core::{Capability, CapabilityGrant, CapabilityScope, DfmcpError, ErrorCode,
     OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget};
 use crate::agent_turn::{AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, empty_active_work};
@@ -85,15 +87,16 @@ impl OperationsSession {
         if self.source.poisoned() { return Err(error(ErrorCode::AdapterUnavailable, "operations source fenced; reopen session")); }
         if let Some(journal) = &self.journal {
             context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-            if journal.fenced() || journal.state().snapshot().map(|s|s.anchor()) != Some(context.anchor) {
-                return Err(error(ErrorCode::CorruptLedger, "journal is fenced or disagrees with the published session anchor"));
+            if self.state.profile() != OperationsProfile::V1_3 || journal.fenced()
+                || journal.state().snapshot().map(|s|s.anchor()) != Some(context.anchor) {
+                return Err(error(ErrorCode::CorruptLedger, "journal is fenced or disagrees with the published session profile or anchor"));
             }
         }
         let result = self.source.read(Duration::from_millis(context.budget.max_wall_millis))
             .and_then(|value| {
                 if value.jobs.jobs.len() > self.limits.jobs as usize
                     || value.buildings.len() > self.limits.buildings as usize || value.items.len() > self.limits.items as usize
-                    || value.encode_payload()?.len() > self.limits.payload_bytes {
+                    || value.encode_profile(self.state.profile())?.len() > self.limits.payload_bytes {
                     return Err(error(ErrorCode::BudgetExceeded, "operations observation exceeds session limits"));
                 }
                 match self.journal.as_mut() {
@@ -121,7 +124,7 @@ fn resolve(raw: Option<String>) -> Result<Arc<Mutex<OperationsSession>>> {
     }
     let raw = u128::from_str_radix(&text, 16).map_err(|_| error(ErrorCode::InvalidRequest, "invalid session hex"))?;
     let id = SessionId::new(raw);
-    if id.get() != raw || !id.is_process_scoped_live() || (raw & ((1u128 << 62) - 1)) >> 60 != 2 {
+    if id.get() != raw || !id.is_process_scoped_live() || !matches!((raw & ((1u128 << 62) - 1)) >> 60, 2 | 3) {
         return Err(error(ErrorCode::InvalidRequest, "not an encoded operations runtime handle"));
     }
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(|| error(ErrorCode::SessionNotFound, "operations session not found"))
@@ -153,12 +156,14 @@ fn coverage() -> Value {
 }
 fn briefing(session: &OperationsSession) -> Value {
     let value = session.state.observation();
-    json!({"runtime":"unadmitted_development", "bridge_protocol":"1.3", "observation_profile":"operations",
+    json!({"runtime":"unadmitted_development", "bridge_protocol":session.state.profile().protocol(), "observation_profile":"operations",
         "read_only":true, "live":true, "runtime_admitted":false, "compatibility_admitted":false,
         "mutation_admissible":false, "source_poisoned":session.source.poisoned(),
         "paused":value.map(|v|v.jobs.paused), "job_count":value.map(|v|v.jobs.jobs.len()),
         "building_count":value.map(|v|v.buildings.len()), "item_count":value.map(|v|v.items.len()),
         "attached_item_relations":value.map(|v|v.attachments.len()),
+        "native_snapshot_paging":session.state.profile()==OperationsProfile::PagedV1_4,
+        "snapshot_tick_is_capture_tick":true,
         "observation_history":history::summary(session.journal.as_ref()),
         "note":"inventory membership and job attachment do not prove usable supply or fulfillment"})
 }
@@ -189,7 +194,7 @@ fn packet(session: Option<&OperationsSession>, context: Option<&OperationContext
             .continuity(continuity, Some(anchor_json(context.anchor)), None,
                 reset.then(||"operations_clock_generation_or_identity_horizon_reset".to_owned()));
     } else {
-        builder = builder.briefing(json!({"runtime":"unadmitted_development","bridge_protocol":"1.3",
+        builder = builder.briefing(json!({"runtime":"unadmitted_development",
             "runtime_admitted":false,"mutation_admissible":false,"fortress_loaded":false}))
             .coverage(json!({"status":"unknown","complete_domains":[],"partial_domains":[],
                 "omitted_domains":["fortress.operations"],"continuation":null}));
@@ -313,13 +318,13 @@ pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"f
 #[tool(description = "Refresh one operations observation without controlling game time. Use query await_watch for bounded condition evaluation.")]
 pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
 fn query_view(session:&OperationsSession,context:&OperationContext)->Result<QueryResponseProjection> {
-    let source=session.state.observation().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"operations source missing"))?;
+    let source=session.state.source_digest()?;
     Ok(QueryResponseProjection {session_id:session.id.to_string(),request_id:context.request_id.to_string(),anchor:anchor_json(session.anchor()?),
         briefing:briefing(session),attention:Vec::new(),affordances:Vec::new(),coverage:coverage(),
         uncertainty:vec![json!({"domain":"fortress.operations.feasibility","epistemic_state":"unknown",
             "reason":"raw containment, flags, stacks and construction stages do not prove material eligibility, access, or job completion"})],
         budget:json!({"admitted":{"max_bytes":session.budget.max_bytes,"max_output_tokens":session.budget.max_output_tokens}}),
-        references:vec![json!({"kind":"operations_observation","digest":source.source_digest()?.to_string()})],
+        references:vec![json!({"kind":"operations_observation","digest":source.to_string()})],
         maximum_bytes:packet_limit(session.budget)})
 }
 fn finish_query(view:&QueryResponseProjection,value:Value)->Result<String> {
@@ -329,7 +334,7 @@ fn finish_query(view:&QueryResponseProjection,value:Value)->Result<String> {
     let encoded=value.to_string();
     if encoded.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"operations packet overflow"));}Ok(encoded)
 }
-#[tool(description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Historical_query reads an exact durable journal record without refreshing or changing live state. Structured production_diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply.")]
+#[tool(description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production. History requires a compatible durable journal and is unavailable in the paged 1.4 profile. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String {
     with_session(session_id,"fortress.query",Capability::Query,|session,mut context| {
         if mode.is_some() && query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}
@@ -348,6 +353,9 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         };
         let kind=input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str).unwrap_or("");
         if !schema && history::handles(&input) {
+            if session.state.profile()!=OperationsProfile::V1_3 {
+                return Err(error(ErrorCode::InvalidRequest,"durable archive queries are not implemented for operations/1.4; 1.3 archives cannot be reinterpreted"));
+            }
             let result=history::execute(session,&context,&input);
             if matches!(&result,Err(failure) if failure.code==ErrorCode::CorruptLedger) {session.source.fence();}
             return result;
@@ -373,9 +381,9 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         let view=query_view(session,&context)?;
         let mut narrowed=context.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
         if schema {
-            let schema=history::query_schema()?;
+            let schema=if session.state.profile()==OperationsProfile::V1_3 {history::query_schema()?}else{production::query_schema()?};
             return semantic_query::publish_with_active_work(&context,json!({"query_schema":schema,"mode":"schema",
-                "profile":"operations/1.3","source_stale":session.source.poisoned(),"truncated":false,"continuation":null}),
+                "profile":format!("operations/{}",session.state.profile().protocol()),"source_stale":session.source.poisoned(),"truncated":false,"continuation":null}),
                 |value|finish_query(&view,value));
         }
         if production::handles(&input) {
@@ -412,17 +420,17 @@ pub fn fortress_doctor(session_id:Option<String>)->String {
 }
 fn no_effect(id:Option<String>,operation:&str)->String {
     with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,
-        "operations/1.3 is read-only; no prepare, commit, cancellation, save, or restore effect exists")))
+        "operations read profiles have no prepare, commit, cancellation, save, or restore effect")))
 }
-#[tool(description = "Unavailable: operations/1.3 cannot plan live effects.")]
+#[tool(description = "Unavailable: operations read profiles cannot plan live effects.")]
 pub fn fortress_plan(session_id:Option<String>)->String{no_effect(session_id,"fortress.plan")}
-#[tool(description = "Unavailable: operations/1.3 commits no game effects.")]
+#[tool(description = "Unavailable: operations read profiles commit no game effects.")]
 pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id,"fortress.commit")}
 #[tool(description = "Unavailable for game actions. Local condition watches use query cancel_watch.")]
 pub fn fortress_cancel(session_id:Option<String>)->String{no_effect(session_id,"fortress.cancel")}
-#[tool(description = "Unavailable: operations/1.3 creates no game or save checkpoint.")]
+#[tool(description = "Unavailable: operations read profiles create no game or save checkpoint.")]
 pub fn fortress_checkpoint(session_id:Option<String>)->String{no_effect(session_id,"fortress.checkpoint")}
-#[tool(description = "Unavailable: operations/1.3 restores no game or save state.")]
+#[tool(description = "Unavailable: operations read profiles restore no game or save state.")]
 pub fn fortress_restore(session_id:Option<String>)->String{no_effect(session_id,"fortress.restore")}
 
 /// Independently gated when called as a library, not only through its binary.
