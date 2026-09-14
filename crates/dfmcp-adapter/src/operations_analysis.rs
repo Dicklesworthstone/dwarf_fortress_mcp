@@ -61,7 +61,7 @@ fn source<'a>(state: &'a LiveOperationsState, context: &OperationContext)
         return Err(exhausted("operations analysis exceeds the session scan budget"));
     }
     if !snapshot.hash_is_valid() { return Err(invariant("operations analysis source hash is invalid")); }
-    Ok((observation, snapshot, observation.source_digest()?))
+    Ok((observation, snapshot, state.source_digest()?))
 }
 
 /// Computed once per request, not once per job or demand. Chains are iterative
