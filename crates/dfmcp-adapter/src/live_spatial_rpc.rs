@@ -1,5 +1,8 @@
 //! Fixed spatial/1.6 transport, compiled below live_jobs_rpc for shared framing.
 
+#[path = "live_spatial_citizens_rpc.rs"]
+pub mod citizens;
+
 use crate::live_jobs_rpc::{DeadlineStream, JobsManifest, Message, bytes, call,
     checked_timeout, failure, io_failure, malformed, number};
 use crate::live_jobs_rpc::operations::paged::{PagedOperationsLimits, snapshot::{SnapshotAssembler, SnapshotManifest, SnapshotPage}};
