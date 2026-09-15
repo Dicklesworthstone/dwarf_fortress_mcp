@@ -6,8 +6,8 @@ actually establish.
 
 ## Current phase
 
-**Phase 0D-R0 with implemented but unadmitted read profiles through spatial/1.6 and an explicitly
-unadmitted pause-control/1.7 development slice. No live tuple is currently admitted.**
+**Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8
+and an explicitly unadmitted pause-control/1.7 development slice. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -16,6 +16,7 @@ The repository contains:
 - exact compatibility, anti-rollback, artifact, and process-admission machinery;
 - an implemented protocol-1.1 retained-announcement extension;
 - separate unadmitted jobs-only 1.2, operations/1.3, paged operations/1.4, map/1.5 and spatial/1.6 development profiles;
+- a citizen-inclusive spatial/1.8 source path that captures strict citizens, jobs, buildings, items and bounded terrain during one native suspension, then publishes one combined anchor;
 - a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, and reconcile for `Pause { paused }` only;
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
@@ -38,6 +39,52 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
+
+### Coherent citizen + operations + terrain spatial/1.8 source
+
+`docs/LIVE_SPATIAL_CITIZENS.md` describes the new citizen-inclusive read profile. It removes the
+cross-observation ambiguity between the old citizen profile and spatial/1.6: the strict citizen
+roster and the existing operations/terrain payload are serialized during one native DFHack RPC
+suspension and transferred as one immutable retained capture.
+
+- `dfmcp_spatial_v1_8` keeps the two-method `Handshake`/`ReadObservation` waist. Its request adds an
+  explicit citizen bound while preserving fixed jobs/buildings/items/terrain/page/byte bounds.
+  Native retained-cache ownership binds both the requested terrain region and citizen bound.
+- A strict complete citizen component is bounded to 4,096 records, sorted by nonnegative native unit
+  ID, and rejects duplicates, non-citizens and residents. Observed fields are bounded visible name,
+  race, profession, position, alive/sane/active/visible and developmental status.
+- The combined payload is at most 16 MiB and preserves the spatial/1.6 immutable-page semantics.
+  Citizens are captured before the native RPC returns; later page transfer never dereferences DF
+  pointers or mixes a newer citizen roster into the retained operations/terrain bytes.
+- Spatial/1.8 uses a dedicated citizen entity namespace rather than the legacy protocol-1.0 unit
+  encoding, which would collide with current job IDs. All projected facts and edges are rebound to
+  one spatial/1.8 source digest and one combined observation anchor/generation universe.
+- A job whose `Job::getWorker` ID appears in the complete strict-citizen roster gains a
+  generation-checked `worker_entity` fact and a `performs` edge from that citizen to the job. A job
+  with no worker records absence. An assigned worker outside the strict-citizen roster remains
+  explicitly unknown rather than becoming a fabricated placeholder unit.
+- The existing route-aware inventory allocator and candidate route queries were generalized over a
+  coherent spatial-state interface; spatial/1.6 behavior is preserved while spatial/1.8 can run the
+  same algorithms against its larger same-anchor graph.
+- `dfmcp-live-spatial-citizens-dev-server` is registered with a distinct process-scoped session
+  family, its own credentials/opt-in, two-session limit, read-only Observe/Query/Doctor grants, and
+  the frozen eleven top-level tool names. Convenience modes expose citizens/jobs/buildings/items/
+  tiles, while ordinary graph/baseline/watch/route/allocation queries all use the combined anchor.
+- The profile still does not establish citizen skills, needs, health, labor eligibility, complete
+  unit navigation, non-citizen unit details, outside-region terrain, native material requirements,
+  durable 1.8 history, or any game effect. Pause-control/1.7 remains separate and gains no authority
+  from a spatial observation.
+
+Four new Rust integration scenarios are registered for worker joins, non-citizen uncertainty,
+citizen-only advancement/generation continuity and strict-roster corruption. A reproducible native
+mock harness is checked in at `scripts/test_live_spatial_citizens_native_mock.py`, covering immutable
+retained bytes, strict citizen limits, hidden-terrain noninterference, generation invalidation and
+fixed method registration.
+
+Those new spatial/1.8 Rust/native checks have **not been executed in this editing environment**. The
+container has no Rust toolchain and no network-mounted repository. No real generated DFHack/protobuf
+build, live-game campaign, full repository qualification or admission is claimed. This section is
+therefore evidence rung 1: source present.
 
 ### Durable spatial/1.6 history and exact-record analysis
 
@@ -190,7 +237,7 @@ Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;
 - the production launcher cannot authorize any newly added development profile;
-- protocols 1.1 through 1.7 remain outside the production runner map;
+- protocols 1.1 through 1.8 remain outside the production runner map;
 - old or external receipts do not qualify this current source generation.
 
 ## Area matrix
@@ -200,16 +247,16 @@ Consequences:
 | Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis | durable handoff, complete counterfactual/VOI models, durable control-effect listing without a known key |
 | Protocol 1.0 | authenticated citizen read stack and production-runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
-| Jobs/operations/map/spatial | coherent bounded development reads through spatial/1.6 | Rust qualification, real DFHack campaigns, production admission |
+| Jobs/operations/map/spatial | coherent bounded development reads through citizen-inclusive spatial/1.8, including same-anchor strict-citizen worker joins | Rust qualification, real DFHack campaigns, citizen skills/needs/health, full unit navigation, durable 1.8 history, production admission |
 | Control/1.7 | pause prepare/commit/reconcile source, mandatory private durable coordinator journal, generation-bound tokens/receipts, isolated development runtime | Rust qualification, real DFHack build, crash/disposable-fort campaigns, production admission, any other live effect family |
-| World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial observation replay | admitted production durable backend and complete fortress coverage |
+| World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial/1.6 observation replay | admitted production durable backend and complete fortress coverage |
 | Intent/effects | sealed plans, in-memory dispatcher laboratory, bridge-backed pause effect with durable pre-dispatch/terminal coordinator states | qualified/admitted effect journal, leases/checkpoints tied to live commits, dig/build/labor/etc. live effects |
 | Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
 
 ## Explicitly absent
 
 - no current admitted live tuple;
-- no supported production compatibility claim for protocols 1.1 through 1.7;
+- no supported production compatibility claim for protocols 1.1 through 1.8;
 - no admitted live mutation capability;
 - no live dig, construction, labor, burrow, stockpile, work-order, military, checkpoint, Lua,
   arbitrary command, keyboard, filesystem, or network effect;
@@ -219,17 +266,21 @@ Consequences:
 
 ## Next executable milestones
 
-1. Run full Rust verification/qualification for the exact current clean head, including the durable
-   pause-effect journal, control client, development runtime, and all registered recovery tests.
-2. Build control/1.7 against a named real DFHack/protobuf generation and run the native mock plus
-   disposable-fort prepare/commit/query campaigns for the exact plugin bytes.
-3. Execute host/bridge failure campaigns at every durability boundary: before `CommitStarted` sync,
-   after sync/before dispatch, after dispatch/before reply, after reply/before terminal sync, Rust
-   restart with live bridge, DFHack restart, world load/unload, and incomplete/corrupt journal tails.
-4. Only after those exact semantics are qualified should the first control/1.7 admission proposal or
-   another narrowly versioned mutation family be considered. Do not jump directly to broad generic effects.
-5. Independently continue the established protocol-1.0 admission chain and keep the production map
-   unchanged until exact evidence supports widening it.
+1. Run full Rust verification/qualification for the exact current clean head, including spatial/1.8
+   citizen coherence, the durable pause-effect journal, control client, development runtime, and all
+   registered recovery tests.
+2. Compile spatial/1.8 and control/1.7 against named real DFHack/protobuf generations and execute
+   disposable-fort read/control campaigns for the exact plugin bytes.
+3. Exercise spatial/1.8 with real citizen/job churn, non-citizen workers, large rosters, hidden terrain,
+   immutable multi-page transfers, route/allocation analysis and foreground watches before treating
+   its cross-domain joins as live-qualified evidence.
+4. Execute control host/bridge failure campaigns at every durability boundary: before
+   `CommitStarted` sync, after sync/before dispatch, after dispatch/before reply, after reply/before
+   terminal sync, Rust restart with live bridge, DFHack restart, world load/unload, and incomplete/
+   corrupt journal tails.
+5. Only after those exact semantics are qualified should a control/1.7 admission proposal or another
+   narrowly versioned mutation family be considered. Keep the production map unchanged until exact
+   evidence supports widening it.
 
 ## Status rules
 
