@@ -7,7 +7,7 @@ actually establish.
 ## Current phase
 
 **Phase 0D-R0 with implemented but unadmitted announcement, jobs-only, coherent operations,
-and immutable-paged operations development read slices. No live tuple is currently admitted.**
+immutable-paged operations and bounded map development read slices. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -19,6 +19,7 @@ The repository contains:
 - a separate jobs-only protocol-1.2 native plugin, Rust client, projection, and development MCP binary;
 - an operations/1.3 native producer, client, coherent jobs/buildings/items graph, and development MCP binary;
 - an operations/1.4 immutable native snapshot cache, bounded page client, fixed-profile projection, and development entry using the shared handlers;
+- a map/1.5 bounded terrain producer, closed client, canonical tile facts, candidate route query and development binary;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map currently contains only
   protocol 1.0.
 
@@ -67,6 +68,52 @@ A higher rung applies only to the exact identities it names. It never transfers 
 commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
+
+### Bounded map/1.5 terrain observation and candidate routes
+
+The map profile integrates one native terrain-region read with canonical tile
+facts, existing typed queries, baselines, foreground watches and `map_route`.
+See `docs/LIVE_MAP.md` for the entry, wire, examples and exact limitations.
+
+- A fixed region contains at most 16,384 cells, with sides at most 128 tiles and
+  a 1-MiB native payload bound. Missing blocks are not allocated. Hidden cells
+  serialize only presence, never terrain/occupancy/liquid/temperature attributes.
+- Visible facts include normalized shape, liquid depth/type, designation,
+  traffic, occupancy, raw temperature and cached walkable-region ID. Hidden
+  attributes project as Redacted; missing-block attributes remain Unknown.
+- Strict manifest/region decoding precedes atomic publication. Stable physical
+  tile handles support revision tracking; clock, generation or dimension resets
+  advance the epoch. Failed reads preserve the previous anchor and fence the source.
+- Candidate routes use deterministic dry, unoccupied cardinal floor/stair BFS.
+  Vertical edges require complementary observed stair endpoints. Routes are not
+  unit-specific paths, safety proofs, travel-time predictions or global absence
+  evidence. Unsupported mechanics and unobserved cells remain excluded.
+- `dfmcp-live-map-dev-server` retains the eleven tool names and reuses typed
+  queries, aggregates, baselines and foreground watches. `await_watch` validates
+  before one observation and reauthorizes afterward. Whole-vertex route pages
+  bind session, complete anchor, policy, endpoints and work budget while retaining
+  required Agent Turn coverage and current active watches.
+- The independently gated map session family, credentials and two-session limit
+  do not widen existing profiles or production admission. Regions are fixed for
+  session lifetime; no coherent operations/map join or durable map archive exists.
+
+Both GCC and Clang compiled the actual native producer against mock DFHack and
+protobuf interfaces with C++17 and warnings-as-errors. Each run passed 110 checks
+and matched an independent Python encoder's 455-byte fixture, including block
+boundaries, hidden-data noninterference and the hard-volume capture ceiling.
+Exact producer SHA-256: `b4e148c3827936115ed1b389c50d2d936e01a8bb773cda366ac8f5cc09e0be14`.
+The reproducible harness is `scripts/test_live_map_native_mock.py`.
+
+Seventeen Rust scenarios are registered but not executed: six pure route/model,
+three codec/projection, two RPC and six actual-handler tests. Independent Python
+design checks passed 512 exhaustive obstacle maps and 500 seeded 3-D shape maps;
+the route schema passed 64 cases (19 accepted, 45 rejected). These checks are not
+Rust execution or native qualification. Rust, Cargo and rustfmt were unavailable;
+no Clippy, stdio, real DF headers/protobuf build, live-game campaign or complete
+repository qualification is claimed. Full unit navigation, coherent cross-domain
+spatial feasibility, mutable region windows, durable monitoring and all live
+mutations remain unfinished. Existing bridge bytes, dependencies and migration
+bead status are unchanged; only closed map-client registration uses shared framing.
 
 ### Immutable-paged operations/1.4 development read path
 
@@ -405,6 +452,7 @@ pins, and migration bead status are unchanged.
 - Separately gated jobs-only protocol-1.2 development server source.
 - Separately gated coherent operations/1.3 development server source.
 - Separately gated immutable-paged operations/1.4 development entry sharing the operations handlers.
+- Separately gated map/1.5 development server with bounded terrain facts and model-only route queries.
 - Canonical Agent Turn Packet with identity, anchor, continuity, briefing, changes, attention,
   active work, affordances, recommendations, uncertainty, coverage, budgets, references, and typed
   recovery.
@@ -443,7 +491,7 @@ Implemented source includes:
   retained-window bounds, gap evidence, and complete-through-latest semantics;
 - safe-Rust extension codec with canonical protobuf validation;
 - combined citizen and announcement capsule assembly;
-- transactional publication across citizen pagination and announcement continuation;
+- transactional protocol-1.1 publication across citizen pagination and announcement continuation;
 - complete retained-suffix versus incomplete historical-coverage separation;
 - deterministic world projection, briefing, attention, and report-ID change summaries;
 - read-only `GameAdapter` integration;
@@ -571,7 +619,7 @@ Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;
 - the production launcher cannot authorize a process from the checked-in registry;
-- protocol 1.1, jobs-only 1.2 and operations/1.3 or 1.4 profiles cannot enter the production runner map;
+- protocol 1.1, jobs-only 1.2, operations/1.3 or 1.4 and map/1.5 profiles cannot enter the production runner map;
 - an empty-registry floor correctly preserves “no admissions”;
 - old or external receipts do not qualify the current source generation unless they match every
   exact identity and are reviewed and promoted.
@@ -590,6 +638,7 @@ binary or live configuration.
 | Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
 | Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring, production diagnosis, declared inventory allocation, optional synced observation archive, historical queries and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, native material/path feasibility, admission |
 | Paged operations/1.4 | immutable native capture cache, bounded page acquisition, 65,536-item/16-MiB codec, profile-bound source projection and shared agent handlers | Rust execution, real DFHack build/live campaign, capture performance, 1.4 archive support, admission |
+| Map/1.5 | bounded native region producer, redacted/unknown tile facts, closed client, candidate floor/stair routes, shared query/watch engines and registered binary | Rust execution, real DFHack build/live campaign, combined spatial world, unit navigation, region lifecycle, terrain archive, admission |
 | Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
 | Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
 | World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
@@ -601,7 +650,7 @@ binary or live configuration.
 
 - no current admitted live tuple;
 - no current supported or production compatibility claim;
-- no admitted protocol-1.1, jobs-only protocol-1.2 or operations/1.3 or 1.4 runtime;
+- no admitted protocol-1.1, jobs-only protocol-1.2, operations/1.3 or 1.4, or map/1.5 runtime;
 - no live mutation RPC;
 - no pause/resume, dig, construction, labor, burrow, stockpile, work-order, military, keyboard, Lua,
   arbitrary command, arbitrary filesystem, or arbitrary network effect;
@@ -622,8 +671,8 @@ binary or live configuration.
 6. Qualify a protocol-1.1 production server artifact and review a protocol-1.1 compatibility entry.
 7. Only after all protocol-1.1 evidence exists, add an explicit production runner to the V2 protocol
    map, advance the floor, and execute through a fresh protocol-bound ticket.
-8. Validate jobs-only 1.2 and operations/1.3 and 1.4 against Rust and a real DFHack build; expand
-   citizen, map/path and requirement coverage under separately versioned coherent contracts.
+8. Validate jobs-only 1.2, operations/1.3 and 1.4, and map/1.5 against Rust and a real DFHack build;
+   expand combined citizen, map/path and requirement coverage under coherent contracts.
 9. Design pause/resume only after the widened read path is stable; mutation must be separately
    versioned, witnessed, idempotent, reconciled, and disposable-fort qualified.
 
