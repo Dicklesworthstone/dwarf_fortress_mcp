@@ -82,6 +82,8 @@ pub struct DurablePauseRecord {
     pub observed_game_tick: Option<u64>,
     pub receipt_digest: Option<Digest32>,
     pub revision: u64,
+    pub transition_number: u64,
+    pub previous_digest: Digest32,
     pub record_digest: Digest32,
 }
 impl DurablePauseRecord {
@@ -100,7 +102,6 @@ pub trait EffectJournalStorage: Read + Write + Seek {
 pub struct ControlEffectJournal<S> {
     storage: S,
     id: Digest32,
-    header_digest: Digest32,
     head: Digest32,
     length: u64,
     transitions: usize,
@@ -141,7 +142,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         let mut header = [0u8; HEADER_BYTES];
         storage.read_exact(&mut header).map_err(storage_error)?;
         let (id, header_digest) = decode_header(&header)?;
-        let mut journal = Self { storage, id, header_digest, head: header_digest,
+        let mut journal = Self { storage, id, head: header_digest,
             length: HEADER_BYTES as u64, transitions: 0, records: BTreeMap::new(),
             fenced: false, repaired_tail_bytes: 0 };
         while journal.length < file_length {
@@ -189,7 +190,11 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     }
 
     fn accept_replay(&mut self, record: DurablePauseRecord) -> Result<()> {
-        if record.record_digest == Digest32::ZERO { return Err(corrupt("zero control record digest")); }
+        if record.record_digest == Digest32::ZERO
+            || record.transition_number != self.transitions as u64 + 1
+            || record.previous_digest != self.head {
+            return Err(corrupt("control effect journal sequence or predecessor chain disagrees"));
+        }
         let expected_revision = self.records.get(&record.idempotency_key).map_or(1, |prior| prior.revision.saturating_add(1));
         if record.revision != expected_revision { return Err(corrupt("control effect revision is not contiguous")); }
         validate_transition(self.records.get(&record.idempotency_key), &record)?;
@@ -217,8 +222,10 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
             return Err(exhausted("control effect journal effect limit reached"));
         }
         next.revision = self.records.get(&next.idempotency_key).map_or(1, |prior| prior.revision.saturating_add(1));
+        next.transition_number = self.transitions as u64 + 1;
+        next.previous_digest = self.head;
         validate_transition(self.records.get(&next.idempotency_key), &next)?;
-        let frame = encode_frame(self.id, self.transitions as u64 + 1, self.head, &next)?;
+        let frame = encode_frame(self.id, &next)?;
         let next_length = self.length.checked_add(frame.len() as u64).ok_or_else(||exhausted("control journal length overflow"))?;
         if next_length > MAX_LEDGER_BYTES { return Err(exhausted("control effect journal byte limit reached")); }
         let decoded = decode_frame(&frame, self.id)?;
@@ -258,7 +265,8 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         self.append(DurablePauseRecord { idempotency_key:key, plan_digest, desired_paused,
             expected_game_tick, bridge_generation, prepare_token, state:DurablePauseState::Prepared,
             effect_known:false, effect_applied:false, observed_paused:None, observed_game_tick:None,
-            receipt_digest:None, revision:0, record_digest:Digest32::ZERO }, context)
+            receipt_digest:None, revision:0, transition_number:0, previous_digest:Digest32::ZERO,
+            record_digest:Digest32::ZERO }, context)
     }
 
     pub fn begin_commit(&mut self, key: &str, plan_digest: Digest32, bridge_generation: u64,
@@ -352,7 +360,8 @@ fn validate_key(key: &str) -> Result<()> {
 
 fn validate_transition(previous: Option<&DurablePauseRecord>, next: &DurablePauseRecord) -> Result<()> {
     validate_key(&next.idempotency_key)?;
-    if next.bridge_generation == 0 || next.bridge_generation == u64::MAX || next.prepare_token == [0u8; 16] {
+    if next.bridge_generation == 0 || next.bridge_generation == u64::MAX || next.prepare_token == [0u8; 16]
+        || next.transition_number == 0 || next.previous_digest == Digest32::ZERO {
         return Err(corrupt("invalid durable pause record identity"));
     }
     match previous {
@@ -419,10 +428,10 @@ fn decode_frame_header(prefix: &[u8], id: Digest32) -> Result<usize> {
     }
     Ok(length)
 }
-fn encode_frame(id: Digest32, sequence: u64, previous: Digest32, record: &DurablePauseRecord) -> Result<Vec<u8>> {
+fn encode_frame(id: Digest32, record: &DurablePauseRecord) -> Result<Vec<u8>> {
     let mut body = Vec::new();
-    body.extend_from_slice(&sequence.to_be_bytes());
-    body.extend_from_slice(previous.as_bytes());
+    body.extend_from_slice(&record.transition_number.to_be_bytes());
+    body.extend_from_slice(record.previous_digest.as_bytes());
     body.extend_from_slice(&record.revision.to_be_bytes());
     body.extend_from_slice(&(record.idempotency_key.len() as u16).to_be_bytes());
     body.extend_from_slice(record.idempotency_key.as_bytes());
@@ -454,8 +463,8 @@ fn decode_frame(frame: &[u8], id: Digest32) -> Result<DurablePauseRecord> {
         return Err(corrupt("control record checksum or commit footer failed"));
     }
     let mut body = Reader(body_bytes);
-    let _sequence = body.u64()?;
-    let _previous = body.digest()?;
+    let transition_number = body.u64()?;
+    let previous_digest = body.digest()?;
     let revision = body.u64()?;
     let key = body.text(MAX_KEY_BYTES)?;
     let plan_digest = body.digest()?;
@@ -472,8 +481,8 @@ fn decode_frame(frame: &[u8], id: Digest32) -> Result<DurablePauseRecord> {
     if !body.0.is_empty() { return Err(corrupt("trailing control record bytes")); }
     Ok(DurablePauseRecord { idempotency_key:key, plan_digest, desired_paused, expected_game_tick,
         bridge_generation, prepare_token, state, effect_known, effect_applied, observed_paused,
-        observed_game_tick: observed_paused.map(|_|observed_raw),
-        receipt_digest: (receipt_raw != Digest32::ZERO).then_some(receipt_raw), revision, record_digest:digest })
+        observed_game_tick: observed_paused.map(|_|observed_raw), receipt_digest:(receipt_raw != Digest32::ZERO).then_some(receipt_raw),
+        revision, transition_number, previous_digest, record_digest:digest })
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -568,16 +577,10 @@ mod tests {
     use dfmcp_core::{CapabilityGrant,CapabilityScope,FortressId,GameTick,ObservationCursor,RequestId,SessionId,StateAnchor,WorkBudget};
 
     #[derive(Default)]
-    struct Memory { bytes:Cursor<Vec<u8>>, fail_after:Option<usize>, sync_fails:bool }
+    struct Memory { bytes:Cursor<Vec<u8>>, sync_fails:bool }
     impl Read for Memory { fn read(&mut self,out:&mut [u8])->io::Result<usize>{self.bytes.read(out)} }
     impl Seek for Memory { fn seek(&mut self,from:SeekFrom)->io::Result<u64>{self.bytes.seek(from)} }
-    impl Write for Memory {
-        fn write(&mut self,bytes:&[u8])->io::Result<usize>{
-            let n=match &mut self.fail_after{Some(0)=>return Err(io::Error::other("injected")),Some(left)=>{let n=(*left).min(bytes.len());*left-=n;n},None=>bytes.len()};
-            self.bytes.write(&bytes[..n])
-        }
-        fn flush(&mut self)->io::Result<()>{Ok(())}
-    }
+    impl Write for Memory { fn write(&mut self,bytes:&[u8])->io::Result<usize>{self.bytes.write(bytes)} fn flush(&mut self)->io::Result<()>{Ok(())} }
     impl EffectJournalStorage for Memory {
         fn sync(&mut self)->io::Result<()>{if self.sync_fails{Err(io::Error::other("injected sync"))}else{Ok(())}}
         fn truncate(&mut self,length:u64)->io::Result<()>{self.bytes.get_mut().truncate(length as usize);Ok(())}
@@ -629,5 +632,12 @@ mod tests {
         assert!(ControlEffectJournal::open(Memory{bytes:Cursor::new(bytes.clone()),..Memory::default()},&context(),false,7,EffectTailRecovery::Refuse).is_err());
         let repaired=ControlEffectJournal::open(Memory{bytes:Cursor::new(bytes),..Memory::default()},&context(),false,7,EffectTailRecovery::TruncateIncomplete)?;
         assert_eq!(repaired.retained_bytes(),length);assert_eq!(repaired.repaired_tail_bytes(),3);assert_eq!(repaired.lookup("k").map(|v|v.state),Some(DurablePauseState::Prepared));Ok(())
+    }
+    #[test]
+    fn replay_rejects_validly_hashed_but_wrong_predecessor_chain()->Result<()> {
+        let mut j=fresh()?;let digest=Digest32::of_bytes(b"plan");let prepared=j.record_prepared("k".to_owned(),digest,true,10,7,[1u8;16],&context())?;
+        let mut next=prepared.clone();next.state=DurablePauseState::CommitStarted;next.revision=2;next.transition_number=2;next.previous_digest=Digest32::of_bytes(b"wrong");
+        let forged=encode_frame(j.id,&next)?;j.storage.bytes.get_mut().extend_from_slice(&forged);
+        let bytes=j.storage.bytes.into_inner();assert!(ControlEffectJournal::open(Memory{bytes:Cursor::new(bytes),..Memory::default()},&context(),false,7,EffectTailRecovery::Refuse).is_err());Ok(())
     }
 }
