@@ -6,7 +6,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier};
-use super::{JournalLimits, JournalStorage, OperationsJournal, TailRecovery, storage_error};
+use super::{JournalLimits, JournalStorage, OperationsJournal, TailRecovery, storage_error,
+    JournalProfile, ObservationJournal, Operations13};
 
 pub struct PrivateJournalFile {
     file: File,
@@ -47,8 +48,16 @@ impl JournalStorage for PrivateJournalFile {
     }
 }
 
+/// The existing entry retains its exact operations/1.3 codec and file identity.
 pub fn open_private_journal(path:&Path,context:&OperationContext,limits:JournalLimits,
     recovery:TailRecovery)->Result<OperationsJournal<PrivateJournalFile>> {
+    open_profile_journal::<Operations13>(path,context,limits,recovery)
+}
+
+/// The caller chooses a sealed profile in Rust, never via an MCP string or by
+/// inspecting incoming payload size. Existing files must match that profile.
+pub fn open_profile_journal<P: JournalProfile>(path:&Path,context:&OperationContext,limits:JournalLimits,
+    recovery:TailRecovery)->Result<ObservationJournal<PrivateJournalFile,P>> {
     context.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
     limits.validate()?;
@@ -75,17 +84,17 @@ pub fn open_private_journal(path:&Path,context:&OperationContext,limits:JournalL
         let mut options=OpenOptions::new();options.read(true).write(true);
         if created {options.create_new(true).mode(0o600);}
         let file=options.open(path).map_err(storage_error)?;
-        file.try_lock().map_err(|_|DfmcpError::new(ErrorCode::Conflict,"operations journal already has a writer or cannot be exclusively locked"))?;
+        file.try_lock().map_err(|_|DfmcpError::new(ErrorCode::Conflict,"observation journal already has a writer or cannot be exclusively locked"))?;
         let opened=file.metadata().map_err(storage_error)?;
         if before.as_ref().is_some_and(|meta|(meta.dev(),meta.ino())!=(opened.dev(),opened.ino())) {return Err(denied());}
         let storage=PrivateJournalFile{identity:(opened.dev(),opened.ino(),opened.uid(),dir.dev(),dir.ino()),file,path:path.to_owned()};
         storage.validate_identity().map_err(storage_error)?;
         // Ensure the newly created directory entry precedes any acknowledged append.
         if created {File::open(parent).and_then(|dir|dir.sync_all()).map_err(storage_error)?;}
-        OperationsJournal::open(storage,context,limits,created,recovery)
+        ObservationJournal::<_,P>::open(storage,context,limits,created,recovery)
     }
     #[cfg(not(unix))] {
         let _=(path,limits,recovery);
-        Err(DfmcpError::new(ErrorCode::CapabilityDenied,"private operations journals are currently supported on Unix only"))
+        Err(DfmcpError::new(ErrorCode::CapabilityDenied,"private observation journals are currently supported on Unix only"))
     }
 }
