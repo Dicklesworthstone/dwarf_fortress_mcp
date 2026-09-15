@@ -22,7 +22,7 @@ constexpr std::size_t MAX_RECORDS=4096;
 std::uint64_t generation=static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())|1;
 struct Record{std::string digest,token,receipt;bool requested=false,applied=false,paused=false;std::uint64_t tick=0;};
 std::map<std::string,Record> records;
-bool text_ok(const std::string &v,std::size_t max){return !v.empty()&&v.size()<=max&&!v.contains('\0');}
+bool text_ok(const std::string &v,std::size_t max){return !v.empty()&&v.size()<=max&&v.find('\0')==std::string::npos;}
 void append_u64(std::string &out,std::uint64_t v){for(int s=56;s>=0;s-=8)out.push_back(static_cast<char>((v>>s)&255));}
 std::string hash_token(const std::string &key,const std::string &digest,std::uint64_t tick,bool paused){
     std::string input="dfmcp-control-token-v2\0";append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;append_u64(input,tick);input.push_back(paused?1:0);
