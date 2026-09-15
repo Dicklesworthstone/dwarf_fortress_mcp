@@ -18,6 +18,7 @@ pub mod agent_turn;
 pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
+pub mod live_control_server;
 pub mod live_jobs_server;
 pub mod live_map_server;
 pub mod live_operations_server;
@@ -56,8 +57,6 @@ fn run_with_runtime_cx<F: std::future::Future>(
     let runtime = RuntimeBuilder::new()
         .worker_threads(1)
         .with_reactor(reactor)
-        // The stdio receive pump must not occupy the scheduler worker. Match
-        // the framework bridge's bounded, on-demand blocking capacity.
         .blocking_threads(0, 16)
         .build()?;
     let cx = match inherited {
@@ -79,11 +78,6 @@ fn run_modern_stdio(server: fastmcp_rust::modern::Server) {
     }
 }
 
-/// Run the explicitly unadmitted protocol-1.1 development server.
-///
-/// The public seam rejects the production protocol marker before entering the
-/// private runtime so external callers cannot accidentally combine development
-/// execution with a production-looking admission environment.
 pub fn run_live_v1_1_development_stdio() {
     const ADMITTED_PROTOCOL_ENVIRONMENT: &str = "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
     if std::env::var_os(ADMITTED_PROTOCOL_ENVIRONMENT).is_some() {
@@ -115,11 +109,8 @@ mod runtime_entry_tests {
                 (42, std::thread::current().id())
             })?;
             let (answer, worker) = fastmcp_rust::asupersync::time::timeout(
-                cx.now(),
-                Duration::from_secs(5),
-                child.join(&cx),
-            )
-            .await??;
+                cx.now(), Duration::from_secs(5), child.join(&cx),
+            ).await??;
             assert_eq!(answer, 42);
             assert_ne!(worker, caller);
             Ok::<_, Box<dyn Error>>(())
@@ -147,10 +138,7 @@ mod runtime_entry_tests {
                         assert!(cx.io().is_none());
                         assert!(cx.timer_driver().is_none());
                         assert!(!cx.capabilities().spawn);
-                        assert!(matches!(
-                            cx.spawn_blocking(|_| 42),
-                            Err(SpawnError::RuntimeUnavailable)
-                        ));
+                        assert!(matches!(cx.spawn_blocking(|_| 42), Err(SpawnError::RuntimeUnavailable)));
                         let ambient = Cx::current().ok_or("runtime entry lost its context");
                         match ambient {
                             Ok(ambient) => {
@@ -159,30 +147,16 @@ mod runtime_entry_tests {
                             }
                             Err(error) => return Poll::Ready(Err(error)),
                         }
-                        if polls == 1 {
-                            context.waker().wake_by_ref();
-                            Poll::Pending
-                        } else {
-                            Poll::Ready(Ok(()))
-                        }
-                    })
-                    .await
+                        if polls == 1 { context.waker().wake_by_ref(); Poll::Pending } else { Poll::Ready(Ok(())) }
+                    }).await
                 })??;
-                assert!(
-                    Cx::current()
-                        .ok_or("restriction lost")?
-                        .timer_driver()
-                        .is_none()
-                );
+                assert!(Cx::current().ok_or("restriction lost")?.timer_driver().is_none());
             }
             let restored = Cx::current().ok_or("parent context lost")?;
             assert_eq!(restored.task_id(), task);
             assert_eq!(restored.capabilities(), parent_caps);
             assert!(restored.timer_driver().is_some());
-            parent.cancel_with(
-                fastmcp_rust::asupersync::types::CancelKind::User,
-                Some("inherited entry cancellation"),
-            );
+            parent.cancel_with(fastmcp_rust::asupersync::types::CancelKind::User, Some("inherited entry cancellation"));
             run_with_runtime_cx(|cx| async move {
                 assert_eq!(cx.task_id(), task);
                 assert!(cx.checkpoint().is_err());
