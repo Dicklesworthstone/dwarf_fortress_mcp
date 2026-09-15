@@ -20,6 +20,7 @@ The repository contains:
 - an operations/1.3 native producer, client, coherent jobs/buildings/items graph, and development MCP binary;
 - an operations/1.4 immutable native snapshot cache, bounded page client, fixed-profile projection, and development entry using the shared handlers;
 - a map/1.5 bounded terrain producer, closed client, canonical tile facts, candidate route query and development binary;
+- a spatial/1.6 single-capture operations/terrain producer, paged client, combined projector, route-aware inventory analysis and development binary;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map currently contains only
   protocol 1.0.
 
@@ -68,6 +69,60 @@ A higher rung applies only to the exact identities it names. It never transfers 
 commit, rebuilt binary, different bridge protocol, or another platform.
 
 ## Present now
+
+### Coherent spatial/1.6 capture and route-aware inventory allocation
+
+The new spatial profile captures jobs, buildings, items, attachments and one
+bounded terrain region during one native RPC suspension, then transfers immutable
+serialized pages. It does not join independently timed observations. Earlier
+profile-specific limitations below still apply to those earlier profiles.
+See `docs/LIVE_SPATIAL.md` for the entry and workflow.
+
+- The composite decoder requires exact world/site/clock/pause/software/generation
+  agreement across the embedded operations and terrain codecs. One combined source
+  digest, observation cursor and entity-generation universe cover every fact and
+  relationship. An invalid component prevents publication of the entire capture.
+- Native bounds are 4,096 jobs, 4,096 buildings, 65,536 items, 65,536 attachments,
+  16,384 terrain cells and 16 MiB total. Hidden terrain attributes remain redacted.
+  The unchanged retained-byte cache also binds the region into ownership. Page
+  assembly, full digest validation, semantic decoding and release acknowledgement
+  complete before a new world is returned. Initial capture latency is not measured.
+- A reusable multi-source terrain reachability field avoids a separate traversal
+  for every item. Spatial inventory planning resolves outermost ground-container
+  positions once, propagates conservative item/container exclusions, and supplies
+  the existing integral allocator only with candidate-connected declared stacks.
+- `spatial_inventory_plan` returns source-bound item/root handles, candidate path
+  lengths, same-anchor route drill-downs, disjoint exclusion counts and a checked
+  flow/min-cut shortage certificate. Results are conditional on the declared
+  stack model and observed terrain policy, not native recipe satisfaction, unit
+  navigation, safety, global inaccessibility, reservations or executable plans.
+- `dfmcp-live-spatial-dev-server` is registered with its own credentials, opt-in,
+  process-scoped session family and two-session limit. It preserves eleven tools
+  and reuses the existing sixteen semantic query variants plus spatial routes and
+  allocation. Inventory baselines and terrain watches share one refresh/anchor.
+  Whole-row pages retain required Agent Turns and active watches within budget.
+- Existing native profiles, dependency pins, admission map and migration bead are
+  unchanged. The old map client gains only closed spatial-client registration.
+  Spatial sessions reject other profiles' credentials, journals and admission
+  state. Citizen coverage, full unit navigation, native requirement matching,
+  durable spatial history/supervision and live game mutations remain unfinished.
+
+Both GCC and Clang compiled the actual producer/capture/cache against explicit
+mock DFHack/protobuf interfaces, C++17 and warnings-as-errors. Each run passed
+786 checks and matched independent Python encoders for an 810-byte fixture and
+40,000-item, 2,200,457-byte composite capture across 135 immutable pages. Changes
+to inventory, game tick and terrain between pages did not change captured bytes.
+Reproduce with `scripts/test_live_spatial_native_mock.py`.
+
+Twenty-three Rust scenarios are registered but not executed: three reachability,
+six composite projection, four transport, four inventory and six actual-handler
+scenarios, including an 8,192-byte allocation pagination path retaining a watch.
+No Rust compiler, Cargo or rustfmt was available; Rust compilation, Clippy, stdio,
+real DF headers/protobuf/native loading, live-game behavior and repository
+qualification remain unverified. The schema passed 59 cases (20 accepted, 39
+rejected). A separate Python ancestry-design oracle passed 2,000 seeded forests
+and 200,721 node comparisons; it did not execute Rust. These checks are not native
+qualification or production admission, and earlier receipts do not qualify 1.6.
 
 ### Bounded map/1.5 terrain observation and candidate routes
 
