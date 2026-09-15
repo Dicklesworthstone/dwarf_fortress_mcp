@@ -2,6 +2,7 @@
 
 pub mod announcement_wire;
 pub mod api;
+pub mod control_effect_journal;
 pub mod delta_scanner;
 pub mod dfhack_probe;
 /// Compatibility path for callers that imported the first unqualified client
