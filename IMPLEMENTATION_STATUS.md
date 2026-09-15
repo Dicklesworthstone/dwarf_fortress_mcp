@@ -38,6 +38,41 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable spatial/1.6 history and exact-record analysis
+
+The optional spatial journal is integrated into authenticated bootstrap and
+refresh. Complete coherent captures are synced before publishing changed live
+anchors, and restart replays the exact combined generation chain. Historical
+queries reconstruct an independent typed spatial state, not a replacement live
+world. See `docs/SPATIAL_HISTORY.md`.
+
+- The shared journal has sealed operations/1.3, operations/1.4 and spatial/1.6
+  codecs. Legacy 1.3 APIs, framing and digest domains remain unchanged. Wrong
+  profiles are rejected before incomplete-tail repair; no archive migration is
+  inferred. The 1.4 codec is a library API, not 1.4 MCP journal integration.
+- Spatial `history` lists committed captures with bound whole-row pagination.
+  `historical_query` admits only eight stateless query kinds, including candidate
+  routes and route-aware inventory allocation. Allocation route drill-downs stay
+  pinned to their exact archived record and digest.
+- Current Query authority is required; old captures do not revive expired grants.
+  Current watches stay current and are not evaluated against archived facts.
+  Acquisition/replay and response budgets remain separate. Native source failure
+  still permits verified archive reads in an already-open session.
+- Paths and explicit incomplete-tail repair are operator-only settings. Failed
+  writes/syncs fence publication; complete corrupt frames are never silently
+  discarded. Default retention is 64 MiB/1,024 changed captures with no pruning.
+- No offline bootstrap, durable watches/baselines, automatic rotation, effect
+  journal, anti-rollback floor, native bridge change, dependency change, or
+  production admission is introduced. Concurrent control work is unchanged.
+
+Fourteen new Rust scenarios are registered: eight journal/profile and six Unix
+actual-handler scenarios. They have not run because Rust, Cargo and rustfmt were
+unavailable. No Rust compilation, Clippy, stdio, filesystem crash campaign, live
+DFHack or repository qualification is claimed. JSON Schema meta-validation and
+50 new-wrapper/gate component checks passed; full composed schema validation did
+not run. Sixteen independent JSON-size checks passed for archived route wrappers.
+Those checks are not execution of the Rust implementation.
+
 ### Pause-control/1.7 development effect boundary
 
 `docs/LIVE_CONTROL.md` describes the first bridge-backed live mutation source. The implementation is
@@ -143,7 +178,7 @@ Consequences:
 | Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
 | Jobs/operations/map/spatial | coherent bounded development reads through spatial/1.6 | Rust qualification, real DFHack campaigns, production admission |
 | Control/1.7 | pause prepare/commit/reconcile source and isolated development runtime | Rust/native/live qualification, durable effect recovery, admission, any other live effect family |
-| World | canonical snapshots, deltas, query/graph/path/allocation/history laboratories | admitted production durable backend and complete fortress coverage |
+| World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial observation replay | admitted production durable backend and complete fortress coverage |
 | Intent/effects | sealed plans, in-memory dispatcher laboratory, pause-control live source | production two-phase effect journal, leases/checkpoints, dig/build/labor/etc. live effects |
 | Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
 
