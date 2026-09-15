@@ -1,5 +1,5 @@
 //! Spatial-only route and supply queries. All facts share the native capture.
-use dfmcp_adapter::live_spatial::LiveSpatialState;
+use dfmcp_adapter::live_spatial::SpatialStateView;
 use dfmcp_adapter::live_map::map_error;
 use dfmcp_adapter::spatial_inventory::{self as inventory, SPATIAL_SUPPLY_POLICY};
 use dfmcp_adapter::operations_analysis::MaterialDemand;
@@ -89,7 +89,7 @@ fn base(c:&OperationContext,s:Digest32,kind:&str)->Value{
         "unit_path_proven":false,"safety_proven":false,"global_unreachability_proven":false,
         "reservation_created":false,"commit_compatible":false,"route_policy":ROUTE_POLICY})
 }
-pub(super) fn execute(state:&LiveSpatialState,c:&OperationContext,input:&Value)->Result<Value>{
+pub(super) fn execute<T:SpatialStateView>(state:&T,c:&OperationContext,input:&Value)->Result<Value>{
     c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;validate(input)?;
     let envelope:Envelope=serde_json::from_value(input.clone()).map_err(|_|invalid("invalid spatial query fields"))?;
     if envelope.schema!="dfmcp.query/1"{return Err(invalid("spatial query requires dfmcp.query/1"));}
@@ -101,7 +101,7 @@ pub(super) fn execute(state:&LiveSpatialState,c:&OperationContext,input:&Value)-
     match envelope.query{
         Query::MapRoute{start,goal,limit,continuation,max_work}=>{
             let max_work=max_work.unwrap_or(1_000_000);
-            let map=&state.observation().ok_or_else(||invalid("spatial source absent"))?.terrain().map;
+            let map=&state.spatial_observation().ok_or_else(||invalid("spatial source absent"))?.terrain().map;
             let route=map.route(start,goal,max_work).map_err(map_error)?;
             let id=identity(c,source,json!({"kind":"map_route","start":start,"goal":goal,"max_work":max_work}));
             let mut out=base(c,source,"map_route");out["status"]=json!(if route.endpoint_excluded{"endpoint_excluded"}
