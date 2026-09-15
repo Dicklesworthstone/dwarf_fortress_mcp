@@ -90,6 +90,12 @@ impl<'a> Reader<'a> {
     }
 }
 
+pub trait SpatialStateView {
+    fn snapshot(&self) -> Option<&WorldSnapshot>;
+    fn spatial_observation(&self) -> Option<&LiveSpatialObservation>;
+    fn source_digest(&self) -> Result<Digest32>;
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct LiveSpatialState {
     observation: Option<LiveSpatialObservation>,
@@ -175,6 +181,11 @@ impl LiveSpatialState {
         self.snapshot = Some(snapshot);
         Ok(outcome)
     }
+}
+impl SpatialStateView for LiveSpatialState {
+    fn snapshot(&self) -> Option<&WorldSnapshot> { LiveSpatialState::snapshot(self) }
+    fn spatial_observation(&self) -> Option<&LiveSpatialObservation> { LiveSpatialState::observation(self) }
+    fn source_digest(&self) -> Result<Digest32> { LiveSpatialState::source_digest(self) }
 }
 fn rebind(fact: &mut Fact, source: Digest32) {
     fact.source_digest = source;
