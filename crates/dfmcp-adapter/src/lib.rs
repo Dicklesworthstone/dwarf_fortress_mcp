@@ -46,6 +46,7 @@ pub mod live_spatial;
 pub mod live_version;
 pub mod operations_analysis;
 pub mod operations_journal;
+pub mod spatial_inventory;
 pub mod transceiver;
 
 pub use announcement_wire::{
