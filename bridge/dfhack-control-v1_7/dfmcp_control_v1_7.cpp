@@ -25,11 +25,11 @@ std::map<std::string,Record> records;
 bool text_ok(const std::string &v,std::size_t max){return !v.empty()&&v.size()<=max&&v.find('\0')==std::string::npos;}
 void append_u64(std::string &out,std::uint64_t v){for(int s=56;s>=0;s-=8)out.push_back(static_cast<char>((v>>s)&255));}
 std::string hash_token(const std::string &key,const std::string &digest,std::uint64_t tick,bool paused){
-    std::string input="dfmcp-control-token-v2\0";append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;append_u64(input,tick);input.push_back(paused?1:0);
+    std::string input="dfmcp-control-token-v2";input.push_back('\0');append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;append_u64(input,tick);input.push_back(paused?1:0);
     const auto full=dfmcp_snapshot::sha256(input);return full.substr(0,16);
 }
 std::string receipt(const std::string &key,const std::string &digest,bool paused,std::uint64_t tick){
-    std::string input="dfmcp-control-receipt-v2\0";append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;input.push_back(paused?1:0);append_u64(input,tick);
+    std::string input="dfmcp-control-receipt-v2";input.push_back('\0');append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;input.push_back(paused?1:0);append_u64(input,tick);
     return dfmcp_snapshot::sha256(input);
 }
 bool auth(const wire::Request *in,wire::Reply *out){
