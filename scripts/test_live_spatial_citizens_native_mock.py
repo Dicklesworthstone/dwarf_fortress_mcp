@@ -22,8 +22,8 @@ int main(){
  read();check(p.accepted);check(p.has_payload);check(p.complete);check(p.payload.compare(0,8,"DFMS1800")==0);
  const auto first=p.payload;const auto token=p.token;const auto base=u32(first,8);const auto citizen_len=u32(first,12+base);
  check(first.compare(16+base,8,"DFMC1800")==0);check(citizen_len>=20);check(u32(first,24+base)==1);check(u32(first,28+base)==42);
- // Retained bytes do not observe later citizen/game mutations.
- r.snapshot=token;dwarf.name="Domas";dwarf.pos={9,9,5};World::tick=4;read();check(!p.accepted); // complete captures have no second page
+ // Repeat reads of an existing token return the exact retained bytes even after the game changes.
+ r.snapshot=token;dwarf.name="Domas";dwarf.pos={9,9,5};World::tick=4;read();check(p.accepted);check(p.complete);check(p.payload==first);check(p.token==token);
  r.snapshot.clear();snapshots.clear();World::tick=3;read();check(p.accepted);check(p.payload!=first);check(p.payload.compare(0,8,"DFMS1800")==0);
  // Strict roster bounds and membership are fail closed.
  snapshots.clear();r.maxcitizens=0;bad();r.maxcitizens=4097;bad();r.maxcitizens=4096;
