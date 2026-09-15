@@ -12,6 +12,9 @@ use crate::live_spatial::{LiveSpatialObservation,SpatialStateView};
 
 pub const MAX_COHERENT_CITIZENS:usize=4096;
 pub const MAX_SPATIAL_CITIZEN_BYTES:usize=16*1024*1024;
+pub const MAX_SKILLS_PER_CITIZEN:usize=256;
+pub const MAX_SKILLS_TOTAL:usize=131072;
+const MAX_SKILL_KEY_BYTES:usize=96;
 const MAGIC:&[u8;8]=b"DFMS1800";
 const CITIZEN_MAGIC:&[u8;8]=b"DFMC1800";
 const CITIZEN_NAMESPACE:u64=3<<40;
@@ -22,8 +25,10 @@ fn invalid(text:&str)->DfmcpError{DfmcpError::new(ErrorCode::AdapterRejected,tex
 fn exhausted(text:&str)->DfmcpError{DfmcpError::new(ErrorCode::BudgetExceeded,text)}
 
 #[derive(Clone,Debug,PartialEq,Eq)]
+pub struct LiveSkill{pub native_id:i32,pub key:String,pub nominal:i32,pub effective:i32,pub experience:i32}
+#[derive(Clone,Debug,PartialEq,Eq)]
 pub struct LiveCitizen{
-    pub native_id:u32,pub name:String,pub race:String,pub profession:i32,pub position:MapCoord,pub flags:u16,
+    pub native_id:u32,pub name:String,pub race:String,pub profession:i32,pub position:MapCoord,pub flags:u16,pub skills:Vec<LiveSkill>,
 }
 impl LiveCitizen{
     pub fn alive(&self)->bool{self.flags&1!=0}pub fn sane(&self)->bool{self.flags&2!=0}
@@ -40,13 +45,23 @@ impl LiveSpatialCitizenObservation{
     pub fn validate(&self)->Result<()>{
         self.spatial.validate()?;
         if self.citizens.len()>MAX_COHERENT_CITIZENS{return Err(exhausted("citizen roster exceeds spatial/1.8 bound"));}
-        let mut previous=None;let mut ids=BTreeSet::new();
+        let mut previous=None;let mut ids=BTreeSet::new();let mut total_skills=0usize;
         for citizen in &self.citizens{
             if citizen.native_id>i32::MAX as u32||previous.is_some_and(|id|id>=citizen.native_id)||!ids.insert(citizen.native_id)
                 ||citizen.name.len()>256||citizen.race.len()>128||citizen.name.contains('\0')||citizen.race.contains('\0')
-                ||citizen.profession<0||citizen.flags&!CITIZEN_FLAGS!=0||!citizen.citizen()||citizen.resident(){
+                ||citizen.profession<0||citizen.flags&!CITIZEN_FLAGS!=0||!citizen.citizen()||citizen.resident()
+                ||citizen.skills.len()>MAX_SKILLS_PER_CITIZEN{
                 return Err(invalid("invalid, unordered, or non-strict citizen in spatial/1.8 roster"));
             }
+            let mut last_skill=None;let mut keys=BTreeSet::new();
+            for skill in &citizen.skills{
+                if skill.native_id<0||last_skill.is_some_and(|id|id>=skill.native_id)||skill.key.is_empty()||skill.key.len()>MAX_SKILL_KEY_BYTES
+                    ||skill.key.contains('\0')||!keys.insert(skill.key.as_str())||skill.nominal<0||skill.effective<0||skill.experience<0
+                    ||(skill.nominal==0&&skill.effective==0&&skill.experience==0){return Err(invalid("invalid or unordered citizen skill evidence"));}
+                last_skill=Some(skill.native_id);
+            }
+            total_skills=total_skills.checked_add(citizen.skills.len()).ok_or_else(||exhausted("citizen skill count overflow"))?;
+            if total_skills>MAX_SKILLS_TOTAL{return Err(exhausted("citizen skill evidence exceeds aggregate bound"));}
             previous=Some(citizen.native_id);
         }
         Ok(())
@@ -76,14 +91,21 @@ impl LiveSpatialCitizenObservation{
 fn encode_citizens(citizens:&[LiveCitizen])->Result<Vec<u8>>{
     let mut out=CITIZEN_MAGIC.to_vec();put(&mut out,citizens.len() as u32);
     for c in citizens{put(&mut out,c.native_id);text(&mut out,&c.name)?;text(&mut out,&c.race)?;signed(&mut out,c.profession);
-        signed(&mut out,c.position.x);signed(&mut out,c.position.y);signed(&mut out,c.position.z);out.extend_from_slice(&c.flags.to_be_bytes());}
+        signed(&mut out,c.position.x);signed(&mut out,c.position.y);signed(&mut out,c.position.z);out.extend_from_slice(&c.flags.to_be_bytes());
+        if c.skills.len()>u16::MAX as usize{return Err(exhausted("citizen skill count exceeds wire width"));}out.extend_from_slice(&(c.skills.len() as u16).to_be_bytes());
+        for skill in &c.skills{signed(&mut out,skill.native_id);text(&mut out,&skill.key)?;signed(&mut out,skill.nominal);signed(&mut out,skill.effective);signed(&mut out,skill.experience);}}
     Ok(out)
 }
 fn decode_citizens(bytes:&[u8])->Result<Vec<LiveCitizen>>{
     let mut r=Reader{bytes,offset:0};if r.take(8)?!=CITIZEN_MAGIC{return Err(invalid("wrong citizen component profile"));}
     let count=r.u32()? as usize;if count>MAX_COHERENT_CITIZENS{return Err(exhausted("citizen component count exceeds bound"));}
-    let mut out=Vec::with_capacity(count);for _ in 0..count{out.push(LiveCitizen{native_id:r.u32()?,name:r.text(256)?,race:r.text(128)?,profession:r.i32()?,
-        position:MapCoord::new(r.i32()?,r.i32()?,r.i32()?),flags:r.u16()?});}
+    let mut out=Vec::with_capacity(count);let mut total=0usize;
+    for _ in 0..count{let native_id=r.u32()?;let name=r.text(256)?;let race=r.text(128)?;let profession=r.i32()?;
+        let position=MapCoord::new(r.i32()?,r.i32()?,r.i32()?);let flags=r.u16()?;let skill_count=r.u16()? as usize;
+        if skill_count>MAX_SKILLS_PER_CITIZEN{return Err(exhausted("citizen skill count exceeds per-unit bound"));}
+        total=total.checked_add(skill_count).ok_or_else(||exhausted("citizen skill count overflow"))?;if total>MAX_SKILLS_TOTAL{return Err(exhausted("citizen skill evidence exceeds aggregate bound"));}
+        let mut skills=Vec::with_capacity(skill_count);for _ in 0..skill_count{skills.push(LiveSkill{native_id:r.i32()?,key:r.text(MAX_SKILL_KEY_BYTES)?,nominal:r.i32()?,effective:r.i32()?,experience:r.i32()?});}
+        out.push(LiveCitizen{native_id,name,race,profession,position,flags,skills});}
     if r.offset!=bytes.len(){return Err(invalid("trailing citizen component bytes"));}Ok(out)
 }
 fn put(out:&mut Vec<u8>,value:u32){out.extend_from_slice(&value.to_be_bytes());}
@@ -153,11 +175,22 @@ impl LiveSpatialCitizenState{
                 ("race".to_owned(),fact("citizen.race",Value::Text(citizen.race.clone()))),
                 ("profession".to_owned(),fact("citizen.profession",Value::I64(i64::from(citizen.profession)))),
                 ("position".to_owned(),fact("citizen.position",Value::Coord(citizen.position))),
+                ("skill_count".to_owned(),fact("citizen.skills",Value::U64(citizen.skills.len() as u64))),
             ]);
             for(name,value)in[("alive",citizen.alive()),("sane",citizen.sane()),("active",citizen.active()),("visible",citizen.visible()),
                 ("citizen",citizen.citizen()),("resident",citizen.resident()),("baby",citizen.baby()),("child",citizen.child()),("adult",citizen.adult())]{
                 fields.insert(name.to_owned(),fact(name,Value::Bool(value)));
             }
+            let mut best:Option<&LiveSkill>=None;
+            for skill in &citizen.skills{
+                let stem=format!("skill.{}",skill.key);
+                fields.insert(format!("{stem}.nominal"),fact("citizen.skill.nominal",Value::I64(i64::from(skill.nominal))));
+                fields.insert(format!("{stem}.effective"),fact("citizen.skill.effective",Value::I64(i64::from(skill.effective))));
+                fields.insert(format!("{stem}.experience"),fact("citizen.skill.experience",Value::I64(i64::from(skill.experience))));
+                if best.is_none_or(|prior|(skill.effective,skill.nominal,skill.experience,&skill.key)>(prior.effective,prior.nominal,prior.experience,&prior.key)){best=Some(skill);}
+            }
+            if let Some(skill)=best{fields.insert("top_skill_key".to_owned(),fact("citizen.skills",Value::Text(skill.key.clone())));
+                fields.insert("top_skill_effective".to_owned(),fact("citizen.skills",Value::I64(i64::from(skill.effective))));}
             graph.entities.insert(id,EntityRecord{id,generation:1,revision:1,kind:EntityKind::Unit,
                 label:if citizen.name.is_empty(){format!("citizen-{}",citizen.native_id)}else{citizen.name.clone()},fields});
             let eid=edge_id(EdgeKind::MemberOf,id,EntityId::new(1))?;
