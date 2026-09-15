@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use dfmcp_core::{DfmcpError,Digest32,EdgeId,EntityId,ErrorCode,MapCoord,ObservationCursor,Result};
 use dfmcp_world::{EdgeKind,EdgeRecord,EntityKind,EntityRecord,Fact,FactPresence,FactSource,Value,WorldSnapshot};
 use crate::live_jobs::JobPublication;
+use crate::live_map::tile_entity_id;
 use crate::live_spatial::{LiveSpatialObservation,SpatialStateView};
 
 pub const MAX_COHERENT_CITIZENS:usize=4096;
@@ -106,6 +107,10 @@ fn edge_id(kind:EdgeKind,from:EntityId,to:EntityId)->Result<EdgeId>{
     bytes.extend_from_slice(&from.get().to_be_bytes());bytes.extend_from_slice(&to.get().to_be_bytes());
     let digest=Digest32::of_bytes(&bytes);let raw:[u8;16]=digest.as_bytes()[..16].try_into().map_err(|_|invalid("edge digest width"))?;Ok(EdgeId::new(u128::from_be_bytes(raw)|1))
 }
+fn mapped_position(position:MapCoord,region:dfmcp_world::map_region::Region)->Option<[u32;3]>{
+    if position.x<0||position.y<0||position.z<0{return None;}
+    let p=[position.x as u32,position.y as u32,position.z as u32];region.index(p).map(|_|p)
+}
 
 #[derive(Clone,Debug,Default)]
 pub struct LiveSpatialCitizenState{
@@ -137,7 +142,9 @@ impl LiveSpatialCitizenState{
             root.fields.insert("strict_citizen_count".to_owned(),fact("citizens.count",Value::U64(value.citizens.len() as u64)));
             root.fields.insert("observation_profile".to_owned(),fact("capture",Value::Text("spatial/1.8".to_owned())));
         }
+        let region=value.spatial.terrain().map.region;
         let citizen_ids:BTreeSet<_>=value.citizens.iter().map(|c|c.native_id).collect();
+        let mut pending_edges=Vec::new();
         for citizen in &value.citizens{
             let id=citizen_entity_id(citizen.native_id);if graph.entities.contains_key(&id){return Err(invalid("citizen entity namespace collision"));}
             let mut fields=BTreeMap::from([
@@ -154,26 +161,37 @@ impl LiveSpatialCitizenState{
             graph.entities.insert(id,EntityRecord{id,generation:1,revision:1,kind:EntityKind::Unit,
                 label:if citizen.name.is_empty(){format!("citizen-{}",citizen.native_id)}else{citizen.name.clone()},fields});
             let eid=edge_id(EdgeKind::MemberOf,id,EntityId::new(1))?;
-            graph.edges.insert(eid,EdgeRecord{id:eid,revision:1,kind:EdgeKind::MemberOf,from:id,to:EntityId::new(1),
+            pending_edges.push(EdgeRecord{id:eid,revision:1,kind:EdgeKind::MemberOf,from:id,to:EntityId::new(1),
                 fields:BTreeMap::from([("strict_citizen_membership".to_owned(),fact("citizen.citizen",Value::Bool(true)))])});
+            if let Some(position)=mapped_position(citizen.position,region){let tile=tile_entity_id(position)?;let eid=edge_id(EdgeKind::LocatedAt,id,tile)?;
+                pending_edges.push(EdgeRecord{id:eid,revision:1,kind:EdgeKind::LocatedAt,from:id,to:tile,
+                    fields:BTreeMap::from([("position_observed".to_owned(),fact("citizen.position",Value::Bool(true)))])});}
         }
         for job in &value.spatial.operations().jobs.jobs{
             let job_id=EntityId::new(u64::from(job.native_id)+2);
-            let entity=graph.entities.get_mut(&job_id).ok_or_else(||invalid("job projection absent during citizen join"))?;
-            match job.worker_native_id{
-                None=>{entity.fields.insert("worker_entity".to_owned(),Fact::with_presence(FactPresence::Absent,tick,
-                    FactSource::DfhackField("spatial/1.8.Job.getWorker".to_owned()),source));
-                    entity.fields.insert("worker_is_strict_citizen".to_owned(),fact("Job.getWorker",Value::Bool(false)));}
-                Some(worker)=>{
-                    let strict=citizen_ids.contains(&worker);entity.fields.insert("worker_is_strict_citizen".to_owned(),fact("Job.getWorker",Value::Bool(strict)));
-                    if strict{let worker_id=citizen_entity_id(worker);entity.fields.insert("worker_entity".to_owned(),fact("Job.getWorker",Value::Entity(worker_id)));
-                        let eid=edge_id(EdgeKind::Performs,worker_id,job_id)?;graph.edges.insert(eid,EdgeRecord{id:eid,revision:1,kind:EdgeKind::Performs,from:worker_id,to:job_id,
-                            fields:BTreeMap::from([("assignment_observed".to_owned(),fact("Job.getWorker",Value::Bool(true)))])});}
-                    else{entity.fields.insert("worker_entity".to_owned(),Fact::with_presence(FactPresence::Unknown(
-                        "assigned worker is outside the complete strict-citizen roster".to_owned()),tick,FactSource::DfhackField("spatial/1.8.Job.getWorker".to_owned()),source));}
+            let mut worker_edge=None;
+            {
+                let entity=graph.entities.get_mut(&job_id).ok_or_else(||invalid("job projection absent during citizen join"))?;
+                match job.worker_native_id{
+                    None=>{entity.fields.insert("worker_entity".to_owned(),Fact::with_presence(FactPresence::Absent,tick,
+                        FactSource::DfhackField("spatial/1.8.Job.getWorker".to_owned()),source));
+                        entity.fields.insert("worker_is_strict_citizen".to_owned(),fact("Job.getWorker",Value::Bool(false)));}
+                    Some(worker)=>{
+                        let strict=citizen_ids.contains(&worker);entity.fields.insert("worker_is_strict_citizen".to_owned(),fact("Job.getWorker",Value::Bool(strict)));
+                        if strict{let worker_id=citizen_entity_id(worker);entity.fields.insert("worker_entity".to_owned(),fact("Job.getWorker",Value::Entity(worker_id)));
+                            let eid=edge_id(EdgeKind::Performs,worker_id,job_id)?;worker_edge=Some(EdgeRecord{id:eid,revision:1,kind:EdgeKind::Performs,from:worker_id,to:job_id,
+                                fields:BTreeMap::from([("assignment_observed".to_owned(),fact("Job.getWorker",Value::Bool(true)))])});}
+                        else{entity.fields.insert("worker_entity".to_owned(),Fact::with_presence(FactPresence::Unknown(
+                            "assigned worker is outside the complete strict-citizen roster".to_owned()),tick,FactSource::DfhackField("spatial/1.8.Job.getWorker".to_owned()),source));}
+                    }
                 }
             }
+            if let Some(edge)=worker_edge{pending_edges.push(edge);}
+            if let Some(position)=mapped_position(job.position,region){let tile=tile_entity_id(position)?;let eid=edge_id(EdgeKind::LocatedAt,job_id,tile)?;
+                pending_edges.push(EdgeRecord{id:eid,revision:1,kind:EdgeKind::LocatedAt,from:job_id,to:tile,
+                    fields:BTreeMap::from([("position_observed".to_owned(),fact("job.position",Value::Bool(true)))])});}
         }
+        for edge in pending_edges{if graph.edges.insert(edge.id,edge).is_some(){return Err(invalid("spatial/1.8 edge identity collision"));}}
         let mut generations=self.generations.clone();let revision=cursor.sequence.checked_add(1).ok_or_else(||exhausted("spatial/1.8 revision exhausted"))?;
         for(id,entity)in &mut graph.entities{
             let present=self.snapshot.as_ref().is_some_and(|s|s.graph.entities.contains_key(id));
