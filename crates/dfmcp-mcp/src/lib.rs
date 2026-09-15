@@ -21,6 +21,7 @@ pub mod http_transport;
 pub mod live_jobs_server;
 pub mod live_map_server;
 pub mod live_operations_server;
+pub mod live_spatial_server;
 mod live_server;
 mod live_server_v1_1;
 pub mod server;
