@@ -24,13 +24,14 @@ int main(){
  check(first.compare(16+base,8,"DFMC1800")==0);check(citizen_len>=20);check(u32(first,24+base)==1);check(u32(first,28+base)==42);
  check(first.find("job_skill_0",16+base)!=std::string::npos);check(first.find("job_skill_2",16+base)!=std::string::npos);
  // Repeat reads of an existing token return exact retained bytes after citizen/game changes.
- r.snapshot=token;dwarf.name="Domas";dwarf.pos={9,9,5};dwarf.mining=1;World::tick=4;read();check(p.accepted);check(p.complete);check(p.payload==first);check(p.token==token);
+ r.snapshot=token;dwarf.name="Domas";dwarf.pos={9,9,5};dwarf.mining=1;dwarf.stress=0;dwarf.available=false;World::tick=4;
+ read();check(p.accepted);check(p.complete);check(p.payload==first);check(p.token==token);
  r.snapshot.clear();snapshots.clear();World::tick=3;read();check(p.accepted);check(p.payload!=first);check(p.payload.compare(0,8,"DFMS1800")==0);
  // Strict roster bounds and membership are fail closed.
  snapshots.clear();r.maxcitizens=0;bad();r.maxcitizens=4097;bad();r.maxcitizens=4096;
  df::unit other;other.id=43;DFHack::Units::citizens={&dwarf,&other};r.maxcitizens=1;bad();r.maxcitizens=4096;
  dwarf.resident=true;bad();dwarf.resident=false;DFHack::Units::citizens={&dwarf};
- dwarf.id=-1;bad();dwarf.id=42;
+ dwarf.id=-1;bad();dwarf.id=42;dwarf.stress=7;bad();dwarf.stress=3;
  // Hidden terrain remains presence-only in the composite profile.
  Maps::block.designation[1][1].bits.hidden=true;snapshots.clear();read();check(p.accepted);const auto hidden=p.payload;
  Maps::block.tiletype[1][1]=df::tiletype::Wall;Maps::block.walkable[1][1]=0;snapshots.clear();read();check(p.accepted);check(p.payload==hidden);
@@ -47,7 +48,7 @@ def transform_mock(mock:str)->str:
     mock=mock.replace('#define DFhackCExport\n', '#define DFhackCExport\n#define ENUM_LAST_ITEM(kind) df::kind::CARPENTRY\n')
     mock=mock.replace('enum class job_type{BrewDrink=1};', 'enum class job_type{BrewDrink=1};\nenum class job_skill{MINING=0,WOODCUTTING=1,CARPENTRY=2};')
     mock=mock.replace('struct unit{int32_t id=9;};', '''struct unit{int32_t id=9;coord pos;int32_t profession=3;std::string name="Urist",race="dwarf";
- int mining=7,woodcutting=0,carpentry=3;bool alive=true,sane=true,active=true,visible=true,resident=false,baby=false,child=false,adult=true;};''')
+ int mining=7,woodcutting=0,carpentry=3,stress=3;bool available=true;bool alive=true,sane=true,active=true,visible=true,resident=false,baby=false,child=false,adult=true;};''')
     marker='namespace Items{inline df::item *getContainer(df::item *i){return i->container;}inline df::building *getHolderBuilding(df::item *i){return i->holder;}}'
     addition=marker+'''\nnamespace Units{inline std::vector<df::unit*> citizens;
  inline bool getCitizens(std::vector<df::unit*>&out,bool,bool){out=citizens;return true;}inline bool isCitizen(df::unit*,bool){return true;}
@@ -56,6 +57,7 @@ def transform_mock(mock:str)->str:
  inline df::coord getPosition(df::unit*u){return u->pos;}inline bool isAlive(df::unit*u){return u->alive;}inline bool isSane(df::unit*u){return u->sane;}
  inline bool isActive(df::unit*u){return u->active;}inline bool isVisible(df::unit*u){return u->visible;}inline bool isBaby(df::unit*u){return u->baby;}
  inline bool isChild(df::unit*u){return u->child;}inline bool isAdult(df::unit*u){return u->adult;}
+ inline int getStressCategory(df::unit*u){return u->stress;}inline bool isJobAvailable(df::unit*u,bool){return u->available;}
  inline int getNominalSkill(df::unit*u,df::job_skill s,bool){return s==df::job_skill::MINING?u->mining:s==df::job_skill::CARPENTRY?u->carpentry:u->woodcutting;}
  inline int getEffectiveSkill(df::unit*u,df::job_skill s){int n=getNominalSkill(u,s,true);return n?std::max(0,n-1):0;}
  inline int getExperience(df::unit*u,df::job_skill s,bool){return getNominalSkill(u,s,true)*100;}}
