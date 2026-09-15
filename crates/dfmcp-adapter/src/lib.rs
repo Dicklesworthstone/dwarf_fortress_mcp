@@ -29,6 +29,7 @@ pub mod live_briefing;
 pub mod live_compatibility;
 pub mod live_connect;
 pub mod live_connect_v1_1;
+pub mod live_control_rpc;
 pub mod live_evidence;
 pub mod live_identity;
 pub mod live_jobs;
