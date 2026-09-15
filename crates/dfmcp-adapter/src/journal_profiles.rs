@@ -5,7 +5,8 @@ use dfmcp_core::{Digest32, FortressId, Result};
 use dfmcp_world::WorldSnapshot;
 use crate::live_jobs::{JobPublication, LiveJobObservation};
 use crate::live_operations::{LiveOperationsObservation, LiveOperationsState, OperationsProfile};
-use crate::live_spatial::{LiveSpatialObservation, LiveSpatialState, MAX_SPATIAL_BYTES};
+use crate::live_spatial::{LiveSpatialObservation, LiveSpatialState, MAX_SPATIAL_BYTES,
+    citizens::{LiveSpatialCitizenObservation,LiveSpatialCitizenState,MAX_SPATIAL_CITIZEN_BYTES}};
 
 mod sealed {
     pub trait Sealed {}
@@ -36,9 +37,11 @@ pub trait JournalProfile: sealed::Sealed {
 pub struct Operations13;
 pub struct Operations14;
 pub struct Spatial16;
+pub struct Spatial18;
 impl sealed::Sealed for Operations13 {}
 impl sealed::Sealed for Operations14 {}
 impl sealed::Sealed for Spatial16 {}
+impl sealed::Sealed for Spatial18 {}
 
 macro_rules! operations_profile {
     ($name:ident, $profile:expr, $magic:expr, $text:expr, $domain:expr) => {
@@ -89,6 +92,30 @@ impl JournalProfile for Spatial16 {
     fn jobs(value: &Self::Observation) -> &LiveJobObservation { &value.operations().jobs }
     fn entity_count(value: &Self::Observation) -> usize {
         Operations14::entity_count(value.operations()).saturating_add(value.terrain().map.cells.len())
+    }
+}
+
+impl JournalProfile for Spatial18 {
+    type Observation = LiveSpatialCitizenObservation;
+    type State = LiveSpatialCitizenState;
+    const MAGIC: &'static [u8; 8] = b"DFMUJ001";
+    const NAME: &'static str = "spatial/1.8";
+    const MAX_PAYLOAD: usize = MAX_SPATIAL_CITIZEN_BYTES;
+    const IDENTITY_DOMAIN: &'static [u8] = b"dfmcp-spatial-citizen-journal-incarnation/1\0";
+    fn empty() -> Self::State { LiveSpatialCitizenState::default() }
+    fn publish(state: &mut Self::State, value: Self::Observation) -> Result<JobPublication> { state.publish(value) }
+    fn snapshot(state: &Self::State) -> Option<&WorldSnapshot> {
+        use crate::live_spatial::SpatialStateView;
+        state.snapshot()
+    }
+    fn encode(value: &Self::Observation) -> Result<Vec<u8>> { value.encode_payload() }
+    fn decode(bytes: &[u8], generation: u64, df: String, dfhack: String) -> Result<Self::Observation> {
+        LiveSpatialCitizenObservation::decode_payload(bytes, generation, df, dfhack)
+    }
+    fn source_digest(value: &Self::Observation) -> Result<Digest32> { value.source_digest() }
+    fn jobs(value: &Self::Observation) -> &LiveJobObservation { &value.spatial().operations().jobs }
+    fn entity_count(value: &Self::Observation) -> usize {
+        Spatial16::entity_count(value.spatial()).saturating_add(value.citizens().len())
     }
 }
 
