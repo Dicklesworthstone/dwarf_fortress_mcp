@@ -10,7 +10,7 @@ use dfmcp_world::map_reachability::Reachability;
 use dfmcp_world::map_region::MAX_ROUTE_WORK;
 use crate::live_map::map_error;
 use crate::live_operations::item_entity_id;
-use crate::live_spatial::LiveSpatialState;
+use crate::live_spatial::SpatialStateView;
 use crate::operations_analysis::MaterialDemand;
 
 pub const SPATIAL_SUPPLY_POLICY: &str = "observed-route-unattached-ground-root-stack-units/1";
@@ -66,7 +66,7 @@ fn normalize(requested: &[MaterialDemand]) -> Result<Vec<MaterialDemand>> {
     Ok(demands)
 }
 
-pub fn plan(state: &LiveSpatialState, context: &OperationContext, origin: [u32; 3],
+pub fn plan<T: SpatialStateView>(state: &T, context: &OperationContext, origin: [u32; 3],
     requested: &[MaterialDemand], maximum_work: u64) -> Result<SpatialInventory> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if maximum_work == 0 || maximum_work > flow::MAX_WORK { return Err(exhausted("invalid spatial work budget")); }
@@ -75,7 +75,7 @@ pub fn plan(state: &LiveSpatialState, context: &OperationContext, origin: [u32; 
     if snapshot.anchor() != context.anchor { return Err(DfmcpError::new(ErrorCode::StaleAnchor,"spatial plan uses another observation")); }
     if snapshot.graph.entities.len() > context.budget.max_entities as usize { return Err(exhausted("spatial scan exceeds session budget")); }
     if !snapshot.hash_is_valid() { return Err(invariant("invalid spatial snapshot hash")); }
-    let observation = state.observation().ok_or_else(||invariant("spatial observation absent"))?;
+    let observation = state.spatial_observation().ok_or_else(||invariant("spatial observation absent"))?;
     let map = &observation.terrain().map;
     let field = Reachability::compute(map, &[origin], maximum_work.min(MAX_ROUTE_WORK)).map_err(map_error)?;
     let mut work = Work { used: field.work_units, maximum: maximum_work };
