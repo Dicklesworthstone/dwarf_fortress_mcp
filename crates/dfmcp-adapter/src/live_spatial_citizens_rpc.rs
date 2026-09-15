@@ -3,7 +3,7 @@
 
 use crate::live_jobs_rpc::{DeadlineStream,JobsManifest,Message,bytes,call,checked_timeout,failure,io_failure,malformed,number};
 use crate::live_jobs_rpc::operations::paged::snapshot::{SnapshotAssembler,SnapshotManifest,SnapshotPage};
-use crate::live_spatial_citizens::{LiveSpatialCitizenObservation,MAX_COHERENT_CITIZENS};
+use crate::live_spatial::citizens::{LiveSpatialCitizenObservation,MAX_COHERENT_CITIZENS};
 use dfmcp_core::{Digest32,ErrorCode,Result};
 use std::io::{Read,Write};
 use std::net::{SocketAddr,TcpStream};
