@@ -18,6 +18,7 @@ using namespace DFHack;
 namespace base = dfmcp_spatial_capture;
 constexpr std::size_t MAX_SKILLS_PER_CITIZEN=256;
 constexpr std::size_t MAX_SKILLS_TOTAL=131072;
+constexpr std::size_t MAX_SKILL_KEY_BYTES=96;
 
 inline std::size_t utf8_width(const std::string &value,std::size_t offset){
     const auto lead=static_cast<unsigned char>(value[offset]);
@@ -69,7 +70,7 @@ inline std::uint32_t capture(std::uint32_t maximum,std::size_t maximum_bytes,std
             const auto skill=static_cast<df::job_skill>(raw);if(!is_valid_enum_item(skill))continue;
             const auto nominal=Units::getNominalSkill(unit,skill,true);const auto effective=Units::getEffectiveSkill(unit,skill);
             const auto experience=Units::getExperience(unit,skill,false);if(nominal<=0&&effective<=0&&experience<=0)continue;
-            const std::string key=ENUM_KEY_STR(job_skill,skill);if(!base::utf8(key,128)||skills.size()>=MAX_SKILLS_PER_CITIZEN||skill_total>=MAX_SKILLS_TOTAL)return 3;
+            const std::string key=ENUM_KEY_STR(job_skill,skill);if(!base::utf8(key,MAX_SKILL_KEY_BYTES)||skills.size()>=MAX_SKILLS_PER_CITIZEN||skill_total>=MAX_SKILLS_TOTAL)return 3;
             skills.push_back({raw,nominal,effective,experience,key});++skill_total;
         }
         base::u32(out,static_cast<std::uint32_t>(unit->id));base::text(out,name);base::text(out,race);base::i32(out,profession);
