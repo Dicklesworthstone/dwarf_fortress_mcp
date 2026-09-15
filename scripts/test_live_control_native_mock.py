@@ -59,7 +59,9 @@ int main(){setenv("DFMCP_CONTROL_TOKEN",std::string(32,'t').c_str(),1);color_ost
  request.key="pause-1";request.digest=std::string(32,'d');request.paused_present=true;request.paused_value=true;request.tick_present=true;
  request.tick=uint64_t(World::year)*403200ull+World::tick;
  PreparePause(out,&request,&reply);check(reply.accepted);check(reply.code==0);check(reply.prepare.size()==16);check(!reply.known);const auto token1=reply.prepare;
- PreparePause(out,&request,&reply);check(reply.accepted);check(reply.prepare==token1);check(World::set_calls==0);
+ PreparePause(out,&request,&reply);check(reply.accepted);check(reply.prepare==token1);check(reply.known);check(!reply.applied);check(reply.receipt.empty());check(World::set_calls==0);
+ ++World::tick;request.tick=uint64_t(World::year)*403200ull+World::tick;PreparePause(out,&request,&reply);check(!reply.accepted);check(reply.code==7);
+ --World::tick;request.tick=uint64_t(World::year)*403200ull+World::tick;
  request.paused_value=false;PreparePause(out,&request,&reply);check(!reply.accepted);check(reply.code==7);request.paused_value=true;
  request.digest=std::string(32,'x');PreparePause(out,&request,&reply);check(!reply.accepted);check(reply.code==7);request.digest=std::string(32,'d');
  request.prepare=std::string(16,'z');CommitPause(out,&request,&reply);check(!reply.accepted);check(reply.code==7);check(World::set_calls==0);
