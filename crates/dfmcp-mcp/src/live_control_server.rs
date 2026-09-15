@@ -14,8 +14,7 @@ use std::time::Duration;
 
 use dfmcp_adapter::control_effect_journal::{ControlEffectJournal, DurablePauseRecord,
     DurablePauseState, EffectTailRecovery, PrivateControlJournalFile, open_private_control_journal};
-use dfmcp_adapter::live_control_rpc::{ControlRpcClient, PauseEffect};
-use dfmcp_adapter::live_jobs_rpc::DeadlineStream;
+use dfmcp_adapter::live_control_rpc::{ControlDeadlineStream, ControlRpcClient, PauseEffect};
 use dfmcp_core::{Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, ErrorCode,
     FortressId, GameTick, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
     SessionId, StateAnchor, WorkBudget};
@@ -42,7 +41,7 @@ impl Drop for Slot{fn drop(&mut self){SLOTS.fetch_sub(1,Ordering::AcqRel);}}
 
 struct ControlSession{
     id:SessionId,
-    client:ControlRpcClient<DeadlineStream>,
+    client:ControlRpcClient<ControlDeadlineStream>,
     endpoint:SocketAddr,
     token:Vec<u8>,
     nonce:Vec<u8>,
@@ -62,12 +61,18 @@ impl ControlSession{
     fn reconnect(&mut self)->Result<()> {
         self.client=ControlRpcClient::connect(self.endpoint,self.token.clone(),self.nonce.clone(),self.timeout)?;Ok(())
     }
-    fn ensure_connection(&mut self)->Result<()> {if self.client.poisoned(){self.reconnect()?;}Ok(())}
+    fn arm(&mut self)->Result<()> {
+        if self.client.poisoned(){self.reconnect()?;}
+        self.client.reset_deadline(self.timeout)
+    }
     fn query_with_reconnect(&mut self,key:&str,digest:Digest32)->Result<PauseEffect>{
-        self.ensure_connection()?;
+        self.arm()?;
         match self.client.query_pause(key,digest){
             Ok(effect)=>Ok(effect),
-            Err(first) if self.client.poisoned()=>{self.reconnect()?;self.client.query_pause(key,digest).map_err(|_|first)},
+            Err(first) if self.client.poisoned()=>{
+                self.reconnect()?;self.client.reset_deadline(self.timeout)?;
+                self.client.query_pause(key,digest).map_err(|_|first)
+            }
             Err(error)=>Err(error),
         }
     }
@@ -167,7 +172,7 @@ pub fn fortress_plan(session_id:Option<String>,idempotency_key:String,plan_diges
         context.authorize(Capability::ControlClock,RiskTier::Reversible,&[],None)?;let plan=digest(&plan_digest)?;
         if let Some(existing)=session.journal.lookup(&idempotency_key).cloned(){same_identity(&existing,plan,paused,expected_game_tick)?;
             return Ok(json!({"ok":true,"existing":true,"effect":record_json(&existing),"durable_effect_journal":journal_json(&session.journal)}));}
-        session.ensure_connection()?;
+        session.arm()?;
         let effect=session.client.prepare_pause(&idempotency_key,plan,paused,expected_game_tick)?;
         if effect.known{return Err(err(ErrorCode::Conflict,"bridge already knows this idempotency key but the durable journal does not; choose a new key"));}
         let record=session.journal.record_prepared(idempotency_key,plan,paused,expected_game_tick,effect.bridge_generation,effect_token(&effect)?,&context)?;
@@ -182,7 +187,8 @@ pub fn fortress_commit(session_id:Option<String>,idempotency_key:String,plan_dig
         if current.plan_digest!=plan||current.prepare_token!=token{return Err(err(ErrorCode::Conflict,"commit does not match the durable prepared effect"));}
         if current.state.terminal(){return Ok(json!({"ok":current.effect_applied,"replayed_terminal":true,"effect":record_json(&current),"durable_effect_journal":journal_json(&session.journal)}));}
         if current.state.reconciliation_required(){return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,"durable journal contains an unresolved commit attempt; reconcile before any retry"));}
-        if session.client.poisoned(){return Err(err(ErrorCode::AdapterUnavailable,"control source is fenced before dispatch; reconnect by reopening the session"));}
+        if session.client.poisoned(){return Err(err(ErrorCode::AdapterUnavailable,"control source is fenced before dispatch; reconcile/reopen rather than retrying this commit"));}
+        session.client.reset_deadline(session.timeout)?;
         let generation=session.client.bridge_generation();
         if !current.safe_to_dispatch(generation){return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,"prepared effect belongs to another bridge generation; replan with a new idempotency key"));}
         // Durability boundary: if this fsync fails, no bridge mutation is attempted.
@@ -210,7 +216,7 @@ pub fn fortress_explain(session_id:Option<String>,idempotency_key:String,plan_di
         if current.state.terminal(){return Ok(json!({"ok":true,"effect":record_json(&current),"commit_permitted":false,
             "new_plan_required":!current.effect_applied,"durable_effect_journal":journal_json(&session.journal)}));}
         if current.state==DurablePauseState::Prepared{
-            session.ensure_connection()?;let same_generation=session.client.bridge_generation()==current.bridge_generation;
+            session.arm()?;let same_generation=session.client.bridge_generation()==current.bridge_generation;
             return Ok(json!({"ok":true,"effect":record_json(&current),"commit_permitted":same_generation,
                 "new_plan_required":!same_generation,"safe_to_retry_same_effect":false,"durable_effect_journal":journal_json(&session.journal)}));
         }
