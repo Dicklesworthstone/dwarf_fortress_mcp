@@ -28,7 +28,8 @@ fn exhausted(text:&str)->DfmcpError{DfmcpError::new(ErrorCode::BudgetExceeded,te
 pub struct LiveSkill{pub native_id:i32,pub key:String,pub nominal:i32,pub effective:i32,pub experience:i32}
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub struct LiveCitizen{
-    pub native_id:u32,pub name:String,pub race:String,pub profession:i32,pub position:MapCoord,pub flags:u16,pub skills:Vec<LiveSkill>,
+    pub native_id:u32,pub name:String,pub race:String,pub profession:i32,pub position:MapCoord,pub flags:u16,
+    pub stress_category:i32,pub job_available_preserve_social:bool,pub job_available_interrupt_social:bool,pub skills:Vec<LiveSkill>,
 }
 impl LiveCitizen{
     pub fn alive(&self)->bool{self.flags&1!=0}pub fn sane(&self)->bool{self.flags&2!=0}
@@ -49,7 +50,7 @@ impl LiveSpatialCitizenObservation{
         for citizen in &self.citizens{
             if citizen.native_id>i32::MAX as u32||previous.is_some_and(|id|id>=citizen.native_id)||!ids.insert(citizen.native_id)
                 ||citizen.name.len()>256||citizen.race.len()>128||citizen.name.contains('\0')||citizen.race.contains('\0')
-                ||citizen.profession<0||citizen.flags&!CITIZEN_FLAGS!=0||!citizen.citizen()||citizen.resident()
+                ||citizen.profession<0||!(0..=6).contains(&citizen.stress_category)||citizen.flags&!CITIZEN_FLAGS!=0||!citizen.citizen()||citizen.resident()
                 ||citizen.skills.len()>MAX_SKILLS_PER_CITIZEN{
                 return Err(invalid("invalid, unordered, or non-strict citizen in spatial/1.8 roster"));
             }
@@ -92,6 +93,7 @@ fn encode_citizens(citizens:&[LiveCitizen])->Result<Vec<u8>>{
     let mut out=CITIZEN_MAGIC.to_vec();put(&mut out,citizens.len() as u32);
     for c in citizens{put(&mut out,c.native_id);text(&mut out,&c.name)?;text(&mut out,&c.race)?;signed(&mut out,c.profession);
         signed(&mut out,c.position.x);signed(&mut out,c.position.y);signed(&mut out,c.position.z);out.extend_from_slice(&c.flags.to_be_bytes());
+        signed(&mut out,c.stress_category);out.push(u8::from(c.job_available_preserve_social));out.push(u8::from(c.job_available_interrupt_social));
         if c.skills.len()>u16::MAX as usize{return Err(exhausted("citizen skill count exceeds wire width"));}out.extend_from_slice(&(c.skills.len() as u16).to_be_bytes());
         for skill in &c.skills{signed(&mut out,skill.native_id);text(&mut out,&skill.key)?;signed(&mut out,skill.nominal);signed(&mut out,skill.effective);signed(&mut out,skill.experience);}}
     Ok(out)
@@ -101,11 +103,12 @@ fn decode_citizens(bytes:&[u8])->Result<Vec<LiveCitizen>>{
     let count=r.u32()? as usize;if count>MAX_COHERENT_CITIZENS{return Err(exhausted("citizen component count exceeds bound"));}
     let mut out=Vec::with_capacity(count);let mut total=0usize;
     for _ in 0..count{let native_id=r.u32()?;let name=r.text(256)?;let race=r.text(128)?;let profession=r.i32()?;
-        let position=MapCoord::new(r.i32()?,r.i32()?,r.i32()?);let flags=r.u16()?;let skill_count=r.u16()? as usize;
+        let position=MapCoord::new(r.i32()?,r.i32()?,r.i32()?);let flags=r.u16()?;let stress_category=r.i32()?;
+        let job_available_preserve_social=r.boolean()?;let job_available_interrupt_social=r.boolean()?;let skill_count=r.u16()? as usize;
         if skill_count>MAX_SKILLS_PER_CITIZEN{return Err(exhausted("citizen skill count exceeds per-unit bound"));}
         total=total.checked_add(skill_count).ok_or_else(||exhausted("citizen skill count overflow"))?;if total>MAX_SKILLS_TOTAL{return Err(exhausted("citizen skill evidence exceeds aggregate bound"));}
         let mut skills=Vec::with_capacity(skill_count);for _ in 0..skill_count{skills.push(LiveSkill{native_id:r.i32()?,key:r.text(MAX_SKILL_KEY_BYTES)?,nominal:r.i32()?,effective:r.i32()?,experience:r.i32()?});}
-        out.push(LiveCitizen{native_id,name,race,profession,position,flags,skills});}
+        out.push(LiveCitizen{native_id,name,race,profession,position,flags,stress_category,job_available_preserve_social,job_available_interrupt_social,skills});}
     if r.offset!=bytes.len(){return Err(invalid("trailing citizen component bytes"));}Ok(out)
 }
 fn put(out:&mut Vec<u8>,value:u32){out.extend_from_slice(&value.to_be_bytes());}
@@ -116,6 +119,8 @@ struct Reader<'a>{bytes:&'a [u8],offset:usize}
 impl<'a> Reader<'a>{
     fn take(&mut self,n:usize)->Result<&'a [u8]>{let end=self.offset.checked_add(n).ok_or_else(||invalid("spatial/1.8 length overflow"))?;
         let value=self.bytes.get(self.offset..end).ok_or_else(||invalid("truncated spatial/1.8 payload"))?;self.offset=end;Ok(value)}
+    fn byte(&mut self)->Result<u8>{Ok(self.take(1)?[0])}
+    fn boolean(&mut self)->Result<bool>{match self.byte()?{0=>Ok(false),1=>Ok(true),_=>Err(invalid("noncanonical citizen Boolean"))}}
     fn u32(&mut self)->Result<u32>{Ok(u32::from_be_bytes(self.take(4)?.try_into().map_err(|_|invalid("invalid citizen u32"))?))}
     fn i32(&mut self)->Result<i32>{Ok(self.u32()? as i32)}
     fn u16(&mut self)->Result<u16>{Ok(u16::from_be_bytes(self.take(2)?.try_into().map_err(|_|invalid("invalid citizen u16"))?))}
@@ -175,6 +180,9 @@ impl LiveSpatialCitizenState{
                 ("race".to_owned(),fact("citizen.race",Value::Text(citizen.race.clone()))),
                 ("profession".to_owned(),fact("citizen.profession",Value::I64(i64::from(citizen.profession)))),
                 ("position".to_owned(),fact("citizen.position",Value::Coord(citizen.position))),
+                ("stress_category".to_owned(),fact("citizen.stress_category",Value::I64(i64::from(citizen.stress_category)))),
+                ("job_available_preserve_social".to_owned(),fact("citizen.job_available",Value::Bool(citizen.job_available_preserve_social))),
+                ("job_available_interrupt_social".to_owned(),fact("citizen.job_available",Value::Bool(citizen.job_available_interrupt_social))),
                 ("skill_count".to_owned(),fact("citizen.skills",Value::U64(citizen.skills.len() as u64))),
             ]);
             for(name,value)in[("alive",citizen.alive()),("sane",citizen.sane()),("active",citizen.active()),("visible",citizen.visible()),
