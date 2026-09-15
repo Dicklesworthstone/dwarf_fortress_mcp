@@ -1,3 +1,4 @@
+#include "../common/retained_snapshot.h"
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -24,14 +25,12 @@ std::map<std::string,Record> records;
 bool text_ok(const std::string &v,std::size_t max){return !v.empty()&&v.size()<=max&&!v.contains('\0');}
 void append_u64(std::string &out,std::uint64_t v){for(int s=56;s>=0;s-=8)out.push_back(static_cast<char>((v>>s)&255));}
 std::string hash_token(const std::string &key,const std::string &digest,std::uint64_t tick,bool paused){
-    std::string out="dfmcp-control-token-v1\0";out+=key;out.push_back('\0');out+=digest;append_u64(out,tick);out.push_back(paused?1:0);
-    std::hash<std::string> h;std::string token(16,'\0');auto a=h(out),b=h(std::string("2")+out);
-    for(int i=0;i<8;++i){token[i]=static_cast<char>(a>>(56-i*8));token[8+i]=static_cast<char>(b>>(56-i*8));}return token;
+    std::string input="dfmcp-control-token-v2\0";append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;append_u64(input,tick);input.push_back(paused?1:0);
+    const auto full=dfmcp_snapshot::sha256(input);return full.substr(0,16);
 }
 std::string receipt(const std::string &key,const std::string &digest,bool paused,std::uint64_t tick){
-    std::string out="dfmcp-control-receipt-v1\0";out+=key;out.push_back('\0');out+=digest;out.push_back(paused?1:0);append_u64(out,tick);
-    std::hash<std::string> h;std::string r(16,'\0');auto a=h(out),b=h(std::string("r")+out);
-    for(int i=0;i<8;++i){r[i]=static_cast<char>(a>>(56-i*8));r[8+i]=static_cast<char>(b>>(56-i*8));}return r;
+    std::string input="dfmcp-control-receipt-v2\0";append_u64(input,generation);input+=key;input.push_back('\0');input+=digest;input.push_back(paused?1:0);append_u64(input,tick);
+    return dfmcp_snapshot::sha256(input);
 }
 bool auth(const wire::Request *in,wire::Reply *out){
     out->Clear();out->set_accepted(false);out->set_failure_code(3);out->set_client_nonce("");out->set_protocol_major(1);out->set_protocol_minor(7);
@@ -51,7 +50,9 @@ command_result PreparePause(color_ostream &,const wire::Request *in,wire::Reply 
     if(!auth(in,out))return CR_OK;out->set_failure_code(3);
     if(!Core::getInstance().isWorldLoaded()||!World::isFortressMode()){out->set_failure_code(4);return CR_OK;}
     if(!text_ok(in->idempotency_key(),512)||in->plan_digest().size()!=32||!in->has_paused()||!in->has_expected_game_tick())return CR_OK;
-    const auto now=static_cast<std::uint64_t>(World::ReadCurrentYear())*403200ull+World::ReadCurrentTick();if(now!=in->expected_game_tick()){out->set_failure_code(6);return CR_OK;}
+    const auto year=static_cast<std::int64_t>(World::ReadCurrentYear());const auto tick=World::ReadCurrentTick();
+    if(year<0||year>static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())||tick>=403200){out->set_failure_code(5);return CR_OK;}
+    const auto now=static_cast<std::uint64_t>(year)*403200ull+tick;if(now!=in->expected_game_tick()){out->set_failure_code(6);return CR_OK;}
     auto found=records.find(in->idempotency_key());if(found!=records.end()){
         if(found->second.digest!=in->plan_digest()||found->second.paused!=in->paused()){out->set_failure_code(7);return CR_OK;}
         out->set_prepare_token(found->second.token);if(found->second.requested)fill_record(out,found->second);out->set_accepted(true);out->set_failure_code(0);return CR_OK;
@@ -67,7 +68,9 @@ command_result CommitPause(color_ostream &,const wire::Request *in,wire::Reply *
     auto &r=found->second;if(r.requested){fill_record(out,r);out->set_accepted(true);out->set_failure_code(0);return CR_OK;}
     if(!Core::getInstance().isWorldLoaded()||!World::isFortressMode()){out->set_failure_code(4);return CR_OK;}
     r.requested=true;World::SetPauseState(r.paused);r.applied=World::ReadPauseState()==r.paused;
-    r.tick=static_cast<std::uint64_t>(World::ReadCurrentYear())*403200ull+World::ReadCurrentTick();r.receipt=receipt(in->idempotency_key(),r.digest,r.paused,r.tick);
+    const auto year=static_cast<std::int64_t>(World::ReadCurrentYear());const auto tick=World::ReadCurrentTick();
+    if(year<0||year>static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())||tick>=403200){r.applied=false;r.tick=0;}else{r.tick=static_cast<std::uint64_t>(year)*403200ull+tick;}
+    r.receipt=receipt(in->idempotency_key(),r.digest,r.paused,r.tick);
     fill_record(out,r);out->set_accepted(true);out->set_failure_code(r.applied?0:5);return CR_OK;
 }
 command_result QueryPause(color_ostream &,const wire::Request *in,wire::Reply *out){
