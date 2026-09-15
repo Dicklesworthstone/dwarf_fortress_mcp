@@ -44,7 +44,7 @@ bool auth(const wire::Request *in,wire::Reply *out){
     if(!generation||generation==std::numeric_limits<std::uint64_t>::max()||df.empty()||dfhack.empty())return false;
     out->set_bridge_generation(generation);out->set_df_version(df);out->set_dfhack_version(dfhack);out->set_failure_code(0);return true;
 }
-void fill_record(wire::Reply *out,const Record &r){out->set_effect_known(true);out->set_effect_applied(r.applied);out->set_paused(r.paused);out->set_observed_game_tick(r.tick);out->set_receipt_digest(r.receipt);}
+void fill_record(wire::Reply *out,const Record &r){out->set_effect_known(true);out->set_effect_applied(r.applied);out->set_paused(r.paused);out->set_observed_game_tick(r.tick);if(!r.receipt.empty())out->set_receipt_digest(r.receipt);}
 command_result Handshake(color_ostream &,const wire::Request *in,wire::Reply *out){if(auth(in,out))out->set_accepted(true);return CR_OK;}
 command_result PreparePause(color_ostream &,const wire::Request *in,wire::Reply *out){
     if(!auth(in,out))return CR_OK;out->set_failure_code(3);
@@ -54,8 +54,8 @@ command_result PreparePause(color_ostream &,const wire::Request *in,wire::Reply 
     if(year<0||year>static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())||tick>=403200){out->set_failure_code(5);return CR_OK;}
     const auto now=static_cast<std::uint64_t>(year)*403200ull+tick;if(now!=in->expected_game_tick()){out->set_failure_code(6);return CR_OK;}
     auto found=records.find(in->idempotency_key());if(found!=records.end()){
-        if(found->second.digest!=in->plan_digest()||found->second.paused!=in->paused()){out->set_failure_code(7);return CR_OK;}
-        out->set_prepare_token(found->second.token);if(found->second.requested)fill_record(out,found->second);out->set_accepted(true);out->set_failure_code(0);return CR_OK;
+        if(found->second.digest!=in->plan_digest()||found->second.paused!=in->paused()||found->second.tick!=in->expected_game_tick()){out->set_failure_code(7);return CR_OK;}
+        out->set_prepare_token(found->second.token);fill_record(out,found->second);out->set_accepted(true);out->set_failure_code(0);return CR_OK;
     }
     if(records.size()>=MAX_RECORDS){out->set_failure_code(3);return CR_OK;}
     Record r;r.digest=in->plan_digest();r.paused=in->paused();r.tick=now;r.token=hash_token(in->idempotency_key(),r.digest,now,r.paused);
@@ -65,7 +65,7 @@ command_result CommitPause(color_ostream &,const wire::Request *in,wire::Reply *
     if(!auth(in,out))return CR_OK;out->set_failure_code(3);
     if(!text_ok(in->idempotency_key(),512)||in->plan_digest().size()!=32||in->prepare_token().size()!=16)return CR_OK;
     auto found=records.find(in->idempotency_key());if(found==records.end()||found->second.digest!=in->plan_digest()||found->second.token!=in->prepare_token()){out->set_failure_code(7);return CR_OK;}
-    auto &r=found->second;if(r.requested){fill_record(out,r);out->set_accepted(true);out->set_failure_code(0);return CR_OK;}
+    auto &r=found->second;if(r.requested){fill_record(out,r);out->set_accepted(true);out->set_failure_code(r.applied?0:5);return CR_OK;}
     if(!Core::getInstance().isWorldLoaded()||!World::isFortressMode()){out->set_failure_code(4);return CR_OK;}
     r.requested=true;World::SetPauseState(r.paused);r.applied=World::ReadPauseState()==r.paused;
     const auto year=static_cast<std::int64_t>(World::ReadCurrentYear());const auto tick=World::ReadCurrentTick();
