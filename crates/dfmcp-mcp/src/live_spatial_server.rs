@@ -3,6 +3,7 @@
 #[path="semantic_query.rs"] mod semantic_query;
 #[path="query_response.rs"] mod query_response;
 #[path="spatial_queries.rs"] mod spatial_queries;
+#[path="spatial_history.rs"] mod history;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc,LazyLock,Mutex,MutexGuard};
@@ -45,6 +46,7 @@ impl SpatialSource for SpatialRpcClient<DeadlineStream>{
     fn pages(&self)->u32{self.last_page_count()}
 }
 struct SpatialSession{id:SessionId,source:Box<dyn SpatialSource>,state:LiveSpatialState,limits:SpatialLimits,
+    journal:Option<history::Journal>,
     budget:WorkBudget,grants:Vec<CapabilityGrant>,request:u128,_slot:Slot}
 impl SpatialSession{
     fn anchor(&self)->Result<StateAnchor>{self.state.snapshot().map(|s|s.anchor()).ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial snapshot absent"))}
@@ -57,12 +59,27 @@ impl SpatialSession{
         c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
         if c.anchor!=self.anchor()?{return Err(error(ErrorCode::StaleAnchor,"spatial refresh anchor changed"));}
         if self.source.poisoned(){return Err(error(ErrorCode::AdapterUnavailable,"spatial source fenced; reopen session"));}
+        if let Some(journal)=&self.journal {
+            c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
+            if journal.fenced() || journal.state().snapshot().map(|s|s.anchor())!=Some(c.anchor) {
+                self.source.fence();
+                return Err(error(ErrorCode::CorruptLedger,"spatial journal is fenced or disagrees with the published anchor"));
+            }
+        }
+        let replay=history::replay_context(self,c);
         let result=self.source.read(Duration::from_millis(c.budget.max_wall_millis)).and_then(|v|{
             let op=v.operations();let limits=self.limits.operations;
             if op.jobs.jobs.len()>limits.jobs as usize||op.buildings.len()>limits.buildings as usize||op.items.len()>limits.items as usize
                 ||v.terrain().map.region!=self.limits.region||v.encode_payload()?.len()>limits.payload_bytes{
                 return Err(error(ErrorCode::BudgetExceeded,"spatial observation exceeds session acquisition bounds"));}
-            self.state.publish(v)
+            match self.journal.as_mut() {
+                Some(journal)=>{
+                    let outcome=journal.append(v,&replay)?;
+                    self.state=journal.state().clone();
+                    Ok(outcome)
+                }
+                None=>self.state.publish(v),
+            }
         });if result.is_err(){self.source.fence();}result
     }
 }
@@ -77,7 +94,7 @@ fn resolve(raw:Option<String>)->Result<Arc<Mutex<SpatialSession>>>{
         return Err(error(ErrorCode::InvalidRequest,"not an encoded spatial session"));}
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(||error(ErrorCode::SessionNotFound,"spatial session not found"))
 }
-fn allowed_environment(n:&str)->bool{!n.starts_with("DFMCP_")||matches!(n,"DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_6"|"DFMCP_SPATIAL_TOKEN"|"DFMCP_SPATIAL_ENDPOINT")}
+fn allowed_environment(n:&str)->bool{!n.starts_with("DFMCP_")||matches!(n,"DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_6"|"DFMCP_SPATIAL_TOKEN"|"DFMCP_SPATIAL_ENDPOINT"|"DFMCP_SPATIAL_JOURNAL"|"DFMCP_SPATIAL_JOURNAL_REPAIR")}
 fn validate_environment()->Result<()>{
     if std::env::var("DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_6").ok().as_deref()!=Some("1")
         ||std::env::vars_os().any(|(n,_)|!allowed_environment(&n.to_string_lossy()))||crate::admission::current_admission_provenance().is_some(){
@@ -91,12 +108,13 @@ fn briefing(s:&SpatialSession)->Value{
         "runtime_admitted":false,"mutation_admissible":false,"read_only":true,"source_poisoned":s.source.poisoned(),
         "job_count":v.map(|v|v.operations().jobs.jobs.len()),"building_count":v.map(|v|v.operations().buildings.len()),
         "item_count":v.map(|v|v.operations().items.len()),"region":{"origin":s.limits.region.origin,"size":s.limits.region.size},
+        "observation_history":history::summary(s.journal.as_ref()),
         "capture_tick":v.map(|v|v.terrain().tick().0),"last_transfer_pages":s.source.pages(),
         "freshness":"capture time, not transfer completion; simulation can advance during page transfer"})
 }
 fn coverage()->Value{json!({"status":"partial","complete_domains":["current_job_roster","building_roster","item_roster","job_item_attachments","requested_region.cell_presence"],
     "partial_domains":[{"domain":"fortress.spatial","reason":"one coherent capture; hidden terrain redacted, unallocated terrain unknown, route model deliberately restricted"}],
-    "omitted_domains":["outside_region_terrain","unit_navigation_rules","citizens","native_material_requirements","history"],"continuation":null})}
+    "omitted_domains":["outside_region_terrain","unit_navigation_rules","citizens","native_material_requirements","continuous_game_history"],"continuation":null})}
 fn packet(s:Option<&SpatialSession>,c:Option<&OperationContext>,operation:&str,mut v:Value)->Result<String>{
     let mut work=empty_active_work();if let Some(w)=v.as_object_mut().and_then(|m|m.remove("_condition_watch_work")){work["obligations"]=w;}
     let mut builder=AgentTurnBuilder::new(operation,AgentPhase::Inspect).active_work(work);let mut maximum=8192;
@@ -146,6 +164,10 @@ fn capabilities(input:Option<Vec<String>>)->Result<Vec<Capability>>{
 pub fn fortress_open_session(region:Value,max_items:Option<u32>,max_capture_bytes:Option<u64>,page_bytes:Option<u32>,
     max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>)->String{
     let result=(||->Result<String>{validate_environment()?;let region=parse_region(&region)?;let caps=capabilities(requested_capabilities)?;
+        let journal_configuration=history::configuration()?;
+        if journal_configuration.is_some() && (!caps.contains(&Capability::Query)||!caps.contains(&Capability::Observe)) {
+            return Err(error(ErrorCode::CapabilityDenied,"durable spatial sessions require Query and Observe authority"));
+        }
         let capture=usize::try_from(max_capture_bytes.unwrap_or(MAX_SPATIAL_BYTES as u64)).map_err(|_|error(ErrorCode::BudgetExceeded,"capture size overflow"))?;
         let limits=SpatialLimits{operations:PagedOperationsLimits{items:max_items.unwrap_or(65536),payload_bytes:capture,
             page_bytes:page_bytes.unwrap_or(65536) as usize,..PagedOperationsLimits::default()},region};limits.validate()?;
@@ -161,7 +183,11 @@ pub fn fortress_open_session(region:Value,max_items:Option<u32>,max_capture_byte
         let fortress=state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial bootstrap snapshot absent"))?.fortress_id;
         let grants=caps.iter().map(|c|CapabilityGrant{capability:*c,scope:CapabilityScope{fortress_id:Some(fortress),..CapabilityScope::default()},
             max_risk:RiskTier::ReadOnly,expires_at_tick:None,remaining_uses:None}).collect();
-        let mut s=SpatialSession{id,source:Box::new(source),state,limits,budget,grants,request:0,_slot:slot};let c=s.context()?;
+        let mut s=SpatialSession{id,source:Box::new(source),state,limits,journal:None,budget,grants,request:0,_slot:slot};let mut c=s.context()?;
+        if let Some((path,recovery))=journal_configuration {
+            history::attach(&mut s,&path,recovery,&c)?;
+            c.anchor=s.anchor()?;
+        }
         let out=packet(Some(&s),Some(&c),"fortress.open_session",json!({"ok":true,"granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
             "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}}))?;
         let mut registry=lock(&SESSIONS)?;if registry.contains_key(&id){return Err(error(ErrorCode::InternalInvariantViolation,"spatial session ID collision"));}
@@ -192,19 +218,25 @@ fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{
     v["agent_turn"]["turn_id"]=json!(format!("spatial-turn-{}",view.request_id));let out=v.to_string();
     if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial query response exceeds budget"));}Ok(out)
 }
-#[tool(description="Query one coherent operations/terrain capture. Modes: summary, jobs, buildings, items, tiles, schema. Structured map_route and spatial_inventory_plan use the same capture; ordinary filters, aggregates, baselines and watches are also available.")]
+#[tool(description="Query one coherent operations/terrain capture. Modes: summary, jobs, buildings, items, tiles, history, schema. Historical_query replays an exact durable record without modifying live state. Structured map_route and spatial_inventory_plan use the same capture; ordinary filters, aggregates, baselines and watches are also available.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{
     with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
         if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}
         let schema=mode.as_deref()==Some("schema");
         let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
             None|Some("summary"|"schema")=>json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}}),
+            Some("history")=>json!({"schema":"dfmcp.query/1","query":{"kind":"history"}}),
             Some("items")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["item"],"fields":["type_key","stack_size","container","raw_position"],"limit":1}}),
             Some("jobs")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["job"],"fields":["type_key","suspended"],"limit":1}}),
             Some("buildings")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["building"],"fields":["type_key","build_stage"],"limit":1}}),
             Some("tiles")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["tile_feature"],"fields":["position","visibility","shape"],"limit":1}}),
             _=>return Err(error(ErrorCode::InvalidRequest,"unknown spatial query mode")),}};
         let kind=input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str).unwrap_or("");
+        if !schema && history::handles(&input) {
+            let result=history::execute(s,&c,&input);
+            if matches!(&result,Err(e) if e.code==ErrorCode::CorruptLedger) {s.source.fence();}
+            return result;
+        }
         let local=matches!(kind,"watches"|"cancel_watch"|"release_watch"|"baselines"|"release_baseline");
         if s.source.poisoned()&&!local&&!schema{return Err(error(ErrorCode::AdapterUnavailable,"spatial source fenced; reopen or manage local records"));}
         let mut refresh=None;
@@ -219,7 +251,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
             if let Some(obj)=input.as_object_mut(){obj.remove("expected_anchor");}input["query"]["kind"]=json!("poll_watch");
         }
         let view=view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
-        if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":spatial_queries::schema()?,"mode":"schema",
+        if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":history::schema()?,"mode":"schema",
             "profile":"spatial/1.6","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
         if spatial_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=spatial_queries::execute(&s.state,&rc,&input)?;
             return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
@@ -234,7 +266,7 @@ pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_
     semantic_query::publish_with_active_work(&c,json!({"ok":true,"coherence":"one native capture of operations plus requested terrain",
         "allocation":"declared interchangeable stack units whose outermost ground container has a candidate route from the requested origin",
         "unknown":["full unit navigation","native job requirement satisfaction","outside-region routes","safety","citizen state"],
-        "history":"no durable spatial archive or cross-profile journal import"}),|v|packet(Some(s),Some(&c),"fortress.explain",v)))}
+        "history":"optional fixed-profile archive; history lists captures and historical_query reads an exact past record; no cross-profile import"}),|v|packet(Some(s),Some(&c),"fortress.explain",v)))}
 #[tool(description="Report source health; does not reconnect or imply native qualification.")]
 pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_id,"fortress.doctor",Capability::Doctor,|s,c|
     packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else{"read_only_unadmitted"}})))}
@@ -255,7 +287,7 @@ pub fn run_stdio(){
     let server=ServerBuilder::new("dfmcp-live-spatial-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .request_timeout(60).instructions("Unadmitted read-only spatial/1.6. Open a fixed-region session first. Operations and terrain share one immutable native capture. Use schema for typed queries; spatial_inventory_plan allocates declared units within the observed route model, not native feasibility. map_route provides candidate paths only. Baselines and foreground watches use the same combined anchor. Capture time is not transfer completion. No citizens, durable spatial archive, movement, reservations or live game effects.").build();
+        .request_timeout(60).instructions("Unadmitted read-only spatial/1.6. Open a fixed-region session first. Operations and terrain share one immutable native capture. Use schema for typed queries; spatial_inventory_plan allocates declared units within the observed route model, not native feasibility. map_route provides candidate paths only. Baselines and foreground watches use the same combined anchor. Capture time is not transfer completion. With an operator-configured spatial journal, history and historical_query inspect committed captures without changing current watches. No citizens, movement, reservations or live game effects.").build();
     crate::run_modern_stdio(server);
 }
 #[cfg(test)]

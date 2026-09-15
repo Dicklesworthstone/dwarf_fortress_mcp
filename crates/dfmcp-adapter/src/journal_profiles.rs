@@ -91,3 +91,7 @@ impl JournalProfile for Spatial16 {
         Operations14::entity_count(value.operations()).saturating_add(value.terrain().map.cells.len())
     }
 }
+
+#[cfg(test)]
+#[path = "journal_profile_tests.rs"]
+mod tests;

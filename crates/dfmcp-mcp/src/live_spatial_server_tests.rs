@@ -31,7 +31,7 @@ fn register(tokens:u32,caps:Vec<Capability>)->Result<Registered>{
     let anchor=state.snapshot().ok_or_else(||error(ErrorCode::InvalidRequest,"fixture snapshot"))?.anchor();
     let calls=Arc::new(AtomicUsize::new(0));let limits=SpatialLimits{operations:PagedOperationsLimits::default(),region};
     let session=SpatialSession{id,source:Box::new(Script{values:VecDeque::from([next]),calls:Arc::clone(&calls),fenced:false}),
-        state,limits,budget:WorkBudget{max_entities:limits.entity_limit(),max_bytes:1024*1024,max_output_tokens:tokens,..WorkBudget::default()},
+        state,journal:None,limits,budget:WorkBudget{max_entities:limits.entity_limit(),max_bytes:1024*1024,max_output_tokens:tokens,..WorkBudget::default()},
         grants:caps.into_iter().map(|capability|CapabilityGrant{capability,scope:CapabilityScope{fortress_id:Some(anchor.fortress_id),..CapabilityScope::default()},
             max_risk:RiskTier::ReadOnly,expires_at_tick:None,remaining_uses:None}).collect(),request:0,_slot:slot};
     lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(session)));Ok(Registered{id,calls})
@@ -58,7 +58,7 @@ fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill()->Result<(
     assert_eq!(route["ok"],true);assert_eq!(route["model_steps"],3);assert_eq!(route["anchor"],p["anchor"]);
     assert_eq!(route["source_digest"],p["source_digest"]);assert_eq!(route["unit_path_proven"],false);
     let schema=decode(&fortress_query(s.handle(),Some("schema".to_owned()),None))?;assert_eq!(schema["ok"],true);
-    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(18));
+    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(20));
     assert_eq!(s.calls.load(Ordering::SeqCst),0);Ok(())
 }
 #[test]
@@ -139,3 +139,7 @@ fn authority_region_and_profile_rejections_do_not_touch_the_bridge()->Result<()>
         json!({"kind":"spatial_inventory_plan","origin":[0,0,5],"quantity_unit":"mass","demands":[]})]{assert_eq!(ask(&s,q)?["ok"],false);}
     assert_eq!(decode(&fortress_commit(s.handle()))?["error"]["code"],"capability_denied");assert_eq!(s.calls.load(Ordering::SeqCst),0);Ok(())
 }
+
+#[cfg(unix)]
+#[path="spatial_history_tests.rs"]
+mod history_cases;
