@@ -1,0 +1,30 @@
+syntax = "proto2";
+package dfmcp.control.v1_7;
+message Request {
+  required bytes bearer_token = 1;
+  required bytes client_nonce = 2;
+  required uint32 protocol_major = 3;
+  required uint32 protocol_minor = 4;
+  optional string idempotency_key = 5;
+  optional bytes plan_digest = 6;
+  optional bytes prepare_token = 7;
+  optional bool paused = 8;
+  optional uint64 expected_game_tick = 9;
+  optional bool query_only = 10 [default=false];
+}
+message Reply {
+  required bool accepted = 1;
+  required uint32 failure_code = 2;
+  required bytes client_nonce = 3;
+  required uint32 protocol_major = 4;
+  required uint32 protocol_minor = 5;
+  required uint64 bridge_generation = 6;
+  required string df_version = 7;
+  required string dfhack_version = 8;
+  optional bytes prepare_token = 9;
+  optional bool effect_known = 10;
+  optional bool effect_applied = 11;
+  optional bool paused = 12;
+  optional uint64 observed_game_tick = 13;
+  optional bytes receipt_digest = 14;
+}
