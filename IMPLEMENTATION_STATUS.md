@@ -16,7 +16,8 @@ The repository contains:
 - exact compatibility, anti-rollback, artifact, and process-admission machinery;
 - an implemented protocol-1.1 retained-announcement extension;
 - separate unadmitted jobs-only 1.2, operations/1.3, paged operations/1.4, map/1.5 and spatial/1.6 development profiles;
-- a new pause-control/1.7 bridge/client/development MCP runtime supporting prepare, commit and reconcile for `Pause { paused }` only;
+- a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, and reconcile for `Pause { paused }` only;
+- a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
@@ -73,7 +74,7 @@ DFHack or repository qualification is claimed. JSON Schema meta-validation and
 not run. Sixteen independent JSON-size checks passed for archived route wrappers.
 Those checks are not execution of the Rust implementation.
 
-### Pause-control/1.7 development effect boundary
+### Pause-control/1.7 durable development effect boundary
 
 `docs/LIVE_CONTROL.md` describes the first bridge-backed live mutation source. The implementation is
 strictly scoped to simulation pause/resume and remains unadmitted development functionality.
@@ -81,29 +82,52 @@ strictly scoped to simulation pause/resume and remains unadmitted development fu
 - The native bridge exposes only `Handshake`, `PreparePause`, `CommitPause`, and `QueryPause` under
   fixed protocol 1.7 identities. It does not expose a generic command, Lua, keyboard, path, address,
   method selector, or any other action family.
-- Prepare binds one idempotency key, 32-byte sealed plan digest, desired pause state, and expected
-  game tick. It performs no game mutation and returns a prepare token.
-- Commit requires the same key/digest/token. The bridge records the attempt before calling
-  `World::SetPauseState`, observes the resulting pause state, and retains a stable receipt. Replays
-  of a known effect return the retained result instead of applying it twice.
-- Query/reconcile reports whether the bridge knows the key, whether the pause effect was applied,
-  the observed pause state/tick, prepare token and retained receipt digest. A lost commit reply is
-  treated as `EffectIndeterminate`; callers are directed to reconcile before retry.
-- World load/unload advances bridge generation and clears retained effect records, preventing
-  idempotency state from crossing a world boundary.
+- Prepare binds one idempotency key, 32-byte sealed plan digest, desired pause state, expected game
+  tick, and bridge generation. It performs no game mutation. The 16-byte prepare token is derived
+  from a fixed SHA-256 domain and that complete identity.
+- A private durable coordinator journal is mandatory. It uses an exclusive locked exact-mode `0600`
+  file under a canonical exact-mode `0700` directory, a hash-chained transition sequence, bounded
+  retention, file sync, and explicit incomplete-tail repair. Complete corrupt records and broken
+  predecessor chains are rejected.
+- The coordinator syncs `Prepared` after nonmutating bridge prepare. Before any `CommitPause` RPC it
+  appends and syncs `CommitStarted`. If this durability boundary fails, no game mutation is called.
+  The runtime never retries a mutating commit automatically.
+- After one commit dispatch, the bridge observes pause state and returns a generation-bound full
+  32-byte SHA-256 receipt. The coordinator must sync `VerifiedApplied` or `VerifiedNotApplied`
+  before acknowledging a terminal result. Failure to establish terminal durability is reported as
+  `EffectIndeterminate`, even if a bridge reply was received.
+- Rust-process restart replays the exact durable transition chain. `CommitStarted` and
+  `Indeterminate` remain reconciliation-required. Read-only reconciliation may reconnect to the
+  bridge, but commit is not redispatched as recovery work.
+- If the bridge incarnation still knows the effect, reconciliation records its retained result. If
+  bridge generation changed or the key is unknown, the durable state remains indeterminate and the
+  same effect is never reported safe to retry; a new observation and new plan/idempotency key are
+  required. A merely `Prepared` effect may commit once only while its bridge generation still agrees.
+- World load/unload advances bridge generation and clears native retained records, preventing native
+  idempotency state from crossing a world boundary. The generation is also bound into tokens and
+  receipts.
 - The safe-Rust client binds only the four fixed methods and profile identity. The development MCP
-  runtime grants only `ControlClock` at reversible risk, preserves the eleven top-level tool names,
-  and refuses every non-pause mutation surface.
-- `dfmcp-live-control-dev-server` requires `DFMCP_ALLOW_UNADMITTED_CONTROL_V1_7=1`, its own token and
-  loopback endpoint, rejects unrelated `DFMCP_*` state, and refuses production admission provenance.
-- No registry entry, deployment floor, server qualification, production runner, or admitted live
-  mutation capability exists for protocol 1.7.
+  runtime retains one isolated mutation session family, grants only `ControlClock` at reversible
+  risk, preserves the eleven top-level tool names, and refuses every non-pause mutation surface.
+- Agent Turn metadata explicitly keeps `runtime_admitted=false` and `mutation_admissible=false`; the
+  unadmitted development effect switch is represented separately. Protocol 1.7 remains absent from
+  the production runner map and the compatibility registry remains empty.
 
-This editing session did **not** compile the Rust client/runtime or build the plugin against real
-DFHack/protobuf generated sources, and did not execute a disposable-fort control campaign. The
-slice is source-present only. The bridge uses a bounded process-local retained effect map; durable
-effect-journal crash recovery is still unfinished. No claim is made that a host crash after effect
-dispatch can be fully reconciled across process restart.
+The actual native source was compile-checked in the editing environment against explicit mock
+DFHack/protobuf interfaces with both GCC and Clang under C++17 and warning-denied flags. A local
+state-machine mirror exercised prepare replay, one-shot commit, duplicate suppression, query
+reconciliation, generation reset, and fixed method registration. Independent Python `hashlib`
+calculations matched the generation-bound token and receipt identities after an embedded-NUL domain
+separator bug was corrected. `scripts/test_live_control_native_mock.py` is checked in as the
+reproducible mock-native harness.
+
+These checks are not native qualification. The Rust durable journal/client/MCP runtime have not been
+compiled or executed because no Rust toolchain was available. No real generated DFHack/protobuf
+build, filesystem power-loss campaign, disposable-fort control campaign, registry promotion,
+deployment-floor advancement, server-artifact qualification, production runner, or admitted live
+mutation capability is established. The source now contains restart-safe coordination semantics;
+those semantics still require exact Rust/native/live qualification before broader effects or
+production admission are considered.
 
 ### Coherent spatial/1.6 capture and route-aware inventory allocation
 
@@ -173,13 +197,13 @@ Consequences:
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis | durable handoff, complete counterfactual/VOI models |
+| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis | durable handoff, complete counterfactual/VOI models, durable control-effect listing without a known key |
 | Protocol 1.0 | authenticated citizen read stack and production-runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
 | Jobs/operations/map/spatial | coherent bounded development reads through spatial/1.6 | Rust qualification, real DFHack campaigns, production admission |
-| Control/1.7 | pause prepare/commit/reconcile source and isolated development runtime | Rust/native/live qualification, durable effect recovery, admission, any other live effect family |
+| Control/1.7 | pause prepare/commit/reconcile source, mandatory private durable coordinator journal, generation-bound tokens/receipts, isolated development runtime | Rust qualification, real DFHack build, crash/disposable-fort campaigns, production admission, any other live effect family |
 | World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial observation replay | admitted production durable backend and complete fortress coverage |
-| Intent/effects | sealed plans, in-memory dispatcher laboratory, pause-control live source | production two-phase effect journal, leases/checkpoints, dig/build/labor/etc. live effects |
+| Intent/effects | sealed plans, in-memory dispatcher laboratory, bridge-backed pause effect with durable pre-dispatch/terminal coordinator states | qualified/admitted effect journal, leases/checkpoints tied to live commits, dig/build/labor/etc. live effects |
 | Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
 
 ## Explicitly absent
@@ -189,19 +213,21 @@ Consequences:
 - no admitted live mutation capability;
 - no live dig, construction, labor, burrow, stockpile, work-order, military, checkpoint, Lua,
   arbitrary command, keyboard, filesystem, or network effect;
-- no durable production effect journal proving restart-safe reconciliation of dispatched effects;
+- no Rust-qualified/native-qualified/live-qualified control effect journal or power-loss evidence;
 - no proof that the current head passed every Rust qualification gate;
 - no signed cross-platform release provenance.
 
 ## Next executable milestones
 
-1. Run full Rust verification/qualification for the exact current clean head.
-2. Build control/1.7 against a named real DFHack/protobuf generation and exercise prepare/commit/query
-   in disposable forts, including lost-response and world-reset campaigns.
-3. Replace process-local control receipts with the durable two-phase effect-journal/recovery boundary
-   before considering any production admission.
-4. Only after that boundary is qualified, add the next narrowly versioned mutation family; do not
-   jump directly to broad generic effects.
+1. Run full Rust verification/qualification for the exact current clean head, including the durable
+   pause-effect journal, control client, development runtime, and all registered recovery tests.
+2. Build control/1.7 against a named real DFHack/protobuf generation and run the native mock plus
+   disposable-fort prepare/commit/query campaigns for the exact plugin bytes.
+3. Execute host/bridge failure campaigns at every durability boundary: before `CommitStarted` sync,
+   after sync/before dispatch, after dispatch/before reply, after reply/before terminal sync, Rust
+   restart with live bridge, DFHack restart, world load/unload, and incomplete/corrupt journal tails.
+4. Only after those exact semantics are qualified should the first control/1.7 admission proposal or
+   another narrowly versioned mutation family be considered. Do not jump directly to broad generic effects.
 5. Independently continue the established protocol-1.0 admission chain and keep the production map
    unchanged until exact evidence supports widening it.
 
