@@ -3,6 +3,9 @@
 //! One native spatial/1.6 frame, not a join of independently fetched snapshots.
 //! Embedded 1.4 operations and 1.5 terrain are codecs, not source authorities.
 
+#[path = "live_spatial_citizens.rs"]
+pub mod citizens;
+
 use std::collections::BTreeMap;
 use dfmcp_core::{DfmcpError, Digest32, EntityId, ErrorCode, ObservationCursor, Result};
 use dfmcp_world::{Fact, FactSource, Value, WorldSnapshot};
