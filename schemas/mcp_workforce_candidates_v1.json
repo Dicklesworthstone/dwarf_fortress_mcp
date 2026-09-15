@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "target", "skill_key"],
+  "properties": {
+    "kind": {"const": "workforce_candidates"},
+    "target": {
+      "type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 32767},
+      "minItems": 3, "maxItems": 3
+    },
+    "skill_key": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\u0000]+$"},
+    "min_effective_skill": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
+    "preserve_social": {"type": ["boolean", "null"]},
+    "adults_only": {"type": ["boolean", "null"]},
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+    "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000000},
+    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^wc1:[1-9][0-9]*:[0-9a-f]{64}$"}
+  }
+}
