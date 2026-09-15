@@ -19,7 +19,9 @@ inline std::uint32_t capture(const Bounds &bounds,std::string &out){
     if(!bounds.valid())return 3;
     std::string base,units;
     auto status=spatial::capture(bounds.spatial_bounds,base);if(status)return status;
-    status=citizens::capture(bounds.max_citizens,bounds.spatial_bounds.bytes,units);if(status)return status;
+    if(base.size()+16>=bounds.spatial_bounds.bytes)return 3;
+    const auto remaining=bounds.spatial_bounds.bytes-base.size()-16;
+    status=citizens::capture(bounds.max_citizens,remaining,units);if(status)return status;
     const auto total=base.size()+units.size()+16;
     if(total>bounds.spatial_bounds.bytes)return 3;
     out.assign("DFMS1800",8);
