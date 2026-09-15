@@ -22,7 +22,7 @@ use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Value, json};
 
-const FAMILY:u128=1u128<<58;
+const FAMILY:u128=1u128<<57;
 static NEXT:Mutex<u128>=Mutex::new(1);
 static SLOTS:AtomicUsize=AtomicUsize::new(0);
 static SESSIONS:LazyLock<Mutex<BTreeMap<SessionId,Arc<Mutex<ControlSession>>>>>=LazyLock::new(||Mutex::new(BTreeMap::new()));
@@ -74,7 +74,7 @@ fn next_id()->Result<SessionId>{let mut n=lock(&NEXT)?;if *n>=FAMILY{return Err(
 fn resolve(raw:Option<String>)->Result<Arc<Mutex<ControlSession>>>{let raw=raw.ok_or_else(||err(ErrorCode::InvalidRequest,"open control session first"))?;
     if raw.len()!=32||!raw.bytes().all(|b|b.is_ascii_hexdigit()){return Err(err(ErrorCode::InvalidRequest,"invalid control session"));}
     let value=u128::from_str_radix(&raw,16).map_err(|_|err(ErrorCode::InvalidRequest,"invalid control session"))?;let id=SessionId::new(value);
-    if id.get()!=value||!id.is_process_scoped_live()||(value&((1u128<<62)-1))>>58!=1{return Err(err(ErrorCode::InvalidRequest,"not a control session"));}
+    if id.get()!=value||!id.is_process_scoped_live()||(value&((1u128<<62)-1))>>57!=1{return Err(err(ErrorCode::InvalidRequest,"not a control session"));}
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(||err(ErrorCode::SessionNotFound,"control session not found"))}
 fn validate_environment()->Result<()>{
     let allowed=["DFMCP_ALLOW_UNADMITTED_CONTROL_V1_7","DFMCP_CONTROL_TOKEN","DFMCP_CONTROL_ENDPOINT",
