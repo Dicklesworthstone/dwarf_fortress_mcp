@@ -60,8 +60,11 @@ inline std::uint32_t capture(std::uint32_t maximum,std::size_t maximum_bytes,std
         const auto race=bounded_utf8(Units::getRaceReadableName(unit),128);
         if(!base::utf8(name,256,true)||!base::utf8(race,128,true))return 5;
         const auto profession=static_cast<std::int32_t>(Units::getProfession(unit));
-        if(profession<0)return 5;
+        const auto stress=Units::getStressCategory(unit);
+        if(profession<0||stress<0||stress>6)return 5;
         const auto position=Units::getPosition(unit);
+        const bool available_preserve_social=Units::isJobAvailable(unit,true);
+        const bool available_interrupt_social=Units::isJobAvailable(unit,false);
         std::uint16_t flags=0;unsigned bit=0;
         for(bool value:{Units::isAlive(unit),Units::isSane(unit),Units::isActive(unit),Units::isVisible(unit),true,false,
             Units::isBaby(unit),Units::isChild(unit),Units::isAdult(unit)}){if(value)flags|=static_cast<std::uint16_t>(1u<<bit);++bit;}
@@ -74,7 +77,8 @@ inline std::uint32_t capture(std::uint32_t maximum,std::size_t maximum_bytes,std
             skills.push_back({raw,nominal,effective,experience,key});++skill_total;
         }
         base::u32(out,static_cast<std::uint32_t>(unit->id));base::text(out,name);base::text(out,race);base::i32(out,profession);
-        base::i32(out,position.x);base::i32(out,position.y);base::i32(out,position.z);base::u16(out,flags);base::u16(out,static_cast<std::uint16_t>(skills.size()));
+        base::i32(out,position.x);base::i32(out,position.y);base::i32(out,position.z);base::u16(out,flags);base::i32(out,stress);
+        out.push_back(available_preserve_social?1:0);out.push_back(available_interrupt_social?1:0);base::u16(out,static_cast<std::uint16_t>(skills.size()));
         for(const auto &skill:skills){base::i32(out,skill.id);base::text(out,skill.key);base::i32(out,skill.nominal);base::i32(out,skill.effective);base::i32(out,skill.experience);}
         if(out.size()>maximum_bytes)return 3;previous=unit->id;
     }
