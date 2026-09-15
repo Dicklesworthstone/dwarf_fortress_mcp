@@ -17,7 +17,8 @@ use dfmcp_adapter::control_effect_journal::{ControlEffectJournal, DurablePauseRe
 use dfmcp_adapter::live_control_rpc::{ControlRpcClient, PauseEffect};
 use dfmcp_adapter::live_jobs_rpc::DeadlineStream;
 use dfmcp_core::{Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, ErrorCode,
-    OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget};
+    FortressId, GameTick, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
+    SessionId, StateAnchor, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Value, json};
@@ -28,6 +29,8 @@ static SLOTS:AtomicUsize=AtomicUsize::new(0);
 static SESSIONS:LazyLock<Mutex<BTreeMap<SessionId,Arc<Mutex<ControlSession>>>>>=LazyLock::new(||Mutex::new(BTreeMap::new()));
 fn err(code:ErrorCode,text:&str)->DfmcpError{DfmcpError::new(code,text)}
 fn lock<T>(m:&Mutex<T>)->Result<MutexGuard<'_,T>>{m.lock().map_err(|_|err(ErrorCode::InternalInvariantViolation,"control mutex poisoned"))}
+fn coordinator_anchor()->StateAnchor{StateAnchor{fortress_id:FortressId::NIL,cursor:ObservationCursor::ORIGIN,
+    tick:GameTick(0),state_hash:Digest32::ZERO}}
 
 type Journal=ControlEffectJournal<PrivateControlJournalFile>;
 struct Slot;
@@ -53,7 +56,7 @@ struct ControlSession{
 impl ControlSession{
     fn context(&mut self)->Result<OperationContext>{
         self.request=self.request.checked_add(1).ok_or_else(||err(ErrorCode::BudgetExceeded,"control request IDs exhausted"))?;
-        Ok(OperationContext{session_id:self.id,request_id:RequestId::new(self.request),anchor:StateAnchor::default(),budget:self.budget,
+        Ok(OperationContext{session_id:self.id,request_id:RequestId::new(self.request),anchor:coordinator_anchor(),budget:self.budget,
             grants:self.grants.clone(),cancellation_requested:false})
     }
     fn reconnect(&mut self)->Result<()> {
@@ -149,7 +152,7 @@ pub fn fortress_open_session(max_wall_millis:Option<u64>)->String{
         let client=ControlRpcClient::connect(endpoint,token.clone(),nonce.clone(),timeout)?;
         let grants=vec![CapabilityGrant{capability:Capability::ControlClock,scope:CapabilityScope::default(),max_risk:RiskTier::Reversible,expires_at_tick:None,remaining_uses:None}];
         let budget=WorkBudget{max_wall_millis:millis,max_actions:1,..WorkBudget::CONSERVATIVE_DEFAULT};budget.validate()?;
-        let context=OperationContext{session_id:id,request_id:RequestId::new(1),anchor:StateAnchor::default(),budget,grants:grants.clone(),cancellation_requested:false};
+        let context=OperationContext{session_id:id,request_id:RequestId::new(1),anchor:coordinator_anchor(),budget,grants:grants.clone(),cancellation_requested:false};
         let journal=open_private_control_journal(&journal_path,&context,client.bridge_generation(),recovery)?;
         let summary=journal_json(&journal);
         let session=ControlSession{id,client,endpoint,token,nonce,timeout,journal,request:1,budget,grants,_slot:slot};
