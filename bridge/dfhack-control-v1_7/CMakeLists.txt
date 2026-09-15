@@ -1,0 +1,2 @@
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+dfhack_plugin(dfmcp_control_v1_7 dfmcp_control_v1_7.cpp PROTOBUFS DfmcpControlV1_7)
