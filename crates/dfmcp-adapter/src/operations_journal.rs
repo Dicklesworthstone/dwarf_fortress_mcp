@@ -13,7 +13,7 @@ use crate::live_jobs::JobPublication;
 
 #[path = "journal_profiles.rs"]
 mod profiles;
-pub use profiles::{JournalProfile, Operations13, Operations14, Spatial16};
+pub use profiles::{JournalProfile, Operations13, Operations14, Spatial16, Spatial18};
 #[path = "operations_journal_file.rs"]
 mod file_storage;
 pub use file_storage::{PrivateJournalFile, open_private_journal, open_profile_journal};
@@ -21,6 +21,7 @@ pub use file_storage::{PrivateJournalFile, open_private_journal, open_profile_jo
 pub type OperationsJournal<S> = ObservationJournal<S, Operations13>;
 pub type PagedOperationsJournal<S> = ObservationJournal<S, Operations14>;
 pub type SpatialJournal<S> = ObservationJournal<S, Spatial16>;
+pub type SpatialCitizenJournal<S> = ObservationJournal<S, Spatial18>;
 
 const FOOTER: &[u8; 8] = b"DFMOEND1";
 const RECORD: &[u8; 8] = b"DFMOREC1";
