@@ -1,6 +1,9 @@
 //! Closed map/1.5 client, nested below operations solely to reuse bounded native
 //! framing and the absolute-deadline stream. No caller-selected methods exist.
 
+#[path = "live_spatial_rpc.rs"]
+pub mod spatial;
+
 use super::super::{Message,JobsManifest,DeadlineStream,bytes,number,call,checked_timeout,io_failure};
 use std::io::{Read,Write};
 use std::net::{SocketAddr,TcpStream};
