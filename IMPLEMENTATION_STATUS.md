@@ -6,8 +6,8 @@ actually establish.
 
 ## Current phase
 
-**Phase 0D-R0 with implemented but unadmitted announcement, jobs-only, coherent operations,
-immutable-paged operations and bounded map development read slices. No live tuple is currently admitted.**
+**Phase 0D-R0 with implemented but unadmitted read profiles through spatial/1.6 and an explicitly
+unadmitted pause-control/1.7 development slice. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -15,652 +15,109 @@ The repository contains:
 - canonical live citizen observations and an agent-oriented MCP server;
 - exact compatibility, anti-rollback, artifact, and process-admission machinery;
 - an implemented protocol-1.1 retained-announcement extension;
-- an explicitly unadmitted protocol-1.1 development MCP runtime;
-- a separate jobs-only protocol-1.2 native plugin, Rust client, projection, and development MCP binary;
-- an operations/1.3 native producer, client, coherent jobs/buildings/items graph, and development MCP binary;
-- an operations/1.4 immutable native snapshot cache, bounded page client, fixed-profile projection, and development entry using the shared handlers;
-- a map/1.5 bounded terrain producer, closed client, canonical tile facts, candidate route query and development binary;
-- a spatial/1.6 single-capture operations/terrain producer, paged client, combined projector, route-aware inventory analysis and development binary;
-- a protocol-bound V2 production ticket and runtime dispatcher whose map currently contains only
-  protocol 1.0.
+- separate unadmitted jobs-only 1.2, operations/1.3, paged operations/1.4, map/1.5 and spatial/1.6 development profiles;
+- a new pause-control/1.7 bridge/client/development MCP runtime supporting prepare, commit and reconcile for `Pause { paused }` only;
+- a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
-The checked-in compatibility registry nevertheless has status `no_admitted_live_tuples` and zero
-entries. Therefore:
-
-```text
-implementation source exists
-≠ the current source has a fresh full qualification receipt
-≠ the current native plugin passed a named R1 build
-≠ the tuple passed its complete live campaign
-≠ the tuple is present in the checked-in registry
-≠ a deployment floor accepted that registry generation
-≠ a server binary is qualified for that source generation
-≠ a live process is authorized to start
-```
-
-No live mutation RPC or mutation capability is implemented or admitted.
-
-The Asupersync 0.5.0 consumer migration (`dfmcp-k2y`) advances the exact FastMCP
-pin to `180a7c88890705217bb8e202d19555adabf24187` and gives all four stdio
-composition roots explicit runtime ownership. Its scoped Rust and subprocess
-validation is in progress. It does not create a fresh full qualification receipt
-or admit a live tuple; historical conformance findings remain recorded in
-`docs/DOGFOODING_FASTMCP.md`.
+The checked-in compatibility registry remains empty. Source presence does not imply qualification,
+admission, or support. No protocol beyond 1.0 appears in the production runner map.
 
 ## Evidence hierarchy
 
-Implementation claims must identify their evidence rung:
-
 1. **source present** — code, contracts, and tests are checked in;
-2. **static/Python checked** — repository and Python contract gates passed for one exact commit;
-3. **Rust-qualified** — latest-nightly formatting, warning-denied Clippy, debug/release tests, and
-   warning-denied rustdoc passed for one exact clean commit;
-4. **native-qualified** — one exact DFHack plugin built and passed R1 for named DFHack source and
-   plugin bytes;
-5. **live-qualified** — the required disposable-fort campaign passed for the same exact tuple;
-6. **registry-admitted** — reviewed receipts were promoted into the checked-in registry;
-7. **floor-accepted** — a deployment host advanced its owner-only monotonic floor to those exact
-   registry bytes;
-8. **artifact-qualified** — a source-bound release-server receipt identifies the exact executable;
-9. **runtime-admitted** — the floor-bound launcher issued and the Rust process consumed one exact
-   protocol-bound single-use ticket.
+2. **static/Python checked** — static or design checks passed for one exact source generation;
+3. **Rust-qualified** — latest-nightly formatting, warning-denied Clippy, debug/release tests and rustdoc passed;
+4. **native-qualified** — exact DFHack plugin built and passed native qualification;
+5. **live-qualified** — required disposable-fort campaign passed;
+6. **registry-admitted** — reviewed receipt promoted to compatibility registry;
+7. **floor-accepted** — deployment host advanced monotonic floor;
+8. **artifact-qualified** — exact server executable qualified;
+9. **runtime-admitted** — protocol-bound single-use ticket consumed by the exact runner.
 
-A higher rung applies only to the exact identities it names. It never transfers silently to a later
-commit, rebuilt binary, different bridge protocol, or another platform.
+Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
 
+### Pause-control/1.7 development effect boundary
+
+`docs/LIVE_CONTROL.md` describes the first bridge-backed live mutation source. The implementation is
+strictly scoped to simulation pause/resume and remains unadmitted development functionality.
+
+- The native bridge exposes only `Handshake`, `PreparePause`, `CommitPause`, and `QueryPause` under
+  fixed protocol 1.7 identities. It does not expose a generic command, Lua, keyboard, path, address,
+  method selector, or any other action family.
+- Prepare binds one idempotency key, 32-byte sealed plan digest, desired pause state, and expected
+  game tick. It performs no game mutation and returns a prepare token.
+- Commit requires the same key/digest/token. The bridge records the attempt before calling
+  `World::SetPauseState`, observes the resulting pause state, and retains a stable receipt. Replays
+  of a known effect return the retained result instead of applying it twice.
+- Query/reconcile reports whether the bridge knows the key, whether the pause effect was applied,
+  the observed pause state/tick, prepare token and retained receipt digest. A lost commit reply is
+  treated as `EffectIndeterminate`; callers are directed to reconcile before retry.
+- World load/unload advances bridge generation and clears retained effect records, preventing
+  idempotency state from crossing a world boundary.
+- The safe-Rust client binds only the four fixed methods and profile identity. The development MCP
+  runtime grants only `ControlClock` at reversible risk, preserves the eleven top-level tool names,
+  and refuses every non-pause mutation surface.
+- `dfmcp-live-control-dev-server` requires `DFMCP_ALLOW_UNADMITTED_CONTROL_V1_7=1`, its own token and
+  loopback endpoint, rejects unrelated `DFMCP_*` state, and refuses production admission provenance.
+- No registry entry, deployment floor, server qualification, production runner, or admitted live
+  mutation capability exists for protocol 1.7.
+
+This editing session did **not** compile the Rust client/runtime or build the plugin against real
+DFHack/protobuf generated sources, and did not execute a disposable-fort control campaign. The
+slice is source-present only. The bridge uses a bounded process-local retained effect map; durable
+effect-journal crash recovery is still unfinished. No claim is made that a host crash after effect
+dispatch can be fully reconciled across process restart.
+
 ### Coherent spatial/1.6 capture and route-aware inventory allocation
 
-The new spatial profile captures jobs, buildings, items, attachments and one
-bounded terrain region during one native RPC suspension, then transfers immutable
-serialized pages. It does not join independently timed observations. Earlier
-profile-specific limitations below still apply to those earlier profiles.
-See `docs/LIVE_SPATIAL.md` for the entry and workflow.
+The spatial profile captures jobs, buildings, items, attachments and one bounded terrain region in
+one native suspension, then transfers immutable serialized pages. `docs/LIVE_SPATIAL.md` contains the
+full contract.
 
-- The composite decoder requires exact world/site/clock/pause/software/generation
-  agreement across the embedded operations and terrain codecs. One combined source
-  digest, observation cursor and entity-generation universe cover every fact and
-  relationship. An invalid component prevents publication of the entire capture.
-- Native bounds are 4,096 jobs, 4,096 buildings, 65,536 items, 65,536 attachments,
-  16,384 terrain cells and 16 MiB total. Hidden terrain attributes remain redacted.
-  The unchanged retained-byte cache also binds the region into ownership. Page
-  assembly, full digest validation, semantic decoding and release acknowledgement
-  complete before a new world is returned. Initial capture latency is not measured.
-- A reusable multi-source terrain reachability field avoids a separate traversal
-  for every item. Spatial inventory planning resolves outermost ground-container
-  positions once, propagates conservative item/container exclusions, and supplies
-  the existing integral allocator only with candidate-connected declared stacks.
-- `spatial_inventory_plan` returns source-bound item/root handles, candidate path
-  lengths, same-anchor route drill-downs, disjoint exclusion counts and a checked
-  flow/min-cut shortage certificate. Results are conditional on the declared
-  stack model and observed terrain policy, not native recipe satisfaction, unit
-  navigation, safety, global inaccessibility, reservations or executable plans.
-- `dfmcp-live-spatial-dev-server` is registered with its own credentials, opt-in,
-  process-scoped session family and two-session limit. It preserves eleven tools
-  and reuses the existing sixteen semantic query variants plus spatial routes and
-  allocation. Inventory baselines and terrain watches share one refresh/anchor.
-  Whole-row pages retain required Agent Turns and active watches within budget.
-- Existing native profiles, dependency pins, admission map and migration bead are
-  unchanged. The old map client gains only closed spatial-client registration.
-  Spatial sessions reject other profiles' credentials, journals and admission
-  state. Citizen coverage, full unit navigation, native requirement matching,
-  durable spatial history/supervision and live game mutations remain unfinished.
+- Composite decoding requires matching world/site/clock/pause/software/generation identities.
+- One source digest, observation cursor and entity-generation universe cover operations and terrain.
+- Bounded terrain reachability feeds the existing integral allocator without double-counting stacks.
+- `spatial_inventory_plan` returns same-anchor candidate routes, supply handles, exclusion reasons,
+  and a flow/min-cut shortage certificate under the declared stack-unit model.
+- The registered spatial development server preserves eleven tools, shared query/watch behavior and
+  strict read-only mutation refusal.
 
-Both GCC and Clang compiled the actual producer/capture/cache against explicit
-mock DFHack/protobuf interfaces, C++17 and warnings-as-errors. Each run passed
-786 checks and matched independent Python encoders for an 810-byte fixture and
-40,000-item, 2,200,457-byte composite capture across 135 immutable pages. Changes
-to inventory, game tick and terrain between pages did not change captured bytes.
-Reproduce with `scripts/test_live_spatial_native_mock.py`.
-
-Twenty-three Rust scenarios are registered but not executed: three reachability,
-six composite projection, four transport, four inventory and six actual-handler
-scenarios, including an 8,192-byte allocation pagination path retaining a watch.
-No Rust compiler, Cargo or rustfmt was available; Rust compilation, Clippy, stdio,
-real DF headers/protobuf/native loading, live-game behavior and repository
-qualification remain unverified. The schema passed 59 cases (20 accepted, 39
-rejected). A separate Python ancestry-design oracle passed 2,000 seeded forests
-and 200,721 node comparisons; it did not execute Rust. These checks are not native
-qualification or production admission, and earlier receipts do not qualify 1.6.
+Mock-native validation previously passed 786 GCC and 786 Clang checks, including a 40,000-item,
+2,200,457-byte immutable capture across 135 pages. Twenty-three Rust scenarios remain registered but
+unexecuted in this editing environment. Spatial/1.6 remains unadmitted.
 
 ### Bounded map/1.5 terrain observation and candidate routes
 
-The map profile integrates one native terrain-region read with canonical tile
-facts, existing typed queries, baselines, foreground watches and `map_route`.
-See `docs/LIVE_MAP.md` for the entry, wire, examples and exact limitations.
+The map profile observes one fixed bounded terrain region, preserving hidden cells as redacted and
+unallocated blocks as unknown. Deterministic dry cardinal floor/stair candidate routes are available
+through the existing query surface. Routes are not unit-specific navigation or global reachability
+proofs. The profile remains unadmitted development source.
 
-- A fixed region contains at most 16,384 cells, with sides at most 128 tiles and
-  a 1-MiB native payload bound. Missing blocks are not allocated. Hidden cells
-  serialize only presence, never terrain/occupancy/liquid/temperature attributes.
-- Visible facts include normalized shape, liquid depth/type, designation,
-  traffic, occupancy, raw temperature and cached walkable-region ID. Hidden
-  attributes project as Redacted; missing-block attributes remain Unknown.
-- Strict manifest/region decoding precedes atomic publication. Stable physical
-  tile handles support revision tracking; clock, generation or dimension resets
-  advance the epoch. Failed reads preserve the previous anchor and fence the source.
-- Candidate routes use deterministic dry, unoccupied cardinal floor/stair BFS.
-  Vertical edges require complementary observed stair endpoints. Routes are not
-  unit-specific paths, safety proofs, travel-time predictions or global absence
-  evidence. Unsupported mechanics and unobserved cells remain excluded.
-- `dfmcp-live-map-dev-server` retains the eleven tool names and reuses typed
-  queries, aggregates, baselines and foreground watches. `await_watch` validates
-  before one observation and reauthorizes afterward. Whole-vertex route pages
-  bind session, complete anchor, policy, endpoints and work budget while retaining
-  required Agent Turn coverage and current active watches.
-- The independently gated map session family, credentials and two-session limit
-  do not widen existing profiles or production admission. Regions are fixed for
-  session lifetime; no coherent operations/map join or durable map archive exists.
+### Immutable-paged operations/1.4
 
-Both GCC and Clang compiled the actual native producer against mock DFHack and
-protobuf interfaces with C++17 and warnings-as-errors. Each run passed 110 checks
-and matched an independent Python encoder's 455-byte fixture, including block
-boundaries, hidden-data noninterference and the hard-volume capture ceiling.
-Exact producer SHA-256: `b4e148c3827936115ed1b389c50d2d936e01a8bb773cda366ac8f5cc09e0be14`.
-The reproducible harness is `scripts/test_live_map_native_mock.py`.
+Operations/1.4 captures one coherent jobs/buildings/items state and transfers immutable bytes through
+bounded pages with fixed token/generation/limit identity and whole-payload digest verification. It
+remains unadmitted development source and does not inherit 1.3 qualification or archive identity.
 
-Seventeen Rust scenarios are registered but not executed: six pure route/model,
-three codec/projection, two RPC and six actual-handler tests. Independent Python
-design checks passed 512 exhaustive obstacle maps and 500 seeded 3-D shape maps;
-the route schema passed 64 cases (19 accepted, 45 rejected). These checks are not
-Rust execution or native qualification. Rust, Cargo and rustfmt were unavailable;
-no Clippy, stdio, real DF headers/protobuf build, live-game campaign or complete
-repository qualification is claimed. Full unit navigation, coherent cross-domain
-spatial feasibility, mutable region windows, durable monitoring and all live
-mutations remain unfinished. Existing bridge bytes, dependencies and migration
-bead status are unchanged; only closed map-client registration uses shared framing.
+### Durable operations/1.3 observation history
 
-### Immutable-paged operations/1.4 development read path
+Operations/1.3 can optionally persist canonical changed observations before publication, replay the
+exact generation chain on restart, list retained history, and execute stateless historical queries.
+This is an observation archive, not durable effect-journal recovery, anti-rollback custody, or a
+production MVCC claim.
 
-The new fixed profile captures one coherent native jobs/buildings/items world,
-then transfers immutable bytes rather than mixing independently timed pages.
-`docs/OPERATIONS_PAGING.md` specifies the entry, wire, limits and remaining work.
+### Query, graph, monitoring and production analysis
 
-- Native captures contain at most 4,096 jobs, 4,096 buildings, 65,536 items,
-  65,536 attachments and 16 MiB. Transfer pages are 16..256 KiB. The old 1.3
-  native source and default codec retain their 32,768-item/2-MiB ceilings.
-- A bounded cache retains serialized bytes only, with nonce/generation/limit
-  binding, monotone tokens, fixed 120-second validity, repeatable page reads,
-  explicit release and world-reset invalidation. At most four captures and
-  32 MiB of payload bytes are retained. Additional working memory is not included
-  in that retained-byte ceiling; initial capture remains one suspended operation.
-- The Rust client uses fixed plugin/type/protocol identities and the existing
-  bounded framing. One absolute acquisition deadline covers all pages and release.
-  Immutable metadata, exact byte progression, full SHA-256 and semantic invariants
-  must pass before returning a world. Failure fences the source without publishing
-  a partial snapshot or silently starting another capture.
-- An explicit codec profile binds source digests and fact provenance to 1.4.
-  Default 1.3 decoding and journal replay are not widened or relabeled. Production
-  analysis now obtains its source digest from the selected canonical state.
-- `dfmcp-live-operations-paged-dev-server` is registered with its own credentials,
-  opt-in, process-scoped session family and two-session limit. It reuses the ten
-  existing post-bootstrap handlers and eleven tool names. Queries, graphs,
-  production analysis, baselines and foreground watches retain their own budgets.
-- Responses identify snapshot game time as capture time, not transfer completion.
-  Normal game simulation may advance while immutable pages are transferred.
-  Paged sessions reject durable journal configuration and history queries; 1.3
-  archives remain 1.3-only. No new game effect or admission authority exists.
-
-Both GCC and Clang compiled the actual native producer/cache against mock
-DFHack/protobuf interfaces with C++17 and warnings-as-errors. Each run passed
-748 checks, including 40,000 items / 2,200,070 bytes / 135 pages despite simulated
-game changes, the exact 65,536-item ceiling, release and invalidation. Cache
-quota/expiry checks and eleven SHA-256 vectors matched Python hashlib.
-Exact producer SHA-256: `568c56b13a84fb87e9c47affc5156045ceaf29c10d486133a8c370df1e7623e0`.
-Exact cache SHA-256: `4c822e308b0b700df10e38162bfc5e8bdc96fff6956b350a6bc405f3a7bcb887`.
-Reproduce with `scripts/test_retained_snapshot_native.py`.
-
-Fifteen new Rust tests are registered but not executed: five assembler, five
-wire-client, three codec/profile and two MCP integration/isolation scenarios.
-Rust, Cargo and rustfmt were unavailable. No Rust compilation, Clippy, stdio,
-real DFHack-generated headers, protobuf linking, plugin loading, live campaign,
-full repository qualification or production admission is claimed. Native capture
-latency and total memory use are not benchmarked. This profile still lacks 1.4
-archive integration, citizen/map coverage, full native material/path feasibility,
-and live mutations. Dependency pins and the active migration bead are unchanged.
-
-### Durable operations observations and historical replay
-
-The operations/1.3 development runtime now has an optional synced observation
-journal integrated into authenticated bootstrap and live publication. See
-`docs/OPERATIONS_HISTORY.md` for configuration, queries and the recovery contract.
-
-- Canonical sources, complete anchors and predecessor digests are persisted before
-  a changed observation becomes visible. Restart replays the exact version and
-  generation chain; heartbeats do not add duplicate records.
-- Private Unix storage uses an exclusive writer lock, exact directory/file modes,
-  regular-file/link/identity checks and file/directory fsync. Operator paths and
-  explicit incomplete-tail repair are environment configuration, never MCP input.
-- Failed writes/syncs fence publication. Default recovery preserves all bytes and
-  refuses incomplete tails; explicit repair truncates only a verified incomplete
-  suffix. Complete corrupt frames, invalid length checksums and nonreproducible
-  projection anchors refuse instead of silently accepting a shorter history.
-- `history` lists committed observations with bound whole-row pagination.
-  `historical_query` replays an exact record and executes only stateless queries.
-  Archived anchors/evidence are explicit, current Query authority is required,
-  current active watches remain current, and neither live state nor watches or
-  baselines are mutated by a historical read.
-- Journal retention defaults to 64 MiB/1,024 records, with no automatic pruning.
-  This is a bounded observation archive, not the FrankenSQLite MVCC backend,
-  effect journal, game checkpoint, durable watches/baselines, signed provenance,
-  anti-rollback floor, complete game history or an admitted production feature.
-
-Fifteen new Rust scenarios are registered but not executed. The independent
-Python framing-design oracle passed 5,833 checks; it treats semantic anchors as
-opaque and is not Rust execution or projector verification. The new schema passed
-JSON Schema meta-validation. No Rust compiler, Cargo or rustfmt was available;
-Clippy, stdio, real filesystem crash behavior, live DFHack and full repository
-qualification remain unestablished. Existing bridge bytes, dependency pins,
-production admission and the active migration bead are unchanged.
-
-### Observed production diagnosis and declared inventory allocation
-
-The operations/1.3 `fortress.query` source now integrates `production_diagnosis`
-and `inventory_plan`, with `mode=production` as a diagnostic shortcut. The complete
-contract and example workflow are in `docs/PRODUCTION_ANALYSIS.md`.
-
-- Production diagnosis joins jobs, holders, actual attached items and memoized
-  container ancestry. It exposes flags, unassigned workers, holder stages,
-  unindexed filters and shared inputs with generation-checked drill-downs.
-  Repeated attachment roles do not multiply distinct-item counts. Findings remain
-  observed conditions, not causal blocker proofs or a claim that a job is ready.
-- Declared stack-unit demands use exact type/subtype/raw material selectors and
-  conservative ancestry-aware exclusions. The bounded integral allocator uses
-  residual rerouting, never double-counts shared supply, and checks flow/min-cut
-  equality plus a joint shortage witness when the declared model is deficient.
-- Inventory results are conditional on the supplied model and exclusion policy.
-  They do not infer native recipes, full material eligibility, path access,
-  reservations, executable plans, or permission to mutate the game.
-- Both query modes retain the full Agent Turn and active watches, paginate complete
-  rows with session/query/policy/snapshot-bound continuations, and reject poisoned
-  sources, changed handles, missing authority, malformed input and exhausted budgets.
-  Only operations schema discovery gains the two variants; the other sixteen
-  variants, eleven tool names and native acquisition bounds are preserved.
-
-Twenty-two Rust tests are registered: seven allocator, eight model, and seven
-actual-handler scenarios. Rust compilation, tests, rustfmt, Clippy, stdio and live
-execution remain unverified because no Rust toolchain was available. An independent
-Python design oracle passed 1,568 exhaustive and 1,000 seeded allocation models;
-90 schema-extension cases (38 accepted, 52 rejected) and three documentation
-examples passed. Those checks are not Rust execution or repository qualification.
-Native producer/wire bytes, dependency pins, production admission and the active
-migration bead are unchanged. Full native requirement matching, map reachability,
-durable supervision and live effects remain absent. Larger acquisition paging
-is now separately implemented as unadmitted operations/1.4 source above.
-
-### Coherent operations/1.3 development read path
-
-The operations profile adds source integration from one suspended native read of
-jobs, buildings, inventory and their relationships through the common agent query
-and foreground-monitoring engines. See `docs/LIVE_OPERATIONS.md`.
-
-- A separate authenticated plugin observes complete bounded native rosters and
-  actual container, building-holder and job-item attachment references in one RPC.
-  It never merges independently timed citizen, announcement, or jobs snapshots.
-- Canonical decoding validates exact type/count/identity bounds, same-roster
-  reference endpoints, attachment counts and containment acyclicity before atomic
-  multi-domain publication. Every fact and edge shares one source digest/anchor.
-- Stable entity namespaces and semantic edge IDs support real graph traversal.
-  Observed retirement/reappearance advances generation; native job, building or
-  item ID-horizon regression resets the shared epoch. Invisible reuse is not claimed.
-- `dfmcp-live-operations-dev-server` is registered with its independently gated
-  public entry and the existing owned runtime. It retains eleven tools and only
-  Observe/Query/Doctor authority. Its own token, opt-in and process-scoped session
-  family keep it separate from existing profiles and production admission.
-- Typed inventory/building/job queries, grouping, lexical search, relation paths,
-  baselines and condition watches use the combined projection. One await refresh
-  can update an inventory baseline and construction watch at the same anchor.
-  Authority is rechecked after refresh, terminal watch retry skips I/O, and source
-  failure preserves the prior anchor with explicitly stale local management.
-- Full roster/payload bounds are 4,096 jobs, 4,096 buildings, 32,768 items,
-  65,536 attachments and 2 MiB. Oversized acquisition refuses rather than paging
-  or publishing a partial domain. This older native profile remains unpaged.
-- Raw material IDs, flags, stack counts, stage values and attachments are not
-  material-eligibility, accessibility, blocker-cause or successful-completion proofs.
-  No placeholder citizen entities or speculative requirements are introduced.
-
-The actual native producer compiled against mock DFHack/protobuf interfaces with
-both GCC and Clang, C++17 and warning-denied flags. Each run passed 135 checks and
-matched an independent Python encoder's 423-byte golden frame. Exact source
-SHA-256: `ecb555296d3b84111f2acd5290c48797027c12a830d7bb4d2ffdec4e3aa4acb7`.
-The reproducible harness is `scripts/test_live_operations_native_mock.py`.
-
-Eighteen new Rust tests are registered but not executed: nine codec/model tests,
-four RPC tests and five actual-handler scenarios. No Rust compiler, Cargo or
-rustfmt was available. No Clippy, stdio, full repository gate, real generated DF
-headers, protobuf generation/linking, actual native loading, live-game behavior
-or production qualification has been established. Mock compilation is not native
-qualification. Existing native profiles, dependency pins, production map and
-migration bead are unchanged; the shared framing module gained client registration.
-Citizen/announcement integration, map/path observations, requirement evaluation,
-durable monitoring and live mutations remain unfinished.
-
-### Jobs-only protocol 1.2 development read path
-
-The independent jobs profile now has source integration from native DFHack reads
-through MCP queries and foreground monitoring. `docs/LIVE_JOBS.md` describes its
-build path, entry, fields, examples, binary layout, and limitations.
-
-- `dfmcp_jobs_v1_2` is a separate authenticated plugin with exactly Handshake and
-  ReadObservation. It collects the complete bounded global job list in one RPC;
-  oversized, cyclic, malformed, or partial source rosters are rejected.
-- Records contain job type/reaction, suspension/repeat flags, position, native
-  worker/holder identities, raw completion timer, and item-reference/filter counts.
-  They do not establish material availability, path access, blocker causes, or
-  successful job completion. No placeholder citizen/building entities are created.
-- The owned Rust RPC client pins plugin/type/method/protocol identities, bounds
-  protobuf and binary input, validates nonce/version/generation, and fences failed
-  streams. Numeric-loopback TCP uses an absolute whole-call deadline across
-  fragments and notifications; bootstrap and first observation are separate calls.
-- Canonical job snapshots have source digests, generation tracking, immutable
-  publication, exact heartbeats, ordinary sequence advancement, and epoch resets
-  on source-generation, clock, or next-job-ID regression. Observed retirement and
-  reappearance advance generation; invisible same-ID reuse is not claimed detected.
-- `dfmcp-live-jobs-dev-server` is registered as an automatically discovered Cargo
-  binary. Its independently gated public entry uses the existing owned modern MCP
-  runtime and preserves the eleven tool names. Only Observe, Query, and Doctor
-  grants are available; all game-mutation tools refuse without an effect.
-- Shared entity queries, aggregates, lexical search, baselines, and condition
-  watches operate on the job projection. The jobs runtime's observe/wait refreshes
-  one roster; await_watch validates ownership before refreshing and terminal retry
-  skips I/O. Source failure still permits local watch management with stale coverage.
-- The jobs profile has its own token, opt-in, session namespace, and explicit
-  jobs-only coverage. It is not a citizen/announcement superset, does not merge
-  independently timed worlds, and is absent from the production protocol map.
-
-The actual native plugin source was compiled against **mock DFHack/protobuf types**
-with both GCC and Clang, C++17, and warning-denied flags. Each run passed 95 checks
-and matched an independent Python encoder's 153-byte golden frame. The exact
-source SHA-256 was `0458b5548e5bb9891083d29f192bccd3be510107722795f96257855d0c3a7960`.
-The reproducible test is `scripts/test_live_jobs_native_mock.py` and the golden
-frame is retained for Rust decoder/query tests.
-
-Nineteen new Rust tests are registered but **not executed**. No Rust compiler,
-Cargo, or rustfmt was available in the editing environment. Real generated DF
-headers, protobuf generation/linking, native DFHack loading, stdio execution,
-live-game behavior, full repository gates, and production admission have not been
-established. Mock compilation is not native qualification or a live success claim.
-The existing 1.0/1.1 bridges, production map, dependency pins, and migration bead
-status are unchanged.
-
-### Foreground condition watches and one-observation waits
-
-Protocol-1.1 `fortress.query` now integrates `watch`, `poll_watch`, `await_watch`,
-`watches`, `cancel_watch`, and `release_watch`. The workflow and exact limitations
-are described in `docs/CONDITION_WATCHES.md`.
-
-- Watches retain bounded typed success/failure predicates, entity generations,
-  game-tick deadlines, sampling cadence, and distinct-observation stability.
-- Duplicate anchors cannot manufacture completion. Unknown, incompatible, stale,
-  inferred, or unsupported facts cannot satisfy a field condition, including
-  under negation. Known failure wins; unknown failure blocks success.
-- Missing entities remain unknown. Reused generations, epoch changes, time or
-  sequence regressions, and same-cursor forks invalidate nonterminal records.
-  Skipped observation sequences reset stability rather than proving continuity.
-- `await_watch` validates the session-owned handle before I/O, requires Query and
-  Observe authority, performs at most one bounded adapter observation, then
-  reauthorizes at the published target before evaluating. Its adapter observation
-  may internally require multiple bounded native pages. It never unpauses or
-  controls game time. Terminal awaits skip the read entirely.
-- Active watches are projected into successful protocol-1.1 query Agent Turns.
-  Authorized query errors include them when the complete packet fits. Source
-  poisoning still permits local watch listing, cancellation, and terminal release,
-  with explicitly stale source continuity.
-- Registration, evaluation, cancellation, and release publish only after the full
-  response renders within budget. A failed render leaves watch state unchanged,
-  although a preceding bridge read may already have published a newer observation.
-- Retention is bounded to eight records per session and 128 per process. Terminal
-  evidence is immutable; explicit release cannot resurrect an old watch handle.
-
-This tranche adds 25 registered Rust scenarios but remains **source present**:
-Rust compilation, Rust tests, rustfmt, Clippy, stdio, native DFHack, and live-game
-execution were not available in the editing environment. The self-contained JSON
-Schema passed 73 local cases (34 accepted, 39 rejected), preserving all ten prior
-query variants; three documentation JSON examples also validated. Those checks
-are not Rust or repository qualification. Watches are foreground-only and not
-durable, continuous-history proofs, mutation obligations, or admission evidence.
-The separate `fortress.wait` tool, other runtimes, bridge methods, dependency pins,
-production protocol map, and migration bead status are unchanged.
-
-### Structured live queries and foreground change monitoring
-
-The protocol-1.1 development `fortress.query` implementation now exposes typed
-entity filtering, generation-checked inspection, graph traversal/dependency
-analysis, grouped aggregates, lexical search, and embedded schema discovery.
-These operate on the session's current published projection, not arbitrary
-DFHack objects. Other runtime query surfaces are not implicitly upgraded.
-
-The subsequent foreground-history slice adds four query variants behind the same
-tool: `capture`, `changes`, `baselines`, and `release_baseline`. Its complete
-contract and example workflow are in `docs/QUERY_HISTORY.md`.
-
-- Capture collects the complete selected entity set across bounded pages at one
-  exact anchor; no partial page is accepted as a baseline.
-- Immutable baselines are process-local and session-owned, with explicit
-  idempotent capture keys, game-tick deadlines, 256-row/256-KiB retained-row bounds,
-  eight entries per session and 128 entries per process.
-- Later queries return deterministic, generation-aware entered/left/changed result
-  rows with before/after facts. Leaving a filter is not classified as death or
-  deletion. Presence, epistemic class, source kind, and selected values remain
-  significant; observation-bookkeeping-only refreshes are counted separately.
-- Change pages bind the baseline and exact target snapshot. Reading or retrying a
-  page never advances or consumes the baseline. Session, epoch, fork, regression,
-  deadline, input, scan, row, and response-budget violations fail explicitly.
-- The actual live query route renders the complete Agent Turn before publishing a
-  capture or release. Failed response construction leaves retained state unchanged.
-- Agent Turns expose the true comparison basis and a compact change summary.
-  Advanced endpoint comparisons are explicitly partial temporal coverage, never
-  proof of continuous intervening history. Required warnings and source coverage
-  remain in the response budget.
-- Ten registered Rust regression scenarios exercise the public query dispatcher,
-  including an 8192-byte full Agent Turn path with multi-page changes.
-
-This slice is **source present**. Rust compilation, Rust tests, rustfmt, Clippy,
-repository qualification, stdio execution, and live-game execution were not run
-in its editing environment, which had no Rust toolchain. No fresh receipt or
-admission is claimed. Baselines are not durable, background watchers, obligations,
-complete fortress history, or mutation authority. The bridge methods, dependency
-pins, eleven-tool waist, and production protocol map are unchanged.
-
-### Bounded query and graph execution
-
-The 2026-09-13 query/graph additions are source-present functionality, not a fresh
-qualification or admission. See `docs/QUERY_EXECUTION.md` and
-`docs/GRAPH_QUERY_EXECUTION.md` for the contracts and limitations.
-
-- Public world query entry points now bind continuation offsets to the exact
-  fortress, epoch, sequence, game tick, state hash, filters, and ordering.
-  Existing adapter callers use this path. Legacy query cursors require restarting;
-  delta cursors are unchanged. Page width and byte budget may change between pages.
-- Combined scan/predicate-work and aggregate query-identity limits prevent otherwise
-  individually legal inputs from multiplying into unbounded evaluation work.
-  Cursor digests are not authentication; every adapter request still needs authority.
-- `dfmcp_world::graph_query` provides bounded deterministic multi-source traversal,
-  outgoing/incoming/undirected interpretations, shortest-path edge witnesses,
-  explicit depth frontiers, and bounded path reconstruction.
-- Iterative SCC analysis identifies dependency cycles and their dependent blockers,
-  orders the condensation prerequisite-first, and returns a stable entity order
-  and longest unweighted dependency chain only when acyclic.
-- Graph results carry exact source anchors, caller-supplied scope identities,
-  projection/decision digests, and operation counters. They describe observed
-  authorized projections, not complete-world absence, game walkability, timed
-  production schedules, or permission to mutate.
-- Twenty-one added Rust regression tests include an exhaustive directed
-  three-vertex graph oracle. An independent Python design oracle passed 512
-  exhaustive graphs and 200 seeded multigraphs in the editing environment.
-
-No Rust compiler, Cargo, or rustfmt was available in that editing environment.
-The Rust tests, workspace gates, native plugin, and live-game campaign were not
-executed for these changes. The Python design check is not repository-gate or
-Rust-execution evidence. Graph query modes subsequently gained protocol-1.1
-MCP source integration as described above; broader live projection coverage
-remains unfinished. The eleven-tool waist, production protocol map, dependency
-pins, and migration bead status are unchanged.
-
-### Agent-facing MCP
-
-- Modern-only MCP 2026-07-28 through the exact-revision-pinned owned `fastmcp_rust` sibling.
-- Frozen eleven-tool `fortress.*` waist.
-- Deterministic laboratory mode with process-local pause-state effects.
-- Authenticated protocol-1.0 read-only production server source.
-- Explicitly unadmitted protocol-1.1 development server source.
-- Separately gated jobs-only protocol-1.2 development server source.
-- Separately gated coherent operations/1.3 development server source.
-- Separately gated immutable-paged operations/1.4 development entry sharing the operations handlers.
-- Separately gated map/1.5 development server with bounded terrain facts and model-only route queries.
-- Canonical Agent Turn Packet with identity, anchor, continuity, briefing, changes, attention,
-  active work, affordances, recommendations, uncertainty, coverage, budgets, references, and typed
-  recovery.
-- An admitted Agent Turn exposes bridge protocol, entry, registry, decision, floor, server receipt,
-  launch, ticket, and executable identities after successful V2 ticket consumption.
-- Mutation-stage tools remain registered for the frozen waist but fail closed in live read-only
-  modes.
-
-### Protocol 1.0 live read path
-
-- Out-of-process DFHack plugin using supported native protobuf RPC facilities.
-- Loopback bearer-token authentication with bounded nonce and exact protocol handshake.
-- Exactly two plugin methods: `Handshake` and `ReadObservation`.
-- No remote-service flag and no arbitrary command, Lua, keyboard, path, direct memory-write, or
-  mutation route.
-- Safe-Rust wire codec with bounded frames, duplicate-field rejection, canonical protobuf checks,
-  text budgets, nonce/version/generation fencing, and poisoned-stream behavior.
-- Complete bounded citizen-roster reads with stable unit-ID order, optional names, and paused-world
-  requirements for coherent multi-page assembly.
-- Pagination-independent immutable observation capsules.
-- Deterministic fortress/citizen projection with fact-level source digests and explicit coverage.
-- Fortress identity derivation, observation epochs, heartbeats, ordinary advancement, restart and
-  clock-regression resets, and world/version switch refusal.
-- Read-only briefing, attention, query, explain, doctor, and wait surfaces.
-
-This is implemented source, not a current admitted tuple.
-
-### Protocol 1.1 retained-announcement read slice
-
-Protocol 1.1 extends the same two-method bridge waist by adding bounded announcement request and
-reply fields inside `ReadObservation`. It does not add `ReadAnnouncements` or any mutation method.
-
-Implemented source includes:
-
-- distinct protocol package, plugin name, bridge version, text and count limits,
-  retained-window bounds, gap evidence, and complete-through-latest semantics;
-- safe-Rust extension codec with canonical protobuf validation;
-- combined citizen and announcement capsule assembly;
-- transactional protocol-1.1 publication across citizen pagination and announcement continuation;
-- complete retained-suffix versus incomplete historical-coverage separation;
-- deterministic world projection, briefing, attention, and report-ID change summaries;
-- read-only `GameAdapter` integration;
-- single-publication bootstrap that acquires one combined capsule and replays that exact capsule
-  into adapter initialization without another underlying bridge read;
-- a two-dimensional primed replay contract over citizen pagination and announcement continuation;
-- a separately named `dfmcp-live-v1-1-dev-server` preserving the eleven-tool waist;
-- exact opt-in and rejection of production admission environment state;
-- A1-A6 evidence, journal, native-receipt, probe, source-qualification, and mutation-test tooling.
-
-The development runtime uses a distinct session namespace, exposes only read-only behavior, and
-cannot consume a production ticket. It is useful for source testing and live evidence capture. It
-is not production admission.
-
-### R1-R5 and A1-A6 qualification machinery
-
-- Protocol-1.0 native plugin qualification and R2-R5 acceptance tooling.
-- Protocol-1.1 source-only qualification contract.
-- Protocol-1.1 native receipt contract and issuer.
-- Protocol-1.1 A1-A6 announcement acceptance contract with 43 exact cases.
-- Secret scanning, append-only evidence journals, capture guidance, and fail-closed verifiers.
-- Aggregate protocol-1.1 checker that now runs core isolation, transactional publication,
-  single-read bootstrap, and development-MCP isolation checkers.
-- Mutation tests that reject production-map widening, inherited admission, lost coverage, method
-  widening, development guard removal, and mutation contamination.
-- Local qualification digest inventory covering the complete protocol-1.1 source graph rather than
-  only the wire and batch layers.
-
-These mechanisms do not mean the current commit has passing native or live receipts.
-
-### Compatibility and local custody
-
-- Content-addressed exact compatibility registry.
-- Deterministic promotion with expected-generation compare-and-swap and a single-writer lock.
-- Resolver binding the complete registry digest, deployment manifest, and required entry ID.
-- Owner-private monotonic floor with:
-  - absolute path;
-  - exact `0700` parent and exact `0600` file;
-  - root/effective-user ownership;
-  - no-follow reads;
-  - exclusive initialization;
-  - atomic fsynced compare-and-swap advancement;
-  - monotonic sequence and digest chain;
-  - preservation of every previously accepted entry ID.
-- Deterministic authority-free admission doctor with fixed registry, floor, tuple, and optional
-  server-artifact stages.
-
-The floor is local anti-rollback custody, not distributed consensus, compatibility evidence,
-revocation, or protection against compromise of the owner/root account.
-
-### Protocol-bound V2 process admission
-
-The previous ticket boundary did not carry the bridge protocol. A future protocol-1.1 compatibility
-entry could therefore have reached the always-protocol-1.0 Rust runner. That protocol-confusion bug
-is now closed by `architecture/live_admission_ticket_v2.json`.
-
-The exact bridge protocol is bound across:
-
-```text
-deployment manifest
-→ compatibility decision
-→ launch record
-→ single-use ticket
-→ DFMCP_ADMITTED_BRIDGE_PROTOCOL
-→ Rust admission context and retained provenance
-→ final private runner lookup
-```
-
-Both launch and ticket digests cover the protocol. The production map currently contains only:
-
-```text
-1.0 → dwarf-fortress-mcp serve-live → private protocol-1.0 server
-```
-
-Protocol 1.1, unknown protocols, mismatched representations, and legacy V1 tickets fail before live
-server startup. The development protocol-1.1 server rejects the production protocol marker at its
-public API seam.
-
-The launcher and Rust consumer additionally enforce:
-
-- exact registry and monotonic-floor generation;
-- exact entry fence and source commit;
-- source-bound server receipt;
-- loader-environment hygiene;
-- no-follow executable opening;
-- executable owner, mode, device, inode, size, and SHA-256;
-- repeated registry/floor and descriptor revalidation;
-- exact `0700` ticket directory and exact `0600` ticket file;
-- process and expiry binding;
-- single-use deletion before server startup;
-- no path-based execution fallback;
-- empty mutation capability.
-
-The server-binary receipt source map now includes the V2 ticket contract, launcher, Rust consumer,
-Agent Turn projection, and focused tests.
-
-### Source and release custody
-
-- Canonical clean-commit source-bundle contract.
-- Git-object-derived deterministic archive with canonical file modes and metadata.
-- Independent hostile archive verification without extraction.
-- Atomic sibling-directory publication after complete verification.
-- Stable no-follow repository-file reader.
-- Repository integrity rejection for symbolic links, special files, invalid UTF-8, NUL corruption,
-  oversized source text, machine-local placeholders, recovery debris, and files that
-  change while being inspected.
-- Local qualification and DSR release specifications.
-
-A source bundle proves source/archive identity only. It does not prove compilation, tests,
-compatibility, binary reproducibility, or runtime admission.
+Public query continuations are snapshot/query bound. Structured entity inspection, aggregates,
+search, graph traversal, SCC/dependency diagnosis, baseline changes, foreground condition watches,
+production diagnosis, integral inventory allocation and spatial inventory planning are implemented
+as described in their dedicated documentation. These derived layers never grant mutation authority.
 
 ## Current registry and qualification state
 
-The checked-in registry remains:
+The checked-in compatibility registry remains:
 
 ```json
 {
@@ -673,78 +130,56 @@ The checked-in registry remains:
 Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;
-- the production launcher cannot authorize a process from the checked-in registry;
-- protocol 1.1, jobs-only 1.2, operations/1.3 or 1.4 and map/1.5 profiles cannot enter the production runner map;
-- an empty-registry floor correctly preserves “no admissions”;
-- old or external receipts do not qualify the current source generation unless they match every
-  exact identity and are reviewed and promoted.
-
-No fresh full latest-nightly qualification receipt is checked in for the final current head. The
-present tranche is therefore described as implemented and source-bound, not as a newly qualified
-binary or live configuration.
+- the production launcher cannot authorize any newly added development profile;
+- protocols 1.1 through 1.7 remain outside the production runner map;
+- old or external receipts do not qualify this current source generation.
 
 ## Area matrix
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | canonical Agent Turn, eleven-tool waist, read-only orientation, protocol-bound admission provenance, protocol-1.1 structured queries, endpoint change monitoring and foreground condition watches, jobs/operations profile integration | durable handoff, complete objectives/counterfactuals, empirical VOI/cost/confidence models |
-| Protocol 1.0 | authenticated citizen read stack and private production runner source | current R1-R5 receipts and registry entry |
-| Protocol 1.1 | retained-announcement bridge, codec, publication, adapter, bootstrap, dev MCP, A1-A6 tooling | source receipt for current head, native/live receipts, production artifact, registry/floor/runtime admission |
-| Jobs-only 1.2 | native job roster service, bounded client, canonical projection, shared queries/monitoring, development binary, native-source mock tests | Rust execution, real DFHack build, live campaign, admission, coherent combined citizen/job/inventory projection |
-| Operations/1.3 | same-read jobs/buildings/items/attachment producer, closed client, atomic graph publication, shared queries/monitoring, production diagnosis, declared inventory allocation, optional synced observation archive, historical queries and registered development binary | Rust execution, actual DF headers/protobuf/native build, live campaign, native material/path feasibility, admission |
-| Paged operations/1.4 | immutable native capture cache, bounded page acquisition, 65,536-item/16-MiB codec, profile-bound source projection and shared agent handlers | Rust execution, real DFHack build/live campaign, capture performance, 1.4 archive support, admission |
-| Map/1.5 | bounded native region producer, redacted/unknown tile facts, closed client, candidate floor/stair routes, shared query/watch engines and registered binary | Rust execution, real DFHack build/live campaign, combined spatial world, unit navigation, region lifecycle, terrain archive, admission |
-| Compatibility | exact registry, promotion, resolver, monotonic floor, authority-free doctor | any current entry, evidence-bearing revocation, supported compatibility window |
-| Process admission | V2 protocol-bound launch/ticket/environment/Rust dispatch, exact custody and executable checks | a fresh qualified current binary and successful admitted launch receipt |
-| World | canonical snapshots, facts, deltas, bound query pagination, witnessed BFS, SCC/dependency analysis, graph/search/Merkle/checkpoint/ATP laboratories | native validation of current query/graph changes, broader live observations, admitted durable FrankenSQLite/FrankenFS/FrankenSearch/FrankenGraphDB backends |
-| Intent | semantic actions, sealed plans, witnesses, idempotency, obligations, lab pause effect | any qualified live mutation family |
-| Security | safe Rust, closed deps, secret scan, loader refusal, source/archive integrity, protocol-confusion defense | hostile-host resistance, signed provenance, external review |
-| Release | local qualification, source bundles, server receipts, DSR specifications | current signed cross-platform release assets and install/rollback evidence |
+| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis | durable handoff, complete counterfactual/VOI models |
+| Protocol 1.0 | authenticated citizen read stack and production-runner source | current R1-R5 receipts and registry entry |
+| Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
+| Jobs/operations/map/spatial | coherent bounded development reads through spatial/1.6 | Rust qualification, real DFHack campaigns, production admission |
+| Control/1.7 | pause prepare/commit/reconcile source and isolated development runtime | Rust/native/live qualification, durable effect recovery, admission, any other live effect family |
+| World | canonical snapshots, deltas, query/graph/path/allocation/history laboratories | admitted production durable backend and complete fortress coverage |
+| Intent/effects | sealed plans, in-memory dispatcher laboratory, pause-control live source | production two-phase effect journal, leases/checkpoints, dig/build/labor/etc. live effects |
+| Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
 
 ## Explicitly absent
 
 - no current admitted live tuple;
-- no current supported or production compatibility claim;
-- no admitted protocol-1.1, jobs-only protocol-1.2, operations/1.3 or 1.4, or map/1.5 runtime;
-- no live mutation RPC;
-- no pause/resume, dig, construction, labor, burrow, stockpile, work-order, military, keyboard, Lua,
-  arbitrary command, arbitrary filesystem, or arbitrary network effect;
-- no proof that the final current head passed every Rust qualification gate;
-- no admitted production MVCC/WAL, effect-journal crash recovery, game-checkpoint custody or ATP deployment;
-- no signed release provenance or hostile-host security claim.
+- no supported production compatibility claim for protocols 1.1 through 1.7;
+- no admitted live mutation capability;
+- no live dig, construction, labor, burrow, stockpile, work-order, military, checkpoint, Lua,
+  arbitrary command, keyboard, filesystem, or network effect;
+- no durable production effect journal proving restart-safe reconciliation of dispatched effects;
+- no proof that the current head passed every Rust qualification gate;
+- no signed cross-platform release provenance.
 
 ## Next executable milestones
 
-1. Run `./scripts/verify.sh` and `./scripts/qualify_local.sh` for one exact clean current head with no
-   Rust gate skipped.
-2. Produce the protocol-1.0 source-bound release-server receipt for that exact commit.
-3. Build the exact protocol-1.0 native plugin against a named DFHack revision and run R1-R5.
-4. Review and promote the first exact protocol-1.0 tuple, advance the deployment floor, run the
-   authority-free preflight, and launch only through the V2 protocol-bound boundary.
-5. Separately run protocol-1.1 source qualification, native qualification, A1-A6, and baseline R2-R5
-   for one exact generation.
-6. Qualify a protocol-1.1 production server artifact and review a protocol-1.1 compatibility entry.
-7. Only after all protocol-1.1 evidence exists, add an explicit production runner to the V2 protocol
-   map, advance the floor, and execute through a fresh protocol-bound ticket.
-8. Validate jobs-only 1.2, operations/1.3 and 1.4, and map/1.5 against Rust and a real DFHack build;
-   expand combined citizen, map/path and requirement coverage under coherent contracts.
-9. Design pause/resume only after the widened read path is stable; mutation must be separately
-   versioned, witnessed, idempotent, reconciled, and disposable-fort qualified.
+1. Run full Rust verification/qualification for the exact current clean head.
+2. Build control/1.7 against a named real DFHack/protobuf generation and exercise prepare/commit/query
+   in disposable forts, including lost-response and world-reset campaigns.
+3. Replace process-local control receipts with the durable two-phase effect-journal/recovery boundary
+   before considering any production admission.
+4. Only after that boundary is qualified, add the next narrowly versioned mutation family; do not
+   jump directly to broad generic effects.
+5. Independently continue the established protocol-1.0 admission chain and keep the production map
+   unchanged until exact evidence supports widening it.
 
 ## Status rules
 
-1. This file, exact receipts, the current registry, and local floor bytes define status.
-2. Source presence is not qualification, admission, support, or production evidence.
-3. Development execution is not production admission.
-4. A tuple is admitted only while its exact entry exists in the current registry generation.
-5. A deployment is admitted only when its trusted floor matches that registry generation.
-6. A protocol can execute in production only when the V2 production map contains its reviewed
-   runner and every launch/ticket representation agrees.
-7. A doctor report is diagnosis, never authority.
-8. A server receipt qualifies one executable, never a bridge or game session.
-9. A ticket authorizes one exact process/protocol start and is single-use.
-10. Negative evidence may reject a claim but cannot certify success.
-11. Derived indexes, attention, recommendations, memory, and counterfactuals are never more
-    authoritative than canonical source evidence.
-12. Unit tests do not substitute for disposable-fort evidence where Dwarf Fortress behavior
-    matters.
+1. Source presence is not qualification, admission, support, or production evidence.
+2. Development execution is not production admission.
+3. A tuple is admitted only while its exact entry exists in the current registry generation.
+4. A deployment is admitted only when its trusted floor matches that registry generation.
+5. A protocol executes in production only when the V2 production map contains its reviewed runner.
+6. A doctor report is diagnosis, never authority.
+7. A server receipt qualifies one executable, not a bridge session or game state.
+8. A single-use ticket authorizes one exact process/protocol start and does not grant unstated effects.
+9. Negative evidence may reject a claim but cannot certify success.
+10. Derived indexes, recommendations, history and path models never grant authority.
+11. Unit tests never substitute for disposable-fort evidence where Dwarf Fortress behavior matters.
