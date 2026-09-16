@@ -1,10 +1,8 @@
-//! Operations-only presentation for production diagnosis and declared supply plans.
-//! Algorithms stay in the adapter/world crates. This module validates envelopes,
-//! binds whole-row pages, and renders conditional evidence without effect handles.
+//! Presentation for production diagnosis and declared supply plans over sealed
+//! coherent adapter states. Algorithms stay in the adapter/world crates.
 
-use dfmcp_adapter::live_operations::LiveOperationsState;
 use dfmcp_adapter::operations_analysis::{self as analysis, AnalysisHandle, DiagnosisScope,
-    JobDiagnosis, MaterialDemand, ANALYSIS_POLICY, MAX_ANALYSIS_WORK, SUPPLY_POLICY};
+    JobDiagnosis, MaterialDemand, OperationsStateView, ANALYSIS_POLICY, MAX_ANALYSIS_WORK, SUPPLY_POLICY};
 use dfmcp_core::{Capability, DfmcpError, Digest32, EntityId, ErrorCode,
     OperationContext, Result, RiskTier};
 use serde::Deserialize;
@@ -137,7 +135,7 @@ fn page_offset(raw: Option<&str>) -> Result<usize> {
 fn handle_json(handle: AnalysisHandle) -> Value {
     json!({"entity_id":handle.entity_id.to_string(),"generation":handle.generation,"revision":handle.revision})
 }
-fn diagnosis_json(row: &JobDiagnosis) -> Value {
+fn diagnosis_json(row: &JobDiagnosis, context: &OperationContext) -> Value {
     json!({"job":handle_json(row.job),"native_job_id":row.native_job_id,"type_key":row.type_key,
         "assessment":"observed_conditions_not_proven_causes","blocker_proven":false,"job_ready_proven":false,
         "findings":row.findings,"suspended":row.suspended,"worker_assigned":row.worker_assigned,
@@ -149,7 +147,10 @@ fn diagnosis_json(row: &JobDiagnosis) -> Value {
         "affected_item_count":row.affected_item_count,
         "affected_item_examples":row.affected_item_examples.iter().copied().map(handle_json).collect::<Vec<_>>(),
         "affected_item_examples_truncated":row.affected_item_examples.len() < row.affected_item_count as usize,
-        "inspect_relationships":{"schema":"dfmcp.query/1","query":{"kind":"traverse",
+        "inspect_assignment":{"schema":"dfmcp.query/1","expected_anchor":anchor_json(context.anchor),"query":{
+            "kind":"inspect","entity_id":row.job.entity_id.to_string(),"generation":row.job.generation,
+            "fields":["worker_assigned","worker_entity","worker_is_strict_citizen","position"]}},
+        "inspect_relationships":{"schema":"dfmcp.query/1","expected_anchor":anchor_json(context.anchor),"query":{"kind":"traverse",
             "roots":[row.job.entity_id.to_string()],"edge_kinds":["uses","contained_in"],"max_depth":4}}})
 }
 fn base_payload(context: &OperationContext, source: Digest32, kind: &str) -> Value {
@@ -190,7 +191,8 @@ where F: Fn(usize) -> Result<Value> {
     Ok(payload)
 }
 
-pub(super) fn execute(state: &LiveOperationsState, context: &OperationContext, input: &Value) -> Result<Value> {
+pub(super) fn execute<S: OperationsStateView + ?Sized>(state: &S, context: &OperationContext, input: &Value) -> Result<Value> {
+    let started = std::time::Instant::now();
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
     validate_shape(input)?;
     let envelope: Envelope = serde_json::from_value(input.clone()).map_err(|_| invalid("invalid production query envelope or fields"))?;
@@ -207,7 +209,7 @@ pub(super) fn execute(state: &LiveOperationsState, context: &OperationContext, i
     let offset = page_offset(continuation)?;
     let maximum_bytes = usize::try_from(context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens).saturating_mul(4)))
         .map_err(|_| exhausted("production output budget does not fit this platform"))?;
-    match envelope.query {
+    let result = match envelope.query {
         Query::ProductionDiagnosis { job, holder, include_clear_jobs, continuation, .. } => {
             let scope = DiagnosisScope { job: job.map(Focus::decode).transpose()?, holder: holder.map(Focus::decode).transpose()?,
                 include_clear_jobs: include_clear_jobs.unwrap_or(false) };
@@ -222,7 +224,7 @@ pub(super) fn execute(state: &LiveOperationsState, context: &OperationContext, i
             payload["ordering"] = json!("removed-rotten-forbidden-suspended-holder-stage-native-id/1");
             payload["work_units"] = json!(report.work_units);
             page(payload, report.rows.len(), Page {raw:continuation.as_deref(),offset,limit,identity,maximum_bytes},
-                |index| Ok(diagnosis_json(&report.rows[index])))
+                |index| Ok(diagnosis_json(&report.rows[index], context)))
         }
         Query::InventoryPlan { quantity_unit: QuantityUnit::StackUnits, demands, continuation, .. } => {
             let requested: Vec<_> = demands.into_iter().map(MaterialDemand::from).collect();
@@ -254,7 +256,7 @@ pub(super) fn execute(state: &LiveOperationsState, context: &OperationContext, i
                     "note":"joint shortage witness; per-demand maxima must not be added independently"
                 }))});
             payload["work_units"] = json!(report.work_units);
-            let snapshot = state.snapshot().ok_or_else(|| invariant("allocation source projection missing"))?;
+            let snapshot = state.operations_snapshot().ok_or_else(|| invariant("allocation source projection missing"))?;
             page(payload, report.allocation.assignments.len(), Page {raw:continuation.as_deref(),offset,limit,identity,maximum_bytes}, |index| {
                 let assignment = &report.allocation.assignments[index];
                 let item = snapshot.graph.entities.get(&EntityId::new(assignment.supply_id))
@@ -264,14 +266,17 @@ pub(super) fn execute(state: &LiveOperationsState, context: &OperationContext, i
                     "units":assignment.units,"source_digest":report.source_digest.to_string()}))
             })
         }
+    }?;
+    context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
+    if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
+        return Err(exhausted("production query exhausted its cooperative wall-time budget"));
     }
+    Ok(result)
 }
 
-/// Extend only the operations runtime's discovered schema. Other profiles keep
-/// their original sixteen variants and do not advertise unsupported analyses.
-pub(super) fn query_schema() -> Result<Value> {
-    let mut base: Value = serde_json::from_str(include_str!("../../../schemas/mcp_query_v1.json"))
-        .map_err(|_| invariant("invalid base query schema"))?;
+/// Compose into the selected runtime's existing query schema, without dropping
+/// its workforce, route, watch or history definitions or inheriting another profile.
+pub(super) fn extend_schema(mut base: Value) -> Result<Value> {
     let extension: Value = serde_json::from_str(include_str!("../../../schemas/mcp_operations_query_extensions_v1.json"))
         .map_err(|_| invariant("invalid operations query schema extension"))?;
     let definitions = extension["definitions"].as_object().ok_or_else(|| invariant("operations schema definitions missing"))?;
@@ -281,6 +286,14 @@ pub(super) fn query_schema() -> Result<Value> {
     }
     let queries = extension["queries"].as_array().ok_or_else(|| invariant("operations schema variants missing"))?;
     base["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(|| invariant("base query variants missing"))?.extend(queries.iter().cloned());
+    Ok(base)
+}
+
+/// Retain the operations runtime's original schema identity and descriptions.
+pub(super) fn query_schema() -> Result<Value> {
+    let base: Value = serde_json::from_str(include_str!("../../../schemas/mcp_query_v1.json"))
+        .map_err(|_| invariant("invalid base query schema"))?;
+    let mut base = extend_schema(base)?;
     base["$id"] = json!("urn:dfmcp:operations-query:1");
     base["title"] = json!("Operations query envelope with production diagnostics and conditional inventory planning");
     base["description"] = json!("Value of the operations/1.3 fortress.query query argument. Original structured queries plus observed production diagnostics and declared stack-unit allocation. Runtime enforces authority, canonical identities, UTF-8 bounds, work ceilings and full response budgets.");
