@@ -48,6 +48,7 @@ pub mod live_spatial;
 pub mod live_version;
 pub mod operations_analysis;
 pub mod operations_journal;
+pub mod pause_reconciliation;
 pub mod spatial_inventory;
 pub mod transceiver;
 
@@ -65,8 +66,8 @@ pub use delta_scanner::{
 };
 pub use dfhack_probe::{
     DfHackProbeClient, MAX_PROBE_FIELD_BYTES, MAX_PROBE_METHODS,
-    MAX_PROBE_TEXT_NOTIFICATION_BYTES, ProbeHandshakeReply, ProbeHandshakeRequest,
-    ProbeObservationReply, ProbeObservationRequest,
+    MAX_PROBE_TEXT_NOTIFICATION_BYTES, ProbeHandshakeReply, ProbeObservationReply,
+    ProbeObservationRequest,
 };
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
