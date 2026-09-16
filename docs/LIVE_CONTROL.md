@@ -14,10 +14,11 @@ The core ordering is:
 
 ```text
 bridge prepare (no mutation)
+→ verify prepare identity
 → fsync Prepared
 → fsync CommitStarted
 → exactly one CommitPause dispatch
-→ observe bridge result
+→ observe bridge result and verify terminal receipt identity
 → fsync VerifiedApplied / VerifiedNotApplied
 → acknowledge terminal result
 ```
@@ -28,9 +29,11 @@ If any step after `CommitStarted` is ambiguous, the effect remains reconciliatio
 
 Prepare accepts a stable idempotency key, a 32-byte sealed plan digest, desired pause state, and expected game tick. It performs no mutation.
 
-The bridge prepare token is the first 16 bytes of SHA-256 over a fixed domain, the current bridge generation, key, plan digest, expected tick, and desired pause state. A world-generation change therefore invalidates the old token even if the textual key is reused.
+The bridge prepare token is the first 16 bytes of SHA-256 over a fixed domain, the current bridge generation, key, plan digest, expected tick, and desired pause state. A world-generation change therefore invalidates the old token even if the textual key is reused. Rust independently recomputes this identity before accepting a new preparation.
 
 After bridge prepare succeeds, the Rust coordinator syncs a `Prepared` record before returning success. Reusing the key with different plan content, desired state, tick, bridge generation, or token is rejected.
+
+The native record keeps the desired pause state and expected prepare tick separate from observed pause state and observed tick. Replaying the same preparation after time advances or after a commit returns the original token and retained evidence. It does not reseal the effect at a newer tick. A new preparation still requires the exact current tick.
 
 If the Rust process dies after bridge prepare but before the durable `Prepared` record is synced, no game mutation has occurred. On a later attempt the bridge may know a key that the journal does not; the runtime refuses to adopt it implicitly and requires a new idempotency key.
 
@@ -40,21 +43,27 @@ Commit requires the exact key, plan digest, and prepare token already present in
 
 Before calling the bridge, the coordinator appends and syncs `CommitStarted`. If this durability boundary fails, **no bridge mutation is attempted**.
 
-After that boundary, the runtime performs exactly one `CommitPause` RPC. It never retries a commit automatically. The native bridge marks its own process-local effect record as requested before calling `World::SetPauseState`, observes the pause state afterward, and returns a retained result on duplicate commits while that bridge incarnation remains alive.
+After that boundary, the runtime performs exactly one `CommitPause` RPC. It never retries a commit automatically. The native bridge checks world/fortress availability and a valid, nonregressed clock before the setter. It marks its own process-local effect record as requested before calling `World::SetPauseState`, then reads the actual pause state and game tick. Duplicate commits return the retained result without invoking the setter again while that bridge incarnation remains alive.
 
-Applied receipts are full 32-byte SHA-256 values over a fixed receipt domain, bridge generation, key, plan digest, desired pause state, and observed game tick. Terminal applied evidence is rejected if it reports the opposite pause state or lacks a 32-byte receipt. The journal enforces matching pause-state evidence during replay as well as live reconciliation.
+Terminal receipts are full 32-byte SHA-256 values over the existing fixed receipt domain, bridge generation, key, plan digest, desired pause state, and observed game tick. The live coordinator independently recomputes the receipt, requires the observed tick not to precede preparation, and requires the applied flag to agree with whether the observed pause state equals the desired state. A returned prepare token, when present, must match the durable token.
+
+Both terminal applied and terminal not-applied results require a complete matching receipt. A setter that returns while the game remains in the opposite pause state produces observed not-applied evidence. A clock failure or exception after the setter leaves no complete terminal receipt and must remain indeterminate. The native record remains requested, so a duplicate cannot invoke the setter again.
+
+**A known key without a receipt is not proof that an effect failed.** It may be only a native prepare, or a commit whose observation did not finish. Live commit/reconciliation therefore never promotes that reply to `VerifiedNotApplied`; an unresolved durable attempt stays indeterminate. Merely recording `CommitStarted` also does not prove the bridge ever received the request.
+
+The wire decoder requires explicit applied, paused and observed-tick fields for a known record. Missing fields are not converted into observations of false or zero. Present tokens and receipts must have their exact lengths. Any failed wire call fences the connection, including budget failures that leave unread frame bytes; a later request cannot consume those bytes as its reply. Connection establishment and handshake share one timeout allowance.
 
 The Rust coordinator syncs `VerifiedApplied` or `VerifiedNotApplied` before acknowledging a terminal outcome. If the bridge reply is received but that terminal journal write cannot be durably established, the MCP result is `effect_indeterminate`, not success.
 
 ### Reconciliation and restart
 
-In a live session, `fortress.explain` is the reconciliation operation. It never dispatches an effect. A poisoned connection may be reopened for this read-only bridge query, but a mutating commit is never reissued as part of recovery. A live reconciliation may append coordinator evidence; it is distinct from a read-only recovery session.
+In a live session, `fortress.explain` reconciles one effect and `fortress.wait` performs a bounded pass over selected effects. Neither dispatches a game mutation. A poisoned connection may be reopened for read-only bridge queries, but a mutating commit is never reissued as recovery. Live reconciliation may append coordinator evidence; it is distinct from an offline read-only recovery session.
 
 After Rust-process restart, the journal reconstructs the exact transition chain. A retained `CommitStarted` or `Indeterminate` state remains unresolved until reconciliation. `fortress.query` discovers the retained keys, plan digests and states without needing the previous conversation or action handles.
 
-If the same bridge incarnation still retains the effect, live reconciliation records its known applied/not-applied result durably. If the bridge generation changed, the DFHack process restarted, a world load/unload cleared the bridge record, or the bridge otherwise reports the key unknown, the durable record remains **indeterminate**. The same effect is never reported safe to retry. A fresh observation and a new plan/idempotency key are required.
+If the same bridge incarnation retains a complete matching terminal receipt, live reconciliation records the applied/not-applied result durably. If the generation changed, the key is unknown, or no terminal receipt exists, the durable record remains **indeterminate**. Invalid or contradictory evidence is rejected without resolving the existing attempt. The same effect is never reported safe to retry. A fresh observation and a new plan/idempotency key are required for a new effect.
 
-A `Prepared` record that never reached `CommitStarted` may still be committed once only in a live session when the current bridge generation exactly matches the generation sealed into the durable prepare. Otherwise it must be abandoned in favor of a new plan/key.
+A `Prepared` record that never reached `CommitStarted` may still be committed once only in a live session when the current bridge generation exactly matches the generation sealed into the durable prepare. Otherwise it must be abandoned in favor of a new plan/key. Reconciliation does not commit a prepared record.
 
 This policy deliberately prefers an unresolved durable record over the possibility of replaying a mutation whose prior outcome cannot be proved.
 
@@ -68,7 +77,9 @@ A write or sync failure fences the journal. Default startup refuses an incomplet
 
 Recovery uses a read-only file descriptor, retains the same exclusive lock and custody checks, and never creates, initializes, truncates, syncs or appends a journal. All mutation entry points reject recovery mode even if a caller supplies a `ControlClock` context. Public MCP operations recheck authority and journal custody before exposing even an idempotent or terminal result.
 
-This journal is not an anti-rollback floor, signed provenance, a game checkpoint, or production admission. It makes coordinator restart behavior explicit; it does not prove what happened if both durable coordinator evidence and the bridge's retained effect evidence are lost or maliciously modified.
+The receipt-verification increment governs newly received live evidence. It does not migrate or cryptographically requalify terminal records already persisted by earlier code. Existing journal replay still checks framing, chain, transition identity and applied pause-state consistency. A retained terminal record is stored historical evidence, not a new claim of current game truth.
+
+This journal is not an anti-rollback floor, signed provenance, a game checkpoint, or production admission. Receipt hashes bind identity; they are not signatures and do not make a compromised bridge trustworthy. The journal does not prove what happened if durable coordinator evidence and the bridge's retained effect evidence are lost or maliciously modified.
 
 ## Development runtime
 
@@ -86,7 +97,7 @@ cargo run --locked --bin dfmcp-live-control-dev-server
 
 Opening a default live session creates a new journal file as `0600` when needed. Existing files must already satisfy custody rules. `DFMCP_CONTROL_JOURNAL_REPAIR=1` is an explicit operator-only incomplete-tail repair opt-in for live mode.
 
-The runtime rejects unrelated `DFMCP_*` environment state and production admission provenance. Live sessions grant only `ControlClock` at reversible risk; recovery-only sessions grant only `Query` at read-only risk. The control session namespace is distinct from the read-profile namespaces and the runtime retains at most one control or recovery session. The eleven top-level tool names remain present. Session opening, `fortress.query`, `fortress.explain`, and `fortress.doctor` work in both modes; `fortress.plan` and `fortress.commit` require live mode. Other operations refuse.
+The runtime rejects unrelated `DFMCP_*` environment state and production admission provenance. Live sessions grant only `ControlClock` at reversible risk; recovery-only sessions grant only `Query` at read-only risk. The control session namespace is distinct from the read-profile namespaces and the runtime retains at most one control or recovery session. The eleven top-level tool names remain present. Session opening, `fortress.query`, `fortress.explain`, and `fortress.doctor` work in both modes; `fortress.plan`, `fortress.commit`, and `fortress.wait` require live mode. Other operations refuse.
 
 Agent Turn metadata says `runtime_admitted=false` and `mutation_admissible=false`. Live mode separately reports `development_mutation_enabled=true`; recovery-only mode reports false and advertises no supported effects. Both explicitly distinguish coordinator evidence from current game facts.
 
@@ -130,6 +141,28 @@ A page may contain fewer records than `limit` to fit the negotiated response bud
 
 Recovery-mode `fortress.explain` returns the selected stored record without querying the bridge or changing the journal. `fortress.doctor` reports no bridge connection and an unknown/null current bridge generation. To perform live reconciliation, stop this server and open a new live session with bridge credentials. A recovery session cannot upgrade itself or dispatch an effect.
 
+### Bounded reconciliation with fortress.wait (live mode)
+
+Select real keys returned by `fortress.query`:
+
+```json
+{
+  "session_id": "<live session>",
+  "idempotency_keys": ["pause-maintenance-001", "pause-maintenance-002"],
+  "max_wall_millis": 2000
+}
+```
+
+The pass accepts 1..16 unique known keys within the session entity budget. It validates the complete selection, sorts by key, and reserves the worst-case complete response including the Agent Turn before any bridge query or journal transition. An unknown/duplicate key or inadequate response budget rejects the whole selection before work. Select fewer keys when a large selection cannot fit. Optional `max_bytes`, `max_output_tokens`, and `max_wall_millis` only narrow the existing session allowances.
+
+Only `CommitStarted` and `Indeterminate` records are queried. Prepared records are returned unchanged, never committed; terminal records are returned as stored evidence without a query. The recovery transport interface has only a query method, not prepare or commit.
+
+A pass uses one shared wall-time allowance rather than resetting the budget per key. It stops querying on the first error or exhausted deadline and marks later unresolved records deferred. Each accepted result is synced individually before reporting a terminal transition. Successful earlier transitions are retained even when a later query fails. A sync failure fences the journal and cannot be acknowledged as a newly terminal result. The deadline is cooperative around storage operations; synchronous filesystem calls are not claimed to have a hard cancellation bound.
+
+The response contains complete per-key records, `queried`, `deferred`, per-key errors, aggregate counts, `journal_head_before`, `journal_head_after`, and a stop reason. `pass_complete` means the pass finished without being stopped; it does not mean every effect resolved. Check `unresolved` and `all_terminal`. The response always says `mutation_dispatched=false`, `safe_to_retry_same_effect=false`, and `current_freshness_proven=false`.
+
+This is one foreground pass, not a background polling task or a temporal game-goal obligation. A caller may perform another read-only reconciliation pass later, but must not retry the mutating commit. Changed journal heads invalidate old discovery continuations as usual. Recovery-only sessions refuse `fortress.wait` without connecting or writing.
+
 ### Prepare example (live mode)
 
 ```json
@@ -171,17 +204,25 @@ The response reports the durable state, recorded bridge generation, observed pau
 
 ## Evidence status
 
-The existing native-source evidence reports compile checks against explicit mock DFHack/protobuf interfaces with GCC and Clang under C++17, `-Wall -Wextra -Werror -pedantic`. The reproducible repository harness is `scripts/test_live_control_native_mock.py`. Those checks are not a real DFHack build or native qualification and were not rerun for the recovery-only increment.
+The recovery-only increment added 14 Rust regression tests: seven adapter journal tests, four bounded-query tests, and three Unix MCP-handler tests. They cover read-only replay, authority/custody, no-write behavior, retention/replay bounds, pagination and actual offline handlers.
 
-The recovery increment adds and registers 14 Rust regression tests: seven adapter journal tests, four bounded-query tests, and three Unix MCP-handler tests. They cover read-only replay and no-write behavior, write refusal despite supplied clock authority, custody/locking, missing and incomplete journals, effect-count and applied-evidence replay validation, canonical paging and state filters, session/filter/head/tampering rejection, full-packet budgets, and actual offline query/explain/doctor/plan/commit behavior.
+The receipt-verified reconciliation increment adds 19 Rust tests: ten coordinator/identity tests, seven wire tests, and two complete-response reservation tests. The existing offline handler tests also cover refusal of live wait, including injected clock grants. Covered cases include missing or corrupted receipts, native prepares mistaken for failed effects, generation loss, opposite observed state, canonical batch ordering, preflight refusal, partial progress, shared deadlines, explicit required wire fields, exact binary lengths and oversized-frame fencing.
 
-The Rust tests have **not been executed in the editing environment**, which has no Rust toolchain. Focused validation commands on a configured checkout are:
+These Rust tests have **not been compiled or executed in this editing environment**: Rust, Cargo and rustfmt are unavailable. Independent Python SHA-256 calculations verified the checked-in prepare/receipt test vectors, but that is not Rust execution.
+
+The changed actual native producer was compiled and executed through `scripts/test_live_control_outcomes_native_mock.py` with both GCC and Clang, each using C++17 and `-Wall -Wextra -Werror -pedantic`. Each run passed 75 C++ assertions plus three independent Python SHA-256 comparisons. The tested producer SHA-256 is `80bb0c427ce94ecee41b86c52ea721e979cd15b1f371e0a4a7a27f5aa410a6ff`. Tests exercise time-advanced prepare replay, actual observed setter failure, incomplete post-set clock evidence, post-set exception, duplicate suppression, generation reset, auth refusal and the fixed RPC method set. The local harness used the existing mock interfaces and hash helpers; this is not a generated-protobuf or real DFHack build.
+
+Reproducible focused commands on a configured checkout:
 
 ```bash
+python3 scripts/test_live_control_outcomes_native_mock.py --compiler g++
+python3 scripts/test_live_control_outcomes_native_mock.py --compiler clang++
 cargo test --locked -p dfmcp-adapter control_effect_journal
+cargo test --locked -p dfmcp-adapter pause_reconciliation
+cargo test --locked -p dfmcp-adapter live_control_rpc
 cargo test --locked -p dfmcp-mcp live_control_server
 ```
 
-These focused commands are not a substitute for the repository's full verification and qualification requirements. No Rust compilation/test pass, filesystem power-loss campaign, disposable-fort control campaign, registry entry, monotonic-floor advancement, qualified server artifact, production runner, or admitted mutation capability is claimed by this increment. Protocol 1.7 remains unadmitted.
+These commands are not a substitute for the repository's full verification and qualification requirements. No Rust compilation/test pass, filesystem power-loss campaign, disposable-fort control campaign, registry entry, monotonic-floor advancement, qualified server artifact, production runner, or admitted mutation capability is claimed. Protocol 1.7 remains unadmitted. Its existing method/field layout and receipt domains are unchanged; these source fixes do not inherit qualification from older plugin bytes.
 
 The next evidence-bearing step is qualification of this exact narrow boundary, not adding broader mutation families.
