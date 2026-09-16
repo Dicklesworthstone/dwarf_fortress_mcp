@@ -8,7 +8,8 @@ pub(super) fn handles(input: &Value) -> bool {
     matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),
         Some("poll_watches"|"await_watches"))
 }
-pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
+pub(super) fn extend_schema(schema: Value) -> Result<Value> {
+    let mut schema=semantic_query::extend_watch_count_schema(schema)?;
     let additions:Value=serde_json::from_str(include_str!("../../../schemas/mcp_watch_batch_v1.json"))
         .map_err(|_|error(ErrorCode::InternalInvariantViolation,"watch batch schema is invalid"))?;
     let variants=additions["oneOf"].as_array().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"batch variants absent"))?;
