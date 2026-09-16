@@ -1,6 +1,9 @@
 use super::*;
 use dfmcp_core::{CapabilityGrant, CapabilityScope, FortressId, GameTick, ObservationCursor, RequestId, SessionId, StateAnchor, WorkBudget};
 
+#[path = "workforce_runtime_tests.rs"]
+mod runtime;
+
 fn context() -> OperationContext {
     OperationContext { session_id: SessionId::new(1), request_id: RequestId::new(2),
         anchor: StateAnchor { fortress_id: FortressId::new(3), cursor: ObservationCursor { epoch: 1, sequence: 4 },
