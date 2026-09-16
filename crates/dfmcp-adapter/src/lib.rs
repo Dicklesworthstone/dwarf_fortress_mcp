@@ -106,7 +106,7 @@ pub use live_announcement_batch::{
 pub use live_announcement_briefing::{
     AnnouncementAttentionItem, AnnouncementAttentionSeverity, LiveAnnouncementBriefing,
     LiveAnnouncementChangeSummary, MAX_ANNOUNCEMENT_ATTENTION_ITEMS,
-    MAX_BRIEFING_RECORDS, MAX_ANNOUNCEMENT_CHANGE_IDS,
+    MAX_ANNOUNCEMENT_BRIEFING_RECORDS, MAX_ANNOUNCEMENT_CHANGE_IDS,
     build_live_announcement_briefing, summarize_live_announcement_change,
 };
 pub use live_announcement_projection::{
