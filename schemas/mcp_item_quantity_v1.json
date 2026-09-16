@@ -1,0 +1,28 @@
+{
+  "condition": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["op", "scope", "quantity_unit", "predicate", "comparison", "value"],
+    "properties": {
+      "op": {"const": "item_quantity"},
+      "scope": {"const": "observed_projection"},
+      "quantity_unit": {"const": "stack_units"},
+      "predicate": {"$ref": "#/$defs/watch_count_predicate"},
+      "comparison": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]},
+      "value": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+    },
+    "description": "Compare the sum of native U64 stack_size fields for selected observed item records. Unknown membership contributes [0, known quantity]; unknown quantity has no established upper bound. True or false requires the entire bound to agree. Not usable supply, portions, nutrition, reachability or global absence."
+  },
+  "query": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["kind", "scope", "quantity_unit", "predicate"],
+    "properties": {
+      "kind": {"const": "item_quantity"},
+      "scope": {"const": "observed_projection"},
+      "quantity_unit": {"const": "stack_units"},
+      "predicate": {"$ref": "#/$defs/watch_count_predicate"}
+    },
+    "description": "Read the same complete bounded quantity summary used by item_quantity watches without registering, sampling or changing a watch. No pagination or bridge read; omitted bounded examples are explicit. All predicate nodes share one scan/deadline allowance."
+  }
+}
