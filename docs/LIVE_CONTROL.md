@@ -23,7 +23,7 @@ bridge prepare (no mutation)
 → acknowledge terminal result
 ```
 
-If any step after `CommitStarted` is ambiguous, the effect remains reconciliation-required. Restarting the Rust process never turns that state back into a retryable prepare.
+If any step after `CommitStarted` is ambiguous, the effect remains reconciliation-required. Restarting the Rust process never turns that state back into a retryable prepare. Before `CommitStarted`, the alternative `Prepared -> CancelledBeforeDispatch` transition durably prevents this coordinator from dispatching that key without calling the bridge.
 
 ### Prepare
 
@@ -37,9 +37,19 @@ The native record keeps the desired pause state and expected prepare tick separa
 
 If the Rust process dies after bridge prepare but before the durable `Prepared` record is synced, no game mutation has occurred. On a later attempt the bridge may know a key that the journal does not; the runtime refuses to adopt it implicitly and requires a new idempotency key.
 
+### Cancel before dispatch
+
+`fortress.cancel` accepts the exact retained `idempotency_key` and `plan_digest` in a writable live control session. It durably retires a still-prepared key without a native call, reconnect, pause toggle or undo. Full acknowledgement rendering precedes append; successful sync precedes publication and acknowledgement. A failed response budget leaves the preparation unchanged.
+
+`CancelledBeforeDispatch` is terminal coordinator evidence, not a native not-applied receipt. It retains immutable preparation identity with `effect_known=false` and no observed pause/tick or receipt. The same key cannot be committed or reused. Query and explain expose it as `cancelled_before_dispatch`, including after restart. Replaying cancellation does not append or rewind a later journal head.
+
+Started/indeterminate attempts cannot be cancelled and remain reconciliation-required; verified effects cannot be undone by this operation. Cancellation and commit-start serialize on the session mutex. A partial write or uncertain sync fences the journal without acknowledgement; normal recovery determines which complete records survived. Existing recovery-only sessions cannot write cancellation evidence.
+
+An already-open writable session can cancel after bridge failure, but live bootstrap still requires its existing handshake. Native retained preparation capacity is not released, and independent controllers are not fenced. See [CONTROL_CANCELLATION.md](CONTROL_CANCELLATION.md) for exact scope, failure behavior, on-disk compatibility and unexecuted Rust regressions.
+
 ### Commit
 
-Commit requires the exact key, plan digest, and prepare token already present in the durable journal.
+Commit requires the exact key, plan digest, and prepare token already present in the durable journal. A cancelled key is refused before transport even when that identity matches.
 
 Before calling the bridge, the coordinator appends and syncs `CommitStarted`. If this durability boundary fails, **no bridge mutation is attempted**.
 
@@ -63,7 +73,7 @@ After Rust-process restart, the journal reconstructs the exact transition chain.
 
 If the same bridge incarnation retains a complete matching terminal receipt, live reconciliation records the applied/not-applied result durably. If the generation changed, the key is unknown, or no terminal receipt exists, the durable record remains **indeterminate**. Invalid or contradictory evidence is rejected without resolving the existing attempt. The same effect is never reported safe to retry. A fresh observation and a new plan/idempotency key are required for a new effect.
 
-A `Prepared` record that never reached `CommitStarted` may still be committed once only in a live session when the current bridge generation exactly matches the generation sealed into the durable prepare. Otherwise it must be abandoned in favor of a new plan/key. Reconciliation does not commit a prepared record.
+A `Prepared` record that never reached `CommitStarted` may still be committed once only in a live session when the current bridge generation exactly matches the generation sealed into the durable prepare. Otherwise it must be abandoned in favor of a new plan/key. Reconciliation does not commit a prepared record. A cancelled record stays terminal and cannot be reconciled into native outcome evidence.
 
 This policy deliberately prefers an unresolved durable record over the possibility of replaying a mutation whose prior outcome cannot be proved.
 
@@ -75,7 +85,9 @@ The journal is hash chained and bounded to 64 MiB, 16,384 transitions, and 4,096
 
 A write or sync failure fences the journal. Default startup refuses an incomplete tail without changing the file. In live mode, `DFMCP_CONTROL_JOURNAL_REPAIR=1` permits truncating only an incomplete trailing frame after a verified prefix. Complete corrupt frames and broken predecessor chains are never silently repaired. Recovery-only mode refuses the repair opt-in entirely.
 
-Recovery uses a read-only file descriptor, retains the same exclusive lock and custody checks, and never creates, initializes, truncates, syncs or appends a journal. All mutation entry points reject recovery mode even if a caller supplies a `ControlClock` context. Public MCP operations recheck authority and journal custody before exposing even an idempotent or terminal result.
+Recovery uses a read-only file descriptor, retains the same exclusive lock and custody checks, and never creates, initializes, truncates, syncs or appends a journal. All mutation entry points reject recovery mode even if a caller supplies a `ControlClock` context. Public MCP operations recheck authority and journal custody before exposing even an idempotent or terminal result. Journal mutation APIs now also perform those custody checks before cached replays.
+
+Cancellation adds journal state tag 6 without rewriting existing encodings. Older readers reject complete cancellation records rather than making their keys dispatchable. Such records are not incomplete tails and are not removable through normal incomplete-tail repair. Replay also rejects absent pause evidence carrying a nonzero observation tick.
 
 The receipt-verification increment governs newly received live evidence. It does not migrate or cryptographically requalify terminal records already persisted by earlier code. Existing journal replay still checks framing, chain, transition identity and applied pause-state consistency. A retained terminal record is stored historical evidence, not a new claim of current game truth.
 
@@ -97,7 +109,7 @@ cargo run --locked --bin dfmcp-live-control-dev-server
 
 Opening a default live session creates a new journal file as `0600` when needed. Existing files must already satisfy custody rules. `DFMCP_CONTROL_JOURNAL_REPAIR=1` is an explicit operator-only incomplete-tail repair opt-in for live mode.
 
-The runtime rejects unrelated `DFMCP_*` environment state and production admission provenance. Live sessions grant only `ControlClock` at reversible risk; recovery-only sessions grant only `Query` at read-only risk. The control session namespace is distinct from the read-profile namespaces and the runtime retains at most one control or recovery session. The eleven top-level tool names remain present. Session opening, `fortress.query`, `fortress.explain`, and `fortress.doctor` work in both modes; `fortress.plan`, `fortress.commit`, and `fortress.wait` require live mode. Other operations refuse.
+The runtime rejects unrelated `DFMCP_*` environment state and production admission provenance. Live sessions grant only `ControlClock` at reversible risk; recovery-only sessions grant only `Query` at read-only risk. The control session namespace is distinct from the read-profile namespaces and the runtime retains at most one control or recovery session. The eleven top-level tool names remain present. Session opening, `fortress.query`, `fortress.explain`, and `fortress.doctor` work in both modes; `fortress.plan`, `fortress.commit`, `fortress.cancel`, and `fortress.wait` require writable live mode. Cancellation does not contact the bridge. Other operations refuse.
 
 Agent Turn metadata says `runtime_admitted=false` and `mutation_admissible=false`. Live mode separately reports `development_mutation_enabled=true`; recovery-only mode reports false and advertises no supported effects. Both explicitly distinguish coordinator evidence from current game facts.
 
@@ -131,7 +143,7 @@ Use `fortress.query` with the returned session ID:
 }
 ```
 
-The default state filter is `all`. Other filters are `nonterminal`, `reconciliation_required`, `prepared`, `commit_started`, `indeterminate`, `verified_applied`, and `verified_not_applied`. `nonterminal` includes prepared effects; `reconciliation_required` includes only started or indeterminate attempts.
+The default state filter is `all`. Other filters are `nonterminal`, `reconciliation_required`, `prepared`, `commit_started`, `indeterminate`, `verified_applied`, `verified_not_applied`, and `cancelled_before_dispatch`. `nonterminal` includes prepared effects; `reconciliation_required` includes only started or indeterminate attempts. Both exclude cancelled effects, which are counted separately from native verified outcomes.
 
 Results are sorted by idempotency key and contain complete durable records, total/matching counts, counts for each state, and the journal ID/head. The result reports `current_freshness_proven=false`, `reconciliation_performed=false`, and `commit_permitted=false`. A historical applied receipt does not establish that the game is still paused now.
 
@@ -139,7 +151,7 @@ A page may contain fewer records than `limit` to fit the negotiated response bud
 
 `limit` must be 1..128 and is narrowed by the session entity budget. Optional `max_bytes` and `max_output_tokens` can only narrow the session response limits. Successful pages include the entire Agent Turn in byte accounting; tokens are explicitly estimated as `ceil(UTF-8 bytes / 4)`, not counted with a model tokenizer. A budget too small for one complete matching record and required metadata returns `BudgetExceeded`, never a zero-progress continuation. No fields or authority metadata are silently removed to fit a page.
 
-Recovery-mode `fortress.explain` returns the selected stored record without querying the bridge or changing the journal. `fortress.doctor` reports no bridge connection and an unknown/null current bridge generation. To perform live reconciliation, stop this server and open a new live session with bridge credentials. A recovery session cannot upgrade itself or dispatch an effect.
+Recovery-mode `fortress.explain` returns the selected stored record without querying the bridge or changing the journal. `fortress.doctor` reports no bridge connection and an unknown/null current bridge generation. To perform live reconciliation, stop this server and open a new live session with bridge credentials. A recovery session cannot upgrade itself, cancel a preparation or dispatch an effect.
 
 ### Bounded reconciliation with fortress.wait (live mode)
 
@@ -155,7 +167,7 @@ Select real keys returned by `fortress.query`:
 
 The pass accepts 1..16 unique known keys within the session entity budget. It validates the complete selection, sorts by key, and reserves the worst-case complete response including the Agent Turn before any bridge query or journal transition. An unknown/duplicate key or inadequate response budget rejects the whole selection before work. Select fewer keys when a large selection cannot fit. Optional `max_bytes`, `max_output_tokens`, and `max_wall_millis` only narrow the existing session allowances.
 
-Only `CommitStarted` and `Indeterminate` records are queried. Prepared records are returned unchanged, never committed; terminal records are returned as stored evidence without a query. The recovery transport interface has only a query method, not prepare or commit.
+Only `CommitStarted` and `Indeterminate` records are queried. Prepared records are returned unchanged, never committed; terminal records, including cancellations, are returned as stored evidence without a query. The recovery transport interface has only a query method, not prepare or commit.
 
 A pass uses one shared wall-time allowance rather than resetting the budget per key. It stops querying on the first error or exhausted deadline and marks later unresolved records deferred. Each accepted result is synced individually before reporting a terminal transition. Successful earlier transitions are retained even when a later query fails. A sync failure fences the journal and cannot be acknowledged as a newly terminal result. The deadline is cooperative around storage operations; synchronous filesystem calls are not claimed to have a hard cancellation bound.
 
@@ -175,7 +187,7 @@ This is one foreground pass, not a background polling task or a temporal game-go
 }
 ```
 
-Use the returned durable `prepare_token_hex` for commit.
+Use the returned durable `prepare_token_hex` for commit, or cancel the exact key/digest before dispatch.
 
 ### Commit example (live mode)
 
@@ -188,7 +200,7 @@ Use the returned durable `prepare_token_hex` for commit.
 }
 ```
 
-If commit reports `effect_indeterminate`, do not call commit again for that durable effect.
+If commit reports `effect_indeterminate`, do not call commit again for that durable effect. Cancellation cannot erase the unresolved attempt.
 
 ### Explain/reconcile example
 
@@ -200,9 +212,11 @@ If commit reports `effect_indeterminate`, do not call commit again for that dura
 }
 ```
 
-The response reports the durable state, recorded bridge generation, observed pause state/tick when established, receipt digest and journal head. In live mode it may reconcile and report whether a new plan is required. In recovery-only mode it reports only stored evidence and never permits commit. `safe_to_retry_same_effect` remains false once a commit attempt has started.
+The response reports the durable state, recorded bridge generation, observed pause state/tick when established, receipt digest and journal head. In live mode it may reconcile and report whether a new plan is required. Cancelled records return stored evidence without a bridge query in either mode. In recovery-only mode explain never permits commit. `safe_to_retry_same_effect` remains false once a commit attempt has started.
 
 ## Evidence status
+
+The cancellation increment adds 21 registered Rust test functions covering the durable transition, publication faults, cached custody checks, independent binary vectors, actual handlers, discovery and cancel/commit-start races. They have not been compiled or executed. The independent framing reference and its limits are recorded in [CONTROL_CANCELLATION.md](CONTROL_CANCELLATION.md).
 
 The recovery-only increment added 14 Rust regression tests: seven adapter journal tests, four bounded-query tests, and three Unix MCP-handler tests. They cover read-only replay, authority/custody, no-write behavior, retention/replay bounds, pagination and actual offline handlers.
 
@@ -215,12 +229,14 @@ The changed actual native producer was compiled and executed through `scripts/te
 Reproducible focused commands on a configured checkout:
 
 ```bash
+python3 scripts/test_control_cancellation_vectors.py
 python3 scripts/test_live_control_outcomes_native_mock.py --compiler g++
 python3 scripts/test_live_control_outcomes_native_mock.py --compiler clang++
 cargo test --locked -p dfmcp-adapter control_effect_journal
+cargo test --locked -p dfmcp-adapter --test control_cancellation_vectors
 cargo test --locked -p dfmcp-adapter pause_reconciliation
 cargo test --locked -p dfmcp-adapter live_control_rpc
-cargo test --locked -p dfmcp-mcp live_control_server
+cargo test --locked -p dfmcp-mcp live_control_server -- --test-threads=1
 ```
 
 These commands are not a substitute for the repository's full verification and qualification requirements. No Rust compilation/test pass, filesystem power-loss campaign, disposable-fort control campaign, registry entry, monotonic-floor advancement, qualified server artifact, production runner, or admitted mutation capability is claimed. Protocol 1.7 remains unadmitted. Its existing method/field layout and receipt domains are unchanged; these source fixes do not inherit qualification from older plugin bytes.
