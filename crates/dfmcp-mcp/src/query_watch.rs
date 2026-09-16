@@ -371,6 +371,14 @@ impl Probe {
 }
 
 impl Watch {
+    fn seal(&mut self) -> Result<()> {
+        self.evidence_digest = digest(&json!({"domain":"dfmcp-condition-watch-evidence-v1",
+            "watch":self.handle,"prior_digest":self.evidence_digest.to_string(),
+            "anchor":anchor(self.last_seen),"status":self.status.text(),
+            "streak":self.streak,"samples":self.samples,"evaluation":self.evaluation}))?;
+        Ok(())
+    }
+
     #[cfg(test)]
     fn advance(&mut self, snapshot: &WorldSnapshot, initial: bool) -> Result<()> {
         self.advance_bounded(snapshot, initial, &mut counts::EvaluationBudget::new(60_000))
@@ -480,7 +488,7 @@ impl Watch {
         result["created_at"] = anchor(self.created_at);
         result["sample_count"] = json!(self.samples);
         result["evaluation"] = self.evaluation.clone();
-        return result;
+        result
     }
 }
 
