@@ -68,12 +68,12 @@ fn heartbeat_and_cadence_do_not_manufacture_samples()->Result<()> {
 fn explicit_selection_is_canonical_and_does_not_advance_unselected_work()->Result<()> {
     let store=Mutex::new(Store::default());let s=snapshot(0,1);let c=context(&s);
     let a=paused(&store,&s,&c,"a",3)?;let b=paused(&store,&s,&c,"b",3)?;
-    let prior=record(&lock(&store)?,c.session_id,&b)?.evidence_digest;
+    let prior=record(&*lock(&store)?,c.session_id,&b)?.evidence_digest;
     let prepared=prepare_in(&store,&s,&c,&request(true,Some(&[a])),encoded)?;
     let later=snapshot(1,2);let mut next=c;next.anchor=later.anchor();
     let result=decode(&complete_in(&store,&later,&next,prepared,true,encoded)?)?;
     assert_eq!(result["selected"],1);assert_eq!(result["sampled"],1);
-    assert_eq!(record(&lock(&store)?,next.session_id,&b)?.evidence_digest,prior);Ok(())
+    assert_eq!(record(&*lock(&store)?,next.session_id,&b)?.evidence_digest,prior);Ok(())
 }
 
 #[test]
@@ -109,17 +109,17 @@ fn empty_and_terminal_only_batches_need_no_observe_authority()->Result<()> {
 fn failed_render_or_late_watch_error_publishes_none_of_the_batch()->Result<()> {
     let store=Mutex::new(Store::default());let s=snapshot(0,1);let c=context(&s);
     paused(&store,&s,&c,"a",3)?;let b=paused(&store,&s,&c,"b",3)?;
-    let prior=registry(&lock(&store)?,c.session_id)?;
+    let prior=registry(&*lock(&store)?,c.session_id)?;
     let later=snapshot(1,2);let mut next=c.clone();next.anchor=later.anchor();
     let prepared=prepare_in(&store,&s,&c,&request(true,None),encoded)?;
     assert!(complete_in(&store,&later,&next,prepared,true,|_|Err(bounded("injected renderer failure"))).is_err());
-    assert_eq!(registry(&lock(&store)?,c.session_id)?,prior);
+    assert_eq!(registry(&*lock(&store)?,c.session_id)?,prior);
     {let mut guard=lock(&store)?;let w=guard.entries.get_mut(&(c.session_id,b)).ok_or_else(||invalid("test watch"))?;
         w.samples=u64::MAX;w.seal()?;}
-    let prior=registry(&lock(&store)?,c.session_id)?;
+    let prior=registry(&*lock(&store)?,c.session_id)?;
     let prepared=prepare_in(&store,&s,&c,&request(true,None),encoded)?;
     assert!(complete_in(&store,&later,&next,prepared,true,encoded).is_err());
-    assert_eq!(registry(&lock(&store)?,c.session_id)?,prior);Ok(())
+    assert_eq!(registry(&*lock(&store)?,c.session_id)?,prior);Ok(())
 }
 
 #[test]
@@ -128,10 +128,10 @@ fn registry_change_during_capture_is_a_conflict_not_a_partial_poll()->Result<()>
     paused(&store,&s,&c,"a",3)?;
     let prepared=prepare_in(&store,&s,&c,&request(true,None),encoded)?;
     paused(&store,&s,&c,"new",3)?;
-    let prior=registry(&lock(&store)?,c.session_id)?;
+    let prior=registry(&*lock(&store)?,c.session_id)?;
     let later=snapshot(1,2);let mut next=c.clone();next.anchor=later.anchor();
     assert!(matches!(complete_in(&store,&later,&next,prepared,true,encoded),Err(e)if e.code==ErrorCode::Conflict));
-    assert_eq!(registry(&lock(&store)?,c.session_id)?,prior);
+    assert_eq!(registry(&*lock(&store)?,c.session_id)?,prior);
     let prepared=prepare_in(&store,&s,&c,&request(true,None),encoded)?;
     let mut other=c.clone();other.session_id=SessionId::new(8403);paused(&store,&s,&other,"other",3)?;
     assert!(complete_in(&store,&later,&next,prepared,true,encoded).is_ok());Ok(())
