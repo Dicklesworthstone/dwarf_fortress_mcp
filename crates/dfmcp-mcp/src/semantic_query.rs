@@ -13,9 +13,23 @@ mod query_watch;
 #[path = "query_history_tests.rs"]
 mod history_tests;
 
-use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier};
+use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result,
+    RiskTier, StateAnchor};
 use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
+
+/// Ownership of a durable watch registry belongs to the enclosing session.
+/// Dropping it releases only process-local ownership, never durable intent.
+pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
+
+/// The spatial/1.8 caller supplies exact verified archive anchors after syncing
+/// its fresh bootstrap capture. No MCP argument can select a journal or profile.
+pub(crate) fn attach_watch_journal<F>(snapshot: &WorldSnapshot, context: &OperationContext,
+    path: &std::path::Path, archive: Digest32, observations: &[StateAnchor], value: Value, publish: F)
+    -> Result<(String, WatchJournalGuard)>
+where F: FnOnce(Value) -> Result<String> {
+    query_watch::attach_journal(snapshot, context, path, archive, observations, value, publish)
+}
 
 pub fn execute(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
     match input.get("query").and_then(|query| query.get("kind")).and_then(Value::as_str) {
