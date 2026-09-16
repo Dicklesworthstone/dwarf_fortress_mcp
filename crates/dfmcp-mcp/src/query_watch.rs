@@ -21,6 +21,9 @@ pub(super) mod batch;
 mod counts;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> { counts::extend_schema(schema) }
+pub(super) fn quantity_query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
+    counts::quantity::query(snapshot, context, input)
+}
 
 const MAX_PER_SESSION: usize = 8;
 const MAX_TOTAL: usize = 128;
@@ -50,6 +53,8 @@ enum Condition {
     Field { entity_id: String, generation: u32, field: String, comparison: Comparison, value: Literal },
     EntityCount { scope: counts::Scope, kind: counts::Kind, predicate: counts::Predicate,
         comparison: Comparison, value: u64 },
+    ItemQuantity { scope: counts::Scope, quantity_unit: counts::quantity::QuantityUnit,
+        predicate: counts::Predicate, comparison: Comparison, value: u64 },
     Paused { value: bool },
     TickAtLeast { value: u64 },
     All { args: Vec<Condition> },
@@ -237,10 +242,10 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                     return Err(invalid("watch text literal exceeds its byte bound or contains NUL"));
                 }
             }
-            Condition::EntityCount { predicate, .. } => {
+            Condition::EntityCount { predicate, .. } | Condition::ItemQuantity { predicate, .. } => {
                 nodes = nodes.saturating_add(counts::validate(predicate, depth + 1)?);
                 if nodes.saturating_add(pending.len()) > MAX_CONDITIONS {
-                    return Err(bounded("count predicates exceed the shared success/failure node budget"));
+                    return Err(bounded("population predicates exceed the shared success/failure node budget"));
                 }
             }
             Condition::All { args } | Condition::Any { args } => {
@@ -293,6 +298,9 @@ impl Probe {
         match condition {
             Condition::EntityCount { kind, predicate, comparison, value, .. } => {
                 counts::evaluate(self, snapshot, *kind, predicate, *comparison, *value, budget)
+            }
+            Condition::ItemQuantity { predicate, comparison, value, .. } => {
+                counts::quantity::evaluate(self, snapshot, predicate, *comparison, *value, budget)
             }
             Condition::All { args } | Condition::Any { args } => {
                 let all = matches!(condition, Condition::All { .. });
