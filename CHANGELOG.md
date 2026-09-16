@@ -8,6 +8,14 @@ readiness.
 
 ### Added
 
+- Operational situation briefings and deterministic attention in the live spatial/1.8 loop:
+  seven native-evidence rules, explicit unknown counts, bounded generation/anchor-bound inspection
+  links, compact tactical alerts and `fortress.query` mode `situation` for detailed orientation.
+  Observe/wait include bounded endpoint-count changes without inventing causality or event history.
+- Current-authority and historical-source separation, watch-specific response reservation through
+  the final renderer, and fifteen registered Rust projection/actual-handler scenarios. Those tests
+  remain uncompiled/unexecuted; six independent reference JSON packet shapes fit 8,192 bytes.
+  Behavior, limitations and evidence status are documented in `docs/SPATIAL_SITUATION.md`.
 - `historical_changes` in journal-backed live and archive-only spatial/1.8 sessions: exact record
   pairs, complete selected endpoint projections, generation-aware entered/left/changed rows,
   separate provenance refresh counts, and whole-change pagination without process-local baselines.
@@ -231,7 +239,7 @@ readiness.
 - Bridge-protocol confusion across manifest, launch, ticket, environment, Rust provenance, and
   runtime dispatch now fails closed.
 - Legacy V1 tickets, unknown bridge protocols, protocol 1.1 production attempts, and mismatched
-  protocol representations fail before live-server startup.
+  protocol representations fail before server startup.
 - Protocol-1.1 development execution refuses every production admission marker, including the V2
   protocol environment field.
 - Compatibility registry rollback relative to an accepted local generation fails closed.
@@ -244,6 +252,9 @@ readiness.
 
 ### Current evidence status
 
+- Spatial situation/attention has fifteen registered but uncompiled and unexecuted Rust scenarios.
+  Six independent watch-packet JSON reference cases fit the minimum output budget; this is not
+  execution of Rust rules, watch transitions, actual MCP or native/live-game behavior.
 - Historical endpoint comparisons are source-present with sixteen registered but uncompiled and
   unexecuted Rust scenarios. The 66 Python checks validate the record/page envelope only, not the
   delegated selector schema, Rust comparison, journal replay, MCP or native/live qualification.
