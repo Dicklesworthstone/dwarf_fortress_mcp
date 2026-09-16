@@ -89,7 +89,7 @@ fn full_projection_authority_anchor_cancellation_and_work_limits_are_checked() -
             0=>c.grants.clear(),1=>c.cancellation_requested=true,
             2=>c.anchor.cursor.sequence+=1,
             3=>c.budget.max_entities=1,
-            _=>c.grants[0].scope.entity_ids=vec![EntityId::new(9)],
+            _=>c.grants[0].scope.entity_ids=[EntityId::new(9)].into_iter().collect(),
         }
         assert!(analysis::diagnose_production(&state,&c,DiagnosisScope::default(),MAX_ANALYSIS_WORK).is_err());
         assert!(analysis::plan_inventory(&state,&c,&demands(),MAX_ANALYSIS_WORK).is_err());
