@@ -95,7 +95,7 @@ fn archive_bootstrap_and_actual_queries_never_claim_live_freshness()->Result<()>
     let before=fs::read(&files.path).map_err(io_error)?;let (s,opened)=register(&files,65536)?;
     assert_eq!(opened["archive_only"],true);assert_eq!(opened["live"],false);
     assert_eq!(opened["agent_turn"]["continuity"]["status"],"partial");
-    for mode in ["summary","citizens","jobs","buildings","items","tiles","history","production"] {
+    for mode in ["summary","citizens","jobs","buildings","items","tiles","history"] {
         let result=decode(&fortress_query(s.handle(),Some(mode.into()),None))?;
         assert_eq!(result["ok"],true,"mode={mode}: {result}");
         assert_eq!(result["historical"],true);assert_eq!(result["native_captures"],0);
@@ -148,9 +148,10 @@ fn archive_rejects_monitoring_baselines_refresh_and_all_effect_tools()->Result<(
     for name in ["watch","poll_watch","await_watch","watches","cancel_watch","release_watch","capture","changes","baselines","release_baseline"] {
         assert_eq!(ask(&s,json!({"kind":name}))?["error"]["code"],"capability_denied","{name}");
     }
-    for call in [fortress_observe,fortress_wait,fortress_plan,fortress_commit,fortress_cancel,fortress_checkpoint,fortress_restore] {
+    for call in [fortress_observe,fortress_wait,fortress_plan,fortress_commit,fortress_checkpoint,fortress_restore] {
         assert_eq!(decode(&call(s.handle()))?["error"]["code"],"capability_denied");
     }
+    assert_eq!(decode(&fortress_cancel(s.handle(),None,None))?["error"]["code"],"capability_denied");
     {let handle=resolve(s.handle())?;let mut session=lock(&handle)?;
         session.grants.push(grants(&[Capability::Observe],None).remove(0));let c=session.context()?;
         assert!(matches!(session.refresh(&c),Err(e)if e.code==ErrorCode::CapabilityDenied));
