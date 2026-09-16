@@ -184,12 +184,13 @@ fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error()->Re
 }
 
 #[test]
-fn archive_schema_advertises_only_the_twelve_executable_read_variants()->Result<()> {
+fn archive_schema_advertises_thirteen_read_variants_including_endpoint_comparison()->Result<()> {
     let _serial=lock(&SERIAL)?;let files=Files::new()?;files.populate(2)?;let (s,_)=register(&files,65536)?;
     let result=decode(&fortress_query(s.handle(),Some("schema".into()),None))?;
     assert_eq!(result["ok"],true,"{result}");
     let variants=result["query_schema"]["$defs"]["query"]["oneOf"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"schema variants"))?;
-    assert_eq!(variants.len(),12);
+    assert_eq!(variants.len(),13);
+    assert!(variants.iter().any(|v|v["properties"]["kind"]["const"]=="historical_changes"));
     assert_eq!(result["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(10));
     for variant in variants {assert_ne!(variant["properties"]["kind"]["const"],"watch");}
     Ok(())
@@ -211,3 +212,6 @@ fn archive_configuration_and_bootstrap_fail_without_creating_replacement_history
     assert!(open(next_id()?,Slot::reserve()?,&files.path,wrong,budget(65536),&[Capability::Query]).is_err());
     assert_eq!(fs::read(&files.path).map_err(io_error)?,before);Ok(())
 }
+
+#[path = "spatial_history_changes_tests.rs"]
+mod comparisons;
