@@ -7,6 +7,9 @@
 #[path="spatial_watch_runtime.rs"] mod durable_watches;
 #[path="workforce_queries.rs"] mod workforce_queries;
 #[path="spatial_archive_runtime.rs"] mod archive;
+#[path="spatial_situation.rs"] mod situation;
+#[cfg(test)]
+#[path="spatial_situation_tests.rs"] mod situation_tests;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc,LazyLock,Mutex,MutexGuard};
@@ -101,18 +104,40 @@ fn coverage()->Value{json!({"status":"partial","complete_domains":["fortress.cit
     "partial_domains":[{"domain":"fortress.spatial","reason":"one coherent capture; hidden terrain redacted and route model deliberately restricted"},
         {"domain":"citizen_skills","reason":"observed sparse nonzero skills and job availability; no complete native skill-key registry or labor eligibility"}],
     "omitted_domains":["noncitizen_units","outside_region_terrain","full_unit_navigation_rules","citizen_needs_health","native_labor_configuration","native_material_requirements","continuous_game_history"],"continuation":null})}
-fn packet(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,mut v:Value)->Result<String>{
+fn situation_report(s:&Session,c:&OperationContext)->Result<Option<situation::Report>>{
+    let mut current=c.clone();current.anchor=s.anchor()?;
+    // Observation-only/Doctor-only callers do not gain Query authority. A fenced
+    // source or archive is not promoted into a current operational situation.
+    if s.source.archive_only()||s.source.poisoned()||current.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_err(){return Ok(None);}
+    let snapshot=s.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"situation snapshot absent"))?;
+    situation::build(snapshot,&current,s.state.source_digest()?).map(Some)
+}
+fn situation_briefing(s:&Session,report:Option<&situation::Report>)->Value{
+    let mut value=briefing(s);
+    value["situation"]=report.map_or_else(||json!({"status":"unavailable","all_clear_proven":false,
+        "reason":"live_source_or_current_query_authority_unavailable"}),situation::Report::summary);
+    value
+}
+fn packet(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,v:Value)->Result<String>{
+    packet_with_basis(s,c,operation,v,None)
+}
+fn packet_with_basis(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,mut v:Value,before:Option<&situation::Report>)->Result<String>{
     let mut work=empty_active_work();if let Some(w)=v.as_object_mut().and_then(|m|m.remove("_condition_watch_work")){work["obligations"]=w;}
     if let(Some(s),Some(c))=(s,c){if s.source.archive_only(){return archive::packet(s,c,operation,None,v);}}
     let mut builder=AgentTurnBuilder::new(operation,AgentPhase::Inspect).active_work(work);let mut maximum=8192;
     if let(Some(s),Some(c))=(s,c){let a=s.anchor()?;maximum=s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize;v["session_id"]=json!(s.id.to_string());v["anchor"]=anchor_json(a);
+        let report=situation_report(s,c)?;
+        if let Some(report)=&report{
+            builder=builder.attention(report.attention(s.id));
+            if let Some(before)=before{let(summary,changes)=report.comparison(before);v["situation_comparison"]=summary;builder=builder.changes(changes);}
+        }
         let reset=v["reset"]==true;
         let opening=operation=="fortress.open_session";
         let recovered=v.get("watch_recovery").and_then(|r|r.get("restored")).and_then(Value::as_u64).is_some_and(|n|n>0);
         let continuity=if s.source.poisoned(){ContinuityStatus::Stale}else if reset{ContinuityStatus::Reset}
             else if recovered{ContinuityStatus::Partial}else if opening{ContinuityStatus::Bootstrap}
             else if v["kind"]=="heartbeat"{ContinuityStatus::Heartbeat}else{ContinuityStatus::Continuous};
-        builder=builder.session_id(s.id.to_string()).request_id(c.request_id.to_string()).anchor(anchor_json(a)).briefing(briefing(s)).coverage(coverage())
+        builder=builder.session_id(s.id.to_string()).request_id(c.request_id.to_string()).anchor(anchor_json(a)).briefing(situation_briefing(s,report.as_ref())).coverage(coverage())
             .continuity(continuity,if opening{None}else{Some(anchor_json(c.anchor))},
                 recovered.then(||json!({"reason":"watch_monitoring_gap_during_process_downtime","stability_reset":true})),
                 reset.then(||"citizen_spatial_capture_epoch_reset".to_owned()));
@@ -146,7 +171,7 @@ fn capabilities(input:Option<Vec<String>>)->Result<Vec<Capability>>{let input=in
     let mut out=Vec::new();for name in input{let c=match name.as_str(){"observe"=>Capability::Observe,"query"=>Capability::Query,"doctor"=>Capability::Doctor,
         _=>return Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 cannot grant that capability"))};if out.contains(&c){return Err(error(ErrorCode::InvalidRequest,"duplicate capability"));}out.push(c);}Ok(out)}
 
-#[tool(description="Open an unadmitted spatial/1.8 session. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive.")]
+#[tool(description="Open an unadmitted spatial/1.8 session with a bounded operational briefing and evidence-linked attention. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive.")]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Option<u32>,max_capture_bytes:Option<u64>,page_bytes:Option<u32>,
     max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>,recovery_only:Option<bool>)->String{
@@ -189,21 +214,31 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
             "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}});
         let out=durable_watches::finish_open(&mut s,&c,watch_path.as_deref(),value)?;
         lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));Ok(out)})();match result{Ok(v)=>v,Err(e)=>failure(None,None,"fortress.open_session",&e)}}
-fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Observe,|s,c|{let outcome=s.refresh(&c)?;let mut target=c.clone();target.anchor=s.anchor()?;
+fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Observe,|s,c|{
+    let before=situation_report(s,&c)?;let outcome=s.refresh(&c)?;let mut target=c.clone();target.anchor=s.anchor()?;
     target.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;let v=json!({"ok":true,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},
         "reset":outcome==JobPublication::Reset,"native_captures":1,"transfer_pages":s.source.pages(),"game_clock_controlled":false});
-    if target.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok(){semantic_query::publish_with_active_work(&target,v,|v|packet(Some(s),Some(&c),operation,v))}else{packet(Some(s),Some(&c),operation,v)}})}
-#[tool(description="Acquire one new coherent citizens/operations/terrain capture without modifying game time or state. Archive-only sessions refuse.")]pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"fortress.observe")}
-#[tool(description="Acquire one coherent capture. Use query await_watch for a sampled foreground condition. Archive-only sessions refuse.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
+    if target.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok(){semantic_query::publish_with_active_work(&target,v,|v|packet_with_basis(Some(s),Some(&c),operation,v,before.as_ref()))}
+    else{packet_with_basis(Some(s),Some(&c),operation,v,None)}})}
+#[tool(description="Acquire one coherent capture without changing game time. Query-authorized live sessions receive operational attention and bounded endpoint-count changes, not event history or causal diagnoses. Archive-only sessions refuse.")]pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"fortress.observe")}
+#[tool(description="Acquire one coherent capture and summarize operational count changes. Use query await_watch for a sampled foreground condition. Archive-only sessions refuse.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
 fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(QueryResponseProjection{session_id:s.id.to_string(),request_id:c.request_id.to_string(),
     anchor:anchor_json(s.anchor()?),briefing:briefing(s),attention:Vec::new(),affordances:Vec::new(),coverage:coverage(),
     uncertainty:vec![json!({"domain":"unit_navigation_and_labor","epistemic_state":"partial","reason":"sparse skill and job-availability evidence is observed; needs, native labor eligibility and full movement rules are not"})],
     budget:json!({"admitted":{"max_bytes":s.budget.max_bytes,"max_output_tokens":s.budget.max_output_tokens}}),
     references:vec![json!({"kind":"coherent_citizen_spatial_capture","digest":s.state.source_digest()?.to_string()})],
     maximum_bytes:s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize})}
+// Historical handlers intentionally use the unadorned view above. Never mix a
+// current operational finding into a response anchored to an older record.
+fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{
+    let report=situation_report(s,c)?;let mut projection=view(s,c)?;
+    projection.briefing=situation_briefing(s,report.as_ref());
+    if let Some(report)=report{projection.attention=report.attention(s.id);}
+    Ok(projection)
+}
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query coherent spatial/1.8 data. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Workforce queries analyze skill/capacity without assigning labor. In recovery_only sessions all results are historical: stateless graph/terrain/inventory/workforce reads and exact-record history only; no watches, baselines or live acquisition.")]
+#[tool(description="Query coherent spatial/1.8 data with operational briefing and exact-anchor inspection links. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention, watches, baselines or acquisition.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
@@ -224,15 +259,16 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         if semantic_query::prepare_await(snapshot,&c,&input)?{let basis=c.anchor;let outcome=s.refresh(&c)?;c.anchor=s.anchor()?;c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
             refresh=Some(json!({"basis":anchor_json(basis),"reset":outcome==JobPublication::Reset,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},"native_captures":1,"transfer_pages":s.source.pages()}));}
         if let Some(obj)=input.as_object_mut(){obj.remove("expected_anchor");}input["query"]["kind"]=json!("poll_watch");}
-    let view=view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
+    let view=situation_view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
     if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":workforce_queries::extend_schema(history::schema()?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
     if workforce_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=workforce_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     if spatial_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=spatial_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     let snapshot=s.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 snapshot absent"))?;
     semantic_query::execute_with_publisher(snapshot,&narrowed,&input,|mut v|{v["source_stale"]=json!(s.source.poisoned());if let Some(r)=refresh{v["observation_refresh"]=r;}finish(&view,v)})})}
-#[tool(description="Explain coherent citizen/job assignment, workforce model limits, spatial coverage and optional exact-record history. No effect authority is inferred.")]
+#[tool(description="Explain coherent evidence, workforce limits and the deterministic situation-attention rule catalog. Findings are inspection priorities, not causal diagnoses or effect authority.")]
 pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_id,"fortress.explain",Capability::Query,|s,c|
     semantic_query::publish_with_active_work(&c,json!({"ok":true,"coherence":"strict citizens, operations and requested terrain are one native capture",
+        "situation_policy":situation::policy(),
         "worker_join":"observed strict-citizen workers have generation-checked unit entities and performs edges to jobs",
         "workforce":"query workforce_plan maximizes filled declared worker slots with one capacity per citizen; no labor assignment, reservation, native job eligibility or global distance/skill optimum is proved",
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
@@ -249,4 +285,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Set recovery_only=true at open to inspect an existing observation archive without DFHack or credentials; archived facts are historical, no live acquisition or monitoring is allowed, and exact-record route drill-downs never select newer observations. Default live mode captures strict citizens, jobs, buildings, items and terrain together. Query workforce_candidates or workforce_plan for model-only staffing analysis. Paired operator watch journals preserve monitoring definitions and outcomes; live restart gives fresh handles and resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Live Agent Turns include a bounded operational situation, observed warning signs and exact-anchor inspection requests. Observe/wait summarize endpoint count changes, never causal or continuous history. Explain exposes the rule policy. Recovery-only sessions inspect original archives without credentials; archived facts never become current operational attention. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
