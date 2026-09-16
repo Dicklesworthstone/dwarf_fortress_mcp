@@ -1,0 +1,36 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"const": "poll_watches"},
+        "watches": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^watch:[0-9a-f]{64}$", "minLength": 70, "maxLength": 70},
+          "description": "Omit or use null to select every retained watch in this session. An explicit selection must be nonempty."
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"const": "await_watches"},
+        "watches": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^watch:[0-9a-f]{64}$", "minLength": 70, "maxLength": 70},
+          "description": "Evaluate the selected set after at most one coherent capture. Empty or entirely terminal session sets acquire no observation."
+        }
+      }
+    }
+  ]
+}
