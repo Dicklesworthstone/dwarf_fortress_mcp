@@ -8,6 +8,15 @@ readiness.
 
 ### Added
 
+- Offline spatial/1.8 archive sessions through `fortress.open_session(recovery_only=true)`, using
+  the existing operator-configured observation journal without DFHack, credentials or a connection.
+  Fixed-profile replay retains exact entity generations and historical anchors under Query and
+  optional Doctor authority; read-only custody refuses creation, repair and write operations.
+- Archive-only graph, terrain, inventory and workforce analysis, bounded history discovery and
+  exact-record historical queries. Route drill-downs stay pinned to their source record. Full
+  Agent Turns label archived evidence as historical and never currently fresh; watches, baselines,
+  live acquisition and effects remain unavailable. Fourteen registered Rust scenarios are unrun;
+  the independent JSON wrapper-size check passed 128 cases. See `docs/SPATIAL_ARCHIVE_RECOVERY.md`.
 - Coherent `workforce_candidates` and `workforce_plan` queries wired into the spatial/1.8 MCP
   dispatcher and schema discovery. Observed skill/readiness and terrain approaches feed the
   existing integral allocator, with capacity one per citizen across 1..16 simultaneous demands,
@@ -228,6 +237,9 @@ readiness.
 
 ### Current evidence status
 
+- Offline spatial archive recovery is source-present with fourteen registered but uncompiled and
+  unexecuted Rust scenarios. The 128 independent JSON-size checks cover route-wrapper sizing only,
+  not Rust, replay, filesystem custody, MCP, native/live-game behavior or qualification.
 - Workforce queries are source-present with fifteen registered but uncompiled/unexecuted Rust
   tests. The 88 passing Python schema cases and 4,096 independent allocation-oracle cases do not
   execute the production allocator or establish Rust, MCP, native/live or admission evidence.
