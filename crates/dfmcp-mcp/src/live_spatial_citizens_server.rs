@@ -5,6 +5,7 @@
 #[path="spatial_queries.rs"] mod spatial_queries;
 #[path="spatial_citizen_history.rs"] mod history;
 #[path="spatial_watch_runtime.rs"] mod durable_watches;
+#[path="workforce_queries.rs"] mod workforce_queries;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc,LazyLock,Mutex,MutexGuard};
@@ -94,8 +95,9 @@ fn briefing(s:&Session)->Value{let full=s.state.observation_full();let base=full
         "freshness":"capture time, not page-transfer completion"})}
 fn coverage()->Value{json!({"status":"partial","complete_domains":["fortress.citizens.strict_roster","current_job_roster","building_roster",
     "item_roster","job_item_attachments","requested_region.cell_presence"],
-    "partial_domains":[{"domain":"fortress.spatial","reason":"one coherent capture; hidden terrain redacted and route model deliberately restricted"}],
-    "omitted_domains":["noncitizen_units","outside_region_terrain","full_unit_navigation_rules","citizen_skills_needs_health","native_material_requirements","continuous_game_history"],"continuation":null})}
+    "partial_domains":[{"domain":"fortress.spatial","reason":"one coherent capture; hidden terrain redacted and route model deliberately restricted"},
+        {"domain":"citizen_skills","reason":"observed sparse nonzero skills and job availability; no complete native skill-key registry or labor eligibility"}],
+    "omitted_domains":["noncitizen_units","outside_region_terrain","full_unit_navigation_rules","citizen_needs_health","native_labor_configuration","native_material_requirements","continuous_game_history"],"continuation":null})}
 fn packet(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,mut v:Value)->Result<String>{
     let mut work=empty_active_work();if let Some(w)=v.as_object_mut().and_then(|m|m.remove("_condition_watch_work")){work["obligations"]=w;}
     let mut builder=AgentTurnBuilder::new(operation,AgentPhase::Inspect).active_work(work);let mut maximum=8192;
@@ -177,13 +179,13 @@ fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,C
 #[tool(description="Acquire one coherent capture. Use query await_watch for a sampled foreground condition.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
 fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(QueryResponseProjection{session_id:s.id.to_string(),request_id:c.request_id.to_string(),
     anchor:anchor_json(s.anchor()?),briefing:briefing(s),attention:Vec::new(),affordances:Vec::new(),coverage:coverage(),
-    uncertainty:vec![json!({"domain":"unit_navigation_and_labor","epistemic_state":"partial","reason":"citizen identity/position/status are observed; skills, needs and full movement rules are not"})],
+    uncertainty:vec![json!({"domain":"unit_navigation_and_labor","epistemic_state":"partial","reason":"sparse skill and job-availability evidence is observed; needs, native labor eligibility and full movement rules are not"})],
     budget:json!({"admitted":{"max_bytes":s.budget.max_bytes,"max_output_tokens":s.budget.max_output_tokens}}),
     references:vec![json!({"kind":"coherent_citizen_spatial_capture","digest":s.state.source_digest()?.to_string()})],
     maximum_bytes:s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize})}
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query one coherent citizen/operations/terrain capture. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. With paired operator journals, watch registration, samples, cancellation and release survive restart. Historical_query replays an exact record without changing live watches. Structured graph, watch, map_route and spatial_inventory_plan queries share the same anchor.")]
+#[tool(description="Query one coherent citizen/operations/terrain capture. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Structured workforce_candidates and workforce_plan analyze observed skill, availability and terrain approaches; workforce_plan never double-books a citizen and does not dispatch labor. Paired journals retain watches. Historical_query replays supported stateless reads; workforce queries currently require the live capture.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
@@ -204,17 +206,19 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
             refresh=Some(json!({"basis":anchor_json(basis),"reset":outcome==JobPublication::Reset,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},"native_captures":1,"transfer_pages":s.source.pages()}));}
         if let Some(obj)=input.as_object_mut(){obj.remove("expected_anchor");}input["query"]["kind"]=json!("poll_watch");}
     let view=view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
-    if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":history::schema()?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
+    if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":workforce_queries::extend_schema(history::schema()?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
+    if workforce_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=workforce_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     if spatial_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=spatial_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     let snapshot=s.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 snapshot absent"))?;
     semantic_query::execute_with_publisher(snapshot,&narrowed,&input,|mut v|{v["source_stale"]=json!(s.source.poisoned());if let Some(r)=refresh{v["observation_refresh"]=r;}finish(&view,v)})})}
-#[tool(description="Explain coherent citizen/job assignment, spatial coverage and optional exact-record history. No effect authority is inferred.")]
+#[tool(description="Explain coherent citizen/job assignment, workforce model limits, spatial coverage and optional exact-record history. No effect authority is inferred.")]
 pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_id,"fortress.explain",Capability::Query,|s,c|
     semantic_query::publish_with_active_work(&c,json!({"ok":true,"coherence":"strict citizens, operations and requested terrain are one native capture",
         "worker_join":"observed strict-citizen workers have generation-checked unit entities and performs edges to jobs",
+        "workforce":"query workforce_plan maximizes filled declared worker slots with one capacity per citizen; no labor assignment, reservation, native job eligibility or global distance/skill optimum is proved",
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
         "history":"optional fixed-profile spatial/1.8 archive; history and historical_query never import another profile or mutate current watches",
-        "unknown":["noncitizen unit details","skills","needs","labor eligibility","full unit pathfinding","outside-region routes"]}),|v|packet(Some(s),Some(&c),"fortress.explain",v)))}
+        "unknown":["noncitizen unit details","complete native skill-key registry","needs","labor eligibility","full unit pathfinding","outside-region routes"]}),|v|packet(Some(s),Some(&c),"fortress.explain",v)))}
 #[tool(description="Report spatial/1.8 source health; no reconnect or qualification claim.")]pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_id,"fortress.doctor",Capability::Doctor,|s,c|
     packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else{"read_only_unadmitted"}})))}
 fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
@@ -226,4 +230,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Strict citizens, jobs, buildings, items and one terrain region share one immutable native capture. Use unit/job performs and located_at edges for observed assignment/location; route/allocation results remain model-only. Optional fixed-profile history replays exact captures. Paired operator-configured watch journals preserve monitoring definitions and outcomes; restart gives fresh handles, resets unfinished stability and never proves continuity during downtime. Rediscover with query watches, then await_watch for fresh evidence. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Strict citizens, jobs, buildings, items and one terrain region share one immutable native capture. Query workforce_candidates for ranked observed candidates or workforce_plan for conflict-free declared worker allocation; neither assigns labor. Use unit/job performs and located_at edges for observed assignment/location; route/allocation results remain model-only. Optional fixed-profile history replays exact captures. Paired operator-configured watch journals preserve monitoring definitions and outcomes; restart gives fresh handles, resets unfinished stability and never proves continuity during downtime. Rediscover with query watches, then await_watch for fresh evidence. No game effects.").build();crate::run_modern_stdio(server);}
