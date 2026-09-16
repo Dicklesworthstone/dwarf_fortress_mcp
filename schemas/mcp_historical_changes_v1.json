@@ -10,7 +10,7 @@
       "required": ["record", "record_digest"],
       "properties": {
         "record": {"type": "integer", "minimum": 1, "maximum": 4096},
-        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "to": {
@@ -18,14 +18,15 @@
       "required": ["record", "record_digest"],
       "properties": {
         "record": {"type": "integer", "minimum": 1, "maximum": 4096},
-        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
       }
     },
     "select": {"$ref": "#/$defs/capture_selection"},
     "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
     "continuation": {
       "type": ["string", "null"], "maxLength": 128,
-      "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$"
+      "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$",
+      "not": {"type": "string", "pattern": "\\s"}
     }
   }
 }
