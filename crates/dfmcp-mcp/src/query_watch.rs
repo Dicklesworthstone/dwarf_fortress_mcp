@@ -425,17 +425,29 @@ impl Watch {
         self.seal()
     }
 
+    fn awaiting_recovery_observation(&self) -> bool {
+        self.recovery.is_some() && self.status == Status::BlockedUnknown
+            && self.evaluation.get("reason").and_then(Value::as_str)
+                == Some("restart_gap_requires_fresh_observation")
+    }
+
     fn summary(&self, current: StateAnchor) -> Value {
+        let awaiting = self.awaiting_recovery_observation();
+        let historical = self.evaluation.get("terminal_evidence_retained").and_then(Value::as_bool) == Some(true);
         let mut result = json!({"watch":self.handle,"key":self.definition.key,"label":self.definition.label,
             "status":self.status.text(),"terminal":self.status.terminal(),
             "stable_observations":self.streak,"required_stable_observations":self.definition.stable_observations,
             "deadline_tick":self.definition.deadline_tick,
             "last_evaluated_anchor":anchor(self.last_seen),
-            "evaluation_current":self.last_seen==current,
+            "evaluation_current":self.last_seen==current && !awaiting && !historical,
             "needs_poll":!self.status.terminal() && self.last_seen!=current,
             "next_sample_tick":self.last_sample_tick.and_then(|tick|tick.checked_add(self.definition.poll_interval_ticks)),
             "evidence_digest":self.evidence_digest.to_string()});
-        if let Some(recovery) = &self.recovery { result["recovery"] = json!(recovery); }
+        if let Some(recovery) = &self.recovery {
+            result["recovery"] = json!(recovery);
+            result["fresh_observation_required"] = json!(awaiting);
+            result["historical_outcome"] = json!(historical);
+        }
         result
     }
 
@@ -456,9 +468,10 @@ fn active_work(store: &Store, context: &OperationContext) -> Vec<Value> {
             value["obligation_id"] = json!(watch.handle);
             value["kind"] = json!("foreground_observation_watch");
             value["game_effect"] = json!("none");
+            let next_kind = if watch.awaiting_recovery_observation() { "await_watch" } else { "poll_watch" };
             value["next_step"] = json!({"tool":"fortress.query","arguments":{
                 "session_id":context.session_id.to_string(),"query":{"schema":"dfmcp.query/1",
-                    "query":{"kind":"poll_watch","watch":watch.handle}}}});
+                    "query":{"kind":next_kind,"watch":watch.handle}}}});
             value
         }).collect()
 }
