@@ -2,9 +2,9 @@
 //! registration/evaluation, baseline mutation, observation or game effect is routed.
 use super::*;
 
-const READ_KINDS: [&str;12] = ["entities","inspect","traverse","dependencies","aggregate","search",
+const READ_KINDS: [&str;13] = ["entities","inspect","traverse","dependencies","aggregate","search",
     "map_route","spatial_inventory_plan","workforce_candidates","workforce_plan",
-    "production_diagnosis","inventory_plan"];
+    "production_diagnosis","inventory_plan","item_quantity"];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
