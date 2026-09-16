@@ -15,6 +15,7 @@ use dfmcp_adapter::control_effect_journal::{ControlEffectJournal, DurablePauseRe
     DurablePauseState, EffectJournalStorage, EffectTailRecovery, PrivateControlJournalFile,
     open_private_control_journal, open_private_control_recovery};
 use dfmcp_adapter::live_control_rpc::{ControlDeadlineStream, ControlRpcClient, PauseEffect};
+use dfmcp_adapter::pause_reconciliation;
 use dfmcp_core::{Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, ErrorCode,
     FortressId, GameTick, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
     SessionId, StateAnchor, WorkBudget};
@@ -24,6 +25,8 @@ use serde_json::{Value, json};
 
 #[path = "control_effect_queries.rs"]
 mod effect_queries;
+#[path = "control_reconciliation.rs"]
+mod reconciliation;
 
 const FAMILY:u128=1u128<<57;
 static NEXT:Mutex<u128>=Mutex::new(1);
@@ -147,12 +150,6 @@ fn digest(raw:&str)->Result<Digest32>{if raw.len()!=64||!raw.bytes().all(|byte|b
 fn prepare_token(raw:&str)->Result<[u8;16]>{if raw.len()!=32||!raw.bytes().all(|byte|byte.is_ascii_digit()||(b'a'..=b'f').contains(&byte)){
         return Err(err(ErrorCode::InvalidRequest,"prepare_token_hex must be canonical lowercase 16-byte hex"));}
     let mut out=[0u8;16];for i in 0..16{out[i]=u8::from_str_radix(&raw[i*2..i*2+2],16).map_err(|_|err(ErrorCode::InvalidRequest,"invalid prepare token"))?;}Ok(out)}
-fn effect_token(effect:&PauseEffect)->Result<[u8;16]>{effect.prepare_token.as_slice().try_into().map_err(|_|err(ErrorCode::AdapterRejected,"control bridge returned an invalid prepare token length"))}
-fn receipt(effect:&PauseEffect)->Result<Option<Digest32>>{
-    if effect.receipt_digest.is_empty(){return Ok(None);}
-    let bytes:[u8;32]=effect.receipt_digest.as_slice().try_into().map_err(|_|err(ErrorCode::AdapterRejected,"control bridge returned a non-SHA-256 receipt"))?;
-    Ok(Some(Digest32::from_bytes(bytes)))
-}
 fn state_name(state:DurablePauseState)->&'static str{match state{DurablePauseState::Prepared=>"prepared",DurablePauseState::CommitStarted=>"commit_started",
     DurablePauseState::VerifiedApplied=>"verified_applied",DurablePauseState::VerifiedNotApplied=>"verified_not_applied",DurablePauseState::Indeterminate=>"indeterminate"}}
 fn record_json(record:&DurablePauseRecord)->Value{json!({"idempotency_key":record.idempotency_key,"plan_digest":record.plan_digest.to_string(),
@@ -169,7 +166,11 @@ fn same_identity(record:&DurablePauseRecord,digest:Digest32,paused:bool,tick:u64
     if record.plan_digest!=digest||record.desired_paused!=paused||record.expected_game_tick!=tick{
         return Err(err(ErrorCode::Conflict,"idempotency key already names different durable pause-effect content"));}Ok(())}
 fn record_effect(journal:&mut Journal,key:&str,digest:Digest32,effect:&PauseEffect,context:&OperationContext)->Result<DurablePauseRecord>{
-    journal.record_reconciliation(key,digest,effect.bridge_generation,effect.known,effect.applied,effect.paused,effect.observed_tick,receipt(effect)?,context)
+    pause_reconciliation::reconcile_reply(journal,key,digest,effect,context).map_err(|error|{
+        if error.code==ErrorCode::AdapterRejected {
+            err(ErrorCode::EffectIndeterminate,"bridge evidence does not prove this pause effect; durable attempt remains unresolved")
+        } else { error }
+    })
 }
 
 fn configured_session(id:SessionId,path:&Path,recovery:EffectTailRecovery,budget:WorkBudget,
@@ -222,6 +223,13 @@ pub fn fortress_query(session_id:Option<String>,state:Option<String>,limit:Optio
     })
 }
 
+#[tool(description="Reconcile 1..16 selected durable pause keys in one foreground pass. Only unresolved commit attempts query the bridge; prepared and terminal records are not dispatched. Stops on failure or the shared wall-time budget, retaining partial progress. Validates all keys and reserves complete output before work. Does not send mutations. Recovery-only sessions refuse this tool.")]
+pub fn fortress_wait(session_id:Option<String>,idempotency_keys:Vec<String>,max_wall_millis:Option<u64>,
+    max_bytes:Option<u64>,max_output_tokens:Option<u32>)->String {
+    with_session(session_id,"fortress.wait",|session,context|
+        reconciliation::wait(session,context,idempotency_keys,max_wall_millis,max_bytes,max_output_tokens))
+}
+
 #[tool(description="Prepare one pause/resume effect. Requires stable idempotency_key, plan_digest, desired paused state and expected game tick. Prepare does not mutate; its receipt is synced before success. Recovery-only sessions refuse this tool.")]
 pub fn fortress_plan(session_id:Option<String>,idempotency_key:String,plan_digest:String,paused:bool,expected_game_tick:u64)->String{
     with_session(session_id,"fortress.plan",|session,context|{
@@ -233,7 +241,11 @@ pub fn fortress_plan(session_id:Option<String>,idempotency_key:String,plan_diges
         let effect={let connection=session.live()?;connection.arm()?;
             connection.client.prepare_pause(&idempotency_key,plan,paused,expected_game_tick)?};
         if effect.known{return Err(err(ErrorCode::Conflict,"bridge already knows this idempotency key but the durable journal does not; choose a new key"));}
-        let record=session.journal.record_prepared(idempotency_key,plan,paused,expected_game_tick,effect.bridge_generation,effect_token(&effect)?,&context)?;
+        let token=match pause_reconciliation::validate_prepare_reply(&idempotency_key,plan,paused,expected_game_tick,&effect){
+            Ok(token)=>token,
+            Err(error)=>{session.live()?.client.fence();return Err(error);}
+        };
+        let record=session.journal.record_prepared(idempotency_key,plan,paused,expected_game_tick,effect.bridge_generation,token,&context)?;
         Ok(json!({"ok":true,"prepared":true,"effect":record_json(&record),"durable_effect_journal":journal_json(&session.journal)}))
     })}
 
@@ -300,7 +312,6 @@ pub fn fortress_explain(session_id:Option<String>,idempotency_key:String,plan_di
 
 fn denied(id:Option<String>,operation:&str)->String{with_session(id,operation,|_,_|Err(err(ErrorCode::CapabilityDenied,"control/1.7 supports durable pause control and evidence discovery, not this operation")))}
 #[tool(description="Unavailable in control/1.7.")] pub fn fortress_observe(session_id:Option<String>)->String{denied(session_id,"fortress.observe")}
-#[tool(description="Unavailable in control/1.7.")] pub fn fortress_wait(session_id:Option<String>)->String{denied(session_id,"fortress.wait")}
 #[tool(description="Unavailable in control/1.7.")] pub fn fortress_cancel(session_id:Option<String>)->String{denied(session_id,"fortress.cancel")}
 #[tool(description="Unavailable in control/1.7.")] pub fn fortress_checkpoint(session_id:Option<String>)->String{denied(session_id,"fortress.checkpoint")}
 #[tool(description="Unavailable in control/1.7.")] pub fn fortress_restore(session_id:Option<String>)->String{denied(session_id,"fortress.restore")}
@@ -315,7 +326,7 @@ pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_i
 
 pub fn run_stdio(){if let Err(error)=validate_environment(){eprintln!("{error}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-control-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .instructions("Explicitly unadmitted control/1.7. A private durable journal is mandatory. Open recovery_only=true to discover journaled effects without DFHack, credentials, repair or mutation authority. fortress.query lists bounded durable records, not current game facts. Live mode supports only pause/resume prepare, one dispatch attempt and reconciliation. Never retry an indeterminate effect. No other live mutation family exists.").build();crate::run_modern_stdio(server);}
+    .instructions("Explicitly unadmitted control/1.7. A private durable journal is mandatory. Open recovery_only=true to discover journaled effects without DFHack, credentials, repair or mutation authority. fortress.query lists bounded durable records, not current game facts. In live mode fortress.wait reconciles selected unresolved effects under one bounded foreground pass without dispatching mutations. Terminal results require identity-verified receipts; an indeterminate effect is never safe to retry. No other live mutation family exists.").build();crate::run_modern_stdio(server);}
 
 #[cfg(all(test, unix))]
 #[path = "live_control_recovery_tests.rs"]
