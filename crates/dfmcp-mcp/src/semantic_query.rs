@@ -31,6 +31,14 @@ where F: FnOnce(Value) -> Result<String> {
     query_watch::attach_journal(snapshot, context, path, archive, observations, value, publish)
 }
 
+/// The caller verifies archive custody and exact record identities. Historical
+/// anchors do not replace current authority, and this never creates local work.
+pub(super) fn compare_endpoints(before: &WorldSnapshot, after: &WorldSnapshot,
+    context: &OperationContext, selection: &Value, binding: Digest32,
+    limit: Option<u32>, continuation: Option<&str>) -> Result<Value> {
+    query_history::compare_endpoints(before, after, context, selection, binding, limit, continuation)
+}
+
 pub fn execute(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
     match input.get("query").and_then(|query| query.get("kind")).and_then(Value::as_str) {
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
