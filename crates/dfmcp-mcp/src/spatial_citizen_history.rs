@@ -9,8 +9,8 @@ use dfmcp_adapter::operations_journal::{JournalEntry,JournalLimits,SpatialCitize
 use dfmcp_core::Digest32;
 
 pub(super) type Journal=SpatialCitizenJournal<PrivateJournalFile>;
-const STATELESS: [&str;10] = ["entities","inspect","traverse","dependencies","aggregate","search",
-    "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan"];
+const STATELESS: [&str;11] = ["entities","inspect","traverse","dependencies","aggregate","search",
+    "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan","item_quantity"];
 
 pub(super) fn configuration()->Result<Option<(PathBuf,TailRecovery)>>{
     let path=match std::env::var("DFMCP_SPATIAL_CITIZEN_JOURNAL"){
@@ -134,7 +134,7 @@ pub(super) fn execute(session:&mut Session,c:&OperationContext,input:&Value)->Re
 }
 
 pub(super) fn schema()->Result<Value>{
-    let mut schema=production::extend_schema(spatial_queries::schema()?)?;
+    let mut schema=semantic_query::extend_watch_count_schema(production::extend_schema(spatial_queries::schema()?)?)?;
     let mut extra:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_history_v1.json"))
         .map_err(|_|error(ErrorCode::InternalInvariantViolation,"embedded spatial history schema invalid"))?;
     // The shared source file also serves spatial/1.6. Specialize only this
