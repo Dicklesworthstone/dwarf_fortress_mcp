@@ -1,0 +1,32 @@
+{
+  "$defs": {
+    "watch_count_predicate": {
+      "description": "Dynamic row predicate. Its nodes share the enclosing watch's 64-node, depth-8 success/failure budget. Unknown fields remain unknown under negation.",
+      "oneOf": [
+        {"type":"object","additionalProperties":false,"required":["op"],"properties":{"op":{"const":"always"}}},
+        {"type":"object","additionalProperties":false,"required":["op","field","comparison","value"],"properties":{
+          "op":{"const":"field"},"field":{"$ref":"#/$defs/name"},
+          "comparison":{"enum":["eq","ne","lt","le","gt","ge"]},"value":{"$ref":"#/$defs/watch_literal"}}},
+        {"type":"object","additionalProperties":false,"required":["op","args"],"properties":{
+          "op":{"const":"all"},"args":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/watch_count_predicate"}}}},
+        {"type":"object","additionalProperties":false,"required":["op","args"],"properties":{
+          "op":{"const":"any"},"args":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/watch_count_predicate"}}}},
+        {"type":"object","additionalProperties":false,"required":["op","arg"],"properties":{
+          "op":{"const":"not"},"arg":{"$ref":"#/$defs/watch_count_predicate"}}}
+      ]
+    }
+  },
+  "condition": {
+    "type":"object","additionalProperties":false,
+    "required":["op","scope","kind","predicate","comparison","value"],
+    "properties":{
+      "op":{"const":"entity_count"},
+      "scope":{"const":"observed_projection"},
+      "kind":{"enum":["unit","job","building","item","tile_feature","announcement"]},
+      "predicate":{"$ref":"#/$defs/watch_count_predicate"},
+      "comparison":{"enum":["eq","ne","lt","le","gt","ge"]},
+      "value":{"type":"integer","minimum":0,"maximum":18446744073709551615}
+    },
+    "description":"Count range [known matches, known matches plus unknowns] in the named entity-kind projection. Satisfaction requires every possible count to meet the comparison. Counts are records, not stack units, events, available resources or global absence proofs. Membership may change between samples."
+  }
+}
