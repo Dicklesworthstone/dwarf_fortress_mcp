@@ -92,7 +92,7 @@ readiness.
 - Protocol-bound V2 production admission contract
   (`architecture/live_admission_ticket_v2.json`). The exact bridge protocol now travels from the
   deployment manifest through the compatibility decision, launch record, single-use ticket,
-  `dfmcp_ADMITTED_BRIDGE_PROTOCOL`, Rust admission provenance, and final private runner lookup.
+  `DFMCP_ADMITTED_BRIDGE_PROTOCOL`, Rust admission provenance, and final private runner lookup.
   Launch and ticket digests both cover the protocol. The production map currently contains only
   protocol 1.0; protocol 1.1 and unknown protocols fail before live-server startup.
 - Protocol-1.1 retained-announcement read generation with a distinct protobuf package, plugin,
