@@ -38,10 +38,12 @@ pub(super) fn live(session: &mut Session, context: &OperationContext, input: &Va
     }
     custody(session,context)?;
     let projection=situation_presentation::tactical(session,context)?;
-    let mut query_context=context.clone();
-    query_context.budget.max_bytes=projection.result_byte_budget()?.checked_sub(64)
+    let mut publication_context=context.clone();
+    publication_context.budget.max_bytes=projection.result_byte_budget()?.checked_sub(64)
         .ok_or_else(||error(ErrorCode::BudgetExceeded,"production metadata leaves no result budget"))? as u64;
-    query_context=semantic_query::result_context(&query_context)?;
+    // Rows use the allowance AFTER reserving watches. Publication must use the
+    // pre-reservation allowance, since it adds that same metadata exactly once.
+    let mut query_context=semantic_query::result_context(&publication_context)?;
     let elapsed=started.elapsed().as_millis();
     if elapsed>=u128::from(context.budget.max_wall_millis) {
         return Err(error(ErrorCode::BudgetExceeded,"production preflight exhausted wall-time budget"));
@@ -50,7 +52,7 @@ pub(super) fn live(session: &mut Session, context: &OperationContext, input: &Va
     let mut value=execute(&session.state,&query_context,input)?;
     value["native_captures"]=json!(0);
     custody(session,context)?;
-    semantic_query::publish_with_active_work(&query_context,value,|value| {
+    semantic_query::publish_with_active_work(&publication_context,value,|value| {
         let encoded=finish(&projection,value)?;
         if started.elapsed().as_millis()>=u128::from(context.budget.max_wall_millis) {
             return Err(error(ErrorCode::BudgetExceeded,"production response exhausted wall-time budget"));
