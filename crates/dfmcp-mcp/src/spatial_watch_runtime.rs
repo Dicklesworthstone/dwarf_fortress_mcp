@@ -8,8 +8,8 @@ use super::*;
 fn configured_path(value: Option<std::ffi::OsString>, observation_path: Option<&Path>)
     -> Result<Option<PathBuf>> {
     let Some(value) = value else { return Ok(None); };
-    let text = value.to_str().filter(|text| !text.is_empty()).ok_or_else(|| {
-        error(ErrorCode::InvalidRequest, "DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL must be nonempty UTF-8")
+    let text = value.to_str().filter(|text| !text.is_empty() && !text.contains('\0')).ok_or_else(|| {
+        error(ErrorCode::InvalidRequest, "DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL must be nonempty UTF-8 without NUL")
     })?;
     let observation_path = observation_path.ok_or_else(|| {
         error(ErrorCode::CapabilityDenied, "durable watches require DFMCP_SPATIAL_CITIZEN_JOURNAL; process-local observation generations cannot be recovered")
@@ -41,23 +41,24 @@ pub(super) fn finish_open(session: &mut Session, context: &OperationContext,
     }
     let archive = journal.id();
     let observations: Vec<_> = journal.entries().iter().map(|entry| entry.anchor).collect();
-    let snapshot = session.state.snapshot().ok_or_else(|| {
-        error(ErrorCode::InternalInvariantViolation, "durable watch bootstrap snapshot absent")
-    })?;
-    let (output, owner) = semantic_query::attach_watch_journal(snapshot, context, path,
-        archive, &observations, value, |value| {
-            packet(Some(session), Some(context), "fortress.open_session", value)
+    let (output, owner) = {
+        let view: &Session = session;
+        let snapshot = view.state.snapshot().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "durable watch bootstrap snapshot absent")
         })?;
+        semantic_query::attach_watch_journal(snapshot, context, path, archive, &observations, value,
+            |value| packet(Some(view), Some(context), "fortress.open_session", value))?
+    };
     session._watch_journal = Some(owner);
     Ok(output)
 }
 
-#[cfg(test)]
+#[cfg(all(test,unix))]
 mod tests {
     use super::*;
     #[test]
     fn watch_configuration_requires_separate_archive_and_absolute_path() {
-        for value in ["", "relative.bin", "/private/../watches.bin", "/private/observations.bin"] {
+        for value in ["", "relative.bin", "/private/../watches.bin", "/private/observations.bin", "/private/nul\u{0}"] {
             assert!(configured_path(Some(value.into()), Some(Path::new("/private/observations.bin"))).is_err());
         }
         assert!(configured_path(Some("/private/watches.bin".into()), None).is_err());
@@ -65,7 +66,6 @@ mod tests {
         assert_eq!(configured_path(Some("/private/watches.bin".into()), Some(Path::new("/private/observations.bin"))).ok(),
             Some(Some(PathBuf::from("/private/watches.bin"))));
     }
-    #[cfg(unix)]
     #[test]
     fn non_utf8_watch_path_is_refused_without_environment_mutation() {
         use std::os::unix::ffi::OsStringExt;
@@ -73,3 +73,7 @@ mod tests {
         assert!(configured_path(Some(path), Some(Path::new("/private/observations.bin"))).is_err());
     }
 }
+
+#[cfg(all(test,unix))]
+#[path = "spatial_watch_runtime_tests.rs"]
+mod handler_tests;
