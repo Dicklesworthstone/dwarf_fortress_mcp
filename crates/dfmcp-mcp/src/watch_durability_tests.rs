@@ -1,4 +1,5 @@
 use super::*;
+use super::super::invalid;
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::sync::atomic::{AtomicU64,Ordering};
@@ -11,8 +12,11 @@ fn io_error(_:std::io::Error)->dfmcp_core::DfmcpError{corrupt("durable watch tes
 struct Files{directory:std::path::PathBuf,path:std::path::PathBuf}
 impl Files{
     fn new()->Result<Self>{
+        // semantic_query.rs is instantiated in several runtimes. Each test
+        // module needs a separate namespace, not just its own atomic counter.
+        let namespace=Digest32::of_bytes(module_path!().as_bytes());
         let directory=std::env::temp_dir().canonicalize().map_err(io_error)?
-            .join(format!("dfmcp-watch-durable-{}-{}",std::process::id(),next()));
+            .join(format!("dfmcp-watch-durable-{}-{namespace}-{}",std::process::id(),next()));
         fs::DirBuilder::new().mode(0o700).create(&directory).map_err(io_error)?;
         Ok(Self{path:directory.join("watches.bin"),directory})
     }
@@ -67,12 +71,16 @@ fn restart_restores_intent_but_requires_new_stability_evidence()->Result<()>{
     let listed=run(&boot,new_id,json!({"kind":"watches"}))?;let new=listed_handle(&listed)?;
     assert_ne!(new,old);assert_eq!(listed["records"][0]["status"],"blocked_unknown");
     assert_eq!(listed["records"][0]["stable_observations"],0);
+    assert_eq!(listed["records"][0]["evaluation_current"],false);
+    assert_eq!(listed["records"][0]["fresh_observation_required"],true);
+    assert_eq!(listed["_condition_watch_work"][0]["next_step"]["arguments"]["query"]["query"]["kind"],"await_watch");
     assert!(run(&boot,new_id,json!({"kind":"poll_watch","watch":old})).is_err());
     let same=run(&boot,new_id,json!({"kind":"poll_watch","watch":new}))?;
     assert_eq!(same["record"]["sample_count"],1);
     assert_eq!(same["record"]["evaluation"]["reason"],"restart_gap_requires_fresh_observation");
     let next=run(&world(3,2,true),new_id,json!({"kind":"poll_watch","watch":new}))?;
     assert_eq!(next["record"]["status"],"candidate");assert_eq!(next["record"]["stable_observations"],1);
+    assert_eq!(next["record"]["fresh_observation_required"],false);
     let done=run(&world(4,3,true),new_id,json!({"kind":"poll_watch","watch":new}))?;
     assert_eq!(done["record"]["status"],"satisfied");assert_eq!(done["record"]["sample_count"],3);
     drop(guard);Ok(())
@@ -89,6 +97,7 @@ fn terminal_outcome_remains_historical_after_restart()->Result<()>{
     assert_eq!(restored["record"]["status"],"satisfied");assert_eq!(restored["record"]["evaluation_current"],false);
     assert_eq!(restored["record"]["sample_count"],1);
     assert_eq!(restored["record"]["recovery"]["prior_evidence_digest"],old["record"]["evidence_digest"]);
+    assert_eq!(restored["record"]["historical_outcome"],true);
     assert_eq!(restored["_condition_watch_work"],json!([]));drop(guard);Ok(())
 }
 
@@ -176,4 +185,88 @@ fn failed_recovery_render_leaves_no_session_or_persistent_rebind()->Result<()>{
     assert!(!super::super::lock(&WATCHES)?.entries.keys().any(|(id,_)|*id==c.session_id));
     let (_,opened,guard)=open(&files,&second,&[first.anchor(),second.anchor()])?;
     assert_eq!(opened["watch_recovery"]["restored"],1);drop(guard);Ok(())
+}
+
+#[test]
+fn identical_bootstrap_does_not_relabel_old_terminal_evidence_as_fresh()->Result<()>{
+    let files=Files::new()?;let first=world(1,0,true);
+    let (id,_,guard)=open(&files,&first,&[first.anchor()])?;run(&first,id,create(1))?;drop(guard);
+    let (id,_,guard)=open(&files,&first,&[first.anchor()])?;
+    let result=run(&first,id,json!({"kind":"watches"}))?;
+    assert_eq!(result["records"][0]["historical_outcome"],true);
+    assert_eq!(result["records"][0]["evaluation_current"],false);
+    assert_eq!(result["records"][0]["status"],"satisfied");drop(guard);Ok(())
+}
+
+#[test]
+fn recovery_cannot_restore_an_old_larger_time_horizon()->Result<()>{
+    let files=Files::new()?;let first=world(1,0,true);let second=world(2,1,true);
+    let (id,_,guard)=open(&files,&first,&[first.anchor()])?;run(&first,id,create(2))?;drop(guard);
+    let before=files.bytes()?;let mut c=context(&second,SessionId::new(u128::from(next())));
+    c.budget.max_game_ticks=10;
+    assert!(matches!(attach(&second,&c,&files.path,archive(),&[first.anchor(),second.anchor()],json!({}),
+        |v|Ok(v.to_string())),Err(e)if e.code==ErrorCode::BudgetExceeded));
+    assert_eq!(files.bytes()?,before);Ok(())
+}
+
+#[test]
+fn invalid_evaluation_shapes_and_unbounded_json_are_rejected()->Result<()>{
+    let files=Files::new()?;let first=world(1,0,true);let (id,_,guard)=open(&files,&first,&[first.anchor()])?;
+    run(&first,id,create(2))?;
+    let saved=journals()?.get(&id).and_then(|e|e.saved.clone()).ok_or_else(||invalid("missing saved fixture"))?;
+    let anchors=BTreeMap::from([(first.anchor(),0)]);
+    for evaluation in [Value::Null,json!(true),json!("not an object"),json!([]),json!({"reason":"bad\u{0}"})]{
+        let mut bad=saved.clone();bad.watches[0].evaluation=evaluation;
+        let bytes=serde_json::to_vec(&bad).map_err(|_|invalid("fixture serialization"))?;
+        assert!(decode_saved(&bytes,&anchors).is_err());
+    }
+    let mut deep=json!({"leaf":0});for _ in 0..33{deep=json!({"child":deep});}
+    assert!(bounded_json(deep.to_string().as_bytes()).is_err());
+    let wide=json!({"array":vec![Value::Null;32769]});
+    assert!(bounded_json(wide.to_string().as_bytes()).is_err());
+    let mut bad=saved;bad.watches[0].definition.deadline_tick=1;
+    assert!(decode_saved(&serde_json::to_vec(&bad).map_err(|_|invalid("fixture serialization"))?,&anchors).is_err());
+    drop(guard);Ok(())
+}
+
+#[test]
+fn watch_persistence_never_claims_unrelated_baselines_are_durable()->Result<()>{
+    let files=Files::new()?;let first=world(1,0,true);let (id,_,guard)=open(&files,&first,&[first.anchor()])?;
+    run(&first,id,create(2))?;let before=files.bytes()?;
+    let result=super::super::with_active_work(&context(&first,id),json!({"kind":"capture","durable":false}),
+        |v|Ok(v.to_string()))?;
+    let result=parse(&result)?;assert_eq!(result["durable"],false);
+    assert_eq!(result["watch_persistence"]["scope"],"foreground_condition_watches");
+    assert_eq!(result["watch_persistence"]["durable"],true);
+    assert_eq!(files.bytes()?,before);drop(guard);Ok(())
+}
+
+#[test]
+fn checkpoint_bytes_match_independent_python_vectors()->Result<()>{
+    use std::io::{self,Read,Write,Seek,SeekFrom,Cursor};
+    #[derive(Clone,Default)]
+    struct Bytes(std::rc::Rc<std::cell::RefCell<Cursor<Vec<u8>>>>);
+    impl Read for Bytes{fn read(&mut self,b:&mut[u8])->io::Result<usize>{self.0.borrow_mut().read(b)}}
+    impl Write for Bytes{
+        fn write(&mut self,b:&[u8])->io::Result<usize>{self.0.borrow_mut().write(b)}
+        fn flush(&mut self)->io::Result<()>{Ok(())}
+    }
+    impl Seek for Bytes{fn seek(&mut self,p:SeekFrom)->io::Result<u64>{self.0.borrow_mut().seek(p)}}
+    impl dfmcp_adapter::operations_journal::JournalStorage for Bytes{
+        fn sync(&mut self)->io::Result<()>{Ok(())}
+        fn truncate(&mut self,_:u64)->io::Result<()>{Err(io::Error::other("no repair"))}
+    }
+    let bytes=Bytes::default();let mut c=context(&world(1,0,true),SessionId::new(7));
+    c.request_id=RequestId::new(3);c.anchor.state_hash=Digest32::of_bytes(b"world");
+    let mut journal=checkpoint::Journal::open(bytes.clone(),&c,Digest32::of_bytes(b"spatial/1.8 archive"),true,|_|Ok(()))?;
+    assert_eq!(journal.id().to_string(),"d94a9a394f027513b75f4f042667fe0123aa13de1e66afa1dd3b5c8c3c09edaf");
+    assert_eq!(journal.head().to_string(),"d3404626c30fe42c90c400a4cb31cd574e77077f29415421c73fa11ed651f518");
+    let first=journal.stage(b"first".to_vec(),&c)?;journal.commit(first,&c)?;
+    assert_eq!(journal.head().to_string(),"06a925e21a650ae34c37cb00a6e3c2e414d468cf2476de849c14c2131aae4f80");
+    let second=journal.stage(b"second".to_vec(),&c)?;journal.commit(second,&c)?;
+    assert_eq!(journal.head().to_string(),"6e557d1732e84b9fbb9eb3628bf0a1650edd0af766597a7415cb16b2502a4063");
+    assert_eq!(journal.count(),2);assert_eq!(journal.retained_bytes(),363);
+    assert_eq!(Digest32::of_bytes(bytes.0.borrow().get_ref()).to_string(),
+        "8166fa4dc5bc52ea47bf0919976e9f40b99f425ae0967d7acf48c806edd2c327");
+    Ok(())
 }
