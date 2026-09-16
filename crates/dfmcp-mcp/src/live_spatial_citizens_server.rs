@@ -6,6 +6,7 @@
 #[path="spatial_citizen_history.rs"] mod history;
 #[path="spatial_watch_runtime.rs"] mod durable_watches;
 #[path="workforce_queries.rs"] mod workforce_queries;
+#[path="spatial_archive_runtime.rs"] mod archive;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc,LazyLock,Mutex,MutexGuard};
@@ -35,7 +36,8 @@ struct Slot;
 impl Slot{fn reserve()->Result<Self>{SLOTS.fetch_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<2).then_some(n+1))
     .map_err(|_|error(ErrorCode::BudgetExceeded,"spatial/1.8 retains at most two sessions"))?;Ok(Self)}}
 impl Drop for Slot{fn drop(&mut self){SLOTS.fetch_sub(1,Ordering::AcqRel);}}
-trait Source:Send{fn read(&mut self,timeout:Duration)->Result<LiveSpatialCitizenObservation>;fn poisoned(&self)->bool;fn fence(&mut self);fn pages(&self)->u32;}
+trait Source:Send{fn read(&mut self,timeout:Duration)->Result<LiveSpatialCitizenObservation>;fn poisoned(&self)->bool;fn fence(&mut self);fn pages(&self)->u32;
+    fn archive_only(&self)->bool{false}}
 impl Source for CitizenSpatialRpcClient<DeadlineStream>{
     fn read(&mut self,t:Duration)->Result<LiveSpatialCitizenObservation>{self.refresh(t)}
     fn poisoned(&self)->bool{CitizenSpatialRpcClient::poisoned(self)}fn fence(&mut self){CitizenSpatialRpcClient::fence(self)}
@@ -50,6 +52,7 @@ impl Session{
         Ok(OperationContext{session_id:self.id,request_id:RequestId::new(self.request),anchor:self.anchor()?,budget:self.budget,
             grants:self.grants.clone(),cancellation_requested:false})}
     fn refresh(&mut self,c:&OperationContext)->Result<JobPublication>{
+        if self.source.archive_only(){return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot refresh even with an injected Observe grant"));}
         c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;if c.anchor!=self.anchor()?{return Err(error(ErrorCode::StaleAnchor,"spatial/1.8 refresh anchor changed"));}
         if self.source.poisoned(){return Err(error(ErrorCode::AdapterUnavailable,"spatial/1.8 source fenced; reopen session"));}
         if let Some(journal)=&self.journal{
@@ -100,6 +103,7 @@ fn coverage()->Value{json!({"status":"partial","complete_domains":["fortress.cit
     "omitted_domains":["noncitizen_units","outside_region_terrain","full_unit_navigation_rules","citizen_needs_health","native_labor_configuration","native_material_requirements","continuous_game_history"],"continuation":null})}
 fn packet(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,mut v:Value)->Result<String>{
     let mut work=empty_active_work();if let Some(w)=v.as_object_mut().and_then(|m|m.remove("_condition_watch_work")){work["obligations"]=w;}
+    if let(Some(s),Some(c))=(s,c){if s.source.archive_only(){return archive::packet(s,c,operation,None,v);}}
     let mut builder=AgentTurnBuilder::new(operation,AgentPhase::Inspect).active_work(work);let mut maximum=8192;
     if let(Some(s),Some(c))=(s,c){let a=s.anchor()?;maximum=s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize;v["session_id"]=json!(s.id.to_string());v["anchor"]=anchor_json(a);
         let reset=v["reset"]==true;
@@ -128,6 +132,7 @@ fn failure(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,e:&Dfmc
 fn with_session<F>(id:Option<String>,operation:&str,cap:Capability,body:F)->String where F:FnOnce(&mut Session,OperationContext)->Result<String>{
     let handle=match resolve(id){Ok(v)=>v,Err(e)=>return failure(None,None,operation,&e)};let mut s=match lock(&handle){Ok(v)=>v,Err(e)=>return failure(None,None,operation,&e)};
     let c=match s.context(){Ok(v)=>v,Err(e)=>return failure(None,None,operation,&e)};if let Err(e)=c.authorize(cap,RiskTier::ReadOnly,&[],None){return failure(None,None,operation,&e);}
+    if let Err(e)=archive::validate(&mut s,&c){return failure(Some(&s),Some(&c),operation,&e);}
     match body(&mut s,c.clone()){Ok(v)=>v,Err(e)=>{let mut current=c;if let Ok(a)=s.anchor(){current.anchor=a;}failure(Some(&s),Some(&current),operation,&e)}}
 }
 #[derive(Deserialize)]#[serde(deny_unknown_fields)]struct RegionInput{origin:[u32;3],size:[u32;3]}
@@ -141,14 +146,18 @@ fn capabilities(input:Option<Vec<String>>)->Result<Vec<Capability>>{let input=in
     let mut out=Vec::new();for name in input{let c=match name.as_str(){"observe"=>Capability::Observe,"query"=>Capability::Query,"doctor"=>Capability::Doctor,
         _=>return Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 cannot grant that capability"))};if out.contains(&c){return Err(error(ErrorCode::InvalidRequest,"duplicate capability"));}out.push(c);}Ok(out)}
 
-#[tool(description="Open an unadmitted read-only spatial/1.8 session: strict citizens, jobs, buildings, inventory and one terrain region are captured together and paged immutably. Operator-configured paired observation/watch journals restore monitoring intent with fresh handles and reset stability after restart.")]
+#[tool(description="Open an unadmitted spatial/1.8 session. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive.")]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Option<u32>,max_capture_bytes:Option<u64>,page_bytes:Option<u32>,
-    max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>)->String{
-    let result=(||->Result<String>{validate_environment()?;let region=parse_region(&region)?;let caps=capabilities(requested_capabilities)?;
+    max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>,recovery_only:Option<bool>)->String{
+    let recovery_only=recovery_only.unwrap_or(false);
+    let result=(||->Result<String>{validate_environment()?;let region=parse_region(&region)?;
+        let caps=if recovery_only{archive::requested_capabilities(requested_capabilities)?}else{capabilities(requested_capabilities)?};
         let journal_configuration=history::configuration()?;
         let watch_path=durable_watches::configuration(journal_configuration.as_ref().map(|(path,_)|path.as_path()))?;
-        if journal_configuration.is_some()&&(!caps.contains(&Capability::Query)||!caps.contains(&Capability::Observe)){
+        if recovery_only{archive::validate_configuration(journal_configuration.as_ref().map(|(path,_)|path.as_path()),
+            journal_configuration.as_ref().map(|(_,repair)|*repair).unwrap_or(dfmcp_adapter::operations_journal::TailRecovery::Refuse),watch_path.as_deref())?;}
+        else if journal_configuration.is_some()&&(!caps.contains(&Capability::Query)||!caps.contains(&Capability::Observe)){
             return Err(error(ErrorCode::CapabilityDenied,"durable spatial/1.8 sessions require Query and Observe authority"));}
         let capture=usize::try_from(max_capture_bytes.unwrap_or(MAX_SPATIAL_CITIZEN_BYTES as u64)).map_err(|_|error(ErrorCode::BudgetExceeded,"capture size overflow"))?;
         let spatial=SpatialLimits{operations:PagedOperationsLimits{items:max_items.unwrap_or(65536),payload_bytes:capture,
@@ -158,6 +167,15 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
             max_wall_millis:max_wall_millis.unwrap_or(5000),..WorkBudget::default()};budget.validate()?;
         if !(2048..=65536).contains(&budget.max_output_tokens)||!(1..=60000).contains(&budget.max_wall_millis){return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 output or wall budget outside bounds"));}
         let slot=Slot::reserve()?;let id=next_id()?;
+        if recovery_only{
+            let path=journal_configuration.as_ref().map(|(path,_)|path.as_path()).ok_or_else(||error(ErrorCode::InvalidRequest,"archive path missing"))?;
+            let mut s=archive::open(id,slot,path,limits,budget,&caps)?;let c=s.context()?;
+            let out=packet(Some(&s),Some(&c),"fortress.open_session",json!({"ok":true,"recovery_only":true,
+                "granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
+                "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}},
+                "history_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"history"}}}))?;
+            lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));return Ok(out);
+        }
         let endpoint=dfmcp_adapter::parse_loopback_endpoint(&std::env::var("DFMCP_SPATIAL_CITIZEN_ENDPOINT").unwrap_or_else(|_|"127.0.0.1:5000".to_owned()))?;
         let token=std::env::var("DFMCP_SPATIAL_CITIZEN_TOKEN").map_err(|_|error(ErrorCode::CapabilityDenied,"DFMCP_SPATIAL_CITIZEN_TOKEN required"))?;
         let timeout=Duration::from_millis(budget.max_wall_millis);let mut source=CitizenSpatialRpcClient::connect(endpoint,token.into_bytes(),id.get().to_be_bytes().to_vec(),timeout,limits)?;
@@ -175,8 +193,8 @@ fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,C
     target.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;let v=json!({"ok":true,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},
         "reset":outcome==JobPublication::Reset,"native_captures":1,"transfer_pages":s.source.pages(),"game_clock_controlled":false});
     if target.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok(){semantic_query::publish_with_active_work(&target,v,|v|packet(Some(s),Some(&c),operation,v))}else{packet(Some(s),Some(&c),operation,v)}})}
-#[tool(description="Acquire one new coherent citizens/operations/terrain capture without modifying game time or state.")]pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"fortress.observe")}
-#[tool(description="Acquire one coherent capture. Use query await_watch for a sampled foreground condition.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
+#[tool(description="Acquire one new coherent citizens/operations/terrain capture without modifying game time or state. Archive-only sessions refuse.")]pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"fortress.observe")}
+#[tool(description="Acquire one coherent capture. Use query await_watch for a sampled foreground condition. Archive-only sessions refuse.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
 fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(QueryResponseProjection{session_id:s.id.to_string(),request_id:c.request_id.to_string(),
     anchor:anchor_json(s.anchor()?),briefing:briefing(s),attention:Vec::new(),affordances:Vec::new(),coverage:coverage(),
     uncertainty:vec![json!({"domain":"unit_navigation_and_labor","epistemic_state":"partial","reason":"sparse skill and job-availability evidence is observed; needs, native labor eligibility and full movement rules are not"})],
@@ -185,7 +203,7 @@ fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(Quer
     maximum_bytes:s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize})}
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query one coherent citizen/operations/terrain capture. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Structured workforce_candidates and workforce_plan analyze observed skill, availability and terrain approaches; workforce_plan never double-books a citizen and does not dispatch labor. Paired journals retain watches. Historical_query replays supported stateless reads; workforce queries currently require the live capture.")]
+#[tool(description="Query coherent spatial/1.8 data. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Workforce queries analyze skill/capacity without assigning labor. In recovery_only sessions all results are historical: stateless graph/terrain/inventory/workforce reads and exact-record history only; no watches, baselines or live acquisition.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
@@ -197,6 +215,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         Some("buildings")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["building"],"fields":["type_key","build_stage"],"limit":1}}),
         Some("tiles")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["tile_feature"],"fields":["position","visibility","shape"],"limit":1}}),
         _=>return Err(error(ErrorCode::InvalidRequest,"unknown spatial/1.8 query mode")),}};
+    if s.source.archive_only(){return archive::query(s,&c,&input,schema);}
     let kind=input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str).unwrap_or("");
     if !schema&&history::handles(&input){let result=history::execute(s,&c,&input);if matches!(&result,Err(e)if e.code==ErrorCode::CorruptLedger){s.source.fence();}return result;}
     let local=matches!(kind,"watches"|"cancel_watch"|"release_watch"|"baselines"|"release_baseline");
@@ -219,8 +238,8 @@ pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
         "history":"optional fixed-profile spatial/1.8 archive; history and historical_query never import another profile or mutate current watches",
         "unknown":["noncitizen unit details","complete native skill-key registry","needs","labor eligibility","full unit pathfinding","outside-region routes"]}),|v|packet(Some(s),Some(&c),"fortress.explain",v)))}
-#[tool(description="Report spatial/1.8 source health; no reconnect or qualification claim.")]pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_id,"fortress.doctor",Capability::Doctor,|s,c|
-    packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else{"read_only_unadmitted"}})))}
+#[tool(description="Report spatial/1.8 source or archive health; no reconnect or qualification claim.")]pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_id,"fortress.doctor",Capability::Doctor,|s,c|
+    packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else if s.source.archive_only(){"archive_only"}else{"read_only_unadmitted"}})))}
 fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
 #[tool(description="Unavailable: coherent observations do not authorize effects.")]pub fn fortress_plan(session_id:Option<String>)->String{no_effect(session_id,"fortress.plan")}
 #[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id,"fortress.commit")}
@@ -230,4 +249,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Strict citizens, jobs, buildings, items and one terrain region share one immutable native capture. Query workforce_candidates for ranked observed candidates or workforce_plan for conflict-free declared worker allocation; neither assigns labor. Use unit/job performs and located_at edges for observed assignment/location; route/allocation results remain model-only. Optional fixed-profile history replays exact captures. Paired operator-configured watch journals preserve monitoring definitions and outcomes; restart gives fresh handles, resets unfinished stability and never proves continuity during downtime. Rediscover with query watches, then await_watch for fresh evidence. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Set recovery_only=true at open to inspect an existing observation archive without DFHack or credentials; archived facts are historical, no live acquisition or monitoring is allowed, and exact-record route drill-downs never select newer observations. Default live mode captures strict citizens, jobs, buildings, items and terrain together. Query workforce_candidates or workforce_plan for model-only staffing analysis. Paired operator watch journals preserve monitoring definitions and outcomes; live restart gives fresh handles and resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
