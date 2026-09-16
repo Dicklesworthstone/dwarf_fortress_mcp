@@ -142,6 +142,7 @@ fn complete_in<F>(watches: &Mutex<Store>, snapshot: &WorldSnapshot, context: &Op
     prepared: Prepared, observation_acquired: bool, publisher: F) -> Result<String>
 where F: FnOnce(Value) -> Result<String> {
     let started=Instant::now(); check(context,started)?; authorize(snapshot,context)?;
+    let mut evaluation_budget=counts::EvaluationBudget::new(context.budget.max_wall_millis);
     if context.session_id!=prepared.session || context.anchor.fortress_id!=prepared.basis.fortress_id
         || observation_acquired!=prepared.needs_observation
         || (!observation_acquired&&context.anchor!=prepared.basis) {
@@ -157,7 +158,7 @@ where F: FnOnce(Value) -> Result<String> {
         check(context,started)?;
         let watch=candidate.entries.get_mut(&(context.session_id,handle.clone()))
             .ok_or_else(||invalid("selected batch watch disappeared"))?;
-        watch.advance(snapshot,false)?;
+        watch.advance_bounded(snapshot,false,&mut evaluation_budget)?;
     }
     let value=output(&store,&candidate,context,&prepared)?;
     let encoded=publish(&candidate,context,value,|value| {
