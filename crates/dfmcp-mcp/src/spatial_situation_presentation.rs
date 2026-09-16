@@ -41,7 +41,12 @@ pub(super) fn result_budget(projection:&QueryResponseProjection,input:&Value)->R
         "record":{"watch":format!("watch:{}","f".repeat(64))},
         "observation_refresh":{"basis":projection.anchor,"reset":true,"kind":"snapshot",
             "native_captures":u64::MAX,"transfer_pages":u32::MAX}});
-    let payload_bytes=sample.to_string().len();
+    // The server callback adds refresh metadata AFTER the watch producer's
+    // budget check, so it is envelope overhead rather than producer payload.
+    let mut producer_sample=sample.clone();
+    producer_sample.as_object_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"watch reservation sample is not an object"))?
+        .remove("observation_refresh");
+    let payload_bytes=producer_sample.to_string().len();
     let packet_bytes=finish(projection,sample)?.len();
     let overhead=packet_bytes.checked_sub(payload_bytes).and_then(|n|n.checked_add(256))
         .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"watch response reservation overflow"))?;
