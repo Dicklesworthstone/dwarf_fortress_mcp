@@ -95,7 +95,7 @@ fn archive_bootstrap_and_actual_queries_never_claim_live_freshness()->Result<()>
     let before=fs::read(&files.path).map_err(io_error)?;let (s,opened)=register(&files,65536)?;
     assert_eq!(opened["archive_only"],true);assert_eq!(opened["live"],false);
     assert_eq!(opened["agent_turn"]["continuity"]["status"],"partial");
-    for mode in ["summary","citizens","jobs","buildings","items","tiles","history"] {
+    for mode in ["summary","citizens","jobs","buildings","items","tiles","history","production"] {
         let result=decode(&fortress_query(s.handle(),Some(mode.into()),None))?;
         assert_eq!(result["ok"],true,"mode={mode}: {result}");
         assert_eq!(result["historical"],true);assert_eq!(result["native_captures"],0);
