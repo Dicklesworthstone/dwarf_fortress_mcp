@@ -204,3 +204,6 @@ fn full_eight_watch_batch_fits_the_default_8192_token_budget()->Result<()> {
     assert_eq!(result["selected"],8);assert_eq!(result["sampled"],8);assert_eq!(result["all_satisfied"],true);
     assert_eq!(result["records"].as_array().map(Vec::len),Some(8));assert_eq!(s.calls.load(Ordering::SeqCst),1);Ok(())
 }
+
+#[path="spatial_watch_count_tests.rs"]
+mod count_tests;
