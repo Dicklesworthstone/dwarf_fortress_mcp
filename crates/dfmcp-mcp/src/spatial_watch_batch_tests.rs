@@ -163,7 +163,7 @@ fn watch_storage_changed_during_capture_cannot_publish_the_candidate_set()->Resu
 
 #[test]
 fn authority_expiring_at_new_capture_does_not_commit_watch_progress()->Result<()> {
-    let _serial=lock(&SERIAL)?;let files=Files::new()?;let s=register(&files,3,&[4],false)?;
+    let _serial=lock(&SERIAL)?;let files=Files::new()?;let s=register(&files,3,&[5],false)?;
     watch(&s,"a",2)?;watch(&s,"b",2)?;let before=fs::read(&files.watches).map_err(io_error)?;
     {let h=resolve(s.handle())?;let mut session=lock(&h)?;
         let expiration=GameTick(session.anchor()?.tick.0+1);
@@ -192,4 +192,15 @@ fn schema_discovers_batches_but_archive_and_historical_queries_refuse_them()->Re
             Err(e)if e.code==ErrorCode::CapabilityDenied));
     }
     Ok(())
+}
+
+#[test]
+fn full_eight_watch_batch_fits_the_default_8192_token_budget()->Result<()> {
+    let _serial=lock(&SERIAL)?;let files=Files::new()?;let s=register(&files,3,&[4],false)?;
+    for index in 0..8 {watch(&s,&format!("batch-{index}"),2)?;}
+    {let handle=resolve(s.handle())?;let mut session=lock(&handle)?;session.budget.max_output_tokens=8192;}
+    let raw=fortress_query(s.handle(),None,Some(json!({"schema":"dfmcp.query/1","query":{"kind":"await_watches"}})));
+    assert!(raw.len()<=32768);let result=decode(&raw)?;require_success(&result)?;
+    assert_eq!(result["selected"],8);assert_eq!(result["sampled"],8);assert_eq!(result["all_satisfied"],true);
+    assert_eq!(result["records"].as_array().map(Vec::len),Some(8));assert_eq!(s.calls.load(Ordering::SeqCst),1);Ok(())
 }
