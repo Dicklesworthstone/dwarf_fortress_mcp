@@ -1,7 +1,7 @@
 //! Foreground, session-owned predicates over published observations.
 //! No timers, bridge calls, game effects, or detached work live here. A caller
 //! explicitly refreshes observations and polls a watch. Publication occurs only
-//! after the complete response, including active work, has been rendered.
+//! after complete response rendering and, when configured, checkpoint sync.
 
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -11,6 +11,10 @@ use dfmcp_core::{Capability, DfmcpError, Digest32, EntityId, ErrorCode, Operatio
 use dfmcp_world::{FactPresence, FactSource, Value as WorldValue, WorldSnapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+#[path = "watch_durability.rs"]
+mod durability;
+pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 
 const MAX_PER_SESSION: usize = 8;
 const MAX_TOTAL: usize = 128;
@@ -71,7 +75,8 @@ enum Request {
     ReleaseWatch { watch: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Definition {
     key: String,
     label: String,
@@ -124,6 +129,7 @@ struct Watch {
     status: Status,
     evaluation: Value,
     evidence_digest: Digest32,
+    recovery: Option<durability::Recovery>,
 }
 
 #[derive(Default)]
@@ -420,7 +426,7 @@ impl Watch {
     }
 
     fn summary(&self, current: StateAnchor) -> Value {
-        json!({"watch":self.handle,"key":self.definition.key,"label":self.definition.label,
+        let mut result = json!({"watch":self.handle,"key":self.definition.key,"label":self.definition.label,
             "status":self.status.text(),"terminal":self.status.terminal(),
             "stable_observations":self.streak,"required_stable_observations":self.definition.stable_observations,
             "deadline_tick":self.definition.deadline_tick,
@@ -428,7 +434,9 @@ impl Watch {
             "evaluation_current":self.last_seen==current,
             "needs_poll":!self.status.terminal() && self.last_seen!=current,
             "next_sample_tick":self.last_sample_tick.and_then(|tick|tick.checked_add(self.definition.poll_interval_ticks)),
-            "evidence_digest":self.evidence_digest.to_string()})
+            "evidence_digest":self.evidence_digest.to_string()});
+        if let Some(recovery) = &self.recovery { result["recovery"] = json!(recovery); }
+        result
     }
 
     fn detail(&self, current: StateAnchor) -> Value {
@@ -476,13 +484,18 @@ fn authorize(snapshot: &WorldSnapshot, context: &OperationContext) -> Result<()>
     Ok(())
 }
 
-fn publish_work<F>(store: &Store, context: &OperationContext, mut value: Value, publish: F) -> Result<String>
+fn publish_plain<F>(context: &OperationContext, value: Value, publish: F) -> Result<String>
 where F: FnOnce(Value) -> Result<String> {
-    value["_condition_watch_work"] = json!(active_work(store, context));
     let size = serde_json::to_vec(&value).map_err(|_| invalid("watch result cannot be encoded"))?.len();
     let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
     if size as u64 > maximum { return Err(bounded("watch result and active-work summary exceed the output budget")); }
     publish(value)
+}
+
+fn publish_work<F>(store: &Store, context: &OperationContext, mut value: Value, publish: F) -> Result<String>
+where F: FnOnce(Value) -> Result<String> {
+    value["_condition_watch_work"] = json!(active_work(store, context));
+    durability::publish(store,context,value,|value|publish_plain(context,value,publish))
 }
 
 /// Pure queries retain the current watch projection without sampling it.
@@ -540,14 +553,14 @@ where F: FnOnce(Value) -> Result<String> {
                 "serial":serial,"anchor":anchor(context.anchor),"definition":definition}))?;
             let mut watch = Watch {handle:format!("watch:{identity}"),definition,created_at:context.anchor,
                 last_seen:context.anchor,last_sample_tick:None,streak:0,samples:0,status:Status::Waiting,
-                evaluation:Value::Null,evidence_digest:identity};
+                evaluation:Value::Null,evidence_digest:identity,recovery:None};
             watch.advance(snapshot,true)?;
             let key = (context.session_id,watch.handle.clone());
             let mut value = payload(context,"watch");
             value["record"] = watch.detail(context.anchor);
             value["replayed"] = json!(false);
             // Build a bounded candidate store. The caller's pure publisher must
-            // accept the full response before the authoritative root is swapped.
+            // accept the full response, then durable watches sync before root swap.
             let mut candidate = Store {serial,entries:store.entries.clone()};
             candidate.entries.insert(key,watch);
             let encoded = publish_work(&candidate,context,value,publish)?;
