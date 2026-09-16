@@ -56,7 +56,7 @@ impl Kind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Predicate {
-    Always,
+    Always {},
     Field { field: String, comparison: Comparison, value: Literal },
     All { args: Vec<Predicate> },
     Any { args: Vec<Predicate> },
@@ -73,7 +73,7 @@ pub(super) fn validate(predicate: &Predicate, depth: usize) -> Result<usize> {
             return Err(bounded("count predicate exceeds the watch's shared depth/node bounds"));
         }
         match predicate {
-            Predicate::Always => {}
+            Predicate::Always {} => {}
             Predicate::Field { field, value, .. } => {
                 name(field, 128)?;
                 if let Literal::Text(text) = value
@@ -97,7 +97,7 @@ fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnaps
     budget: &mut EvaluationBudget) -> Result<Truth> {
     budget.charge()?;
     Ok(match predicate {
-        Predicate::Always => Truth::True,
+        Predicate::Always {} => Truth::True,
         Predicate::Field { field, comparison, value } => {
             match entity.fields.get(field) {
                 Some(fact) if matches!(&fact.source, FactSource::DfhackField(_))
