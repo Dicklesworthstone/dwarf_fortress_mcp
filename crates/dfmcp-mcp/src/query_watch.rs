@@ -15,6 +15,8 @@ use serde_json::{Value, json};
 #[path = "watch_durability.rs"]
 mod durability;
 pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
+#[path = "query_watch_batch.rs"]
+pub(super) mod batch;
 
 const MAX_PER_SESSION: usize = 8;
 const MAX_TOTAL: usize = 128;
