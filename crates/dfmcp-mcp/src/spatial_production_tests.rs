@@ -160,8 +160,8 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
     assert_eq!(result["rows"][0]["inspect_assignment"]["query"]["kind"],"historical_query");
     ok(ask(&s,supply())?)?;
     let schema=ok(decode(&fortress_query(s.handle(),Some("schema".into()),None))?)?;
-    assert_eq!(schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(12));
-    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(15));
+    assert_eq!(schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(13));
+    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(16));
     drop(s);assert_eq!(fs::read(&files.observations).map_err(io_error)?,before);
     assert_eq!(fs::read(&files.watches).map_err(io_error)?,watches);Ok(())
 }
@@ -189,7 +189,7 @@ fn rejected_work_focus_authority_and_custody_do_not_acquire_or_publish()->Result
 fn composed_schema_keeps_existing_features_and_specializes_only_spatial_history()->Result<()> {
     let schema=watch_batch::extend_schema(workforce_queries::extend_schema(history::schema()?)?)?;
     let variants=schema["$defs"]["query"]["oneOf"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"schema variants missing"))?;
-    for name in ["production_diagnosis","inventory_plan","map_route","workforce_plan","watch","await_watches","historical_changes"] {
+    for name in ["production_diagnosis","inventory_plan","map_route","workforce_plan","watch","await_watches","historical_changes","item_quantity"] {
         assert_eq!(variants.iter().filter(|v|v["properties"]["kind"]["const"]==name).count(),1,"{name}");
     }
     let history=variants.iter().find(|v|v["properties"]["kind"]["const"]=="history").ok_or_else(||error(ErrorCode::InvalidRequest,"history variant missing"))?;
@@ -197,3 +197,6 @@ fn composed_schema_keeps_existing_features_and_specializes_only_spatial_history(
     assert!(schema["$defs"]["watch_condition"]["oneOf"].as_array().is_some_and(|v|v.iter().any(|v|v["properties"]["op"]["const"]=="entity_count")));
     assert_eq!(shared::query_schema()?["$id"],"urn:dfmcp:operations-query:1");Ok(())
 }
+
+#[path="spatial_quantity_tests.rs"]
+mod quantities;
