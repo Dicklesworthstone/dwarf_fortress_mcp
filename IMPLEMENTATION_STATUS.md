@@ -43,6 +43,35 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Operational situation and attention in the live spatial loop
+
+`docs/SPATIAL_SITUATION.md` describes the fixed `dfmcp.spatial-situation/1` derivation integrated into
+spatial/1.8 session opening, observations and queries. Seven ordered rules summarize observed citizen,
+job, building, item and visible-terrain signs without inferring causal blockers, global safety,
+starvation or threat exposure. Native field provenance, coherent source digest, tick, type and
+consistent known presence are required; unknown and redacted inputs remain explicitly unestablished.
+
+Open/observe/wait and query `mode="situation"` include all signal counts and at most two detailed
+attention groups with generation-checked, exact-anchor inspection requests. Ordinary tactical queries
+retain one compact priority signal, omitted/unknown group counts and a situation-detail request.
+Observe/wait add at most four endpoint-count changes, with explicit omissions and no cross-epoch,
+continuous-history, acknowledged-client-cursor or game-effect-success claim. Situation queries acquire
+no extra native capture and do not sample watches. Fenced sources and expired Query grants suppress
+current findings; historical and archive-only responses do not inherit live operational attention.
+
+Watch result-budget reservation now uses the actual final renderer's watch-specific metadata shape,
+including metadata added by the post-refresh callback, rather than unrelated baseline-comparison
+metadata. Full output is still checked before watch root publication or durable checkpoint append.
+No native protocol, top-level tool, dependency, mutation authority or production admission changes.
+
+Fifteen Rust scenarios are registered: nine projection tests and six actual live/archive handler
+tests, including compact/detail navigation, unknown/provenance and hidden-data cases, stale links,
+authority expiry, unchanged watch evidence, 8,192-byte pagination and budget-refused registration.
+**None has been compiled or executed here**: Rust, Cargo and rustfmt are unavailable. Six independent
+Python reference watch-packet shapes fit an 8,192-byte budget, measuring 6,553–6,590 bytes. That sizing
+reference does not execute Rust serialization, rules, watch transitions, MCP or native/live DFHack.
+No Rust, runtime or whole-repository qualification is established by this increment.
+
 ### Restart-safe historical endpoint comparisons
 
 `docs/HISTORICAL_CHANGES.md` describes the new `historical_changes` query in both journal-backed
