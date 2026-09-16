@@ -3,6 +3,8 @@
 
 #[path = "watch_checkpoint.rs"]
 mod checkpoint;
+#[path = "watch_session_release.rs"]
+mod session_release;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
