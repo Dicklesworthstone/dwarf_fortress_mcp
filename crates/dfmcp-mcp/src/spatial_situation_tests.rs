@@ -165,13 +165,17 @@ fn equal_counts_do_not_claim_unchanged_entities_and_changed_metrics_are_bounded(
 
 #[test]
 fn policy_explains_every_emitted_rule_and_order()->Result<()> {
-    let policy=situation::policy();let rules=policy["rules"].as_array()
+    let policy:Value=situation::policy();let rules=policy["rules"].as_array()
         .ok_or_else(||dfmcp_core::DfmcpError::new(ErrorCode::InvalidRequest,"rules missing"))?;
     assert_eq!(rules.len(),7);assert_eq!(policy["authority_granted"],false);
     let codes:BTreeMap<_,_>=rules.iter().filter_map(|r|r["rule"].as_str().map(|key|(key,&r["priority"]))).collect();
     assert_eq!(codes.len(),7);
     for finding in report(&warning_world())?.attention(SessionId::new(123)) {
-        assert_eq!(codes.get(finding["rule"].as_str().unwrap_or("")),Some(&&finding["inspection_priority"]));
+        assert_eq!(codes.get(finding["rule"].as_str().unwrap_or("")).copied(),Some(&finding["inspection_priority"]));
     }
     Ok(())
 }
+
+#[cfg(unix)]
+#[path="spatial_situation_runtime_tests.rs"]
+mod runtime;
