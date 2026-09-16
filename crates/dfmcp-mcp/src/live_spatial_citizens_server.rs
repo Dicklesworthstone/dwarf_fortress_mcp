@@ -10,6 +10,7 @@
 #[path="spatial_situation.rs"] mod situation;
 #[path="spatial_situation_presentation.rs"] mod situation_presentation;
 #[path="spatial_watch_batch.rs"] mod watch_batch;
+#[path="spatial_production.rs"] mod production;
 #[cfg(test)]
 #[path="spatial_situation_tests.rs"] mod situation_tests;
 
@@ -237,13 +238,14 @@ fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjectio
 }
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, citizens, jobs, buildings, items, tiles, history, schema. Structured poll_watches evaluates selected watches on the current capture; await_watches obtains at most one shared capture, then atomically publishes the selected watch set. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention or acquisition.")]
+#[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, production, citizens, jobs, buildings, items, tiles, history, schema. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     if mode.as_deref()==Some("situation"){return situation_presentation::detail(s,&c);}
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
         None|Some("summary"|"schema")=>json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}}),
         Some("history")=>json!({"schema":"dfmcp.query/1","query":{"kind":"history"}}),
+        Some("production")=>json!({"schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"}}),
         Some("citizens")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["unit"],"fields":["name","profession","position","alive","active"],"limit":1}}),
         Some("items")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["item"],"fields":["type_key","stack_size","raw_position"],"limit":1}}),
         Some("jobs")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["job"],"fields":["type_key","suspended","worker_entity","worker_is_strict_citizen"],"limit":1}}),
@@ -254,6 +256,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
     if !schema&&watch_batch::handles(&input){return watch_batch::execute(s,&c,&input);}
     let kind=input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str).unwrap_or("");
     if !schema&&history::handles(&input){let result=history::execute(s,&c,&input);if matches!(&result,Err(e)if e.code==ErrorCode::CorruptLedger){s.source.fence();}return result;}
+    if !schema&&production::handles(&input){let result=production::live(s,&c,&input);if matches!(&result,Err(e)if e.code==ErrorCode::CorruptLedger){s.source.fence();}return result;}
     let local=matches!(kind,"watches"|"cancel_watch"|"release_watch"|"baselines"|"release_baseline");
     if s.source.poisoned()&&!local&&!schema{return Err(error(ErrorCode::AdapterUnavailable,"spatial/1.8 source fenced; reopen or manage local records"));}
     let mut refresh=None;if !schema&&kind=="await_watch"{let snapshot=s.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"snapshot absent"))?;
@@ -270,6 +273,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
 pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_id,"fortress.explain",Capability::Query,|s,c|
     semantic_query::publish_with_active_work(&c,json!({"ok":true,"coherence":"strict citizens, operations and requested terrain are one native capture",
         "situation_policy":situation::policy(),
+        "production":"production_diagnosis and inventory_plan use this exact capture and entity generations; flags, attachments and declared supply shortages do not prove causal blockers, native requirements, reachability or job completion",
         "worker_join":"observed strict-citizen workers have generation-checked unit entities and performs edges to jobs",
         "workforce":"query workforce_plan maximizes filled declared worker slots with one capacity per citizen; no labor assignment, reservation, native job eligibility or global distance/skill optimum is proved",
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
@@ -286,4 +290,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Use query await_watches to evaluate selected or all retained watches after at most one shared capture; poll_watches uses the current capture. Batch watch progress publishes atomically and uses the existing durable checkpoint. Live Agent Turns include operational attention; situation mode gives detail. Observe/wait summarize endpoint counts, not causal history. Recovery-only sessions inspect original archives without credentials. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Query production_diagnosis (or production mode) for observed job/holder/attachment conditions and exact-anchor assignment/relationship inspections. Inventory_plan allocates declared conservative stack-unit supply, not reservations; spatial_inventory_plan adds its restricted route model. Both production queries support exact historical records. Use await_watches for at most one shared capture and atomic watch progress; poll_watches uses current state. Situation mode gives bounded attention. History is not current game state. Paired watch journals preserve intent but restart resets stability. No game effects.").build();crate::run_modern_stdio(server);}
