@@ -18,6 +18,10 @@ use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, 
 use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
 
+pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
+    query_watch::extend_count_schema(schema)
+}
+
 /// Ownership of a durable watch registry belongs to the enclosing session.
 /// Dropping it releases only process-local ownership, never durable intent.
 pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
