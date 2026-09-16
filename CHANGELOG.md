@@ -8,6 +8,17 @@ readiness.
 
 ### Added
 
+- Optional restart-safe foreground condition watches for spatial/1.8, paired with its exact
+  observation archive through operator-only `DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL` configuration.
+  Registration, samples, terminal outcomes, cancellation and release use bounded hash-chained
+  checkpoints with render-before-sync and sync-before-publication ordering.
+- Recovery under fresh session-bound watch handles, retained definitions/deadlines/evidence,
+  reset unfinished stability, explicit downtime uncertainty, current-authority and horizon checks,
+  and historical labeling for old terminal outcomes. Existing watch queries and eleven-tool
+  interface remain unchanged. Baselines and game effects are not made durable by watch metadata.
+- Twenty-five new logical Rust durability/configuration/actual-handler tests and the executable
+  independent Python checkpoint framing reference. The reference passed 740 checks; Rust tests
+  remain uncompiled and unexecuted here. Full workflow, limits and evidence: `docs/DURABLE_WATCHES.md`.
 - Foreground condition watches integrated into protocol-1.1 `fortress.query`:
   `watch`, `poll_watch`, `await_watch`, `watches`, `cancel_watch`, and
   `release_watch`. Typed predicates retain generation fences, failure guards,
@@ -208,8 +219,11 @@ readiness.
 
 ### Current evidence status
 
+- Durable spatial/1.8 watches are source-present with 25 newly registered Rust tests, not executed
+  here. The 740 passing Python framing-reference checks do not execute Rust or establish runtime,
+  filesystem power-loss, native/live-game, repository qualification or admission evidence.
 - Condition-watch schema checks passed 73 local cases (34 accepted, 39 rejected),
-  plus three documentation examples. The 25 Rust scenarios are registered but
+  plus three documentation examples. The 25 original Rust scenarios are registered but
   unexecuted: no Rust compiler, Cargo, or rustfmt is available in this editing
   environment. These checks do not establish Rust, stdio, native/live-game,
   repository qualification, or admission evidence.
@@ -223,10 +237,12 @@ readiness.
   integration alongside typed inspection, aggregate/search queries, and baselines;
   broader live observation domains remain unfinished.
 - The checked-in compatibility registry remains `no_admitted_live_tuples` with zero entries.
-- Protocol 1.0 and protocol 1.1 source are not currently admitted by that empty registry.
-- The V2 production runtime map contains protocol 1.0 only; protocol 1.1 remains explicitly
+- No current live tuple is admitted by that empty registry.
+- The V2 production runtime map contains protocol 1.0 only; later profiles remain explicitly
   unadmitted development source.
-- No live mutation RPC or capability exists.
+- No admitted live mutation capability exists. The separate control/1.7 pause-only development
+  source and its exact mock-test limitations are recorded in `IMPLEMENTATION_STATUS.md` and
+  `CHANGELOG.d/2026-09-15-pause-reconciliation.md`; it is not production admission.
 - A fresh full latest-nightly qualification receipt, exact native/live evidence, registry
   promotion, deployment-floor advancement, qualified server artifact, and admitted launch evidence
   are still required for the final current head.
