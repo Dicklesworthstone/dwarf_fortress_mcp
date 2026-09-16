@@ -22,6 +22,20 @@ use serde_json::{Value, json};
 /// Dropping it releases only process-local ownership, never durable intent.
 pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
 
+/// Private, single-use preparation: selections cannot be replaced by an MCP
+/// handle after a runtime has acquired the one optional observation.
+pub(crate) type PreparedWatchBatch = query_watch::batch::Prepared;
+pub(crate) fn prepare_watch_batch<F>(snapshot: &WorldSnapshot, context: &OperationContext,
+    input: &Value, preview: F) -> Result<PreparedWatchBatch>
+where F: FnOnce(Value) -> Result<String> {
+    query_watch::batch::prepare(snapshot,context,input,preview)
+}
+pub(crate) fn complete_watch_batch<F>(snapshot: &WorldSnapshot, context: &OperationContext,
+    prepared: PreparedWatchBatch, observation_acquired: bool, publish: F) -> Result<String>
+where F: FnOnce(Value) -> Result<String> {
+    query_watch::batch::complete(snapshot,context,prepared,observation_acquired,publish)
+}
+
 /// The spatial/1.8 caller supplies exact verified archive anchors after syncing
 /// its fresh bootstrap capture. No MCP argument can select a journal or profile.
 pub(crate) fn attach_watch_journal<F>(snapshot: &WorldSnapshot, context: &OperationContext,
