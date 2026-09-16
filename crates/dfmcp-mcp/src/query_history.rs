@@ -2,6 +2,10 @@
 //! Captures are immutable until explicitly released. Changes compare endpoints,
 //! never claim a continuous event history, and never authorize game mutations.
 
+#[path = "query_history_endpoints.rs"]
+mod endpoints;
+pub(super) use endpoints::compare_endpoints;
+
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::hash::{BuildHasher, Hasher};
@@ -145,6 +149,7 @@ fn row_key(row: &Value) -> Result<RowKey> {
 /// Finish all pages against the same in-memory snapshot. Both total rows and
 /// repeated scan work are bounded. A partial result is never captured as a set.
 fn materialize(snapshot: &WorldSnapshot, context: &OperationContext, selection: &Value) -> Result<(Rows, usize)> {
+    let started = std::time::Instant::now();
     let mut input = json!({"schema":"dfmcp.query/1", "query":selection});
     let mut page_limit = context.budget.max_entities.min(8);
     let mut rows = Rows::new();
@@ -152,6 +157,9 @@ fn materialize(snapshot: &WorldSnapshot, context: &OperationContext, selection: 
     let mut expected_matched = None;
     loop {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
+            return Err(exhausted("query selection exhausted its foreground wall-time allowance"));
+        }
         calls += 1;
         if calls > MAX_PAGE_CALLS
             || calls.saturating_mul(snapshot.graph.entities.len()) > MAX_SOURCE_ROW_VISITS
@@ -167,6 +175,9 @@ fn materialize(snapshot: &WorldSnapshot, context: &OperationContext, selection: 
             }
             Err(error) => return Err(error),
         };
+        if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
+            return Err(exhausted("query selection exhausted its foreground wall-time allowance"));
+        }
         if result.get("anchor") != Some(&anchor_json(snapshot.anchor())) {
             return Err(invariant("capture page changed the requested snapshot anchor"));
         }
