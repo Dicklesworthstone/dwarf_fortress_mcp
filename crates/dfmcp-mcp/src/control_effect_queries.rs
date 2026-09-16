@@ -69,7 +69,8 @@ impl PageIdentity<'_> {
 pub(super) fn effects<S: EffectJournalStorage>(journal: &mut ControlEffectJournal<S>,
     context: &OperationContext, query: EffectQuery<'_>) -> Result<Value> {
     if !matches!(query.state, "all" | "nonterminal" | "reconciliation_required" | "prepared"
-        | "commit_started" | "indeterminate" | "verified_applied" | "verified_not_applied") {
+        | "commit_started" | "indeterminate" | "verified_applied" | "verified_not_applied"
+        | "cancelled_before_dispatch") {
         return Err(invalid("unknown durable effect state filter"));
     }
     if !(1..=128).contains(&query.limit) || query.max_bytes == Some(0)
@@ -82,7 +83,7 @@ pub(super) fn effects<S: EffectJournalStorage>(journal: &mut ControlEffectJourna
         head: journal.head(), filter: query.state };
     let metadata = journal_json(journal);
     let records = journal.records(context)?;
-    let mut counts = [0usize; 5];
+    let mut counts = [0usize; 6];
     let mut matching = 0usize;
     for record in records.clone() {
         if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
@@ -94,6 +95,7 @@ pub(super) fn effects<S: EffectJournalStorage>(journal: &mut ControlEffectJourna
             DurablePauseState::Indeterminate => 2,
             DurablePauseState::VerifiedApplied => 3,
             DurablePauseState::VerifiedNotApplied => 4,
+            DurablePauseState::CancelledBeforeDispatch => 5,
         };
         counts[index] += 1;
         matching += usize::from(matches_state(query.state, record.state));
@@ -114,7 +116,8 @@ pub(super) fn effects<S: EffectJournalStorage>(journal: &mut ControlEffectJourna
             "filter":query.state, "order":"idempotency_key_ascending",
             "total_effects":records.len(), "matched_effects":matching,
             "state_counts":{"prepared":counts[0], "commit_started":counts[1],
-                "indeterminate":counts[2], "verified_applied":counts[3], "verified_not_applied":counts[4]},
+                "indeterminate":counts[2], "verified_applied":counts[3], "verified_not_applied":counts[4],
+                "cancelled_before_dispatch":counts[5]},
             "reconciliation_required_effects":counts[1] + counts[2],
             "returned_effects":rows.len(), "effects":rows,
             "truncated":next < matching,
@@ -229,7 +232,8 @@ mod tests {
     fn filters_counts_and_empty_results_preserve_uncertainty() -> Result<()> {
         let mut j = fixture()?;
         for (state, expected) in [("all",5), ("nonterminal",3), ("reconciliation_required",2),
-            ("prepared",1), ("commit_started",1), ("indeterminate",1), ("verified_applied",1), ("verified_not_applied",1)] {
+            ("prepared",1), ("commit_started",1), ("indeterminate",1), ("verified_applied",1), ("verified_not_applied",1),
+            ("cancelled_before_dispatch",0)] {
             let value = effects(&mut j, &context(), query(state, 128))?;
             assert_eq!(value["matched_effects"], expected);
             assert_eq!(value["current_freshness_proven"], false);
@@ -260,6 +264,24 @@ mod tests {
         denied = context(); denied.cancellation_requested = true;
         assert!(matches!(effects(&mut j, &denied, query("all", 1)), Err(e) if e.code == ErrorCode::CancellationRequested));
         assert_eq!(j.head(), head);
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_is_distinct_from_native_failure_and_changes_the_page_identity() -> Result<()> {
+        let mut j=fixture()?;
+        let old=effects(&mut j,&context(),query("all",1))?;
+        let token=old["continuation"].as_str().ok_or_else(||invalid("test continuation"))?;
+        j.cancel_prepared("a-prepared",Digest32::of_bytes(b"a-prepared"),&context())?;
+        let cancelled=effects(&mut j,&context(),query("cancelled_before_dispatch",128))?;
+        assert_eq!(cancelled["matched_effects"],1);
+        assert_eq!(cancelled["effects"][0]["effect_known"],false);
+        assert!(cancelled["effects"][0]["receipt_digest"].is_null());
+        assert_eq!(cancelled["state_counts"]["verified_not_applied"],1);
+        assert_eq!(cancelled["state_counts"]["cancelled_before_dispatch"],1);
+        assert_eq!(effects(&mut j,&context(),query("nonterminal",128))?["matched_effects"],2);
+        assert!(matches!(effects(&mut j,&context(),EffectQuery {continuation:Some(token),..query("all",1)}),
+            Err(e) if e.code==ErrorCode::Conflict));
         Ok(())
     }
 }
