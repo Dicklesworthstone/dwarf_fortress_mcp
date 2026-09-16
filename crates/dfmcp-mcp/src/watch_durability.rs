@@ -14,7 +14,7 @@ use dfmcp_world::WorldSnapshot;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use super::{Definition, Status, Store, Watch, WATCHES, MAX_PER_SESSION, MAX_TOTAL,
-    active_work, anchor, authorize, bounded, digest, failure, invalid, validate_definition, validate_handle};
+    active_work, anchor, authorize, bounded, digest, failure, validate_definition, validate_handle};
 
 const SCHEMA: &str = "dfmcp.watch-checkpoint/1";
 const PROFILE: &str = "spatial/1.8";
@@ -99,11 +99,35 @@ impl SavedSet {
     }
 }
 
+fn bounded_json(bytes: &[u8]) -> Result<Value> {
+    if bytes.len()>checkpoint::MAX_PAYLOAD{return Err(bounded("watch checkpoint exceeds its byte limit"));}
+    let value:Value=serde_json::from_slice(bytes).map_err(|_|corrupt("invalid watch checkpoint JSON"))?;
+    let mut pending=vec![(&value,0usize)];let mut visited=0usize;
+    while let Some((node,depth))=pending.pop(){
+        visited+=1;
+        if depth>32||visited>32768{return Err(corrupt("watch checkpoint JSON shape exceeds its bound"));}
+        match node {
+            Value::Array(array)=>{
+                if visited+pending.len()+array.len()>32768{return Err(corrupt("watch checkpoint array too wide"));}
+                pending.extend(array.iter().map(|node|(node,depth+1)));
+            }
+            Value::Object(map)=>{
+                if visited+pending.len()+map.len()>32768{return Err(corrupt("watch checkpoint object too wide"));}
+                if map.keys().any(|key|key.contains('\0')){return Err(corrupt("NUL in watch checkpoint key"));}
+                pending.extend(map.values().map(|node|(node,depth+1)));
+            }
+            Value::String(text) if text.contains('\0')=>return Err(corrupt("NUL in watch checkpoint text")),
+            Value::Number(number) if !number.is_i64()&&!number.is_u64()=>return Err(corrupt("non-integral watch checkpoint number")),
+            _=>{}
+        }
+    }
+    Ok(value)
+}
+
 /// Every stored anchor must be an exact retained observation, not merely a
 /// matching tick, fortress name, source generation, or caller-supplied hash.
 fn decode_saved(bytes: &[u8], anchors: &BTreeMap<StateAnchor,usize>) -> Result<SavedSet> {
-    if bytes.len()>checkpoint::MAX_PAYLOAD{return Err(bounded("watch checkpoint exceeds its byte limit"));}
-    let set:SavedSet=serde_json::from_slice(bytes).map_err(|_|corrupt("invalid watch checkpoint JSON"))?;
+    let set:SavedSet=serde_json::from_value(bounded_json(bytes)?).map_err(|_|corrupt("invalid watch checkpoint fields"))?;
     if set.schema!=SCHEMA||set.profile!=PROFILE||set.watches.len()>MAX_PER_SESSION {
         return Err(corrupt("watch checkpoint schema/profile/count differs"));
     }
@@ -111,7 +135,9 @@ fn decode_saved(bytes: &[u8], anchors: &BTreeMap<StateAnchor,usize>) -> Result<S
     let checkpoint_index=*anchors.get(&current).ok_or_else(||corrupt("watch checkpoint anchor is absent from its observation archive"))?;
     let mut handles=BTreeSet::new();let mut keys=BTreeSet::new();let mut previous=None;
     for w in &set.watches {
-        validate_handle(&w.handle)?;validate_definition(&w.definition)?;parse_digest(&w.evidence_digest)?;
+        validate_handle(&w.handle).map_err(|_|corrupt("invalid durable watch handle"))?;
+        validate_definition(&w.definition).map_err(|_|corrupt("invalid durable watch definition"))?;
+        parse_digest(&w.evidence_digest)?;
         let state=status(&w.status)?;let created=w.created_at.decode()?;let last=w.last_seen.decode()?;
         let created_index=*anchors.get(&created).ok_or_else(||corrupt("watch creation observation is not retained"))?;
         let last_index=*anchors.get(&last).ok_or_else(||corrupt("watch evidence observation is not retained"))?;
@@ -119,6 +145,7 @@ fn decode_saved(bytes: &[u8], anchors: &BTreeMap<StateAnchor,usize>) -> Result<S
             ||created_index>last_index||last_index>checkpoint_index
             ||!handles.insert(w.handle.as_str())||!keys.insert(w.definition.key.as_str())
             ||previous.is_some_and(|p:&str|p>=w.handle.as_str())
+            ||!w.evaluation.is_object()||w.definition.deadline_tick<=created.tick.0
             ||w.streak>w.definition.stable_observations||u64::from(w.streak)>w.samples
             ||(!state.terminal()&&w.streak>=w.definition.stable_observations)
             ||(state==Status::Satisfied&&w.streak!=w.definition.stable_observations)
@@ -126,8 +153,8 @@ fn decode_saved(bytes: &[u8], anchors: &BTreeMap<StateAnchor,usize>) -> Result<S
             return Err(corrupt("inconsistent durable watch identity, order, evidence or counters"));
         }
         if let Some(recovery)=&w.recovery {
-            validate_handle(&recovery.prior_watch)?;parse_digest(&recovery.prior_evidence_digest)?;
-            parse_digest(&recovery.prior_checkpoint_digest)?;
+            validate_handle(&recovery.prior_watch).map_err(|_|corrupt("invalid prior watch handle"))?;
+            parse_digest(&recovery.prior_evidence_digest)?;parse_digest(&recovery.prior_checkpoint_digest)?;
             if recovery.restart_count==0||recovery.continuity_proven {
                 return Err(corrupt("invalid watch recovery continuity claim"));
             }
@@ -165,8 +192,14 @@ where F:FnOnce(Value)->Result<String> {
         let bytes=serde_json::to_vec(&candidate).map_err(|_|corrupt("watch state cannot be encoded"))?;
         Some(entry.journal.stage(bytes,context)?)
     }else{None};
-    value["durable"]=json!(true);
+    // Attaching current watch work to another response does not make that
+    // response's baselines, query results, or historical replay durable state.
+    if matches!(value.get("kind").and_then(Value::as_str),
+        Some("watch"|"poll_watch"|"watches"|"cancel_watch"|"release_watch")) {
+        value["durable"]=json!(true);
+    }
     value["watch_persistence"]=json!({"schema":SCHEMA,"profile":PROFILE,
+        "scope":"foreground_condition_watches","durable":true,
         "observation_journal_id":entry.observation_journal.to_string(),
         "journal_id":entry.journal.id().to_string(),
         "checkpoint":pending.as_ref().map_or(entry.journal.count(),checkpoint::Pending::number),
@@ -222,6 +255,10 @@ fn recover_watch(saved: &SavedWatch, context: &OperationContext, checkpoint: Dig
             ||watch.created_at.cursor.epoch!=context.anchor.cursor.epoch
             ||context.anchor.tick<previous.tick||context.anchor.cursor.sequence<previous.cursor.sequence
             ||(context.anchor.cursor==previous.cursor&&context.anchor!=previous);
+        if !incompatible&&watch.definition.deadline_tick.checked_sub(context.anchor.tick.0)
+            .is_some_and(|remaining|remaining>context.budget.max_game_ticks) {
+            return Err(bounded("recovered watch exceeds the current session's game-tick horizon"));
+        }
         watch.status=if incompatible{Status::Invalidated}
             else if context.anchor.tick.0>=watch.definition.deadline_tick{Status::Expired}
             else{Status::BlockedUnknown};
@@ -234,6 +271,7 @@ fn recover_watch(saved: &SavedWatch, context: &OperationContext, checkpoint: Dig
     }else{
         // Keep original terminal observations/counters; rebind only the handle.
         watch.evaluation["recovery"]=json!(watch.recovery);
+        watch.evaluation["terminal_evidence_retained"]=json!(true);
     }
     watch.seal()?;
     Ok(watch)
