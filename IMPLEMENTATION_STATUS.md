@@ -17,8 +17,9 @@ The repository contains:
 - an implemented protocol-1.1 retained-announcement extension;
 - separate unadmitted jobs-only 1.2, operations/1.3, paged operations/1.4, map/1.5 and spatial/1.6 development profiles;
 - a citizen-inclusive spatial/1.8 source path that captures strict citizens, jobs, buildings, items and bounded terrain during one native suspension, then publishes one combined anchor;
-- a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, and reconcile for `Pause { paused }` only;
+- a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, receipt-verified reconciliation and bounded foreground recovery for `Pause { paused }` only;
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
+- offline read-only pause-effect discovery without a bridge connection or mutation authority;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
@@ -39,6 +40,53 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
+
+### Pause recovery, verified receipts and bounded foreground reconciliation
+
+The control/1.7 runtime now implements a complete discovery-to-reconciliation source path under the
+existing eleven-tool interface. See `docs/LIVE_CONTROL.md` for exact request and evidence semantics.
+
+- `fortress.open_session(recovery_only=true)` opens an existing private journal with Query authority,
+  a read-only descriptor, no bridge credentials or connection, and no creation or repair. Query,
+  explain and doctor can expose stored evidence while DFHack is unavailable. Recovery sessions
+  cannot promote themselves to live sessions or invoke prepare, commit or live wait.
+- `fortress.query` lists durable effects without prior knowledge of their keys. Whole-record pages
+  and state filters are bounded; continuations bind the session, journal incarnation, exact head,
+  filter and offset. Authority and custody are rechecked even for terminal/idempotent lookups.
+- Native preparation identity now survives a later commit: desired pause and expected tick are
+  immutable, separate from actual observed pause and tick. Duplicate preparation after time advances
+  returns the retained token. Setter failure reports the actual opposite pause state, not the target.
+- New live prepare tokens and terminal receipts are independently recomputed in Rust. Both applied
+  and not-applied terminal results require a complete matching receipt and consistent observation.
+  A known native prepare or interrupted commit without a terminal receipt leaves a durable attempt
+  indeterminate; it is never interpreted as proven non-application.
+- The wire requires explicit outcome/pause/tick fields for known records, exact token/receipt lengths,
+  and fences every failed wire call, including unread oversized frames. TCP connect and handshake
+  share one deadline allowance.
+- `fortress.wait` runs one foreground reconciliation pass over 1..16 selected keys. It validates the
+  complete selection and reserves the complete worst-case response before bridge work, processes keys
+  canonically, skips prepared/terminal records, and uses a query-only recovery transport interface.
+  A shared wall-time allowance and stop-on-first-error preserve earlier durable progress while
+  reporting remaining work as deferred. No mutating commit is dispatched or retried.
+- Previously persisted terminal records are not migrated or newly qualified by the live receipt
+  validator. Historical evidence does not prove current pause state. Hashes are identity checksums,
+  not signatures or authority. Synchronous filesystem calls have no claimed hard cancellation bound.
+
+The offline recovery increment registered 14 Rust tests. The receipt/bounded-pass increment adds 19
+Rust tests (10 coordinator, seven wire and two response-reservation cases) and extends the existing
+MCP-handler tests to refuse live wait in offline mode, including injected clock grants. **None of
+these Rust tests was compiled or executed here**: Rust, Cargo and rustfmt are unavailable. No whole
+repository qualification is claimed.
+
+The changed actual native producer passed `scripts/test_live_control_outcomes_native_mock.py` under
+both GCC and Clang with C++17, `-Wall -Wextra -Werror -pedantic`: 75 C++ assertions and three independent
+Python SHA-256 comparisons per compiler. Tested producer SHA-256:
+`80bb0c427ce94ecee41b86c52ea721e979cd15b1f371e0a4a7a27f5aa410a6ff`.
+The test injects no-op setters, invalid post-set clocks and post-set exceptions, plus time-advanced
+prepare replay, duplicate suppression, generation loss and authentication refusal. Independent Python
+also checked the Rust test-vector constants. These are mock-interface/source checks, not a real
+DFHack/generated-protobuf build, a live campaign, or native qualification. Protocol 1.7 remains
+unadmitted and all production admission boundaries are unchanged.
 
 ### Coherent citizen + operations + terrain spatial/1.8 source
 
@@ -139,34 +187,35 @@ strictly scoped to simulation pause/resume and remains unadmitted development fu
 - The coordinator syncs `Prepared` after nonmutating bridge prepare. Before any `CommitPause` RPC it
   appends and syncs `CommitStarted`. If this durability boundary fails, no game mutation is called.
   The runtime never retries a mutating commit automatically.
-- After one commit dispatch, the bridge observes pause state and returns a generation-bound full
-  32-byte SHA-256 receipt. The coordinator must sync `VerifiedApplied` or `VerifiedNotApplied`
-  before acknowledging a terminal result. Failure to establish terminal durability is reported as
-  `EffectIndeterminate`, even if a bridge reply was received.
+- After one commit dispatch, a complete bridge outcome includes observed pause state and a
+  generation-bound full 32-byte SHA-256 receipt. The coordinator verifies that identity and must sync
+  `VerifiedApplied` or `VerifiedNotApplied` before acknowledging a terminal result. Missing or invalid
+  terminal evidence remains unresolved; failed terminal durability is `EffectIndeterminate`.
 - Rust-process restart replays the exact durable transition chain. `CommitStarted` and
   `Indeterminate` remain reconciliation-required. Read-only reconciliation may reconnect to the
   bridge, but commit is not redispatched as recovery work.
-- If the bridge incarnation still knows the effect, reconciliation records its retained result. If
-  bridge generation changed or the key is unknown, the durable state remains indeterminate and the
-  same effect is never reported safe to retry; a new observation and new plan/idempotency key are
-  required. A merely `Prepared` effect may commit once only while its bridge generation still agrees.
+- If the bridge retains a complete matching receipt, reconciliation records its result. A merely
+  known key, missing receipt, generation loss or unknown key cannot prove a terminal outcome. The same
+  effect is never reported safe to retry; a new observation and new plan/idempotency key are required.
+  A merely `Prepared` effect may commit once only while its bridge generation still agrees.
 - World load/unload advances bridge generation and clears native retained records, preventing native
   idempotency state from crossing a world boundary. The generation is also bound into tokens and
   receipts.
 - The safe-Rust client binds only the four fixed methods and profile identity. The development MCP
-  runtime retains one isolated mutation session family, grants only `ControlClock` at reversible
-  risk, preserves the eleven top-level tool names, and refuses every non-pause mutation surface.
+  runtime retains one isolated control/recovery session family, grants only `ControlClock` at
+  reversible risk in live mode or `Query` in offline mode, preserves the eleven top-level tool names,
+  and refuses every non-pause mutation surface.
 - Agent Turn metadata explicitly keeps `runtime_admitted=false` and `mutation_admissible=false`; the
   unadmitted development effect switch is represented separately. Protocol 1.7 remains absent from
   the production runner map and the compatibility registry remains empty.
 
-The actual native source was compile-checked in the editing environment against explicit mock
+The earlier native source was compile-checked in the editing environment against explicit mock
 DFHack/protobuf interfaces with both GCC and Clang under C++17 and warning-denied flags. A local
 state-machine mirror exercised prepare replay, one-shot commit, duplicate suppression, query
 reconciliation, generation reset, and fixed method registration. Independent Python `hashlib`
 calculations matched the generation-bound token and receipt identities after an embedded-NUL domain
 separator bug was corrected. `scripts/test_live_control_native_mock.py` is checked in as the
-reproducible mock-native harness.
+reproducible baseline mock-native harness; current outcome-fix evidence is recorded above.
 
 These checks are not native qualification. The Rust durable journal/client/MCP runtime have not been
 compiled or executed because no Rust toolchain was available. No real generated DFHack/protobuf
@@ -244,11 +293,11 @@ Consequences:
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis | durable handoff, complete counterfactual/VOI models, durable control-effect listing without a known key |
+| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis, bounded durable control-effect discovery and recovery passes | durable handoff, complete counterfactual/VOI models |
 | Protocol 1.0 | authenticated citizen read stack and production-runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
 | Jobs/operations/map/spatial | coherent bounded development reads through citizen-inclusive spatial/1.8, including same-anchor strict-citizen worker joins | Rust qualification, real DFHack campaigns, citizen skills/needs/health, full unit navigation, durable 1.8 history, production admission |
-| Control/1.7 | pause prepare/commit/reconcile source, mandatory private durable coordinator journal, generation-bound tokens/receipts, isolated development runtime | Rust qualification, real DFHack build, crash/disposable-fort campaigns, production admission, any other live effect family |
+| Control/1.7 | pause prepare/commit, receipt-verified live reconciliation, bounded wait, mandatory private journal and offline Query-only recovery | Rust qualification, real DFHack build, crash/disposable-fort campaigns, production admission, any other live effect family |
 | World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial/1.6 observation replay | admitted production durable backend and complete fortress coverage |
 | Intent/effects | sealed plans, in-memory dispatcher laboratory, bridge-backed pause effect with durable pre-dispatch/terminal coordinator states | qualified/admitted effect journal, leases/checkpoints tied to live commits, dig/build/labor/etc. live effects |
 | Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
@@ -267,8 +316,8 @@ Consequences:
 ## Next executable milestones
 
 1. Run full Rust verification/qualification for the exact current clean head, including spatial/1.8
-   citizen coherence, the durable pause-effect journal, control client, development runtime, and all
-   registered recovery tests.
+   citizen coherence, the durable pause-effect journal, receipt-verified coordinator, control wire,
+   development runtime, bounded wait and all registered recovery tests.
 2. Compile spatial/1.8 and control/1.7 against named real DFHack/protobuf generations and execute
    disposable-fort read/control campaigns for the exact plugin bytes.
 3. Exercise spatial/1.8 with real citizen/job churn, non-citizen workers, large rosters, hidden terrain,
