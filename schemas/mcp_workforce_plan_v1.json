@@ -10,10 +10,10 @@
         "type": "object", "additionalProperties": false,
         "required": ["key", "workers", "target", "skill_key"],
         "properties": {
-          "key": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$"},
+          "key": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$", "not": {"pattern": "[^A-Za-z0-9._-]"}},
           "workers": {"type": "integer", "minimum": 1, "maximum": 128},
           "target": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
-          "skill_key": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"},
+          "skill_key": {"type": "string", "minLength": 1, "maxLength": 96, "not": {"pattern": "[\\u0000-\\u001f\\u007f-\\u009f]"}},
           "min_effective_skill": {"type": ["integer", "null"], "minimum": 0, "maximum": 2147483647},
           "preserve_social": {"type": ["boolean", "null"]},
           "adults_only": {"type": ["boolean", "null"]}
@@ -22,6 +22,6 @@
     },
     "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
     "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000000},
-    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^wp1:[1-9][0-9]*:[0-9a-f]{64}$"}
+    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^wp1:[1-9][0-9]*:[0-9a-f]{64}$", "not": {"type": "string", "pattern": "[\\u0000-\\u001f\\u007f-\\u009f]"}}
   }
 }
