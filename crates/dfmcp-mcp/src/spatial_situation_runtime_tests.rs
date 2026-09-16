@@ -17,7 +17,7 @@ impl Source for Script {
         self.calls.fetch_add(1,Ordering::SeqCst);
         self.values.pop_front().ok_or_else(||error(ErrorCode::AdapterUnavailable,"situation fixture exhausted"))
     }
-    fn poisoned(&self)->bool{self.fenced=true == false;self.fenced}
+    fn poisoned(&self)->bool{self.fenced}
     fn fence(&mut self){self.fenced=true;}
     fn pages(&self)->u32{1}
 }
