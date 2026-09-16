@@ -89,7 +89,7 @@ pub struct DurablePauseRecord {
 impl DurablePauseRecord {
     #[must_use]
     pub const fn safe_to_dispatch(&self, bridge_generation: u64) -> bool {
-        self.state == DurablePauseState::Prepared && self.bridge_generation == bridge_generation
+        matches!(self.state, DurablePauseState::Prepared) && self.bridge_generation == bridge_generation
     }
 }
 
@@ -107,16 +107,28 @@ pub struct ControlEffectJournal<S> {
     transitions: usize,
     records: BTreeMap<String, DurablePauseRecord>,
     fenced: bool,
+    read_only: bool,
     repaired_tail_bytes: u64,
 }
 
 impl<S: EffectJournalStorage> ControlEffectJournal<S> {
-    pub fn open(mut storage: S, context: &OperationContext, initialize_empty: bool,
+    pub fn open(storage: S, context: &OperationContext, initialize_empty: bool,
         bridge_generation: u64, recovery: EffectTailRecovery) -> Result<Self> {
         authorize(context)?;
         if bridge_generation == 0 || bridge_generation == u64::MAX {
             return Err(invalid("control bridge generation is invalid"));
         }
+        Self::open_inner(storage, context, initialize_empty, bridge_generation, recovery, false)
+    }
+
+    /// Replay existing evidence without a bridge or mutation authority. Never initialize or repair.
+    pub fn open_read_only(storage: S, context: &OperationContext) -> Result<Self> {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        Self::open_inner(storage, context, false, 0, EffectTailRecovery::Refuse, true)
+    }
+
+    fn open_inner(mut storage: S, context: &OperationContext, initialize_empty: bool,
+        bridge_generation: u64, recovery: EffectTailRecovery, read_only: bool) -> Result<Self> {
         storage.validate_identity().map_err(storage_error)?;
         let mut file_length = storage.seek(SeekFrom::End(0)).map_err(storage_error)?;
         if file_length > MAX_LEDGER_BYTES { return Err(exhausted("control effect journal exceeds 64 MiB")); }
@@ -144,7 +156,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         let (id, header_digest) = decode_header(&header)?;
         let mut journal = Self { storage, id, head: header_digest,
             length: HEADER_BYTES as u64, transitions: 0, records: BTreeMap::new(),
-            fenced: false, repaired_tail_bytes: 0 };
+            fenced: false, read_only, repaired_tail_bytes: 0 };
         while journal.length < file_length {
             if journal.transitions >= MAX_TRANSITIONS {
                 return Err(exhausted("control effect journal transition limit reached"));
@@ -190,6 +202,9 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     }
 
     fn accept_replay(&mut self, record: DurablePauseRecord) -> Result<()> {
+        if !self.records.contains_key(&record.idempotency_key) && self.records.len() >= MAX_EFFECTS {
+            return Err(exhausted("control effect journal effect limit reached during replay"));
+        }
         if record.record_digest == Digest32::ZERO
             || record.transition_number != self.transitions as u64 + 1
             || record.previous_digest != self.head {
@@ -205,17 +220,42 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     }
 
     fn ensure_healthy(&mut self, context: &OperationContext) -> Result<()> {
-        authorize(context)?;
+        if self.read_only {
+            context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        } else {
+            authorize(context)?;
+        }
         if self.fenced { return Err(corrupt("control effect journal is fenced; reopen for verified recovery")); }
         if self.storage.validate_identity().is_err()
-            || self.storage.seek(SeekFrom::End(0)).map_err(storage_error)? != self.length {
+            || !matches!(self.storage.seek(SeekFrom::End(0)), Ok(length) if length == self.length) {
             self.fenced = true;
             return Err(corrupt("control effect journal identity or length changed"));
         }
         Ok(())
     }
 
+    fn authorize_write(&self, context: &OperationContext) -> Result<()> {
+        authorize(context)?;
+        if self.read_only {
+            return Err(DfmcpError::new(ErrorCode::CapabilityDenied,
+                "recovery-only control journals cannot prepare, commit, repair or reconcile effects"));
+        }
+        Ok(())
+    }
+
+    /// Current durable effects in canonical key order, after authority and custody checks.
+    /// Callers must bound output; enumeration does not change records, head, or effect state.
+    pub fn records(&mut self, context: &OperationContext)
+        -> Result<std::collections::btree_map::Values<'_, String, DurablePauseRecord>> {
+        self.ensure_healthy(context)?;
+        Ok(self.records.values())
+    }
+
+    #[must_use]
+    pub fn read_only(&self) -> bool { self.read_only }
+
     fn append(&mut self, mut next: DurablePauseRecord, context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.authorize_write(context)?;
         self.ensure_healthy(context)?;
         if self.transitions >= MAX_TRANSITIONS { return Err(exhausted("control effect journal transition limit reached")); }
         if !self.records.contains_key(&next.idempotency_key) && self.records.len() >= MAX_EFFECTS {
@@ -250,6 +290,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     pub fn record_prepared(&mut self, key: String, plan_digest: Digest32, desired_paused: bool,
         expected_game_tick: u64, bridge_generation: u64, prepare_token: [u8; 16],
         context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.authorize_write(context)?;
         validate_key(&key)?;
         if bridge_generation == 0 || bridge_generation == u64::MAX || prepare_token == [0u8; 16] {
             return Err(invalid("invalid prepared pause effect identity"));
@@ -271,6 +312,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
 
     pub fn begin_commit(&mut self, key: &str, plan_digest: Digest32, bridge_generation: u64,
         context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.authorize_write(context)?;
         let current = self.require(key, plan_digest)?;
         if current.bridge_generation != bridge_generation {
             return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,
@@ -289,6 +331,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
 
     pub fn mark_indeterminate(&mut self, key: &str, plan_digest: Digest32,
         context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.authorize_write(context)?;
         let current = self.require(key, plan_digest)?;
         if current.state == DurablePauseState::Indeterminate { return Ok(current); }
         if current.state != DurablePauseState::CommitStarted {
@@ -302,6 +345,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         bridge_generation: u64, effect_known: bool, effect_applied: bool,
         observed_paused: bool, observed_game_tick: u64, receipt_digest: Option<Digest32>,
         context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.authorize_write(context)?;
         let current = self.require(key, plan_digest)?;
         if current.state.terminal() { return Ok(current); }
         if current.state == DurablePauseState::Prepared {
@@ -394,8 +438,9 @@ fn validate_transition(previous: Option<&DurablePauseRecord>, next: &DurablePaus
             || next.effect_applied != (next.state == DurablePauseState::VerifiedApplied) {
             return Err(corrupt("terminal pause-effect record lacks a complete reconciled outcome"));
         }
-        if next.effect_applied && next.receipt_digest.is_none() {
-            return Err(corrupt("verified applied pause effect lacks receipt evidence"));
+        if next.effect_applied && (next.receipt_digest.is_none()
+            || next.observed_paused != Some(next.desired_paused)) {
+            return Err(corrupt("verified applied pause effect lacks matching pause-state receipt evidence"));
         }
     } else if next.effect_known || next.effect_applied || next.observed_paused.is_some()
         || next.observed_game_tick.is_some() || next.receipt_digest.is_some() {
@@ -507,18 +552,27 @@ impl<'a> Reader<'a> {
 pub struct PrivateControlJournalFile {
     file: File,
     path: PathBuf,
+    read_only: bool,
     #[cfg(unix)]
     identity: (u64, u64, u32, u64, u64),
 }
+impl PrivateControlJournalFile {
+    fn require_writable(&self) -> io::Result<()> {
+        if self.read_only {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "recovery-only journal descriptor"));
+        }
+        Ok(())
+    }
+}
 impl Read for PrivateControlJournalFile { fn read(&mut self, out:&mut [u8])->io::Result<usize>{self.file.read(out)} }
 impl Write for PrivateControlJournalFile {
-    fn write(&mut self, bytes:&[u8])->io::Result<usize>{self.file.write(bytes)}
-    fn flush(&mut self)->io::Result<()>{self.file.flush()}
+    fn write(&mut self, bytes:&[u8])->io::Result<usize>{self.require_writable()?;self.file.write(bytes)}
+    fn flush(&mut self)->io::Result<()>{self.require_writable()?;self.file.flush()}
 }
 impl Seek for PrivateControlJournalFile { fn seek(&mut self, from:SeekFrom)->io::Result<u64>{self.file.seek(from)} }
 impl EffectJournalStorage for PrivateControlJournalFile {
-    fn sync(&mut self)->io::Result<()>{self.validate_identity()?;self.file.sync_all()}
-    fn truncate(&mut self,length:u64)->io::Result<()>{self.validate_identity()?;self.file.set_len(length)}
+    fn sync(&mut self)->io::Result<()>{self.require_writable()?;self.validate_identity()?;self.file.sync_all()}
+    fn truncate(&mut self,length:u64)->io::Result<()>{self.require_writable()?;self.validate_identity()?;self.file.set_len(length)}
     fn validate_identity(&self)->io::Result<()> {
         #[cfg(unix)] {
             use std::os::unix::fs::MetadataExt;
@@ -538,6 +592,29 @@ impl EffectJournalStorage for PrivateControlJournalFile {
 pub fn open_private_control_journal(path:&Path,context:&OperationContext,bridge_generation:u64,
     recovery:EffectTailRecovery)->Result<ControlEffectJournal<PrivateControlJournalFile>> {
     authorize(context)?;
+    if bridge_generation == 0 || bridge_generation == u64::MAX {
+        return Err(invalid("control bridge generation is invalid"));
+    }
+    let (storage, created) = open_private_control_storage(path, context, false)?;
+    ControlEffectJournal::open(storage, context, created, bridge_generation, recovery)
+}
+
+/// Read existing custody-checked evidence without a bridge generation or writable descriptor.
+/// Missing, empty, incomplete and corrupt journals are refused without modifying their bytes.
+pub fn open_private_control_recovery(path: &Path, context: &OperationContext)
+    -> Result<ControlEffectJournal<PrivateControlJournalFile>> {
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    let (storage, _) = open_private_control_storage(path, context, true)?;
+    ControlEffectJournal::open_read_only(storage, context)
+}
+
+fn open_private_control_storage(path: &Path, context: &OperationContext, read_only: bool)
+    -> Result<(PrivateControlJournalFile, bool)> {
+    if read_only {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    } else {
+        authorize(context)?;
+    }
     #[cfg(unix)] {
         use std::os::unix::fs::{MetadataExt,OpenOptionsExt};
         let denied=||DfmcpError::new(ErrorCode::CapabilityDenied,
@@ -553,19 +630,21 @@ pub fn open_private_control_journal(path:&Path,context:&OperationContext,bridge_
             Err(error) if error.kind()==io::ErrorKind::NotFound=>None,
             Err(error)=>return Err(storage_error(error)),
         };
-        let created=before.is_none();let mut options=OpenOptions::new();options.read(true).write(true);
+        let created=before.is_none();
+        if created && read_only { return Err(invalid("recovery requires an existing control effect journal")); }
+        let mut options=OpenOptions::new();options.read(true).write(!read_only);
         if created{options.create_new(true).mode(0o600);}
         let file=options.open(path).map_err(storage_error)?;
         file.try_lock().map_err(|_|conflict("control effect journal already has a writer or cannot be exclusively locked"))?;
         let opened=file.metadata().map_err(storage_error)?;
         if before.as_ref().is_some_and(|meta|(meta.dev(),meta.ino())!=(opened.dev(),opened.ino())){return Err(denied());}
-        let storage=PrivateControlJournalFile{identity:(opened.dev(),opened.ino(),opened.uid(),dir.dev(),dir.ino()),file,path:path.to_owned()};
+        let storage=PrivateControlJournalFile{identity:(opened.dev(),opened.ino(),opened.uid(),dir.dev(),dir.ino()),file,path:path.to_owned(),read_only};
         storage.validate_identity().map_err(storage_error)?;
         if created{File::open(parent).and_then(|directory|directory.sync_all()).map_err(storage_error)?;}
-        ControlEffectJournal::open(storage,context,created,bridge_generation,recovery)
+        Ok((storage, created))
     }
     #[cfg(not(unix))] {
-        let _=(path,bridge_generation,recovery);
+        let _=(path,read_only);
         Err(DfmcpError::new(ErrorCode::CapabilityDenied,"private control effect journals are currently Unix-only"))
     }
 }
@@ -641,3 +720,7 @@ mod tests {
         let bytes=j.storage.bytes.into_inner();assert!(ControlEffectJournal::open(Memory{bytes:Cursor::new(bytes),..Memory::default()},&context(),false,7,EffectTailRecovery::Refuse).is_err());Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "control_effect_recovery_tests.rs"]
+mod recovery_tests;
