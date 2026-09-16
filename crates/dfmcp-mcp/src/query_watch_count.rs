@@ -4,6 +4,9 @@ use super::*;
 use std::time::Instant;
 use dfmcp_world::{EntityKind, EntityRecord};
 
+#[path = "query_watch_quantity.rs"]
+pub(super) mod quantity;
+
 pub(super) const MAX_EVALUATION_WORK: u64 = 1_000_000;
 
 /// Shared by every condition/failure predicate and every watch in a batch.
@@ -199,7 +202,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     schema["$defs"]["watch_condition"]["oneOf"].as_array_mut()
         .ok_or_else(|| invalid("watch condition schema variants absent"))?
         .push(extension["condition"].clone());
-    Ok(schema)
+    quantity::extend_schema(schema)
 }
 
 #[cfg(test)]
