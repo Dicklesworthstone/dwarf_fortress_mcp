@@ -17,6 +17,10 @@ mod durability;
 pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 #[path = "query_watch_batch.rs"]
 pub(super) mod batch;
+#[path = "query_watch_count.rs"]
+mod counts;
+
+pub(super) fn extend_count_schema(schema: Value) -> Result<Value> { counts::extend_schema(schema) }
 
 const MAX_PER_SESSION: usize = 8;
 const MAX_TOTAL: usize = 128;
@@ -44,6 +48,8 @@ enum Comparison { Eq, Ne, Lt, Le, Gt, Ge }
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Condition {
     Field { entity_id: String, generation: u32, field: String, comparison: Comparison, value: Literal },
+    EntityCount { scope: counts::Scope, kind: counts::Kind, predicate: counts::Predicate,
+        comparison: Comparison, value: u64 },
     Paused { value: bool },
     TickAtLeast { value: u64 },
     All { args: Vec<Condition> },
@@ -215,7 +221,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     }
     let mut pending = vec![(&definition.condition, 1usize)];
     if let Some(condition) = &definition.failure_condition { pending.push((condition, 1)); }
-    let mut nodes = 0;
+    let mut nodes = 0usize;
     while let Some((condition, depth)) = pending.pop() {
         nodes += 1;
         if nodes > MAX_CONDITIONS || depth > MAX_CONDITION_DEPTH {
@@ -229,6 +235,12 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                 if let Literal::Text(text) = value
                     && (text.len() > 1_024 || text.contains('\0')) {
                     return Err(invalid("watch text literal exceeds its byte bound or contains NUL"));
+                }
+            }
+            Condition::EntityCount { predicate, .. } => {
+                nodes = nodes.saturating_add(counts::validate(predicate, depth + 1)?);
+                if nodes.saturating_add(pending.len()) > MAX_CONDITIONS {
+                    return Err(bounded("count predicates exceed the shared success/failure node budget"));
                 }
             }
             Condition::All { args } | Condition::Any { args } => {
@@ -270,8 +282,18 @@ struct Probe {
 }
 
 impl Probe {
+    #[cfg(test)]
     fn evaluate(&mut self, condition: &Condition, snapshot: &WorldSnapshot) -> Result<Truth> {
+        self.evaluate_bounded(condition, snapshot, &mut counts::EvaluationBudget::new(60_000))
+    }
+
+    fn evaluate_bounded(&mut self, condition: &Condition, snapshot: &WorldSnapshot,
+        budget: &mut counts::EvaluationBudget) -> Result<Truth> {
+        budget.charge()?;
         match condition {
+            Condition::EntityCount { kind, predicate, comparison, value, .. } => {
+                counts::evaluate(self, snapshot, *kind, predicate, *comparison, *value, budget)
+            }
             Condition::All { args } | Condition::Any { args } => {
                 let all = matches!(condition, Condition::All { .. });
                 let mut decisive = false;
@@ -279,7 +301,7 @@ impl Probe {
                 // Visit every bounded leaf, including after a boolean decision,
                 // so a recycled identity cannot hide behind short-circuiting.
                 for child in args {
-                    match self.evaluate(child, snapshot)? {
+                    match self.evaluate_bounded(child, snapshot, budget)? {
                         Truth::False if all => decisive = true,
                         Truth::True if !all => decisive = true,
                         Truth::Unknown => unknown = true,
@@ -289,7 +311,7 @@ impl Probe {
                 Ok(if decisive { Truth::from_bool(!all) }
                     else if unknown { Truth::Unknown } else { Truth::from_bool(all) })
             }
-            Condition::Not { arg } => Ok(self.evaluate(arg, snapshot)?.not()),
+            Condition::Not { arg } => Ok(self.evaluate_bounded(arg, snapshot, budget)?.not()),
             Condition::Paused { value } => {
                 let truth = Truth::from_bool(snapshot.paused == *value);
                 self.facts.push(json!({"field":"canonical.paused","truth":truth.text(),
@@ -349,15 +371,14 @@ impl Probe {
 }
 
 impl Watch {
-    fn seal(&mut self) -> Result<()> {
-        self.evidence_digest = digest(&json!({"domain":"dfmcp-condition-watch-evidence-v1",
-            "watch":self.handle,"prior_digest":self.evidence_digest.to_string(),
-            "anchor":anchor(self.last_seen),"status":self.status.text(),
-            "streak":self.streak,"samples":self.samples,"evaluation":self.evaluation}))?;
-        Ok(())
+    #[cfg(test)]
+    fn advance(&mut self, snapshot: &WorldSnapshot, initial: bool) -> Result<()> {
+        self.advance_bounded(snapshot, initial, &mut counts::EvaluationBudget::new(60_000))
     }
 
-    fn advance(&mut self, snapshot: &WorldSnapshot, initial: bool) -> Result<()> {
+    fn advance_bounded(&mut self, snapshot: &WorldSnapshot, initial: bool,
+        budget: &mut counts::EvaluationBudget) -> Result<()> {
+        budget.check()?;
         if self.status.terminal() { return Ok(()); }
         let current = snapshot.anchor();
         let previous = self.last_seen;
@@ -384,9 +405,9 @@ impl Watch {
         let gap = !initial && current.cursor.sequence > previous.cursor.sequence.saturating_add(1);
         if gap { self.streak = 0; }
         let mut probe = Probe::default();
-        let truth = probe.evaluate(&self.definition.condition, snapshot)?;
+        let truth = probe.evaluate_bounded(&self.definition.condition, snapshot, budget)?;
         let failure_truth = match &self.definition.failure_condition {
-            Some(condition) => probe.evaluate(condition, snapshot)?,
+            Some(condition) => probe.evaluate_bounded(condition, snapshot, budget)?,
             None => Truth::False,
         };
         let due = self.last_sample_tick.is_none_or(|last| {
@@ -459,7 +480,7 @@ impl Watch {
         result["created_at"] = anchor(self.created_at);
         result["sample_count"] = json!(self.samples);
         result["evaluation"] = self.evaluation.clone();
-        result
+        return result;
     }
 }
 
@@ -528,6 +549,7 @@ where F: FnOnce(Value) -> Result<String> {
 fn execute_in<F>(storage: &Mutex<Store>, snapshot: &WorldSnapshot, context: &OperationContext,
     input: &Value, publish: F) -> Result<String>
 where F: FnOnce(Value) -> Result<String> {
+    let mut evaluation_budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
     validate_input(input)?;
     if input["query"]["kind"] == "watches"
@@ -569,7 +591,7 @@ where F: FnOnce(Value) -> Result<String> {
             let mut watch = Watch {handle:format!("watch:{identity}"),definition,created_at:context.anchor,
                 last_seen:context.anchor,last_sample_tick:None,streak:0,samples:0,status:Status::Waiting,
                 evaluation:Value::Null,evidence_digest:identity,recovery:None};
-            watch.advance(snapshot,true)?;
+            watch.advance_bounded(snapshot,true,&mut evaluation_budget)?;
             let key = (context.session_id,watch.handle.clone());
             let mut value = payload(context,"watch");
             value["record"] = watch.detail(context.anchor);
@@ -578,7 +600,9 @@ where F: FnOnce(Value) -> Result<String> {
             // accept the full response, then durable watches sync before root swap.
             let mut candidate = Store {serial,entries:store.entries.clone()};
             candidate.entries.insert(key,watch);
-            let encoded = publish_work(&candidate,context,value,publish)?;
+            let encoded = publish_work(&candidate,context,value,|value| {
+                let encoded=publish(value)?; evaluation_budget.check()?; Ok(encoded)
+            })?;
             *store = candidate;
             Ok(encoded)
         }
@@ -609,10 +633,12 @@ where F: FnOnce(Value) -> Result<String> {
                     record.last_seen = context.anchor;
                     record.evaluation = json!({"reason":"foreground_watch_cancelled_without_game_effect"});
                     record.seal()?;
-                } else if kind=="poll_watch" { record.advance(snapshot,false)?; }
+                } else if kind=="poll_watch" { record.advance_bounded(snapshot,false,&mut evaluation_budget)?; }
                 value["record"] = record.detail(context.anchor);
             }
-            let encoded = publish_work(&candidate,context,value,publish)?;
+            let encoded = publish_work(&candidate,context,value,|value| {
+                let encoded=publish(value)?; evaluation_budget.check()?; Ok(encoded)
+            })?;
             *store = candidate;
             Ok(encoded)
         }
