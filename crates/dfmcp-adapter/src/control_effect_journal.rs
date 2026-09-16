@@ -13,6 +13,9 @@ use std::path::{Component, Path, PathBuf};
 
 use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier};
 
+#[path = "control_effect_cancellation.rs"]
+mod cancellation;
+
 const MAGIC: &[u8; 8] = b"DFMCEJ01";
 const RECORD: &[u8; 8] = b"DFMCREC1";
 const FOOTER: &[u8; 8] = b"DFMCEND1";
@@ -45,6 +48,9 @@ pub enum DurablePauseState {
     VerifiedApplied = 3,
     VerifiedNotApplied = 4,
     Indeterminate = 5,
+    /// This coordinator never started dispatch. No native outcome is asserted.
+    /// Older readers reject tag 6 rather than interpreting cancellation as failure.
+    CancelledBeforeDispatch = 6,
 }
 impl DurablePauseState {
     fn decode(tag: u8) -> Result<Self> {
@@ -54,12 +60,13 @@ impl DurablePauseState {
             3 => Ok(Self::VerifiedApplied),
             4 => Ok(Self::VerifiedNotApplied),
             5 => Ok(Self::Indeterminate),
+            6 => Ok(Self::CancelledBeforeDispatch),
             _ => Err(corrupt("control effect journal contains an unknown state")),
         }
     }
     #[must_use]
     pub const fn terminal(self) -> bool {
-        matches!(self, Self::VerifiedApplied | Self::VerifiedNotApplied)
+        matches!(self, Self::VerifiedApplied | Self::VerifiedNotApplied | Self::CancelledBeforeDispatch)
     }
     #[must_use]
     pub const fn reconciliation_required(self) -> bool {
@@ -238,7 +245,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         authorize(context)?;
         if self.read_only {
             return Err(DfmcpError::new(ErrorCode::CapabilityDenied,
-                "recovery-only control journals cannot prepare, commit, repair or reconcile effects"));
+                "recovery-only control journals cannot prepare, commit, cancel, repair or reconcile effects"));
         }
         Ok(())
     }
@@ -254,7 +261,13 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     #[must_use]
     pub fn read_only(&self) -> bool { self.read_only }
 
-    fn append(&mut self, mut next: DurablePauseRecord, context: &OperationContext) -> Result<DurablePauseRecord> {
+    fn append(&mut self, next: DurablePauseRecord, context: &OperationContext) -> Result<DurablePauseRecord> {
+        self.append_with(next, context, |_, _| Ok(())).map(|(record, ())| record)
+    }
+
+    fn append_with<T, F>(&mut self, mut next: DurablePauseRecord, context: &OperationContext,
+        publish: F) -> Result<(DurablePauseRecord, T)>
+    where F: FnOnce(&DurablePauseRecord, u64) -> Result<T> {
         self.authorize_write(context)?;
         self.ensure_healthy(context)?;
         if self.transitions >= MAX_TRANSITIONS { return Err(exhausted("control effect journal transition limit reached")); }
@@ -269,6 +282,11 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         let next_length = self.length.checked_add(frame.len() as u64).ok_or_else(||exhausted("control journal length overflow"))?;
         if next_length > MAX_LEDGER_BYTES { return Err(exhausted("control effect journal byte limit reached")); }
         let decoded = decode_frame(&frame, self.id)?;
+        // A pure renderer may refuse before any write. Never acknowledge until
+        // sync succeeds; after a failed write the renderer's result is discarded.
+        let rendered = publish(&decoded, next_length)?;
+        self.authorize_write(context)?;
+        self.ensure_healthy(context)?;
         let write = (|| -> io::Result<()> {
             self.storage.validate_identity()?;
             if self.storage.seek(SeekFrom::End(0))? != self.length { return Err(io::Error::other("journal length changed")); }
@@ -284,13 +302,14 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         self.head = decoded.record_digest;
         self.transitions += 1;
         self.records.insert(decoded.idempotency_key.clone(), decoded.clone());
-        Ok(decoded)
+        Ok((decoded, rendered))
     }
 
     pub fn record_prepared(&mut self, key: String, plan_digest: Digest32, desired_paused: bool,
         expected_game_tick: u64, bridge_generation: u64, prepare_token: [u8; 16],
         context: &OperationContext) -> Result<DurablePauseRecord> {
         self.authorize_write(context)?;
+        self.ensure_healthy(context)?;
         validate_key(&key)?;
         if bridge_generation == 0 || bridge_generation == u64::MAX || prepare_token == [0u8; 16] {
             return Err(invalid("invalid prepared pause effect identity"));
@@ -313,7 +332,11 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     pub fn begin_commit(&mut self, key: &str, plan_digest: Digest32, bridge_generation: u64,
         context: &OperationContext) -> Result<DurablePauseRecord> {
         self.authorize_write(context)?;
+        self.ensure_healthy(context)?;
         let current = self.require(key, plan_digest)?;
+        if current.state == DurablePauseState::CancelledBeforeDispatch {
+            return Err(conflict("cancelled pause effect cannot be dispatched; its idempotency key remains retired"));
+        }
         if current.bridge_generation != bridge_generation {
             return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,
                 "prepared pause effect belongs to another bridge generation; replan with a new idempotency key"));
@@ -332,6 +355,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
     pub fn mark_indeterminate(&mut self, key: &str, plan_digest: Digest32,
         context: &OperationContext) -> Result<DurablePauseRecord> {
         self.authorize_write(context)?;
+        self.ensure_healthy(context)?;
         let current = self.require(key, plan_digest)?;
         if current.state == DurablePauseState::Indeterminate { return Ok(current); }
         if current.state != DurablePauseState::CommitStarted {
@@ -346,7 +370,11 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         observed_paused: bool, observed_game_tick: u64, receipt_digest: Option<Digest32>,
         context: &OperationContext) -> Result<DurablePauseRecord> {
         self.authorize_write(context)?;
+        self.ensure_healthy(context)?;
         let current = self.require(key, plan_digest)?;
+        if current.state == DurablePauseState::CancelledBeforeDispatch {
+            return Err(conflict("cancelled-before-dispatch effect has no coordinator attempt to reconcile"));
+        }
         if current.state.terminal() { return Ok(current); }
         if current.state == DurablePauseState::Prepared {
             return Err(conflict("pause effect has not begun commit and cannot be reconciled as an effect attempt"));
@@ -425,6 +453,7 @@ fn validate_transition(previous: Option<&DurablePauseRecord>, next: &DurablePaus
             }
             let allowed = matches!((previous.state, next.state),
                 (DurablePauseState::Prepared, DurablePauseState::CommitStarted)
+                | (DurablePauseState::Prepared, DurablePauseState::CancelledBeforeDispatch)
                 | (DurablePauseState::CommitStarted, DurablePauseState::Indeterminate)
                 | (DurablePauseState::CommitStarted, DurablePauseState::VerifiedApplied)
                 | (DurablePauseState::CommitStarted, DurablePauseState::VerifiedNotApplied)
@@ -433,7 +462,7 @@ fn validate_transition(previous: Option<&DurablePauseRecord>, next: &DurablePaus
             if !allowed { return Err(corrupt("invalid durable pause-effect state transition")); }
         }
     }
-    if next.state.terminal() {
+    if matches!(next.state, DurablePauseState::VerifiedApplied | DurablePauseState::VerifiedNotApplied) {
         if !next.effect_known || next.observed_paused.is_none() || next.observed_game_tick.is_none()
             || next.effect_applied != (next.state == DurablePauseState::VerifiedApplied) {
             return Err(corrupt("terminal pause-effect record lacks a complete reconciled outcome"));
@@ -444,7 +473,7 @@ fn validate_transition(previous: Option<&DurablePauseRecord>, next: &DurablePaus
         }
     } else if next.effect_known || next.effect_applied || next.observed_paused.is_some()
         || next.observed_game_tick.is_some() || next.receipt_digest.is_some() {
-        return Err(corrupt("nonterminal pause-effect record carried terminal evidence"));
+        return Err(corrupt("undispatched or unresolved pause-effect record carried terminal evidence"));
     }
     Ok(())
 }
@@ -523,6 +552,9 @@ fn decode_frame(frame: &[u8], id: Digest32) -> Result<DurablePauseRecord> {
     let observed_paused = match body.byte()? { 0 => None, 1 => Some(false), 2 => Some(true), _ => return Err(corrupt("invalid observed pause tag")) };
     let observed_raw = body.u64()?;
     let receipt_raw = body.digest()?;
+    if observed_paused.is_none() && observed_raw != 0 {
+        return Err(corrupt("absent pause observation carried a noncanonical game tick"));
+    }
     if !body.0.is_empty() { return Err(corrupt("trailing control record bytes")); }
     Ok(DurablePauseRecord { idempotency_key:key, plan_digest, desired_paused, expected_game_tick,
         bridge_generation, prepare_token, state, effect_known, effect_applied, observed_paused,
@@ -724,3 +756,6 @@ mod tests {
 #[cfg(test)]
 #[path = "control_effect_recovery_tests.rs"]
 mod recovery_tests;
+#[cfg(test)]
+#[path = "control_effect_cancellation_tests.rs"]
+mod cancellation_tests;
