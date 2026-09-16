@@ -6,8 +6,9 @@ actually establish.
 
 ## Current phase
 
-**Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8
-and an explicitly unadmitted pause-control/1.7 development slice. No live tuple is currently admitted.**
+**Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8,
+optional archive-bound durable foreground watches, and an explicitly unadmitted pause-control/1.7
+development slice. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -17,6 +18,7 @@ The repository contains:
 - an implemented protocol-1.1 retained-announcement extension;
 - separate unadmitted jobs-only 1.2, operations/1.3, paged operations/1.4, map/1.5 and spatial/1.6 development profiles;
 - a citizen-inclusive spatial/1.8 source path that captures strict citizens, jobs, buildings, items and bounded terrain during one native suspension, then publishes one combined anchor;
+- optional paired spatial/1.8 observation and watch journals preserving monitoring definitions, outcomes, cancellation and release across restart without claiming downtime continuity;
 - a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, receipt-verified reconciliation and bounded foreground recovery for `Pause { paused }` only;
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - offline read-only pause-effect discovery without a bridge connection or mutation authority;
@@ -40,6 +42,50 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
+
+### Durable foreground monitoring bound to spatial/1.8 observation history
+
+`docs/DURABLE_WATCHES.md` describes the new restart-safe monitoring path. The existing watch queries
+retain their schemas and foreground execution model; no top-level tool, native bridge method,
+dependency, game effect, or production admission boundary is added.
+
+- Operator-only `DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL` selects a separate private file paired with the
+  required spatial/1.8 observation journal. Query and Observe authority, exact-mode custody and an
+  exclusive file lock are required; a process-local observation universe cannot back recovery.
+- Registration, changed samples, terminal outcomes, cancellation and release are persisted as bounded
+  hash-chained checkpoints. Complete response rendering precedes append/sync; durable sync precedes
+  in-memory root publication and acknowledgement. Failed rendering does not commit a transition.
+- Startup replays/syncs the fresh observation first, then verifies the exact watch profile/archive
+  identity and every stored creation/evaluation/checkpoint anchor against retained observations.
+  A wrong archive or missing required observation fails closed without migration or repair.
+- Recovered definitions retain their original deadlines, prior samples and evidence links, but use
+  fresh session-bound handles. Unfinished stability resets; bootstrap is not counted as a sample.
+  `watches` rediscovers the handles and `await_watch` obtains the fresh evidence needed to continue.
+- Epoch/identity discontinuity invalidates unfinished watches. Passed deadlines expire rather than
+  move forward. Current grants and game-tick horizons are not widened by historical configuration.
+  Previously terminal outcomes remain historical, even at an identical bootstrap anchor.
+- Repeated unchanged reads do not append or manufacture samples. Historical queries never evaluate
+  current watches against past game facts. Scoped persistence metadata does not make query baselines,
+  ordinary results, plans or game effects durable. Session drop releases ownership, not durable intent.
+- Partial writes and uncertain sync fence publication. A complete uncertain frame may recover on
+  reopen; an incomplete watch frame is refused unchanged. There is no automatic tail repair, pruning,
+  rotation or compaction. Limits are eight watches/session, 1 MiB/checkpoint, 64 MiB/4,096 checkpoints.
+- The actual spatial startup/query paths include recovery metadata and active work. Corrupt watch
+  storage is not mislabeled as output overflow when the usual active-work error projection fails.
+
+Twenty-five new logical Rust tests are registered: seven binary-journal, thirteen durable-watch,
+two configuration and three actual spatial startup/MCP-handler scenarios. They retain the existing
+watch tests and cover restart stability, cancellation/release, current authority, paired history,
+output refusal, storage faults, historical outcome labeling and fixed framing vectors. **None of
+these Rust tests has been compiled or executed here**: Rust, Cargo and rustfmt are unavailable.
+
+The checked-in independent Python framing reference passed 740 checks, including 363 single-byte
+corruptions and 361 incomplete prefixes. Its tested source SHA-256 is
+`6171594ba703f1b95a458826edcf6acfdf0af002ebe4ce3d8324d99ab3dfac9a`.
+The committed script bytes were checked against that executed source. These checks use opaque
+payloads and do not execute the Rust serializer, watch state machine, filesystem custody or MCP
+runtime. No Rust/Clippy/stdio, power-loss, native/live-game, full-repository or admission claim is
+made. This increment supplies development source and independent framing-reference evidence only.
 
 ### Pause recovery, verified receipts and bounded foreground reconciliation
 
@@ -90,7 +136,7 @@ unadmitted and all production admission boundaries are unchanged.
 
 ### Coherent citizen + operations + terrain spatial/1.8 source
 
-`docs/LIVE_SPATIAL_CITIZENS.md` describes the new citizen-inclusive read profile. It removes the
+`docs/LIVE_SPATIAL_CITIZENS.md` describes the citizen-inclusive read profile. It removes the
 cross-observation ambiguity between the old citizen profile and spatial/1.6: the strict citizen
 roster and the existing operations/terrain payload are serialized during one native DFHack RPC
 suspension and transferred as one immutable retained capture.
@@ -99,8 +145,9 @@ suspension and transferred as one immutable retained capture.
   explicit citizen bound while preserving fixed jobs/buildings/items/terrain/page/byte bounds.
   Native retained-cache ownership binds both the requested terrain region and citizen bound.
 - A strict complete citizen component is bounded to 4,096 records, sorted by nonnegative native unit
-  ID, and rejects duplicates, non-citizens and residents. Observed fields are bounded visible name,
-  race, profession, position, alive/sane/active/visible and developmental status.
+  ID, and rejects duplicates, non-citizens and residents. Observed fields include bounded visible name,
+  race, profession, position, alive/sane/active/visible and developmental status. Subsequent readiness
+  and skill source fields do not establish qualified labor eligibility or full health coverage.
 - The combined payload is at most 16 MiB and preserves the spatial/1.6 immutable-page semantics.
   Citizens are captured before the native RPC returns; later page transfer never dereferences DF
   pointers or mixes a newer citizen roster into the retained operations/terrain bytes.
@@ -118,18 +165,20 @@ suspension and transferred as one immutable retained capture.
   family, its own credentials/opt-in, two-session limit, read-only Observe/Query/Doctor grants, and
   the frozen eleven top-level tool names. Convenience modes expose citizens/jobs/buildings/items/
   tiles, while ordinary graph/baseline/watch/route/allocation queries all use the combined anchor.
-- The profile still does not establish citizen skills, needs, health, labor eligibility, complete
-  unit navigation, non-citizen unit details, outside-region terrain, native material requirements,
-  durable 1.8 history, or any game effect. Pause-control/1.7 remains separate and gains no authority
-  from a spatial observation.
+- A separate sealed spatial/1.8 observation codec supports append-before-publication, exact restart
+  replay and stateless historical queries. The new paired watch journal is described above; neither
+  archive constitutes continuous game history, a game checkpoint, or mutation authority.
+- The profile still does not establish complete needs/health, labor eligibility, complete unit
+  navigation, non-citizen unit details, outside-region terrain, native material requirements or any
+  game effect. Pause-control/1.7 remains separate and gains no authority from a spatial observation.
 
-Four new Rust integration scenarios are registered for worker joins, non-citizen uncertainty,
+Four initial Rust integration scenarios are registered for worker joins, non-citizen uncertainty,
 citizen-only advancement/generation continuity and strict-roster corruption. A reproducible native
 mock harness is checked in at `scripts/test_live_spatial_citizens_native_mock.py`, covering immutable
 retained bytes, strict citizen limits, hidden-terrain noninterference, generation invalidation and
 fixed method registration.
 
-Those new spatial/1.8 Rust/native checks have **not been executed in this editing environment**. The
+Those spatial/1.8 Rust/native checks have **not been executed in this editing environment**. The
 container has no Rust toolchain and no network-mounted repository. No real generated DFHack/protobuf
 build, live-game campaign, full repository qualification or admission is claimed. This section is
 therefore evidence rung 1: source present.
@@ -159,7 +208,8 @@ world. See `docs/SPATIAL_HISTORY.md`.
   discarded. Default retention is 64 MiB/1,024 changed captures with no pruning.
 - No offline bootstrap, durable watches/baselines, automatic rotation, effect
   journal, anti-rollback floor, native bridge change, dependency change, or
-  production admission is introduced. Concurrent control work is unchanged.
+  production admission is introduced by the spatial/1.6 history increment.
+  The subsequent spatial/1.8 durable-watch path is separate and described above.
 
 Fourteen new Rust scenarios are registered: eight journal/profile and six Unix
 actual-handler scenarios. They have not run because Rust, Cargo and rustfmt were
@@ -268,7 +318,8 @@ production MVCC claim.
 Public query continuations are snapshot/query bound. Structured entity inspection, aggregates,
 search, graph traversal, SCC/dependency diagnosis, baseline changes, foreground condition watches,
 production diagnosis, integral inventory allocation and spatial inventory planning are implemented
-as described in their dedicated documentation. These derived layers never grant mutation authority.
+as described in their dedicated documentation. Optional spatial/1.8 watch persistence is now present;
+query baselines remain process-local. These derived layers never grant mutation authority.
 
 ## Current registry and qualification state
 
@@ -293,12 +344,12 @@ Consequences:
 
 | Area | Present now | Not yet established |
 |---|---|---|
-| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, monitoring, production/spatial analysis, bounded durable control-effect discovery and recovery passes | durable handoff, complete counterfactual/VOI models |
+| Agent surface | Agent Turn envelope, eleven-tool waist, structured queries, restart-safe spatial/1.8 watches, production/spatial analysis, bounded durable control-effect discovery and recovery passes | complete durable handoff, durable baselines, complete counterfactual/VOI models |
 | Protocol 1.0 | authenticated citizen read stack and production-runner source | current R1-R5 receipts and registry entry |
 | Protocol 1.1 | retained announcements and development runtime | current native/live admission chain |
-| Jobs/operations/map/spatial | coherent bounded development reads through citizen-inclusive spatial/1.8, including same-anchor strict-citizen worker joins | Rust qualification, real DFHack campaigns, citizen skills/needs/health, full unit navigation, durable 1.8 history, production admission |
+| Jobs/operations/map/spatial | coherent bounded development reads through citizen-inclusive spatial/1.8, same-anchor strict-citizen worker joins, exact spatial/1.8 history and paired durable watches | Rust qualification, real DFHack campaigns, complete needs/health/labor coverage, full unit navigation, production admission |
 | Control/1.7 | pause prepare/commit, receipt-verified live reconciliation, bounded wait, mandatory private journal and offline Query-only recovery | Rust qualification, real DFHack build, crash/disposable-fort campaigns, production admission, any other live effect family |
-| World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial/1.6 observation replay | admitted production durable backend and complete fortress coverage |
+| World | canonical snapshots, deltas, query/graph/path/allocation, operations history and durable spatial/1.6 and spatial/1.8 observation replay | admitted production durable backend and complete fortress coverage |
 | Intent/effects | sealed plans, in-memory dispatcher laboratory, bridge-backed pause effect with durable pre-dispatch/terminal coordinator states | qualified/admitted effect journal, leases/checkpoints tied to live commits, dig/build/labor/etc. live effects |
 | Security/admission | closed dependencies, protocol-bound tickets, monotonic floor machinery | admitted current tuple, hostile-host resistance, signed release provenance |
 
@@ -310,19 +361,20 @@ Consequences:
 - no live dig, construction, labor, burrow, stockpile, work-order, military, checkpoint, Lua,
   arbitrary command, keyboard, filesystem, or network effect;
 - no Rust-qualified/native-qualified/live-qualified control effect journal or power-loss evidence;
+- no Rust-qualified durable-watch implementation, continuous downtime monitoring, or automatic watch-journal compaction/repair;
 - no proof that the current head passed every Rust qualification gate;
 - no signed cross-platform release provenance.
 
 ## Next executable milestones
 
 1. Run full Rust verification/qualification for the exact current clean head, including spatial/1.8
-   citizen coherence, the durable pause-effect journal, receipt-verified coordinator, control wire,
-   development runtime, bounded wait and all registered recovery tests.
+   citizen coherence, paired durable watches and their actual handler tests, the durable pause-effect
+   journal, receipt-verified coordinator, control wire, bounded wait and all registered recovery tests.
 2. Compile spatial/1.8 and control/1.7 against named real DFHack/protobuf generations and execute
    disposable-fort read/control campaigns for the exact plugin bytes.
 3. Exercise spatial/1.8 with real citizen/job churn, non-citizen workers, large rosters, hidden terrain,
-   immutable multi-page transfers, route/allocation analysis and foreground watches before treating
-   its cross-domain joins as live-qualified evidence.
+   immutable multi-page transfers, route/allocation analysis and foreground watches, including paired
+   journal restart/failure cases, before treating its cross-domain joins as live-qualified evidence.
 4. Execute control host/bridge failure campaigns at every durability boundary: before
    `CommitStarted` sync, after sync/before dispatch, after dispatch/before reply, after reply/before
    terminal sync, Rust restart with live bridge, DFHack restart, world load/unload, and incomplete/
