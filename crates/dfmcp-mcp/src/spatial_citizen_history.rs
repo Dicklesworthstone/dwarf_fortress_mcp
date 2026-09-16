@@ -9,6 +9,8 @@ use dfmcp_adapter::operations_journal::{JournalEntry,JournalLimits,SpatialCitize
 use dfmcp_core::Digest32;
 
 pub(super) type Journal=SpatialCitizenJournal<PrivateJournalFile>;
+const STATELESS: [&str;10] = ["entities","inspect","traverse","dependencies","aggregate","search",
+    "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan"];
 
 pub(super) fn configuration()->Result<Option<(PathBuf,TailRecovery)>>{
     let path=match std::env::var("DFMCP_SPATIAL_CITIZEN_JOURNAL"){
@@ -85,7 +87,7 @@ fn history_page(j:&Journal,c:&OperationContext,maximum:usize,limit:Option<u32>,c
     if(start==end&&start<j.entries().len())||result.to_string().len()>maximum{return Err(error(ErrorCode::BudgetExceeded,"one complete historical metadata row does not fit"));}Ok(result)
 }
 pub(super) fn handles(input:&Value)->bool{changes::handles(input)||matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),Some("history"|"historical_query"))}
-fn stateless(kind:&str)->bool{matches!(kind,"entities"|"inspect"|"traverse"|"dependencies"|"aggregate"|"search"|"map_route"|"spatial_inventory_plan")}
+fn stateless(kind:&str)->bool{STATELESS.contains(&kind)}
 
 pub(super) fn execute(session:&mut Session,c:&OperationContext,input:&Value)->Result<String>{
     if changes::handles(input){return changes::execute(session,c,input);}
@@ -112,10 +114,15 @@ pub(super) fn execute(session:&mut Session,c:&OperationContext,input:&Value)->Re
             let metadata=json!({"historical":true,"journal_record":entry_json(&entry),"current_live_anchor":anchor_json(c.anchor),"native_captures":0});
             let mut qc=c.clone();qc.budget.max_bytes=projection.result_byte_budget()?.checked_sub(metadata.to_string().len()+256)
                 .ok_or_else(||error(ErrorCode::BudgetExceeded,"historical context leaves no result budget"))? as u64;qc=semantic_query::result_context(&qc)?;qc.anchor=snapshot.anchor();
-            let envelope=json!({"schema":"dfmcp.query/1","query":query});let mut value=if spatial_queries::handles(&envelope){spatial_queries::execute(&state,&qc,&envelope)?}else{semantic_query::execute(snapshot,&qc,&envelope)?};
+            let envelope=json!({"schema":"dfmcp.query/1","query":query});let mut value=
+                if production::handles(&envelope){production::execute(&state,&qc,&envelope)?}
+                else if spatial_queries::handles(&envelope){spatial_queries::execute(&state,&qc,&envelope)?}
+                else{semantic_query::execute(snapshot,&qc,&envelope)?};
+            production::pin_historical(&mut value,record,digest)?;
             if let Some(rows)=value.get_mut("rows").and_then(Value::as_array_mut){for row in rows{if let Some(route)=row.get("route_query"){
                 let wrapped=json!({"schema":"dfmcp.query/1","query":{"kind":"historical_query","record":record,"record_digest":record_digest,"query":route.get("query")}});
                 if wrapped.to_string().len()>route.to_string().len(){return Err(error(ErrorCode::InternalInvariantViolation,"archived route wrapper exceeds reserved row size"));}row["route_query"]=wrapped;}}}
+            journal.validate_custody(c)?;
             let object=value.as_object_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"historical query result is not object"))?;
             if let Some(additions)=metadata.as_object(){object.extend(additions.iter().map(|(k,v)|(k.clone(),v.clone())));}
             semantic_query::publish_with_active_work(c,value,|v|{let raw=finish(&projection,v)?;let mut packet:Value=serde_json::from_str(&raw)
@@ -127,8 +134,13 @@ pub(super) fn execute(session:&mut Session,c:&OperationContext,input:&Value)->Re
 }
 
 pub(super) fn schema()->Result<Value>{
-    let mut schema=spatial_queries::schema()?;let extra:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_history_v1.json"))
+    let mut schema=production::extend_schema(spatial_queries::schema()?)?;
+    let mut extra:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_history_v1.json"))
         .map_err(|_|error(ErrorCode::InternalInvariantViolation,"embedded spatial history schema invalid"))?;
+    // The shared source file also serves spatial/1.6. Specialize only this
+    // profile's cursor and inner-query allowlist, from the same runtime list.
+    extra["oneOf"][0]["properties"]["continuation"]["oneOf"][1]["pattern"]=json!("^sch1:[1-9][0-9]*:[0-9a-f]{64}$");
+    extra["oneOf"][1]["properties"]["query"]["allOf"][1]["properties"]["kind"]["enum"]=json!(STATELESS);
     let additions=extra["oneOf"].as_array().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"history schema has no variants"))?;
     let variants=schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query schema has no variants"))?;
     variants.extend(additions.iter().cloned());variants.push(changes::schema()?);Ok(schema)
