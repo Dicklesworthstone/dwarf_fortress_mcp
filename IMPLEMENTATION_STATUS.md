@@ -43,6 +43,34 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Coherent workforce candidates and simultaneous capacity planning
+
+`docs/WORKFORCE_PLANNING.md` describes `workforce_candidates` and `workforce_plan` through the actual
+spatial/1.8 `fortress.query` dispatcher. Previously disconnected candidate source is now integrated
+with schema discovery, exact anchors, current authority and complete Agent Turn/active-watch budgets.
+
+The shared adapter analysis reads observed sparse skills, job availability and terrain from one
+capture. The existing integral allocator gives each citizen one worker slot across all declared
+roles, with deterministic rerouting and a distinct-worker shortage certificate. Requests allow
+1..16 demands and at most 128 simultaneous slots. The objective is maximum filled slots, not global
+skill/travel/priority optimization, native labor eligibility, reservations or actual labor changes.
+Unknown skill keys do not recruit every novice. The occupied-citizen endpoint exception relaxes only
+unit occupancy, never hidden terrain, walls, liquid, buildings or unknown walkability.
+
+Whole-row continuations bind the session, full anchor, model and work allowance. Current watches
+remain attached without sampling. Workforce queries currently use only the latest retained live
+capture, not historical-query envelopes. No native protocol, dependency, top-level tool, mutation
+capability, compatibility admission or production map is changed.
+
+Fifteen new Rust tests are registered: eight adapter tests (including all 512 three-worker/three-role
+skill graphs against an exhaustive assignment oracle), four query tests and three actual MCP-handler
+tests, including 8,192-byte pages with current watches. **None has been compiled or executed here**:
+Rust, Cargo and rustfmt are unavailable. The checked-in Python reference passed 88 schema cases
+(25 accepted, 63 rejected) and 4,096 independent mathematical allocation-oracle cases. Its executed
+SHA-256 is `ff87fdd47943ad6b7dc88ec9cec7148fb0490280cf8ff597995973c050268d04`; committed script and
+schema blob identities match the tested bytes. These checks do not execute Rust, the production
+allocator, terrain analysis, MCP, native DFHack or a live fortress, and establish no qualification.
+
 ### Durable foreground monitoring bound to spatial/1.8 observation history
 
 `docs/DURABLE_WATCHES.md` describes the new restart-safe monitoring path. The existing watch queries
