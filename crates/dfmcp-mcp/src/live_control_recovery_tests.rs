@@ -5,7 +5,7 @@ use super::*;
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 
-static SERIAL: Mutex<()> = Mutex::new(());
+use super::SESSION_TESTS as SERIAL;
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn io_error(_: std::io::Error) -> DfmcpError { err(ErrorCode::CorruptLedger, "recovery test filesystem error") }
@@ -85,6 +85,9 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
         let committed = parse(fortress_commit(Some(id.to_string()), "prepared".into(),
             Digest32::of_bytes(b"prepared").to_string(), "01".repeat(16)))?;
         assert_eq!(committed["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
+        let cancelled = parse(fortress_cancel(Some(id.to_string()), Some("prepared".into()),
+            Some(Digest32::of_bytes(b"prepared").to_string()), None, None))?;
+        assert_eq!(cancelled["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
         let waited = parse(fortress_wait(Some(id.to_string()), vec!["started".into()], None, None, None))?;
         assert_eq!(waited["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
         assert_eq!(waited["result"]["error"]["mutation_dispatched"], false);
@@ -134,6 +137,8 @@ fn recovery_session_cannot_dispatch_even_if_a_caller_injects_clock_grants() -> R
     assert!(matches!(session.live(), Err(e) if e.code == ErrorCode::CapabilityDenied));
     let context = session.context()?;
     assert!(matches!(session.journal.begin_commit("prepared", Digest32::of_bytes(b"prepared"), 7, &context),
+        Err(e) if e.code == ErrorCode::CapabilityDenied));
+    assert!(matches!(session.journal.cancel_prepared("prepared", Digest32::of_bytes(b"prepared"), &context),
         Err(e) if e.code == ErrorCode::CapabilityDenied));
     assert!(matches!(reconciliation::wait(&mut session, context, vec!["started".into()], None, None, None),
         Err(e) if e.code == ErrorCode::CapabilityDenied));
