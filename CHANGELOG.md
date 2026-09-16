@@ -8,6 +8,15 @@ readiness.
 
 ### Added
 
+- Coherent `workforce_candidates` and `workforce_plan` queries wired into the spatial/1.8 MCP
+  dispatcher and schema discovery. Observed skill/readiness and terrain approaches feed the
+  existing integral allocator, with capacity one per citizen across 1..16 simultaneous demands,
+  at most 128 worker slots, and distinct-worker shortage certificates. These are read-only models,
+  not labor assignments, reservations, native eligibility proofs or globally quality-optimal plans.
+- Strict occupied-endpoint and unknown-skill handling, whole-row capture/session/model-bound
+  pagination, current active-watch reservation and fifteen registered Rust tests. The independent
+  Python reference passed 88 schema cases and 4,096 mathematical oracle cases without executing
+  Rust. Usage, defaults, exclusions and exact evidence limits: `docs/WORKFORCE_PLANNING.md`.
 - Optional restart-safe foreground condition watches for spatial/1.8, paired with its exact
   observation archive through operator-only `DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL` configuration.
   Registration, samples, terminal outcomes, cancellation and release use bounded hash-chained
@@ -219,6 +228,9 @@ readiness.
 
 ### Current evidence status
 
+- Workforce queries are source-present with fifteen registered but uncompiled/unexecuted Rust
+  tests. The 88 passing Python schema cases and 4,096 independent allocation-oracle cases do not
+  execute the production allocator or establish Rust, MCP, native/live or admission evidence.
 - Durable spatial/1.8 watches are source-present with 25 newly registered Rust tests, not executed
   here. The 740 passing Python framing-reference checks do not execute Rust or establish runtime,
   filesystem power-loss, native/live-game, repository qualification or admission evidence.
