@@ -135,6 +135,7 @@ fn schema()->Result<Value> {
     all.push(json!({"type":"object","additionalProperties":false,"required":["kind","record","record_digest","query"],"properties":{
         "kind":{"const":"historical_query"},"record":{"type":"integer","minimum":1,"maximum":4096},
         "record_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"query":{"$ref":"#/$defs/archive_stateless"}}}));
+    all.push(history::changes::schema()?);
     schema["$defs"]["query"]["oneOf"]=json!(all);
     Ok(schema)
 }
@@ -144,6 +145,7 @@ pub(in super::super) fn query(session:&mut Session,context:&OperationContext,inp
     validate(session,context)?;
     if schema_mode {return packet(session,context,"fortress.query",None,
         json!({"mode":"schema","query_schema":schema()?,"profile":"spatial/1.8-archive","truncated":false,"continuation":null}));}
+    if history::changes::handles(input) { return history::changes::execute(session,context,input); }
     validate_shape(input)?;
     let envelope:Envelope=serde_json::from_value(input.clone()).map_err(|_|invalid("invalid archive query envelope"))?;
     if envelope.schema!="dfmcp.query/1" {return Err(invalid("archive query requires dfmcp.query/1"));}
