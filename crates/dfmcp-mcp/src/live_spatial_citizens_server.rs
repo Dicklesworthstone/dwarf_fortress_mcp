@@ -4,6 +4,7 @@
 #[path="query_response.rs"] mod query_response;
 #[path="spatial_queries.rs"] mod spatial_queries;
 #[path="spatial_citizen_history.rs"] mod history;
+#[path="spatial_watch_runtime.rs"] mod durable_watches;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc,LazyLock,Mutex,MutexGuard};
@@ -40,7 +41,8 @@ impl Source for CitizenSpatialRpcClient<DeadlineStream>{
     fn pages(&self)->u32{self.last_page_count()}
 }
 struct Session{id:SessionId,source:Box<dyn Source>,state:LiveSpatialCitizenState,limits:CitizenSpatialLimits,
-    journal:Option<history::Journal>,budget:WorkBudget,grants:Vec<CapabilityGrant>,request:u128,_slot:Slot}
+    journal:Option<history::Journal>,budget:WorkBudget,grants:Vec<CapabilityGrant>,request:u128,
+    _watch_journal:Option<semantic_query::WatchJournalGuard>,_slot:Slot}
 impl Session{
     fn anchor(&self)->Result<StateAnchor>{self.state.snapshot().map(|s|s.anchor()).ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 snapshot absent"))}
     fn context(&mut self)->Result<OperationContext>{self.request=self.request.checked_add(1).ok_or_else(||error(ErrorCode::BudgetExceeded,"spatial/1.8 request IDs exhausted"))?;
@@ -76,7 +78,7 @@ fn resolve(raw:Option<String>)->Result<Arc<Mutex<Session>>>{let text=raw.ok_or_e
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(||error(ErrorCode::SessionNotFound,"spatial/1.8 session not found"))}
 fn allowed_environment(name:&str)->bool{!name.starts_with("DFMCP_")||matches!(name,
     "DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_8"|"DFMCP_SPATIAL_CITIZEN_TOKEN"|"DFMCP_SPATIAL_CITIZEN_ENDPOINT"|
-    "DFMCP_SPATIAL_CITIZEN_JOURNAL"|"DFMCP_SPATIAL_CITIZEN_JOURNAL_REPAIR")}
+    "DFMCP_SPATIAL_CITIZEN_JOURNAL"|"DFMCP_SPATIAL_CITIZEN_JOURNAL_REPAIR"|"DFMCP_SPATIAL_CITIZEN_WATCH_JOURNAL")}
 fn validate_environment()->Result<()>{if std::env::var("DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_8").ok().as_deref()!=Some("1")
     ||std::env::vars_os().any(|(n,_)|!allowed_environment(&n.to_string_lossy()))||crate::admission::current_admission_provenance().is_some(){
         return Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 requires its own opt-in and refuses other DFMCP/admission state"));}Ok(())}
@@ -98,17 +100,28 @@ fn packet(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,mut v:Va
     let mut work=empty_active_work();if let Some(w)=v.as_object_mut().and_then(|m|m.remove("_condition_watch_work")){work["obligations"]=w;}
     let mut builder=AgentTurnBuilder::new(operation,AgentPhase::Inspect).active_work(work);let mut maximum=8192;
     if let(Some(s),Some(c))=(s,c){let a=s.anchor()?;maximum=s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize;v["session_id"]=json!(s.id.to_string());v["anchor"]=anchor_json(a);
-        let reset=v["reset"]==true;builder=builder.session_id(s.id.to_string()).request_id(c.request_id.to_string()).anchor(anchor_json(a)).briefing(briefing(s)).coverage(coverage())
-            .continuity(if s.source.poisoned(){ContinuityStatus::Stale}else if reset{ContinuityStatus::Reset}else if v["kind"]=="heartbeat"{ContinuityStatus::Heartbeat}else{ContinuityStatus::Continuous},
-                Some(anchor_json(c.anchor)),None,reset.then(||"citizen_spatial_capture_epoch_reset".to_owned()));
+        let reset=v["reset"]==true;
+        let opening=operation=="fortress.open_session";
+        let recovered=v.get("watch_recovery").and_then(|r|r.get("restored")).and_then(Value::as_u64).is_some_and(|n|n>0);
+        let continuity=if s.source.poisoned(){ContinuityStatus::Stale}else if reset{ContinuityStatus::Reset}
+            else if recovered{ContinuityStatus::Partial}else if opening{ContinuityStatus::Bootstrap}
+            else if v["kind"]=="heartbeat"{ContinuityStatus::Heartbeat}else{ContinuityStatus::Continuous};
+        builder=builder.session_id(s.id.to_string()).request_id(c.request_id.to_string()).anchor(anchor_json(a)).briefing(briefing(s)).coverage(coverage())
+            .continuity(continuity,if opening{None}else{Some(anchor_json(c.anchor))},
+                recovered.then(||json!({"reason":"watch_monitoring_gap_during_process_downtime","stability_reset":true})),
+                reset.then(||"citizen_spatial_capture_epoch_reset".to_owned()));
     }else{builder=builder.briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"bridge_protocol":"1.8"}));}
     let out=builder.attach(v);if out.len()>maximum{return Err(error(ErrorCode::BudgetExceeded,"complete spatial/1.8 packet exceeds output budget"));}Ok(out)
 }
 fn failure(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,e:&DfmcpError)->String{
     let value=json!({"ok":false,"error":{"code":e.code.as_str(),"message":e.message,"operation":operation,"mutation_dispatched":false}});
     let result=match(s,c){(Some(s),Some(c))if c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok()=>
-        semantic_query::publish_with_active_work(c,value,|v|packet(Some(s),Some(c),operation,v)),_=>packet(None,None,operation,value)};
-    result.unwrap_or_else(|_|AgentTurnBuilder::new(operation,AgentPhase::Inspect).attach(json!({"ok":false,"error":{"code":"budget_exceeded","message":"required response did not fit"}})))
+        semantic_query::publish_with_active_work(c,value.clone(),|v|packet(Some(s),Some(c),operation,v)),_=>packet(None,None,operation,value.clone())};
+    // A fenced watch journal must not turn its own diagnosis into BudgetExceeded
+    // merely because the usual active-work projection is now unavailable.
+    result.unwrap_or_else(|_|AgentTurnBuilder::new(operation,AgentPhase::Inspect)
+        .briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"bridge_protocol":"1.8","active_work_unavailable":true}))
+        .attach(value))
 }
 fn with_session<F>(id:Option<String>,operation:&str,cap:Capability,body:F)->String where F:FnOnce(&mut Session,OperationContext)->Result<String>{
     let handle=match resolve(id){Ok(v)=>v,Err(e)=>return failure(None,None,operation,&e)};let mut s=match lock(&handle){Ok(v)=>v,Err(e)=>return failure(None,None,operation,&e)};
@@ -126,12 +139,13 @@ fn capabilities(input:Option<Vec<String>>)->Result<Vec<Capability>>{let input=in
     let mut out=Vec::new();for name in input{let c=match name.as_str(){"observe"=>Capability::Observe,"query"=>Capability::Query,"doctor"=>Capability::Doctor,
         _=>return Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 cannot grant that capability"))};if out.contains(&c){return Err(error(ErrorCode::InvalidRequest,"duplicate capability"));}out.push(c);}Ok(out)}
 
-#[tool(description="Open an unadmitted read-only spatial/1.8 session: strict citizens, jobs, buildings, inventory and one terrain region are captured together and paged immutably.")]
+#[tool(description="Open an unadmitted read-only spatial/1.8 session: strict citizens, jobs, buildings, inventory and one terrain region are captured together and paged immutably. Operator-configured paired observation/watch journals restore monitoring intent with fresh handles and reset stability after restart.")]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Option<u32>,max_capture_bytes:Option<u64>,page_bytes:Option<u32>,
     max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>)->String{
     let result=(||->Result<String>{validate_environment()?;let region=parse_region(&region)?;let caps=capabilities(requested_capabilities)?;
         let journal_configuration=history::configuration()?;
+        let watch_path=durable_watches::configuration(journal_configuration.as_ref().map(|(path,_)|path.as_path()))?;
         if journal_configuration.is_some()&&(!caps.contains(&Capability::Query)||!caps.contains(&Capability::Observe)){
             return Err(error(ErrorCode::CapabilityDenied,"durable spatial/1.8 sessions require Query and Observe authority"));}
         let capture=usize::try_from(max_capture_bytes.unwrap_or(MAX_SPATIAL_CITIZEN_BYTES as u64)).map_err(|_|error(ErrorCode::BudgetExceeded,"capture size overflow"))?;
@@ -149,10 +163,11 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
         let fortress=state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 bootstrap snapshot absent"))?.fortress_id;
         let grants=caps.iter().map(|c|CapabilityGrant{capability:*c,scope:CapabilityScope{fortress_id:Some(fortress),..CapabilityScope::default()},
             max_risk:RiskTier::ReadOnly,expires_at_tick:None,remaining_uses:None}).collect();
-        let mut s=Session{id,source:Box::new(source),state,limits,journal:None,budget,grants,request:0,_slot:slot};let mut c=s.context()?;
+        let mut s=Session{id,source:Box::new(source),state,limits,journal:None,budget,grants,request:0,_watch_journal:None,_slot:slot};let mut c=s.context()?;
         if let Some((path,recovery))=journal_configuration{history::attach(&mut s,&path,recovery,&c)?;c.anchor=s.anchor()?;}
-        let out=packet(Some(&s),Some(&c),"fortress.open_session",json!({"ok":true,"granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
-            "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}}))?;
+        let value=json!({"ok":true,"granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
+            "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}});
+        let out=durable_watches::finish_open(&mut s,&c,watch_path.as_deref(),value)?;
         lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));Ok(out)})();match result{Ok(v)=>v,Err(e)=>failure(None,None,"fortress.open_session",&e)}}
 fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Observe,|s,c|{let outcome=s.refresh(&c)?;let mut target=c.clone();target.anchor=s.anchor()?;
     target.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;let v=json!({"ok":true,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},
@@ -168,7 +183,7 @@ fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(Quer
     maximum_bytes:s.budget.max_bytes.min(u64::from(s.budget.max_output_tokens)*4) as usize})}
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query one coherent citizen/operations/terrain capture. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Historical_query replays an exact durable record without modifying live state. Structured graph, watch, map_route and spatial_inventory_plan queries share the same anchor.")]
+#[tool(description="Query one coherent citizen/operations/terrain capture. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. With paired operator journals, watch registration, samples, cancellation and release survive restart. Historical_query replays an exact record without changing live watches. Structured graph, watch, map_route and spatial_inventory_plan queries share the same anchor.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
@@ -211,4 +226,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Strict citizens, jobs, buildings, items and one terrain region share one immutable native capture. Use unit/job performs and located_at edges for observed assignment/location; route/allocation results remain model-only. Optional fixed-profile history replays exact captures. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Strict citizens, jobs, buildings, items and one terrain region share one immutable native capture. Use unit/job performs and located_at edges for observed assignment/location; route/allocation results remain model-only. Optional fixed-profile history replays exact captures. Paired operator-configured watch journals preserve monitoring definitions and outcomes; restart gives fresh handles, resets unfinished stability and never proves continuity during downtime. Rediscover with query watches, then await_watch for fresh evidence. No game effects.").build();crate::run_modern_stdio(server);}
