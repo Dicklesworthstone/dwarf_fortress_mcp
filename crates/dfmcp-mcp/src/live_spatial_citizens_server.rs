@@ -279,7 +279,7 @@ pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_
     packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else if s.source.archive_only(){"archive_only"}else{"read_only_unadmitted"}})))}
 fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
 #[tool(description="Unavailable: coherent observations do not authorize effects.")]pub fn fortress_plan(session_id:Option<String>)->String{no_effect(session_id,"fortress.plan")}
-#[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
+#[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id,"fortress.commit")}
 #[tool(description="Unavailable for game effects.")]pub fn fortress_cancel(session_id:Option<String>)->String{no_effect(session_id,"fortress.cancel")}
 #[tool(description="Unavailable: no game-save checkpoint is created.")]pub fn fortress_checkpoint(session_id:Option<String>)->String{no_effect(session_id,"fortress.checkpoint")}
 #[tool(description="Unavailable: no game or save state is restored.")]pub fn fortress_restore(session_id:Option<String>)->String{no_effect(session_id,"fortress.restore")}
