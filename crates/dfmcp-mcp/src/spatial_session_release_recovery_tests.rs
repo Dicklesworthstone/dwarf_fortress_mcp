@@ -78,3 +78,19 @@ fn local_watches_alone_require_consent_and_repeated_sessions_do_not_fill_global_
     assert_eq!(SLOTS.load(Ordering::SeqCst), 0);
     Ok(())
 }
+
+#[test]
+fn new_close_receipt_survives_even_when_its_session_predates_the_entire_cache() -> Result<()> {
+    let _serial = lock(&SERIAL)?;
+    let long_lived = register(None, false, 3, &[])?;
+    for _ in 0..=MAX_CLOSE_RECEIPTS {
+        let short_lived = register(None, false, 3, &[])?;
+        successful(request_close(&short_lived, false)?);
+    }
+    let closed = fortress_cancel(long_lived.handle(), Some("session".into()), None);
+    successful(decode(&closed)?);
+    assert_eq!(fortress_cancel(long_lived.handle(), Some("session".into()), None), closed);
+    assert_eq!(long_lived.drops.load(Ordering::SeqCst), 1);
+    assert_eq!(SLOTS.load(Ordering::SeqCst), 0);
+    Ok(())
+}
