@@ -8,6 +8,7 @@
 #[path="workforce_queries.rs"] mod workforce_queries;
 #[path="spatial_archive_runtime.rs"] mod archive;
 #[path="spatial_situation.rs"] mod situation;
+#[path="spatial_situation_presentation.rs"] mod situation_presentation;
 #[cfg(test)]
 #[path="spatial_situation_tests.rs"] mod situation_tests;
 
@@ -231,16 +232,14 @@ fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(Quer
 // Historical handlers intentionally use the unadorned view above. Never mix a
 // current operational finding into a response anchored to an older record.
 fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{
-    let report=situation_report(s,c)?;let mut projection=view(s,c)?;
-    projection.briefing=situation_briefing(s,report.as_ref());
-    if let Some(report)=report{projection.attention=report.attention(s.id);}
-    Ok(projection)
+    situation_presentation::tactical(s,c)
 }
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query coherent spatial/1.8 data with operational briefing and exact-anchor inspection links. Modes: summary, citizens, jobs, buildings, items, tiles, history, schema. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention, watches, baselines or acquisition.")]
+#[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, citizens, jobs, buildings, items, tiles, history, schema. Situation returns full signal counts and exact-anchor inspection links without a new capture. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention or acquisition.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
+    if mode.as_deref()==Some("situation"){return situation_presentation::detail(s,&c);}
     let mut input=match query{Some(v)=>v,None=>match mode.as_deref(){
         None|Some("summary"|"schema")=>json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}}),
         Some("history")=>json!({"schema":"dfmcp.query/1","query":{"kind":"history"}}),
@@ -259,7 +258,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         if semantic_query::prepare_await(snapshot,&c,&input)?{let basis=c.anchor;let outcome=s.refresh(&c)?;c.anchor=s.anchor()?;c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
             refresh=Some(json!({"basis":anchor_json(basis),"reset":outcome==JobPublication::Reset,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},"native_captures":1,"transfer_pages":s.source.pages()}));}
         if let Some(obj)=input.as_object_mut(){obj.remove("expected_anchor");}input["query"]["kind"]=json!("poll_watch");}
-    let view=situation_view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=view.result_byte_budget()? as u64;
+    let view=situation_view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=situation_presentation::result_budget(&view,&input)? as u64;
     if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":workforce_queries::extend_schema(history::schema()?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
     if workforce_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=workforce_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     if spatial_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=spatial_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
@@ -285,4 +284,4 @@ fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Live Agent Turns include a bounded operational situation, observed warning signs and exact-anchor inspection requests. Observe/wait summarize endpoint count changes, never causal or continuous history. Explain exposes the rule policy. Recovery-only sessions inspect original archives without credentials; archived facts never become current operational attention. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Live Agent Turns include operational attention: tactical queries use a compact highest-priority signal with a situation-mode detail request. Situation mode, open and observe provide all signal counts and bounded exact-anchor inspection links. Observe/wait summarize endpoint count changes, never causal or continuous history. Explain exposes the rule policy. Recovery-only sessions inspect original archives without credentials; archived facts never become current operational attention. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
