@@ -66,8 +66,8 @@ pub use delta_scanner::{
 };
 pub use dfhack_probe::{
     DfHackProbeClient, MAX_PROBE_FIELD_BYTES, MAX_PROBE_METHODS,
-    MAX_PROBE_TEXT_NOTIFICATION_BYTES, ProbeHandshakeReply, ProbeObservationReply,
-    ProbeObservationRequest,
+    MAX_PROBE_TEXT_NOTIFICATION_BYTES, ProbeHandshakeReply, ProbeHandshakeRequest,
+    ProbeObservationReply, ProbeObservationRequest,
 };
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
@@ -106,7 +106,7 @@ pub use live_announcement_batch::{
 pub use live_announcement_briefing::{
     AnnouncementAttentionItem, AnnouncementAttentionSeverity, LiveAnnouncementBriefing,
     LiveAnnouncementChangeSummary, MAX_ANNOUNCEMENT_ATTENTION_ITEMS,
-    MAX_ANNOUNCEMENT_BRIEFING_RECORDS, MAX_ANNOUNCEMENT_CHANGE_IDS,
+    MAX_BRIEFING_RECORDS, MAX_ANNOUNCEMENT_CHANGE_IDS,
     build_live_announcement_briefing, summarize_live_announcement_change,
 };
 pub use live_announcement_projection::{
