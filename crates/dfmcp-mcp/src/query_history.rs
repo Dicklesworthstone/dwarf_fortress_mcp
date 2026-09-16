@@ -5,6 +5,9 @@
 #[path = "query_history_endpoints.rs"]
 mod endpoints;
 pub(super) use endpoints::compare_endpoints;
+#[path = "query_session_release.rs"]
+mod session_release;
+pub(super) use session_release::release as release_session;
 
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -100,17 +103,19 @@ fn check_input(root: &Value) -> Result<()> {
     while let Some((value, depth)) = pending.pop() {
         nodes += 1;
         bytes = bytes.saturating_add(32);
-        if depth > 24 || nodes > 4096 { return Err(exhausted("history query exceeds its shape bound")); }
+        if depth > 24 || nodes > 4096 {
+            return Err(exhausted("history query exceeds its shape bound"));
+        }
         match value {
             Value::String(text) => bytes = bytes.saturating_add(text.len()),
             Value::Array(values) => {
-                if nodes.saturating_add(pending.len()).saturating_add(values.len()) > 4096 {
+                if values.len().saturating_add(pending.len()).saturating_add(nodes) > 4096 {
                     return Err(exhausted("history query exceeds its node bound"));
                 }
                 pending.extend(values.iter().map(|value| (value, depth + 1)));
             }
             Value::Object(values) => {
-                if nodes.saturating_add(pending.len()).saturating_add(values.len()) > 4096 {
+                if values.len().saturating_add(pending.len()).saturating_add(nodes) > 4096 {
                     return Err(exhausted("history query exceeds its node bound"));
                 }
                 for (key, value) in values {
