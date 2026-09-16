@@ -43,6 +43,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Offline spatial/1.8 archive bootstrap and exact-record analysis
+
+`docs/SPATIAL_ARCHIVE_RECOVERY.md` documents `fortress.open_session(recovery_only=true)` on the
+existing spatial server. It opens an existing observation journal without DFHack, bridge credentials
+or an endpoint. Query and optional Doctor grants are freshly scoped to the verified archive
+fortress; Observe, mutation authority, journal creation/repair and watch recovery are refused.
+The operator-configured path keeps the existing exclusive lock and private-file custody rules,
+using a read-only descriptor whose write, flush, sync and truncate operations explicitly refuse.
+
+The normal fixed-profile replay reconstructs the exact citizen, operations and terrain generation
+history. Empty archives cannot bootstrap a world. Requested region/acquisition bounds remain in
+force. Cached queries and diagnostics recheck current authority and custody; exact historical reads
+also reverify their record bytes. No archive bytes are rewritten or migrated.
+
+Archive queries reuse the ten stateless graph, terrain, inventory and workforce analysis variants,
+plus bounded history listing and exact-record historical queries. Their Agent Turns explicitly
+mark all facts historical and current freshness unproved. Older-record workforce analysis and
+route drill-downs stay pinned to the selected record without replacing the session's latest
+retained observation. Whole-row output includes full historical metadata within the response budget.
+Archive-only schema discovery excludes watch/baseline mutations and uses session/head-bound history
+continuations. No live acquisition or monitor evaluation is routed, even with injected Observe
+capability. Persisted watch evidence is not loaded; empty active work is scoped to this archive
+session and does not prove that no persisted monitoring or game actions exist.
+
+Fourteen Rust scenarios are registered: six private-file adapter integration tests and eight archive
+bootstrap/actual-MCP-handler tests. **None has been compiled or executed here**: Rust, Cargo and
+rustfmt are unavailable. An independent Python JSON-size calculation passed 128 boundary cases for
+exact-record route wrappers; every wrapper was smaller than its original anchor-bound request
+(maximum growth -22 bytes). This limited check does not execute Rust serialization, archive replay,
+filesystem custody, query engines, MCP or DFHack. No full qualification, native/live evidence,
+production runner, admission, dependency or game-effect capability is changed by this increment.
+
 ### Coherent workforce candidates and simultaneous capacity planning
 
 `docs/WORKFORCE_PLANNING.md` describes `workforce_candidates` and `workforce_plan` through the actual
@@ -58,9 +90,10 @@ Unknown skill keys do not recruit every novice. The occupied-citizen endpoint ex
 unit occupancy, never hidden terrain, walls, liquid, buildings or unknown walkability.
 
 Whole-row continuations bind the session, full anchor, model and work allowance. Current watches
-remain attached without sampling. Workforce queries currently use only the latest retained live
-capture, not historical-query envelopes. No native protocol, dependency, top-level tool, mutation
-capability, compatibility admission or production map is changed.
+remain attached without sampling. In live mode workforce queries use the latest retained capture;
+the subsequent archive-only path described above also supports exact historical workforce analysis.
+No native protocol, dependency, top-level tool, mutation capability, compatibility admission or
+production map is changed.
 
 Fifteen new Rust tests are registered: eight adapter tests (including all 512 three-worker/three-role
 skill graphs against an exhaustive assignment oracle), four query tests and three actual MCP-handler
