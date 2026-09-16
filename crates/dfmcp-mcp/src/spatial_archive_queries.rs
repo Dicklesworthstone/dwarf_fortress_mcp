@@ -2,8 +2,9 @@
 //! registration/evaluation, baseline mutation, observation or game effect is routed.
 use super::*;
 
-const READ_KINDS: [&str;10] = ["entities","inspect","traverse","dependencies","aggregate","search",
-    "map_route","spatial_inventory_plan","workforce_candidates","workforce_plan"];
+const READ_KINDS: [&str;12] = ["entities","inspect","traverse","dependencies","aggregate","search",
+    "map_route","spatial_inventory_plan","workforce_candidates","workforce_plan",
+    "production_diagnosis","inventory_plan"];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,9 +108,11 @@ fn execute_on(session:&Session,context:&OperationContext,state:&LiveSpatialCitiz
     validate_limits(state.observation_full().ok_or_else(||error(ErrorCode::CorruptLedger,"archived source absent"))?,session.limits)?;
     let narrowed=result_context(session,context,entry)?;
     let input=json!({"schema":"dfmcp.query/1","expected_anchor":anchor_json(entry.anchor),"query":query});
-    let mut out=if workforce_queries::handles(&input) {workforce_queries::execute(state,&narrowed,&input)?}
+    let mut out=if production::handles(&input) {production::execute(state,&narrowed,&input)?}
+        else if workforce_queries::handles(&input) {workforce_queries::execute(state,&narrowed,&input)?}
         else if spatial_queries::handles(&input) {spatial_queries::execute(state,&narrowed,&input)?}
         else {semantic_query::execute(snapshot,&narrowed,&input)?};
+    production::pin_historical(&mut out,entry.number,entry.record_digest)?;
     pin_routes(&mut out,entry)?;
     packet(session,context,"fortress.query",Some(entry),out)
 }
