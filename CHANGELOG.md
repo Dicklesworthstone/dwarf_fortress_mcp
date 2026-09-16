@@ -8,6 +8,13 @@ readiness.
 
 ### Added
 
+- `historical_changes` in journal-backed live and archive-only spatial/1.8 sessions: exact record
+  pairs, complete selected endpoint projections, generation-aware entered/left/changed rows,
+  separate provenance refresh counts, and whole-change pagination without process-local baselines.
+  Replay/comparison share one cooperative deadline, current watches are preserved without sampling,
+  and full historical Agent Turn metadata is reserved before replay. Sixteen registered Rust
+  scenarios remain uncompiled/unexecuted; 66 Python record/page-envelope checks passed without
+  validating delegated selectors or runtime semantics. See `docs/HISTORICAL_CHANGES.md`.
 - Offline spatial/1.8 archive sessions through `fortress.open_session(recovery_only=true)`, using
   the existing operator-configured observation journal without DFHack, credentials or a connection.
   Fixed-profile replay retains exact entity generations and historical anchors under Query and
@@ -85,7 +92,7 @@ readiness.
 - Protocol-bound V2 production admission contract
   (`architecture/live_admission_ticket_v2.json`). The exact bridge protocol now travels from the
   deployment manifest through the compatibility decision, launch record, single-use ticket,
-  `DFMCP_ADMITTED_BRIDGE_PROTOCOL`, Rust admission provenance, and final private runner lookup.
+  `dfmcp_ADMITTED_BRIDGE_PROTOCOL`, Rust admission provenance, and final private runner lookup.
   Launch and ticket digests both cover the protocol. The production map currently contains only
   protocol 1.0; protocol 1.1 and unknown protocols fail before live-server startup.
 - Protocol-1.1 retained-announcement read generation with a distinct protobuf package, plugin,
@@ -237,6 +244,9 @@ readiness.
 
 ### Current evidence status
 
+- Historical endpoint comparisons are source-present with sixteen registered but uncompiled and
+  unexecuted Rust scenarios. The 66 Python checks validate the record/page envelope only, not the
+  delegated selector schema, Rust comparison, journal replay, MCP or native/live qualification.
 - Offline spatial archive recovery is source-present with fourteen registered but uncompiled and
   unexecuted Rust scenarios. The 128 independent JSON-size checks cover route-wrapper sizing only,
   not Rust, replay, filesystem custody, MCP, native/live-game behavior or qualification.
