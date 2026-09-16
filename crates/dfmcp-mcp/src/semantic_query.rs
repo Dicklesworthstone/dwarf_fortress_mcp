@@ -26,6 +26,15 @@ pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
 /// Dropping it releases only process-local ownership, never durable intent.
 pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
 
+/// The runtime must exclusively own the resolved session across this call.
+/// This release-only path returns no world facts, does not evaluate predicates,
+/// and never changes journal bytes. Render failure leaves both registries intact.
+pub(crate) fn release_session_resources<F>(session: dfmcp_core::SessionId,
+    discard_process_local: bool, publish: F) -> Result<String>
+where F: FnOnce(Value) -> Result<String> {
+    query_history::release_session(session, discard_process_local, publish)
+}
+
 /// Private, single-use preparation: selections cannot be replaced by an MCP
 /// handle after a runtime has acquired the one optional observation.
 pub(crate) type PreparedWatchBatch = query_watch::batch::Prepared;
