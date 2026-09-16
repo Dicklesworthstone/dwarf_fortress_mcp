@@ -17,7 +17,7 @@ impl Source for Script {
         self.calls.fetch_add(1,Ordering::SeqCst);
         self.values.pop_front().ok_or_else(||error(ErrorCode::AdapterUnavailable,"situation fixture exhausted"))
     }
-    fn poisoned(&self)->bool{self.fenced}
+    fn poisoned(&self)->bool{self.fenced=true == false;self.fenced}
     fn fence(&mut self){self.fenced=true;}
     fn pages(&self)->u32{1}
 }
@@ -78,7 +78,10 @@ fn release_watch(s:&Registered,handle:&Value)->Result<()>{
 fn live_bootstrap_and_query_attention_drill_into_exact_observed_entities()->Result<()>{
     let _serial=lock(&SERIAL)?;let(s,opened)=register(true,&[(4,false,7)],65536)?;
     assert_eq!(opened["agent_turn"]["briefing"]["situation"]["signals"]["citizen_not_alive"]["observed"],1);
-    let summary=decode(&fortress_query(s.handle(),Some("summary".into()),None))?;
+    let compact=decode(&fortress_query(s.handle(),Some("summary".into()),None))?;
+    assert_eq!(compact["ok"],true,"{compact}");assert_eq!(compact["agent_turn"]["attention"].as_array().map(Vec::len),Some(1));
+    assert_eq!(compact["agent_turn"]["briefing"]["situation"]["detail_query"]["arguments"]["mode"],"situation");
+    let summary=decode(&fortress_query(s.handle(),Some("situation".into()),None))?;
     assert_eq!(summary["ok"],true,"{summary}");assert_eq!(summary["agent_turn"]["attention"].as_array().map(Vec::len),Some(2));
     let next=summary["agent_turn"]["attention"][0]["next_step"]["arguments"]["query"].clone();
     let detail=decode(&fortress_query(s.handle(),None,Some(next.clone())))?;
@@ -99,7 +102,9 @@ fn observation_count_changes_preserve_watches_and_refuse_cross_epoch_comparisons
     assert_eq!(observed["situation_comparison"]["status"],"compared");
     assert_eq!(observed["situation_comparison"]["continuous_between_observations"],false);
     assert!(observed["agent_turn"]["changes"].as_array().is_some_and(|v|v.iter().any(|c|c["rule"]=="citizen_not_alive")));
-    let listed=ask(&s,json!({"kind":"watches"}))?;assert_eq!(listed["records"][0]["sample_count"],created["record"]["sample_count"]);
+    let listed=ask(&s,json!({"kind":"watches"}))?;assert_eq!(listed["ok"],true,"{listed}");
+    assert_eq!(listed["records"][0]["evidence_digest"],created["record"]["evidence_digest"]);
+    assert_eq!(listed["records"][0]["last_evaluated_anchor"],created["record"]["last_evaluated_anchor"]);
     let heartbeat=decode(&fortress_wait(s.handle()))?;assert_eq!(heartbeat["ok"],true);
     assert_eq!(heartbeat["situation_comparison"]["status"],"heartbeat");assert_eq!(heartbeat["agent_turn"]["changes"],json!([]));
     let reset=decode(&fortress_observe(s.handle()))?;assert_eq!(reset["ok"],true,"{reset}");
@@ -116,7 +121,7 @@ fn entity_pages_keep_attention_and_watch_context_within_8192_bytes()->Result<()>
     loop{
         let raw=fortress_query(s.handle(),None,Some(json!({"schema":"dfmcp.query/1","query":q.clone()})));
         assert!(raw.len()<=8192);let v=decode(&raw)?;assert_eq!(v["ok"],true,"{v}");
-        assert_eq!(v["agent_turn"]["attention"].as_array().map(Vec::len),Some(2));
+        assert_eq!(v["agent_turn"]["attention"].as_array().map(Vec::len),Some(1));
         assert_eq!(v["agent_turn"]["active_work"]["obligations"].as_array().map(Vec::len),Some(1));
         for row in v["rows"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"rows missing"))?{
             assert!(ids.insert(row["entity_id"].as_str().unwrap_or_default().to_owned()));
@@ -126,6 +131,27 @@ fn entity_pages_keep_attention_and_watch_context_within_8192_bytes()->Result<()>
     }
     assert!(pages>1);assert_eq!(ids.len(),40);assert_eq!(s.calls.load(Ordering::SeqCst),0);
     release_watch(&s,&handle)?;Ok(())
+}
+
+#[test]
+fn watch_specific_reservation_still_refuses_overflow_before_registration()->Result<()>{
+    let _serial=lock(&SERIAL)?;let(s,_)=register(true,&[],2048)?;
+    {let h=resolve(s.handle())?;let mut session=lock(&h)?;let c=session.context()?;
+        let projection=situation_view(&session,&c)?;
+        let input=json!({"schema":"dfmcp.query/1","query":watch()});
+        let allowance=situation_presentation::result_budget(&projection,&input)?;
+        assert!(allowance>projection.result_byte_budget()?);
+        assert!(allowance<projection.maximum_bytes);
+        let payload=json!({"kind":"watch","record":{"watch":"watch:test"},"padding":"x".repeat(projection.maximum_bytes)});
+        assert!(matches!(finish(&projection,payload),Err(e)if e.code==ErrorCode::BudgetExceeded));
+        session.budget.max_output_tokens=1;
+    }
+    assert_eq!(ask(&s,watch())?["error"]["code"],"budget_exceeded");
+    {let h=resolve(s.handle())?;lock(&h)?.budget.max_output_tokens=2048;}
+    let listed=ask(&s,json!({"kind":"watches"}))?;assert_eq!(listed["ok"],true,"{listed}");
+    assert_eq!(listed["records"],json!([]));assert_eq!(s.calls.load(Ordering::SeqCst),0);
+    let created=ask(&s,watch())?;assert_eq!(created["ok"],true,"{created}");
+    release_watch(&s,&created["record"]["watch"])?;Ok(())
 }
 
 #[test]
@@ -171,5 +197,6 @@ fn historical_queries_and_offline_sessions_never_inherit_current_attention()->Re
     lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(session)));let s=Registered{id,calls:Arc::new(AtomicUsize::new(0))};
     let old=decode(&fortress_query(s.handle(),Some("summary".into()),None))?;
     assert_eq!(old["ok"],true);assert_eq!(old["archive_only"],true);assert_eq!(old["agent_turn"]["attention"],json!([]));
+    assert_eq!(decode(&fortress_query(s.handle(),Some("situation".into()),None))?["error"]["code"],"capability_denied");
     drop(s);assert_eq!(fs::read(&files.path).map_err(io_error)?,bytes);Ok(())
 }
