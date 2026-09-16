@@ -6,12 +6,16 @@
 //! not DF's full job requirement language or a reservation of game resources.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 use dfmcp_core::{Capability, DfmcpError, Digest32, EntityId, ErrorCode,
     OperationContext, Result, RiskTier, StateAnchor};
 use dfmcp_world::{EntityKind, WorldSnapshot};
 use dfmcp_world::inventory_allocation::{self as flow, Allocation, AllocationError, Demand, Supply};
-use crate::live_operations::{LiveItem, LiveOperationsObservation, LiveOperationsState,
+use crate::live_operations::{LiveItem, LiveOperationsObservation,
     building_entity_id, item_entity_id};
+#[path = "operations_analysis_view.rs"]
+mod views;
+pub use views::OperationsStateView;
 
 pub const ANALYSIS_POLICY: &str = "dfmcp.operations-analysis/1";
 pub const SUPPLY_POLICY: &str = "conservative-unattached-stack-units/1";
@@ -28,15 +32,18 @@ fn invalid(message: &str) -> DfmcpError { DfmcpError::new(ErrorCode::InvalidRequ
 fn invariant(message: &str) -> DfmcpError { DfmcpError::new(ErrorCode::InternalInvariantViolation, message) }
 fn exhausted(message: &str) -> DfmcpError { DfmcpError::new(ErrorCode::BudgetExceeded, message) }
 
-struct Work { used: u64, maximum: u64 }
+struct Work { used: u64, maximum: u64, started: Instant, wall_millis: u64 }
 impl Work {
-    fn new(maximum: u64) -> Result<Self> {
-        if maximum == 0 || maximum > MAX_ANALYSIS_WORK { return Err(exhausted("invalid analysis work bound")); }
-        Ok(Self { used: 0, maximum })
+    fn new(maximum: u64, wall_millis: u64) -> Result<Self> {
+        if maximum == 0 || maximum > MAX_ANALYSIS_WORK || wall_millis == 0 { return Err(exhausted("invalid analysis work bound")); }
+        Ok(Self { used: 0, maximum, started: Instant::now(), wall_millis })
     }
     fn charge(&mut self, units: u64) -> Result<()> {
         self.used = self.used.checked_add(units).ok_or_else(|| exhausted("analysis counter overflow"))?;
         if self.used > self.maximum { return Err(exhausted("operations analysis exhausted its work budget")); }
+        if self.started.elapsed().as_millis() >= u128::from(self.wall_millis) {
+            return Err(exhausted("operations analysis exhausted its cooperative wall-time budget"));
+        }
         Ok(())
     }
 }
@@ -51,17 +58,17 @@ fn handle(snapshot: &WorldSnapshot, id: EntityId) -> Result<AnalysisHandle> {
     let entity = snapshot.graph.entities.get(&id).ok_or_else(|| invariant("analysis endpoint has no canonical entity"))?;
     Ok(AnalysisHandle { entity_id: id, generation: entity.generation, revision: entity.revision })
 }
-fn source<'a>(state: &'a LiveOperationsState, context: &OperationContext)
+fn source<'a, S: OperationsStateView + ?Sized>(state: &'a S, context: &OperationContext)
     -> Result<(&'a LiveOperationsObservation, &'a WorldSnapshot, Digest32)> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    let observation = state.observation().ok_or_else(|| invalid("no coherent operations observation is published"))?;
-    let snapshot = state.snapshot().ok_or_else(|| invariant("operations projection missing"))?;
+    let observation = state.operations_observation().ok_or_else(|| invalid("no coherent operations observation is published"))?;
+    let snapshot = state.operations_snapshot().ok_or_else(|| invariant("operations projection missing"))?;
     if snapshot.anchor() != context.anchor { return Err(DfmcpError::new(ErrorCode::StaleAnchor, "analysis context names another observation")); }
     if snapshot.graph.entities.len() > context.budget.max_entities as usize {
         return Err(exhausted("operations analysis exceeds the session scan budget"));
     }
     if !snapshot.hash_is_valid() { return Err(invariant("operations analysis source hash is invalid")); }
-    Ok((observation, snapshot, state.source_digest()?))
+    Ok((observation, snapshot, state.operations_source_digest()?))
 }
 
 /// Computed once per request, not once per job or demand. Chains are iterative
@@ -181,11 +188,11 @@ fn exclusion(flags: u32) -> Option<&'static str> {
         .into_iter().find_map(|(bit, reason)| (flags & bit != 0).then_some(reason))
 }
 
-pub fn plan_inventory(state: &LiveOperationsState, context: &OperationContext,
+pub fn plan_inventory<S: OperationsStateView + ?Sized>(state: &S, context: &OperationContext,
     requested: &[MaterialDemand], max_work: u64) -> Result<InventoryAnalysis> {
+    let mut work = Work::new(max_work, context.budget.max_wall_millis)?;
     let (observation, snapshot, source_digest) = source(state, context)?;
     let demands = normalized_demands(requested)?;
-    let mut work = Work::new(max_work)?;
     let inventory = InventoryIndex::build(observation, &mut work)?;
     let mut supplies = Vec::new();
     let mut excluded_items = BTreeMap::new();
@@ -269,12 +276,12 @@ fn check_focus(snapshot: &WorldSnapshot, focus: Option<(EntityId, u32)>, kind: E
     Ok(())
 }
 
-pub fn diagnose_production(state: &LiveOperationsState, context: &OperationContext,
+pub fn diagnose_production<S: OperationsStateView + ?Sized>(state: &S, context: &OperationContext,
     scope: DiagnosisScope, max_work: u64) -> Result<ProductionDiagnosis> {
+    let mut work = Work::new(max_work, context.budget.max_wall_millis)?;
     let (observation, snapshot, source_digest) = source(state, context)?;
     check_focus(snapshot, scope.job, EntityKind::Job)?;
     check_focus(snapshot, scope.holder, EntityKind::Building)?;
-    let mut work = Work::new(max_work)?;
     let inventory = InventoryIndex::build(observation, &mut work)?;
     let buildings: BTreeMap<_, _> = observation.buildings.iter().map(|v| (v.native_id, v)).collect();
     work.charge(observation.buildings.len() as u64)?;
@@ -355,6 +362,7 @@ pub fn diagnose_production(state: &LiveOperationsState, context: &OperationConte
         (!flags("removed"), !flags("rotten"), !flags("forbidden"), !row.suspended,
             !row.holder_stage.is_some_and(|(stage, maximum)| stage < maximum), row.native_job_id)
     });
+    work.charge(0)?;
     Ok(ProductionDiagnosis { anchor: snapshot.anchor(), source_digest, jobs_considered,
         jobs_with_findings, finding_counts, rows, work_units: work.used })
 }
