@@ -48,6 +48,56 @@ impl JournalStorage for PrivateJournalFile {
     }
 }
 
+impl PrivateJournalFile {
+    /// Open exclusively owned observation-state storage. The Boolean is true
+    /// only when this call created the file with create_new; only that result
+    /// authorizes a format-specific journal to initialize an empty file.
+    ///
+    /// This is a custody boundary, not a codec selector. Callers must verify their
+    /// own fixed magic, source binding and complete record chain before use.
+    /// Paths are operator configuration, never client-selected MCP arguments.
+    pub fn open(path: &Path, context: &OperationContext) -> Result<(Self, bool)> {
+        context.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
+        context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
+        #[cfg(unix)] {
+            use std::os::unix::fs::{MetadataExt,OpenOptionsExt};
+            let denied=||DfmcpError::new(ErrorCode::CapabilityDenied,
+                "journal requires an absolute normalized file path in an existing private 0700 directory and a single-link 0600 regular file");
+            if !path.is_absolute() || path.as_os_str().len()>4096
+                || path.components().any(|c|!matches!(c,Component::RootDir|Component::Normal(_)))
+                || path.file_name().is_none() {return Err(denied());}
+            let parent=path.parent().ok_or_else(denied)?;
+            if parent.canonicalize().map_err(storage_error)?!=parent{return Err(denied());}
+            let dir=fs::symlink_metadata(parent).map_err(storage_error)?;
+            if !dir.is_dir() || dir.mode()&0o7777!=0o700 {return Err(denied());}
+            let before=match fs::symlink_metadata(path) {
+                Ok(meta)=>{
+                    if !meta.is_file() || meta.mode()&0o7777!=0o600 || meta.nlink()!=1 || meta.uid()!=dir.uid(){return Err(denied());}
+                    Some(meta)
+                }
+                Err(e) if e.kind()==io::ErrorKind::NotFound=>None,
+                Err(e)=>return Err(storage_error(e)),
+            };
+            let created=before.is_none();
+            let mut options=OpenOptions::new();options.read(true).write(true);
+            if created {options.create_new(true).mode(0o600);}
+            let file=options.open(path).map_err(storage_error)?;
+            file.try_lock().map_err(|_|DfmcpError::new(ErrorCode::Conflict,"observation journal already has a writer or cannot be exclusively locked"))?;
+            let opened=file.metadata().map_err(storage_error)?;
+            if before.as_ref().is_some_and(|meta|(meta.dev(),meta.ino())!=(opened.dev(),opened.ino())) {return Err(denied());}
+            let storage=Self{identity:(opened.dev(),opened.ino(),opened.uid(),dir.dev(),dir.ino()),file,path:path.to_owned()};
+            storage.validate_identity().map_err(storage_error)?;
+            // Ensure the new directory entry precedes any acknowledged append.
+            if created {File::open(parent).and_then(|dir|dir.sync_all()).map_err(storage_error)?;}
+            Ok((storage,created))
+        }
+        #[cfg(not(unix))] {
+            let _=path;
+            Err(DfmcpError::new(ErrorCode::CapabilityDenied,"private observation journals are currently supported on Unix only"))
+        }
+    }
+}
+
 /// The existing entry retains its exact operations/1.3 codec and file identity.
 pub fn open_private_journal(path:&Path,context:&OperationContext,limits:JournalLimits,
     recovery:TailRecovery)->Result<OperationsJournal<PrivateJournalFile>> {
@@ -61,40 +111,6 @@ pub fn open_profile_journal<P: JournalProfile>(path:&Path,context:&OperationCont
     context.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
     limits.validate()?;
-    #[cfg(unix)] {
-        use std::os::unix::fs::{MetadataExt,OpenOptionsExt};
-        let denied=||DfmcpError::new(ErrorCode::CapabilityDenied,
-            "journal requires an absolute normalized file path in an existing private 0700 directory and a single-link 0600 regular file");
-        if !path.is_absolute() || path.as_os_str().len()>4096
-            || path.components().any(|c|!matches!(c,Component::RootDir|Component::Normal(_)))
-            || path.file_name().is_none() {return Err(denied());}
-        let parent=path.parent().ok_or_else(denied)?;
-        if parent.canonicalize().map_err(storage_error)?!=parent{return Err(denied());}
-        let dir=fs::symlink_metadata(parent).map_err(storage_error)?;
-        if !dir.is_dir() || dir.mode()&0o7777!=0o700 {return Err(denied());}
-        let before=match fs::symlink_metadata(path) {
-            Ok(meta)=>{
-                if !meta.is_file() || meta.mode()&0o7777!=0o600 || meta.nlink()!=1 || meta.uid()!=dir.uid(){return Err(denied());}
-                Some(meta)
-            }
-            Err(e) if e.kind()==io::ErrorKind::NotFound=>None,
-            Err(e)=>return Err(storage_error(e)),
-        };
-        let created=before.is_none();
-        let mut options=OpenOptions::new();options.read(true).write(true);
-        if created {options.create_new(true).mode(0o600);}
-        let file=options.open(path).map_err(storage_error)?;
-        file.try_lock().map_err(|_|DfmcpError::new(ErrorCode::Conflict,"observation journal already has a writer or cannot be exclusively locked"))?;
-        let opened=file.metadata().map_err(storage_error)?;
-        if before.as_ref().is_some_and(|meta|(meta.dev(),meta.ino())!=(opened.dev(),opened.ino())) {return Err(denied());}
-        let storage=PrivateJournalFile{identity:(opened.dev(),opened.ino(),opened.uid(),dir.dev(),dir.ino()),file,path:path.to_owned()};
-        storage.validate_identity().map_err(storage_error)?;
-        // Ensure the newly created directory entry precedes any acknowledged append.
-        if created {File::open(parent).and_then(|dir|dir.sync_all()).map_err(storage_error)?;}
-        ObservationJournal::<_,P>::open(storage,context,limits,created,recovery)
-    }
-    #[cfg(not(unix))] {
-        let _=(path,limits,recovery);
-        Err(DfmcpError::new(ErrorCode::CapabilityDenied,"private observation journals are currently supported on Unix only"))
-    }
+    let (storage,created)=PrivateJournalFile::open(path,context)?;
+    ObservationJournal::<_,P>::open(storage,context,limits,created,recovery)
 }
