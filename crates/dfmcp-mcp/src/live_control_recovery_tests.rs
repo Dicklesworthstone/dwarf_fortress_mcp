@@ -85,6 +85,9 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
         let committed = parse(fortress_commit(Some(id.to_string()), "prepared".into(),
             Digest32::of_bytes(b"prepared").to_string(), "01".repeat(16)))?;
         assert_eq!(committed["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
+        let waited = parse(fortress_wait(Some(id.to_string()), vec!["started".into()], None, None, None))?;
+        assert_eq!(waited["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
+        assert_eq!(waited["result"]["error"]["mutation_dispatched"], false);
         let doctor = parse(fortress_doctor(Some(id.to_string())))?;
         assert_eq!(doctor["result"]["recovery_only"], true);
         assert_eq!(doctor["result"]["bridge_connection_present"], false);
@@ -124,6 +127,7 @@ fn recovery_session_rejects_repair_and_missing_journals_before_any_connection() 
 fn recovery_session_cannot_dispatch_even_if_a_caller_injects_clock_grants() -> Result<()> {
     let _serial = lock(&SERIAL)?;
     let fixture = Fixture::new()?;
+    let original = fs::read(&fixture.path).map_err(io_error)?;
     let mut session = configured_session(next_id()?, &fixture.path, EffectTailRecovery::Refuse,
         WorkBudget::default(), true, Slot::reserve()?)?;
     session.grants = context().grants;
@@ -131,6 +135,9 @@ fn recovery_session_cannot_dispatch_even_if_a_caller_injects_clock_grants() -> R
     let context = session.context()?;
     assert!(matches!(session.journal.begin_commit("prepared", Digest32::of_bytes(b"prepared"), 7, &context),
         Err(e) if e.code == ErrorCode::CapabilityDenied));
+    assert!(matches!(reconciliation::wait(&mut session, context, vec!["started".into()], None, None, None),
+        Err(e) if e.code == ErrorCode::CapabilityDenied));
     assert!(session.connection.is_none());
+    assert_eq!(fs::read(&fixture.path).map_err(io_error)?, original);
     Ok(())
 }
