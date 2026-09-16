@@ -11,6 +11,7 @@
 #[path="spatial_situation_presentation.rs"] mod situation_presentation;
 #[path="spatial_watch_batch.rs"] mod watch_batch;
 #[path="spatial_production.rs"] mod production;
+#[path="spatial_session_release.rs"] mod session_release;
 #[cfg(test)]
 #[path="spatial_situation_tests.rs"] mod situation_tests;
 
@@ -31,6 +32,7 @@ use fastmcp_rust::prelude::*;
 use serde::Deserialize;
 use serde_json::{Value,json};
 use query_response::QueryResponseProjection;
+use session_release::Slot;
 
 const FAMILY:u128=1u128<<56;
 static NEXT:Mutex<u128>=Mutex::new(1);
@@ -38,12 +40,9 @@ static SLOTS:AtomicUsize=AtomicUsize::new(0);
 static SESSIONS:LazyLock<Mutex<BTreeMap<SessionId,Arc<Mutex<Session>>>>>=LazyLock::new(||Mutex::new(BTreeMap::new()));
 fn error(code:ErrorCode,text:&str)->DfmcpError{DfmcpError::new(code,text)}
 fn lock<T>(m:&Mutex<T>)->Result<MutexGuard<'_,T>>{m.lock().map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 mutex poisoned"))}
-struct Slot;
-impl Slot{fn reserve()->Result<Self>{SLOTS.fetch_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<2).then_some(n+1))
-    .map_err(|_|error(ErrorCode::BudgetExceeded,"spatial/1.8 retains at most two sessions"))?;Ok(Self)}}
-impl Drop for Slot{fn drop(&mut self){SLOTS.fetch_sub(1,Ordering::AcqRel);}}
 trait Source:Send{fn read(&mut self,timeout:Duration)->Result<LiveSpatialCitizenObservation>;fn poisoned(&self)->bool;fn fence(&mut self);fn pages(&self)->u32;
-    fn archive_only(&self)->bool{false}}
+    fn archive_only(&self)->bool{false}
+    fn closed(&self)->bool{false}}
 impl Source for CitizenSpatialRpcClient<DeadlineStream>{
     fn read(&mut self,t:Duration)->Result<LiveSpatialCitizenObservation>{self.refresh(t)}
     fn poisoned(&self)->bool{CitizenSpatialRpcClient::poisoned(self)}fn fence(&mut self){CitizenSpatialRpcClient::fence(self)}
@@ -54,10 +53,13 @@ struct Session{id:SessionId,source:Box<dyn Source>,state:LiveSpatialCitizenState
     _watch_journal:Option<semantic_query::WatchJournalGuard>,_slot:Slot}
 impl Session{
     fn anchor(&self)->Result<StateAnchor>{self.state.snapshot().map(|s|s.anchor()).ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 snapshot absent"))}
-    fn context(&mut self)->Result<OperationContext>{self.request=self.request.checked_add(1).ok_or_else(||error(ErrorCode::BudgetExceeded,"spatial/1.8 request IDs exhausted"))?;
+    fn context(&mut self)->Result<OperationContext>{
+        if self.source.closed(){return Err(error(ErrorCode::SessionNotFound,"spatial session is closed"));}
+        self.request=self.request.checked_add(1).ok_or_else(||error(ErrorCode::BudgetExceeded,"spatial/1.8 request IDs exhausted"))?;
         Ok(OperationContext{session_id:self.id,request_id:RequestId::new(self.request),anchor:self.anchor()?,budget:self.budget,
             grants:self.grants.clone(),cancellation_requested:false})}
     fn refresh(&mut self,c:&OperationContext)->Result<JobPublication>{
+        if self.source.closed(){return Err(error(ErrorCode::SessionNotFound,"spatial session is closed"));}
         if self.source.archive_only(){return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot refresh even with an injected Observe grant"));}
         c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;if c.anchor!=self.anchor()?{return Err(error(ErrorCode::StaleAnchor,"spatial/1.8 refresh anchor changed"));}
         if self.source.poisoned(){return Err(error(ErrorCode::AdapterUnavailable,"spatial/1.8 source fenced; reopen session"));}
@@ -81,10 +83,12 @@ impl Session{
 }
 fn next_id()->Result<SessionId>{let mut n=lock(&NEXT)?;if *n>=FAMILY{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 session IDs exhausted"));}
     let id=SessionId::new((1u128<<127)|FAMILY|*n);*n+=1;Ok(id)}
-fn resolve(raw:Option<String>)->Result<Arc<Mutex<Session>>>{let text=raw.ok_or_else(||error(ErrorCode::InvalidRequest,"open a spatial/1.8 session first"))?;
+fn parse_session_id(raw:Option<String>)->Result<SessionId>{let text=raw.ok_or_else(||error(ErrorCode::InvalidRequest,"open a spatial/1.8 session first"))?;
     if text.len()!=32||!text.bytes().all(|b|b.is_ascii_hexdigit()){return Err(error(ErrorCode::InvalidRequest,"invalid spatial/1.8 session"));}
     let raw=u128::from_str_radix(&text,16).map_err(|_|error(ErrorCode::InvalidRequest,"invalid spatial/1.8 session"))?;let id=SessionId::new(raw);
     if id.get()!=raw||!id.is_process_scoped_live()||(raw&((1u128<<62)-1))>>56!=1{return Err(error(ErrorCode::InvalidRequest,"not a spatial/1.8 session"));}
+    Ok(id)}
+fn resolve(raw:Option<String>)->Result<Arc<Mutex<Session>>>{let id=parse_session_id(raw)?;
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(||error(ErrorCode::SessionNotFound,"spatial/1.8 session not found"))}
 fn allowed_environment(name:&str)->bool{!name.starts_with("DFMCP_")||matches!(name,
     "DFMCP_ALLOW_UNADMITTED_SPATIAL_V1_8"|"DFMCP_SPATIAL_CITIZEN_TOKEN"|"DFMCP_SPATIAL_CITIZEN_ENDPOINT"|
@@ -174,7 +178,7 @@ fn capabilities(input:Option<Vec<String>>)->Result<Vec<Capability>>{let input=in
     let mut out=Vec::new();for name in input{let c=match name.as_str(){"observe"=>Capability::Observe,"query"=>Capability::Query,"doctor"=>Capability::Doctor,
         _=>return Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 cannot grant that capability"))};if out.contains(&c){return Err(error(ErrorCode::InvalidRequest,"duplicate capability"));}out.push(c);}Ok(out)}
 
-#[tool(description="Open an unadmitted spatial/1.8 session with a bounded operational briefing and evidence-linked attention. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive.")]
+#[tool(description="Open an unadmitted spatial/1.8 session with a bounded operational briefing and evidence-linked attention. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive. Close with fortress.cancel scope=session to release connections, locks and capacity before reopening.")]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Option<u32>,max_capture_bytes:Option<u64>,page_bytes:Option<u32>,
     max_output_tokens:Option<u32>,max_wall_millis:Option<u64>,requested_capabilities:Option<Vec<String>>,recovery_only:Option<bool>)->String{
@@ -200,6 +204,7 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
             let mut s=archive::open(id,slot,path,limits,budget,&caps)?;let c=s.context()?;
             let out=packet(Some(&s),Some(&c),"fortress.open_session",json!({"ok":true,"recovery_only":true,
                 "granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
+                "session_close":{"tool":"fortress.cancel","arguments":{"session_id":id.to_string(),"scope":"session"}},
                 "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}},
                 "history_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"history"}}}))?;
             lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));return Ok(out);
@@ -214,6 +219,7 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
         let mut s=Session{id,source:Box::new(source),state,limits,journal:None,budget,grants,request:0,_watch_journal:None,_slot:slot};let mut c=s.context()?;
         if let Some((path,recovery))=journal_configuration{history::attach(&mut s,&path,recovery,&c)?;c.anchor=s.anchor()?;}
         let value=json!({"ok":true,"granted_capabilities":caps.iter().map(|c|c.as_str()).collect::<Vec<_>>(),
+            "session_close":{"tool":"fortress.cancel","arguments":{"session_id":id.to_string(),"scope":"session"}},
             "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}});
         let out=durable_watches::finish_open(&mut s,&c,watch_path.as_deref(),value)?;
         lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));Ok(out)})();match result{Ok(v)=>v,Err(e)=>failure(None,None,"fortress.open_session",&e)}}
@@ -284,10 +290,13 @@ pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_
 fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
 #[tool(description="Unavailable: coherent observations do not authorize effects.")]pub fn fortress_plan(session_id:Option<String>)->String{no_effect(session_id,"fortress.plan")}
 #[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id,"fortress.commit")}
-#[tool(description="Unavailable for game effects.")]pub fn fortress_cancel(session_id:Option<String>)->String{no_effect(session_id,"fortress.cancel")}
+#[tool(description="Close this read-only session with scope=session, releasing connections, locks and capacity without modifying observation or watch journals. Process-local watches or baselines require explicit discard_process_local_work=true. Teardown reads no game facts and remains available after read-grant expiry or source failure. Omitted scope retains the refusal of game-effect cancellation.")]
+pub fn fortress_cancel(session_id:Option<String>,scope:Option<String>,discard_process_local_work:Option<bool>)->String{
+    session_release::cancel(session_id,scope,discard_process_local_work)
+}
 #[tool(description="Unavailable: no game-save checkpoint is created.")]pub fn fortress_checkpoint(session_id:Option<String>)->String{no_effect(session_id,"fortress.checkpoint")}
 #[tool(description="Unavailable: no game or save state is restored.")]pub fn fortress_restore(session_id:Option<String>)->String{no_effect(session_id,"fortress.restore")}
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Query production_diagnosis (or production mode) for observed job/holder/attachment conditions and exact-anchor assignment/relationship inspections. Inventory_plan allocates declared conservative stack-unit supply, not reservations; spatial_inventory_plan adds its restricted route model. Both production queries support exact historical records. Use await_watches for at most one shared capture and atomic watch progress; poll_watches uses current state. Situation mode gives bounded attention. History is not current game state. Paired watch journals preserve intent but restart resets stability. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Close or recover from a fenced session using fortress.cancel with scope=session; it releases connections and journal locks without cancelling saved watches. Explicit consent is required to discard volatile watches/baselines. Reopen with a new session and normal authority. Query production_diagnosis or production mode for observed conditions; inventory_plan allocates declared stack units, not reservations. Historical queries remain exact-record reads. Use await_watches for one shared capture and atomic watch progress. Situation mode gives bounded attention. No game effects.").build();crate::run_modern_stdio(server);}
