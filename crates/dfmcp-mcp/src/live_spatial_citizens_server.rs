@@ -9,6 +9,7 @@
 #[path="spatial_archive_runtime.rs"] mod archive;
 #[path="spatial_situation.rs"] mod situation;
 #[path="spatial_situation_presentation.rs"] mod situation_presentation;
+#[path="spatial_watch_batch.rs"] mod watch_batch;
 #[cfg(test)]
 #[path="spatial_situation_tests.rs"] mod situation_tests;
 
@@ -222,7 +223,7 @@ fn observe(id:Option<String>,operation:&str)->String{with_session(id,operation,C
     if target.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok(){semantic_query::publish_with_active_work(&target,v,|v|packet_with_basis(Some(s),Some(&c),operation,v,before.as_ref()))}
     else{packet_with_basis(Some(s),Some(&c),operation,v,None)}})}
 #[tool(description="Acquire one coherent capture without changing game time. Query-authorized live sessions receive operational attention and bounded endpoint-count changes, not event history or causal diagnoses. Archive-only sessions refuse.")]pub fn fortress_observe(session_id:Option<String>)->String{observe(session_id,"fortress.observe")}
-#[tool(description="Acquire one coherent capture and summarize operational count changes. Use query await_watch for a sampled foreground condition. Archive-only sessions refuse.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
+#[tool(description="Acquire one coherent capture and summarize operational count changes. For monitoring use query await_watch or await_watches; await_watches evaluates up to eight watches after one shared capture. Archive-only sessions refuse.")]pub fn fortress_wait(session_id:Option<String>)->String{observe(session_id,"fortress.wait")}
 fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(QueryResponseProjection{session_id:s.id.to_string(),request_id:c.request_id.to_string(),
     anchor:anchor_json(s.anchor()?),briefing:briefing(s),attention:Vec::new(),affordances:Vec::new(),coverage:coverage(),
     uncertainty:vec![json!({"domain":"unit_navigation_and_labor","epistemic_state":"partial","reason":"sparse skill and job-availability evidence is observed; needs, native labor eligibility and full movement rules are not"})],
@@ -236,7 +237,7 @@ fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjectio
 }
 fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
-#[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, citizens, jobs, buildings, items, tiles, history, schema. Situation returns full signal counts and exact-anchor inspection links without a new capture. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention or acquisition.")]
+#[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, citizens, jobs, buildings, items, tiles, history, schema. Structured poll_watches evaluates selected watches on the current capture; await_watches obtains at most one shared capture, then atomically publishes the selected watch set. Workforce queries analyze capacity without assigning labor. Recovery-only results remain historical, without live attention or acquisition.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
     if mode.is_some()&&query.is_some(){return Err(error(ErrorCode::InvalidRequest,"do not combine mode and query"));}let schema=mode.as_deref()==Some("schema");
     if mode.as_deref()==Some("situation"){return situation_presentation::detail(s,&c);}
@@ -250,6 +251,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
         Some("tiles")=>json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["tile_feature"],"fields":["position","visibility","shape"],"limit":1}}),
         _=>return Err(error(ErrorCode::InvalidRequest,"unknown spatial/1.8 query mode")),}};
     if s.source.archive_only(){return archive::query(s,&c,&input,schema);}
+    if !schema&&watch_batch::handles(&input){return watch_batch::execute(s,&c,&input);}
     let kind=input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str).unwrap_or("");
     if !schema&&history::handles(&input){let result=history::execute(s,&c,&input);if matches!(&result,Err(e)if e.code==ErrorCode::CorruptLedger){s.source.fence();}return result;}
     let local=matches!(kind,"watches"|"cancel_watch"|"release_watch"|"baselines"|"release_baseline");
@@ -259,7 +261,7 @@ pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option
             refresh=Some(json!({"basis":anchor_json(basis),"reset":outcome==JobPublication::Reset,"kind":if outcome==JobPublication::Heartbeat{"heartbeat"}else{"snapshot"},"native_captures":1,"transfer_pages":s.source.pages()}));}
         if let Some(obj)=input.as_object_mut(){obj.remove("expected_anchor");}input["query"]["kind"]=json!("poll_watch");}
     let view=situation_view(s,&c)?;let mut narrowed=c.clone();narrowed.budget.max_bytes=situation_presentation::result_budget(&view,&input)? as u64;
-    if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":workforce_queries::extend_schema(history::schema()?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
+    if schema{return semantic_query::publish_with_active_work(&c,json!({"query_schema":watch_batch::extend_schema(workforce_queries::extend_schema(history::schema()?)?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),|v|finish(&view,v));}
     if workforce_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=workforce_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     if spatial_queries::handles(&input){let rc=semantic_query::result_context(&narrowed)?;let v=spatial_queries::execute(&s.state,&rc,&input)?;return semantic_query::publish_with_active_work(&narrowed,v,|v|finish(&view,v));}
     let snapshot=s.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 snapshot absent"))?;
@@ -277,11 +279,11 @@ pub fn fortress_explain(session_id:Option<String>)->String{with_session(session_
     packet(Some(s),Some(&c),"fortress.doctor",json!({"ok":true,"status":if s.source.poisoned(){"source_fenced"}else if s.source.archive_only(){"archive_only"}else{"read_only_unadmitted"}})))}
 fn no_effect(id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
 #[tool(description="Unavailable: coherent observations do not authorize effects.")]pub fn fortress_plan(session_id:Option<String>)->String{no_effect(session_id,"fortress.plan")}
-#[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id,"fortress.commit")}
+#[tool(description="Unavailable: no executable plan is created.")]pub fn fortress_commit(session_id:Option<String>)->String{no_effect(session_id:Option<String>,operation:&str)->String{with_session(id,operation,Capability::Query,|_,_|Err(error(ErrorCode::CapabilityDenied,"spatial/1.8 has no live mutation or reservation path")))}
 #[tool(description="Unavailable for game effects.")]pub fn fortress_cancel(session_id:Option<String>)->String{no_effect(session_id,"fortress.cancel")}
 #[tool(description="Unavailable: no game-save checkpoint is created.")]pub fn fortress_checkpoint(session_id:Option<String>)->String{no_effect(session_id,"fortress.checkpoint")}
 #[tool(description="Unavailable: no game or save state is restored.")]pub fn fortress_restore(session_id:Option<String>)->String{no_effect(session_id,"fortress.restore")}
 
 pub fn run_stdio(){if let Err(e)=validate_environment(){eprintln!("{e}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Live Agent Turns include operational attention: tactical queries use a compact highest-priority signal with a situation-mode detail request. Situation mode, open and observe provide all signal counts and bounded exact-anchor inspection links. Observe/wait summarize endpoint count changes, never causal or continuous history. Explain exposes the rule policy. Recovery-only sessions inspect original archives without credentials; archived facts never become current operational attention. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Use query await_watches to evaluate selected or all retained watches after at most one shared capture; poll_watches uses the current capture. Batch watch progress publishes atomically and uses the existing durable checkpoint. Live Agent Turns include operational attention; situation mode gives detail. Observe/wait summarize endpoint counts, not causal history. Recovery-only sessions inspect original archives without credentials. Workforce and route queries are model-only. Paired watch journals preserve monitoring intent; restart resets unfinished stability. No game effects.").build();crate::run_modern_stdio(server);}
