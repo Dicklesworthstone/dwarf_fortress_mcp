@@ -51,6 +51,7 @@ pub mod operations_journal;
 pub mod pause_reconciliation;
 pub mod spatial_inventory;
 pub mod transceiver;
+pub mod workforce_analysis;
 
 pub use announcement_wire::{
     ANNOUNCEMENT_AFTER_ID_FIELD, ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD,
@@ -71,7 +72,7 @@ pub use dfhack_probe::{
 };
 pub use dfhack_wire::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, BridgeManifest,
-    CitizenRecord, DFHACK_RPC_VERSION, DfHackRpcClient, MAX_CITIZENS_PER_PAGE,
+    CitizenRecord, DFHACK_RPC_VERSION, MAX_CITIZENS_PER_PAGE,
     MAX_CLIENT_NAME_BYTES, MAX_CLIENT_VERSION_BYTES, MAX_RACE_NAME_BYTES,
     MAX_RPC_PAYLOAD_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL,
     MAX_TEXT_NOTIFICATION_TOTAL_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES,
@@ -93,7 +94,8 @@ pub use fenced_live_source::FencedLiveSource;
 pub use fenced_live_source_v1_1::FencedLiveSourceV1_1;
 pub use ipc::{
     FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
-    IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
+    IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, MAX_IPC_FRAME_PAYLOAD_SIZE,
+    ReconnectionPolicy, compute_crc32,
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};
