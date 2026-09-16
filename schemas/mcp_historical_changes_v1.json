@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "from", "to", "select"],
+  "description": "Read-only comparison of complete selected projections at two verified spatial/1.8 records. Records must be in forward order in the same observation epoch. Each selection is bounded to 256 rows and 256 KiB. No baseline, monitoring work or game effect is created.",
+  "properties": {
+    "kind": {"const": "historical_changes"},
+    "from": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "to": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "select": {"$ref": "#/$defs/capture_selection"},
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+    "continuation": {
+      "type": ["string", "null"], "maxLength": 128,
+      "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$"
+    }
+  }
+}
