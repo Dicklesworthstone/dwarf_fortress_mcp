@@ -1,5 +1,7 @@
 //! Fixed spatial/1.8 history. Archived citizen/job/terrain facts remain distinct
 //! from current session authority, watches, baselines and any control runtime.
+#[path = "spatial_history_changes.rs"]
+pub(super) mod changes;
 use super::*;
 use std::path::{Path,PathBuf};
 use dfmcp_adapter::operations_journal::{JournalEntry,JournalLimits,SpatialCitizenJournal,
@@ -82,16 +84,17 @@ fn history_page(j:&Journal,c:&OperationContext,maximum:usize,limit:Option<u32>,c
         if candidate.to_string().len()>maximum{break;}result=candidate;end+=1;}
     if(start==end&&start<j.entries().len())||result.to_string().len()>maximum{return Err(error(ErrorCode::BudgetExceeded,"one complete historical metadata row does not fit"));}Ok(result)
 }
-pub(super) fn handles(input:&Value)->bool{matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),Some("history"|"historical_query"))}
+pub(super) fn handles(input:&Value)->bool{changes::handles(input)||matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),Some("history"|"historical_query"))}
 fn stateless(kind:&str)->bool{matches!(kind,"entities"|"inspect"|"traverse"|"dependencies"|"aggregate"|"search"|"map_route"|"spatial_inventory_plan")}
 
 pub(super) fn execute(session:&mut Session,c:&OperationContext,input:&Value)->Result<String>{
+    if changes::handles(input){return changes::execute(session,c,input);}
     c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;let request=parse(input,c)?;
     if let Request::HistoricalQuery{query,record,..}=&request{if !stateless(query.get("kind").and_then(Value::as_str).unwrap_or(""))||!(1..=4096).contains(record){
         return Err(error(ErrorCode::InvalidRequest,"historical_query permits retained records and stateless reads only"));}}
     let mut projection=view(session,c)?;let replay=replay_context(session,c);let source_fenced=session.source.poisoned();let limits=session.limits;
     let journal=session.journal.as_mut().ok_or_else(||error(ErrorCode::InvalidRequest,"spatial/1.8 history is not configured; journal paths are operator configuration"))?;
-    if journal.fenced(){return Err(error(ErrorCode::CorruptLedger,"spatial/1.8 journal fenced; reopen for verified recovery"));}
+    journal.validate_custody(c)?;
     match request{
         Request::History{limit,continuation}=>{let mut rc=c.clone();rc.budget.max_bytes=projection.result_byte_budget()? as u64;let rc=semantic_query::result_context(&rc)?;
             let mut value=history_page(journal,c,rc.budget.max_bytes as usize,limit,continuation)?;value["source_stale"]=json!(source_fenced);
@@ -127,6 +130,6 @@ pub(super) fn schema()->Result<Value>{
     let mut schema=spatial_queries::schema()?;let extra:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_history_v1.json"))
         .map_err(|_|error(ErrorCode::InternalInvariantViolation,"embedded spatial history schema invalid"))?;
     let additions=extra["oneOf"].as_array().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"history schema has no variants"))?;
-    schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query schema has no variants"))?
-        .extend(additions.iter().cloned());Ok(schema)
+    let variants=schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query schema has no variants"))?;
+    variants.extend(additions.iter().cloned());variants.push(changes::schema()?);Ok(schema)
 }
