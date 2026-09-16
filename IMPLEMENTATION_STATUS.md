@@ -43,6 +43,41 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Restart-safe historical endpoint comparisons
+
+`docs/HISTORICAL_CHANGES.md` describes the new `historical_changes` query in both journal-backed
+live and archive-only spatial/1.8 sessions. It compares complete bounded entity selections at two
+exact record numbers/digests without creating a process-local baseline. After restart, retained
+record references remain usable; continuations remain session-bound and must be restarted.
+
+The operation shares the existing baseline selection and comparison implementation. It separates
+selected-set entry, departure and semantic changes by entity ID/generation, discloses provenance-only
+refreshes, and preserves unknown/absent/omitted/redacted/source distinctions. ID reuse is a separate
+departure and arrival, not an update to the old identity. Cross-epoch, reversed, forked or missing
+endpoints fail instead of manufacturing a change history. Before/after rows are emitted only after
+both complete selections have been acquired and counted.
+
+Both record replays, both selections, comparison and rendering share one cooperative wall-time
+allowance. Full historical Agent Turn metadata, both record witnesses, pagination and current live
+watches are reserved before replay. Limits are 256 selected rows/256 KiB per endpoint, 64 acquisition
+page attempts/two million source-row visits per endpoint, and 1..128 whole changes per output page.
+Current Query authority, cancellation and journal custody are checked before replay and again before
+return. Selected record bytes are reverified. The operation neither advances current state nor
+samples watches, acquires a native capture, allocates a baseline, repairs history or dispatches effects.
+A live source failure still permits verified history comparison. Archive schema discovery now has
+thirteen executable variants; nested historical comparisons are not permitted.
+
+Sixteen new logical Rust scenarios are registered: nine shared-comparison tests and seven actual
+live/archive handler tests covering pagination, reopen, generation/presence semantics, epoch fences,
+authority, unchanged watches, output refusal and same-length record corruption. **None has been
+compiled or executed here**: Rust, Cargo and rustfmt are unavailable. The independent Python request
+contract checker passed 66 cases (12 accepted, 54 rejected) in explicit `--envelope-only` mode. It
+validates the new record/page envelope only, not delegated entity selectors, record existence/order,
+digest agreement, comparison, filesystem custody, Rust pagination, MCP or native/live behavior.
+Executed script/schema bytes match their committed Git blob identities. Executed script SHA-256:
+`67ef27c59d25a5f83203b505c5e80f81fb487af178288f161622029cbdec69a9`.
+No dependency, native protocol, production runner, mutation authority or admission is changed.
+
 ### Offline spatial/1.8 archive bootstrap and exact-record analysis
 
 `docs/SPATIAL_ARCHIVE_RECOVERY.md` documents `fortress.open_session(recovery_only=true)` on the
