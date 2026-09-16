@@ -27,6 +27,11 @@ fn checked_timeout(timeout:Duration)->Result<Duration>{
     if timeout<Duration::from_millis(1)||timeout>Duration::from_secs(60){return Err(failure(ErrorCode::BudgetExceeded,"control deadline must be 1..60000 milliseconds"));}
     Ok(timeout)
 }
+fn remaining_timeout(timeout:Duration,elapsed:Duration)->Result<Duration>{
+    checked_timeout(timeout)?;
+    timeout.checked_sub(elapsed).filter(|value|*value>=Duration::from_millis(1))
+        .ok_or_else(||failure(ErrorCode::BudgetExceeded,"control deadline exhausted before handshake"))
+}
 fn varint(out:&mut Vec<u8>,mut value:u64){while value>=128{out.push((value as u8&127)|128);value>>=7;}out.push(value as u8);}
 fn number(out:&mut Vec<u8>,field:u32,value:u64){varint(out,u64::from(field)<<3);varint(out,value);}
 fn bytes(out:&mut Vec<u8>,field:u32,value:&[u8]){varint(out,(u64::from(field)<<3)|2);varint(out,value.len() as u64);out.extend_from_slice(value);}
@@ -133,7 +138,12 @@ fn decode(data:&[u8],nonce:&[u8])->Result<(ControlManifest,PauseEffect)>{
     let paused=if message.has(12){message.boolean(12)?}else{false};
     let observed_tick=if message.has(13){message.number(13)?}else{0};
     let receipt_digest=if message.has(14){message.bytes(14,32)?.to_vec()}else{Vec::new()};
-    if applied&&!known{return Err(malformed());}
+    if message.has(9)&&prepare_token.len()!=16{return Err(malformed());}
+    if message.has(14)&&receipt_digest.len()!=32{return Err(malformed());}
+    // Missing fields are not observations of false/zero. A known record must
+    // explicitly carry its outcome and observation, including for pending work.
+    if known&&[11,12,13].into_iter().any(|field|!message.has(field)){return Err(malformed());}
+    if applied&&(!known||receipt_digest.is_empty()){return Err(malformed());}
     if code==5&&(!known||applied){return Err(malformed());}
     if !known&&(message.has(11)||message.has(12)||message.has(13)||message.has(14)){return Err(malformed());}
     Ok((manifest.clone(),PauseEffect{bridge_generation:manifest.generation,known,applied,paused,observed_tick,prepare_token,receipt_digest}))
@@ -171,10 +181,10 @@ impl<S:Read+Write> ControlRpcClient<S>{
             }
             self.manifest=manifest;Ok(effect)
         })();
-        if result.as_ref().err().is_some_and(|error|matches!(error.code,
-            ErrorCode::AdapterUnavailable|ErrorCode::AdapterFailure|ErrorCode::AdapterRejected|ErrorCode::VersionMismatch|ErrorCode::StaleAnchor|ErrorCode::CapabilityDenied)){
-            self.fenced=true;
-        }
+        // A bounded decoder may stop before consuming the frame. Fence EVERY
+        // failed wire call so unread bytes cannot become another request's reply.
+        // Local validation above remains non-I/O and does not poison the stream.
+        if result.is_err(){self.fenced=true;}
         result
     }
     pub fn prepare_pause(&mut self,key:&str,digest:Digest32,paused:bool,tick:u64)->Result<PauseEffect>{self.invoke(self.prepare,key,digest,None,Some(paused),Some(tick))}
@@ -207,9 +217,12 @@ impl Write for ControlDeadlineStream{
 impl ControlRpcClient<ControlDeadlineStream>{
     pub fn connect(endpoint:SocketAddr,token:Vec<u8>,nonce:Vec<u8>,timeout:Duration)->Result<Self>{
         checked_timeout(timeout)?;
+        if !(32..=256).contains(&token.len())||!(16..=64).contains(&nonce.len()){return Err(failure(ErrorCode::InvalidRequest,"invalid control credentials"));}
         if !endpoint.ip().is_loopback()||endpoint.port()==0{return Err(failure(ErrorCode::CapabilityDenied,"control endpoint must be numeric loopback with a nonzero port"));}
+        let started=Instant::now();
         let stream=TcpStream::connect_timeout(&endpoint,timeout).map_err(io_failure)?;stream.set_nodelay(true).map_err(io_failure)?;
-        Self::negotiate(ControlDeadlineStream::new(stream,timeout)?,token,nonce)
+        let remaining=remaining_timeout(timeout,started.elapsed())?;
+        Self::negotiate(ControlDeadlineStream::new(stream,remaining)?,token,nonce)
     }
     pub fn reset_deadline(&mut self,timeout:Duration)->Result<()> {self.stream.reset(timeout)}
 }
@@ -230,8 +243,8 @@ mod tests{
         out
     }
     #[test]
-    fn strict_decoder_accepts_known_not_applied_terminal_response()->Result<()> {
-        let (_,effect)=decode(&reply(5,Some(true),Some(false)),&[b'n';16])?;assert!(effect.known);assert!(!effect.applied);assert_eq!(effect.observed_tick,42);Ok(())
+    fn strict_decoder_accepts_ambiguous_known_record_without_terminal_receipt()->Result<()> {
+        let (_,effect)=decode(&reply(5,Some(true),Some(false)),&[b'n';16])?;assert!(effect.known);assert!(!effect.applied);assert_eq!(effect.observed_tick,42);assert!(effect.receipt_digest.is_empty());Ok(())
     }
     #[test]
     fn strict_decoder_rejects_noncanonical_boolean_and_applied_without_known(){
@@ -257,3 +270,7 @@ mod tests{
         assert!(checked_timeout(Duration::ZERO).is_err());assert!(checked_timeout(Duration::from_secs(61)).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "live_control_outcome_wire_tests.rs"]
+mod outcome_wire_tests;
