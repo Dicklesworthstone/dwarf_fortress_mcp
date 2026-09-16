@@ -10,6 +10,8 @@ use dfmcp_adapter::operations_journal::{JournalLimits, PrivateJournalFile, Spati
 use dfmcp_core::GameTick;
 #[path = "../../dfmcp-adapter/tests/support/production_spatial.rs"]
 mod fixture;
+#[path = "spatial_session_release_recovery_tests.rs"]
+mod recovery;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -235,13 +237,17 @@ fn concurrent_closers_wait_for_session_ownership_and_return_one_receipt() -> Res
         let result = fortress_cancel(raw_a, Some("session".into()), None);
         let _ = done_tx.send(()); result
     });
-    started_rx.recv_timeout(Duration::from_secs(5)).map_err(|_| error(ErrorCode::InternalInvariantViolation, "close thread did not start"))?;
+    let started = started_rx.recv_timeout(Duration::from_secs(5)).is_ok();
     let blocked = done_rx.recv_timeout(Duration::from_millis(20)).is_err();
     let b = std::thread::spawn(move || fortress_cancel(raw_b, Some("session".into()), None));
     drop(guard);
-    let left = a.join().map_err(|_| error(ErrorCode::InternalInvariantViolation, "close thread panicked"))?;
-    let right = b.join().map_err(|_| error(ErrorCode::InternalInvariantViolation, "close thread panicked"))?;
-    assert!(blocked); assert_eq!(left, right); successful(decode(&left)?);
+    // Join both workers before any assertion or error propagation. A failed
+    // timing check or first-worker panic must not detach the second closer.
+    let left = a.join();
+    let right = b.join();
+    let left = left.map_err(|_| error(ErrorCode::InternalInvariantViolation, "close thread panicked"))?;
+    let right = right.map_err(|_| error(ErrorCode::InternalInvariantViolation, "close thread panicked"))?;
+    assert!(started); assert!(blocked); assert_eq!(left, right); successful(decode(&left)?);
     assert_eq!(s.drops.load(Ordering::SeqCst), 1);
     Ok(())
 }
