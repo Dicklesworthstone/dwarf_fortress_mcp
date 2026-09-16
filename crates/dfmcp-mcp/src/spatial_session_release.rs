@@ -3,10 +3,11 @@
 //! calls. Teardown reveals no game facts and never revives expired read grants.
 //! A close waits for the session's current foreground call; it does not abort I/O.
 use super::*;
+use std::collections::VecDeque;
 
 const MAX_CLOSE_RECEIPTS: usize = 32;
-static CLOSED: LazyLock<Mutex<BTreeMap<SessionId, String>>> =
-    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static CLOSED: LazyLock<Mutex<VecDeque<(SessionId, String)>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
 
 pub(super) struct Slot { held: bool }
 impl Slot {
@@ -37,8 +38,9 @@ impl Source for ClosedSource {
 }
 
 fn receipt(id: SessionId) -> Result<String> {
-    lock(&CLOSED)?.get(&id).cloned().ok_or_else(|| error(ErrorCode::SessionNotFound,
-        "spatial session is not open and no recent close receipt is retained"))
+    lock(&CLOSED)?.iter().find(|(session, _)| *session == id).map(|(_, out)| out.clone())
+        .ok_or_else(|| error(ErrorCode::SessionNotFound,
+            "spatial session is not open and no recent close receipt is retained"))
 }
 
 fn render(session: &Session, poisoned: bool, released: Value) -> Result<String> {
@@ -102,8 +104,10 @@ pub(super) fn close(raw: Option<String>, discard_process_local: bool) -> Result<
     session.grants.clear();
     session._slot.release();
     sessions.remove(&id);
-    receipts.insert(id, out.clone());
-    while receipts.len() > MAX_CLOSE_RECEIPTS { receipts.pop_first(); }
+    // A long-lived session may close after many newer sessions. Retain its new
+    // receipt by close order so it is not immediately evicted by an older ID.
+    receipts.push_back((id, out.clone()));
+    while receipts.len() > MAX_CLOSE_RECEIPTS { receipts.pop_front(); }
     Ok(out)
 }
 
