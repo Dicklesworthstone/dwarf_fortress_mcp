@@ -139,7 +139,7 @@ fn schema()->Result<Value> {
     Ok(schema)
 }
 
-pub(crate) fn query(session:&mut Session,context:&OperationContext,input:&Value,schema_mode:bool)->Result<String> {
+pub(in super::super) fn query(session:&mut Session,context:&OperationContext,input:&Value,schema_mode:bool)->Result<String> {
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
     validate(session,context)?;
     if schema_mode {return packet(session,context,"fortress.query",None,
@@ -176,3 +176,7 @@ pub(crate) fn query(session:&mut Session,context:&OperationContext,input:&Value,
         }
     }
 }
+
+#[cfg(all(test,unix))]
+#[path="spatial_archive_runtime_tests.rs"]
+mod tests;
