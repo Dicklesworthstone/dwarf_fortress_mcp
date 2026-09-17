@@ -9,6 +9,8 @@ use std::time::Duration;
 pub mod selection;
 
 pub const PORTFOLIO_POLICY: &str = "joint-complete-tasks-common-origin/1";
+pub const RESERVE_POLICY: &str = "joint-complete-tasks-distinct-protected-reserves/1";
+pub const MAX_RESERVE_POOLS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionTask {
@@ -26,8 +28,12 @@ pub struct ProductionTask {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionPortfolio {
     pub tasks: Vec<ProductionTask>,
+    /// Required, distinct stock pools. Support assignments do not consume them
+    /// and do not establish actual reservations or global inventory thresholds.
+    pub reserves: Vec<MaterialDemand>,
     pub workforce: WorkforceAnalysis,
     pub inventory: SpatialInventory,
+    /// Task index or selection::RESERVE_OWNER, aligned to inventory.demands.
     pub material_owners: Vec<usize>,
     pub selection: selection::Selection,
     pub work_units: u64,
@@ -42,12 +48,33 @@ fn remaining_context(context: &OperationContext, work: &mut Work) -> Result<Oper
     narrowed.budget.max_wall_millis -= elapsed as u64;
     Ok(narrowed)
 }
+fn validate_material(material: &MaterialDemand) -> Result<()> {
+    if material.key.is_empty() || material.key.len() > 48
+        || !material.key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        || material.units == 0 || material.item_types.is_empty() || material.item_types.len() > 8
+        || material.item_types.iter().any(|s| s.is_empty() || s.len() > 128 || s.contains('\0'))
+        || material.subtype.is_some_and(|n| n < -1) || material.material_type.is_some_and(|n| n < -1)
+        || material.material_index.is_some_and(|n| n < -1)
+        || (material.material_index.is_some() && material.material_type.is_none()) {
+        return Err(invalid("invalid task input or reserve material demand"));
+    }
+    Ok(())
+}
+fn normalize_materials(input: &[MaterialDemand]) -> Result<Vec<MaterialDemand>> {
+    // Raw cardinalities are validated before deduplication.
+    for demand in input { validate_material(demand)?; }
+    let mut demands = input.to_vec();
+    demands.sort_by(|a,b| a.key.cmp(&b.key));
+    if demands.windows(2).any(|p| p[0].key == p[1].key) {
+        return Err(invalid("duplicate material key within a task or reserve set"));
+    }
+    for demand in &mut demands { demand.item_types.sort(); demand.item_types.dedup(); }
+    Ok(demands)
+}
 fn normalize_tasks(input: &[ProductionTask]) -> Result<Vec<ProductionTask>> {
     if input.is_empty() || input.len() > selection::MAX_TASKS {
         return Err(exhausted("joint production planning accepts one to eight tasks"));
     }
-    // Validate raw cardinalities and string bounds before cloning or deduping.
-    // A large repeated selector list must not evade the public model contract.
     let mut total_workers = 0u32;
     for task in input {
         if task.key.is_empty() || task.key.len() > 32
@@ -61,49 +88,43 @@ fn normalize_tasks(input: &[ProductionTask]) -> Result<Vec<ProductionTask>> {
         }
         total_workers = total_workers.checked_add(task.workers)
             .ok_or_else(|| exhausted("production worker count overflow"))?;
-        for material in &task.materials {
-            if material.key.is_empty() || material.key.len() > 48
-                || !material.key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                || material.units == 0 || material.item_types.is_empty() || material.item_types.len() > 8
-                || material.item_types.iter().any(|s| s.is_empty() || s.len() > 128 || s.contains('\0'))
-                || material.subtype.is_some_and(|n| n < -1) || material.material_type.is_some_and(|n| n < -1)
-                || material.material_index.is_some_and(|n| n < -1)
-                || (material.material_index.is_some() && material.material_type.is_none()) {
-                return Err(invalid("invalid task-local material demand"));
-            }
-        }
+        for material in &task.materials { validate_material(material)?; }
     }
     if total_workers > MAX_WORKER_SLOTS { return Err(exhausted("production request exceeds 128 worker slots")); }
     let mut tasks = input.to_vec();
     tasks.sort_by(|a, b| a.key.cmp(&b.key));
     if tasks.windows(2).any(|p| p[0].key == p[1].key) { return Err(invalid("duplicate production task key")); }
-    for task in &mut tasks {
-        for material in &mut task.materials {
-            material.item_types.sort();
-            material.item_types.dedup();
-        }
-        task.materials.sort_by(|a, b| a.key.cmp(&b.key));
-        if task.materials.windows(2).any(|p| p[0].key == p[1].key) {
-            return Err(invalid("duplicate material key within a production task"));
-        }
-    }
+    for task in &mut tasks { task.materials = normalize_materials(&task.materials)?; }
     Ok(tasks)
 }
 
-/// No plan handles, leases or effects are created. Both domains must fill every
-/// demand of the SAME chosen set. Candidates discarded by a full-demand partial
-/// allocation remain available to the subset solver through the complete model.
+/// Preserve the original no-reserve API and allocation semantics.
 pub fn plan(state: &LiveSpatialCitizenState, context: &OperationContext, origin: [u32; 3],
     requested: &[ProductionTask], maximum_work: u64) -> Result<ProductionPortfolio> {
+    plan_with_reserves(state,context,origin,requested,&[],maximum_work)
+}
+
+/// All selected task inputs AND every reserve pool must be supported by distinct
+/// units of the same eligible supply. Reserves have no priority and are never
+/// dropped to improve the task score. Infeasible reserves produce a shortage in
+/// selection.materials, zero selected tasks and no feasible optimum claim.
+/// This models retained usable stock at the common origin, not storage commands,
+/// exact container capacities, carrying assignments or future production outputs.
+pub fn plan_with_reserves(state: &LiveSpatialCitizenState, context: &OperationContext, origin: [u32; 3],
+    requested: &[ProductionTask], requested_reserves: &[MaterialDemand], maximum_work: u64) -> Result<ProductionPortfolio> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let mut work = Work::new(context, maximum_work)?;
+    if requested_reserves.len() > MAX_RESERVE_POOLS { return Err(exhausted("production permits at most eight reserve pools")); }
     let tasks = normalize_tasks(requested)?;
+    let reserves = normalize_materials(requested_reserves)?;
+    let total_materials = tasks.iter().map(|t|t.materials.len()).sum::<usize>() + reserves.len();
+    if total_materials > flow::MAX_DEMANDS { return Err(exhausted("task inputs plus reserve pools exceed 32 material demands")); }
     let worker_demands: Vec<_> = tasks.iter().map(|t| WorkforceDemand {
         key: t.key.clone(), workers: t.workers, target: origin, skill_key: t.skill_key.clone(),
         min_effective_skill: t.min_effective_skill, preserve_social: t.preserve_social, adults_only: t.adults_only,
     }).collect();
     let workforce = analyze_inner(state, context, &worker_demands, &mut work)?;
-    let mut materials = Vec::new();
+    let mut materials = Vec::with_capacity(total_materials);
     let mut owners = BTreeMap::new();
     for (owner, task) in tasks.iter().enumerate() {
         for material in &task.materials {
@@ -113,6 +134,13 @@ pub fn plan(state: &LiveSpatialCitizenState, context: &OperationContext, origin:
             owners.insert(demand.key.clone(), owner);
             materials.push(demand);
         }
+    }
+    for reserve in &reserves {
+        work.charge(1)?;
+        let mut demand = reserve.clone();
+        demand.key = format!("reserve.{}",reserve.key);
+        owners.insert(demand.key.clone(),selection::RESERVE_OWNER);
+        materials.push(demand);
     }
     let inventory_context = remaining_context(context, &mut work)?;
     let inventory = inventory::plan(state, &inventory_context, origin, &materials, work.remaining())?;
@@ -144,5 +172,5 @@ pub fn plan(state: &LiveSpatialCitizenState, context: &OperationContext, origin:
         })?;
     work.charge(selected.work_units)?;
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    Ok(ProductionPortfolio { tasks, workforce, inventory, material_owners, selection: selected, work_units: work.used })
+    Ok(ProductionPortfolio { tasks, reserves, workforce, inventory, material_owners, selection: selected, work_units: work.used })
 }
