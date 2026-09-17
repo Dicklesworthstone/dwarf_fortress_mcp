@@ -46,20 +46,39 @@ fn normalize_tasks(input: &[ProductionTask]) -> Result<Vec<ProductionTask>> {
     if input.is_empty() || input.len() > selection::MAX_TASKS {
         return Err(exhausted("joint production planning accepts one to eight tasks"));
     }
-    let mut tasks = input.to_vec();
-    tasks.sort_by(|a, b| a.key.cmp(&b.key));
-    for (i, task) in tasks.iter_mut().enumerate() {
+    // Validate raw cardinalities and string bounds before cloning or deduping.
+    // A large repeated selector list must not evade the public model contract.
+    let mut total_workers = 0u32;
+    for task in input {
         if task.key.is_empty() || task.key.len() > 32
             || !task.key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
             || !(1..=1_000_000).contains(&task.priority)
+            || !(1..=MAX_WORKER_SLOTS).contains(&task.workers)
+            || task.skill_key.is_empty() || task.skill_key.len() > 96
+            || task.skill_key.chars().any(char::is_control) || task.min_effective_skill < 0
             || task.materials.is_empty() || task.materials.len() > 4 {
-            return Err(invalid("invalid production task key, priority or material-input count"));
+            return Err(invalid("invalid production task key, priority, workers, skill or material-input count"));
         }
-        for material in &mut task.materials {
+        total_workers = total_workers.checked_add(task.workers)
+            .ok_or_else(|| exhausted("production worker count overflow"))?;
+        for material in &task.materials {
             if material.key.is_empty() || material.key.len() > 48
-                || !material.key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) {
-                return Err(invalid("invalid task-local material key"));
+                || !material.key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                || material.units == 0 || material.item_types.is_empty() || material.item_types.len() > 8
+                || material.item_types.iter().any(|s| s.is_empty() || s.len() > 128 || s.contains('\0'))
+                || material.subtype.is_some_and(|n| n < -1) || material.material_type.is_some_and(|n| n < -1)
+                || material.material_index.is_some_and(|n| n < -1)
+                || (material.material_index.is_some() && material.material_type.is_none()) {
+                return Err(invalid("invalid task-local material demand"));
             }
+        }
+    }
+    if total_workers > MAX_WORKER_SLOTS { return Err(exhausted("production request exceeds 128 worker slots")); }
+    let mut tasks = input.to_vec();
+    tasks.sort_by(|a, b| a.key.cmp(&b.key));
+    if tasks.windows(2).any(|p| p[0].key == p[1].key) { return Err(invalid("duplicate production task key")); }
+    for task in &mut tasks {
+        for material in &mut task.materials {
             material.item_types.sort();
             material.item_types.dedup();
         }
@@ -67,9 +86,7 @@ fn normalize_tasks(input: &[ProductionTask]) -> Result<Vec<ProductionTask>> {
         if task.materials.windows(2).any(|p| p[0].key == p[1].key) {
             return Err(invalid("duplicate material key within a production task"));
         }
-        let _ = i;
     }
-    if tasks.windows(2).any(|p| p[0].key == p[1].key) { return Err(invalid("duplicate production task key")); }
     Ok(tasks)
 }
 
@@ -97,7 +114,8 @@ pub fn plan(state: &LiveSpatialCitizenState, context: &OperationContext, origin:
             materials.push(demand);
         }
     }
-    let inventory = inventory::plan(state, &remaining_context(context, &mut work)?, origin, &materials, work.remaining())?;
+    let inventory_context = remaining_context(context, &mut work)?;
+    let inventory = inventory::plan(state, &inventory_context, origin, &materials, work.remaining())?;
     work.charge(inventory.work_units)?;
     if inventory.anchor != workforce.anchor || inventory.source_digest != workforce.source_digest {
         return Err(invariant("production domains do not name the same coherent capture"));
