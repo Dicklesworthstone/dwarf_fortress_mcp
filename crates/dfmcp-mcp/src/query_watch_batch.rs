@@ -4,6 +4,9 @@
 use super::*;
 use std::time::Instant;
 
+#[path = "query_watch_registration.rs"]
+pub(crate) mod registration;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BatchEnvelope { schema: String, expected_anchor: Option<Value>, query: BatchRequest }
