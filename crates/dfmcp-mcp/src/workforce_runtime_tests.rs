@@ -157,3 +157,6 @@ fn workforce_query_preserves_authority_fencing_and_invalid_input_refusal() -> Re
 
 #[path = "workforce_quality_runtime_tests.rs"]
 mod quality;
+
+#[path = "spatial_blueprint_monitor_runtime_tests.rs"]
+mod blueprint_monitor;

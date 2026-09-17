@@ -13,6 +13,9 @@ use serde_json::{Value, json};
 
 use super::{base, budget, identity, invalid, paginate};
 
+#[path = "spatial_blueprint_monitor.rs"]
+mod monitor;
+
 const MAX_WORK: u64 = 262_144;
 
 #[derive(Deserialize)]
@@ -23,6 +26,7 @@ pub(super) struct Request {
     limit: Option<u32>,
     continuation: Option<String>,
     max_work: Option<u64>,
+    monitor: Option<monitor::Options>,
 }
 
 #[derive(Deserialize)]
@@ -196,11 +200,15 @@ pub(super) fn execute<T: SpatialStateView>(state: &T, c: &OperationContext, sour
     let maximum = request.max_work.unwrap_or(MAX_WORK);
     let map = state.spatial_observation().ok_or_else(|| invalid("spatial source absent"))?.terrain();
     let (summary, rows) = analyze(map, &layout, maximum)?;
-    let id = identity(c, source, json!({"kind":"blueprint_layout","policy":LAYOUT_POLICY,
-        "origin":request.origin,"max_work":maximum,"summary":summary,"parts":rows}));
+    let monitoring = request.monitor.map(|options| monitor::proposal(&layout, map.map_dimensions, c, options)).transpose()?;
+    let mut basis = json!({"kind":"blueprint_layout","policy":LAYOUT_POLICY,
+        "origin":request.origin,"max_work":maximum,"summary":summary,"parts":rows});
+    if let Some(value) = &monitoring { basis["monitoring"] = value.clone(); }
+    let id = identity(c, source, basis);
     let mut out = base(c, source, "blueprint_layout");
     out["layout_policy"] = json!(LAYOUT_POLICY);
     out["summary"] = summary;
+    if let Some(value) = monitoring { out["monitoring"] = value; }
     out["status"] = json!("geometry_preview_only");
     out["plan_created"] = json!(false);
     out["excavation_eligibility_proven"] = json!(false);

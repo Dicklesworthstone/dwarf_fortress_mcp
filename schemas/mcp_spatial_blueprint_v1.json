@@ -55,6 +55,17 @@
         }
       ]
     },
+    "monitor": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "required": ["key", "deadline_tick"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000]+$"},
+        "deadline_tick": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "poll_interval_ticks": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000000},
+        "stable_observations": {"type": ["integer", "null"], "minimum": 1, "maximum": 64}
+      },
+      "description": "Optional exact-footprint shape-watch request, not registration. Key is additionally bounded to 64 UTF-8 bytes. Deadline must be future and within the session horizon; every generated part must be within the map."
+    },
     "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
     "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 262144},
     "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^sp1:[1-9][0-9]*:[0-9a-f]{64}$"}
