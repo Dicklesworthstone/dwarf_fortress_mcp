@@ -92,7 +92,7 @@ fn page_offset(raw: Option<&str>, prefix: &str, identity: Digest32, count: usize
         || !parts[1].bytes().all(|b| b.is_ascii_digit()) { return Err(invalid("invalid workforce continuation")); }
     let offset = parts[1].parse::<usize>().map_err(|_| invalid("workforce continuation offset overflow"))?;
     if raw != token(prefix, offset, identity) { return Err(DfmcpError::new(ErrorCode::StaleAnchor, "workforce continuation names another session, capture or model")); }
-    if offset >= count { return Err(DfmcpError::CursorGap.into()); }
+    if offset >= count { return Err(DfmcpError::new(ErrorCode::CursorGap, "workforce continuation is past the result set")); }
     Ok(offset)
 }
 struct Page<'a> { limit: u32, continuation: Option<&'a str>, prefix: &'a str, identity: Digest32 }
