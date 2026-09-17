@@ -12,6 +12,7 @@
 #[path="spatial_watch_batch.rs"] mod watch_batch;
 #[path="spatial_production.rs"] mod production;
 #[path="spatial_session_release.rs"] mod session_release;
+#[path="spatial_observation.rs"] mod observation;
 #[cfg(test)]
 #[path="spatial_situation_tests.rs"] mod situation_tests;
 
@@ -58,28 +59,7 @@ impl Session{
         self.request=self.request.checked_add(1).ok_or_else(||error(ErrorCode::BudgetExceeded,"spatial/1.8 request IDs exhausted"))?;
         Ok(OperationContext{session_id:self.id,request_id:RequestId::new(self.request),anchor:self.anchor()?,budget:self.budget,
             grants:self.grants.clone(),cancellation_requested:false})}
-    fn refresh(&mut self,c:&OperationContext)->Result<JobPublication>{
-        if self.source.closed(){return Err(error(ErrorCode::SessionNotFound,"spatial session is closed"));}
-        if self.source.archive_only(){return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot refresh even with an injected Observe grant"));}
-        c.authorize(Capability::Observe,RiskTier::ReadOnly,&[],None)?;if c.anchor!=self.anchor()?{return Err(error(ErrorCode::StaleAnchor,"spatial/1.8 refresh anchor changed"));}
-        if self.source.poisoned(){return Err(error(ErrorCode::AdapterUnavailable,"spatial/1.8 source fenced; reopen session"));}
-        if let Some(journal)=&self.journal{
-            c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
-            if journal.fenced()||journal.state().snapshot().map(|s|s.anchor())!=Some(c.anchor){self.source.fence();
-                return Err(error(ErrorCode::CorruptLedger,"spatial/1.8 journal is fenced or disagrees with published anchor"));}
-        }
-        let replay=history::replay_context(self,c);
-        let result=self.source.read(Duration::from_millis(c.budget.max_wall_millis)).and_then(|value|{
-            let op=value.spatial().operations();let limits=self.limits.spatial.operations;
-            if op.jobs.jobs.len()>limits.jobs as usize||op.buildings.len()>limits.buildings as usize||op.items.len()>limits.items as usize
-                ||value.citizens().len()>self.limits.citizens as usize||value.spatial().terrain().map.region!=self.limits.spatial.region
-                ||value.encode_payload()?.len()>limits.payload_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 observation exceeds negotiated bounds"));}
-            match self.journal.as_mut(){
-                Some(journal)=>{let outcome=journal.append(value,&replay)?;self.state=journal.state().clone();Ok(outcome)}
-                None=>self.state.publish(value),
-            }
-        });if result.is_err(){self.source.fence();}result
-    }
+    fn refresh(&mut self,c:&OperationContext)->Result<JobPublication>{observation::refresh(self,c)}
 }
 fn next_id()->Result<SessionId>{let mut n=lock(&NEXT)?;if *n>=FAMILY{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 session IDs exhausted"));}
     let id=SessionId::new((1u128<<127)|FAMILY|*n);*n+=1;Ok(id)}
@@ -242,7 +222,7 @@ fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(Quer
 fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{
     situation_presentation::tactical(s,c)
 }
-fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
+fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 query response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
 #[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, production, citizens, jobs, buildings, items, tiles, history, schema. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
