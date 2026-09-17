@@ -136,7 +136,7 @@ fn failure(s:Option<&Session>,c:Option<&OperationContext>,operation:&str,e:&Dfmc
     let result=match(s,c){(Some(s),Some(c))if c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None).is_ok()=>
         semantic_query::publish_with_active_work(c,value.clone(),|v|packet(Some(s),Some(c),operation,v)),_=>packet(None,None,operation,value.clone())};
     // A fenced watch journal must not turn its own diagnosis into BudgetExceeded
-    // merely because the usual active-work projection is now unavailable.
+    // merely because the usual active-work error projection is now unavailable.
     result.unwrap_or_else(|_|AgentTurnBuilder::new(operation,AgentPhase::Inspect)
         .briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"bridge_protocol":"1.8","active_work_unavailable":true}))
         .attach(value))
@@ -191,8 +191,7 @@ pub fn fortress_open_session(region:Value,max_citizens:Option<u32>,max_items:Opt
         }
         let endpoint=dfmcp_adapter::parse_loopback_endpoint(&std::env::var("DFMCP_SPATIAL_CITIZEN_ENDPOINT").unwrap_or_else(|_|"127.0.0.1:5000".to_owned()))?;
         let token=std::env::var("DFMCP_SPATIAL_CITIZEN_TOKEN").map_err(|_|error(ErrorCode::CapabilityDenied,"DFMCP_SPATIAL_CITIZEN_TOKEN required"))?;
-        let timeout=Duration::from_millis(budget.max_wall_millis);let mut source=CitizenSpatialRpcClient::connect(endpoint,token.into_bytes(),id.get().to_be_bytes().to_vec(),timeout,limits)?;
-        let mut state=LiveSpatialCitizenState::default();state.publish(source.refresh(timeout)?)?;
+        let (source,state)=observation::connect_and_capture(endpoint,token.into_bytes(),id.get().to_be_bytes().to_vec(),limits,budget)?;
         let fortress=state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial/1.8 bootstrap snapshot absent"))?.fortress_id;
         let grants=caps.iter().map(|c|CapabilityGrant{capability:*c,scope:CapabilityScope{fortress_id:Some(fortress),..CapabilityScope::default()},
             max_risk:RiskTier::ReadOnly,expires_at_tick:None,remaining_uses:None}).collect();
@@ -222,7 +221,7 @@ fn view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{Ok(Quer
 fn situation_view(s:&Session,c:&OperationContext)->Result<QueryResponseProjection>{
     situation_presentation::tactical(s,c)
 }
-fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 query response invalid"))?;
+fn finish(view:&QueryResponseProjection,v:Value)->Result<String>{let mut v:Value=serde_json::from_str(&view.finish(v)?).map_err(|_|error(ErrorCode::InternalInvariantViolation,"spatial/1.8 response invalid"))?;
     v["agent_turn"]["turn_id"]=json!(format!("spatial-citizen-turn-{}",view.request_id));let out=v.to_string();if out.len()>view.maximum_bytes{return Err(error(ErrorCode::BudgetExceeded,"spatial/1.8 query exceeds budget"));}Ok(out)}
 #[tool(description="Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, production, citizens, jobs, buildings, items, tiles, history, schema. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical.")]
 pub fn fortress_query(session_id:Option<String>,mode:Option<String>,query:Option<Value>)->String{with_session(session_id,"fortress.query",Capability::Query,|s,mut c|{
