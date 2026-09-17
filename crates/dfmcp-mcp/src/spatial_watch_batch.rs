@@ -6,8 +6,40 @@ use std::time::Instant;
 
 pub(super) fn handles(input: &Value) -> bool {
     matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),
-        Some("poll_watches"|"await_watches"))
+        Some("poll_watches"|"await_watches"|"register_watches"))
 }
+
+fn registration_schema(mut schema: Value) -> Result<Value> {
+    let invalid=||error(ErrorCode::InternalInvariantViolation,"registration requires one canonical watch request schema");
+    let variants=schema["$defs"]["query"]["oneOf"].as_array().ok_or_else(invalid)?;
+    let mut found=None;
+    for variant in variants {
+        let resolved=match variant.get("$ref").and_then(Value::as_str) {
+            Some(reference)=>schema.pointer(reference.strip_prefix('#').ok_or_else(invalid)?).ok_or_else(invalid)?,
+            None=>variant,
+        };
+        if resolved["properties"]["kind"]["const"]=="watch" {
+            if found.is_some() {return Err(invalid());}
+            found=Some(resolved.clone());
+        }
+    }
+    // Derive each member from the exact single-watch schema after population and
+    // quantity conditions have been composed. No copied condition dialect.
+    let mut member=found.ok_or_else(invalid)?;
+    member["properties"].as_object_mut().ok_or_else(invalid)?.remove("kind");
+    member["required"].as_array_mut().ok_or_else(invalid)?.retain(|name|name!="kind");
+    let definitions=schema["$defs"].as_object_mut().ok_or_else(invalid)?;
+    if definitions.contains_key("watch_set_member") {return Err(invalid());}
+    definitions.insert("watch_set_member".into(),member);
+    schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(invalid)?.push(json!({
+        "type":"object","additionalProperties":false,"required":["kind","watches"],
+        "description":"Atomically register 1..8 unique watch keys at the current capture. Exact existing definitions replay without sampling; changed keys refuse the entire set. Aggregate input/work/output budgets apply.",
+        "properties":{"kind":{"const":"register_watches"},"watches":{
+            "type":"array","minItems":1,"maxItems":8,"items":{"$ref":"#/$defs/watch_set_member"}}}
+    }));
+    Ok(schema)
+}
+
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     // Shared quantity queries and population predicates are composed by history::schema,
     // also used for archive discovery. Only live batch operations are added here.
@@ -17,7 +49,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     schema["$defs"]["query"]["oneOf"].as_array_mut()
         .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query variants absent"))?
         .extend(variants.iter().cloned());
-    Ok(schema)
+    registration_schema(schema)
 }
 fn remaining(context: &OperationContext, started: Instant) -> Result<OperationContext> {
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
@@ -40,7 +72,7 @@ fn check_journal(session: &mut Session, context: &OperationContext) -> Result<()
 pub(super) fn execute(session: &mut Session, context: &OperationContext, input: &Value) -> Result<String> {
     let started=Instant::now();remaining(context,started)?;
     if session.source.archive_only() {
-        return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot evaluate or await watch batches"));
+        return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot register, evaluate or await watch batches"));
     }
     if session.source.poisoned() {
         return Err(error(ErrorCode::AdapterUnavailable,"watch batch source is fenced; reopen before evaluating watches"));
@@ -51,6 +83,14 @@ pub(super) fn execute(session: &mut Session, context: &OperationContext, input: 
     check_journal(session,context)?;
     let preview=situation_presentation::tactical(session,context)?;
     let snapshot=session.state.snapshot().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"batch snapshot absent"))?;
+    if input["query"]["kind"]=="register_watches" {
+        return semantic_query::register_watch_set(snapshot,&remaining(context,started)?,input,|mut value| {
+            value["source_stale"]=json!(false);
+            let encoded=finish(&preview,value)?;
+            remaining(context,started)?;
+            Ok(encoded)
+        });
+    }
     let prepared=semantic_query::prepare_watch_batch(snapshot,&remaining(context,started)?,input,|mut value| {
         value["native_captures"]=json!(0);value["source_stale"]=json!(false);
         // This preflight checks the complete current selection and custody, not
