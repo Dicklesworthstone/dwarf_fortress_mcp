@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence-linked condition inspection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "condition"],
+  "properties": {
+    "kind": {"const": "condition_evaluation"},
+    "condition": {"$ref": "#/$defs/watch_condition"},
+    "failure_condition": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/watch_condition"}]}
+  },
+  "description": "Evaluate the same success and failure predicates as watches without creating a watch or sampling retained work. Both expressions share 64 nodes, depth 8 and one bounded scan/deadline allowance. Generation mismatch overrides boolean shortcuts; failure overrides success; unknown evidence blocks an eligible success sample. A single true capture establishes neither temporal stability nor goal completion. Historical evaluation never modifies current watches."
+}
