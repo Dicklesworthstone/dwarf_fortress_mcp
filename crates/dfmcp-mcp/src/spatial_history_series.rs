@@ -96,13 +96,11 @@ fn start_record(raw: Option<&str>, identity: Digest32, first: u64, last: u64) ->
     Ok(record)
 }
 fn render_series(session: &Session, context: &OperationContext, target: &JournalEntry,
-    projection: Option<&QueryResponseProjection>, value: Value) -> Result<String> {
+    projection: Option<&QueryResponseProjection>, mut value: Value) -> Result<String> {
     let cursor = value.get("continuation").cloned().unwrap_or(Value::Null);
+    value["anchor"] = anchor_json(target.anchor);
     let raw = match projection {
-        Some(projection) => {
-            let mut projection = projection.clone(); projection.anchor = anchor_json(target.anchor);
-            finish(&projection,value)?
-        }
+        Some(projection) => finish(projection,value)?,
         None => archive::packet(session,context,"fortress.query",Some(target),value)?,
     };
     let mut packet: Value = serde_json::from_str(&raw)
@@ -135,6 +133,9 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
     }
     let journal = session.journal.as_mut().ok_or_else(||invalid("historical series requires the configured spatial observation journal"))?;
     journal.validate_custody(context)?;
+    if journal.state().snapshot().map(|s|s.anchor())!=Some(context.anchor) {
+        return Err(error(ErrorCode::CorruptLedger,"timeline archive differs from the current session root"));
+    }
     let first = selected(journal,&from)?; let last = selected(journal,&to)?;
     let id = journal.id(); let head = journal.head();
     let identity = Digest32::of_bytes(json!({"domain":"dfmcp-quantity-timeline/1","session":session.id.to_string(),
@@ -147,6 +148,7 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
         .map(|e|(e.number,e.record_digest)).collect();
     let mut projection = if session.source.archive_only() {None} else {Some(view(session,context)?)};
     if let Some(p) = projection.as_mut() {
+        p.anchor = anchor_json(last.anchor);
         p.briefing = json!({"runtime":"unadmitted_development","bridge_protocol":"1.8","historical":true,
             "read_only":true,"runtime_admitted":false,"mutation_admissible":false,"live":false,
             "current_session_anchor":anchor_json(context.anchor),"live_source_fenced":session.source.poisoned(),
@@ -213,6 +215,7 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
         target = current.0.clone(); out = next; returned += 1;
     }
     if returned==0 { return Err(bounded("one whole timeline sample and its evidence cannot fit")); }
+    if let Some(p) = projection.as_mut() { p.anchor = anchor_json(target.anchor); }
     remaining(context,started)?;
     if projection.is_some() {
         semantic_query::publish_with_active_work(context,out,|value| {
