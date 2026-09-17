@@ -14,6 +14,9 @@ use dfmcp_world::map_region::{Cell, MapRegion, MAX_ROUTE_WORK};
 use crate::live_map::map_error;
 use crate::live_spatial::{SpatialStateView, citizens::{LiveSpatialCitizenState, citizen_entity_id}};
 
+#[path = "production_portfolio.rs"]
+pub mod portfolio;
+
 pub const MAX_WORKFORCE_DEMANDS: usize = 16;
 pub const MAX_WORKER_SLOTS: u32 = 128;
 pub const WORKFORCE_POLICY: &str = "coherent-observed-skill-readiness-dry-occupied-endpoint/1";
@@ -189,6 +192,7 @@ fn analyze_inner(state: &LiveSpatialCitizenState, context: &OperationContext,
             let Some((approach, steps, endpoint_step)) = approach(map, field, [citizen.position.x, citizen.position.y, citizen.position.z]) else {
                 *counts.entry("no_candidate_approach_in_observed_model").or_insert(0) += 1; continue;
             };
+            work.charge(1)?;
             let id = citizen_entity_id(citizen.native_id);
             let entity = snapshot.graph.entities.get(&id).ok_or_else(|| invariant("workforce citizen entity is absent"))?;
             rows.push(WorkforceCandidate { citizen_index, entity_id: id.get(), generation: entity.generation,
