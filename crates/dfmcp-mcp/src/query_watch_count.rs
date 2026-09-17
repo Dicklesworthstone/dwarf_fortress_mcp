@@ -6,6 +6,8 @@ use dfmcp_world::{EntityKind, EntityRecord};
 
 #[path = "query_watch_quantity.rs"]
 pub(super) mod quantity;
+#[path = "query_watch_terrain.rs"]
+pub(super) mod terrain;
 
 pub(super) const MAX_EVALUATION_WORK: u64 = 1_000_000;
 
@@ -202,7 +204,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     schema["$defs"]["watch_condition"]["oneOf"].as_array_mut()
         .ok_or_else(|| invalid("watch condition schema variants absent"))?
         .push(extension["condition"].clone());
-    quantity::extend_schema(schema)
+    terrain::extend_schema(quantity::extend_schema(schema)?)
 }
 
 #[cfg(test)]

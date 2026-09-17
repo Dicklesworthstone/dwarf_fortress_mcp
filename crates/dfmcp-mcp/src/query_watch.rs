@@ -62,6 +62,8 @@ enum Condition {
         comparison: Comparison, value: u64 },
     ItemQuantity { scope: counts::Scope, quantity_unit: counts::quantity::QuantityUnit,
         predicate: counts::Predicate, comparison: Comparison, value: u64 },
+    TerrainCount { areas: Vec<counts::terrain::Area>, predicate: counts::Predicate,
+        comparison: Comparison, value: u64 },
     Paused { value: bool },
     TickAtLeast { value: u64 },
     All { args: Vec<Condition> },
@@ -249,7 +251,9 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                     return Err(invalid("watch text literal exceeds its byte bound or contains NUL"));
                 }
             }
-            Condition::EntityCount { predicate, .. } | Condition::ItemQuantity { predicate, .. } => {
+            Condition::EntityCount { predicate, .. } | Condition::ItemQuantity { predicate, .. }
+                | Condition::TerrainCount { predicate, .. } => {
+                if let Condition::TerrainCount { areas, .. } = condition { counts::terrain::validate(areas)?; }
                 nodes = nodes.saturating_add(counts::validate(predicate, depth + 1)?);
                 if nodes.saturating_add(pending.len()) > MAX_CONDITIONS {
                     return Err(bounded("population predicates exceed the shared success/failure node budget"));
@@ -308,6 +312,9 @@ impl Probe {
             }
             Condition::ItemQuantity { predicate, comparison, value, .. } => {
                 counts::quantity::evaluate(self, snapshot, predicate, *comparison, *value, budget)
+            }
+            Condition::TerrainCount { areas, predicate, comparison, value } => {
+                counts::terrain::evaluate(self, snapshot, areas, predicate, *comparison, *value, budget)
             }
             Condition::All { args } | Condition::Any { args } => {
                 let all = matches!(condition, Condition::All { .. });

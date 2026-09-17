@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["op", "areas", "predicate", "comparison", "value"],
+  "properties": {
+    "op": {"const": "terrain_count"},
+    "areas": {
+      "type": "array", "minItems": 1, "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["min", "max"],
+        "properties": {
+          "min": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+          "max": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}}
+        }
+      },
+      "description": "Inclusive ordered cuboids, pairwise disjoint, at most 16384 total coordinates. Overlap and aggregate volume are checked at runtime."
+    },
+    "predicate": {"$ref": "#/$defs/watch_count_predicate"},
+    "comparison": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]},
+    "value": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+  },
+  "description": "Count range over every requested coordinate, not just observed tile entities. Hidden, unallocated, missing and uncaptured cells remain unknown. Only coherent registered native terrain fields qualify. A satisfied predicate proves neither native job completion, mutation causation nor safety."
+}
