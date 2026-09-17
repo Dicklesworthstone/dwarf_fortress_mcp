@@ -185,16 +185,16 @@ fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error()->Re
 }
 
 #[test]
-fn archive_schema_advertises_sixteen_read_variants_including_quantities()->Result<()> {
+fn archive_schema_advertises_seventeen_read_variants_including_portfolios()->Result<()> {
     let _serial=lock(&SERIAL)?;let files=Files::new()?;files.populate(2)?;let (s,_)=register(&files,65536)?;
     let result=decode(&fortress_query(s.handle(),Some("schema".into()),None))?;
     assert_eq!(result["ok"],true,"{result}");
     let variants=result["query_schema"]["$defs"]["query"]["oneOf"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"schema variants"))?;
-    assert_eq!(variants.len(),16);
-    for kind in ["historical_changes","production_diagnosis","inventory_plan","item_quantity"] {
+    assert_eq!(variants.len(),17);
+    for kind in ["historical_changes","production_diagnosis","inventory_plan","item_quantity","production_portfolio"] {
         assert!(variants.iter().any(|v|v["properties"]["kind"]["const"]==kind));
     }
-    assert_eq!(result["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(13));
+    assert_eq!(result["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(14));
     for variant in variants {assert_ne!(variant["properties"]["kind"]["const"],"watch");}
     Ok(())
 }
@@ -203,8 +203,8 @@ fn archive_schema_advertises_sixteen_read_variants_including_quantities()->Resul
 fn archive_configuration_and_bootstrap_fail_without_creating_replacement_history()->Result<()> {
     let _serial=lock(&SERIAL)?;let files=Files::new()?;
     assert!(validate_configuration(None,TailRecovery::Refuse,None).is_err());
-    assert!(validate_configuration(Some(&files.path),TailRecovery::Refuse,Some(&files.path)).is_err());
     assert!(validate_configuration(Some(&files.path),TailRecovery::TruncateIncomplete,None).is_err());
+    assert!(validate_configuration(Some(&files.path),TailRecovery::Refuse,Some(&files.path)).is_err());
     for caps in [vec!["observe".into(),"query".into()],vec!["doctor".into()],vec!["control_clock".into()]] {
         assert!(requested_capabilities(Some(caps)).is_err());
     }
