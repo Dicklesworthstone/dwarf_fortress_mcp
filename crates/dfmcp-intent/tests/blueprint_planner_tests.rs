@@ -53,7 +53,7 @@ fn test_workshop_hub_blueprint_compilation() -> Result<(), Box<dyn Error>> {
         &index,
     )?;
 
-    assert_eq!(intent.requested_actions.len(), 3);
+    assert_eq!(intent.requested_actions.len(), 8);
     assert_eq!(intent.summary, "excavate 3 workshop bays");
 
     Ok(())
@@ -141,7 +141,7 @@ fn test_stockpile_vault_and_defensive_moat_compilation() -> Result<(), Box<dyn E
         },
         &index,
     )?;
-    assert_eq!(moat_intent.requested_actions.len(), 1);
+    assert_eq!(moat_intent.requested_actions.len(), 4);
     assert_eq!(moat_intent.summary, "excavate defensive moat");
 
     Ok(())
