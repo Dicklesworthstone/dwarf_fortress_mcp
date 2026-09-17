@@ -2,6 +2,9 @@
 //! Ancestors and the owning account/root are trusted; this is not a hostile-host
 //! sandbox. Pre/post-open identity checks reject ordinary replacement and links.
 
+#[path = "observation_projection.rs"]
+mod projection;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
