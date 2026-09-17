@@ -92,8 +92,13 @@ fn terminal_outcomes_require_durable_intent_and_never_dispatch_twice()->Result<(
         let(mut journal,mut source,plan)=fixture(reply)?;
         let first=commit_once(&mut journal,&mut source,"key",plan,&[1;16],&context())?;
         assert_eq!(first.record.state,state);assert!(first.dispatch_attempted);assert!(!first.replayed_terminal);
-        let mut c=context();c.budget.max_actions=0;source.fenced=true;
-        let replay=commit_once(&mut journal,&mut source,"key",plan,&[1;16],&c)?;
+        source.fenced=true;
+        // Historical evidence does not bypass the core budget or current grant.
+        let mut invalid=context();invalid.budget.max_actions=0;
+        assert!(matches!(commit_once(&mut journal,&mut source,"key",plan,&[1;16],&invalid),Err(e)if e.code==ErrorCode::InvalidRequest));
+        let mut denied=context();denied.grants.clear();
+        assert!(matches!(commit_once(&mut journal,&mut source,"key",plan,&[1;16],&denied),Err(e)if e.code==ErrorCode::CapabilityDenied));
+        let replay=commit_once(&mut journal,&mut source,"key",plan,&[1;16],&context())?;
         assert!(replay.replayed_terminal);assert!(!replay.dispatch_attempted);
         assert_eq!(replay.record,first.record);assert_eq!((source.preflights,source.commits),(1,1));
         assert_eq!(reopen(&source.storage,false)?.lookup("key"),Some(&first.record));
@@ -181,7 +186,9 @@ fn budgets_authority_and_identity_refusals_precede_source_calls_and_writes()->Re
         match case {0=>c.budget.max_actions=0,1=>c.grants.clear(),2=>c.cancellation_requested=true,
             3=>digest=Digest32::ZERO,4=>token=[2;16],_=>{journal.cancel_prepared("key",plan,&c)?;}}
         let head=if case==5 {journal.head()}else{head};
-        assert!(commit_once(&mut journal,&mut source,"key",digest,&token,&c).is_err());
+        let expected=match case {0=>ErrorCode::InvalidRequest,1=>ErrorCode::CapabilityDenied,
+            2=>ErrorCode::CancellationRequested,_=>ErrorCode::Conflict};
+        assert!(matches!(commit_once(&mut journal,&mut source,"key",digest,&token,&c),Err(e)if e.code==expected));
         assert_eq!((source.preflights,source.commits),(0,0));assert_eq!(journal.head(),head);
     }
     let(journal,mut source,plan)=fixture(Reply::Applied)?;let mut read_only=reopen(&source.storage,true)?;
