@@ -9,8 +9,8 @@ use dfmcp_adapter::operations_journal::{JournalEntry,JournalLimits,SpatialCitize
 use dfmcp_core::Digest32;
 
 pub(super) type Journal=SpatialCitizenJournal<PrivateJournalFile>;
-const STATELESS: [&str;11] = ["entities","inspect","traverse","dependencies","aggregate","search",
-    "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan","item_quantity"];
+const STATELESS: [&str;12] = ["entities","inspect","traverse","dependencies","aggregate","search",
+    "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan","item_quantity","production_portfolio"];
 
 pub(super) fn configuration()->Result<Option<(PathBuf,TailRecovery)>>{
     let path=match std::env::var("DFMCP_SPATIAL_CITIZEN_JOURNAL"){
