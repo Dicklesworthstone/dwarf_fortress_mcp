@@ -92,3 +92,6 @@ pub(super) fn pin_historical(value: &mut Value, record: u64, digest: Digest32) -
 #[cfg(all(test,unix))]
 #[path="spatial_production_tests.rs"]
 mod tests;
+#[cfg(all(test,unix))]
+#[path="spatial_portfolio_tests.rs"]
+mod portfolio_tests;
