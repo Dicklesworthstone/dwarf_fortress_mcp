@@ -95,3 +95,6 @@ mod tests;
 #[cfg(all(test,unix))]
 #[path="spatial_portfolio_tests.rs"]
 mod portfolio_tests;
+#[cfg(all(test,unix))]
+#[path="spatial_portfolio_sites_harness.rs"]
+mod site_tests;
