@@ -31,6 +31,8 @@ mod reconciliation;
 mod cancellation;
 #[path = "control_session_release.rs"]
 mod session_release;
+#[path = "control_commit.rs"]
+mod execution;
 
 const FAMILY:u128=1u128<<57;
 static NEXT:Mutex<u128>=Mutex::new(1);
@@ -286,39 +288,11 @@ pub fn fortress_plan(session_id:Option<String>,idempotency_key:String,plan_diges
         Ok(json!({"ok":true,"prepared":true,"effect":record_json(&record),"durable_effect_journal":journal_json(&session.journal)}))
     })}
 
-#[tool(description="Commit a durably prepared pause/resume effect. Sync commit_started before exactly one bridge dispatch and reconciled evidence before acknowledging success. Cancelled keys are refused permanently. Any ambiguous result requires reconciliation; same-effect retry and recovery-only commits are refused.")]
+#[tool(description="Commit one durably prepared pause effect. Validate identity, action budget and complete response capacity before commit_started sync; dispatch at most once using the remaining deadline. Verify and sync outcome evidence before success. Cancelled keys never execute; ambiguous attempts only reconcile. No automatic reconnect or mutation retry.")]
 pub fn fortress_commit(session_id:Option<String>,idempotency_key:String,plan_digest:String,prepare_token_hex:String)->String{
     with_session(session_id,"fortress.commit",|session,context|{
-        context.authorize(Capability::ControlClock,RiskTier::Reversible,&[],None)?;
-        session.writable()?;
         let plan=digest(&plan_digest)?;let token=prepare_token(&prepare_token_hex)?;
-        let current=session.journal.lookup(&idempotency_key).cloned().ok_or_else(||err(ErrorCode::InvalidRequest,"effect must be durably prepared before commit"))?;
-        if current.plan_digest!=plan||current.prepare_token!=token{return Err(err(ErrorCode::Conflict,"commit does not match the durable prepared effect"));}
-        if current.state==DurablePauseState::CancelledBeforeDispatch{
-            return Err(err(ErrorCode::Conflict,"pause effect was durably cancelled before dispatch; its key cannot be committed or reused"));
-        }
-        if current.state.terminal(){return Ok(json!({"ok":current.effect_applied,"replayed_terminal":true,"effect":record_json(&current),"durable_effect_journal":journal_json(&session.journal)}));}
-        if current.state.reconciliation_required(){return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,"durable journal contains an unresolved commit attempt; reconcile before any retry"));}
-        let generation={let connection=session.live()?;
-            if connection.client.poisoned(){return Err(err(ErrorCode::AdapterUnavailable,"control source is fenced before dispatch; reconcile/reopen rather than retrying this commit"));}
-            connection.client.reset_deadline(connection.timeout)?;
-            connection.client.bridge_generation()};
-        if !current.safe_to_dispatch(generation){return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,"prepared effect belongs to another bridge generation; replan with a new idempotency key"));}
-        // Durability boundary: if this fsync fails, no bridge mutation is attempted.
-        session.journal.begin_commit(&idempotency_key,plan,generation,&context)?;
-        let response=match session.live(){Ok(connection)=>connection.client.commit_pause(&idempotency_key,plan,&token),Err(error)=>Err(error)};
-        match response{
-            Ok(effect)=>match record_effect(&mut session.journal,&idempotency_key,plan,&effect,&context){
-                Ok(record)=>Ok(json!({"ok":record.effect_applied,"state":state_name(record.state),"effect":record_json(&record),
-                    "durable_effect_journal":journal_json(&session.journal)})),
-                Err(_)=>Err(DfmcpError::new(ErrorCode::EffectIndeterminate,
-                    "pause result returned but terminal journal evidence could not be durably acknowledged; reconcile after reopening")),
-            },
-            Err(_)=>{
-                let _=session.journal.mark_indeterminate(&idempotency_key,plan,&context);
-                Err(DfmcpError::new(ErrorCode::EffectIndeterminate,"pause commit outcome is ambiguous; durable state requires reconciliation before any retry"))
-            }
-        }
+        execution::execute(session,&context,&idempotency_key,plan,&token)
     })}
 
 #[tool(description="Explain one durable effect. Live sessions may query the bridge and durably reconcile, never dispatching a mutation. Cancelled keys and recovery-only sessions return stored evidence without connecting or changing state; unresolved effects remain unresolved.")]
