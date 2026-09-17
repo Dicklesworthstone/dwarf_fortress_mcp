@@ -207,3 +207,5 @@ fn full_eight_watch_batch_fits_the_default_8192_token_budget()->Result<()> {
 
 #[path="spatial_watch_count_tests.rs"]
 mod count_tests;
+#[path="spatial_watch_registration_tests.rs"]
+mod registration_tests;
