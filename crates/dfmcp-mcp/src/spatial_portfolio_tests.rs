@@ -212,3 +212,6 @@ fn current_production_queries_refuse_changed_observation_journal_custody()->Resu
     assert_eq!(ask(&s,request())?["error"]["code"],"corrupt_ledger");
     assert_eq!(fs::read(&f.watches).map_err(io_error)?,watches);assert_eq!(s.calls.load(Ordering::SeqCst),0);Ok(())
 }
+
+#[path="spatial_portfolio_reserve_tests.rs"]
+mod reserve_tests;
