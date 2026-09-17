@@ -1,6 +1,8 @@
-//! Read-only resource timelines. Each page projects one verified journal prefix;
-//! no watch, baseline, bridge capture or current-world publication is performed.
+//! Read-only quantity and condition timelines. Each page projects one verified
+//! prefix; no watch, baseline, bridge capture or current world is published.
 use super::*;
+#[path = "spatial_condition_series.rs"]
+mod conditions;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,11 +20,13 @@ pub(in super::super::super) fn handles(input: &Value) -> bool {
 pub(in super::super::super) fn schema() -> Result<Value> {
     let mut schema: Value = serde_json::from_str(include_str!("../../../schemas/mcp_historical_series_v1.json"))
         .map_err(|_| error(ErrorCode::InternalInvariantViolation,"historical series schema invalid"))?;
-    // Reuse the authoritative quantity-query contract, including its conservative
-    // population predicate language. No parallel selector schema is maintained.
+    // Both measurement contracts reference the same watch predicate definitions
+    // as current inspection. No parallel historical condition language exists.
     let quantity: Value = serde_json::from_str(include_str!("../../../schemas/mcp_item_quantity_v1.json"))
         .map_err(|_| error(ErrorCode::InternalInvariantViolation,"quantity schema invalid"))?;
-    schema["properties"]["measurement"] = quantity["query"].clone();
+    let condition: Value = serde_json::from_str(include_str!("../../../schemas/mcp_condition_evaluation_v1.json"))
+        .map_err(|_| error(ErrorCode::InternalInvariantViolation,"condition schema invalid"))?;
+    schema["properties"]["measurement"] = json!({"oneOf":[quantity["query"],condition]});
     Ok(schema)
 }
 
@@ -58,6 +62,9 @@ fn transition(previous: &(JournalEntry, Value), current: &(JournalEntry, Value))
         result["status"] = json!("epoch_or_clock_discontinuity");
         result["net_change"] = Value::Null; result["net_rate"] = Value::Null;
         return Ok(result);
+    }
+    if current.1.get("kind").and_then(Value::as_str)==Some("condition_evaluation") {
+        return conditions::transition(&previous.1,&current.1,result,after.anchor.tick.0-before.anchor.tick.0);
     }
     let (lower, upper) = QuantityBounds::read(&current.1)?.difference(QuantityBounds::read(&previous.1)?);
     // Decimal strings preserve every signed difference of two u64 quantities.
@@ -128,9 +135,11 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
     if from.record>to.record || !(1..=32).contains(&limit) || limit>context.budget.max_entities {
         return Err(invalid("timeline requires increasing endpoints and a page limit of 1..32"));
     }
-    if measurement.get("kind").and_then(Value::as_str)!=Some("item_quantity") {
-        return Err(invalid("historical series admits only stateless item_quantity measurements"));
-    }
+    let condition_measurement = match measurement.get("kind").and_then(Value::as_str) {
+        Some("item_quantity") => false,
+        Some("condition_evaluation") => true,
+        _ => return Err(invalid("historical series permits stateless item_quantity or condition_evaluation only")),
+    };
     let journal = session.journal.as_mut().ok_or_else(||invalid("historical series requires the configured spatial observation journal"))?;
     journal.validate_custody(context)?;
     if journal.state().snapshot().map(|s|s.anchor())!=Some(context.anchor) {
@@ -153,10 +162,10 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
             "read_only":true,"runtime_admitted":false,"mutation_admissible":false,"live":false,
             "current_session_anchor":anchor_json(context.anchor),"live_source_fenced":session.source.poisoned(),
             "active_work_basis":"current_session_not_archived"});
-        p.coverage = json!({"status":"partial","complete_domains":["returned_archived_quantity_samples"],
+        p.coverage = json!({"status":"partial","complete_domains":[if condition_measurement {"returned_archived_condition_samples"} else {"returned_archived_quantity_samples"}],
             "omitted_domains":["current_game_state","events_between_captures","usable_supply"],
             "temporal_coverage":"retained_observation_samples_only","current_freshness_proven":false,"continuation":null});
-        p.references = vec![json!({"kind":"archived_quantity_series","journal_id":id.to_string(),
+        p.references = vec![json!({"kind":if condition_measurement {"archived_condition_series"} else {"archived_quantity_series"},"journal_id":id.to_string(),
             "from_digest":first.record_digest.to_string(),"to_digest":last.record_digest.to_string()})];
     }
     let mut out = json!({"ok":true,"schema":"dfmcp.query.result/1","kind":"historical_series",
@@ -167,7 +176,9 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
             "to":archive::entry_json(&last),"retained_records":last.number-first.number+1},
         "current_session_anchor":anchor_json(context.anchor),"rows":[],"returned":0,"truncated":false,"continuation":null,
         "replay":{"prefix_verified_through_record":end,"projected_records":requested.len(),"preceding_sample_for_change":start>first.number},
-        "interpretation":"Dynamic selected stack quantities at retained captures. Net changes are not consumption, production, continuous stability or depletion forecasts."});
+        "interpretation":if condition_measurement {
+            "Conditions and failure guards evaluated at retained captures, without creating or sampling watches. Classification changes do not prove continuous satisfaction, cadence, deadline compliance or stable goal completion."
+        } else {"Dynamic selected stack quantities at retained captures. Net changes are not consumption, production, continuous stability or depletion forecasts."}});
     // Reserve all fixed evidence, the mode-specific Agent Turn and duplicated
     // continuation before replay. Keep a margin for varying anchor digit widths.
     let mut sample = out.clone(); sample["continuation"] = json!("x".repeat(128));
@@ -191,7 +202,7 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
         // every scan still has the existing one-million-unit work ceiling.
         current.budget.max_bytes = current.budget.max_bytes.min(16*1024);
         let value = semantic_query::execute(snapshot,&current,&query)?;
-        QuantityBounds::read(&value)?;
+        if condition_measurement {conditions::validate(&value)?;} else {QuantityBounds::read(&value)?;}
         remaining(context,started)?;
         Ok(value)
     })?;
@@ -205,8 +216,10 @@ pub(in super::super::super) fn execute(session: &mut Session, context: &Operatio
                 .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"timeline page lost preceding sample"))?;
             transition(previous,current)?
         };
-        let row = json!({"record":archive::entry_json(&current.0),"quantity":current.1["quantity"],
-            "evidence_digest":current.1["evidence_digest"],"change_from_previous":change});
+        let row = if condition_measurement { conditions::row(&current.0,&current.1,change)? } else {
+            json!({"record":archive::entry_json(&current.0),"quantity":current.1["quantity"],
+                "evidence_digest":current.1["evidence_digest"],"change_from_previous":change})
+        };
         let mut next = out.clone();
         next["rows"].as_array_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"timeline rows absent"))?.push(row);
         next["returned"] = json!(returned+1); next["truncated"] = json!(current.0.number<last.number);
