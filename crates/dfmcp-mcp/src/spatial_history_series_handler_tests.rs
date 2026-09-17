@@ -167,7 +167,11 @@ fn offline_series_matches_live_history_and_rejects_old_session_continuations()->
     let schema=ok(decode(&fortress_query(s.handle(),Some("schema".into()),None))?);
     let series=schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().and_then(|v|v.iter()
         .find(|v|v["properties"]["kind"]["const"]=="historical_series")).ok_or_else(||invalid("series schema"))?;
-    assert_eq!(series["properties"]["measurement"]["properties"]["kind"]["const"],"item_quantity");
+    let measurements=series["properties"]["measurement"]["oneOf"].as_array().ok_or_else(||invalid("measurement variants"))?;
+    assert_eq!(measurements.len(),2);
+    for kind in ["item_quantity","condition_evaluation"] {
+        assert!(measurements.iter().any(|m|m["properties"]["kind"]["const"]==kind));
+    }
     assert_eq!(fs::read(&files.observations).map_err(io_error)?,bytes);
     assert_eq!(fs::read(&files.watches).map_err(io_error)?,watch_bytes);Ok(())
 }
@@ -223,3 +227,6 @@ fn schema_and_runtime_keep_series_out_of_recursive_historical_measurements()->Re
         "record_digest":query["from"]["record_digest"],"query":query}))?["ok"],false);
     Ok(())
 }
+
+#[path = "spatial_condition_history_tests.rs"]
+mod condition_tests;
