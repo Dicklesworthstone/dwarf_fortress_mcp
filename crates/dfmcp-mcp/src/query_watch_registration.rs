@@ -166,3 +166,7 @@ where F: FnOnce(Value) -> Result<String> {
     *store = candidate;
     Ok(encoded)
 }
+
+#[cfg(test)]
+#[path = "query_watch_registration_tests.rs"]
+mod tests;
