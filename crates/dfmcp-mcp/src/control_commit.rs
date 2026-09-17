@@ -95,3 +95,40 @@ pub(super) fn execute(session:&mut ControlSession,context:&OperationContext,key:
 #[cfg(all(test,unix))]
 #[path = "control_commit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+    #[test]
+    fn reservation_bounds_complete_packets_not_just_effect_rows()->Result<()> {
+        for key in ["k".to_owned(),"\"".repeat(512),"\u{1f332}".repeat(128)] {
+            let base=DurablePauseRecord {idempotency_key:key,plan_digest:Digest32::ZERO,desired_paused:false,
+                expected_game_tick:u64::MAX-1,bridge_generation:u64::MAX-1,prepare_token:[1;16],
+                state:DurablePauseState::Prepared,effect_known:false,effect_applied:false,
+                observed_paused:None,observed_game_tick:None,receipt_digest:None,revision:1,transition_number:1,
+                previous_digest:Digest32::ZERO,record_digest:Digest32::ZERO};
+            let metadata=json!({"journal_id":Digest32::ZERO.to_string(),"head":Digest32::ZERO.to_string(),
+                "effects":u64::MAX,"transitions":u64::MAX,"retained_bytes":u64::MAX,"repaired_tail_bytes":u64::MAX,
+                "fenced":false,"restart_recovery":true,"read_only":false});
+            let(mut low,mut high)=(0,16384);reserve(&base,metadata.clone(),high)?;
+            while low+1<high {
+                let middle=(low+high)/2;
+                if reserve(&base,metadata.clone(),middle).is_ok(){high=middle;}else{low=middle;}
+            }
+            assert!(reserve(&base,metadata.clone(),high-1).is_err());
+            for state in [DurablePauseState::VerifiedApplied,DurablePauseState::VerifiedNotApplied,DurablePauseState::Indeterminate] {
+                for replayed_terminal in [false,true] {for dispatch_attempted in [false,true] {
+                    let mut record=base.clone();record.state=state;record.revision=u64::MAX;record.transition_number=u64::MAX;
+                    if state.terminal() {
+                        record.effect_known=true;record.effect_applied=state==DurablePauseState::VerifiedApplied;
+                        record.observed_paused=Some(!record.effect_applied);record.observed_game_tick=Some(u64::MAX);
+                        record.receipt_digest=Some(Digest32::ZERO);
+                    }
+                    let outcome=PauseCommitOutcome {record,replayed_terminal,dispatch_attempted};
+                    assert!(packet("fortress.commit",payload(&outcome,metadata.clone()),false).len() as u64<=high);
+                }}
+            }
+        }
+        Ok(())
+    }
+}
