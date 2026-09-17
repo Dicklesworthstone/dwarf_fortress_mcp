@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Joint complete-task production portfolio",
-  "description": "Read-only, exact bounded selection of declared complete tasks at one common candidate origin. Maximize priority sum, then task count, then choose the lexicographically first selected-key list. Runtime enforces UTF-8 bytes, at most 128 total worker slots, arithmetic and shared work/time/output bounds. Not inferred native requirements, a reservation or an executable schedule.",
+  "description": "Read-only exact selection of complete tasks at one common candidate origin. Optional reserves are mandatory DISTINCT unconsumed stock pools, not reservations or overlapping count predicates. Maximize task priority, then task count, then selected keys only after supporting every reserve. Runtime enforces at most 128 worker slots and 32 total task-input plus reserve demands, UTF-8 bytes, unique keys, arithmetic and shared work/time/output bounds. No inferred recipes or executable schedule.",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "origin", "quantity_unit", "tasks"],
@@ -41,6 +41,25 @@
             }
           }
         }
+      }
+    },
+    "reserves": {
+      "description": "Omit, null, or [] for no reserve constraint. Pools require distinct units across one another and all selected task inputs. Eight pools maximum; combined task inputs plus pools must not exceed 32. No priority override or native reservation.",
+      "type": ["array", "null"], "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "units", "item_types"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,48}$"},
+          "units": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+          "item_types": {"type": "array", "minItems": 1, "maxItems": 8,
+            "items": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\u0000]+$"}},
+          "subtype": {"type": ["integer", "null"], "minimum": -1, "maximum": 2147483647},
+          "material_type": {"type": ["integer", "null"], "minimum": -1, "maximum": 2147483647},
+          "material_index": {"type": ["integer", "null"], "minimum": -1, "maximum": 2147483647}
+        },
+        "allOf": [{"if": {"required": ["material_index"], "properties": {"material_index": {"type": "integer"}}},
+          "then": {"required": ["material_type"], "properties": {"material_type": {"type": "integer"}}}}]
       }
     },
     "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
