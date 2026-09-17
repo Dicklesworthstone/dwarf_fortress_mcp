@@ -134,3 +134,6 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
 #[cfg(all(test, unix))]
 #[path = "spatial_observation_tests.rs"]
 mod tests;
+#[cfg(all(test, unix))]
+#[path = "spatial_observation_handler_tests.rs"]
+mod handler_tests;
