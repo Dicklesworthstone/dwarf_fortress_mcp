@@ -91,7 +91,7 @@ fn portfolio_handler_selects_complete_tasks_without_mutating_watches_or_observat
     assert_eq!(rows.iter().filter(|r|r["row_kind"]=="rejected_combination").count(),3);
     assert_eq!(result["optimization"]["higher_ranked_sets_rejected"],3);
     assert_eq!(result["agent_turn"]["active_work"]["obligations"].as_array().map(Vec::len),Some(1));
-    assert_eq!(ok(ask(&s,json!({"kind":"watches"}))?)?["records"],before["records"]);
+    assert_eq!(ok(ask(&s,json!({"kind":"watches"}))?)["records"],before["records"]);
     assert_eq!(fs::read(&f.watches).map_err(io_error)?,watch_bytes);
     assert_eq!(fs::read(&f.observations).map_err(io_error)?,archive_bytes);
     assert_eq!(s.calls.load(Ordering::SeqCst),0);Ok(())
@@ -186,7 +186,7 @@ fn malformed_tasks_small_budgets_and_revoked_authority_leave_state_unchanged()->
     for case in 0..6 {
         let mut q=request();
         match case {
-            0=>q["tasks"][0]["materials"][0]["item_types"]=json!(["item_type_3";9]),
+            0=>q["tasks"][0]["materials"][0]["item_types"]=json!(vec!["item_type_3";9]),
             1=>q["tasks"][1]["key"]=json!("a"),
             2=>q["tasks"][0]["materials"][0]["material_index"]=json!(1),
             3=>q["max_work"]=json!(1),
