@@ -17,6 +17,9 @@ use crate::live_operations::{LiveItem, LiveOperationsObservation,
 mod views;
 pub use views::OperationsStateView;
 
+#[path = "operations_production_chain.rs"]
+pub mod production_chain;
+
 pub const ANALYSIS_POLICY: &str = "dfmcp.operations-analysis/1";
 pub const SUPPLY_POLICY: &str = "conservative-unattached-stack-units/1";
 pub const MAX_ANALYSIS_WORK: u64 = flow::MAX_WORK;
