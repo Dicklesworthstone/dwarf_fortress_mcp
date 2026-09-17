@@ -15,6 +15,9 @@ fn context()->OperationContext {
                 expires_at_tick:None,remaining_uses:None}).collect()}
 }
 fn plan(key:&str)->String {Digest32::of_bytes(key.as_bytes()).to_string()}
+fn active(owned:&mut Option<ControlSession>)->Result<&mut ControlSession> {
+    owned.as_mut().ok_or_else(||err(ErrorCode::SessionNotFound,"fixture session closed"))
+}
 struct Fixture {directory:PathBuf,path:PathBuf}
 impl Fixture {
     fn new()->Result<Self> {
@@ -46,11 +49,11 @@ fn register(f:&Fixture,read_only:bool)->Result<Registered> {
         else {open_private_control_journal(&f.path,&c,7,EffectTailRecovery::Refuse)?};
     let grants=if read_only {c.grants.into_iter().filter(|g|g.capability==Capability::Query).collect()} else {c.grants};
     let s=ControlSession {id,connection:None,journal,request:0,budget:c.budget,grants,_slot:Slot::reserve()?};
-    lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(s)));Ok(Registered{id})
+    lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(Some(s))));Ok(Registered{id})
 }
 fn decode(raw:String)->Result<Value>{serde_json::from_str(&raw).map_err(|_|err(ErrorCode::InvalidRequest,"test JSON"))}
 fn request(s:&Registered,key:&str)->Result<Value>{
-    decode(fortress_cancel(s.handle(),Some(key.into()),Some(plan(key)),None,None))
+    decode(fortress_cancel(s.handle(),Some(key.into()),Some(plan(key)),None,None,None))
 }
 fn success(value:Value)->Value {assert_eq!(value["result"]["ok"],true,"{value}");value}
 fn list(s:&Registered,state:&str)->Result<Value>{
@@ -79,7 +82,7 @@ fn cancellation_is_queryable_explainable_and_never_commit_compatible() -> Result
     let committed=decode(fortress_commit(s.handle(),"a-prepared".into(),plan("a-prepared"),"01".repeat(16)))?;
     assert_eq!(committed["result"]["error"]["code"],"conflict");
     assert_eq!(fs::read(&f.path).map_err(io_error)?,bytes);
-    assert!(lock(&resolve(s.handle())?)?.connection.is_none());
+    {let h=resolve(s.handle())?;let mut owned=lock(&h)?;assert!(active(&mut owned)?.connection.is_none());}
     Ok(())
 }
 
@@ -119,14 +122,14 @@ fn cancellation_budget_authority_and_identity_refusals_leave_the_file_unchanged(
     let _serial=lock(&SESSION_TESTS)?;let f=Fixture::new()?;let s=register(&f,false)?;
     let before=fs::read(&f.path).map_err(io_error)?;
     for bytes in [0,1,32,128,65537] {
-        let v=decode(fortress_cancel(s.handle(),Some("a-prepared".into()),Some(plan("a-prepared")),Some(bytes),None))?;
+        let v=decode(fortress_cancel(s.handle(),Some("a-prepared".into()),Some(plan("a-prepared")),Some(bytes),None,None))?;
         assert_eq!(v["result"]["error"]["code"],"budget_exceeded");
     }
-    assert_eq!(decode(fortress_cancel(s.handle(),Some("a-prepared".into()),Some(plan("other")),None,None))?
+    assert_eq!(decode(fortress_cancel(s.handle(),Some("a-prepared".into()),Some(plan("other")),None,None,None))?
         ["result"]["error"]["code"],"conflict");
-    assert_eq!(decode(fortress_cancel(s.handle(),None,None,None,None))?["result"]["error"]["code"],"capability_denied");
-    assert_eq!(decode(fortress_cancel(s.handle(),Some("a-prepared".into()),None,None,None))?["result"]["error"]["code"],"invalid_request");
-    let h=resolve(s.handle())?;let mut guard=lock(&h)?;guard.grants.clear();drop(guard);
+    assert_eq!(decode(fortress_cancel(s.handle(),None,None,None,None,None))?["result"]["error"]["code"],"capability_denied");
+    assert_eq!(decode(fortress_cancel(s.handle(),Some("a-prepared".into()),None,None,None,None))?["result"]["error"]["code"],"invalid_request");
+    let h=resolve(s.handle())?;let mut guard=lock(&h)?;active(&mut guard)?.grants.clear();drop(guard);
     assert_eq!(request(&s,"a-prepared")?["result"]["error"]["code"],"capability_denied");
     assert_eq!(fs::read(&f.path).map_err(io_error)?,before);Ok(())
 }
@@ -135,7 +138,7 @@ fn cancellation_budget_authority_and_identity_refusals_leave_the_file_unchanged(
 fn injected_clock_authority_cannot_write_an_offline_recovery_journal() -> Result<()> {
     let _serial=lock(&SESSION_TESTS)?;let f=Fixture::new()?;let s=register(&f,true)?;
     let before=fs::read(&f.path).map_err(io_error)?;
-    {let h=resolve(s.handle())?;lock(&h)?.grants=context().grants;}
+    {let h=resolve(s.handle())?;let mut owned=lock(&h)?;active(&mut owned)?.grants=context().grants;}
     assert_eq!(request(&s,"a-prepared")?["result"]["error"]["code"],"capability_denied");
     assert_eq!(fs::read(&f.path).map_err(io_error)?,before);Ok(())
 }
@@ -160,14 +163,14 @@ fn cancellation_and_commit_start_races_have_only_one_durable_winner() -> Result<
         let f=Fixture::new()?;let s=register(&f,false)?;
         let barrier=Arc::new(std::sync::Barrier::new(2));let start=barrier.clone();let id=s.handle();
         let cancel_thread=std::thread::spawn(move||{
-            start.wait();fortress_cancel(id,Some("a-prepared".into()),Some(plan("a-prepared")),None,None)
+            start.wait();fortress_cancel(id,Some("a-prepared".into()),Some(plan("a-prepared")),None,None,None)
         });
         barrier.wait();
-        let dispatched={let h=resolve(s.handle())?;let mut session=lock(&h)?;let c=session.context()?;
+        let dispatched={let h=resolve(s.handle())?;let mut owned=lock(&h)?;let session=active(&mut owned)?;let c=session.context()?;
             session.journal.begin_commit("a-prepared",Digest32::of_bytes(b"a-prepared"),7,&c)};
         let cancelled=decode(cancel_thread.join().map_err(|_|err(ErrorCode::InternalInvariantViolation,"cancel thread panicked"))?)?;
-        let h=resolve(s.handle())?;let guard=lock(&h)?;
-        let state=guard.journal.lookup("a-prepared").ok_or_else(||err(ErrorCode::InvalidRequest,"missing key"))?.state;
+        let h=resolve(s.handle())?;let mut guard=lock(&h)?;
+        let state=active(&mut guard)?.journal.lookup("a-prepared").ok_or_else(||err(ErrorCode::InvalidRequest,"missing key"))?.state;
         match state {
             DurablePauseState::CancelledBeforeDispatch=>{assert!(matches!(dispatched,Err(e)if e.code==ErrorCode::Conflict));success(cancelled);}
             DurablePauseState::CommitStarted=>{assert!(dispatched.is_ok());assert_eq!(cancelled["result"]["error"]["code"],"effect_indeterminate");}
@@ -187,7 +190,7 @@ impl PauseReconciliationSource for NoQueries {
 fn recovery_batches_skip_cancelled_effects_without_native_reads() -> Result<()> {
     let _serial=lock(&SESSION_TESTS)?;let f=Fixture::new()?;let s=register(&f,false)?;
     success(request(&s,"a-prepared")?);
-    let h=resolve(s.handle())?;let mut session=lock(&h)?;let c=session.context()?;
+    let h=resolve(s.handle())?;let mut owned=lock(&h)?;let session=active(&mut owned)?;let c=session.context()?;
     let head=session.journal.head();let mut source=NoQueries(0);
     let batch=reconcile_batch(&mut session.journal,&mut source,&["a-prepared".into()],&c)?;
     assert_eq!(source.0,0);assert_eq!(batch.head_after,head);
