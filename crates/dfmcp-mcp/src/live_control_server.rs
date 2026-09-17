@@ -29,11 +29,16 @@ mod effect_queries;
 mod reconciliation;
 #[path = "control_cancellation.rs"]
 mod cancellation;
+#[path = "control_session_release.rs"]
+mod session_release;
 
 const FAMILY:u128=1u128<<57;
 static NEXT:Mutex<u128>=Mutex::new(1);
 static SLOTS:AtomicUsize=AtomicUsize::new(0);
-static SESSIONS:LazyLock<Mutex<BTreeMap<SessionId,Arc<Mutex<ControlSession>>>>>=LazyLock::new(||Mutex::new(BTreeMap::new()));
+// Taking the value during close invalidates even already-resolved Arc holders.
+// The permit belongs to the value, not the Arc, so stale callers cannot pin it.
+type SessionHandle=Arc<Mutex<Option<ControlSession>>>;
+static SESSIONS:LazyLock<Mutex<BTreeMap<SessionId,SessionHandle>>>=LazyLock::new(||Mutex::new(BTreeMap::new()));
 #[cfg(all(test, unix))]
 static SESSION_TESTS: Mutex<()> = Mutex::new(());
 fn err(code:ErrorCode,text:&str)->DfmcpError{DfmcpError::new(code,text)}
@@ -85,6 +90,7 @@ struct ControlSession{
     request:u128,
     budget:WorkBudget,
     grants:Vec<CapabilityGrant>,
+    // Keep last: connection and journal custody must drop before reuse of capacity.
     _slot:Slot,
 }
 impl ControlSession{
@@ -106,10 +112,15 @@ impl ControlSession{
 }
 fn next_id()->Result<SessionId>{let mut n=lock(&NEXT)?;if *n>=FAMILY{return Err(err(ErrorCode::BudgetExceeded,"control session IDs exhausted"));}
     let id=SessionId::new((1u128<<127)|FAMILY|*n);*n+=1;Ok(id)}
-fn resolve(raw:Option<String>)->Result<Arc<Mutex<ControlSession>>>{let raw=raw.ok_or_else(||err(ErrorCode::InvalidRequest,"open control session first"))?;
+fn parse_session_id(raw:&str)->Result<SessionId>{
     if raw.len()!=32||!raw.bytes().all(|b|b.is_ascii_hexdigit()){return Err(err(ErrorCode::InvalidRequest,"invalid control session"));}
-    let value=u128::from_str_radix(&raw,16).map_err(|_|err(ErrorCode::InvalidRequest,"invalid control session"))?;let id=SessionId::new(value);
+    let value=u128::from_str_radix(raw,16).map_err(|_|err(ErrorCode::InvalidRequest,"invalid control session"))?;let id=SessionId::new(value);
     if id.get()!=value||!id.is_process_scoped_live()||(value&((1u128<<62)-1))>>57!=1{return Err(err(ErrorCode::InvalidRequest,"not a control session"));}
+    Ok(id)
+}
+fn resolve(raw:Option<String>)->Result<SessionHandle>{
+    let raw=raw.ok_or_else(||err(ErrorCode::InvalidRequest,"open control session first"))?;
+    let id=parse_session_id(&raw)?;
     lock(&SESSIONS)?.get(&id).cloned().ok_or_else(||err(ErrorCode::SessionNotFound,"control session not found"))}
 fn validate_environment()->Result<()>{
     let allowed=["DFMCP_ALLOW_UNADMITTED_CONTROL_V1_7","DFMCP_CONTROL_TOKEN","DFMCP_CONTROL_ENDPOINT",
@@ -144,14 +155,20 @@ fn failure(operation:&str,error:&DfmcpError,recovery_only:bool)->String{let inde
         "mutation_dispatched":if indeterminate&&operation!="fortress.cancel"{Value::Null}else{json!(false)},"reconciliation_required":indeterminate}}),recovery_only)}
 fn with_session<F>(id:Option<String>,operation:&str,body:F)->String where F:FnOnce(&mut ControlSession,OperationContext)->Result<Value>{
     let handle=match resolve(id){Ok(value)=>value,Err(error)=>return failure(operation,&error,true)};
-    let mut session=match lock(&handle){Ok(value)=>value,Err(error)=>return failure(operation,&error,true)};
+    with_handle(&handle,operation,body)
+}
+fn with_handle<F>(handle:&SessionHandle,operation:&str,body:F)->String where F:FnOnce(&mut ControlSession,OperationContext)->Result<Value>{
+    let mut owned=match lock(handle){Ok(value)=>value,Err(error)=>return failure(operation,&error,true)};
+    let Some(session)=owned.as_mut() else {
+        return failure(operation,&err(ErrorCode::SessionNotFound,"control session was closed; open a new session"),true);
+    };
     let recovery_only=session.journal.read_only();
     let context=match session.context(){Ok(value)=>value,Err(error)=>return failure(operation,&error,recovery_only)};
     // Recheck authority and custody even for idempotent/terminal lookups.
     if let Err(error)=session.journal.records(&context).map(|_|()) {
         return failure(operation,&error,recovery_only);
     }
-    match body(&mut session,context){Ok(value)=>packet(operation,value,recovery_only),Err(error)=>failure(operation,&error,recovery_only)}}
+    match body(session,context){Ok(value)=>packet(operation,value,recovery_only),Err(error)=>failure(operation,&error,recovery_only)}}
 fn digest(raw:&str)->Result<Digest32>{if raw.len()!=64||!raw.bytes().all(|byte|byte.is_ascii_digit()||(b'a'..=b'f').contains(&byte)){
         return Err(err(ErrorCode::InvalidRequest,"plan_digest must be canonical lowercase SHA-256 hex"));}
     let mut out=[0u8;32];for i in 0..32{out[i]=u8::from_str_radix(&raw[i*2..i*2+2],16).map_err(|_|err(ErrorCode::InvalidRequest,"invalid plan digest"))?;}Ok(Digest32::from_bytes(out))}
@@ -206,21 +223,32 @@ fn configured_session(id:SessionId,path:&Path,recovery:EffectTailRecovery,budget
     Ok(ControlSession{id,connection,journal,request:1,budget,grants,_slot:slot})
 }
 
-#[tool(description="Open an explicitly unadmitted pause-control/1.7 session. Set recovery_only=true to inspect an existing durable journal with Query authority, no bridge credentials/connection, no repair and no mutations. Live mode supports pause prepare/commit/reconcile and durable cancellation before commit starts.")]
+#[tool(description="Open an explicitly unadmitted pause-control/1.7 session. Set recovery_only=true to inspect an existing durable journal with Query authority, no bridge credentials/connection, no repair and no mutations. Live mode supports pause prepare/commit/reconcile and durable cancellation before commit starts. Close with fortress.cancel scope=session to release custody without changing effects.")]
 pub fn fortress_open_session(max_wall_millis:Option<u64>,recovery_only:Option<bool>)->String{
     let recovery_only=recovery_only.unwrap_or(false);
     let result=(||->Result<String>{validate_environment()?;let (path,recovery)=journal_configuration()?;let id=next_id()?;let slot=Slot::reserve()?;
         let millis=max_wall_millis.unwrap_or(5000);if !(1..=60_000).contains(&millis){return Err(err(ErrorCode::BudgetExceeded,"control wall-time must be 1..60000 milliseconds"));}
         let budget=WorkBudget{max_wall_millis:millis,max_actions:1,..WorkBudget::CONSERVATIVE_DEFAULT};
         let session=configured_session(id,&path,recovery,budget,recovery_only,slot)?;
-        let summary=journal_json(&session.journal);
-        lock(&SESSIONS)?.insert(id,Arc::new(Mutex::new(session)));
-        Ok(packet("fortress.open_session",json!({"ok":true,"session_id":id.to_string(),
-            "supported_actions":if recovery_only{json!([])}else{json!(["pause"])},
-            "recovery_only":recovery_only,"bridge_connection_present":!recovery_only,
-            "current_freshness_proven":false,"runtime_admitted":false,"durable_effect_journal":summary,
-            "effect_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"state":"all","limit":8}}}),recovery_only))})();
+        publish_session(session)
+    })();
     result.unwrap_or_else(|error|failure("fortress.open_session",&error,true))}
+
+fn publish_session(session:ControlSession)->Result<String>{
+    let id=session.id;let recovery_only=session.journal.read_only();
+    let out=packet("fortress.open_session",json!({"ok":true,"session_id":id.to_string(),
+        "supported_actions":if recovery_only{json!([])}else{json!(["pause"])},
+        "recovery_only":recovery_only,"bridge_connection_present":!recovery_only,
+        "current_freshness_proven":false,"runtime_admitted":false,"durable_effect_journal":journal_json(&session.journal),
+        "effect_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"state":"all","limit":8}},
+        "session_close":{"tool":"fortress.cancel","arguments":{"session_id":id.to_string(),"scope":"session"}}}),recovery_only);
+    if out.len() as u64>session.budget.max_bytes.min(u64::from(session.budget.max_output_tokens)*4){
+        return Err(err(ErrorCode::BudgetExceeded,"control opening response does not fit; session custody was not published"));
+    }
+    let mut sessions=lock(&SESSIONS)?;
+    if sessions.contains_key(&id){return Err(err(ErrorCode::Conflict,"control session identity is already registered"));}
+    sessions.insert(id,Arc::new(Mutex::new(Some(session))));Ok(out)
+}
 
 #[tool(description="List durable pause effects without contacting the bridge or changing the journal. State: all (default), nonterminal, reconciliation_required, prepared, commit_started, indeterminate, verified_applied, verified_not_applied, cancelled_before_dispatch. Cancellation is not a native outcome. Limit 1..128; continuations bind session, journal head and filter. Budgets only narrow session limits and include the Agent Turn.")]
 pub fn fortress_query(session_id:Option<String>,state:Option<String>,limit:Option<u32>,continuation:Option<String>,
@@ -327,9 +355,19 @@ pub fn fortress_explain(session_id:Option<String>,idempotency_key:String,plan_di
 
 fn denied(id:Option<String>,operation:&str)->String{with_session(id,operation,|_,_|Err(err(ErrorCode::CapabilityDenied,"control/1.7 supports durable pause control and evidence discovery, not this operation")))}
 #[tool(description="Unavailable in control/1.7.")] pub fn fortress_observe(session_id:Option<String>)->String{denied(session_id,"fortress.observe")}
-#[tool(description="Durably cancel one prepared pause effect using its exact idempotency_key and plan_digest. This prevents this journal's future dispatch without contacting DFHack or changing the game. Started/indeterminate attempts require reconciliation and cannot be cancelled. Verified outcomes cannot be undone. Recovery-only sessions refuse writes. Optional output budgets only narrow session limits.")]
+#[tool(description="Cancel one prepared effect by exact key and plan digest, or explicitly close this session with scope=session and no effect identity. Session closure releases connection, journal lock and capacity without cancelling preparations, changing effects or claiming reconciliation. Close works in both modes. Effect cancellation requires writable mode; started attempts cannot be cancelled. Budgets only narrow session limits.")]
 pub fn fortress_cancel(session_id:Option<String>,idempotency_key:Option<String>,plan_digest:Option<String>,
-    max_bytes:Option<u64>,max_output_tokens:Option<u32>)->String {
+    max_bytes:Option<u64>,max_output_tokens:Option<u32>,scope:Option<String>)->String {
+    if let Some(scope)=scope.as_deref(){
+        if scope=="session"{
+            if idempotency_key.is_some()||plan_digest.is_some(){
+                return failure("fortress.cancel",&err(ErrorCode::InvalidRequest,"session closure cannot be combined with an effect identity"),true);
+            }
+            return session_release::close(session_id,max_bytes,max_output_tokens)
+                .unwrap_or_else(|error|failure("fortress.cancel",&error,true));
+        }
+        if scope!="effect"{return failure("fortress.cancel",&err(ErrorCode::InvalidRequest,"control cancel scope must be session or effect"),true);}
+    }
     match (idempotency_key,plan_digest) {
         (Some(key),Some(plan))=>with_session(session_id,"fortress.cancel",|session,context|{
             session.writable()?;
@@ -353,7 +391,7 @@ pub fn fortress_doctor(session_id:Option<String>)->String{with_session(session_i
 
 pub fn run_stdio(){if let Err(error)=validate_environment(){eprintln!("{error}");std::process::exit(1);}let server=ServerBuilder::new("dfmcp-live-control-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .instructions("Explicitly unadmitted control/1.7. A private durable journal is mandatory. Open recovery_only=true to discover journaled effects without DFHack, credentials, repair or mutation authority. fortress.cancel with an exact key and plan digest permanently retires a prepared effect before this coordinator dispatches it; cancellation never undoes native effects or proves global non-application. Cancelled keys remain discoverable and cannot be reused. Started or indeterminate effects require reconciliation, not cancellation or retry. fortress.wait reconciles unresolved effects without mutations. Native terminal results require identity-verified receipts. No other live mutation family exists.").build();crate::run_modern_stdio(server);}
+    .instructions("Explicitly unadmitted control/1.7. A private durable journal is mandatory. Open recovery_only=true to discover journaled effects without DFHack, credentials, repair or mutation authority. fortress.cancel scope=session releases custody and capacity without changing effects; reopen and rediscover durable work. With an exact key and plan digest, fortress.cancel retires one prepared effect before dispatch. Cancellation never undoes native effects or proves global non-application. Cancelled keys cannot be reused. Started or indeterminate effects require reconciliation, not cancellation or retry. fortress.wait reconciles unresolved effects without mutations. Native terminal results require identity-verified receipts. No other live mutation family exists.").build();crate::run_modern_stdio(server);}
 
 #[cfg(all(test, unix))]
 #[path = "live_control_recovery_tests.rs"]
