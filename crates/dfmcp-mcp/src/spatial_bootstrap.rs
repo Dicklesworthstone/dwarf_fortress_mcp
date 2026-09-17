@@ -43,3 +43,7 @@ pub(super) fn establish<S: Source>(limits: CitizenSpatialLimits, budget: WorkBud
     // nor an observation/watch journal has been created by this helper.
     Ok((source, state))
 }
+
+#[cfg(all(test, unix))]
+#[path = "spatial_bootstrap_tests.rs"]
+mod tests;
