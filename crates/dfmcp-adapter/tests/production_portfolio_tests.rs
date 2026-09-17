@@ -74,8 +74,18 @@ fn authority_anchor_input_and_work_failures_do_not_produce_partial_plans() -> Re
     assert!(matches!(portfolio::plan(&state,&stale,[0,0,5],&requested,10_000_000),Err(e)if e.code==ErrorCode::StaleAnchor));
     assert!(portfolio::plan(&state,&c,[0,0,5],&requested,1).is_err());
     assert!(portfolio::plan(&state,&c,[9,9,5],&requested,10_000_000).is_err());
-    let mut bad=requested.to_vec();bad[0].materials.push(bad[0].materials[0].clone());
+    let mut bad=requested.to_vec();let duplicate=bad[0].materials[0].clone();bad[0].materials.push(duplicate);
     assert!(portfolio::plan(&state,&c,[0,0,5],&bad,10_000_000).is_err());
     assert!(portfolio::plan(&state,&c,[0,0,5],&[requested[0].clone(),requested[0].clone()],10_000_000).is_err());
+    for case in 0..4 {
+        let mut bad=requested.to_vec();
+        match case {
+            0=>bad[0].materials[0].item_types=vec!["item_type_3".into();9],
+            1=>bad[0].materials[0].material_index=Some(1),
+            2=>bad[0].priority=0,
+            _=>bad[0].workers=129,
+        }
+        assert!(portfolio::plan(&state,&c,[0,0,5],&bad,10_000_000).is_err());
+    }
     Ok(())
 }
