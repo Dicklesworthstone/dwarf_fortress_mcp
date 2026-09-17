@@ -139,6 +139,7 @@ fn schema()->Result<Value> {
         "kind":{"const":"historical_query"},"record":{"type":"integer","minimum":1,"maximum":4096},
         "record_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"query":{"$ref":"#/$defs/archive_stateless"}}}));
     all.push(history::changes::schema()?);
+    all.push(history::changes::series::schema()?);
     schema["$defs"]["query"]["oneOf"]=json!(all);
     Ok(schema)
 }
