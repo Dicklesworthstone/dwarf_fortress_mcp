@@ -1,11 +1,15 @@
 //! Exact bounded task selection over two disjoint resource universes. A task
 //! receives ALL its worker and material demands, or consumes neither resource.
-//! This is a declared allocation model, not native readiness or a time schedule.
+//! Mandatory material pools are supported by every candidate set, including the
+//! empty set. This is a declared allocation model, not a reservation or schedule.
 use std::time::{Duration, Instant};
 use dfmcp_world::inventory_allocation::{self as flow, Allocation, AllocationError, Demand, Shortage, Supply};
 
 type Result<T> = std::result::Result<T, AllocationError>;
 pub const MAX_TASKS: usize = 8;
+/// Material-only owner marker. These demands are never optional task inputs.
+/// Each reserve pool requires distinct units, even when its selectors overlap.
+pub const RESERVE_OWNER: usize = usize::MAX;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
@@ -16,7 +20,8 @@ pub struct Task {
 pub struct Model<'a> {
     pub supplies: &'a [Supply],
     pub demands: &'a [Demand],
-    /// One task index per demand, in the original canonical demand order.
+    /// One task index per demand in canonical order. Only the material model
+    /// may use RESERVE_OWNER for mandatory, non-consumed reserve pools.
     pub owners: &'a [usize],
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +31,7 @@ pub struct Rejection {
     pub task_mask: u16,
     pub domain: Domain,
     /// Demand indices refer to the ORIGINAL model, not a remapped subset.
+    /// Material cuts may include mandatory reserves as well as task inputs.
     pub shortage: Shortage,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,9 +39,13 @@ pub struct Selection {
     pub task_mask: u16,
     pub priority: u64,
     pub workers: Allocation,
+    /// Includes reserve support separately from task consumption. A shortage
+    /// here means the hard reserves alone are infeasible: NO task set, including
+    /// the empty one, is admissible. Partial reserve flow is diagnostic only.
     pub materials: Allocation,
     /// One checked cut for EVERY combination ranked ahead of the selected set.
-    /// No heuristic pruning or timeout is allowed to turn into an optimum claim.
+    /// If reserves alone fail, materials.shortage excludes all sets directly;
+    /// rejected is empty and there is no feasible optimum to claim.
     pub rejected: Vec<Rejection>,
     pub flow_calls: u32,
     pub work_units: u64,
@@ -58,19 +68,20 @@ fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 64
         && key.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
-fn validate_model(model: Model<'_>, tasks: usize) -> Result<()> {
+fn validate_model(model: Model<'_>, tasks: usize, allow_reserves: bool) -> Result<()> {
     if model.demands.is_empty() || model.demands.len() > flow::MAX_DEMANDS
         || model.owners.len() != model.demands.len() || model.supplies.len() > flow::MAX_SUPPLIES {
         return Err(AllocationError::InvalidInput);
     }
     let mut present = 0u16;
     for &owner in model.owners {
+        if owner == RESERVE_OWNER && allow_reserves { continue; }
         if owner >= tasks { return Err(AllocationError::InvalidInput); }
         present |= 1u16 << owner;
     }
     if present != (1u16 << tasks) - 1 { return Err(AllocationError::InvalidInput); }
-    // Full-model flow below checks IDs, ordering, keys, capacity, eligibility
-    // masks and arithmetic BEFORE any subset can discard malformed input.
+    // Full-model flow checks IDs, ordering, keys, capacities, masks and overflow
+    // BEFORE reserve infeasibility or subset selection can discard malformed input.
     Ok(())
 }
 fn full(model: Model<'_>, budget: &mut Budget) -> Result<Allocation> {
@@ -86,7 +97,7 @@ fn empty(size: usize) -> Allocation {
 fn subset(model: Model<'_>, mask: u16, budget: &mut Budget) -> Result<Allocation> {
     budget.charge(model.demands.len() as u64)?;
     let indices: Vec<_> = model.owners.iter().enumerate()
-        .filter_map(|(i, &owner)| (mask & (1u16 << owner) != 0).then_some(i)).collect();
+        .filter_map(|(i, &owner)| (owner == RESERVE_OWNER || mask & (1u16 << owner) != 0).then_some(i)).collect();
     if indices.is_empty() { return Ok(empty(model.demands.len())); }
     let demands: Vec<_> = indices.iter().map(|&i| model.demands[i].clone()).collect();
     let mut supplies = Vec::new();
@@ -122,8 +133,8 @@ fn rejection(mask: u16, domain: Domain, allocation: &Allocation) -> Result<Rejec
 /// priorities make adding a fully supported task strictly preferable. With unit
 /// priorities this maximizes the number of COMPLETE tasks, not individual slots.
 /// At most 255 nonempty sets are considered; exhaustion returns no partial plan.
-/// Both models use independent capacities, so feasibility of both for the SAME
-/// task set is sufficient for joint feasibility under this explicit model.
+/// Reserve support is solved jointly with each set, NOT greedily subtracted from
+/// specific stacks first. Residual rerouting can preserve scarce task-only inputs.
 pub fn select(tasks: &[Task], workers: Model<'_>, materials: Model<'_>, maximum_work: u64,
     wall: Duration) -> Result<Selection> {
     if tasks.is_empty() || tasks.len() > MAX_TASKS || maximum_work == 0
@@ -136,12 +147,22 @@ pub fn select(tasks: &[Task], workers: Model<'_>, materials: Model<'_>, maximum_
             return Err(AllocationError::InvalidInput);
         }
     }
-    validate_model(workers, tasks.len())?;
-    validate_model(materials, tasks.len())?;
+    validate_model(workers, tasks.len(), false)?;
+    validate_model(materials, tasks.len(), true)?;
     if workers.supplies.iter().any(|s| s.units != 1) { return Err(AllocationError::InvalidInput); }
     let mut budget = Budget { used: 0, maximum: maximum_work, started: Instant::now(), wall, calls: 0 };
     let mut all_workers = Some(full(workers, &mut budget)?);
     let mut all_materials = Some(full(materials, &mut budget)?);
+    let reserve_only = if materials.owners.contains(&RESERVE_OWNER) {
+        subset(materials, 0, &mut budget)?
+    } else { empty(materials.demands.len()) };
+    if reserve_only.shortage.is_some() {
+        // A subset of mandatory demands already lacks distinct supply. Every
+        // larger model is infeasible, regardless of task priority or worker count.
+        budget.charge(0)?;
+        return Ok(Selection { task_mask: 0, priority: 0, workers: empty(workers.demands.len()),
+            materials: reserve_only, rejected: Vec::new(), flow_calls: budget.calls, work_units: budget.used });
+    }
     let all = (1u16 << tasks.len()) - 1;
     let mut ranked = Vec::with_capacity(usize::from(all));
     for mask in 1..=all {
@@ -173,7 +194,7 @@ pub fn select(tasks: &[Task], workers: Model<'_>, materials: Model<'_>, maximum_
             rejected, flow_calls: budget.calls, work_units: budget.used });
     }
     budget.charge(0)?;
-    Ok(Selection { task_mask: 0, priority: 0, workers: empty(workers.demands.len()), materials: empty(materials.demands.len()),
+    Ok(Selection { task_mask: 0, priority: 0, workers: empty(workers.demands.len()), materials: reserve_only,
         rejected, flow_calls: budget.calls, work_units: budget.used })
 }
 
