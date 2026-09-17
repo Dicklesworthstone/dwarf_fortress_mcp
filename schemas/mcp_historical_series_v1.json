@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Historical resource quantity series",
+  "description": "Project every retained record in an exact inclusive interval, in bounded pages. Only stateless item_quantity measurements are supported. The runtime replaces the closed measurement placeholder with the authoritative quantity-query schema. Rates describe endpoint net changes, not consumption, production, forecasts or continuous observations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "from", "to", "measurement"],
+  "properties": {
+    "kind": {"const": "historical_series"},
+    "from": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "to": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "measurement": {
+      "description": "Closed until composed with mcp_item_quantity_v1.json query and its existing predicate definitions.",
+      "not": {}
+    },
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 32, "default": 8},
+    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^hs1:[1-9][0-9]*:[0-9a-f]{64}$"}
+  }
+}
