@@ -17,6 +17,9 @@ use crate::live_spatial::{SpatialStateView, citizens::{LiveSpatialCitizenState, 
 #[path = "production_portfolio.rs"]
 pub mod portfolio;
 
+#[path = "workforce_quality.rs"]
+pub mod quality;
+
 pub const MAX_WORKFORCE_DEMANDS: usize = 16;
 pub const MAX_WORKER_SLOTS: u32 = 128;
 pub const WORKFORCE_POLICY: &str = "coherent-observed-skill-readiness-dry-occupied-endpoint/1";

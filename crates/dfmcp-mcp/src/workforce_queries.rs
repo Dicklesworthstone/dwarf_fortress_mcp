@@ -13,6 +13,9 @@ use super::anchor_json;
 #[path = "production_portfolio_queries.rs"]
 pub(super) mod portfolio;
 
+#[path = "workforce_quality_queries.rs"]
+mod quality;
+
 fn invalid(text: &str) -> DfmcpError { DfmcpError::new(ErrorCode::InvalidRequest, text) }
 fn budget(text: &str) -> DfmcpError { DfmcpError::new(ErrorCode::BudgetExceeded, text) }
 fn invariant(text: &str) -> DfmcpError { DfmcpError::new(ErrorCode::InternalInvariantViolation, text) }
@@ -25,6 +28,7 @@ struct Envelope { schema: String, expected_anchor: Option<Value>, query: Query }
 struct DemandInput {
     key: String, workers: u32, target: [u32; 3], skill_key: String,
     min_effective_skill: Option<i32>, preserve_social: Option<bool>, adults_only: Option<bool>,
+    priority: Option<u16>,
 }
 impl DemandInput {
     fn normalized(self) -> WorkforceDemand {
@@ -39,7 +43,7 @@ enum Query {
     WorkforceCandidates { target: [u32; 3], skill_key: String, min_effective_skill: Option<i32>,
         preserve_social: Option<bool>, adults_only: Option<bool>, limit: Option<u32>,
         continuation: Option<String>, max_work: Option<u64> },
-    WorkforcePlan { demands: Vec<DemandInput>, limit: Option<u32>, continuation: Option<String>, max_work: Option<u64> },
+    WorkforcePlan { demands: Vec<DemandInput>, objective: Option<quality::Objective>, limit: Option<u32>, continuation: Option<String>, max_work: Option<u64> },
 }
 
 pub(super) fn handles(input: &Value) -> bool {
@@ -166,12 +170,11 @@ pub(super) fn execute(state: &LiveSpatialCitizenState, context: &OperationContex
             paginate(out, a.candidates[0].len(), context, Page { limit: limit.unwrap_or(16), continuation: continuation.as_deref(), prefix: "wc2", identity },
                 |i| candidate_row(state, &a, 0, &a.candidates[0][i]))
         }
-        Query::WorkforcePlan { demands, limit, continuation, max_work } => {
+        Query::WorkforcePlan { demands, objective, limit, continuation, max_work } => {
             let maximum = max_work.unwrap_or(MAX_WORK);
-            let requested: Vec<_> = demands.into_iter().map(DemandInput::normalized).collect();
-            let planned = workforce::plan(state, context, &requested, maximum)?;
+            let (planned, details) = quality::prepare(state, context, demands, objective, maximum)?;
             let a = &planned.analysis; let allocation = &planned.allocation;
-            let model = model_digest(a, "workforce_plan"); let identity = page_identity(context, model, maximum);
+            let model = quality::model(a, details.as_ref()); let identity = page_identity(context, model, maximum);
             let mut out = base(a, "workforce_plan", model);
             out["model_feasible"] = json!(allocation.allocated_units == allocation.requested_units);
             out["requested_workers"] = json!(allocation.requested_units); out["assigned_workers"] = json!(allocation.allocated_units);
@@ -194,7 +197,9 @@ pub(super) fn execute(state: &LiveSpatialCitizenState, context: &OperationContex
                         "global_workforce_shortage_proven":false,"independently_additive":false})
                 }
             };
-            paginate(out, allocation.assignments.len(), context, Page { limit: limit.unwrap_or(16), continuation: continuation.as_deref(), prefix: "wp1", identity }, |i| {
+            quality::decorate(&mut out, details.as_ref(), model)?;
+            let prefix = if details.is_some() { "wq1" } else { "wp1" };
+            paginate(out, allocation.assignments.len(), context, Page { limit: limit.unwrap_or(16), continuation: continuation.as_deref(), prefix, identity }, |i| {
                 let assignment = &allocation.assignments[i];
                 let candidate = a.candidates[assignment.demand_index].iter().find(|c| c.entity_id == assignment.supply_id)
                     .ok_or_else(|| invariant("assigned citizen lacks candidate evidence"))?;

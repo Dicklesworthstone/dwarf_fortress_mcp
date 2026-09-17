@@ -22,6 +22,9 @@ fn text(out: &mut Vec<u8>, text: &str) {
 }
 fn part(out: &mut Vec<u8>, bytes: &[u8]) { put(out, bytes.len() as u32); out.extend_from_slice(bytes); }
 fn observation(tick: u32, workers: u32) -> Result<LiveSpatialCitizenObservation> {
+    observation_scored(tick, workers, None)
+}
+fn observation_scored(tick: u32, workers: u32, ratings: Option<&[(u32, u32)]>) -> Result<LiveSpatialCitizenObservation> {
     let hex = include_str!("../../dfmcp-adapter/tests/fixtures/spatial_v1_6.hex").trim();
     let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i+2], 16)
         .map_err(|_| error(ErrorCode::InternalInvariantViolation, "workforce fixture hex"))).collect::<Result<Vec<_>>>()?;
@@ -44,7 +47,8 @@ fn observation(tick: u32, workers: u32) -> Result<LiveSpatialCitizenObservation>
         citizens.extend_from_slice(&(skills.len() as u16).to_be_bytes());
         for (id, skill) in skills.iter().enumerate() {
             put(&mut citizens, id as u32); text(&mut citizens, skill);
-            for n in [5,5,1] { put(&mut citizens, n); }
+            let (nominal, effective) = ratings.and_then(|r| r.get(i as usize)).copied().unwrap_or((5,5));
+            for n in [nominal,effective,1] { put(&mut citizens, n); }
         }
     }
     let mut all = b"DFMS1800".to_vec(); part(&mut all, &spatial); part(&mut all, &citizens);
@@ -149,3 +153,7 @@ fn workforce_query_preserves_authority_fencing_and_invalid_input_refusal() -> Re
     assert_eq!(s.calls.load(Ordering::SeqCst), 0);
     Ok(())
 }
+
+
+#[path = "workforce_quality_runtime_tests.rs"]
+mod quality;
