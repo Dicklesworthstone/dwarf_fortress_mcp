@@ -2,7 +2,8 @@
 //!
 //! A known native key can name only a prepare, or an interrupted commit. Neither
 //! is proof of non-application. Only a complete identity-bound terminal receipt
-//! may resolve an attempted effect. This module has no commit/prepare transport.
+//! may resolve an attempted effect. The reconciliation transport has no mutation
+//! methods; one-shot execution uses its own explicitly separate source trait.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -11,6 +12,10 @@ use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, 
 
 use crate::control_effect_journal::{ControlEffectJournal, DurablePauseRecord, EffectJournalStorage};
 use crate::live_control_rpc::PauseEffect;
+
+#[path = "pause_commit.rs"]
+mod execution;
+pub use execution::{PauseCommitOutcome, PauseCommitSource, commit_once};
 
 pub const MAX_RECONCILIATION_EFFECTS: usize = 16;
 
