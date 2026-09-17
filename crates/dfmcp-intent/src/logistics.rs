@@ -1,27 +1,36 @@
 #![forbid(unsafe_code)]
 
-//! JIT Manager Production Logistics and Workshop Work-Order Compiler.
+//! JIT production proposals over a declared, single-output recipe model.
 //!
-//! WP-PLN-02: Compiles multi-tier material dependency graphs into structured
-//! DFHack manager work orders with automatic stock threshold conditions and deadlock prevention.
+//! Joint quotas share initial stock and supplier batches. This model does not
+//! establish native recipe semantics, workshop readiness or mutation authority.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
-use crate::action::{Action, BuildingKind, WorkOrderCondition};
+use crate::action::{Action, BuildingKind};
 
-/// Represents a single transformation recipe in the fortress manufacturing pipeline.
+#[path = "logistics_planning.rs"]
+mod planning;
+
+pub use planning::{
+    ProductionPlan, ProductionPlanningLimits, ProductionQuota, ProductionRequirement,
+    ProductionShortage, ProductionStep,
+};
+
+/// Represents a single transformation in the caller's declared production model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionRecipe {
     pub output_token: String,
     pub output_batch_size: u32,
-    pub input_tokens: Vec<(String, u32)>, // (input_item_token, quantity_needed)
+    pub input_tokens: Vec<(String, u32)>,
     pub workshop: BuildingKind,
     pub job_token: String,
 }
 
-/// Fortress inventory snapshot for logistics planning.
+/// Declared initial stock for logistics planning. Missing keys mean zero only
+/// inside this model; callers must not coerce unknown observations into this map.
 #[derive(Clone, Debug, Default)]
 pub struct InventoryStockpile {
     pub item_counts: BTreeMap<String, u32>,
@@ -40,17 +49,14 @@ impl InventoryStockpile {
         self.item_counts.insert(token.into(), count);
     }
 
-    /// Get current stock count for an item token (defaults to 0).
+    /// Get declared stock count for an item token (defaults to zero).
     #[must_use]
     pub fn get_stock(&self, token: &str) -> u32 {
-        self.item_counts
-            .get(token)
-            .copied()
-            .map_or(0, |count| count)
+        self.item_counts.get(token).copied().map_or(0, |count| count)
     }
 }
 
-/// Production Logistics Compiler and Work-Order Generator.
+/// Deterministic production proposal compiler. No game effects are dispatched.
 #[derive(Clone, Debug)]
 pub struct ProductionLogisticsCompiler {
     recipes: BTreeMap<String, ProductionRecipe>,
@@ -63,14 +69,20 @@ impl Default for ProductionLogisticsCompiler {
 }
 
 impl ProductionLogisticsCompiler {
-    /// Initialize with standard Dwarf Fortress production recipes.
+    /// Start a closed caller-declared model without the illustrative catalog.
+    #[must_use]
+    pub fn without_recipes() -> Self {
+        Self {
+            recipes: BTreeMap::new(),
+        }
+    }
+
+    /// Initialize the existing illustrative production catalog. These quantities
+    /// are model assumptions, not certified native DF recipe semantics.
     #[must_use]
     pub fn with_standard_recipes() -> Self {
-        let mut compiler = Self {
-            recipes: BTreeMap::new(),
-        };
+        let mut compiler = Self::without_recipes();
 
-        // Brewing: Plants -> Drink (Still)
         compiler.register_recipe(ProductionRecipe {
             output_token: "DRINK".to_owned(),
             output_batch_size: 5,
@@ -78,8 +90,6 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Workshop("Still".to_owned()),
             job_token: "BrewDrink".to_owned(),
         });
-
-        // Woodworking: Wood -> Barrel (Carpenter's Workshop)
         compiler.register_recipe(ProductionRecipe {
             output_token: "BARREL".to_owned(),
             output_batch_size: 1,
@@ -87,8 +97,6 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Workshop("Carpenters".to_owned()),
             job_token: "MakeWoodenBarrel".to_owned(),
         });
-
-        // Woodworking: Wood -> Bin (Carpenter's Workshop)
         compiler.register_recipe(ProductionRecipe {
             output_token: "BIN".to_owned(),
             output_batch_size: 1,
@@ -96,8 +104,6 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Workshop("Carpenters".to_owned()),
             job_token: "MakeWoodenBin".to_owned(),
         });
-
-        // Smelting: Wood -> Charcoal (Wood Furnace)
         compiler.register_recipe(ProductionRecipe {
             output_token: "CHARCOAL".to_owned(),
             output_batch_size: 1,
@@ -105,8 +111,6 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Furnace("WoodFurnace".to_owned()),
             job_token: "MakeCharcoal".to_owned(),
         });
-
-        // Smelting: Iron Ore + Charcoal -> Iron Bar (Smelter)
         compiler.register_recipe(ProductionRecipe {
             output_token: "BAR_IRON".to_owned(),
             output_batch_size: 1,
@@ -114,8 +118,6 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Furnace("Smelter".to_owned()),
             job_token: "SmeltIronOre".to_owned(),
         });
-
-        // Weaponsmithing: Iron Bar + Charcoal -> Iron Short Sword (Forge)
         compiler.register_recipe(ProductionRecipe {
             output_token: "WEAPON_SWORD_SHORT_IRON".to_owned(),
             output_batch_size: 1,
@@ -123,197 +125,38 @@ impl ProductionLogisticsCompiler {
             workshop: BuildingKind::Furnace("MetalsmithsForge".to_owned()),
             job_token: "ForgeIronShortSword".to_owned(),
         });
-
         compiler
     }
 
-    /// Register a custom production recipe.
+    /// Register or replace a declared recipe. Reachable recipes are validated
+    /// before planning; unrelated catalog entries do not consume planning work.
     pub fn register_recipe(&mut self, recipe: ProductionRecipe) {
         self.recipes.insert(recipe.output_token.clone(), recipe);
     }
 
-    /// Compile a target production quota, resolving upstream prerequisite supply chains.
+    /// Compile one quota using the same bounded solver as joint-quota planning.
+    /// Infeasible models return no actions. Use `plan_quotas` for full deficits.
     pub fn compile_quota_work_orders(
         &self,
         target_token: &str,
         target_amount: u32,
         inventory: &InventoryStockpile,
     ) -> Result<Vec<Action>> {
-        if target_token.is_empty() {
+        // Check before copying a caller-supplied string into the quota.
+        if target_token.is_empty() || target_token.len() > 256 || target_token.contains('\0') {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "production target token must be nonempty",
+                "production target must contain 1..256 UTF-8 bytes without NUL",
             ));
         }
-        let current_stock = inventory.get_stock(target_token);
-        if current_stock >= target_amount {
-            return Ok(Vec::new()); // Quota already met
-        }
-
-        let mut requirements = BTreeMap::new();
-        let mut batches = BTreeMap::new();
-        let mut visiting = BTreeSet::new();
-        self.accumulate_requirement(
-            target_token,
-            target_amount,
-            inventory,
-            &mut requirements,
-            &mut batches,
-            &mut visiting,
-        )?;
-
-        let mut work_orders = Vec::new();
-        let mut emitted = BTreeSet::new();
-        let mut emit_visiting = BTreeSet::new();
-        self.emit_orders(
-            target_token,
-            &requirements,
-            &batches,
-            &mut emitted,
-            &mut emit_visiting,
-            &mut work_orders,
-        )?;
-        Ok(work_orders)
-    }
-
-    fn accumulate_requirement(
-        &self,
-        token: &str,
-        additional_required: u32,
-        inventory: &InventoryStockpile,
-        requirements: &mut BTreeMap<String, u32>,
-        batches: &mut BTreeMap<String, u32>,
-        visiting: &mut BTreeSet<String>,
-    ) -> Result<()> {
-        let prior_required = requirements.get(token).copied().map_or(0, |count| count);
-        let total_required = prior_required
-            .checked_add(additional_required)
-            .ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::BudgetExceeded,
-                    format!("production requirement overflow for '{token}'"),
-                )
-            })?;
-        requirements.insert(token.to_owned(), total_required);
-
-        let shortage = total_required.saturating_sub(inventory.get_stock(token));
-        if shortage == 0 {
-            return Ok(());
-        }
-        let recipe = self.recipes.get(token).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::PreconditionsFailed,
-                format!(
-                    "insufficient stock for raw or unknown production token '{token}' and no recipe is registered"
-                ),
-            )
-        })?;
-        if recipe.output_batch_size == 0 {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                format!("recipe for '{token}' has a zero output batch size"),
-            ));
-        }
-
-        let required_batches_u64 =
-            u64::from(shortage).div_ceil(u64::from(recipe.output_batch_size));
-        let required_batches = u32::try_from(required_batches_u64).map_err(|_| {
-            DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                format!("production batch count overflow for '{token}'"),
-            )
-        })?;
-        let prior_batches = batches.get(token).copied().map_or(0, |count| count);
-        if required_batches <= prior_batches {
-            return Ok(());
-        }
-        let extra_batches = required_batches - prior_batches;
-        batches.insert(token.to_owned(), required_batches);
-
-        if !visiting.insert(token.to_owned()) {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                format!("cyclic production dependency detected at '{token}'"),
-            ));
-        }
-        let mut inputs = recipe.input_tokens.clone();
-        inputs.sort_by(|left, right| left.0.cmp(&right.0));
-        for (input_token, needed_per_batch) in inputs {
-            let input_required = needed_per_batch.checked_mul(extra_batches).ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::BudgetExceeded,
-                    format!("production input requirement overflow for '{input_token}'"),
-                )
-            })?;
-            self.accumulate_requirement(
-                &input_token,
-                input_required,
-                inventory,
-                requirements,
-                batches,
-                visiting,
-            )?;
-        }
-        visiting.remove(token);
-        Ok(())
-    }
-
-    fn emit_orders(
-        &self,
-        token: &str,
-        requirements: &BTreeMap<String, u32>,
-        batches: &BTreeMap<String, u32>,
-        emitted: &mut BTreeSet<String>,
-        visiting: &mut BTreeSet<String>,
-        output: &mut Vec<Action>,
-    ) -> Result<()> {
-        let Some(&batch_count) = batches.get(token) else {
-            return Ok(());
-        };
-        if emitted.contains(token) {
-            return Ok(());
-        }
-        if !visiting.insert(token.to_owned()) {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                format!("cyclic production dependency detected at '{token}'"),
-            ));
-        }
-        let recipe = self.recipes.get(token).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                format!("planned production token '{token}' lost its recipe"),
-            )
-        })?;
-        let mut inputs: Vec<&str> = recipe
-            .input_tokens
-            .iter()
-            .map(|(input, _)| input.as_str())
-            .collect();
-        inputs.sort_unstable();
-        inputs.dedup();
-        for input in inputs {
-            self.emit_orders(input, requirements, batches, emitted, visiting, output)?;
-        }
-        visiting.remove(token);
-
-        let threshold = requirements.get(token).copied().ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                format!("planned production token '{token}' has no requirement"),
-            )
-        })?;
-        output.push(Action::CreateWorkOrder {
-            name: format!("Auto-JIT: {}", recipe.job_token),
-            job_token: recipe.job_token.clone(),
-            amount: batch_count,
-            conditions: vec![WorkOrderCondition::ItemCountBelow {
-                item_token: token.to_owned(),
-                threshold,
+        self.compile_quotas_work_orders(
+            &[ProductionQuota {
+                item_token: target_token.to_owned(),
+                minimum_stock: target_amount,
             }],
-        });
-        emitted.insert(token.to_owned());
-        Ok(())
+            inventory,
+            ProductionPlanningLimits::default(),
+        )
     }
 }
 
@@ -328,18 +171,12 @@ mod tests {
         let mut inventory = InventoryStockpile::new();
         inventory.set_stock("DRINK", 10);
         inventory.set_stock("PLANT", 50);
-        inventory.set_stock("BARREL", 0); // Out of barrels!
+        inventory.set_stock("BARREL", 0);
         inventory.set_stock("WOOD", 100);
-
-        // Target: 50 drinks (deficit 40 drinks = 8 batches = requires 8 barrels)
         let actions = compiler.compile_quota_work_orders("DRINK", 50, &inventory)?;
-
-        // Should produce 2 work orders: first MakeWoodenBarrel, then BrewDrink
         assert_eq!(actions.len(), 2);
         match &actions[0] {
-            Action::CreateWorkOrder {
-                job_token, amount, ..
-            } => {
+            Action::CreateWorkOrder { job_token, amount, .. } => {
                 assert_eq!(job_token, "MakeWoodenBarrel");
                 assert_eq!(*amount, 8);
             }
@@ -361,7 +198,6 @@ mod tests {
                 ));
             }
         }
-
         Ok(())
     }
 
@@ -370,10 +206,8 @@ mod tests {
         let compiler = ProductionLogisticsCompiler::default();
         let mut inventory = InventoryStockpile::new();
         inventory.set_stock("DRINK", 100);
-
         let actions = compiler.compile_quota_work_orders("DRINK", 50, &inventory)?;
         assert!(actions.is_empty());
-
         Ok(())
     }
 }
