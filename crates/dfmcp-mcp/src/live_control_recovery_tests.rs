@@ -60,7 +60,7 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
     assert!(session.journal.read_only());
     assert_eq!(session.grants.len(), 1);
     assert_eq!(session.grants[0].capability, Capability::Query);
-    let handle = Arc::new(Mutex::new(session));
+    let handle = Arc::new(Mutex::new(Some(session)));
     lock(&SESSIONS)?.insert(id, handle.clone());
     let result = (|| -> Result<()> {
         let first = parse(fortress_query(Some(id.to_string()), None, Some(1), None, None, None))?;
@@ -86,7 +86,7 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
             Digest32::of_bytes(b"prepared").to_string(), "01".repeat(16)))?;
         assert_eq!(committed["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
         let cancelled = parse(fortress_cancel(Some(id.to_string()), Some("prepared".into()),
-            Some(Digest32::of_bytes(b"prepared").to_string()), None, None))?;
+            Some(Digest32::of_bytes(b"prepared").to_string()), None, None, None))?;
         assert_eq!(cancelled["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
         let waited = parse(fortress_wait(Some(id.to_string()), vec!["started".into()], None, None, None))?;
         assert_eq!(waited["result"]["error"]["code"], ErrorCode::CapabilityDenied.as_str());
@@ -95,7 +95,7 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
         assert_eq!(doctor["result"]["recovery_only"], true);
         assert_eq!(doctor["result"]["bridge_connection_present"], false);
         assert!(doctor["result"]["bridge_generation"].is_null());
-        assert!(lock(&handle)?.connection.is_none());
+        assert!(lock(&handle)?.as_ref().is_some_and(|session|session.connection.is_none()));
         Ok(())
     })();
     lock(&SESSIONS)?.remove(&id);
