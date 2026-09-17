@@ -19,8 +19,15 @@ pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 pub(super) mod batch;
 #[path = "query_watch_count.rs"]
 mod counts;
+#[path = "query_condition_evaluation.rs"]
+mod inspection;
 
-pub(super) fn extend_count_schema(schema: Value) -> Result<Value> { counts::extend_schema(schema) }
+pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
+    inspection::extend_schema(counts::extend_schema(schema)?)
+}
+pub(super) fn condition_query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
+    inspection::query(snapshot, context, input)
+}
 pub(super) fn quantity_query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
     counts::quantity::query(snapshot, context, input)
 }
