@@ -107,3 +107,7 @@ fn malformed_internal_measurement_never_becomes_a_zero_or_exact_value() {
         assert!(QuantityBounds::read(&value).is_err());
     }
 }
+
+#[cfg(unix)]
+#[path = "spatial_history_series_handler_tests.rs"]
+mod handler_tests;
