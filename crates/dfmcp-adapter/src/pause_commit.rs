@@ -38,8 +38,9 @@ fn ambiguous<S: EffectJournalStorage>(journal: &mut ControlEffectJournal<S>,
 
 /// Require durable intent before one source invocation and verified, synced
 /// terminal evidence before success. An identical retained native outcome may be
-/// returned without a connection or an action allowance; cancellation is never a
-/// native outcome. Callers must reserve their complete response BEFORE this call.
+/// returned without a connection; cancellation is never a native outcome. Every
+/// call, including replay, still needs a valid core budget and current authority.
+/// Callers must reserve their complete response BEFORE this call.
 pub fn commit_once<S: EffectJournalStorage, Q: PauseCommitSource>(
     journal: &mut ControlEffectJournal<S>, source: &mut Q, key: &str,
     plan: Digest32, token: &[u8;16], context: &OperationContext) -> Result<PauseCommitOutcome> {
@@ -51,6 +52,8 @@ fn commit_with_clock<S: EffectJournalStorage, Q: PauseCommitSource>(
     journal: &mut ControlEffectJournal<S>, source: &mut Q, key: &str,
     plan: Digest32, token: &[u8;16], context: &OperationContext,
     mut elapsed: impl FnMut()->Duration) -> Result<PauseCommitOutcome> {
+    // Core authorization validates every budget dimension, including requiring
+    // nonzero max_actions. Do not replace its InvalidRequest with another code.
     context.authorize(Capability::ControlClock,RiskTier::Reversible,&[],None)?;
     if journal.read_only() {
         return Err(DfmcpError::new(ErrorCode::CapabilityDenied,"offline evidence recovery cannot commit effects"));
@@ -73,9 +76,6 @@ fn commit_with_clock<S: EffectJournalStorage, Q: PauseCommitSource>(
     if record.state.reconciliation_required() {
         return Err(DfmcpError::new(ErrorCode::EffectIndeterminate,
             "a previous commit attempt is unresolved; reconcile without retrying the mutation"));
-    }
-    if context.budget.max_actions==0 {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded,"pause commit requires one action in the request budget"));
     }
     let generation=source.preflight(remaining(context,elapsed())?,context)?;
     if !record.safe_to_dispatch(generation) {
