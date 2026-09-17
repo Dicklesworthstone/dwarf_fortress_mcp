@@ -3,14 +3,13 @@
 //! The session mutex is held by the caller throughout this foreground operation.
 use super::*;
 use std::time::Instant;
+#[path = "spatial_bootstrap.rs"]
+mod bootstrap;
+pub(super) use bootstrap::connect_and_capture;
 
 fn remaining(context: &OperationContext, elapsed: Duration) -> Result<Duration> {
     context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-    Duration::from_millis(context.budget.max_wall_millis)
-        .checked_sub(elapsed)
-        .filter(|remaining| *remaining >= Duration::from_millis(1))
-        .ok_or_else(|| error(ErrorCode::BudgetExceeded,
-            "spatial refresh exhausted its shared capture/validation/publication deadline"))
+    bootstrap::allowance(context.budget, elapsed)
 }
 
 fn custody(session: &mut Session, context: &OperationContext) -> Result<()> {
@@ -32,19 +31,24 @@ struct Candidate {
     target: OperationContext,
 }
 
-fn stage(session: &Session, context: &OperationContext,
-    observation: LiveSpatialCitizenObservation) -> Result<Candidate> {
+fn check_bounds(observation: &LiveSpatialCitizenObservation, limits: CitizenSpatialLimits) -> Result<()> {
     let op = observation.spatial().operations();
-    let limits = session.limits.spatial.operations;
-    if op.jobs.jobs.len() > limits.jobs as usize
-        || op.buildings.len() > limits.buildings as usize
-        || op.items.len() > limits.items as usize
-        || observation.citizens().len() > session.limits.citizens as usize
-        || observation.spatial().terrain().map.region != session.limits.spatial.region
-        || observation.encode_payload()?.len() > limits.payload_bytes {
+    let counts = limits.spatial.operations;
+    if op.jobs.jobs.len() > counts.jobs as usize
+        || op.buildings.len() > counts.buildings as usize
+        || op.items.len() > counts.items as usize
+        || observation.citizens().len() > limits.citizens as usize
+        || observation.spatial().terrain().map.region != limits.spatial.region
+        || observation.encode_payload()?.len() > counts.payload_bytes {
         return Err(error(ErrorCode::BudgetExceeded,
             "spatial/1.8 observation exceeds negotiated acquisition bounds"));
     }
+    Ok(())
+}
+
+fn stage(session: &Session, context: &OperationContext,
+    observation: LiveSpatialCitizenObservation) -> Result<Candidate> {
+    check_bounds(&observation, session.limits)?;
     // The candidate includes entity-generation history. A rejected projection
     // must not burn a generation or advance the session's source observation.
     let mut state = session.state.clone();
@@ -108,7 +112,8 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
                 write_context.budget.max_wall_millis = allowance.as_millis() as u64;
                 // append revalidates custody and Observe at its own canonical
                 // candidate anchor, then syncs before publishing the journal root.
-                // The staging copy is not an alternative to that authority path.
+                // Do not retain both staging copies through the durable append.
+                drop(candidate.state);
                 let outcome = journal.append(candidate.observation, &write_context)?;
                 session.state = journal.state().clone();
                 // No fallible post-sync deadline check may hide a committed root.
@@ -125,3 +130,7 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
     if result.is_err() { session.source.fence(); }
     result
 }
+
+#[cfg(all(test, unix))]
+#[path = "spatial_observation_tests.rs"]
+mod tests;
