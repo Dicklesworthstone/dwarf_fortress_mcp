@@ -185,16 +185,16 @@ fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error()->Re
 }
 
 #[test]
-fn archive_schema_advertises_eighteen_read_variants_including_timelines()->Result<()> {
+fn archive_schema_advertises_nineteen_read_variants_including_condition_inspection()->Result<()> {
     let _serial=lock(&SERIAL)?;let files=Files::new()?;files.populate(2)?;let (s,_)=register(&files,65536)?;
     let result=decode(&fortress_query(s.handle(),Some("schema".into()),None))?;
     assert_eq!(result["ok"],true,"{result}");
     let variants=result["query_schema"]["$defs"]["query"]["oneOf"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"schema variants"))?;
-    assert_eq!(variants.len(),18);
-    for kind in ["historical_changes","historical_series","production_diagnosis","inventory_plan","item_quantity","production_portfolio"] {
+    assert_eq!(variants.len(),19);
+    for kind in ["historical_changes","historical_series","production_diagnosis","inventory_plan","item_quantity","production_portfolio","condition_evaluation"] {
         assert!(variants.iter().any(|v|v["properties"]["kind"]["const"]==kind));
     }
-    assert_eq!(result["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(14));
+    assert_eq!(result["query_schema"]["$defs"]["archive_stateless"]["oneOf"].as_array().map(Vec::len),Some(15));
     for variant in variants {assert_ne!(variant["properties"]["kind"]["const"],"watch");}
     Ok(())
 }
