@@ -35,6 +35,14 @@ where F: FnOnce(Value) -> Result<String> {
     query_history::release_session(session, discard_process_local, publish)
 }
 
+/// Install all missing definitions together. Existing keys replay unchanged;
+/// this never observes the game or independently publishes a partial set.
+pub(crate) fn register_watch_set<F>(snapshot: &WorldSnapshot, context: &OperationContext,
+    input: &Value, publish: F) -> Result<String>
+where F: FnOnce(Value) -> Result<String> {
+    query_watch::batch::registration::execute(snapshot, context, input, publish)
+}
+
 /// Private, single-use preparation: selections cannot be replaced by an MCP
 /// handle after a runtime has acquired the one optional observation.
 pub(crate) type PreparedWatchBatch = query_watch::batch::Prepared;
