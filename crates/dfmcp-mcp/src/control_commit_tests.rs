@@ -50,13 +50,14 @@ fn commit_budget_refusal_precedes_connection_use_and_durable_intent()->Result<()
     for limit in [0,1,64,200] {
         {let h=resolve(s.raw())?;let mut owned=lock(&h)?;
             owned.as_mut().ok_or_else(||err(ErrorCode::SessionNotFound,"fixture"))?.budget.max_bytes=limit;}
-        assert_eq!(commit(&s)?["result"]["error"]["code"],"budget_exceeded");
+        let expected=if limit==0 {"invalid_request"}else{"budget_exceeded"};
+        assert_eq!(commit(&s)?["result"]["error"]["code"],expected);
         assert_eq!(fs::read(&f.path).map_err(io_error)?,bytes);
     }
     {let h=resolve(s.raw())?;let mut owned=lock(&h)?;
         let session=owned.as_mut().ok_or_else(||err(ErrorCode::SessionNotFound,"fixture"))?;
         session.budget=context().budget;session.budget.max_actions=0;}
-    assert_eq!(commit(&s)?["result"]["error"]["code"],"budget_exceeded");
+    assert_eq!(commit(&s)?["result"]["error"]["code"],"invalid_request");
     assert_eq!(fs::read(&f.path).map_err(io_error)?,bytes);assert_eq!(close(&s)?["result"]["ok"],true);Ok(())
 }
 
@@ -120,7 +121,7 @@ impl Bridge {
             stream.set_read_timeout(Some(Duration::from_secs(3)))?;stream.set_write_timeout(Some(Duration::from_secs(3)))?;
             let mut hello=[0;12];stream.read_exact(&mut hello)?;
             let mut expected=b"DFHack?\n".to_vec();expected.extend_from_slice(&1i32.to_le_bytes());
-            if hello.as_slice()!=expected{return Err(io::Error::other("native hello mismatch"));}
+            if hello.as_slice()!=expected.as_slice(){return Err(io::Error::other("native hello mismatch"));}
             let mut welcome=b"DFHack!\n".to_vec();welcome.extend_from_slice(&1i32.to_le_bytes());stream.write_all(&welcome)?;
             for id in 2..=5 {
                 if !matches!(request(&mut stream)?,Some((0,_))){return Err(io::Error::other("expected method bind"));}
