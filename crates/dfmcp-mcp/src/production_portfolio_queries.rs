@@ -1,6 +1,7 @@
 //! Pure query presentation for joint, all-or-nothing task allocation. The parent
 //! workforce module supplies its established whole-row pager and route witnesses.
 use super::*;
+use std::collections::BTreeMap;
 use std::time::Instant;
 use dfmcp_adapter::operations_analysis::MaterialDemand;
 use dfmcp_adapter::workforce_analysis::portfolio::{self as joint, ProductionTask, ProductionPortfolio};
@@ -26,7 +27,7 @@ impl MaterialInput {
 struct TaskInput {
     key: String, priority: Option<u32>, workers: u32, skill_key: String,
     min_effective_skill: Option<i32>, preserve_social: Option<bool>, adults_only: Option<bool>,
-    materials: Vec<MaterialInput>,
+    materials: Vec<MaterialInput>, origin: Option<[u32; 3]>,
 }
 impl TaskInput {
     fn normalized(self) -> ProductionTask {
@@ -49,17 +50,23 @@ struct Input { schema: String, expected_anchor: Option<Value>, query: Request }
 pub(in super::super) fn handles(input: &Value) -> bool {
     input.get("query").and_then(|q| q.get("kind")).and_then(Value::as_str) == Some("production_portfolio")
 }
+fn multisite(report: &ProductionPortfolio) -> bool { report.sites.multiple_origins(report.inventory.origin) }
 fn material_json(d: &MaterialDemand) -> Value {
     json!({"key":d.key,"units":d.units,"item_types":d.item_types,"subtype":d.subtype,
         "material_type":d.material_type,"material_index":d.material_index})
 }
 fn request_json(report: &ProductionPortfolio) -> Value {
-    let mut value=json!({"origin":report.inventory.origin,"quantity_unit":"stack_units","tasks":report.tasks.iter().map(|t|
-        json!({"key":t.key,"priority":t.priority,"workers":t.workers,"skill_key":t.skill_key,
+    let tasks:Vec<_>=report.tasks.iter().enumerate().map(|(i,t)| {
+        let mut task=json!({"key":t.key,"priority":t.priority,"workers":t.workers,"skill_key":t.skill_key,
             "min_effective_skill":t.min_effective_skill,"preserve_social":t.preserve_social,"adults_only":t.adults_only,
-            "materials":t.materials.iter().map(material_json).collect::<Vec<_>>()})).collect::<Vec<_>>()});
-    // Preserve original no-reserve model identities. Null, absent and [] all
-    // mean the legacy model; nonempty pools are canonicalized and hash-bound.
+            "materials":t.materials.iter().map(material_json).collect::<Vec<_>>()});
+        let origin=report.sites.task_origins[i];
+        if origin!=report.inventory.origin {task["origin"]=json!(origin);}
+        task
+    }).collect();
+    let mut value=json!({"origin":report.inventory.origin,"quantity_unit":"stack_units","tasks":tasks});
+    // Absent/null/explicit-default origins retain the common-origin model.
+    // Absent/null/empty reserves likewise retain their original identity.
     if !report.reserves.is_empty() {value["reserves"]=json!(report.reserves.iter().map(material_json).collect::<Vec<_>>());}
     value
 }
@@ -83,6 +90,12 @@ fn cut_json(report: &ProductionPortfolio, index: usize) -> Result<Value> {
         "domain":match rejected.domain {Domain::Workers=>"workers",Domain::Materials=>"materials"},
         "demand_keys":keys,"required_units":cut.required_units,"eligible_units":cut.eligible_units,"deficit":cut.deficit,
         "interpretation":"A Hall-deficient subset under the declared model; not an independently additive or global shortage."});
+    if multisite(report) {
+        value["demand_origins"]=json!(cut.demand_indices.iter().map(|&i| match rejected.domain {
+            Domain::Workers=>report.sites.task_origins.get(i),
+            Domain::Materials=>report.sites.material_origins.get(i),
+        }.copied().ok_or_else(||invariant("shortage site absent"))).collect::<Result<Vec<_>>>()?);
+    }
     if !report.reserves.is_empty() {
         let mut reserves=Vec::new();
         if rejected.domain==Domain::Materials {
@@ -115,6 +128,7 @@ fn row(state: &LiveSpatialCitizenState, report: &ProductionPortfolio, index: usi
             .find(|c| c.entity_id == assignment.supply_id).ok_or_else(|| invariant("joint worker lost its candidate evidence"))?;
         let mut value = candidate_row(state, &report.workforce, assignment.demand_index, candidate)?;
         value["row_kind"] = json!("worker_assignment"); value["task_key"] = json!(report.tasks[assignment.demand_index].key);
+        if multisite(report) {value["origin"]=json!(report.sites.task_origins[assignment.demand_index]);}
         value["worker_slots"] = json!(assignment.units); return Ok(value);
     }
     let index = index - w.len();
@@ -123,7 +137,8 @@ fn row(state: &LiveSpatialCitizenState, report: &ProductionPortfolio, index: usi
         let owner = report.material_owners[assignment.demand_index];
         let demand = &report.inventory.demands[assignment.demand_index];
         let local_key = demand.key.split_once('.').map(|(_, key)| key).ok_or_else(|| invariant("joint material key absent"))?;
-        let location = report.inventory.locations.get(&assignment.supply_id).ok_or_else(|| invariant("joint supply location lost"))?;
+        let site = report.inventory_for(assignment.demand_index)?;
+        let location = site.locations.get(&assignment.supply_id).ok_or_else(|| invariant("joint supply lacks evidence at its assigned site"))?;
         let protected=owner==RESERVE_OWNER;
         let task=if protected {None} else {Some(report.tasks.get(owner).ok_or_else(||invariant("material task owner invalid"))?.key.as_str())};
         let mut value=json!({"row_kind":if protected {"reserve_assignment"}else{"material_assignment"},"task_key":task,"input_key":local_key,
@@ -131,7 +146,8 @@ fn row(state: &LiveSpatialCitizenState, report: &ProductionPortfolio, index: usi
             "ground_root":{"entity_id":location.outermost_item_id.to_string(),"generation":location.outermost_generation},
             "position":location.position,"candidate_steps":location.candidate_steps,
             "route_query":{"schema":"dfmcp.query/1","expected_anchor":anchor_json(report.workforce.anchor),
-                "query":{"kind":"map_route","start":report.inventory.origin,"goal":location.position}}});
+                "query":{"kind":"map_route","start":site.origin,"goal":location.position}}});
+        if multisite(report) {value["origin"]=json!(site.origin);}
         if protected {value["reserve_key"]=json!(local_key);value["consumed_by_selected_tasks"]=json!(false);
             value["reservation_created"]=json!(false);}
         return Ok(value);
@@ -155,13 +171,15 @@ pub(in super::super) fn execute(state: &LiveSpatialCitizenState, context: &Opera
         return Err(budget("invalid production portfolio page bounds"));
     }
     let maximum = max_work.unwrap_or(MAX_WORK);
+    let task_sites:BTreeMap<_,_>=tasks.iter().filter_map(|t|t.origin.map(|site|(t.key.clone(),site))).collect();
     let requested: Vec<_> = tasks.into_iter().map(TaskInput::normalized).collect();
     let reserves:Vec<_>=reserves.unwrap_or_default().into_iter().map(MaterialInput::normalized).collect();
     let elapsed = started.elapsed().as_millis();
     if elapsed >= u128::from(context.budget.max_wall_millis) { return Err(budget("portfolio parsing exhausted its deadline")); }
     let mut timed = context.clone(); timed.budget.max_wall_millis -= elapsed as u64;
-    let report = joint::plan_with_reserves(state, &timed, origin, &requested, &reserves, maximum)?;
-    let policy=if report.reserves.is_empty() {joint::PORTFOLIO_POLICY}else{joint::RESERVE_POLICY};
+    let report = joint::plan_at_sites(state, &timed, origin, &requested, &reserves, &task_sites, maximum)?;
+    let policy=if multisite(&report) {joint::MULTISITE_POLICY}
+        else if report.reserves.is_empty() {joint::PORTFOLIO_POLICY}else{joint::RESERVE_POLICY};
     let shortfall=reserve_shortfall(&report)?;let feasible=shortfall.is_none();
     let model = Digest32::of_bytes(json!({"domain":"dfmcp-production-portfolio-model/1","policy":policy,
         "workforce_policy":workforce::WORKFORCE_POLICY,"supply_policy":dfmcp_adapter::spatial_inventory::SPATIAL_SUPPLY_POLICY,
@@ -188,14 +206,29 @@ pub(in super::super) fn execute(state: &LiveSpatialCitizenState, context: &Opera
         "higher_ranked_sets_rejected":report.selection.rejected.len(),"exclusion_evidence_digest":proof_digest.to_string(),
         "proof_rows_included_in_pagination":true,"candidate_sets_bound":(1usize<<report.tasks.len())-1,
         "flow_calls":report.selection.flow_calls,"work_units":report.work_units});
-    out["tasks"] = json!(report.tasks.iter().enumerate().map(|(i,t)| json!({"key":t.key,"priority":t.priority,
-        "selected":report.selection.task_mask&(1u16<<i)!=0,"workers_requested":t.workers,
-        "workers_assigned":report.selection.workers.allocated_by_demand[i],"worker_candidates":report.workforce.candidates[i].len(),
-        "skill_key_observed":report.workforce.skill_key_observed[i],"worker_classification":report.workforce.classifications[i],
-        "required_material_inputs":t.materials.len()})).collect::<Vec<_>>());
+    out["tasks"] = json!(report.tasks.iter().enumerate().map(|(i,t)| {
+        let mut task=json!({"key":t.key,"priority":t.priority,
+            "selected":report.selection.task_mask&(1u16<<i)!=0,"workers_requested":t.workers,
+            "workers_assigned":report.selection.workers.allocated_by_demand[i],"worker_candidates":report.workforce.candidates[i].len(),
+            "skill_key_observed":report.workforce.skill_key_observed[i],"worker_classification":report.workforce.classifications[i],
+            "required_material_inputs":t.materials.len()});
+        if multisite(&report) {task["origin"]=json!(report.sites.task_origins[i]);}
+        task
+    }).collect::<Vec<_>>());
     out["supply_model"] = json!({"policy":dfmcp_adapter::spatial_inventory::SPATIAL_SUPPLY_POLICY,
-        "candidate_stacks":report.inventory.supplies.len(),"item_classification":report.inventory.item_counts,
+        "candidate_stacks":report.sites.supplies.len(),"item_classification":report.inventory.item_counts,
         "reachable_tiles":report.inventory.reachable_tiles,"touched_region_boundary":report.inventory.touched_region_boundary});
+    if multisite(&report) {
+        out["supply_model"]["default_origin"]=json!(origin);
+        out["supply_model"]["classification_and_reachability_scope"]=json!("default_origin_only; site_counts_are_not_additive");
+        out["supply_model"]["shared_capacity_across_sites"]=json!(true);
+        out["supply_model"]["sites"]=json!(std::iter::once(&report.inventory).chain(report.sites.additional_inventory.values()).map(|site| {
+            let mask=report.sites.material_origins.iter().enumerate().fold(0u32,|mask,(i,p)|
+                if *p==site.origin {mask|(1u32<<i)}else{mask});
+            json!({"origin":site.origin,"candidate_stacks_for_local_demands":report.sites.supplies.iter().filter(|s|s.eligible&mask!=0).count(),
+                "reachable_tiles":site.reachable_tiles,"touched_region_boundary":site.touched_region_boundary})
+        }).collect::<Vec<_>>());
+    }
     let mut protected=0u64;let mut consumed=0u64;let mut pools=Vec::new();
     for (i,demand) in report.inventory.demands.iter().enumerate() {
         let units=report.selection.materials.allocated_by_demand[i];
@@ -207,14 +240,14 @@ pub(in super::super) fn execute(state: &LiveSpatialCitizenState, context: &Opera
         } else {consumed=consumed.checked_add(units).ok_or_else(||budget("task consumption overflow"))?;}
     }
     out["assigned_workers"] = json!(report.selection.workers.allocated_units);
-    // Reserve support is NOT production consumption, especially in empty plans.
     out["assigned_stack_units"] = json!(consumed);
     if !report.reserves.is_empty() {
-        out["reserve_constraints"]=json!({"satisfied":feasible,"pools":pools,"scope":"eligible_supply_at_common_origin",
+        out["reserve_constraints"]=json!({"satisfied":feasible,"pools":pools,
+            "scope":if multisite(&report) {"eligible_supply_at_default_origin"}else{"eligible_supply_at_common_origin"},
             "distinct_units_across_pools":true,"support_units":protected,"partial_support_is_diagnostic_only":!feasible,
             "protected_stack_units":if feasible {protected}else{0},"reservations_created":false});
     }
-    out["interpretation"] = json!("Complete declared tasks share worker capacity one and conservative route-aware stack capacity at one origin. Declared reserve pools use distinct unconsumed units and are mandatory, never priority tradeoffs. This is not inferred native requirements, a reservation, a timed schedule, or authorization to execute.");
+    out["interpretation"] = json!("Complete tasks share worker capacity one and finite conservative stack capacity across declared sites. Each assignment needs a candidate route at its own site. Reserves remain distinct unconsumed units accessible from the default origin. This is not inferred native requirements, a reservation, a carrying assignment, a timed schedule, or authorization to execute.");
     let count = if feasible {report.selection.workers.assignments.len() + report.selection.materials.assignments.len() + report.selection.rejected.len()}else{1};
     let result = paginate(out, count, context, Page { limit, continuation: continuation.as_deref(), prefix: "pp1", identity },
         |i| row(state,&report,i))?;
