@@ -41,6 +41,10 @@ pub struct SpatialInventory {
     pub origin: [u32; 3],
     pub demands: Vec<MaterialDemand>,
     pub allocation: Allocation,
+    /// The complete validated candidate model, including unallocated supplies.
+    /// Masks index `demands`; capacity has not been reserved or consumed. Reuse
+    /// this model rather than a partial allocation when selecting whole tasks.
+    pub supplies: Vec<Supply>,
     pub locations: BTreeMap<u64, LocatedSupply>,
     /// One disjoint primary classification for each observed item.
     pub item_counts: BTreeMap<&'static str, u64>,
@@ -154,7 +158,7 @@ pub fn plan<T: SpatialStateView>(state: &T, context: &OperationContext, origin: 
         DfmcpError::new(if e == flow::AllocationError::InvariantViolation {ErrorCode::InternalInvariantViolation}
             else {ErrorCode::BudgetExceeded},"spatial allocation exceeded bounds or failed certificate validation"))?;
     work.charge(allocation.work_units)?;
-    Ok(SpatialInventory {anchor:snapshot.anchor(),source_digest:state.source_digest()?,origin,demands,allocation,
+    Ok(SpatialInventory {anchor:snapshot.anchor(),source_digest:state.source_digest()?,origin,demands,allocation,supplies,
         locations,item_counts:counts,reachable_tiles:field.visited_tiles,
         touched_region_boundary:field.touched_region_boundary,work_units:work.used})
 }
