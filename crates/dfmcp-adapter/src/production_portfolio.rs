@@ -1,4 +1,4 @@
-//! Task-level production analysis at one declared delivery/working origin.
+//! Task-level production analysis at declared working/delivery origins.
 //! All candidate evidence is taken from the same citizen/spatial observation.
 use super::*;
 use crate::operations_analysis::MaterialDemand;
@@ -7,6 +7,9 @@ use std::time::Duration;
 
 #[path = "production_selection.rs"]
 pub mod selection;
+#[path = "production_sites.rs"]
+pub mod sites;
+pub use sites::{MULTISITE_POLICY, ProductionSites};
 
 pub const PORTFOLIO_POLICY: &str = "joint-complete-tasks-common-origin/1";
 pub const RESERVE_POLICY: &str = "joint-complete-tasks-distinct-protected-reserves/1";
@@ -32,11 +35,24 @@ pub struct ProductionPortfolio {
     /// and do not establish actual reservations or global inventory thresholds.
     pub reserves: Vec<MaterialDemand>,
     pub workforce: WorkforceAnalysis,
+    /// Default-site evidence, not a claim that every task is located there.
     pub inventory: SpatialInventory,
+    pub sites: ProductionSites,
     /// Task index or selection::RESERVE_OWNER, aligned to inventory.demands.
     pub material_owners: Vec<usize>,
     pub selection: selection::Selection,
     pub work_units: u64,
+}
+impl ProductionPortfolio {
+    /// Exact spatial evidence for one material demand. Never use a default-site
+    /// distance to explain an assignment at a different site.
+    pub fn inventory_for(&self, demand: usize) -> Result<&SpatialInventory> {
+        let origin = self.sites.material_origins.get(demand)
+            .ok_or_else(|| invariant("production demand has no spatial origin"))?;
+        if *origin == self.inventory.origin { Ok(&self.inventory) }
+        else { self.sites.additional_inventory.get(origin)
+            .ok_or_else(|| invariant("production demand site evidence is absent")) }
+    }
 }
 fn remaining_context(context: &OperationContext, work: &mut Work) -> Result<OperationContext> {
     work.charge(0)?;
@@ -61,7 +77,6 @@ fn validate_material(material: &MaterialDemand) -> Result<()> {
     Ok(())
 }
 fn normalize_materials(input: &[MaterialDemand]) -> Result<Vec<MaterialDemand>> {
-    // Raw cardinalities are validated before deduplication.
     for demand in input { validate_material(demand)?; }
     let mut demands = input.to_vec();
     demands.sort_by(|a,b| a.key.cmp(&b.key));
@@ -104,23 +119,31 @@ pub fn plan(state: &LiveSpatialCitizenState, context: &OperationContext, origin:
     plan_with_reserves(state,context,origin,requested,&[],maximum_work)
 }
 
-/// All selected task inputs AND every reserve pool must be supported by distinct
-/// units of the same eligible supply. Reserves have no priority and are never
-/// dropped to improve the task score. Infeasible reserves produce a shortage in
-/// selection.materials, zero selected tasks and no feasible optimum claim.
-/// This models retained usable stock at the common origin, not storage commands,
-/// exact container capacities, carrying assignments or future production outputs.
+/// Preserve the common-origin API. Reserves are hard, distinct capacity demands,
+/// never relaxed to improve task priority and never actual inventory locks.
 pub fn plan_with_reserves(state: &LiveSpatialCitizenState, context: &OperationContext, origin: [u32; 3],
     requested: &[ProductionTask], requested_reserves: &[MaterialDemand], maximum_work: u64) -> Result<ProductionPortfolio> {
+    plan_at_sites(state,context,origin,requested,requested_reserves,&BTreeMap::new(),maximum_work)
+}
+
+/// Named overrides locate tasks independently. Unspecified tasks and every
+/// reserve remain at origin. Worker and material candidate routes must reach
+/// their owning task's site; a stack or citizen still has ONE global capacity.
+/// Uses complete candidate pools, not the results of independent partial flows.
+/// All sites, including losing tasks, must be valid observed candidate tiles.
+pub fn plan_at_sites(state: &LiveSpatialCitizenState, context: &OperationContext, origin: [u32; 3],
+    requested: &[ProductionTask], requested_reserves: &[MaterialDemand],
+    task_sites: &BTreeMap<String, [u32; 3]>, maximum_work: u64) -> Result<ProductionPortfolio> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let mut work = Work::new(context, maximum_work)?;
     if requested_reserves.len() > MAX_RESERVE_POOLS { return Err(exhausted("production permits at most eight reserve pools")); }
     let tasks = normalize_tasks(requested)?;
     let reserves = normalize_materials(requested_reserves)?;
+    let task_origins = sites::normalize(origin, &tasks, task_sites)?;
     let total_materials = tasks.iter().map(|t|t.materials.len()).sum::<usize>() + reserves.len();
     if total_materials > flow::MAX_DEMANDS { return Err(exhausted("task inputs plus reserve pools exceed 32 material demands")); }
-    let worker_demands: Vec<_> = tasks.iter().map(|t| WorkforceDemand {
-        key: t.key.clone(), workers: t.workers, target: origin, skill_key: t.skill_key.clone(),
+    let worker_demands: Vec<_> = tasks.iter().enumerate().map(|(i,t)| WorkforceDemand {
+        key: t.key.clone(), workers: t.workers, target: task_origins[i], skill_key: t.skill_key.clone(),
         min_effective_skill: t.min_effective_skill, preserve_social: t.preserve_social, adults_only: t.adults_only,
     }).collect();
     let workforce = analyze_inner(state, context, &worker_demands, &mut work)?;
@@ -150,6 +173,7 @@ pub fn plan_with_reserves(state: &LiveSpatialCitizenState, context: &OperationCo
     }
     let material_owners = inventory.demands.iter().map(|d| owners.get(&d.key).copied()
         .ok_or_else(|| invariant("joint material owner was lost during normalization"))).collect::<Result<Vec<_>>>()?;
+    let sites = sites::analyze(state, context, &inventory, task_origins, &material_owners, &mut work)?;
     let mut eligible = BTreeMap::<u64, u32>::new();
     for (demand, candidates) in workforce.candidates.iter().enumerate() {
         for candidate in candidates {
@@ -165,12 +189,12 @@ pub fn plan_with_reserves(state: &LiveSpatialCitizenState, context: &OperationCo
     let timed = remaining_context(context, &mut work)?;
     let selected = selection::select(&scores,
         selection::Model { supplies: &workers, demands: &worker_model, owners: &worker_owners },
-        selection::Model { supplies: &inventory.supplies, demands: &material_model, owners: &material_owners },
+        selection::Model { supplies: &sites.supplies, demands: &material_model, owners: &material_owners },
         work.remaining(), Duration::from_millis(timed.budget.max_wall_millis)).map_err(|e| match e {
             flow::AllocationError::InvalidInput | flow::AllocationError::InvariantViolation => invariant("joint production model or certificate is inconsistent"),
             _ => exhausted("joint production planning exceeded work, time or arithmetic bounds; no partial optimum returned"),
         })?;
     work.charge(selected.work_units)?;
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    Ok(ProductionPortfolio { tasks, reserves, workforce, inventory, material_owners, selection: selected, work_units: work.used })
+    Ok(ProductionPortfolio { tasks, reserves, workforce, inventory, sites, material_owners, selection: selected, work_units: work.used })
 }
