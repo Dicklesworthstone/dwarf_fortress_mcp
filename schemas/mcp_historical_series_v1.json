@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Historical resource quantity series",
-  "description": "Project every retained record in an exact inclusive interval, in bounded pages. Only stateless item_quantity measurements are supported. The runtime replaces the closed measurement placeholder with the authoritative quantity-query schema. Rates describe endpoint net changes, not consumption, production, forecasts or continuous observations.",
+  "title": "Historical quantity and condition series",
+  "description": "Project every retained record in an exact inclusive interval, in bounded pages. Stateless item_quantity and condition_evaluation measurements reuse their authoritative query schemas. Quantity rates describe endpoint net changes; condition classifications never infer stability, deadline compliance, current state or watch completion. No capture or retained watch is advanced.",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "from", "to", "measurement"],
@@ -24,7 +24,7 @@
       }
     },
     "measurement": {
-      "description": "Closed until composed with mcp_item_quantity_v1.json query and its existing predicate definitions.",
+      "description": "Closed until composed with the union of the authoritative item_quantity and condition_evaluation schemas and the existing shared predicate definitions.",
       "not": {}
     },
     "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 32, "default": 8},
