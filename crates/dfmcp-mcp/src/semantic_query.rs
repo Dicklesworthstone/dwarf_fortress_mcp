@@ -78,6 +78,7 @@ pub fn execute(snapshot: &WorldSnapshot, context: &OperationContext, input: &Val
     match input.get("query").and_then(|query| query.get("kind")).and_then(Value::as_str) {
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
+        Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         _ => core_query::execute(snapshot, context, input),
     }
 }
