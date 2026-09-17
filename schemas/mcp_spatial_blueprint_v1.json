@@ -1,0 +1,63 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "origin", "template"],
+  "properties": {
+    "kind": {"const": "blueprint_layout"},
+    "origin": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+    "template": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "rooms_count", "room_size"],
+          "properties": {
+            "kind": {"const": "bedroom_cluster"},
+            "rooms_count": {"type": "integer", "minimum": 1, "maximum": 24},
+            "room_size": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 1, "maximum": 255}}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "width", "height"],
+          "properties": {
+            "kind": {"const": "dining_hall"},
+            "width": {"type": "integer", "minimum": 1, "maximum": 255},
+            "height": {"type": "integer", "minimum": 1, "maximum": 255}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "bays_count"],
+          "properties": {
+            "kind": {"const": "workshop_hub"},
+            "bays_count": {"type": "integer", "minimum": 1, "maximum": 24}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "width", "height", "category"],
+          "properties": {
+            "kind": {"const": "stockpile_vault"},
+            "width": {"type": "integer", "minimum": 1, "maximum": 255},
+            "height": {"type": "integer", "minimum": 1, "maximum": 255},
+            "category": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000]+$"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "min", "max", "drawbridge_span"],
+          "properties": {
+            "kind": {"const": "defensive_moat"},
+            "min": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+            "max": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+            "drawbridge_span": {"type": "integer", "minimum": 0, "maximum": 255}
+          }
+        }
+      ]
+    },
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+    "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 262144},
+    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^sp1:[1-9][0-9]*:[0-9a-f]{64}$"}
+  },
+  "description": "Read-only disjoint excavation geometry, footprint/halo visibility and observed attributes. Not a prepared plan, safe site, native eligibility, or a built room/bridge."
+}

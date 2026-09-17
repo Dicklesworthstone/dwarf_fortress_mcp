@@ -45,3 +45,59 @@ missing-coverage, span, zero-dimension and false-completion checks where present
 Rust/Cargo/rustfmt are unavailable in the editing environment: these tests have
 not been compiled or executed there. Independent Python geometry checks are
 reference evidence only, not Rust, MCP, native DFHack or live-game qualification.
+
+## Coherent spatial query
+
+The existing read-only spatial `fortress.query` handler accepts
+`blueprint_layout`. It uses the same captured terrain and source anchor as the
+other spatial queries; it does not acquire another native frame. This is a query
+preview, not `fortress.plan` or `fortress.commit`.
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "blueprint_layout",
+    "origin": [10, 10, 5],
+    "template": {
+      "kind": "bedroom_cluster",
+      "rooms_count": 20,
+      "room_size": [3, 3]
+    },
+    "limit": 8
+  }
+}
+```
+
+The five template variants and their closed inputs are published in
+`schemas/mcp_spatial_blueprint_v1.json`. Input coordinates are 0..32767. Derived
+corridors outside the map are reported explicitly, not clamped or declared safe.
+Moat templates use absolute `min`, `max` and `drawbridge_span` fields; `origin`
+is still required by the common request but does not translate the moat.
+
+Each row reports its disjoint cuboid, role, dig mode, tile count and native
+coverage. The full summary distinguishes visible, hidden, unallocated,
+outside-capture and outside-map positions, both over the footprint and the unique
+one-tile three-dimensional halo. Only visible cells contribute shape, liquid,
+occupancy and existing-designation counts. A reserved moat crossing has separate
+coverage and is never counted as excavation. `all_positions_visible` describes
+coverage only, not hazard absence or suitability.
+
+`max_work` bounds conservative cell visits, including map validation, per-part and
+total footprint reads, repeated halo insertions, halo reads and crossing reads.
+The hard ceiling is 262,144. Pages are whole-row and byte/token bounded; their
+continuations bind session, anchor, source, origin, policy and analysis. Page
+width may change without reallocating geometry. Changed captures or requests
+require restarting the query.
+
+Every result keeps `plan_created`, `commit_compatible`, `reservation_created`,
+`safety_proven`, `excavation_eligibility_proven` and `completion_proven` false.
+Aquifers, water pressure, structural support, protected areas and native unit
+access remain unknown. No archive whitelist or new bridge write is introduced.
+
+Additional Rust regressions cover presence accounting, missing vertical halo,
+out-of-map corridors, separate crossing coverage, work bounds, schema discovery,
+authority and stale anchors, input smuggling and complete-envelope pagination
+through the live spatial handler. These Rust tests are not executed in this
+environment. The JSON Schema was independently validated in Python: five valid
+templates accepted and fifteen malformed/adversarial requests rejected.

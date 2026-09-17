@@ -58,7 +58,7 @@ fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill()->Result<(
     assert_eq!(route["ok"],true);assert_eq!(route["model_steps"],3);assert_eq!(route["anchor"],p["anchor"]);
     assert_eq!(route["source_digest"],p["source_digest"]);assert_eq!(route["unit_path_proven"],false);
     let schema=decode(&fortress_query(s.handle(),Some("schema".to_owned()),None))?;assert_eq!(schema["ok"],true);
-    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(20));
+    assert_eq!(schema["query_schema"]["$defs"]["query"]["oneOf"].as_array().map(Vec::len),Some(21));
     assert_eq!(s.calls.load(Ordering::SeqCst),0);Ok(())
 }
 #[test]
@@ -143,3 +143,34 @@ fn authority_region_and_profile_rejections_do_not_touch_the_bridge()->Result<()>
 #[cfg(unix)]
 #[path="spatial_history_tests.rs"]
 mod history_cases;
+
+#[test]
+fn blueprint_preview_pages_use_one_capture_and_preserve_effect_refusal()->Result<()>{
+    let _serial=lock(&SERIAL)?;let s=register(2048,vec![Capability::Query,Capability::Observe])?;
+    let mut q=json!({"kind":"blueprint_layout","origin":[2,0,5],
+        "template":{"kind":"bedroom_cluster","rooms_count":4,"room_size":[3,3]},"limit":1});
+    let first=ask(&s,q.clone())?;assert_eq!(first["ok"],true,"{first}");
+    assert_eq!(first["total_rows"],10);assert_eq!(first["status"],"geometry_preview_only");
+    assert!(first["continuation"].is_string());
+    let mut indices=Vec::new();let mut pages=0;
+    loop{
+        let raw=fortress_query(s.handle(),None,Some(json!({"schema":"dfmcp.query/1","query":q.clone()})));
+        assert!(raw.len()<=8192);let page=decode(&raw)?;assert_eq!(page["ok"],true,"{raw}");
+        assert_eq!(page["anchor"],first["anchor"]);assert_eq!(page["summary"],first["summary"]);
+        for key in ["safety_proven","completion_proven","commit_compatible","plan_created","reservation_created"]{
+            assert_eq!(page[key],false,"{key}");
+        }
+        for row in page["rows"].as_array().ok_or_else(||error(ErrorCode::InvalidRequest,"blueprint rows absent"))?{
+            indices.push(row["part_index"].as_u64().ok_or_else(||error(ErrorCode::InvalidRequest,"blueprint part index absent"))?);
+        }
+        pages+=1;assert!(pages<=10);if page["continuation"].is_null(){break;}
+        q["continuation"]=page["continuation"].clone();q["limit"]=json!(3);
+    }
+    assert_eq!(indices,(0..10u64).collect::<Vec<_>>());assert!(pages>1);
+    assert_eq!(s.calls.load(Ordering::SeqCst),0);
+    assert_eq!(decode(&fortress_commit(s.handle()))?["error"]["code"],"capability_denied");
+    assert_eq!(decode(&fortress_observe(s.handle()))?["ok"],true);
+    q["continuation"]=first["continuation"].clone();
+    assert_eq!(ask(&s,q)?["error"]["code"],"stale_anchor");
+    assert_eq!(s.calls.load(Ordering::SeqCst),1);Ok(())
+}
