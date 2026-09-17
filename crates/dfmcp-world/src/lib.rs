@@ -20,6 +20,7 @@ pub mod search;
 pub mod spatial_index;
 pub mod sqlite_ledger;
 pub mod topology;
+pub mod workforce_allocation;
 
 pub use franken_fs::{
     ArchiveBlock, BLOCK_CHUNK_SIZE, SavegameArchive, SavegameScrubber, ScrubReport,
