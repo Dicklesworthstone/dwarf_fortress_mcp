@@ -9,6 +9,9 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use super::anchor_json;
 
+#[path = "production_chain_compare.rs"]
+mod comparisons;
+
 const POLICY: &str = "dfmcp.production-chain-query/1";
 fn invalid(s: &str) -> DfmcpError { DfmcpError::new(ErrorCode::InvalidRequest, s) }
 fn budget(s: &str) -> DfmcpError { DfmcpError::new(ErrorCode::BudgetExceeded, s) }
@@ -67,6 +70,7 @@ enum Query {
 
 pub(super) fn handles(input: &Value) -> bool {
     input.get("query").and_then(|v| v.get("kind")).and_then(Value::as_str) == Some("production_chain")
+        || comparisons::handles(input)
 }
 fn validate_shape(input: &Value) -> Result<()> {
     let mut pending = vec![(input, 0usize)]; let mut nodes = 0usize; let mut bytes = 0usize;
@@ -230,6 +234,7 @@ fn paginate(mut out: Value, rows: &[Value], c: &OperationContext, limit: u32,
 }
 
 pub(super) fn execute<S: OperationsStateView + ?Sized>(state: &S, c: &OperationContext, input: &Value) -> Result<Value> {
+    if comparisons::handles(input) { return comparisons::execute(state, c, input); }
     let started = Instant::now();
     c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     validate_shape(input)?;
@@ -259,7 +264,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     let query: Value = serde_json::from_str(include_str!("../../../schemas/mcp_production_chain_v1.json"))
         .map_err(|_| invariant("embedded production-chain schema invalid"))?;
     schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(|| invariant("query schema variants absent"))?.push(query);
-    Ok(schema)
+    comparisons::extend_schema(schema)
 }
 
 #[cfg(test)]

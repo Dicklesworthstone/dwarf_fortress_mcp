@@ -96,3 +96,6 @@ fn fenced_or_unauthorized_sources_cannot_be_used_for_chain_planning() -> Result<
     assert_eq!(ask(&s, query())?["error"]["code"], "capability_denied");
     assert_eq!(s.calls.load(Ordering::SeqCst), 0); Ok(())
 }
+
+#[path = "production_chain_compare_runtime_tests.rs"]
+mod comparisons;
