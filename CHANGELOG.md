@@ -8,6 +8,11 @@ readiness.
 
 ### Added
 
+- Native pause preparation fencing, bounded token lifetime, map-incarnation invalidation
+  and setter/readback exception confinement. The actual handler regressions pass on GCC
+  and Clang with native/protobuf doubles, not a real plugin or live game qualification.
+  See `docs/NATIVE_PAUSE_FENCING.md` and `CHANGELOG.d/native-pause-fencing.md`.
+
 - Operational situation briefings and deterministic attention in the live spatial/1.8 loop:
   seven native-evidence rules, explicit unknown counts, bounded generation/anchor-bound inspection
   links, compact tactical alerts and `fortress.query` mode `situation` for detailed orientation.

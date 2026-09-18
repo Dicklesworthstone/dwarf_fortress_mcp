@@ -43,6 +43,21 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Native pause preparation fencing
+
+`docs/NATIVE_PAUSE_FENCING.md` documents local dispatch-sequence and pause-state
+revalidation, a 60-second monotonic preparation lifetime, map-incarnation resets,
+and exception-safe receipt handling. Old preparations cannot override newer native
+setter attempts, including no-ops and ambiguous failures. Token/receipt formats,
+RPC methods, durable coordination and production admission are unchanged.
+
+Ten grouped actual-handler C++ scenarios passed with explicit DFHack/protobuf doubles
+on GCC and Clang with UBSan, and optimized GCC. A removed-gate mutant fails; the
+upstream handler reproduces the stale-unpause defect. This is not Rust, real plugin,
+protobuf-runtime, live-game or full-repository qualification. It does not implement
+bounded simulation advancement or fence external controllers.
+
+
 ### Operational situation and attention in the live spatial loop
 
 `docs/SPATIAL_SITUATION.md` describes the fixed `dfmcp.spatial-situation/1` derivation integrated into
