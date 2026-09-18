@@ -8,14 +8,18 @@ use dfmcp_core::Digest32;
 #[path="operations_production.rs"]
 mod shared;
 
+#[path="production_chain_query.rs"]
+mod chain;
+
 pub(super) fn handles(input: &Value) -> bool {
-    shared::handles(input) || workforce_queries::portfolio::handles(input)
+    chain::handles(input) || shared::handles(input) || workforce_queries::portfolio::handles(input)
 }
 pub(super) fn extend_schema(base: Value) -> Result<Value> {
-    workforce_queries::portfolio::extend_schema(shared::extend_schema(base)?)
+    chain::extend_schema(workforce_queries::portfolio::extend_schema(shared::extend_schema(base)?)?)
 }
 pub(super) fn execute(state: &LiveSpatialCitizenState, context: &OperationContext, input: &Value) -> Result<Value> {
-    if workforce_queries::portfolio::handles(input) { workforce_queries::portfolio::execute(state,context,input) }
+    if chain::handles(input) { chain::execute(state,context,input) }
+    else if workforce_queries::portfolio::handles(input) { workforce_queries::portfolio::execute(state,context,input) }
     else { shared::execute(state,context,input) }
 }
 
