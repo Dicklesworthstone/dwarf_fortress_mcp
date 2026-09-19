@@ -9,9 +9,9 @@ use dfmcp_adapter::operations_journal::{JournalEntry,JournalLimits,SpatialCitize
 use dfmcp_core::Digest32;
 
 pub(super) type Journal=SpatialCitizenJournal<PrivateJournalFile>;
-const STATELESS: [&str;13] = ["entities","inspect","traverse","dependencies","aggregate","search",
+const STATELESS: [&str;14] = ["entities","inspect","traverse","dependencies","aggregate","search",
     "map_route","spatial_inventory_plan","production_diagnosis","inventory_plan","item_quantity","production_portfolio",
-    "condition_evaluation"];
+    "condition_evaluation","map_connectivity"];
 
 pub(super) fn configuration()->Result<Option<(PathBuf,TailRecovery)>>{
     let path=match std::env::var("DFMCP_SPATIAL_CITIZEN_JOURNAL"){
@@ -148,3 +148,8 @@ pub(super) fn schema()->Result<Value>{
     variants.push(changes::series::schema()?);
     variants.push(changes::monitor::schema()?);Ok(schema)
 }
+
+
+#[cfg(all(test,unix))]
+#[path="spatial_connectivity_handler_tests.rs"]
+mod connectivity_tests;

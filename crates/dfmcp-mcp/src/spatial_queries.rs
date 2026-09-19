@@ -11,6 +11,8 @@ use super::anchor_json;
 
 #[path = "spatial_blueprint.rs"]
 mod blueprint;
+#[path = "spatial_connectivity.rs"]
+mod connectivity;
 
 fn invalid(s:&str)->DfmcpError{DfmcpError::new(ErrorCode::InvalidRequest,s)}
 fn budget(s:&str)->DfmcpError{DfmcpError::new(ErrorCode::BudgetExceeded,s)}
@@ -21,6 +23,7 @@ struct Envelope{schema:String,expected_anchor:Option<Value>,query:Query}
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
 enum Query{
     BlueprintLayout(blueprint::Request),
+    MapConnectivity(connectivity::Request),
     MapRoute{start:[u32;3],goal:[u32;3],limit:Option<u32>,continuation:Option<String>,max_work:Option<u64>},
     SpatialInventoryPlan{origin:[u32;3],quantity_unit:QuantityUnit,demands:Vec<DemandInput>,
         limit:Option<u32>,continuation:Option<String>,max_work:Option<u64>},
@@ -36,7 +39,7 @@ impl From<DemandInput> for MaterialDemand{
         subtype:d.subtype,material_type:d.material_type,material_index:d.material_index}}
 }
 pub(super) fn handles(input:&Value)->bool{
-    matches!(input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str),Some("map_route"|"spatial_inventory_plan"|"blueprint_layout"))
+    matches!(input.get("query").and_then(|v|v.get("kind")).and_then(Value::as_str),Some("map_route"|"spatial_inventory_plan"|"blueprint_layout"|"map_connectivity"))
 }
 fn validate(input:&Value)->Result<()>{
     let mut pending=vec![(input,0usize)];let mut nodes=0usize;let mut bytes=0usize;
@@ -104,6 +107,7 @@ pub(super) fn execute<T:SpatialStateView>(state:&T,c:&OperationContext,input:&Va
     let source=state.source_digest()?;
     match envelope.query{
         Query::BlueprintLayout(request)=>blueprint::execute(state,c,source,request),
+        Query::MapConnectivity(request)=>connectivity::execute(state,c,source,request),
         Query::MapRoute{start,goal,limit,continuation,max_work}=>{
             let max_work=max_work.unwrap_or(1_000_000);
             let map=&state.spatial_observation().ok_or_else(||invalid("spatial source absent"))?.terrain().map;
@@ -149,6 +153,7 @@ pub(super) fn schema()->Result<Value>{
     route["properties"]["continuation"]["oneOf"][1]["pattern"]=json!("^sp1:[1-9][0-9]*:[0-9a-f]{64}$");
     let inventory:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_inventory_v1.json")).map_err(|_|invalid("spatial schema invalid"))?;
     let blueprint:Value=serde_json::from_str(include_str!("../../../schemas/mcp_spatial_blueprint_v1.json")).map_err(|_|invalid("blueprint schema invalid"))?;
+    let connectivity:Value=serde_json::from_str(include_str!("../../../schemas/mcp_map_connectivity_v1.json")).map_err(|_|invalid("connectivity schema invalid"))?;
     let variants=base["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(||invalid("base query variants absent"))?;
-    variants.push(route);variants.push(inventory);variants.push(blueprint);Ok(base)
+    variants.push(route);variants.push(inventory);variants.push(blueprint);variants.push(connectivity);Ok(base)
 }

@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind"],
+  "properties": {
+    "kind": {"const": "map_connectivity"},
+    "landmarks": {
+      "type": "array", "maxItems": 128,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["key", "position"],
+        "properties": {
+          "key": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$", "not": {"pattern": "[^A-Za-z0-9._-]"}},
+          "position": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}}
+        }
+      }
+    },
+    "section": {"type": ["string", "null"], "enum": [null, "all", "components", "bottlenecks", "bridges", "landmarks"]},
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+    "continuation": {"type": ["string", "null"], "maxLength": 128, "pattern": "^sp1:[1-9][0-9]{0,5}:[0-9a-f]{64}$", "not": {"type": "string", "pattern": "[^sp0-9:a-f]"}},
+    "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000000}
+  },
+  "description": "Complete connected-component, articulation-tile and graph-bridge analysis within the captured dry cardinal floor/complementary-stair route model. Landmarks have unique keys (enforced by the runtime); absent/excluded coordinates are unestablished. Whole-row pages do not truncate the derivation. No native unit connectivity, safe demolition, evacuation, global disconnection or mutation authority is proved."
+}

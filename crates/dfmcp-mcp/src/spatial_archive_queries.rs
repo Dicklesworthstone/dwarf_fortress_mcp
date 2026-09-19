@@ -3,9 +3,9 @@
 //! Historical monitor replay is request-owned analysis, not a live watch sample.
 use super::*;
 
-const READ_KINDS: [&str;15] = ["entities","inspect","traverse","dependencies","aggregate","search",
+const READ_KINDS: [&str;16] = ["entities","inspect","traverse","dependencies","aggregate","search",
     "map_route","spatial_inventory_plan","workforce_candidates","workforce_plan",
-    "production_diagnosis","inventory_plan","item_quantity","production_portfolio","condition_evaluation"];
+    "production_diagnosis","inventory_plan","item_quantity","production_portfolio","condition_evaluation","map_connectivity"];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
