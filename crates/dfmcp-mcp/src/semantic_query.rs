@@ -26,6 +26,9 @@ pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
 /// Dropping it releases only process-local ownership, never durable intent.
 pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
 
+/// Request-owned sampled replay; this type has no retained watch-store ownership.
+pub(crate) type HistoricalWatchReplay = query_watch::HistoricalWatchReplay;
+
 /// The runtime must exclusively own the resolved session across this call.
 /// This release-only path returns no world facts, does not evaluate predicates,
 /// and never changes journal bytes. Render failure leaves both registries intact.

@@ -21,6 +21,9 @@ pub(super) mod batch;
 mod counts;
 #[path = "query_condition_evaluation.rs"]
 mod inspection;
+#[path = "query_watch_replay.rs"]
+mod replay;
+pub(super) use replay::Replay as HistoricalWatchReplay;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
     inspection::extend_schema(counts::extend_schema(schema)?)

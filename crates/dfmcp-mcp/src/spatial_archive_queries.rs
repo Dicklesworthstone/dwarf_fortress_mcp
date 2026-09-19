@@ -1,5 +1,6 @@
 //! Stateless queries against exact archived spatial/1.8 records. No monitoring
 //! registration/evaluation, baseline mutation, observation or game effect is routed.
+//! Historical monitor replay is request-owned analysis, not a live watch sample.
 use super::*;
 
 const READ_KINDS: [&str;15] = ["entities","inspect","traverse","dependencies","aggregate","search",
@@ -140,6 +141,7 @@ fn schema()->Result<Value> {
         "record_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"query":{"$ref":"#/$defs/archive_stateless"}}}));
     all.push(history::changes::schema()?);
     all.push(history::changes::series::schema()?);
+    all.push(history::changes::monitor::schema()?);
     schema["$defs"]["query"]["oneOf"]=json!(all);
     Ok(schema)
 }

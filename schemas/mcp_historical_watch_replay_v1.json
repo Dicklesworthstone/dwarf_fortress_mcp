@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "from", "to", "definition"],
+  "properties": {
+    "kind": {"const": "historical_watch_replay"},
+    "from": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "to": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record", "record_digest"],
+      "properties": {
+        "record": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "record_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "definition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["condition", "deadline_tick"],
+      "properties": {
+        "condition": {"$ref": "#/$defs/watch_condition"},
+        "failure_condition": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/watch_condition"}]},
+        "deadline_tick": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "poll_interval_ticks": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 1000000}]},
+        "stable_observations": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 64}]}
+      }
+    },
+    "detail": {"oneOf": [{"type": "null"}, {"enum": ["summary", "evidence"]}]}
+  },
+  "description": "Retrospectively run the foreground monitor over 1..32 consecutive exact archived records. The first record acts as registration. Original deadlines, cadence, stability and failure/identity rules are evaluated without registering or changing any watch. This proves only the result of the declared sampled replay, not original watch activity, continuous game conditions or action completion. Cross-field bounds and canonical predicates are validated at runtime."
+}

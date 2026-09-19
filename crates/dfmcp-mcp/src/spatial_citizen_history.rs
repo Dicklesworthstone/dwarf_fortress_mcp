@@ -145,5 +145,6 @@ pub(super) fn schema()->Result<Value>{
     let additions=extra["oneOf"].as_array().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"history schema has no variants"))?;
     let variants=schema["$defs"]["query"]["oneOf"].as_array_mut().ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query schema has no variants"))?;
     variants.extend(additions.iter().cloned());variants.push(changes::schema()?);
-    variants.push(changes::series::schema()?);Ok(schema)
+    variants.push(changes::series::schema()?);
+    variants.push(changes::monitor::schema()?);Ok(schema)
 }

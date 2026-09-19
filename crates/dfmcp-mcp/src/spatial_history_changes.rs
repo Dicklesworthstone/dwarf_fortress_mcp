@@ -9,6 +9,8 @@ use dfmcp_world::WorldSnapshot;
 
 #[path = "spatial_history_series.rs"]
 pub(in super::super) mod series;
+#[path = "spatial_history_watch_replay.rs"]
+pub(in super::super) mod monitor;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,7 +28,7 @@ fn invalid(text: &str) -> DfmcpError { error(ErrorCode::InvalidRequest, text) }
 fn bounded(text: &str) -> DfmcpError { error(ErrorCode::BudgetExceeded, text) }
 
 pub(in super::super) fn handles(input: &Value) -> bool {
-    series::handles(input) || input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str) == Some("historical_changes")
+    monitor::handles(input) || series::handles(input) || input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str) == Some("historical_changes")
 }
 pub(in super::super) fn schema() -> Result<Value> {
     serde_json::from_str(include_str!("../../../schemas/mcp_historical_changes_v1.json"))
@@ -98,6 +100,7 @@ fn render(session: &Session, context: &OperationContext, target: &JournalEntry,
 }
 
 pub(in super::super) fn execute(session: &mut Session, context: &OperationContext, input: &Value) -> Result<String> {
+    if monitor::handles(input) { return monitor::execute(session,context,input); }
     if series::handles(input) { return series::execute(session,context,input); }
     let started=Instant::now(); remaining(context,started)?; shape(input)?;
     if session.anchor()?!=context.anchor { return Err(error(ErrorCode::StaleAnchor,"comparison context is not the current session anchor")); }
