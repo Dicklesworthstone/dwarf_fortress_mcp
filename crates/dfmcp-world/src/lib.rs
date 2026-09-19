@@ -8,6 +8,7 @@ mod delta;
 pub mod franken_fs;
 pub mod graph_query;
 pub mod inventory_allocation;
+pub mod journal_delta;
 mod ledger;
 pub mod map_reachability;
 pub mod map_region;
