@@ -18,6 +18,7 @@ pub mod fenced_live_source;
 pub mod fenced_live_source_v1_1;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;
+pub mod job_suspension;
 pub mod legacy_bridge_probe;
 pub mod live_adapter;
 pub mod live_adapter_v1_1;
