@@ -1,0 +1,45 @@
+{
+  "compiler": "clang version 17.0.0 (https://github.com/swiftlang/llvm-project.git 10999b6d034fe318f3d56c83bddb6572593a8bb0)",
+  "engine_assertions": 729,
+  "engine_groups": 6,
+  "evidence_scope": "actual C++ engine/handler with explicit DFHack and protobuf doubles",
+  "flags": [
+    "-std=c++17",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-pedantic",
+    "-O1",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all"
+  ],
+  "handler_assertions": 348,
+  "handler_groups": 5,
+  "independent_vectors": 5,
+  "not_established": [
+    "generated protobuf serialization",
+    "real DFHack field access and suspension",
+    "Rust execution",
+    "live fortress behavior",
+    "durable restart coordination",
+    "admission"
+  ],
+  "rejected_compiled_mutants": [
+    "missing_commit_witness",
+    "missing_replay_fence",
+    "unchecked_created_queue",
+    "missing_uncertainty_fence"
+  ],
+  "schema": "dfmcp.work-orders-native-double-evidence/1",
+  "source_sha256": {
+    "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
+    "bridge/common/work_order_creation.h": "e12ba9748bcc15c482867b0b0996bb9221691c68b193581b13324c2df316866c",
+    "bridge/dfhack-work-orders-v1_10/DfmcpWorkOrdersV1_10.proto": "aeb03b1f03f6adb552e6406918bb1a5fa9cdb91d861f4758cfdb1bfe9714b533",
+    "bridge/dfhack-work-orders-v1_10/dfmcp_work_orders_v1_10.cpp": "a74ef1a25cdb7da24ec31318df7fd70001b2cb4acd00b70b7c38eaaee3407c04",
+    "scripts/test_work_orders_native.py": "c4237e643e3471d443334eec8b192ab4e141dd2db6423daa61fc25759fa77b7f",
+    "tests/native/work_orders/engine.cpp": "08c95d1e6750e8826d1b8309432d0e93048d40acb4ea6d266e4c27f246416c32",
+    "tests/native/work_orders/handler.cpp": "c5454638ed4c37aa465fdbb0fc25629c28c01d59d72c617c288646398b5ddf10",
+    "tests/native/work_orders/stubs.h": "59db7f406fa25f20ebdc6611c6bd53b73c136472f5ec907bcc2dbcee227d8280"
+  },
+  "status": "passed"
+}
