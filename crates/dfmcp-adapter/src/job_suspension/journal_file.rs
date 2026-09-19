@@ -46,15 +46,21 @@ impl EffectJournalStorage for PrivateJobJournalFile {
 }
 
 pub fn open_private_job_journal(path: &Path, context: &OperationContext) -> Result<JobControlJournal<PrivateJobJournalFile>> {
-    let (storage, created) = open_storage(path, context, false)?;
+    let (storage, created) = open_storage(path, context, false, true)?;
     JobControlJournal::open(storage, context, created)
 }
 pub fn open_private_job_recovery(path: &Path, context: &OperationContext) -> Result<JobControlJournal<PrivateJobJournalFile>> {
-    let (storage, _) = open_storage(path, context, true)?;
+    let (storage, _) = open_storage(path, context, true, false)?;
     JobControlJournal::open_read_only(storage, context)
 }
-fn open_storage(path: &Path, context: &OperationContext, read_only: bool) -> Result<(PrivateJobJournalFile, bool)> {
-    authorize(context, context.anchor.fortress_id, !read_only)?;
+/// Query-only recovery can retain new reconciliation evidence in an EXISTING
+/// journal. No file creation, native dispatch, grant synthesis or tail repair.
+pub fn open_private_job_reconciliation(path: &Path, context: &OperationContext) -> Result<JobControlJournal<PrivateJobJournalFile>> {
+    let (storage, _) = open_storage(path, context, false, false)?;
+    JobControlJournal::open_for_reconciliation(storage, context)
+}
+fn open_storage(path: &Path, context: &OperationContext, read_only: bool, allow_create: bool) -> Result<(PrivateJobJournalFile, bool)> {
+    authorize(context, context.anchor.fortress_id, allow_create)?;
     #[cfg(unix)] {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let denied = || fail(ErrorCode::CapabilityDenied,
@@ -74,7 +80,7 @@ fn open_storage(path: &Path, context: &OperationContext, read_only: bool) -> Res
             Err(e) => return Err(io_error(e)),
         };
         let created = before.is_none();
-        if created && read_only { return Err(fail(ErrorCode::InvalidRequest, "job recovery requires an existing journal")); }
+        if created && !allow_create { return Err(fail(ErrorCode::InvalidRequest, "job recovery requires an existing journal")); }
         let mut options = OpenOptions::new(); options.read(true).write(!read_only);
         if created { options.create_new(true).mode(0o600); }
         let file = options.open(path).map_err(io_error)?;

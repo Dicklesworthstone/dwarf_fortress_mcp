@@ -14,7 +14,10 @@ use super::rpc::{JobControlManifest, JobControlRpcClient, JobControlStream};
 
 #[path = "journal_file.rs"]
 mod journal_file;
-pub use journal_file::{PrivateJobJournalFile, open_private_job_journal, open_private_job_recovery};
+pub use journal_file::{PrivateJobJournalFile, open_private_job_journal, open_private_job_recovery, open_private_job_reconciliation};
+#[path = "discovery.rs"]
+mod discovery;
+pub use discovery::{JobJournalSummary, JobRecordPage};
 
 const MAGIC: &[u8; 8] = b"DFMJJ019";
 const FRAME: &[u8; 8] = b"DFMJJR19";
@@ -182,15 +185,13 @@ impl<S: EffectJournalStorage> JobControlJournal<S> {
     }
     pub fn poisoned(&self) -> bool { self.fenced }
     pub fn lookup(&self, key: &str, context: &OperationContext) -> Result<Option<&DurableJobRecord>> {
-        authorize(context, self.fortress, false)?; validate_key(key)?;
-        if self.fenced { return Err(corrupt("job journal fenced; reopen for verified recovery")); }
+        self.validate_access(context)?; validate_key(key)?;
         Ok(self.records.get(key))
     }
     /// Return all unresolved work or fail the declared bound; never silently
     /// omit a dispatch that an agent needs to reconcile after transcript loss.
     pub fn unresolved(&self, context: &OperationContext) -> Result<Vec<DurableJobRecord>> {
-        authorize(context, self.fortress, false)?;
-        if self.fenced { return Err(corrupt("job journal fenced; reopen for verified recovery")); }
+        self.validate_access(context)?;
         let mut budget = Budget::new(context)?; let mut out = Vec::new();
         for record in self.records.values().filter(|r| !r.state.terminal()) {
             if out.len() >= context.budget.max_entities as usize { return Err(exhausted()); }
@@ -201,7 +202,8 @@ impl<S: EffectJournalStorage> JobControlJournal<S> {
     fn writable(&self, context: &OperationContext, production: bool) -> Result<()> {
         authorize(context, self.fortress, production)?;
         if self.read_only { return Err(fail(ErrorCode::CapabilityDenied, "recovery-only job journal cannot be written")); }
-        if self.fenced { return Err(corrupt("job journal fenced; reopen without redispatch")); } Ok(())
+        if self.fenced { return Err(corrupt("job journal fenced; reopen without redispatch")); }
+        self.storage.validate_identity().map_err(io_error)
     }
     fn plan_context(&self, plan: &SuspensionPlan, context: &OperationContext) -> Result<()> {
         if job_fortress_id(plan.observation()) != self.fortress || context.anchor.tick.get() != plan.observation().tick() {
