@@ -5,6 +5,8 @@
 //! A plan is not authority to dispatch: an authorized durable coordinator must
 //! record dispatch intent before invoking the native setter.
 
+pub mod rpc;
+
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 pub const MAX_OBSERVATION_BYTES: usize = 1024;
