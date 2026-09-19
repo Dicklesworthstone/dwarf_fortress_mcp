@@ -53,6 +53,7 @@ pub mod pause_reconciliation;
 pub mod spatial_inventory;
 pub mod transceiver;
 pub mod workforce_analysis;
+pub mod work_orders;
 
 pub use announcement_wire::{
     ANNOUNCEMENT_AFTER_ID_FIELD, ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD,

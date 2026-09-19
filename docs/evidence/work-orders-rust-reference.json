@@ -1,0 +1,22 @@
+{
+  "effect_bit_corruptions_rejected": 1904,
+  "incomplete_effect_prefixes_rejected": 952,
+  "native_sdk_or_live_game_executed": false,
+  "native_vectors": 5,
+  "rehashed_or_noncanonical_outcomes_rejected": 30,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "rust_tests_registered": 16,
+  "schema": "dfmcp.work-order-reference-evidence/1",
+  "scope": "Python fixed-plan codec/checksum reference, not Rust, RPC or filesystem execution",
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/work_orders.rs": "da63c97d3dee4fee43791ce2854a73aa8b72a4b0674018ff0f354825676b9d36",
+    "crates/dfmcp-adapter/src/work_orders/rpc.rs": "864ec36f5a5c9ce975a694320fb70e4817fb9f5a906743ccc33d7c1900667a3d",
+    "crates/dfmcp-adapter/src/work_orders/rpc_tests.rs": "04baee4588242f5806270a34c67f85179e13ae1b88ba17bb9b225f83dc3a1de5",
+    "crates/dfmcp-adapter/src/work_orders/tests.rs": "b2c5e8ad35baafe330429dffb8e48f8116a10dfa89aafc4238dc5542642d1d12",
+    "scripts/check_work_order_vectors.py": "d8521a4325dff174a92c89e8bc6782a21c8939b08d9c675796a70dd3aa154d13",
+    "scripts/test_work_orders_native.py": "c4237e643e3471d443334eec8b192ab4e141dd2db6423daa61fc25759fa77b7f"
+  },
+  "status": "passed_reference_only",
+  "trailing_records_rejected": 4
+}
