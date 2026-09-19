@@ -1,0 +1,20 @@
+{
+  "byte_corruptions_rejected": 1385,
+  "filesystem_crash_or_mcp_or_native_executed": false,
+  "incomplete_prefixes_rejected": 1382,
+  "journal_bytes": 1385,
+  "native_created_fixture_matches": true,
+  "rehashed_illegal_histories_rejected": 8,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.creation-journal-reference/1",
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/work_order_control.rs": "10800150d825658ab7a800d8944826c3daf8b715119caa4950ff05eebfe78da7",
+    "crates/dfmcp-adapter/src/work_order_control/private_file.rs": "a8b49961d761f2c27dbec2404e11b74f1c7578d8b950a4d2fb0ba84a4a6cfe80",
+    "crates/dfmcp-adapter/src/work_order_control/session.rs": "5f9be5085393c356a9413ae33e6af9c1d417c69bfb2e2c3c361db6e46cbfa147",
+    "crates/dfmcp-adapter/src/work_order_control/session/tests.rs": "5982a1439bbf018aa6b8d865b5e25677882f1965a58375caff0fa45f64b35173",
+    "crates/dfmcp-adapter/src/work_order_control/tests.rs": "949fbaf1b3cf98d2b9cc513ecb81a6ad9eca3a08b86b6b0eae57f6f81817084d",
+    "scripts/check_creation_journal_reference.py": "33e0b6ca78224972778446cb84aa4f29a6cb617816da5815745ebe65f00eb3cc"
+  },
+  "status": "passed_reference_only"
+}

@@ -127,5 +127,6 @@ corruptions, 1,382 incomplete prefixes and eight rehashed illegal histories.
 Its report records source hashes. It does not execute the Rust implementation,
 filesystem custody, RPC or MCP; it is reference-only evidence.
 
-The next source integration is the separately gated MCP runtime using this loop.
-No production runner or live-game admission follows from this library increment.
+The separately gated MCP runtime now uses this loop; see WORK_ORDER_MCP.md for
+its source integration, operator modes, tools and separately scoped checks.
+No production runner or live-game admission follows from these increments.

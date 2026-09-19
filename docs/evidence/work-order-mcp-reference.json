@@ -1,0 +1,26 @@
+{
+  "eight_record_page_model_bytes": 417979,
+  "envelope_model_bytes": 3500,
+  "envelope_reservation_bytes": 16384,
+  "filesystem_or_native_game_executed": false,
+  "maximal_record_model_bytes": 51809,
+  "mcp_executed": false,
+  "mcp_tools_wired": 11,
+  "pagination_model_cases": 297,
+  "record_reservation_bytes": 65536,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "rust_tests_registered": 16,
+  "schema": "dfmcp.work-order-mcp-reference/1",
+  "scope": "Independent Python pagination/JSON-size models and lexical/source wiring only; not a Rust parser or runtime test",
+  "source_sha256": {
+    "crates/dfmcp-mcp/src/bin/dfmcp-live-work-orders-dev-server.rs": "30d3657ae95964468c1f7061355ca8fffa71bccbc5d5b592a8512a8d07c026b6",
+    "crates/dfmcp-mcp/src/lib.rs": "4a2795dcc632d43d3af4e99af1d0f23ccd055f3d56837c8fb75140b227761b7d",
+    "crates/dfmcp-mcp/src/live_work_orders_server.rs": "12b5c757f6eaf3820578a4016711f2f531e80b0f37d0d61c3ab0348b12331421",
+    "crates/dfmcp-mcp/src/live_work_orders_server_tests.rs": "bf5c59e12f018ef6ce3d78628213b3c43ca3e0508875a63a9b6499a404971a0e",
+    "crates/dfmcp-mcp/src/work_order_presentation.rs": "fe2e6d5f6d00c75cb5ef899997de5c2a549d9508a4267bc0e4915661b31101be",
+    "crates/dfmcp-mcp/src/work_order_presentation_tests.rs": "4b0616d81c1a7ad9f54a1780985943c6a231bddc5f3a849b9d9457956f4e9c3b",
+    "scripts/check_work_order_mcp_reference.py": "d05510e120c4bef6a457c54fa5d241b9be3e0debe4e92693caf466dffc0bdb79"
+  },
+  "status": "passed_reference_only"
+}
