@@ -1,7 +1,11 @@
-//! Release-only session teardown. No observation, predicate evaluation, journal
-//! verification/repair, checkpoint, cancellation or game action is performed.
-//! Lock order remains WATCHES -> JOURNALS, nested beneath baseline ownership.
+//! Session lifecycle boundaries. Release itself performs no observation,
+//! journal verification/repair, checkpoint, cancellation or game action.
+//! The separate source-gap boundary requires read authority and may checkpoint
+//! interrupted monitoring. Lock order remains WATCHES -> JOURNALS.
 use super::*;
+
+#[path = "watch_source_gap.rs"]
+mod source_gap;
 
 impl WatchJournalGuard {
     /// Called only after the runtime has exclusively acquired the session being

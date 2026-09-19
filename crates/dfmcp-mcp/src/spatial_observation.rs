@@ -47,7 +47,7 @@ fn check_bounds(observation: &LiveSpatialCitizenObservation, limits: CitizenSpat
 }
 
 fn stage(session: &Session, context: &OperationContext,
-    observation: LiveSpatialCitizenObservation) -> Result<Candidate> {
+    observation: LiveSpatialCitizenObservation, require_query: bool) -> Result<Candidate> {
     check_bounds(&observation, session.limits)?;
     // The candidate includes entity-generation history. A rejected projection
     // must not burn a generation or advance the session's source observation.
@@ -65,7 +65,7 @@ fn stage(session: &Session, context: &OperationContext,
     // Observe-only, nonjournaled sessions remain valid; persistence requires
     // Query as well, both before acquisition and at the candidate anchor.
     target.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-    if session.journal.is_some() {
+    if require_query || session.journal.is_some() {
         target.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     }
     Ok(Candidate { observation, state, outcome, target })
@@ -76,7 +76,19 @@ pub(super) fn refresh(session: &mut Session, context: &OperationContext) -> Resu
     refresh_with_clock(session, context, || started.elapsed())
 }
 
+/// Query-triggered recovery requires both grants at the target even without a
+/// journal. Ordinary Observe-only sessions retain their original read semantics.
+pub(super) fn refresh_for_query(session: &mut Session, context: &OperationContext) -> Result<JobPublication> {
+    let started = Instant::now();
+    refresh_checked(session, context, true, || started.elapsed())
+}
+
 fn refresh_with_clock(session: &mut Session, context: &OperationContext,
+    elapsed: impl FnMut() -> Duration) -> Result<JobPublication> {
+    refresh_checked(session, context, false, elapsed)
+}
+
+fn refresh_checked(session: &mut Session, context: &OperationContext, require_query: bool,
     mut elapsed: impl FnMut() -> Duration) -> Result<JobPublication> {
     if session.source.closed() {
         return Err(error(ErrorCode::SessionNotFound, "spatial session is closed"));
@@ -85,11 +97,12 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
         return Err(error(ErrorCode::CapabilityDenied, "archive-only sessions cannot acquire live observations"));
     }
     context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+    if require_query { context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?; }
     if context.session_id != session.id || context.anchor != session.anchor()? {
         return Err(error(ErrorCode::StaleAnchor, "spatial refresh names another session or observation"));
     }
     if session.source.poisoned() {
-        return Err(error(ErrorCode::AdapterUnavailable, "spatial source is fenced; reopen the session"));
+        return Err(error(ErrorCode::AdapterUnavailable, "spatial source is fenced; use query recover_source or close/reopen"));
     }
     if let Err(failure) = custody(session, context) {
         if failure.code == ErrorCode::CorruptLedger { session.source.fence(); }
@@ -102,7 +115,7 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
         // An injected or slow source cannot escape the enclosing deadline just
         // because its own transport returned successfully.
         remaining(context, elapsed())?;
-        let candidate = stage(session, context, observation)?;
+        let candidate = stage(session, context, observation, require_query)?;
         custody(session, context)?;
         let allowance = remaining(&candidate.target, elapsed())?;
         match session.journal.as_mut() {
@@ -126,7 +139,7 @@ fn refresh_with_clock(session: &mut Session, context: &OperationContext,
         }
     })();
     // A consumed-but-rejected capture cannot be silently treated as the current
-    // source. Preserve the old world and require the explicit close/reopen path.
+    // source. Preserve the old world until explicit recovery or close/reopen.
     if result.is_err() { session.source.fence(); }
     result
 }

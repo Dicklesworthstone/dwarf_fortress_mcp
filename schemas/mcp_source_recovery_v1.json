@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explicit spatial/1.8 source recovery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "expected_anchor", "query"],
+  "properties": {
+    "schema": {"const": "dfmcp.query/1"},
+    "expected_anchor": {
+      "type": "object",
+      "description": "Must exactly equal the retained complete session anchor. The enclosing query schema supplies the canonical anchor shape; runtime equality is mandatory."
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"const": "recover_source"},
+        "max_wall_millis": {"type": "integer", "minimum": 1, "maximum": 60000}
+      },
+      "description": "Requires current Query and Observe authority and a fenced live spatial/1.8 session. Record monitoring interruption before one connection/handshake and one complete capture. Preserve handles and original deadlines; reset unfinished stability without sampling. Endpoint and credentials remain operator configuration. No automatic retry, archive promotion, journal repair, native mutation or admission change."
+    }
+  }
+}

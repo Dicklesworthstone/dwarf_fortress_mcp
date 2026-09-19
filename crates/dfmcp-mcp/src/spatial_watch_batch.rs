@@ -4,8 +4,12 @@
 use super::*;
 use std::time::Instant;
 
+// Recovery shares the session-locked observation/watch publication frontier.
+#[path = "spatial_source_recovery.rs"]
+mod recovery;
+
 pub(super) fn handles(input: &Value) -> bool {
-    matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),
+    recovery::handles(input) || matches!(input.get("query").and_then(|q|q.get("kind")).and_then(Value::as_str),
         Some("poll_watches"|"await_watches"|"register_watches"))
 }
 
@@ -49,7 +53,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     schema["$defs"]["query"]["oneOf"].as_array_mut()
         .ok_or_else(||error(ErrorCode::InternalInvariantViolation,"spatial query variants absent"))?
         .extend(variants.iter().cloned());
-    registration_schema(schema)
+    recovery::extend_schema(registration_schema(schema)?)
 }
 fn remaining(context: &OperationContext, started: Instant) -> Result<OperationContext> {
     context.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;
@@ -70,6 +74,7 @@ fn check_journal(session: &mut Session, context: &OperationContext) -> Result<()
 }
 
 pub(super) fn execute(session: &mut Session, context: &OperationContext, input: &Value) -> Result<String> {
+    if recovery::handles(input) { return recovery::execute(session,context,input); }
     let started=Instant::now();remaining(context,started)?;
     if session.source.archive_only() {
         return Err(error(ErrorCode::CapabilityDenied,"archive-only sessions cannot register, evaluate or await watch batches"));
