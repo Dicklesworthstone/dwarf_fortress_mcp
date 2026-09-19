@@ -169,7 +169,7 @@ fn decode(data: &[u8], nonce: &[u8], method: Method) -> Result<Reply> {
         if code == 0 || code > 7 || generation != 0 || !df_version.is_empty() || !dfhack_version.is_empty()
             || (9..=11).any(|field| m.has(field)) { return Err(malformed()); }
         let code = match code { 1 => ErrorCode::CapabilityDenied, 2 => ErrorCode::VersionMismatch,
-            3 => ErrorCode::InvalidRequest, 4 => ErrorCode::FortressNotLoaded,
+            3 => ErrorCode::InvalidRequest, 4 => ErrorCode::AdapterRejected,
             6 => ErrorCode::StaleAnchor, 7 => ErrorCode::Conflict, _ => ErrorCode::AdapterFailure };
         return Err(error(code, "job-control request rejected without verified effect evidence"));
     }

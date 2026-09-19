@@ -5,6 +5,7 @@
 //! A plan is not authority to dispatch: an authorized durable coordinator must
 //! record dispatch intent before invoking the native setter.
 
+pub mod coordinator;
 pub mod rpc;
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};

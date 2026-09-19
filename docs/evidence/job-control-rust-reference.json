@@ -1,0 +1,18 @@
+{
+  "evidence": "Python reference only; no Rust, filesystem crash execution, real DFHack or admission",
+  "native_hash_chain": "witness, plan, token, after-witness, receipt verified",
+  "native_states_verified": 5,
+  "effect_bit_corruptions_rejected": 1608,
+  "journal_byte_corruptions_rejected": 1361,
+  "journal_incomplete_prefixes_rejected": 1358,
+  "rehashed_invalid_state_histories_rejected": 6,
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/job_suspension.rs": "5a67067f3a8685b57cd5d75150c409114c995f99093dbf7ce3f4d4c431193aed",
+    "crates/dfmcp-adapter/src/job_suspension/coordinator.rs": "a244ed1225510f8bed725fd8daa11bfeb5763c96072d22b81079bd7bffb0aa7a",
+    "crates/dfmcp-adapter/src/job_suspension/coordinator_tests.rs": "ce0700717e09434acbfac581a0a904e7dfc759a7082ffaf42bbbef11107d7818",
+    "crates/dfmcp-adapter/src/job_suspension/journal_file.rs": "0c091fc2e54deb60fe04a2917ff6cb52ec3df594ddeaa9cd8e3c36267796e361",
+    "crates/dfmcp-adapter/src/job_suspension/rpc.rs": "4a2d1c86d51958f5eef0fa536836f75d76fbcbf9d54165859a9768cf52ea935c",
+    "crates/dfmcp-adapter/src/job_suspension/rpc_tests.rs": "15d09015991ec8c07f322a8dd7b04743230d5669ce7fe6aae3f6d5d01a724885",
+    "crates/dfmcp-adapter/src/job_suspension/tests.rs": "8ef4f0784603a6db6637db351eb86bced45b8391a60f914712fda385dfcabad0"
+  }
+}
