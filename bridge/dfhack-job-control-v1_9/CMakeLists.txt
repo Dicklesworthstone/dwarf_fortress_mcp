@@ -1,0 +1,2 @@
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+dfhack_plugin(dfmcp_job_control_v1_9 dfmcp_job_control_v1_9.cpp PROTOBUFS DfmcpJobControlV1_9)
