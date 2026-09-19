@@ -45,6 +45,10 @@ int main(){
 '''
 
 def transform_mock(mock:str)->str:
+    mock=mock.replace('inline std::string dfhack_version(){return "dfhack";}',
+        'inline const char* dfhack_version(){return "dfhack";}')
+    mock=mock.replace('SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_OTHER',
+        'SC_WORLD_LOADED,SC_WORLD_UNLOADED,SC_MAP_LOADED,SC_MAP_UNLOADED,SC_OTHER')
     # This whole-producer fixture uses ASCII only. Non-ASCII conversion and
     # bounded UTF-8 are exercised by test_citizen_capture_codec.py instead.
     mock=mock.replace('#include <vector>\n', '#include <vector>\n#include <stdexcept>\n' +

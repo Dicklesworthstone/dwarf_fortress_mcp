@@ -44,17 +44,46 @@ bool authorize(const wire::Request *in,wire::Reply *out){
     const auto &provided=in->bearer_token();out->set_failure_code(1);
     if(expected.size()<32||expected.size()>256||provided.size()<32||provided.size()>256)return false;
     std::size_t difference=expected.size()^provided.size();for(std::size_t i=0;i<256;++i){const unsigned char a=i<expected.size()?expected[i]:0,b=i<provided.size()?provided[i]:0;difference|=a^b;}if(difference)return false;
-    out->set_failure_code(5);const auto &version=Core::getInstance().vinfo;const auto df=version?version->getVersion():std::string(),dfhack=Version::dfhack_version();
+    out->set_failure_code(5);const auto &version=Core::getInstance().vinfo;
+    const std::string df=version?version->getVersion():std::string();
+    // DFHack declares const char*, not std::string. Keep the pointer separate
+    // and reject a missing version instead of constructing a string from null.
+    const char *native_version=Version::dfhack_version();
+    const std::string dfhack=native_version?native_version:"";
     if(!generation||generation==std::numeric_limits<std::uint64_t>::max()||!base::utf8(df,128)||!base::utf8(dfhack,128))return false;
     out->set_bridge_generation(generation);out->set_df_version(df);out->set_dfhack_version(dfhack);out->set_failure_code(0);return true;
 }
+// Exception text is never returned: it may contain native/private data. Clear
+// every payload/identity field, including fields already set by a failed reply.
+command_result exception_reply(const wire::Request *in,wire::Reply *out){
+    try{
+        out->Clear();out->set_accepted(false);out->set_failure_code(5);
+        const auto &nonce=in->client_nonce();
+        out->set_client_nonce(nonce.size()>=16&&nonce.size()<=64?nonce:std::string());
+        out->set_protocol_major(1);out->set_protocol_minor(8);out->set_bridge_generation(0);
+        out->set_df_version("");out->set_dfhack_version("");
+        return CR_OK;
+    }catch(...){
+        // If even an error envelope cannot be allocated, let DFHack report the
+        // RPC failure. A partially accepted response must not escape instead.
+        out->Clear();return CR_FAILURE;
+    }
+}
 command_result Handshake(color_ostream &,const wire::Request *in,wire::Reply *out){
-    if(authorize(in,out)){if(!in->snapshot_token().empty()||in->offset()!=0||in->release())out->set_failure_code(3);else out->set_accepted(true);}return CR_OK;
+    try{
+        if(authorize(in,out)){
+            if(!in->snapshot_token().empty()||in->offset()!=0||in->release())out->set_failure_code(3);
+            else out->set_accepted(true);
+        }
+    }catch(...){return exception_reply(in,out);}
+    return CR_OK;
 }
 command_result ReadObservation(color_ostream &,const wire::Request *in,wire::Reply *out){
-    if(!authorize(in,out))return CR_OK;
+    std::string key,token;bool inserted=false;
+    dfmcp_snapshot::Cache::Clock::time_point now;
     try{
-        const auto now=dfmcp_snapshot::Cache::Clock::now();const auto key=owner(in);auto token=in->snapshot_token();
+        if(!authorize(in,out))return CR_OK;
+        now=dfmcp_snapshot::Cache::Clock::now();key=owner(in);token=in->snapshot_token();
         if(in->release()){
             if(token.empty()||in->offset()!=0){out->set_failure_code(3);return CR_OK;}
             if(!snapshots.release(key,token,generation,limits(in),now)){out->set_failure_code(6);return CR_OK;}
@@ -64,19 +93,25 @@ command_result ReadObservation(color_ostream &,const wire::Request *in,wire::Rep
             if(in->offset()!=0||!snapshots.can_capture(in->max_bytes(),now)){out->set_failure_code(3);return CR_OK;}
             std::string payload;const auto status=capture::capture(bounds(in),payload);if(status){out->set_failure_code(status);return CR_OK;}
             if(!snapshots.insert(key,generation,limits(in),std::move(payload),now,token)){out->set_failure_code(3);return CR_OK;}
+            inserted=true;
         }
         dfmcp_snapshot::Page page;
-        if(!snapshots.page(key,token,generation,limits(in),in->offset(),in->page_bytes(),now,page)){out->set_failure_code(6);return CR_OK;}
+        if(!snapshots.page(key,token,generation,limits(in),in->offset(),in->page_bytes(),now,page)){
+            if(inserted)snapshots.release(key,token,generation,limits(in),now);
+            out->set_failure_code(6);return CR_OK;
+        }
         out->set_observation(page.bytes);out->set_snapshot_token(page.token);out->set_page_offset(page.offset);out->set_total_bytes(page.total);
         out->set_payload_sha256(page.digest);out->set_complete(page.complete);out->set_accepted(true);
-    }catch(const std::exception &){
-        out->Clear();out->set_accepted(false);out->set_failure_code(3);out->set_client_nonce(in->client_nonce());out->set_protocol_major(1);out->set_protocol_minor(8);
-        out->set_bridge_generation(0);out->set_df_version("");out->set_dfhack_version("");
+    }catch(...){
+        // Only this call's newly captured bytes are unpublished. A failed later
+        // page must retain its previously acknowledged immutable capture token.
+        if(inserted)snapshots.release(key,token,generation,limits(in),now);
+        return exception_reply(in,out);
     }
     return CR_OK;
 }
 }
 DFhackCExport command_result plugin_init(color_ostream &,std::vector<PluginCommand>&){return CR_OK;}
 DFhackCExport command_result plugin_shutdown(color_ostream &){snapshots.clear();return CR_OK;}
-DFhackCExport command_result plugin_onstatechange(color_ostream &,state_change_event event){if(event==SC_WORLD_LOADED||event==SC_WORLD_UNLOADED){snapshots.clear();if(generation!=std::numeric_limits<std::uint64_t>::max())++generation;}return CR_OK;}
+DFhackCExport command_result plugin_onstatechange(color_ostream &,state_change_event event){if(event==SC_WORLD_LOADED||event==SC_WORLD_UNLOADED||event==SC_MAP_LOADED||event==SC_MAP_UNLOADED){snapshots.clear();if(generation!=std::numeric_limits<std::uint64_t>::max())++generation;}return CR_OK;}
 DFhackCExport RPCService *plugin_rpcconnect(color_ostream &){auto *s=new RPCService();s->addFunction("Handshake",Handshake,0);s->addFunction("ReadObservation",ReadObservation,0);return s;}

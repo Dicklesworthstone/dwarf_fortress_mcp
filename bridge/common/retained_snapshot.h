@@ -90,7 +90,9 @@ public:
         auto result=entries.emplace(id,std::move(entry));
         if(!result.second) return false;
         retained+=result.first->second.payload.size();
-        token=id;
+        // Do not allocate after publishing the cache entry. A throwing token
+        // copy would strand a retained capture whose handle was never returned.
+        token.swap(id);
         return true;
     }
     bool page(const std::string &owner,const std::string &token,std::uint64_t generation,Limits limits,
