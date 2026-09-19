@@ -44,11 +44,11 @@ fn shifted_suffixes_reconstruct_insertions_and_deletions() -> Result<(), Error> 
     let base: Vec<u8> = (0..4096).map(|n| (n % 251) as u8).collect();
     for start in [0, 17, 511, 2048] {
         let mut inserted = base.clone();
-        inserted.splice(start..start, b"new entity".iter().copied());
+        drop(inserted.splice(start..start, b"new entity".iter().copied()));
         let delta = required(&base, &inserted)?;
         assert_eq!(decode(&base, &delta, inserted.len())?, inserted);
         let mut deleted = base.clone();
-        deleted.drain(start..start + 13);
+        drop(deleted.drain(start..start + 13));
         let delta = required(&base, &deleted)?;
         assert_eq!(decode(&base, &delta, deleted.len())?, deleted);
     }
@@ -87,6 +87,7 @@ fn every_incomplete_prefix_and_trailing_byte_is_rejected() -> Result<(), Error> 
 fn output_and_command_bounds_are_validated_before_reconstruction() -> Result<(), Error> {
     let base = vec![9; 512];
     let delta = required(&base, &base)?;
+    assert_eq!(expanded_length(&base, &delta, MAX_PAYLOAD)?, 512);
     assert_eq!(decode(&base, &delta, 511), Err(Error::LimitExceeded));
     assert_eq!(decode(&base, &delta, MAX_PAYLOAD + 1), Err(Error::LimitExceeded));
     for commands in [vec![2, 0, 0, 0, 1], vec![0, 0, 0, 0, 0], vec![1, 0, 0, 0, 0, 0, 0, 0, 0],

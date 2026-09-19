@@ -21,6 +21,8 @@ pub trait JournalProfile: sealed::Sealed {
     const NAME: &'static str;
     const MAX_PAYLOAD: usize;
     const IDENTITY_DOMAIN: &'static [u8];
+    /// Storage-only feature, never a native observation/protocol capability.
+    const DELTA_STORAGE: bool = false;
     fn empty() -> Self::State;
     fn publish(state: &mut Self::State, value: Self::Observation) -> Result<JobPublication>;
     fn snapshot(state: &Self::State) -> Option<&WorldSnapshot>;
@@ -100,6 +102,7 @@ impl JournalProfile for Spatial18 {
     type State = LiveSpatialCitizenState;
     const MAGIC: &'static [u8; 8] = b"DFMUJ001";
     const NAME: &'static str = "spatial/1.8";
+    const DELTA_STORAGE: bool = true;
     const MAX_PAYLOAD: usize = MAX_SPATIAL_CITIZEN_BYTES;
     const IDENTITY_DOMAIN: &'static [u8] = b"dfmcp-spatial-citizen-journal-incarnation/1\0";
     fn empty() -> Self::State { LiveSpatialCitizenState::default() }

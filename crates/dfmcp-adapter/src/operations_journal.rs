@@ -11,6 +11,10 @@ use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, FortressId, GameTi
 use dfmcp_world::WorldSnapshot;
 use crate::live_jobs::JobPublication;
 
+#[path = "journal_compression.rs"]
+mod compression;
+pub use compression::JournalStorageStats;
+
 #[path = "journal_profiles.rs"]
 mod profiles;
 pub use profiles::{JournalProfile, Operations13, Operations14, Spatial16, Spatial18};
@@ -83,6 +87,8 @@ pub struct ObservationJournal<S, P: JournalProfile> {
     length: u64,
     entries: Vec<JournalEntry>,
     state: P::State,
+    payload_base: Option<compression::PayloadBase>,
+    storage_stats: JournalStorageStats,
     fenced: bool,
     repaired_tail_bytes: u64,
 }
@@ -133,6 +139,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         }
         let mut journal = Self { storage, limits, fortress, id, header_digest, head: header_digest,
             length: HEADER_BYTES as u64, entries: Vec::new(), state: P::empty(),
+            payload_base: None, storage_stats: JournalStorageStats::default(),
             fenced: false, repaired_tail_bytes: 0 };
         while journal.length < length {
             check(context, started)?;
@@ -142,8 +149,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
             if remaining < FRAME_HEADER_BYTES as u64 {
                 let mut prefix = vec![0; remaining as usize];
                 journal.storage.read_exact(&mut prefix).map_err(storage_error)?;
-                let comparable = prefix.len().min(RECORD.len());
-                if prefix[..comparable] != RECORD[..comparable] {
+                if !compression::is_record_prefix::<P>(&prefix) {
                     return Err(corrupt("journal trailing bytes do not begin a record; no repair applied"));
                 }
                 break;
@@ -156,8 +162,11 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
             let mut frame = vec![0; frame_length];
             frame[..FRAME_HEADER_BYTES].copy_from_slice(&prefix);
             journal.storage.read_exact(&mut frame[FRAME_HEADER_BYTES..]).map_err(storage_error)?;
-            let (entry, observation) = decode_profile_frame::<P>(&frame, journal.id, journal.length)?;
-            journal.accept_replayed(entry, observation, context)?;
+            let decoded = compression::decode::<P>(&frame, journal.id, journal.length,
+                journal.payload_base.as_ref(), expanded_allowance::<P>(context))?;
+            journal.accept_replayed(decoded.entry, decoded.observation, context)?;
+            journal.payload_base = decoded.payload_base;
+            journal.storage_stats.include(decoded.measurement);
             journal.length += frame_length as u64;
         }
         if journal.length != length {
@@ -210,10 +219,17 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         target_context.anchor = anchor;
         target_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if self.entries.len() >= self.limits.max_records { return Err(budget("journal record capacity reached; rotate explicitly")); }
-        let frame = encode_profile_frame::<P>(self.id, self.entries.len() as u64 + 1, self.head, anchor, &observation)?;
+        let frame = compression::encode::<P>(self.id, self.entries.len() as u64 + 1,
+            self.head, anchor, &observation, self.payload_base.as_ref())?;
         let next_length = self.length.checked_add(frame.len() as u64).ok_or_else(|| budget("journal length overflow"))?;
         if next_length > self.limits.max_bytes { return Err(budget("journal byte capacity reached; rotate explicitly")); }
-        let (entry, _) = decode_profile_frame::<P>(&frame, self.id, self.length)?;
+        let decoded = compression::decode::<P>(&frame, self.id, self.length,
+            self.payload_base.as_ref(), expanded_allowance::<P>(context))?;
+        let entry = decoded.entry;
+        if entry.anchor != anchor || P::source_digest(&decoded.observation)? != entry.source_digest {
+            return Err(corrupt("prepared journal frame does not reproduce its observation identity"));
+        }
+        drop(decoded.observation);
         check(context, started)?;
         let write_result = (|| -> io::Result<()> {
             self.storage.validate_identity()?;
@@ -231,6 +247,8 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         self.head = entry.record_digest;
         self.entries.push(entry);
         self.state = candidate;
+        self.payload_base = decoded.payload_base;
+        self.storage_stats.include(decoded.measurement);
         Ok(outcome)
     }
 
@@ -267,13 +285,17 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         if decode_header::<P>(&header)? != (self.fortress, self.id, self.header_digest) { return Err(corrupt("journal header changed")); }
         let mut state = P::empty();
         let mut previous = self.header_digest;
+        let mut payload_base = None;
         for i in 0..=index {
             check(context, started)?;
             let known = &self.entries[i];
             self.storage.seek(SeekFrom::Start(known.offset)).map_err(storage_error)?;
             let mut frame = vec![0; known.encoded_bytes as usize];
             self.storage.read_exact(&mut frame).map_err(storage_error)?;
-            let (entry, observation) = decode_profile_frame::<P>(&frame, self.id, known.offset)?;
+            let decoded = compression::decode::<P>(&frame, self.id, known.offset,
+                payload_base.as_ref(), expanded_allowance::<P>(context))?;
+            let entry = decoded.entry;
+            let observation = decoded.observation;
             if &entry != known || entry.previous_digest != previous { return Err(corrupt("journal record changed after opening")); }
             if P::source_digest(&observation)? != entry.source_digest { return Err(corrupt("historical source digest differs")); }
             check_observation::<P>(&observation, context)?;
@@ -282,6 +304,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
                 return Err(corrupt("historical projection anchor does not reproduce"));
             }
             previous = entry.record_digest;
+            payload_base = decoded.payload_base;
         }
         check(context, started)?;
         self.storage.validate_identity().map_err(storage_error)?;
@@ -298,8 +321,14 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
     pub fn id(&self) -> Digest32 { self.id }
     pub fn head(&self) -> Digest32 { self.head }
     pub fn retained_bytes(&self) -> u64 { self.length }
+    /// Payload accounting only; this neither revalidates custody nor scans disk.
+    pub fn storage_stats(&self) -> JournalStorageStats { self.storage_stats }
     pub fn repaired_tail_bytes(&self) -> u64 { self.repaired_tail_bytes }
     pub fn fenced(&self) -> bool { self.fenced }
+}
+
+fn expanded_allowance<P: JournalProfile>(context: &OperationContext) -> usize {
+    context.budget.max_bytes.min(P::MAX_PAYLOAD as u64) as usize
 }
 
 fn check_observation<P: JournalProfile>(observation: &P::Observation, context: &OperationContext) -> Result<()> {
@@ -329,7 +358,10 @@ fn frame_header_hash(id: Digest32, prefix: &[u8]) -> Digest32 {
     Digest32::of_bytes(&bytes)
 }
 fn decode_frame_header<P: JournalProfile>(prefix: &[u8], id: Digest32) -> Result<usize> {
-    if prefix.len() != FRAME_HEADER_BYTES || &prefix[..8] != RECORD { return Err(corrupt("journal record marker invalid")); }
+    if prefix.len() != FRAME_HEADER_BYTES
+        || !compression::is_record_prefix::<P>(prefix) {
+        return Err(corrupt("journal record marker invalid for its fixed profile"));
+    }
     let size = u32::from_be_bytes(prefix[8..12].try_into().map_err(|_| corrupt("journal record length"))?) as usize;
     if !(148..=P::MAX_PAYLOAD + 1024).contains(&size)
         || &prefix[12..] != frame_header_hash(id, &prefix[..12]).as_bytes() {
@@ -381,30 +413,10 @@ fn encode_profile_frame<P: JournalProfile>(id: Digest32, number: u64, previous: 
     frame.extend_from_slice(FOOTER);
     Ok(frame)
 }
+#[cfg(test)]
 fn decode_profile_frame<P: JournalProfile>(frame: &[u8], id: Digest32, offset: u64) -> Result<(JournalEntry, P::Observation)> {
-    let mut r = Reader(frame);
-    let size = decode_frame_header::<P>(r.take(FRAME_HEADER_BYTES)?, id)?;
-    if frame.len() != size + FRAME_HEADER_BYTES + 40 { return Err(corrupt("invalid journal frame length")); }
-    let mut body = Reader(r.take(size)?);
-    let record_digest = r.digest()?;
-    if r.take(8)? != FOOTER || record_digest != frame_hash(id, &frame[..size + FRAME_HEADER_BYTES]) {
-        return Err(corrupt("journal checksum or commit footer failed; no repair applied"));
-    }
-    let number = body.u64()?;
-    let previous_digest = body.digest()?;
-    let anchor = StateAnchor { fortress_id: FortressId::new(body.u64()?),
-        cursor: ObservationCursor { epoch: body.u64()?, sequence: body.u64()? },
-        tick: GameTick(body.u64()?), state_hash: body.digest()? };
-    let source_digest = body.digest()?;
-    let generation = body.u64()?;
-    let df = body.text()?;
-    let dfhack = body.text()?;
-    let n = body.u32()? as usize;
-    let observation = P::decode(body.take(n)?, generation, df, dfhack)
-        .map_err(|_| corrupt("journal payload is invalid for its fixed observation profile"))?;
-    if !body.0.is_empty() { return Err(corrupt("trailing journal record data")); }
-    Ok((JournalEntry { number, anchor, source_digest, record_digest, previous_digest,
-        offset, encoded_bytes: frame.len() as u32 }, observation))
+    let decoded = compression::decode::<P>(frame, id, offset, None, P::MAX_PAYLOAD)?;
+    Ok((decoded.entry, decoded.observation))
 }
 struct Reader<'a>(&'a [u8]);
 impl<'a> Reader<'a> {
@@ -436,3 +448,7 @@ fn encode_frame(id: Digest32, number: u64, previous: Digest32, anchor: StateAnch
 #[cfg(test)]
 #[path = "operations_journal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "journal_compression_tests.rs"]
+mod compression_tests;

@@ -144,6 +144,13 @@ fn validate<'a>(base: &[u8], encoded: &'a [u8], maximum: usize)
     Ok((length, commands, body))
 }
 
+/// Validate all command ranges and return the expanded length without allocating
+/// the output. Journals use this to distinguish corruption from a narrower
+/// caller acquisition allowance before reconstruction.
+pub fn expanded_length(base: &[u8], encoded: &[u8], maximum: usize) -> Result<usize, Error> {
+    validate(base, encoded, maximum).map(|(length, _, _)| length)
+}
+
 /// Reconstruct an exact payload under a separate *expanded* byte allowance.
 /// Compression never widens the acquisition budget. Output does not escape on
 /// malformed input; the caller must still validate its semantic/native codec.
