@@ -3,6 +3,16 @@
     "watch_count_predicate": {
       "description": "Dynamic row predicate. Its nodes share the enclosing watch's 64-node, depth-8 success/failure budget. Unknown fields remain unknown under negation.",
       "oneOf": [
+        {"type":"object","additionalProperties":false,
+          "required":["op","entity_id","generation","relation","direction"],
+          "properties":{
+            "op":{"const":"related"},
+            "entity_id":{"type":"string","pattern":"^[1-9][0-9]{0,19}$","not":{"pattern":"[^0-9]"},"maxLength":20},
+            "generation":{"type":"integer","minimum":1,"maximum":4294967295},
+            "relation":{"enum":["contained_in","uses","performs"]},
+            "direction":{"enum":["incoming","outgoing"]}
+          },
+          "description":"One-hop observed relationship to a generation-fenced root. Direction is relative to that root: incoming selects rows pointing to it. Every root is checked even in empty populations or decisive boolean branches. Missing roots block evaluation; generation changes invalidate watches. Parallel edges count the candidate once. No transitive containment, complete-world relation absence, availability or completion claim."},
         {"type":"object","additionalProperties":false,"required":["op"],"properties":{"op":{"const":"always"}}},
         {"type":"object","additionalProperties":false,"required":["op","field","comparison","value"],"properties":{
           "op":{"const":"field"},"field":{"$ref":"#/$defs/name"},

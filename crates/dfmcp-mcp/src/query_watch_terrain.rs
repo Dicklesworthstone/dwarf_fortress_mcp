@@ -1,6 +1,6 @@
 //! Exact-coordinate terrain predicates. Missing cells remain possible matches;
 //! an incomplete projection cannot prove that a requested excavation is finished.
-use super::{EvaluationBudget, Predicate, interval_truth};
+use super::{EvaluationBudget, Predicate, interval_truth, relationships};
 use super::super::{Comparison, Probe, Truth, bounded, compare, digest, invalid};
 use dfmcp_adapter::live_map::tile_entity_id;
 use dfmcp_core::{Digest32, EntityId, GameTick, Result};
@@ -116,6 +116,9 @@ fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnaps
     budget.charge()?;
     Ok(match predicate {
         Predicate::Always {} => Truth::True,
+        // Terrain payloads do not certify entity relationships. Never use a
+        // graph edge to bypass the stricter requested-tile evidence boundary.
+        Predicate::Related { .. } => Truth::Unknown,
         Predicate::Field { field, comparison, value } => native_suffix(field)
             .and_then(|suffix| observed(entity, field, suffix, capture.prefix, capture.source, snapshot.tick))
             .map_or(Truth::Unknown, |actual| compare(actual, *comparison, value)),
@@ -170,6 +173,7 @@ fn tile_truth(snapshot: &WorldSnapshot, capture: &Capture, p: [u32; 3],
 pub(in super::super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, areas: &[Area],
     predicate: &Predicate, comparison: Comparison, value: u64, budget: &mut EvaluationBudget) -> Result<Truth> {
     let total = validate(areas)?;
+    let relations = relationships::bind(predicate, snapshot, budget)?;
     let capture = capture(snapshot);
     let mut ordered = areas.to_vec();
     ordered.sort_by_key(|a| (a.min[2], a.min[1], a.min[0], a.max[2], a.max[1], a.max[0]));
@@ -202,7 +206,8 @@ pub(in super::super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, ar
     budget.check()?;
     let upper = matched + unknown;
     let truth = if capture.is_some() { interval_truth(matched, upper, comparison, value) } else { Truth::Unknown };
-    probe.facts.push(json!({"op":"terrain_count","policy":POLICY,"scope":"requested_disjoint_terrain_mask",
+    let truth = relations.guard(truth);
+    let mut fact = json!({"op":"terrain_count","policy":POLICY,"scope":"requested_disjoint_terrain_mask",
         "mask_digest":digest(&json!(ordered))?.to_string(),
         "predicate_digest":digest(&json!(predicate))?.to_string(),"snapshot_hash":snapshot.state_hash.to_string(),
         "source_digest":capture.as_ref().map(|c|c.source.to_string()),
@@ -210,7 +215,11 @@ pub(in super::super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, ar
         "matched_min":matched,"matched_max":upper,"known_nonmatches":total-upper,"unestablished":unknown,
         "unestablished_reasons":reasons,"unestablished_examples":examples,"examples_complete":unknown<=2,
         "comparison":comparison,"threshold":value,"truth":truth.text(),
-        "native_job_completion_proven":false,"mutation_cause_proven":false,"safety_proven":false}));
+        "native_job_completion_proven":false,"mutation_cause_proven":false,"safety_proven":false});
+    relations.annotate(&mut fact);
+    budget.check()?;
+    probe.invalid_generation |= relations.invalid_generation();
+    probe.facts.push(fact);
     Ok(truth)
 }
 

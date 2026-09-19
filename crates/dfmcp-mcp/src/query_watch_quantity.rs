@@ -64,6 +64,7 @@ fn observed_quantity(entity: &EntityRecord, snapshot: &WorldSnapshot) -> Option<
 #[derive(Default)]
 struct Measurement {
     bounds: Bounds,
+    relations: relationships::Bindings,
     population: u64,
     matched: u64,
     unknown_membership: u64,
@@ -74,7 +75,7 @@ struct Measurement {
 }
 impl Measurement {
     fn json(&self, snapshot: &WorldSnapshot, predicate: &Predicate) -> Result<Value> {
-        Ok(json!({"scope":"observed_projection","quantity_unit":"stack_units","field":"stack_size",
+        let mut result = json!({"scope":"observed_projection","quantity_unit":"stack_units","field":"stack_size",
             "quantity_min":self.bounds.lower,"quantity_max":self.bounds.upper,
             "quantity_exact":self.bounds.upper==Some(self.bounds.lower),
             "upper_bound_established":self.bounds.upper.is_some(),
@@ -89,17 +90,20 @@ impl Measurement {
             "snapshot_hash":snapshot.state_hash.to_string(),"membership":"dynamic_at_each_sample",
             "usable_supply_proven":false,"complete_world_quantity_proven":false,
             "unknown_quantity_policy":"no_established_upper_bound",
-            "interpretation":"Raw selected item stack units, not usable supply, food portions, nutrition, access, reservations or continuous history."}))
+            "interpretation":"Raw selected item stack units, not usable supply, food portions, nutrition, access, reservations or continuous history."});
+        self.relations.annotate(&mut result);
+        Ok(result)
     }
 }
 
 fn measure(snapshot: &WorldSnapshot, predicate: &Predicate, budget: &mut EvaluationBudget) -> Result<Measurement> {
-    let mut report = Measurement::default();
+    let mut report = Measurement { relations: relationships::bind(predicate, snapshot, budget)?,
+        ..Measurement::default() };
     for entity in snapshot.graph.entities.values() {
         budget.charge()?;
         if entity.kind != EntityKind::Item { continue; }
         report.population += 1;
-        let membership = row_truth(predicate, entity, snapshot, budget)?;
+        let membership = row_truth_bound(predicate, entity, snapshot, &report.relations, budget)?;
         // A definitely excluded item contributes zero regardless of a missing
         // quantity. An uncertain item with known zero units also contributes zero.
         if membership == Truth::False { continue; }
@@ -122,6 +126,10 @@ fn measure(snapshot: &WorldSnapshot, predicate: &Predicate, budget: &mut Evaluat
             }
         }
     }
+    if !report.relations.ready() {
+        // Even an empty projection cannot measure a recycled or missing root.
+        report.bounds = Bounds { lower: 0, upper: None };
+    }
     budget.check()?;
     Ok(report)
 }
@@ -129,11 +137,12 @@ fn measure(snapshot: &WorldSnapshot, predicate: &Predicate, budget: &mut Evaluat
 pub(in super::super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot,
     predicate: &Predicate, comparison: Comparison, value: u64, budget: &mut EvaluationBudget) -> Result<Truth> {
     let measured = measure(snapshot, predicate, budget)?;
-    let truth = measured.bounds.compare(comparison, value);
+    let truth = measured.relations.guard(measured.bounds.compare(comparison, value));
     let mut fact = measured.json(snapshot, predicate)?;
     fact["op"] = json!("item_quantity"); fact["comparison"] = json!(comparison);
     fact["threshold"] = json!(value); fact["truth"] = json!(truth.text());
     budget.check()?;
+    probe.invalid_generation |= measured.relations.invalid_generation();
     probe.facts.push(fact);
     Ok(truth)
 }

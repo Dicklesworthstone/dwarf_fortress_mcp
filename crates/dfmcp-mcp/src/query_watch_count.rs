@@ -8,6 +8,8 @@ use dfmcp_world::{EntityKind, EntityRecord};
 pub(super) mod quantity;
 #[path = "query_watch_terrain.rs"]
 pub(super) mod terrain;
+#[path = "query_watch_relationship.rs"]
+mod relationships;
 
 pub(super) const MAX_EVALUATION_WORK: u64 = 1_000_000;
 
@@ -55,14 +57,16 @@ impl Kind {
     }
 }
 
-/// No entity ID is captured in a population predicate. Explicit Field watch
-/// conditions retain their existing generation fences; these count memberships
-/// intentionally follow the current projection instead of a frozen identity set.
+/// Population membership follows each current projection. Related predicates
+/// additionally fence the explicitly named root by generation; the set of its
+/// neighbors remains dynamic rather than becoming a frozen identity list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Predicate {
     Always {},
     Field { field: String, comparison: Comparison, value: Literal },
+    Related { entity_id: String, generation: u32, relation: relationships::Relation,
+        direction: relationships::Direction },
     All { args: Vec<Predicate> },
     Any { args: Vec<Predicate> },
     Not { arg: Box<Predicate> },
@@ -79,6 +83,10 @@ pub(super) fn validate(predicate: &Predicate, depth: usize) -> Result<usize> {
         }
         match predicate {
             Predicate::Always {} => {}
+            Predicate::Related { entity_id, generation, .. } => {
+                positive_id(entity_id)?;
+                if *generation == 0 { return Err(invalid("relationship root generation must be positive")); }
+            }
             Predicate::Field { field, value, .. } => {
                 name(field, 128)?;
                 if let Literal::Text(text) = value
@@ -98,11 +106,13 @@ pub(super) fn validate(predicate: &Predicate, depth: usize) -> Result<usize> {
     Ok(nodes)
 }
 
-fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnapshot,
-    budget: &mut EvaluationBudget) -> Result<Truth> {
+fn row_truth_bound(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnapshot,
+    relations: &relationships::Bindings, budget: &mut EvaluationBudget) -> Result<Truth> {
     budget.charge()?;
     Ok(match predicate {
         Predicate::Always {} => Truth::True,
+        Predicate::Related { entity_id, generation, relation, direction } =>
+            relations.row_truth(entity, entity_id, *generation, *relation, *direction)?,
         Predicate::Field { field, comparison, value } => {
             match entity.fields.get(field) {
                 Some(fact) if matches!(&fact.source, FactSource::DfhackField(_))
@@ -115,13 +125,13 @@ fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnaps
                 _ => Truth::Unknown,
             }
         }
-        Predicate::Not { arg } => row_truth(arg, entity, snapshot, budget)?.not(),
+        Predicate::Not { arg } => row_truth_bound(arg, entity, snapshot, relations, budget)?.not(),
         Predicate::All { args } | Predicate::Any { args } => {
             let all = matches!(predicate, Predicate::All { .. });
             let mut decisive = false;
             let mut unknown = false;
             for arg in args {
-                match row_truth(arg, entity, snapshot, budget)? {
+                match row_truth_bound(arg, entity, snapshot, relations, budget)? {
                     Truth::False if all => decisive = true,
                     Truth::True if !all => decisive = true,
                     Truth::Unknown => unknown = true,
@@ -132,6 +142,13 @@ fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnaps
             else if unknown { Truth::Unknown } else { Truth::from_bool(all) }
         }
     })
+}
+
+#[cfg(test)]
+fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnapshot,
+    budget: &mut EvaluationBudget) -> Result<Truth> {
+    let relations = relationships::bind(predicate, snapshot, budget)?;
+    Ok(relations.guard(row_truth_bound(predicate, entity, snapshot, &relations, budget)?))
 }
 
 /// True/false only when every integer in the sound interval agrees. In
@@ -154,6 +171,7 @@ fn example(entity: &EntityRecord) -> Value {
 
 pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
     predicate: &Predicate, comparison: Comparison, value: u64, budget: &mut EvaluationBudget) -> Result<Truth> {
+    let relations = relationships::bind(predicate, snapshot, budget)?;
     let mut population = 0u64;
     let mut matched = 0u64;
     let mut unknown = 0u64;
@@ -164,7 +182,7 @@ pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
         budget.charge()?;
         if entity.kind != expected_kind { continue; }
         population += 1;
-        match row_truth(predicate, entity, snapshot, budget)? {
+        match row_truth_bound(predicate, entity, snapshot, &relations, budget)? {
             Truth::True => {
                 matched += 1;
                 if matching_examples.len() < 2 { matching_examples.push(example(entity)); }
@@ -178,14 +196,18 @@ pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
     }
     budget.check()?;
     let upper = matched + unknown;
-    let truth = interval_truth(matched, upper, comparison, value);
-    probe.facts.push(json!({"op":"entity_count","scope":"observed_projection","kind":kind,
+    let truth = relations.guard(interval_truth(matched, upper, comparison, value));
+    let mut fact = json!({"op":"entity_count","scope":"observed_projection","kind":kind,
         "predicate_digest":digest(&json!(predicate))?.to_string(),"snapshot_hash":snapshot.state_hash.to_string(),
         "population":population,"matched_min":matched,"matched_max":upper,"unestablished":unknown,
         "comparison":comparison,"threshold":value,"truth":truth.text(),
         "matching_examples":matching_examples,"unestablished_examples":unknown_examples,
         "examples_complete":matched<=2 && unknown<=2,"membership":"dynamic_at_each_sample",
-        "complete_world_count_proven":false}));
+        "complete_world_count_proven":false});
+    relations.annotate(&mut fact);
+    budget.check()?;
+    probe.invalid_generation |= relations.invalid_generation();
+    probe.facts.push(fact);
     Ok(truth)
 }
 
