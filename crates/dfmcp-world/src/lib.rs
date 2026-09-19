@@ -10,6 +10,7 @@ pub mod graph_query;
 pub mod inventory_allocation;
 pub mod journal_delta;
 mod ledger;
+pub mod map_connectivity;
 pub mod map_reachability;
 pub mod map_region;
 pub mod merkle;
