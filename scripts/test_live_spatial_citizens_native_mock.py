@@ -45,6 +45,10 @@ int main(){
 '''
 
 def transform_mock(mock:str)->str:
+    # This whole-producer fixture uses ASCII only. Non-ASCII conversion and
+    # bounded UTF-8 are exercised by test_citizen_capture_codec.py instead.
+    mock=mock.replace('#include <vector>\n', '#include <vector>\n#include <stdexcept>\n' +
+        'inline std::string DF2UTF(const std::string &value){for(unsigned char c:value)if(c>=128)throw std::runtime_error("ASCII-only spatial mock");return value;}\n')
     mock=mock.replace('#define DFhackCExport\n', '#define DFhackCExport\n#define ENUM_LAST_ITEM(kind) df::kind::CARPENTRY\n')
     mock=mock.replace('enum class job_type{BrewDrink=1};', 'enum class job_type{BrewDrink=1};\nenum class job_skill{MINING=0,WOODCUTTING=1,CARPENTRY=2};')
     mock=mock.replace('struct unit{int32_t id=9;};', '''struct unit{int32_t id=9;coord pos;int32_t profession=3;std::string name="Urist",race="dwarf";
