@@ -62,6 +62,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
         }
         let mut state = P::empty();
         let mut predecessor = self.header_digest;
+        let mut payload_base = None;
         let mut projected = Vec::with_capacity(records.len());
         let last = usize::try_from(previous_number)
             .map_err(|_| DfmcpError::new(ErrorCode::CursorGap, "historical projection bound overflow"))?;
@@ -71,7 +72,14 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
             self.storage.seek(SeekFrom::Start(known.offset)).map_err(storage_error)?;
             let mut frame = vec![0; known.encoded_bytes as usize];
             self.storage.read_exact(&mut frame).map_err(storage_error)?;
-            let (entry, observation) = decode_profile_frame::<P>(&frame, self.id, known.offset)?;
+            // Carry every verified predecessor, including records omitted from
+            // the selection. Delta payloads always refer to the preceding record,
+            // not the preceding projected row. Use the same production decoder
+            // as open/state_at and apply the expanded budget before allocation.
+            let decoded = compression::decode::<P>(&frame, self.id, known.offset,
+                payload_base.as_ref(), expanded_allowance::<P>(context))?;
+            let entry = decoded.entry;
+            let observation = decoded.observation;
             if &entry != known || entry.previous_digest != predecessor
                 || entry.anchor.fortress_id != self.fortress
                 || P::source_digest(&observation)? != entry.source_digest {
@@ -83,6 +91,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
                 return Err(corrupt("historical projection does not reproduce its exact anchor"));
             }
             predecessor = entry.record_digest;
+            payload_base = decoded.payload_base;
             if records.get(projected.len()).is_some_and(|(number, _)| *number == entry.number) {
                 check_now()?;
                 let value = project(&entry, &state)?;
@@ -127,7 +136,7 @@ mod tests {
         fn sync(&mut self) -> io::Result<()> { self.syncs += 1; Ok(()) }
         fn truncate(&mut self, n: u64) -> io::Result<()> { self.bytes.get_mut().truncate(n as usize); Ok(()) }
     }
-    fn observation(tick: u32) -> Result<LiveSpatialObservation> {
+    pub(super) fn observation(tick: u32) -> Result<LiveSpatialObservation> {
         let hex = include_str!("../tests/fixtures/spatial_v1_6.hex").trim();
         let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i+2],16)
             .map_err(|_| corrupt("fixture hex"))).collect::<Result<Vec<_>>>()?;
@@ -223,3 +232,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "observation_projection_compressed_tests.rs"]
+mod compressed_tests;
