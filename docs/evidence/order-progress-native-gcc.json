@@ -1,0 +1,35 @@
+{
+  "assertions": 1456,
+  "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+  "groups": 4,
+  "independent_native_vectors": 4,
+  "live_game_executed": false,
+  "mutation_tests": [
+    {
+      "name": "missing-duplicate-check",
+      "rejected": true
+    },
+    {
+      "name": "missing-condition-check",
+      "rejected": true
+    },
+    {
+      "name": "wrong-remaining-counter",
+      "rejected": true
+    }
+  ],
+  "real_dfhack_or_generated_protobuf": false,
+  "rust_or_mcp_executed": false,
+  "schema": "dfmcp.order-progress-native-tests/1",
+  "scope": "actual native handler with explicit SDK/protobuf doubles",
+  "source_sha256": {
+    "bridge/common/order_progress.h": "afcf5ff13f79a8b0e9aac51c831e1ec2056dcb22bb26d58853dedc8c7801742f",
+    "bridge/dfhack-order-progress-v1_11/DfmcpOrderProgressV1_11.proto": "7819a9e0d9ba8f3e8c0b8f6811956be2e9536b9acec9dbb64cffc1069d7d4936",
+    "bridge/dfhack-order-progress-v1_11/dfmcp_order_progress_v1_11.cpp": "5f10d5512352b08af0419387f5a78357ac41b2e22a5523bddf0c246f90405e13",
+    "scripts/test_order_progress_native.py": "f19a5859884b404eaef80511dc522e845e65aa6b5526d739ee5cd011204c6a8d",
+    "tests/native/order_progress/handler.cpp": "8b82177e536a1adce1e4a2b93e9db9941ce349978e060530bd22703a329db5af",
+    "tests/native/order_progress/stubs.h": "6ffba4be46aead8591a399340be1677427e88ed4e7c74bb6850ddd2699b6b509",
+    "tests/native/work_orders/stubs.h": "59db7f406fa25f20ebdc6611c6bd53b73c136472f5ec907bcc2dbcee227d8280"
+  },
+  "status": "passed_with_test_doubles"
+}
