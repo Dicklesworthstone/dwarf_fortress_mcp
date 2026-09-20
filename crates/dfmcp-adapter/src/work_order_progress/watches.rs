@@ -4,6 +4,11 @@ use dfmcp_core::{Digest32, ErrorCode, FortressId, Result};
 use super::{error, OrderStatus, ProgressManifest};
 use super::archive::ArchivedProgress;
 
+#[path = "watch_book.rs"]
+mod book;
+pub use book::{WatchBook, WatchBookSummary, WatchBatch, RetainedWatch, PrivateWatchFile,
+    open_watch_book, MAX_BOOK_BYTES, MAX_BOOK_EVENTS, BOOK_OPEN_RESERVE};
+
 pub const MAX_WATCHES: usize = 32;
 pub const MAX_WATCH_KEY: usize = 64;
 pub const MAX_WATCH_HORIZON: u64 = 120_000;

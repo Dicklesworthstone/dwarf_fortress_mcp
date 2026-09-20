@@ -8,7 +8,7 @@
   "schema": "dfmcp.progress-watch-reference/1",
   "scope": "Independent Python temporal and predicate models, not Rust execution",
   "source_sha256": {
-    "crates/dfmcp-adapter/src/work_order_progress/watches.rs": "261cf4607ae5635e539c484ae45d33d175def9873d831f553178ac3cee80fd88",
+    "crates/dfmcp-adapter/src/work_order_progress/watches.rs": "f1d806949175f54d35ffad532bc2cf4464633e00e69ea3ac26c8cece48b1ff86",
     "crates/dfmcp-adapter/src/work_order_progress/watches_tests.rs": "a8438b1fce87c4cb92bf3e0f6881c54d8c8355feac12f62d15a31e101ceecdbd",
     "scripts/check_progress_watch_reference.py": "324bc107e1fbc9c6e36c70ea48728bd597e42516da041afc979d7f4d611d782d"
   },

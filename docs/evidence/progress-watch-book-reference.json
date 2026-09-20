@@ -1,0 +1,20 @@
+{
+  "archive_bytes": 866,
+  "book_bytes": 307,
+  "byte_corruptions_rejected": 307,
+  "filesystem_or_mcp_or_native_executed": false,
+  "foreign_archive_rejected": true,
+  "incomplete_prefixes_rejected": 306,
+  "rehashed_illegal_histories_rejected": 7,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.progress-watch-book-reference/1",
+  "scope": "Independent fixed-plan Python book/archive framing and replay model, not Rust execution",
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/work_order_progress/watch_book.rs": "9d02c6a38a585298825ba2eb9cc235995734b9fc6c10d7aba9c613a0420ed2eb",
+    "crates/dfmcp-adapter/src/work_order_progress/watch_book_tests.rs": "8f5acf570a3a760ad4d9a650b66681163ff5010304d03249b5cf56ecdcb3ddf2",
+    "crates/dfmcp-adapter/src/work_order_progress/watch_file.rs": "f22a82ac5cd85694b456510eb6b038b484dba56ac28ff03cec945b8d8be028a0",
+    "scripts/check_progress_watch_book_reference.py": "ad0c7c557c93ef61a39d80b08845db7cbb03f0f487dd0d4bacd8fefad6e6e589"
+  },
+  "status": "passed_reference_only"
+}
