@@ -43,6 +43,27 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Selected work-order approval and progress monitoring
+
+`docs/WORK_ORDER_PROGRESS.md` and `docs/WORK_ORDER_PROGRESS_MCP.md` describe a
+separate read-only protocol-1.12 native reader, bounded Rust codec/RPC/session and
+explicitly unadmitted eleven-tool development server. Complete queue validation
+establishes presence for 1..32 selected IDs; flags and counters expose current
+approval/activity without promoting disappearance or zero remaining to production
+completion. Exact-witness waits perform one foreground read; replayed sequences
+are rejected and identity/clock/horizon changes cannot manufacture progress.
+Failed refresh clears cached selection. The separately published single-order
+1.11 reader remains unchanged. No existing wire generation, creation
+journal, production map, dependency or compatibility admission is changed.
+
+Both GCC and Clang passed 1,358 actual-handler assertions and rejected three
+separately compiled mutants using explicit SDK/protobuf doubles and UBSan.
+Independent Python checked 4,800 recipe/counter/status cases, the native fixture,
+malformed records and response-size models. Twenty-four Rust regression groups
+are registered but UNCOMPILED AND UNEXECUTED; Rust/Cargo/rustfmt were unavailable.
+No real DFHack SDK, MCP execution, live-game or full repository qualification is
+claimed. Monitoring is session-local, not durable completion or downtime evidence.
+
 ### Native pause preparation fencing
 
 `docs/NATIVE_PAUSE_FENCING.md` documents local dispatch-sequence and pause-state

@@ -8,6 +8,15 @@ readiness.
 
 ### Added
 
+- Read-only work-order-progress/1.12 capture and MCP monitoring: complete selected
+  presence, approval/activity flags, remaining-work counters, conservative finite
+  template recognition, exact-witness foreground refresh and epoch/reset-safe
+  endpoint comparisons. No insertion receipt or counter is promoted to completed
+  goods. Includes 24 unexecuted Rust regression groups, 1,358 executed C++ assertions
+  on each of GCC/Clang with SDK/protobuf doubles and UBSan, three rejected mutants
+  per compiler, and 4,800 independent Python phase cases. See
+  `docs/WORK_ORDER_PROGRESS_MCP.md`; this is not production or live-game admission.
+
 - Native pause preparation fencing, bounded token lifetime, map-incarnation invalidation
   and setter/readback exception confinement. The actual handler regressions pass on GCC
   and Clang with native/protobuf doubles, not a real plugin or live game qualification.

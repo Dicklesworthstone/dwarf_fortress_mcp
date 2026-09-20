@@ -1,0 +1,30 @@
+{
+  "invalid_identity_or_template_cases_rejected": 25,
+  "maximal_page_with_envelope_model_bytes": 90376,
+  "maximal_row_plus_change_model_bytes": 2343,
+  "mcp_executed": false,
+  "native_fixture_bytes": 129,
+  "native_fixture_sha256": "f208dc6df4149cdd4838f182bb0deb1b9d1173888d01f2ce39c0280255455197",
+  "recipe_amount_counter_status_cases": 4800,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "rust_tests_registered": 24,
+  "schema": "dfmcp.work-order-progress-reference/1",
+  "scope": "Independent Python wire/phase/size models and source wiring; not Rust type checking, serialization or execution",
+  "selection_cases_rejected": 6,
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/lib.rs": "bcae48466fc9933aaa97cc1a63dfb0186d6fe05d6e8a6ff8349f61c87543b444",
+    "crates/dfmcp-adapter/src/work_order_progress.rs": "3b8355e43ceced7fce11e3543f2086e98d53945372c929489a7ba9ca79cf51fe",
+    "crates/dfmcp-adapter/src/work_order_progress/rpc.rs": "420c9e97a43e460005204ea43db6128775c5a2511402e1553360d92c90242322",
+    "crates/dfmcp-adapter/src/work_order_progress/rpc_tests.rs": "e0a2acce887907991e130fab2e3bdbf6d9065aa72536e3b316b638440b80c157",
+    "crates/dfmcp-adapter/src/work_order_progress/tests.rs": "8cabf7ffe1830592fa4ef1367d94f60e4ea8d66c3a6af9174028dadbbf3bbc68",
+    "crates/dfmcp-mcp/src/bin/dfmcp-live-work-order-progress-dev-server.rs": "5e8d975d799bc5d19ad4432cb701a778bd3a57afb5e9b1950192c4a24d278e58",
+    "crates/dfmcp-mcp/src/lib.rs": "defb99c116b5f242f307fbfee9fda24d715ef0893fce82ab53b973b30c1e3bda",
+    "crates/dfmcp-mcp/src/live_work_order_progress_server.rs": "bebd04259c3dbf6820b25b743db7a54bd7766706faed01f656056b494031ea4d",
+    "crates/dfmcp-mcp/src/live_work_order_progress_server_tests.rs": "02da9946ff57004b503ec5646eacd373c9521cc5e0580cb552b50a11de4d539b",
+    "scripts/check_work_order_progress_reference.py": "66aee6f5f33a41f871d97a278baa26bb35208b218b9bab7cee0dbcc89b906f09"
+  },
+  "status": "passed_reference_only",
+  "trailing_records_rejected": 1,
+  "truncated_prefixes_rejected": 129
+}
