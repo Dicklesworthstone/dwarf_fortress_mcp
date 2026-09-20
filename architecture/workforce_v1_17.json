@@ -22,5 +22,11 @@
   "native_idempotency_survives_restart": false,
   "cross_controller_exclusion": false,
   "rust_mcp_integrated": false,
-  "production_admitted": false
+  "production_admitted": false,
+  "developer_client": "scripts/workforce_client.py",
+  "developer_journal": "dfmcp.workforce-journal/1",
+  "developer_journal_limits": {"keys": 64, "events": 512, "bytes": 67108864, "line_bytes": 163840},
+  "developer_reviewed_digest_required": true,
+  "developer_dispatch_synced_before_assignment": true,
+  "developer_post_witness_independently_reconstructed": true
 }
