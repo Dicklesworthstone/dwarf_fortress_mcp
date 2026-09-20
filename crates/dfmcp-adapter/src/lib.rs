@@ -55,6 +55,7 @@ pub mod transceiver;
 pub mod workforce_analysis;
 pub mod work_orders;
 pub mod work_order_control;
+pub mod order_progress;
 
 pub use announcement_wire::{
     ANNOUNCEMENT_AFTER_ID_FIELD, ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD,
