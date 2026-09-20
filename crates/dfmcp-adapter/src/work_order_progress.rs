@@ -4,6 +4,7 @@
 
 pub mod rpc;
 pub mod archive;
+pub mod watches;
 
 use std::time::{Duration, Instant};
 use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, FortressId,

@@ -1,0 +1,17 @@
+{
+  "deadline_cadence_discontinuity_controls": 10,
+  "native_or_filesystem_or_mcp_executed": false,
+  "predicate_cases": 144,
+  "rust_compiled": false,
+  "rust_groups_registered": 11,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.progress-watch-reference/1",
+  "scope": "Independent Python temporal and predicate models, not Rust execution",
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/work_order_progress/watches.rs": "261cf4607ae5635e539c484ae45d33d175def9873d831f553178ac3cee80fd88",
+    "crates/dfmcp-adapter/src/work_order_progress/watches_tests.rs": "a8438b1fce87c4cb92bf3e0f6881c54d8c8355feac12f62d15a31e101ceecdbd",
+    "scripts/check_progress_watch_reference.py": "324bc107e1fbc9c6e36c70ea48728bd597e42516da041afc979d7f4d611d782d"
+  },
+  "status": "passed_reference_only",
+  "truth_schedule_cases": 2018
+}
