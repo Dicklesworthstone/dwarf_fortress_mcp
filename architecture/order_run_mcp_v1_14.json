@@ -1,0 +1,178 @@
+{
+  "schema_version": "dfmcp.order_run_mcp/1",
+  "bridge_protocol": "1.14",
+  "profile": "order-run/1.14",
+  "implementation_status": "source_present_uncompiled",
+  "runtime_admitted": false,
+  "rust_tests_executed": false,
+  "entrypoint": "dfmcp-live-order-run-dev-server",
+  "native_wire_changed": false,
+  "new_dependencies": [],
+  "tool_names": [
+    "fortress.open_session",
+    "fortress.observe",
+    "fortress.query",
+    "fortress.plan",
+    "fortress.commit",
+    "fortress.wait",
+    "fortress.cancel",
+    "fortress.checkpoint",
+    "fortress.restore",
+    "fortress.explain",
+    "fortress.doctor"
+  ],
+  "modes": [
+    "offline",
+    "recover",
+    "control"
+  ],
+  "default_mode": "offline",
+  "environment_allowlist": [
+    "DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14",
+    "DFMCP_ORDER_RUN_TOKEN",
+    "DFMCP_ORDER_RUN_ENDPOINT",
+    "DFMCP_ORDER_RUN_JOURNAL",
+    "DFMCP_ORDER_RUN_ALLOW_CLOCK",
+    "DFMCP_ORDER_RUN_WORLD_FOLDER",
+    "DFMCP_ORDER_RUN_SITE_ID"
+  ],
+  "control_opt_in": {
+    "DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14": "1",
+    "DFMCP_ORDER_RUN_ALLOW_CLOCK": "1"
+  },
+  "operator_only": [
+    "world_folder",
+    "site_id",
+    "endpoint",
+    "credential",
+    "journal_path"
+  ],
+  "control_capabilities": [
+    "query",
+    "plan",
+    "control_clock"
+  ],
+  "control_risk": "guarded",
+  "recovery_capabilities": [
+    "query"
+  ],
+  "recovery_can_promote_to_control": false,
+  "limits": {
+    "max_page_records": 8,
+    "condition_json_bytes": 2048,
+    "max_game_ticks": 1200,
+    "max_native_wall_millis": 60000,
+    "max_stable_samples": 16,
+    "max_interval_ticks": 1200,
+    "max_request_wall_millis": 60000,
+    "default_work_bytes": 33554432,
+    "max_work_bytes": 67108864,
+    "max_output_token_proxy_units": 65536,
+    "output_base_bytes": 16384,
+    "output_row_bytes": 16384,
+    "view_reservation_bytes": 3145728,
+    "cursor_cache_entries": 64
+  },
+  "condition_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "order_id",
+      "predicate",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "properties": {
+      "order_id": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+      },
+      "predicate": {
+        "enum": [
+          "approved",
+          "active",
+          "remaining_at_most"
+        ]
+      },
+      "game_ticks": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1200
+      },
+      "wall_millis": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 60000
+      },
+      "threshold": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 100,
+        "default": 0
+      },
+      "stable_samples": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 1,
+        "maximum": 16,
+        "default": 1
+      },
+      "interval_ticks": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 1,
+        "maximum": 1200,
+        "default": 1
+      }
+    }
+  },
+  "condition_semantics": [
+    "null optional fields use defaults",
+    "stable_samples * interval_ticks <= game_ticks",
+    "flag predicates require threshold=0",
+    "exact retained capture witness required",
+    "already-observed predicate refused"
+  ],
+  "durability": [
+    "sync intent before native preparation",
+    "sync dispatch before sole unpause attempt",
+    "sync validated receipt before acknowledgement",
+    "no dispatch after uncertain attempt",
+    "no incomplete-tail repair",
+    "source loss remains unresolved"
+  ],
+  "wait_semantics": "one query and receipt retention; no advance, reprepare, commit retry or native budget extension",
+  "session_release_semantics": "explicit recovery release retains journal and native stop; no cancellation or quiescence claim",
+  "anchor_scope": "coordination_root_not_world_state",
+  "anchor_tick_is_sentinel": true,
+  "predicate_observed_implies_goods_produced": false,
+  "pause_receipt_implies_current_pause": false,
+  "global_clock_lease_established": false,
+  "storage_platforms": [
+    "linux-x86_64",
+    "linux-aarch64"
+  ],
+  "format_compatibility": {
+    "rust_journal_magic": "DFMOJ014",
+    "python_jsonl_import": false,
+    "timer_run_1_13_import": false
+  },
+  "executed_checks": "independent Python references and lexical wiring only",
+  "remaining_qualification": [
+    "Rust compile/format/Clippy/tests",
+    "actual modern MCP process",
+    "actual DFHack SDK/ABI",
+    "live disposable fortress campaigns",
+    "power-loss recovery",
+    "complete repository qualification",
+    "compatibility admission"
+  ]
+}
