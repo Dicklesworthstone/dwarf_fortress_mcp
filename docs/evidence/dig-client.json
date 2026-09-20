@@ -1,0 +1,22 @@
+{
+  "actual_cli_executed": true,
+  "actual_loopback_sockets": true,
+  "designated_bit_corruptions_rejected": 1704,
+  "effect_prefixes_rejected": 639,
+  "local_posix_custody_executed": true,
+  "native_fixture_matches": 4,
+  "observation_prefixes_rejected": 1616,
+  "phase_reason_presence_cases": 72,
+  "power_loss_campaign": false,
+  "real_dfhack_sdk_or_game": false,
+  "rust_or_mcp_executed": false,
+  "schema": "dfmcp.dig-client-evidence/1",
+  "source_sha256": {
+    "bridge/common/dig_designation_v1_16.h": "42b0909b575e276aa0a6d82a126be6c0bef5200b87ce9c1c1b7f30122b846a4b",
+    "scripts/dig_designation_client.py": "3ebb87145e0e69fb06f94952fd90b170e5c474f896fefac5cf5671c333a6b0a6",
+    "scripts/test_dig_designation_client.py": "4083f2649caf5ae1b67eae071f05ea9d8721775c9928ab0c4d0072080d9c1890",
+    "scripts/test_dig_designation_native.py": "b59efb77424fe27455256b73dfb2231b970bd0820c66b0fa40614673c74f6af7"
+  },
+  "status": "passed_loopback_and_local_custody",
+  "test_groups": 23
+}
