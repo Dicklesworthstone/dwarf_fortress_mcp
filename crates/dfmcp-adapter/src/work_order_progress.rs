@@ -3,6 +3,7 @@
 //! produced, creation receipts, native identity across reload, or mutation authority.
 
 pub mod rpc;
+pub mod archive;
 
 use std::time::{Duration, Instant};
 use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, FortressId,
@@ -250,6 +251,14 @@ impl<S: ProgressSource> ProgressSession<S> {
         self.access(context)?; Ok(self.comparison.as_ref())
     }
     pub fn refresh(&mut self, ids: &[u32], context: &OperationContext) -> Result<()> {
+        self.refresh_with_publication(ids, context, |_, _, _| Ok(()))
+    }
+    /// Complete evidence must pass the caller's durable-publication barrier before
+    /// it can become the current capture. Failure clears selection and fences reads.
+    /// The callback receives the remaining wall allowance; callers must reserve its
+    /// storage/output byte work before acquisition. It must not dispatch game effects.
+    pub fn refresh_with_publication<F>(&mut self, ids: &[u32], context: &OperationContext, publish: F) -> Result<()>
+    where F: FnOnce(&ProgressManifest, &ProgressObservation, &OperationContext) -> Result<()> {
         self.access(context)?;
         self.current_context(context).authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         validate_targets(ids)?;
@@ -265,11 +274,15 @@ impl<S: ProgressSource> ProgressSession<S> {
             let capture = ProgressObservation::decode(capture.canonical_bytes(), ids)?;
             require(self.source.manifest() == &manifest && capture.generation == manifest.generation
                 && capture.fortress_id() == self.fortress_id, "progress source changed incarnation, software or fortress")?;
-            let mut fresh = context.clone(); fresh.anchor.tick = GameTick(capture.tick);
+            let mut fresh = context.clone(); fresh.anchor.tick = GameTick(context.anchor.tick.get().max(capture.tick));
             fresh.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
             fresh.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
             let comparison = compare(before.as_ref(), &capture)?;
             if started.elapsed() >= timeout { return Err(error(ErrorCode::BudgetExceeded, "progress capture exceeded its deadline")); }
+            fresh.budget.max_wall_millis = u64::try_from(timeout.saturating_sub(started.elapsed()).as_millis())
+                .ok().filter(|millis| *millis > 0).ok_or_else(|| error(ErrorCode::BudgetExceeded, "progress publication has no remaining deadline"))?;
+            publish(&manifest, &capture, &fresh)?;
+            if started.elapsed() >= timeout { return Err(error(ErrorCode::BudgetExceeded, "progress publication exceeded its deadline")); }
             Ok((capture, comparison))
         })();
         match result {
