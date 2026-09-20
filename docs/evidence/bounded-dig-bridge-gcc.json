@@ -1,0 +1,35 @@
+{
+  "assertions": 9201,
+  "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+  "flags": [
+    "-std=c++17",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-pedantic",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all"
+  ],
+  "groups": 4,
+  "live_game_executed": false,
+  "mutants_rejected": [
+    "unknown_fields_accepted",
+    "block_scheduling_marker_removed",
+    "aquifer_classification_removed",
+    "production_revocation_ignored"
+  ],
+  "real_dfhack_sdk_or_protobuf_runtime": false,
+  "rust_or_mcp_executed": false,
+  "schema": "dfmcp.bounded-dig-bridge-evidence/1",
+  "source_sha256": {
+    "bridge/common/dig_designation.h": "c86313d2aec3940622c113b5378bb3069111fdef1932a145371f796ddd4d808e",
+    "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
+    "bridge/dfhack-dig-v1_15/DfmcpDigV1_15.proto": "a7882d7421844e27221f90a9c2755d38be3178bdf2c1357691c6ac3b4459b014",
+    "bridge/dfhack-dig-v1_15/dfmcp_dig_v1_15.cpp": "ff99945a398571dbf750dc47cea3d0288dddfa66319cd17742eccf8aad9611f7",
+    "scripts/test_bounded_dig_bridge.py": "b009524a0fbdfd48a6b5041fb6b52eeacd755ea759fb6e6de6cb81c2fb193ff8",
+    "scripts/test_bounded_dig_engine.py": "25a75186b7dd189eb3f42779bc3b4cfbcbf6b21c9a6b510a7a3208fd8328c039",
+    "tests/native/dig/handler.cpp": "addb34cb6279cefe34fdb44082cb74199544a1796ad5e91e97a6bd7a94e64f6f",
+    "tests/native/dig/stubs.h": "836e2ccbf65c79d4f1f8dd6b2ba811358181982a3d9d652a3681f85e6cfc1f3a"
+  },
+  "status": "passed_actual_handler_with_api_doubles"
+}

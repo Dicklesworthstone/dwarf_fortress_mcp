@@ -1,0 +1,95 @@
+{
+  "authorization": {
+    "development_opt_in": "DFMCP_ALLOW_UNADMITTED_DIG_V1_15=1",
+    "effect_opt_in": "DFMCP_DIG_ALLOW_DESIGNATE=1",
+    "future_semantic_capability": "designate",
+    "minimum_risk": "guarded",
+    "native_opt_in_is_capability_authority": false,
+    "secret": "DFMCP_DIG_TOKEN"
+  },
+  "bounds": {
+    "depth": 1,
+    "digest_bytes": 32,
+    "height": [
+      1,
+      8
+    ],
+    "key_bytes": [
+      1,
+      128
+    ],
+    "max_effect_bytes": 331,
+    "max_halo_cells": 300,
+    "max_keys": 128,
+    "max_observation_bytes": 16384,
+    "max_targets": 64,
+    "prepare_seconds": 60,
+    "token_bytes": 16,
+    "width": [
+      1,
+      8
+    ]
+  },
+  "effect": "target dig=Default and affected block designated=true only",
+  "exclusions": [
+    "terrain excavation",
+    "structural support safety",
+    "mining completion",
+    "job assignment",
+    "clock advancement",
+    "priority modification",
+    "map allocation",
+    "hidden-data disclosure",
+    "Rust/MCP route",
+    "restart-safe native retention",
+    "production admission"
+  ],
+  "live_game_executed": false,
+  "methods": {
+    "CommitDig": [
+      "idempotency_key",
+      "plan_digest",
+      "prepare_token"
+    ],
+    "Handshake": [],
+    "PrepareDig": [
+      "x",
+      "y",
+      "z",
+      "width",
+      "height",
+      "idempotency_key",
+      "expected_witness",
+      "plan_digest"
+    ],
+    "QueryDig": [
+      "idempotency_key",
+      "plan_digest"
+    ],
+    "ReadDig": [
+      "x",
+      "y",
+      "z",
+      "width",
+      "height"
+    ]
+  },
+  "protocol": {
+    "major": 1,
+    "minor": 15,
+    "package": "dfmcp.dig.v1_15",
+    "plugin": "dfmcp_dig_v1_15"
+  },
+  "readback": "exact entire captured halo, identity and expected local sequence",
+  "real_dfhack_sdk_executed": false,
+  "rust_compiled": false,
+  "schema": "dfmcp.bounded-mining-contract/1",
+  "states": {
+    "designated": 2,
+    "prepared": 0,
+    "refused": 4,
+    "unknown": 1
+  },
+  "status": "implemented_unadmitted_native_development_only",
+  "unknown_policy": "no retry of original or different keys; no rollback"
+}
