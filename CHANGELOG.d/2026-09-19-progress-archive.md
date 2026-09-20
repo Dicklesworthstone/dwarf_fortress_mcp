@@ -12,3 +12,12 @@ Python reference passes 120 positive cases and rejects 604 byte corruptions,
 602 torn prefixes and 11 rehashed illegal histories. This does not establish Rust,
 filesystem, MCP, live-game or admission qualification. See
 `docs/WORK_ORDER_PROGRESS_HISTORY.md` for exact limits and evidence scope.
+
+The same progress MCP server now supports operator-configured append-before-
+publication history and offline Query-only recovery without endpoint/token reads
+or a native source. Query history lists complete metadata, fetches exact records
+and compares same-segment endpoints. Historical navigation preserves live current
+state, native failure does not disable healthy history, and custody/output failures
+cannot publish a bootstrap session. Eleven additional Rust groups remain unrun;
+the independent Python model passes 134/32 accepted/rejected request cases and
+7,263 pagination cases, with modeled maximal output below its reservation.

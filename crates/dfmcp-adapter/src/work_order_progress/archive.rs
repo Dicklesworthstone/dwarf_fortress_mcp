@@ -69,6 +69,13 @@ impl Budget {
         Ok(Self { start: Instant::now(), allowance: Duration::from_millis(c.budget.max_wall_millis.min(60_000)), bytes: c.budget.max_bytes })
     }
     fn check(&self) -> Result<()> { if self.start.elapsed() >= self.allowance { Err(exhausted()) } else { Ok(()) } }
+    fn remaining_context(&self, c: &OperationContext) -> Result<OperationContext> {
+        self.check()?;
+        let mut remaining = c.clone();
+        remaining.budget.max_wall_millis = u64::try_from(self.allowance.saturating_sub(self.start.elapsed()).as_millis())
+            .ok().filter(|n| *n > 0).ok_or_else(exhausted)?;
+        Ok(remaining)
+    }
     fn charge(&mut self, n: u64) -> Result<()> {
         self.check()?; self.bytes = self.bytes.checked_sub(n).ok_or_else(exhausted)?; Ok(())
     }
@@ -262,7 +269,8 @@ impl<S: JournalStorage> ProgressArchive<S> {
         let mut budget = Budget::new(c)?; self.access(c)?;
         if before.0 >= after.0 { return Err(error(ErrorCode::InvalidRequest, "history comparison requires strictly ordered distinct records")); }
         budget.charge(2 * MAX_FRAME_BYTES)?;
-        let a = self.record(before.0, before.1, c)?; let b = self.record(after.0, after.1, c)?;
+        let a = self.record(before.0, before.1, &budget.remaining_context(c)?)?;
+        let b = self.record(after.0, after.1, &budget.remaining_context(c)?)?;
         if a.entry.segment != b.entry.segment {
             return Err(error(ErrorCode::StaleAnchor, "history comparison crosses a restart, selection or source discontinuity"));
         }

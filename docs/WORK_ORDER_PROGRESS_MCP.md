@@ -33,14 +33,17 @@ material shortage. A disappeared order is not silently labeled complete.
 ## Operator configuration
 
 The server and native plugin independently require the exact opt-in
-`DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12=1` and the separate
-`DFMCP_WORK_ORDER_PROGRESS_TOKEN` (32..256 bytes). The server additionally uses
+`DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12=1`. Connected live mode also
+requires the separate `DFMCP_WORK_ORDER_PROGRESS_TOKEN` (32..256 bytes); offline
+recovery never reads it or constructs a connection. The server additionally uses
 `DFMCP_WORK_ORDER_PROGRESS_FORTRESS_ID`, a canonical nonzero decimal folder/site
 lineage ID, and optional `DFMCP_WORK_ORDER_PROGRESS_ENDPOINT`, numeric loopback
-with a nonzero port (default `127.0.0.1:5000`). Only these four DFMCP names are
-accepted by the server. Production/admission state and other profile variables
-are refused. No request selects a credential, endpoint, fortress, native method,
-file path or protocol. This profile grants only Query and Observe.
+with a nonzero port (default `127.0.0.1:5000`). The optional fifth name
+`DFMCP_WORK_ORDER_PROGRESS_JOURNAL` selects an operator-owned private progress
+archive. Only these five DFMCP names are accepted by the server. Production/admission
+state and other profile variables are refused. No request selects a credential,
+endpoint, fortress, native method, file path or protocol. Live mode grants Query
+and Observe; offline mode grants Query only.
 
 The explicitly selected binary is:
 
@@ -53,17 +56,29 @@ with its pinned dependencies; it is not evidence that this binary was compiled.
 
 ## Tool flow
 
-`fortress.open_session` accepts `native_order_ids` (1..32 distinct IDs), plus
-optional session wall/byte/output allowances. It sorts the selection and rejects
+`fortress.open_session` accepts `native_order_ids` (1..32 distinct IDs) in live mode,
+plus optional session wall/byte/output allowances. With `recovery_only=true`, omit
+`native_order_ids` and configure an existing nonempty JOURNAL; opening grants only
+Query, reads no endpoint/token and creates no native source. Archive-only data is
+labeled historical and its authority floor is the largest retained game tick.
+The following acquisition flow describes live mode. It sorts the selection and rejects
 duplicates. It negotiates the fixed two-method native protocol and obtains one
 complete capture before publishing the session. A failed bootstrap publishes no
 session. The response provides a session ID, current observation witness and a
-ready-to-use wait request.
+ready-to-use wait request. When JOURNAL is configured, complete observations and
+source manifests sync before the in-memory capture or session is published.
+Insufficient capacity is refused before acquisition. Failed bootstrap may leave a
+valid retained capture, but never publishes a session after a failed output or
+custody check. Empty offline archives cannot bootstrap an observation.
 
 `fortress.observe` obtains one new capture. Optional `native_order_ids` replace
 the selection; comparison resets instead of joining different selections.
 `fortress.query` inspects the cached capture with no native call, optionally
 requiring `expected_witness`. Cached data never claims current freshness.
+An alternative `history` JSON argument supports `list`, `record` and `changes`
+without any native calls. It cannot be combined with `expected_witness`. Exact
+references survive restart; continuations do not. See
+`WORK_ORDER_PROGRESS_HISTORY.md` for the complete request shapes and examples.
 
 `fortress.wait` requires the exact current `expected_witness` and optionally a
 narrower wall allowance. It performs ONE foreground capture and comparison, not
@@ -92,9 +107,10 @@ an older frame has a regressed clock. Incarnation/selection changes and monotoni
 clock/allocation-horizon regressions never yield cross-boundary progress deltas.
 
 `fortress.explain` returns the same retained evidence without a native call.
-`fortress.doctor` reports local capture availability, not bridge-health proof.
-`fortress.cancel` closes the read-only session, including after source failure or
-operator revocation; it never cancels orders. Plan, commit, checkpoint and restore
+`fortress.doctor` reports local capture availability and custody-checked archive
+metadata, not bridge-health proof. `fortress.cancel` closes the read-only session,
+including after source failure or operator revocation; it releases archive custody
+and the connection without changing history or cancelling orders. Plan, commit, checkpoint and restore
 remain registered but explicitly refused. There is no mutation-capable interface
 under the progress reader or session.
 
@@ -104,8 +120,13 @@ Every semantic operation requires current session/fortress-scoped authority.
 Cached reads evaluate grants at no earlier than the last observed tick. New
 captures recheck Query/Observe against the newly observed tick before retention.
 Failed native refresh clears the old capture and fences the connection. There is
-no implicit reconnect; close and reopen explicitly. A new session starts without
-a baseline, and no downtime continuity or durable monitoring is claimed.
+no implicit reconnect; close and reopen explicitly. A new live session starts without an in-memory baseline; its first archived capture
+starts a new comparison segment even if native identity is unchanged. Previously
+archived observations are recoverable, but neither downtime continuity nor durable
+watch definitions are claimed. Historical queries leave the current selection and
+live comparison unchanged. They remain available after native failure while
+archive custody is healthy. Offline mode cannot acquire captures or append history,
+even with an injected Observe grant.
 
 The native queue scan is bounded to 4,096 entries and the selection to 32 whole
 rows. This permits complete selected-presence evidence without returning the
@@ -115,10 +136,15 @@ eight, 64 KiB each and 256 KiB total per call. Numeric loopback TCP reapplies th
 remaining absolute deadline before every blocking operation. Connection and all
 bootstrap requests share one deadline. Injected streams must honor that contract.
 
-Session defaults are 5 seconds, 2 MiB work and 65,536 output-token proxy units;
-maxima are 60 seconds, 2 MiB and 131,072 proxy units. The four-byte output proxy
+Session defaults are 5 seconds, 2 MiB work without JOURNAL (68 MiB with it), and
+65,536 output-token proxy units; maxima are 60 seconds, 68 MiB and 131,072 proxy
+units. Archive-backed bootstrap charges retained archive bytes before native
+negotiation; it does not allocate the whole admitted allowance. History retains at
+most 64 MiB / 4,096 complete records and has no automatic rotation or repair. The four-byte output proxy
 is an accounting convention, not a tokenizer count. Response capacity of 16 KiB
-plus 4 KiB per complete selected row is reserved before native work. Bootstrap
+plus 4 KiB per complete selected row is reserved before native work. Historical
+requests and offline opening reserve all 32 row slots, covering either a full
+selected capture and comparison or up to 64 complete metadata entries. Bootstrap
 also reserves 1 MiB for negotiation and 384 KiB for its first read. No output is
 truncated mid-object, and an inadequate request is refused before capture. An
 unadmitted tiny request does not imply that a complete error fits a one-token
@@ -158,3 +184,25 @@ static material recognition or unknown-field rejection fail executed assertions
 under each compiler. This does not qualify real DFHack, generated protobuf,
 CoreSuspender/events, a live fortress or production admission. Exact source hashes
 are retained with the scoped reports under `docs/evidence/`.
+
+
+## Archive integration evidence
+
+The archive/MCP increments add 24 Rust regression groups: thirteen archive,
+private-custody and publication-barrier tests, plus eleven history-dispatch and
+actual shared-runtime offline/publication scenarios. These are **registered but
+uncompiled and unexecuted**. They include zero-source offline bootstrap, Query-only
+mode, historical navigation without selection changes, exact-record corruption,
+output refusal before session publication, lock release and maximal historical
+responses. No Rust type check, actual MCP transport, filesystem durability or
+live-fortress execution has been established.
+
+The executed independent Python models reject 604 archive byte corruptions,
+602 torn prefixes and eleven rehashed illegal histories; they accept 120 valid
+segment/counter cases. The MCP reference checks 134 accepted and 32 rejected
+request shapes, 7,263 pagination cases, and seven cursor binding/restart/eviction
+refusals. Maximum modeled historical response is 98,848 bytes including a 16 KiB
+envelope allowance, below the 147,456-byte reservation. Those models do not run the
+Rust parser, serializer, session or filesystem. The unchanged actual native handler
+was rerun on GCC and Clang with UBSan: 1,358 assertions and three rejected mutants
+per compiler, still scoped only to explicit DFHack/protobuf test doubles.

@@ -1,0 +1,34 @@
+{
+  "complete_output_reservation_bytes": 147456,
+  "cursor_rebinding_restart_eviction_rejections": 7,
+  "filesystem_executed": false,
+  "live_game_executed": false,
+  "mcp_executed": false,
+  "mcp_tools_wired": 11,
+  "new_mcp_history_rust_groups": 11,
+  "output_model_bytes": {
+    "changes": 98848,
+    "metadata_page": 66980,
+    "record": 89921
+  },
+  "pagination_cases": 7263,
+  "requests_accepted": 134,
+  "requests_rejected": 32,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.progress-history-mcp-reference/1",
+  "scope": "Independent Python request, cursor, pagination and JSON-size models plus lexical wiring, not Rust or MCP execution",
+  "segment_comparison_cases": 2,
+  "source_sha256": {
+    "architecture/work_order_progress_v1_12.json": "a3044d887a1ed38e2c3c987ab32461080250f91cd704301115ab0556ec303805",
+    "crates/dfmcp-adapter/src/work_order_progress.rs": "3c3fd39439a9a75ca9ef710eac01634ffcd0d2228d7d425b8dabdf530cf2e5ae",
+    "crates/dfmcp-adapter/src/work_order_progress/archive.rs": "c5ac20eab21e2b7040037633477c314550203ecc2f34b356535068626b45cdb2",
+    "crates/dfmcp-adapter/src/work_order_progress/archive_file.rs": "99bc603a252bef51a766e273df8c24fbddbe52e2cea2f69fd29fd358936c8ef7",
+    "crates/dfmcp-mcp/src/live_work_order_progress_server.rs": "7173c4e176e6ccf455cbd0b34ad603faa979520bf65580d15034055637c2c285",
+    "crates/dfmcp-mcp/src/live_work_order_progress_server_tests.rs": "5b547ffd11ba9be8d01c12b4815a10073642b6860440667d1f3c1143feba7b58",
+    "crates/dfmcp-mcp/src/progress_history.rs": "b6c658a83eb9c1f295b4f80dee0813f269248ad4e2ab3b34f598a8f8abe4ba75",
+    "crates/dfmcp-mcp/src/progress_history_tests.rs": "f967cb2d2278eb6ec0f2f1ab95bc2fb2a0d1ad734ff04db9de375e48fad45804",
+    "scripts/check_progress_history_mcp_reference.py": "ee6fbdba53f14dced1211a25a01d49910777da9f24a83ae6d85cbe299276b2e0"
+  },
+  "status": "passed_reference_only"
+}

@@ -85,3 +85,101 @@ or actual MCP execution is claimed.
 and 11 illegal rehashed histories, and checks 120 valid segment/counter cases.
 This is a Python model, not execution of the Rust parser or filesystem operations.
 The scoped result and source hashes are in `docs/evidence/progress-archive-reference.json`.
+
+
+## Integrated MCP history and offline workflow
+
+`dfmcp-live-work-order-progress-dev-server` now accepts optional operator
+`DFMCP_WORK_ORDER_PROGRESS_JOURNAL`. Existing live use without an archive remains
+available. The path never appears in a tool argument. Live opening/refresh reserve
+retention and complete output before acquisition, then append and sync the complete
+observation before publishing it. Lost acknowledgements leave exact records
+available for inspection; no record is deleted to hide a failed response.
+
+To inspect an existing archive without DFHack, keep the exact 1.12 development
+opt-in and operator fortress ID, configure JOURNAL, and call:
+
+```json
+{"recovery_only":true}
+```
+
+Do not send `native_order_ids` in this mode. An existing nonempty archive is
+required. The branch executes before endpoint/credential reads and has no source
+object. Query is the only granted capability; even a later injected Observe grant
+cannot turn offline mode into a live session or permit archive append. Empty,
+corrupt, foreign-fortress and custody-invalid archives refuse bootstrap. The
+latest exact record supplies historical orientation, never a current-game claim.
+
+In either archive-backed live mode or offline mode, `fortress.query` accepts a
+`history` STRING containing one of these JSON objects. The examples show the
+inner JSON; encode it as a string in the tool's `history` argument and include the
+session ID separately. `expected_witness` and `history` are mutually exclusive.
+
+```json
+{"mode":"list","limit":8}
+```
+
+This returns complete metadata entries, the archive ID/head, total retained count
+and an optional continuation. Follow it with the same page size:
+
+```json
+{"mode":"list","limit":8,"continuation":"<returned continuation>"}
+```
+
+Limits are 1..64 whole metadata rows. The 64 retained issued cursors bind session,
+archive ID, exact head and page size; replay of the same page returns the same
+cursor while retained. Unknown, evicted, restarted-session or changed-head tokens
+require restarting discovery. A token is a scoped handle, not authority or a
+client-selected file offset. Exact entry references do not depend on those cursors.
+
+```json
+{"mode":"record","archive_id":"<archive ID>","number":1,"record_digest":"<entry digest>"}
+```
+
+This re-reads the selected frame, verifies it against retained identity and returns
+its full source manifest and native observation. The Agent Turn anchor is that
+historical capture. The live session's current selection, witness and authority
+clock do not change. A same-length rewrite of the requested frame is refused.
+
+```json
+{"mode":"changes","archive_id":"<archive ID>","before_number":1,"before_digest":"<first digest>","after_number":2,"after_digest":"<second digest>"}
+```
+
+Both exact records must be ordered and in the SAME archive segment. The response
+returns the before reference, full after record and bounded endpoint comparison.
+The two reads share a narrowing wall allowance and reserve two complete frames.
+An intervening restart or discontinuity cannot be bypassed by choosing apparently
+compatible endpoints. Neither history queries nor current queries reconnect a
+failed source, sample a monitor, mutate a creation journal or dispatch game work.
+
+Requests are at most 2,048 UTF-8 bytes with a closed tagged field grammar. Unknown
+fields/modes, invalid/duplicate keys, noncanonical digests, invalid limits and
+reversed/identical endpoints fail. Normal history pages carry complete-set flags;
+metadata discovery does not reread every unrequested payload. All exact-record
+and comparison responses verify their requested payload bytes again.
+
+Session closure releases the source and archive while holding the runtime slot.
+It remains available after source failure or operator revocation and never
+cancels orders or erases historical evidence. Healthy history remains readable
+after live source failure. Corrupt archive custody suppresses even already-built
+historical packets before publication. Final output failure or acknowledgement
+expiry cannot publish a new session.
+
+### Runtime limits and executed evidence
+
+Archive-backed startup defaults to 68 MiB byte work, sufficient for the 64 MiB
+retained maximum plus bounded negotiation, capture, archive frame and output work.
+Unarchived sessions retain their 2 MiB default. Maxima are 60 seconds, 68 MiB and
+131,072 four-byte output-proxy units. Historical responses reserve 147,456 bytes
+before work; this covers a 16 KiB envelope plus 32 complete 4 KiB row allowances.
+An insufficient request returns a refusal rather than partial record JSON.
+
+Eleven additional Rust tests exercise the actual generic history dispatcher and
+shared runtime offline/render/publication helpers, including Unix private files.
+They are uncompiled and unexecuted. The separate Python request/cursor/size model
+passed 134 positive and 32 negative request cases, 7,263 pagination cases, seven
+cursor rejection cases and two segment-comparison controls. Conservative modeled
+metadata, exact-record and comparison responses measured 66,980, 89,921 and
+98,848 bytes, respectively, including the full 16 KiB envelope allowance.
+Those are model sizes, not measured Rust serialization. The scoped report is
+`docs/evidence/progress-history-mcp-reference.json`.

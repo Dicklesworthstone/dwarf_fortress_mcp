@@ -76,6 +76,30 @@
     "clock_or_allocation_horizon_regressed"
   ],
   "same_generation_replayed_sequence": "reject_before_comparison_or_clock_reset",
-  "monitoring_lifetime": "foreground_session_only_no_durable_or_downtime_continuity",
-  "coexisting_protocol_1_11": "unchanged single-order DFMOP011 reader; no codec or admission equivalence"
+  "monitoring_lifetime": "foreground_acquisition_optional_durable_observations_no_downtime_continuity",
+  "coexisting_protocol_1_11": "unchanged single-order DFMOP011 reader; no codec or admission equivalence",
+  "archive": {
+    "operator_environment": "DFMCP_WORK_ORDER_PROGRESS_JOURNAL",
+    "magic": "DFMWPA12",
+    "frame_magic": "DFMWPR12",
+    "footer": "DFMWPE12",
+    "max_bytes": 67108864,
+    "max_records": 4096,
+    "max_body_bytes": 18432,
+    "max_metadata_rows": 64,
+    "max_history_request_bytes": 2048,
+    "capture_publication": "complete_decode_authorize_compare_append_sync_then_publish",
+    "reopen_comparison": "first_append_starts_new_segment",
+    "offline": "existing_nonempty_read_only_query_no_credentials_no_native_source",
+    "history_queries": [
+      "list",
+      "record",
+      "changes"
+    ],
+    "history_comparison": "two_ordered_exact_records_in_one_segment",
+    "continuation": "issued_session_archive_exact_head_page_size_bound_max_64",
+    "repairs": false,
+    "external_anti_rollback_floor": false,
+    "creation_journal_reconciliation": false
+  }
 }

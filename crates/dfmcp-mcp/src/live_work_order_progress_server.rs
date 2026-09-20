@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Explicitly unadmitted, foreground-only work-order progress. No mutation edge.
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -12,8 +13,14 @@ use dfmcp_core::{AgentPhase, Capability, CapabilityGrant, CapabilityScope, Conti
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Value, json};
+use dfmcp_adapter::work_order_progress::archive::{ArchiveMode, PrivateProgressArchiveFile,
+    ProgressArchive, ProgressArchiveEntry, ProgressArchiveSummary, MAX_FRAME_BYTES, open_progress_archive};
 
-const MAX_BYTES: u64 = 2 * 1024 * 1024;
+#[path = "progress_history.rs"]
+mod history;
+
+const MAX_BYTES: u64 = 68 * 1024 * 1024;
+const TRANSIENT_BYTES: u64 = 2 * 1024 * 1024;
 const BASE_RESERVE: u64 = 16 * 1024;
 const ROW_RESERVE: u64 = 4 * 1024;
 const FAMILY: u128 = 12u128 << 57;
@@ -22,7 +29,15 @@ static SESSION: Mutex<Option<RuntimeSession>> = Mutex::new(None);
 type Reader = ProgressSession<ProgressRpcClient<ProgressTcpStream>>;
 struct RuntimeSession {
     id: SessionId, request: u128, anchor: StateAnchor, budget: WorkBudget,
-    grants: Vec<CapabilityGrant>, ids: Vec<u32>, reader: Reader,
+    grants: Vec<CapabilityGrant>, ids: Vec<u32>, reader: Option<Reader>,
+    archive: Option<ProgressArchive<PrivateProgressArchiveFile>>, record: Option<ProgressArchiveEntry>,
+    offline: bool, cursors: history::Cursors,
+}
+struct Projection {
+    value: Value, capture: Option<ProgressObservation>, comparison: Option<ProgressComparison>, historical: bool,
+}
+impl Projection {
+    fn plain(value: Value, historical: bool) -> Self { Self { value, capture: None, comparison: None, historical } }
 }
 fn error(code: ErrorCode, text: &str) -> DfmcpError { DfmcpError::new(code, text) }
 fn runtime_io() -> Result<()> {
@@ -31,8 +46,9 @@ fn runtime_io() -> Result<()> {
     if cx.io().is_none() { return Err(error(ErrorCode::CapabilityDenied, "inherited runtime denies progress I/O")); }
     Ok(())
 }
-const ENVIRONMENT: [&str; 4] = ["DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12",
-    "DFMCP_WORK_ORDER_PROGRESS_TOKEN", "DFMCP_WORK_ORDER_PROGRESS_ENDPOINT", "DFMCP_WORK_ORDER_PROGRESS_FORTRESS_ID"];
+const ENVIRONMENT: [&str; 5] = ["DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12",
+    "DFMCP_WORK_ORDER_PROGRESS_TOKEN", "DFMCP_WORK_ORDER_PROGRESS_ENDPOINT", "DFMCP_WORK_ORDER_PROGRESS_FORTRESS_ID",
+    "DFMCP_WORK_ORDER_PROGRESS_JOURNAL"];
 fn environment_contract(opt_in: Option<&str>, keys: &[String], admitted: bool) -> Result<()> {
     if opt_in != Some("1") || admitted || keys.iter().any(|k| k.starts_with("DFMCP_") && !ENVIRONMENT.contains(&k.as_str())) {
         return Err(error(ErrorCode::CapabilityDenied, "progress/1.12 requires exact development opt-in and refuses production/admission or other DFMCP environment state"));
@@ -124,24 +140,29 @@ fn failure(cause: &DfmcpError) -> Value {
         "game_mutation_dispatched":false,"recovery":"Inspect cached evidence or explicitly close/reopen after source failure; no automatic reconnect."}})
 }
 fn packet(operation: &str, result: Value, context: Option<&OperationContext>, capture: Option<&ProgressObservation>, comparison: Option<&ProgressComparison>) -> String {
+    packet_origin(operation, result, context, capture, comparison, false, None)
+}
+fn packet_origin(operation: &str, result: Value, context: Option<&OperationContext>, capture: Option<&ProgressObservation>,
+    comparison: Option<&ProgressComparison>, historical: bool, archive: Option<&ProgressArchiveSummary>) -> String {
     let phase = if operation == "fortress.open_session" { AgentPhase::Bootstrap } else { AgentPhase::Inspect };
-    let continuity = if capture.is_none() { ContinuityStatus::Indeterminate }
+    let continuity = if historical { ContinuityStatus::Stale } else if capture.is_none() { ContinuityStatus::Indeterminate }
         else if comparison.is_some_and(|c|c.status == "reset") { ContinuityStatus::Reset }
         else if comparison.is_some_and(|c|c.status == "bootstrap") { ContinuityStatus::Bootstrap } else { ContinuityStatus::Partial };
     let mut builder = crate::AgentTurnBuilder::new(operation, phase)
         .continuity(continuity, None, None, comparison.and_then(|c|c.reset_reason).map(str::to_owned))
         .briefing(json!({"runtime":"unadmitted_development","bridge_protocol":"1.12","runtime_admitted":false,"read_only":true,
-            "current_freshness_proven":false,"production_completion_proven":false}))
+            "current_freshness_proven":false,"production_completion_proven":false,"historical":historical,
+            "progress_archive":archive.map(history::summary_json)}))
         .active_work(json!({"pending_plans":[],"actions":[],"obligations":[],"cancellation_drains":[],
             "indeterminate_effects":[],"publications":[],"confirmations":[],
             "scope":"This read-only session only; other journals, effects and monitors were not examined."}))
-        .coverage(json!({"status":"partial","complete_domains":if capture.is_some(){json!(["presence_for_selected_order_ids"])}else{json!([])},
-            "partial_domains":["selected_order_progress_fields"],"omitted_domains":["continuous_history","full_order_configuration",
+        .coverage(json!({"status":"partial","complete_domains":if capture.is_none(){json!([])}else if historical {json!(["historical_presence_for_selected_order_ids"])}else{json!(["presence_for_selected_order_ids"])},
+            "partial_domains":if historical{json!(["historical_selected_order_progress_fields"])}else{json!(["selected_order_progress_fields"])},"omitted_domains":["continuous_history","full_order_configuration",
             "material_availability","causal_blockers","created_receipt_identity","goods_produced"],"continuation":null}))
         .uncertainty(vec![json!({"code":"counters_are_not_completion","detail":"Absent orders, zero remaining and counter decreases do not independently prove completed goods or resolve a creation receipt."})]);
     if let Some(c) = context { builder = builder.session_id(c.session_id.to_string()).request_id(c.request_id.to_string()); }
     if let Some(o) = capture {
-        builder = builder.anchor(json!({"kind":"selected_native_order_progress","fortress_id":o.fortress_id().to_string(),
+        builder = builder.anchor(json!({"kind":if historical {"historical_native_order_progress"} else {"selected_native_order_progress"},"fortress_id":o.fortress_id().to_string(),
             "bridge_generation":o.generation(),"capture_sequence":o.sequence(),"game_tick":o.tick(),"witness":o.witness().to_string(),
             "canonical_world_anchor":false}));
     }
@@ -152,21 +173,114 @@ fn packet(operation: &str, result: Value, context: Option<&OperationContext>, ca
     json!({"result":result,"agent_turn":turn}).to_string()
 }
 fn unbound(operation: &str, cause: &DfmcpError) -> String { packet(operation, failure(cause), None, None, None) }
-fn render(operation: &str, result: Value, s: &RuntimeSession, c: &OperationContext) -> String {
-    let mut current = c.clone(); current.anchor = s.anchor;
-    let o = s.reader.current(&current).ok().flatten(); let comparison = s.reader.comparison(&current).ok().flatten();
-    let out = packet(operation, result, Some(c), o, comparison);
-    if out.len() as u64 <= c.budget.max_bytes.min(u64::from(c.budget.max_output_tokens)*4) { out }
-    else { packet(operation, failure(&error(ErrorCode::BudgetExceeded,"progress output exceeded its reservation; no game effect occurred")),Some(c),None,None) }
+fn archive_path() -> Result<Option<PathBuf>> {
+    if std::env::var_os(ENVIRONMENT[4]).is_none() { return Ok(None); }
+    Ok(Some(PathBuf::from(configured(ENVIRONMENT[4], 4096)?)))
 }
-fn selected_result(s: &RuntimeSession, c: &OperationContext, fresh: bool) -> Result<Value> {
-    let capture = s.reader.current(c)?.ok_or_else(|| error(ErrorCode::StaleAnchor,"no valid capture is retained; explicitly close/reopen a fenced source"))?;
-    Ok(json!({"ok":true,"source_read_this_call":fresh,"observation":observation_json(capture),
-        "comparison":s.reader.comparison(c)?.map(comparison_json),
-        "next_step":{"tool":"fortress.wait","session_id":s.id.to_string(),"expected_witness":capture.witness().to_string()}}))
+fn session_grants(fortress: FortressId, offline: bool) -> Vec<CapabilityGrant> {
+    [Capability::Query, Capability::Observe].into_iter().filter(|cap| !offline || *cap == Capability::Query)
+        .map(|capability| CapabilityGrant { capability,
+            scope: CapabilityScope { fortress_id: Some(fortress), ..CapabilityScope::default() },
+            max_risk: RiskTier::ReadOnly, expires_at_tick: None, remaining_uses: None }).collect()
+}
+fn access(s: &mut RuntimeSession, c: &OperationContext) -> Result<Option<ProgressArchiveSummary>> {
+    if s.id != c.session_id || s.anchor.fortress_id != c.anchor.fortress_id {
+        return Err(error(ErrorCode::CapabilityDenied, "progress belongs to another session or fortress"));
+    }
+    let mut current = c.clone(); current.anchor.tick = GameTick(s.anchor.tick.get().max(c.anchor.tick.get()));
+    current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    s.archive.as_mut().map(|a| a.summary(&current)).transpose()
+}
+fn render_checked(operation: &str, projection: Projection, s: &mut RuntimeSession, c: &OperationContext) -> Result<String> {
+    let archive = access(s, c)?;
+    let out = packet_origin(operation, projection.value, Some(c), projection.capture.as_ref(),
+        projection.comparison.as_ref(), projection.historical, archive.as_ref());
+    if out.len() as u64 > c.budget.max_bytes.min(u64::from(c.budget.max_output_tokens)*4) {
+        return Err(error(ErrorCode::BudgetExceeded, "progress output exceeded its reservation; inspect retained history"));
+    }
+    Ok(out)
+}
+fn render(operation: &str, projection: Projection, s: &mut RuntimeSession, c: &OperationContext) -> String {
+    render_checked(operation, projection, s, c).unwrap_or_else(|cause|
+        packet_origin(operation, failure(&cause), Some(c), None, None, s.offline, None))
+}
+fn offline_session(mut archive: ProgressArchive<PrivateProgressArchiveFile>, c: &OperationContext,
+    budget: WorkBudget) -> Result<RuntimeSession>
+{
+    let summary = archive.summary(c)?;
+    if !summary.read_only { return Err(error(ErrorCode::CapabilityDenied,"offline session requires immutable read-only custody")); }
+    let retained = archive.latest(c)?.ok_or_else(||error(ErrorCode::InvalidRequest,"empty progress archive cannot bootstrap observations"))?;
+    let anchor = StateAnchor { tick:GameTick(c.anchor.tick.get().max(summary.authority_tick_floor)),
+        state_hash:retained.observation.witness(), ..c.anchor };
+    Ok(RuntimeSession { id:c.session_id, request:c.request_id.get(), anchor, budget,
+        grants:c.grants.iter().filter(|g|g.capability == Capability::Query).cloned().collect(),
+        ids:retained.observation.ids(), reader:None, archive:Some(archive), record:Some(retained.entry),
+        offline:true, cursors:history::Cursors::default() })
+}
+fn publish_session(mut session: RuntimeSession, projection: Projection, c: &OperationContext,
+    started: Instant, target: &mut Option<RuntimeSession>) -> Result<String>
+{
+    if target.is_some() { return Err(error(ErrorCode::Conflict,"progress slot already occupied")); }
+    let out = render_checked("fortress.open_session", projection, &mut session, c)?;
+    if started.elapsed() >= Duration::from_millis(c.budget.max_wall_millis) {
+        return Err(error(ErrorCode::BudgetExceeded,"progress bootstrap exceeded its budget; custody was not published"));
+    }
+    *target = Some(session); Ok(out)
+}
+fn selected_result(s: &mut RuntimeSession, c: &OperationContext, fresh: bool) -> Result<Projection> {
+    let summary = access(s, c)?;
+    let (capture, comparison, entry) = if s.offline {
+        let archive = s.archive.as_mut().ok_or_else(|| error(ErrorCode::InternalInvariantViolation,"offline archive missing"))?;
+        let record = archive.latest(c)?.ok_or_else(|| error(ErrorCode::InvalidRequest,"archive contains no capture"))?;
+        (record.observation, None, Some(record.entry))
+    } else {
+        let reader = s.reader.as_ref().ok_or_else(|| error(ErrorCode::InternalInvariantViolation,"live source missing"))?;
+        let capture = reader.current(c)?.ok_or_else(|| error(ErrorCode::StaleAnchor,"no current capture; history remains available when archive custody is healthy"))?.clone();
+        let comparison = reader.comparison(c)?.cloned();
+        if let Some(archive) = s.archive.as_mut() {
+            let entry = s.record.as_ref().ok_or_else(|| error(ErrorCode::CorruptLedger,"current capture lacks a durable reference"))?;
+            let record = archive.record(entry.number, entry.record_digest, c)?;
+            if record.observation != capture { return Err(error(ErrorCode::CorruptLedger,"current capture and durable record disagree")); }
+        }
+        (capture, comparison, s.record.clone())
+    };
+    let reference = entry.as_ref().zip(summary.as_ref()).map(|(e,a)|history::entry_json(e,a.archive_id));
+    let value = json!({"ok":true,"historical":s.offline,"source_read_this_call":fresh,"observation":observation_json(&capture),
+        "comparison":comparison.as_ref().map(comparison_json),"archive_record":reference,
+        "progress_archive":summary.as_ref().map(history::summary_json),
+        "next_step":if s.offline {json!({"tool":"fortress.query","session_id":s.id.to_string(),"history":"{\"mode\":\"list\"}"})}
+            else {json!({"tool":"fortress.wait","session_id":s.id.to_string(),"expected_witness":capture.witness().to_string()})}});
+    Ok(Projection { value, capture:Some(capture), comparison, historical:s.offline })
+}
+fn refresh(s: &mut RuntimeSession, ids: &[u32], c: &OperationContext) -> Result<()> {
+    if s.offline { return Err(error(ErrorCode::CapabilityDenied,"offline recovery cannot acquire native observations or append history")); }
+    let started = Instant::now(); access(s, c)?;
+    if let Some(archive) = s.archive.as_mut() {
+        let mut storage = c.clone();
+        storage.budget.max_bytes = storage.budget.max_bytes.checked_sub(progress::RPC_BYTE_RESERVE + MAX_FRAME_BYTES)
+            .ok_or_else(||error(ErrorCode::BudgetExceeded,"native capture, durable append and exact readback do not fit"))?;
+        archive.reserve_capture(&storage)?;
+    }
+    let work = remaining(c.clone(), started, c.budget.max_wall_millis)?;
+    let reader = s.reader.as_mut().ok_or_else(|| error(ErrorCode::InternalInvariantViolation,"live source missing"))?;
+    let archive = &mut s.archive;
+    let mut record = None;
+    reader.refresh_with_publication(ids, &work, |manifest, capture, context| {
+        runtime_io()?;
+        if let Some(archive) = archive.as_mut() {
+            let mut storage = context.clone();
+            storage.budget.max_bytes = storage.budget.max_bytes.checked_sub(progress::RPC_BYTE_RESERVE + MAX_FRAME_BYTES)
+                .ok_or_else(|| error(ErrorCode::BudgetExceeded,"progress archive allowance exhausted"))?;
+            record = Some(archive.append(manifest, capture, &storage)?);
+        }
+        Ok(())
+    })?;
+    let capture = reader.current(&work)?.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"capture publication missing"))?;
+    s.anchor.tick = GameTick(s.anchor.tick.get().max(capture.tick())); s.anchor.state_hash = capture.witness();
+    s.record = record; s.ids = ids.to_vec(); Ok(())
 }
 fn with_session<F>(id: String, operation: &str, rows: Option<usize>, max_wall: Option<u64>, body: F) -> String
-where F: FnOnce(&mut RuntimeSession, &OperationContext) -> Result<Value> {
+where F: FnOnce(&mut RuntimeSession, &OperationContext) -> Result<Projection> {
     let started = Instant::now();
     let result = (|| {
         runtime_io()?; validate_environment()?; let id = parse_session(&id)?; let mut guard = slot()?;
@@ -174,94 +288,140 @@ where F: FnOnce(&mut RuntimeSession, &OperationContext) -> Result<Value> {
         let mut display = s.context()?;
         if let Some(wall) = max_wall { display.budget.max_wall_millis = wall.min(display.budget.max_wall_millis); }
         let work = reserve(display.clone(), rows.unwrap_or(s.ids.len())).and_then(|c|remaining(c,started,display.budget.max_wall_millis));
-        let outcome = work.and_then(|work| body(s,&work)).and_then(|value| {
+        let outcome = work.and_then(|work| { access(s, &work)?; body(s,&work) }).and_then(|value| {
             if started.elapsed() >= Duration::from_millis(display.budget.max_wall_millis) {
-                Err(error(ErrorCode::BudgetExceeded, "progress request exceeded its acknowledgement deadline; inspect retained evidence"))
+                Err(error(ErrorCode::BudgetExceeded,"progress acknowledgement deadline expired; inspect retained history"))
             } else { Ok(value) }
         });
-        let result = outcome.unwrap_or_else(|cause|failure(&cause));
-        Ok::<_,DfmcpError>(render(operation,result,s,&display))
+        let projection = outcome.unwrap_or_else(|cause|Projection::plain(failure(&cause),s.offline));
+        Ok::<_,DfmcpError>(render(operation,projection,s,&display))
     })();
     result.unwrap_or_else(|cause|unbound(operation,&cause))
 }
 
-#[tool(description="Open an explicitly unadmitted read-only work-order-progress/1.12 session for 1..32 native order IDs. Operator supplies fortress, numeric loopback endpoint and separate token. A complete queue scan establishes selected presence; counters never prove goods produced. One capture is acquired before publishing the session.")]
-pub fn fortress_open_session(native_order_ids: Vec<u32>, max_wall_millis: Option<u64>, max_bytes: Option<u64>, max_output_tokens: Option<u32>) -> String {
+#[tool(description="Open unadmitted progress/1.12. Live mode requires 1..32 native_order_ids and acquires a complete capture. With an operator JOURNAL, sync each capture before publication. recovery_only=true requires an existing nonempty archive, omits IDs, grants only Query and never reads endpoint/token or contacts DFHack. No game mutation or creation reconciliation exists.")]
+pub fn fortress_open_session(native_order_ids: Option<Vec<u32>>, max_wall_millis: Option<u64>, max_bytes: Option<u64>,
+    max_output_tokens: Option<u32>, recovery_only: Option<bool>) -> String {
     let started = Instant::now();
     let result = (|| {
-        runtime_io()?; validate_environment()?; let ids = normalized_ids(native_order_ids)?; let mut guard = slot()?;
+        runtime_io()?; validate_environment()?;
+        let offline = recovery_only.unwrap_or(false); let path = archive_path()?;
+        let ids = match (offline, native_order_ids) {
+            (true,None) if path.is_some() => Vec::new(),
+            (false,Some(ids)) => normalized_ids(ids)?,
+            _ => return Err(error(ErrorCode::InvalidRequest,"live mode requires IDs; offline requires JOURNAL and no IDs")),
+        };
+        let mut guard = slot()?;
         if guard.is_some() { return Err(error(ErrorCode::Conflict,"close the existing progress session first")); }
         let raw_fortress = configured(ENVIRONMENT[3],20)?;
         let value = raw_fortress.parse::<u64>().map_err(|_|error(ErrorCode::InvalidRequest,"fortress ID must be canonical nonzero decimal"))?;
         if value==0 || value.to_string()!=raw_fortress { return Err(error(ErrorCode::InvalidRequest,"fortress ID must be canonical nonzero decimal")); }
         let fortress = FortressId::new(value);
         let budget = WorkBudget { max_wall_millis:max_wall_millis.unwrap_or(5000),max_game_ticks:0,max_entities:4096,
-            max_bytes:max_bytes.unwrap_or(MAX_BYTES),max_output_tokens:max_output_tokens.unwrap_or(65_536),max_actions:1 };
+            max_bytes:max_bytes.unwrap_or(if path.is_some(){MAX_BYTES}else{TRANSIENT_BYTES}),
+            max_output_tokens:max_output_tokens.unwrap_or(65_536),max_actions:1 };
         budget.validate()?;
-        if budget.max_wall_millis>60_000 || budget.max_bytes>MAX_BYTES || budget.max_output_tokens>131_072 { return Err(error(ErrorCode::BudgetExceeded,"progress session limits exceed 60000ms, 2MiB or 131072 output proxy units")); }
+        if budget.max_wall_millis>60_000 || budget.max_bytes>MAX_BYTES || budget.max_output_tokens>131_072 {
+            return Err(error(ErrorCode::BudgetExceeded,"progress limits exceed 60000ms, 68MiB or 131072 output proxy units"));
+        }
         let seq = NEXT.fetch_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1))
             .map_err(|_|error(ErrorCode::BudgetExceeded,"progress session identities exhausted"))?;
         let id = SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
-        let grants = [Capability::Query,Capability::Observe].into_iter().map(|capability|CapabilityGrant {
-            capability,scope:CapabilityScope{fortress_id:Some(fortress),..CapabilityScope::default()},max_risk:RiskTier::ReadOnly,
-            expires_at_tick:None,remaining_uses:None }).collect::<Vec<_>>();
+        let grants = session_grants(fortress, offline);
         let anchor = StateAnchor { fortress_id:fortress,cursor:ObservationCursor::ORIGIN,tick:GameTick(0),state_hash:Digest32::ZERO };
         let context = OperationContext {session_id:id,request_id:RequestId::new(1),anchor,budget,grants:grants.clone(),cancellation_requested:false};
-        let mut work = reserve(context.clone(),ids.len())?;
-        work.budget.max_bytes = work.budget.max_bytes.checked_sub(progress::BOOTSTRAP_BYTE_RESERVE)
-            .filter(|left|*left>=progress::RPC_BYTE_RESERVE).ok_or_else(||error(ErrorCode::BudgetExceeded,"progress bootstrap and complete read do not fit"))?;
-        let endpoint = match std::env::var(ENVIRONMENT[2]) {
-            Ok(v) if v.len()<=128 => v,
-            Err(std::env::VarError::NotPresent) => "127.0.0.1:5000".to_owned(),
-            _ => return Err(error(ErrorCode::InvalidRequest,"progress endpoint must be bounded UTF-8 numeric loopback")),
-        }.parse::<SocketAddr>().map_err(|_|error(ErrorCode::InvalidRequest,"progress endpoint must be numeric loopback"))?;
-        let token = configured(ENVIRONMENT[1],256)?.into_bytes();
+        let mut work = reserve(context.clone(), if offline{progress::MAX_TARGETS}else{ids.len()})?;
         work = remaining(work,started,budget.max_wall_millis)?;
-        let source = ProgressRpcClient::connect(endpoint,token,id.get().to_be_bytes().to_vec(),Duration::from_millis(work.budget.max_wall_millis))?;
-        work = remaining(work,started,budget.max_wall_millis)?; runtime_io()?;
-        let mut reader = ProgressSession::new(source,&work)?; reader.refresh(&ids,&work)?;
-        let o = reader.current(&work)?.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"bootstrap capture missing"))?;
-        let anchor = StateAnchor{tick:GameTick(o.tick()),state_hash:o.witness(),..anchor};
-        let session = RuntimeSession{id,request:1,anchor,budget,grants,ids,reader};
-        let result = json!({"ok":true,"session_id":id.to_string(),"capabilities":["query","observe"],"read_only":true,
-            "capture":selected_result(&session,&context,true)?,"close":{"tool":"fortress.cancel","session_id":id.to_string()}});
-        let out = packet("fortress.open_session",result,Some(&context),
-            session.reader.current(&context)?,session.reader.comparison(&context)?);
-        if out.len() as u64>budget.max_bytes.min(u64::from(budget.max_output_tokens)*4) || started.elapsed()>=Duration::from_millis(budget.max_wall_millis) {
-            return Err(error(ErrorCode::BudgetExceeded,"progress bootstrap response did not fit; session was not published"));
+        let mut archive = path.as_deref().map(|path|open_progress_archive(path,
+            if offline{ArchiveMode::Offline}else{ArchiveMode::Live},&work)).transpose()?;
+        if let Some(a) = archive.as_mut() {
+            let summary = a.summary(&work)?;
+            work.budget.max_bytes = work.budget.max_bytes.checked_sub(summary.retained_bytes + 160)
+                .filter(|n|*n>=2*MAX_FRAME_BYTES).ok_or_else(||error(ErrorCode::BudgetExceeded,"archive replay and bootstrap response do not fit"))?;
+            work.anchor.tick = GameTick(summary.authority_tick_floor);
         }
-        *guard=Some(session); Ok::<_,DfmcpError>(out)
+        work = remaining(work,started,budget.max_wall_millis)?; runtime_io()?;
+        // This branch intentionally precedes all endpoint/credential reads.
+        let mut session = if offline {
+            let a = archive.take().ok_or_else(||error(ErrorCode::InvalidRequest,"offline mode needs a progress archive"))?;
+            offline_session(a, &work, budget)?
+        } else {
+            work.budget.max_bytes = work.budget.max_bytes.checked_sub(progress::BOOTSTRAP_BYTE_RESERVE)
+                .filter(|left|*left>=progress::RPC_BYTE_RESERVE + 2*MAX_FRAME_BYTES)
+                .ok_or_else(||error(ErrorCode::BudgetExceeded,"native bootstrap and durable read do not fit"))?;
+            let endpoint = match std::env::var(ENVIRONMENT[2]) {
+                Ok(v) if v.len()<=128 => v,
+                Err(std::env::VarError::NotPresent) => "127.0.0.1:5000".to_owned(),
+                _ => return Err(error(ErrorCode::InvalidRequest,"progress endpoint must be bounded UTF-8 numeric loopback")),
+            }.parse::<SocketAddr>().map_err(|_|error(ErrorCode::InvalidRequest,"progress endpoint must be numeric loopback"))?;
+            let token = configured(ENVIRONMENT[1],256)?.into_bytes();
+            let source = ProgressRpcClient::connect(endpoint,token,id.get().to_be_bytes().to_vec(),Duration::from_millis(work.budget.max_wall_millis))?;
+            work = remaining(work,started,budget.max_wall_millis)?; runtime_io()?;
+            let reader = ProgressSession::new(source,&work)?;
+            let mut session = RuntimeSession {id,request:1,anchor:StateAnchor{tick:work.anchor.tick,..anchor},budget,grants,ids:ids.clone(),
+                reader:Some(reader),archive,record:None,offline:false,cursors:history::Cursors::default()};
+            refresh(&mut session,&ids,&work)?; session
+        };
+        work = remaining(work,started,budget.max_wall_millis)?;
+        let mut projection = selected_result(&mut session,&work,!offline)?;
+        projection.value = json!({"ok":true,"session_id":id.to_string(),"recovery_only":offline,"read_only":true,
+            "capabilities":if offline{json!(["query"])}else{json!(["query","observe"])},"capture":projection.value,
+            "close":{"tool":"fortress.cancel","session_id":id.to_string()}});
+        publish_session(session, projection, &context, started, &mut guard)
     })(); result.unwrap_or_else(|cause|unbound("fortress.open_session",&cause))
 }
 
-#[tool(description="Acquire one complete selected order-progress capture; optional IDs replace the selection. Comparisons reset on changed selection. Failed native refresh clears the old capture. This never changes a manager order or game clock.")]
+#[tool(description="Acquire one complete selected progress capture; optional IDs change selection. When journaling, capacity and output are reserved before acquisition and the complete capture is synced before publication. Offline sessions refuse. No manager-order or clock mutation occurs.")]
 pub fn fortress_observe(session_id: String, native_order_ids: Option<Vec<u32>>) -> String {
     let ids = match native_order_ids.map(normalized_ids).transpose() { Ok(v)=>v,Err(c)=>return unbound("fortress.observe",&c) };
     with_session(session_id,"fortress.observe",ids.as_ref().map(Vec::len),None,|s,c| {
-        let ids=ids.unwrap_or_else(||s.ids.clone()); s.reader.refresh(&ids,c)?;
-        let o=s.reader.current(c)?.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"capture missing"))?;
-        s.anchor.tick=GameTick(o.tick());s.anchor.state_hash=o.witness();s.ids=ids;selected_result(s,c,true)
+        let ids=ids.unwrap_or_else(||s.ids.clone()); refresh(s,&ids,c)?; selected_result(s,c,true)
     })
 }
-#[tool(description="Inspect the retained complete progress capture without a native call. The response explicitly does not prove current freshness. Optional expected witness rejects a stale client baseline.")]
-pub fn fortress_query(session_id: String, expected_witness: Option<String>) -> String {
-    with_session(session_id,"fortress.query",None,None,|s,c| {
-        if let Some(w)=expected_witness { check_witness(s,c,&w)?; } selected_result(s,c,false)
+#[tool(description="Inspect retained progress without native calls. Optional expected_witness binds the current capture. Alternatively history is a <=2048-byte JSON request: mode=list with limit/continuation; mode=record with archive_id,number,record_digest; mode=changes with archive_id,before_number,before_digest,after_number,after_digest. History and expected_witness are mutually exclusive. Exact history remains available offline or after native failure.")]
+pub fn fortress_query(session_id: String, expected_witness: Option<String>, history: Option<String>) -> String {
+    let request = match history.as_deref().map(history::Request::parse).transpose() {
+        Ok(request) if request.is_none() || expected_witness.is_none() => request,
+        Ok(_) => return unbound("fortress.query",&error(ErrorCode::InvalidRequest,"history and current witness cannot be mixed")),
+        Err(cause) => return unbound("fortress.query",&cause),
+    };
+    with_session(session_id,"fortress.query",request.as_ref().map(|_|progress::MAX_TARGETS),None,|s,c| {
+        if let Some(request) = request {
+            let archive = s.archive.as_mut().ok_or_else(||error(ErrorCode::CapabilityDenied,"this session has no operator-configured progress archive"))?;
+            let answer = history::query(archive,&mut s.cursors,request,c)?;
+            return Ok(Projection {value:answer.value,capture:answer.capture,comparison:answer.comparison,historical:true});
+        }
+        let projection = selected_result(s,c,false)?;
+        if let Some(w) = expected_witness {
+            let expected = parse_digest(&w)?;
+            if projection.capture.as_ref().is_none_or(|o|o.witness()!=expected) {
+                return Err(error(ErrorCode::StaleAnchor,"progress baseline changed; query current capture first"));
+            }
+        }
+        Ok(projection)
     })
 }
-fn check_witness(s:&RuntimeSession,c:&OperationContext,raw:&str)->Result<()> {
+fn check_witness(s:&mut RuntimeSession,c:&OperationContext,raw:&str)->Result<()> {
     let expected=parse_digest(raw)?;
-    if s.reader.current(c)?.is_none_or(|o|o.witness()!=expected) { return Err(error(ErrorCode::StaleAnchor,"progress baseline changed; query the current capture first")); }
+    let projection=selected_result(s,c,false)?;
+    if projection.capture.as_ref().is_none_or(|o|o.witness()!=expected) { return Err(error(ErrorCode::StaleAnchor,"progress baseline changed; query current capture first")); }
     Ok(())
 }
-#[tool(description="Perform one bounded foreground progress refresh from an exact retained witness. No sleep, polling loop, background task or game-clock advance. Counter decreases and disappearance are not proof of completed goods; reset evidence never becomes a cross-incarnation comparison.")]
+#[tool(description="Perform one foreground refresh from the exact retained witness. Archived sessions sync before publication; offline sessions refuse native work. Reopening creates a new history segment. No polling loop, clock advance, mutation or creation reconciliation exists.")]
 pub fn fortress_wait(session_id: String, expected_witness: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id,"fortress.wait",None,max_wall_millis,|s,c| {
-        check_witness(s,c,&expected_witness)?;s.reader.refresh(&s.ids,c)?;
-        let o=s.reader.current(c)?.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"capture missing"))?;
-        s.anchor.tick=GameTick(o.tick());s.anchor.state_hash=o.witness();selected_result(s,c,true)
+        if s.offline { return Err(error(ErrorCode::CapabilityDenied,"offline progress recovery cannot wait on DFHack")); }
+        let started = Instant::now(); check_witness(s,c,&expected_witness)?;
+        let mut work = remaining(c.clone(),started,c.budget.max_wall_millis)?;
+        if s.archive.is_some() {
+            work.budget.max_bytes = work.budget.max_bytes.checked_sub(MAX_FRAME_BYTES)
+                .ok_or_else(||error(ErrorCode::BudgetExceeded,"witness recheck and new capture do not fit"))?;
+        }
+        let ids=s.ids.clone(); refresh(s,&ids,&work)?;
+        let work = remaining(work,started,c.budget.max_wall_millis)?; selected_result(s,&work,true)
     })
 }
+
 #[tool(description="Explain retained validation/activity and remaining-work counters without native calls. Inactive does not establish why work is blocked; absence and zero remaining do not certify goods produced.")]
 pub fn fortress_explain(session_id: String)->String {
     with_session(session_id,"fortress.explain",None,None,|s,c|selected_result(s,c,false))
@@ -288,15 +448,21 @@ pub fn fortress_checkpoint(session_id:String)->String {denied(session_id,"fortre
 pub fn fortress_restore(session_id:String)->String {denied(session_id,"fortress.restore")}
 #[tool(description="Inspect local progress-session state without probing the native bridge. This is not compatibility admission, connection-health proof or a game-state refresh.")]
 pub fn fortress_doctor(session_id:String)->String {
-    with_session(session_id,"fortress.doctor",None,None,|s,c|Ok(json!({"ok":true,"runtime_admitted":false,"native_calls":0,
-        "selected_order_ids":s.ids,"capture_available":s.reader.current(c)?.is_some(),"read_only":true})))
+    with_session(session_id,"fortress.doctor",None,None,|s,c| {
+        let summary=access(s,c)?;
+        let available=if s.offline {s.archive.as_mut().map(|a|a.latest(c)).transpose()?.flatten().is_some()}
+            else {s.reader.as_ref().map(|r|r.current(c).map(|o|o.is_some())).transpose()?.unwrap_or(false)};
+        Ok(Projection::plain(json!({"ok":true,"runtime_admitted":false,"native_calls":0,
+            "selected_order_ids":s.ids,"capture_available":available,"read_only":true,"recovery_only":s.offline,
+            "bridge_connection_present":s.reader.is_some(),"progress_archive":summary.as_ref().map(history::summary_json)}),s.offline))
+    })
 }
 pub fn run_stdio() {
     if let Err(cause)=validate_environment() {eprintln!("{cause}");std::process::exit(1);}
     let server=ServerBuilder::new("dfmcp-live-work-order-progress-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted read-only progress/1.12. Select native manager-order IDs, inspect approval/activity/counters, and wait for one new bounded capture using its exact witness. No background polling or clock control. Disappearance, zero remaining or decreasing counters do not prove completed goods or resolve historical creation effects. Comparisons are between sampled endpoints, not continuous history. Unknown configuration is explicit. After source failure close and reopen explicitly. Creation and its durable journal remain a separate authorized profile.")
+        .instructions("Unadmitted read-only progress/1.12. Select native manager-order IDs, inspect approval/activity/counters, and wait for one new bounded capture using its exact witness. No background polling or clock control. Disappearance, zero remaining or decreasing counters do not prove completed goods or resolve historical creation effects. Comparisons are between sampled endpoints, not continuous history. Unknown configuration is explicit. Optional operator JOURNAL retains complete captures before publication. Open recovery_only=true with no IDs to inspect existing history without DFHack credentials or connection. Query history list/record/changes using exact archive references; do not compare across restart segments. Source failure preserves healthy archive access. Creation and its durable journal remain a separate authorized profile.")
         .build();crate::run_modern_stdio(server);
 }
 

@@ -14,7 +14,7 @@
   "scope": "Independent Python framing/continuity model, not Rust, filesystem durability or game truth",
   "source_sha256": {
     "crates/dfmcp-adapter/src/work_order_progress.rs": "3c3fd39439a9a75ca9ef710eac01634ffcd0d2228d7d425b8dabdf530cf2e5ae",
-    "crates/dfmcp-adapter/src/work_order_progress/archive.rs": "cd2b7de990d567505148a2415d4187a76f17ffd92cbe02cf1564672ec01fc675",
+    "crates/dfmcp-adapter/src/work_order_progress/archive.rs": "c5ac20eab21e2b7040037633477c314550203ecc2f34b356535068626b45cdb2",
     "crates/dfmcp-adapter/src/work_order_progress/archive_file.rs": "99bc603a252bef51a766e273df8c24fbddbe52e2cea2f69fd29fd358936c8ef7",
     "crates/dfmcp-adapter/src/work_order_progress/archive_tests.rs": "256d8e351fa591499510af8ea1e5217c36848b3d0b7023652208f5b29e2caddc",
     "crates/dfmcp-adapter/src/work_order_progress/tests.rs": "8cabf7ffe1830592fa4ef1367d94f60e4ea8d66c3a6af9174028dadbbf3bbc68",
