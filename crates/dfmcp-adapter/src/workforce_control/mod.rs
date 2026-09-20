@@ -3,6 +3,8 @@
 //! The wire is unchanged; this module cannot create authority from a receipt.
 
 pub mod rpc;
+pub mod journal;
+pub mod private_file;
 
 use std::collections::BTreeSet;
 use dfmcp_core::{Digest32, ErrorCode, FortressId, Result};
@@ -162,6 +164,7 @@ impl WorkforceCapture {
     pub fn details(&self) -> &[Detail] { &self.details }
     pub fn citizens(&self) -> &[Citizen] { &self.citizens }
     pub fn ids(&self) -> Vec<u32> { self.citizens.iter().map(Citizen::id).collect() }
+    pub fn entity_cost(&self) -> usize { self.citizens.len() + self.details.len() + self.details.iter().map(|d| d.members.len()).sum::<usize>() }
     pub fn fortress_id(&self) -> FortressId { fortress_id(&self.folder, self.site) }
 }
 pub fn fortress_id(folder: &str, site: u32) -> FortressId {
