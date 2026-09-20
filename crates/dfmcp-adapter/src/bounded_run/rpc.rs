@@ -26,6 +26,7 @@ impl RunManifest {
 /// durable dispatch ordering. No trait method may perform hidden retries.
 pub trait RunSource {
     fn manifest(&self) -> &RunManifest;
+    fn endpoint(&self) -> Option<SocketAddr>;
     fn observe(&mut self, context: &OperationContext) -> Result<RunObservation>;
     fn prepare(&mut self, plan: &RunPlan, context: &OperationContext) -> Result<RunRecord>;
     fn commit(&mut self, plan: &RunPlan, context: &OperationContext) -> Result<RunRecord>;
@@ -145,18 +146,18 @@ impl Write for RunTcpStream {
 
 pub struct RunRpcClient<S> {
     stream: S, token: Vec<u8>, nonce: Vec<u8>, methods: [i16; 6], manifest: RunManifest,
-    deadline: Instant, bytes_left: u64, fenced: bool,
+    deadline: Instant, bytes_left: u64, call_bytes_left: u64, fenced: bool, endpoint: Option<SocketAddr>,
 }
 struct Reply { observation: Option<RunObservation>, record: Option<RunRecord> }
 impl<S: Read + Write> RunRpcClient<S> {
     pub fn negotiate(stream: S, token: Vec<u8>, nonce: Vec<u8>, context: &OperationContext) -> Result<Self> {
-        Self::negotiate_until(stream, token, nonce, context, deadline(context)?)
+        Self::negotiate_until(stream, token, nonce, context, deadline(context)?, None)
     }
-    fn negotiate_until(stream: S, token: Vec<u8>, nonce: Vec<u8>, context: &OperationContext, end: Instant) -> Result<Self> {
+    fn negotiate_until(stream: S, token: Vec<u8>, nonce: Vec<u8>, context: &OperationContext, end: Instant, endpoint: Option<SocketAddr>) -> Result<Self> {
         require((32..=256).contains(&token.len()) && (16..=64).contains(&nonce.len()), "invalid run credentials")?;
         let mut client = Self { stream, token, nonce, methods: [0; 6],
             manifest: RunManifest { generation: 0, df_version: String::new(), dfhack_version: String::new() },
-            deadline: end, bytes_left: context.budget.max_bytes, fenced: false };
+            deadline: end, bytes_left: context.budget.max_bytes, call_bytes_left: context.budget.max_bytes, fenced: false, endpoint };
         client.charge(24)?;
         client.stream.write_all(b"DFHack?\n\x01\0\0\0").map_err(io_error)?;
         client.stream.flush().map_err(io_error)?;
@@ -177,6 +178,8 @@ impl<S: Read + Write> RunRpcClient<S> {
     pub fn fenced(&self) -> bool { self.fenced }
     fn charge(&mut self, n: usize) -> Result<()> {
         remaining(self.deadline)?;
+        self.call_bytes_left = self.call_bytes_left.checked_sub(n as u64)
+            .ok_or_else(|| error(ErrorCode::BudgetExceeded, "run RPC call byte budget exhausted"))?;
         self.bytes_left = self.bytes_left.checked_sub(n as u64)
             .ok_or_else(|| error(ErrorCode::BudgetExceeded, "run RPC byte budget exhausted"))?; Ok(())
     }
@@ -206,7 +209,7 @@ impl<S: Read + Write> RunRpcClient<S> {
         authorize(context, matches!(operation, 2 | 3 | 5))?;
         if let Some(plan) = plan { if matches!(operation, 2 | 3) { authorize_plan(context, plan)?; } }
         if self.fenced { return Err(error(ErrorCode::AdapterUnavailable, "run connection fenced; reopen for query/cancel recovery")); }
-        self.bytes_left = self.bytes_left.min(context.budget.max_bytes);
+        self.call_bytes_left = self.bytes_left.min(context.budget.max_bytes);
         let outcome = (|| {
             let mut request = Vec::new(); bytes(&mut request, 1, &self.token); bytes(&mut request, 2, &self.nonce);
             number(&mut request, 3, 1); number(&mut request, 4, 13);
@@ -270,11 +273,12 @@ impl RunRpcClient<RunTcpStream> {
         require((32..=256).contains(&token.len()) && (16..=64).contains(&nonce.len()), "invalid run credentials")?;
         let stream = TcpStream::connect_timeout(&endpoint, remaining(end)?).map_err(io_error)?;
         stream.set_nodelay(true).map_err(io_error)?;
-        Self::negotiate_until(RunTcpStream { stream, deadline: end }, token, nonce, context, end)
+        Self::negotiate_until(RunTcpStream { stream, deadline: end }, token, nonce, context, end, Some(endpoint))
     }
 }
 impl<S: Read + Write> RunSource for RunRpcClient<S> {
     fn manifest(&self) -> &RunManifest { &self.manifest }
+    fn endpoint(&self) -> Option<SocketAddr> { self.endpoint }
     fn observe(&mut self, context: &OperationContext) -> Result<RunObservation> {
         self.invoke(1, None, context)?.observation.ok_or_else(|| error(ErrorCode::AdapterRejected, "missing run observation"))
     }

@@ -6,6 +6,8 @@
 //! This protocol observes a source incarnation, not a named fortress lineage.
 
 pub mod rpc;
+pub mod journal;
+pub mod private_file;
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
