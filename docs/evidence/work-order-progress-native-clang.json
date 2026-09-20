@@ -1,0 +1,24 @@
+{
+  "assertions": 1358,
+  "compiler": "clang version 17.0.0 (https://github.com/swiftlang/llvm-project.git 10999b6d034fe318f3d56c83bddb6572593a8bb0)",
+  "groups": 5,
+  "native_vector_hex": "44464d5750303132000000000000000700000000000000010000000000003039000000010000000a00000001010007726567696f6e31000000020000000301000000450100000003000000050000000300000000ffffffff00000001ffffffffffffffff0000000000000000000c436f6e73747275637442656400000000000800",
+  "native_vector_sha256": "f208dc6df4149cdd4838f182bb0deb1b9d1173888d01f2ce39c0280255455197",
+  "real_dfhack_or_protobuf_or_game_executed": false,
+  "schema": "dfmcp.work-order-progress-native/1",
+  "separately_compiled_mutants_rejected": [
+    "complete_queue_uniqueness",
+    "static_material_recognition",
+    "unknown_request_field_gate"
+  ],
+  "source_sha256": {
+    "bridge/common/work_order_progress.h": "4741c5d054399e06eeca95a6c62f2a32b28123dc302a8acd225e8ef1e9d1a5c6",
+    "bridge/dfhack-work-order-progress-v1_12/DfmcpWorkOrderProgressV1_12.proto": "b3d5c6179ca76e5aa20beba085382fe7f0f7b80909dd542a16bb1fbb806fb795",
+    "bridge/dfhack-work-order-progress-v1_12/dfmcp_work_order_progress_v1_12.cpp": "8e64b8e429c692e28ca0f7d287f6cbbe1d038f9f00481336d83b4d9f31d7763f",
+    "scripts/test_work_order_progress_native.py": "f54e40e15fcca672757e289ddc93fec1a0b31b0ddab60875c5f91782dc67a1d0",
+    "tests/native/work_order_progress/handler.cpp": "d89930ce671fc60333a2c12bafbc4eb7a3d7eb432f45251a936170e932020686",
+    "tests/native/work_order_progress/stubs.h": "9c0a17119c851dbd2c5f1e84080fe2c2c1a1493bda0886a537fcbd5deda829e9"
+  },
+  "status": "passed_sdk_doubles_only",
+  "ubsan": true
+}

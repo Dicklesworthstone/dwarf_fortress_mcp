@@ -1,0 +1,81 @@
+{
+  "schema": "dfmcp.work-order-progress-contract/1",
+  "bridge_protocol": "1.12",
+  "status": "implemented_unadmitted_development_only",
+  "plugin": "dfmcp_work_order_progress_v1_12",
+  "package": "dfmcp.work_order_progress.v1_12",
+  "methods": {
+    "Handshake": 0,
+    "ReadObservation": 0
+  },
+  "effects": "read_only",
+  "max_targets": 32,
+  "max_queue": 4096,
+  "max_observation_bytes": 16384,
+  "observation_magic": "DFMWP012",
+  "byte_order": "big_endian",
+  "header": [
+    "generation:u64",
+    "capture_sequence:u64",
+    "game_tick:u64",
+    "site:u32",
+    "next_order:u32",
+    "queue_count:u32",
+    "paused:bool8",
+    "folder:text16[1..512]",
+    "row_count:u32[1..32]"
+  ],
+  "row": [
+    "native_order_id:u32",
+    "present:bool8"
+  ],
+  "present_row_suffix": [
+    "job_type:i32",
+    "recognized_recipe:u8[0..4]",
+    "remaining:i32",
+    "total:i32",
+    "status:u32",
+    "frequency:i32",
+    "workshop:i32",
+    "max_workshops:i32",
+    "next_check_year:i32",
+    "next_check_tick:i32",
+    "item_condition_count:u32",
+    "order_condition_count:u32",
+    "job_type_key:text16[1..128]",
+    "reaction:text16[0..128]"
+  ],
+  "recipe_names": [
+    "unrecognized",
+    "wooden_bed",
+    "wooden_door",
+    "wooden_table",
+    "wooden_chair"
+  ],
+  "coverage": [
+    "complete_presence_for_selected_ids",
+    "selected_progress_fields",
+    "static_finite_wood_template_recognition"
+  ],
+  "not_proven": [
+    "historical_creation_identity",
+    "continuous_history",
+    "manager_availability",
+    "material_availability",
+    "causal_blockers",
+    "completed_goods",
+    "goal_completion"
+  ],
+  "production_runner_added": false,
+  "compatibility_admitted": false,
+  "mcp_binary": "dfmcp-live-work-order-progress-dev-server",
+  "mcp_tools": 11,
+  "comparison_reset_reasons": [
+    "incarnation_or_fortress_changed",
+    "selection_changed",
+    "clock_or_allocation_horizon_regressed"
+  ],
+  "same_generation_replayed_sequence": "reject_before_comparison_or_clock_reset",
+  "monitoring_lifetime": "foreground_session_only_no_durable_or_downtime_continuity",
+  "coexisting_protocol_1_11": "unchanged single-order DFMOP011 reader; no codec or admission equivalence"
+}
