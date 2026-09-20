@@ -2,6 +2,7 @@
 
 pub mod announcement_wire;
 pub mod api;
+pub mod bounded_run;
 pub mod control_effect_journal;
 pub mod delta_scanner;
 pub mod dfhack_probe;
