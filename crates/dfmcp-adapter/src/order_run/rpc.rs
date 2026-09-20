@@ -234,6 +234,10 @@ impl<S: OrderRunStream> OrderRunRpc<S> {
                 if matches!(record.phase(), RunPhase::Running | RunPhase::Stopping) {
                     require(active && record.plan().before().generation() == manifest.generation, "unowned running receipt")?;
                 }
+                let mut fresh = context.clone();
+                fresh.anchor.tick = GameTick(record.observed_tick().map_or(context.anchor.tick.get(),
+                    |tick| tick.max(context.anchor.tick.get())));
+                authorize(&fresh, &self.fortress, false)?;
                 Some(record)
             } else { None };
             self.manifest = manifest; Ok(Reply { capture, record })

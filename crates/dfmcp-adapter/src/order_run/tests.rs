@@ -115,6 +115,10 @@ fn terminal_and_trigger_evidence_cannot_change_on_recovery() -> Result<()> {
     let stopping = OrderRunRecord::decode(&record_bytes(&p,2,3,1,Some(&sample),2))?;
     let stopped = OrderRunRecord::decode(&record_bytes(&p,3,3,1,Some(&sample),2))?;
     stopping.validate_successor(&stopped)?; stopped.validate_successor(&stopped)?;
+    let clock_stop = OrderRunRecord::decode(&record_bytes(&p,2,2,0,None,0))?;
+    assert!(clock_stop.validate_successor(&stopped).is_err());
+    let source_lost = OrderRunRecord::decode(&record_bytes(&p,5,7,6,None,0))?;
+    clock_stop.validate_successor(&source_lost)?;
     assert!(stopped.validate_successor(&stopping).is_err());
     let running = OrderRunRecord::decode(&record_bytes(&p,1,0,0,None,0))?;
     assert!(stopping.validate_successor(&running).is_err());

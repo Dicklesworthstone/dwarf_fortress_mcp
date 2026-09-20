@@ -5,6 +5,8 @@
 //! Native stability is a reported sampled count, not a complete sample trace.
 
 pub mod rpc;
+pub mod journal;
+pub mod private_file;
 
 pub use crate::bounded_run::{RunPhase, RunReason, RunSpec};
 use crate::bounded_run::{Reader, error, hash, require, validate_key};
@@ -220,7 +222,7 @@ impl OrderRunRecord {
         let mut r = Reader(bytes); require(r.take(8)? == b"DFMOE014", "not an order-run/1.14 receipt")?;
         let key = text(field(&mut r, 128)?, 128)?;
         let plan = OrderRunPlan::from_native(&key, field(&mut r, MAX_PLAN_BYTES)?)?;
-        require(r.take(32)? == plan.digest.as_bytes() && r.take(16)? == plan.token,
+        require(r.take(32)? == plan.digest.as_bytes() && r.take(16)? == plan.token(),
             "order-run receipt differs from its plan/token")?;
         let phase = match r.byte()? {
             0 => RunPhase::Prepared, 1 => RunPhase::Running, 2 => RunPhase::Stopping, 3 => RunPhase::Stopped,
@@ -316,6 +318,12 @@ impl OrderRunRecord {
         if self.unpause_attempted() { require(next.unpause_attempted(), "native record regressed before dispatch")?; }
         if self.phase == RunPhase::Stopping {
             require(matches!(next.phase, RunPhase::Stopping | RunPhase::Stopped | RunPhase::SourceLost), "native stop regressed")?;
+            require(self.sample == next.sample && self.count == next.count && self.counted_tick == next.counted_tick
+                && (self.reason == next.reason || next.phase == RunPhase::SourceLost), "stopping evidence changed")?;
+            if self.trigger == OrderTrigger::None {
+                require(next.trigger == OrderTrigger::None || (next.trigger == OrderTrigger::SourceChanged
+                    && next.phase == RunPhase::SourceLost), "stopping run acquired a new goal trigger")?;
+            }
         }
         if self.trigger != OrderTrigger::None {
             require(self.trigger == next.trigger && self.sample == next.sample
