@@ -54,6 +54,7 @@ pub mod pause_reconciliation;
 pub mod spatial_inventory;
 pub mod transceiver;
 pub mod workforce_analysis;
+pub mod workforce_control;
 pub mod work_orders;
 pub mod work_order_control;
 pub mod order_progress;
