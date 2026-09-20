@@ -1,0 +1,38 @@
+{
+  "actual_handler": {
+    "assertions": 4499,
+    "groups": 6
+  },
+  "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+  "engine": {
+    "assertions": 1319,
+    "groups": 6
+  },
+  "independent_native_vectors": 4,
+  "live_fortress": false,
+  "protobuf_serialization": false,
+  "real_dfhack_sdk": false,
+  "rejected_compiled_mutants": [
+    "witness",
+    "replay",
+    "priority-readback",
+    "cross-key-uncertainty",
+    "hidden-redaction",
+    "scheduling"
+  ],
+  "rust_executed": false,
+  "schema": "dfmcp.dig-native-evidence/1",
+  "source_sha256": {
+    "bridge/common/dig_designation_v1_16.h": "42b0909b575e276aa0a6d82a126be6c0bef5200b87ce9c1c1b7f30122b846a4b",
+    "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
+    "bridge/dfhack-dig-v1_16/DfmcpDigV1_16.proto": "1b50df2826118a69ec59e9b64d6949d63b1a71650e3686c66dd56f371d301470",
+    "bridge/dfhack-dig-v1_16/dfmcp_dig_v1_16.cpp": "3dcae2f7a75b4005fa5be47e305d941823441bf72163d4688b253a0b0ba229d7",
+    "scripts/test_dig_designation_native.py": "b59efb77424fe27455256b73dfb2231b970bd0820c66b0fa40614673c74f6af7",
+    "tests/native/dig_designation/engine.cpp": "21d224e126e524c63f2bff013ddb83f902e78518a4263d2a9949953f98b4d15a",
+    "tests/native/dig_designation/handler.cpp": "ec2043a2bdabbc64c6580fcab96e8d1c5ef7839f47dadda680d69f3c725d0f11",
+    "tests/native/dig_designation/stubs.h": "bae702b56a46b656bd8ceb58669e233199f30d5007afdc34d6620a79ff9edb13"
+  },
+  "status": "passed_sdk_doubles_only",
+  "ubsan": true,
+  "warning_denied": true
+}

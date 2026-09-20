@@ -1,0 +1,84 @@
+{
+  "gates": {
+    "prepare_commit_cancel": [
+      "DFMCP_DIG_ALLOW_DESIGNATE=1"
+    ],
+    "read": [
+      "DFMCP_ALLOW_UNADMITTED_DIG_V1_16=1",
+      "DFMCP_DIG_TOKEN"
+    ]
+  },
+  "hidden_policy": {
+    "default": "refuse",
+    "explicit_allow_hidden_neighbors": "permits hidden halo only; never hidden target or known hazards",
+    "reveals_hidden_terrain": false
+  },
+  "limits": {
+    "block_events_per_block": 4096,
+    "effect_bytes": 334,
+    "halo_blocks": 12,
+    "halo_cells": 300,
+    "height": 8,
+    "jobs_scanned": 65536,
+    "maximum_observed_temperature": 10080,
+    "observation_bytes": 16384,
+    "prepare_seconds": 60,
+    "priority": 4000,
+    "retained_keys": 128,
+    "target_blocks": 4,
+    "target_tiles": 64,
+    "width": 8,
+    "z_levels": 1
+  },
+  "methods": [
+    "Handshake",
+    "ReadDesignation",
+    "PrepareDesignation",
+    "CommitDesignation",
+    "QueryDesignation",
+    "CancelDesignation"
+  ],
+  "native_plugin": "dfmcp_dig_v1_16",
+  "not_established": [
+    "excavation_completion",
+    "structural_or_geological_safety",
+    "durable_host_dispatch",
+    "canonical_world_identity",
+    "MCP_integration",
+    "production_admission"
+  ],
+  "outcomes": [
+    "prepared",
+    "unknown",
+    "designated",
+    "refused"
+  ],
+  "protocol": [
+    1,
+    16
+  ],
+  "schema": "dfmcp.dig-designation-development/1",
+  "scope": {
+    "action": "designation.dig",
+    "minimum_risk": "guarded",
+    "mode": "normal_mining_only",
+    "read_scope": "target rectangle, one-tile 3D halo, bounded existing-job conflict scan",
+    "required_capability": "designate",
+    "write_scope": "target rectangle plus block scheduling and optional priority events"
+  },
+  "status": "unadmitted_native_development",
+  "developer_client": {
+    "path": "scripts/dig_designation_client.py",
+    "commands": [
+      "observe",
+      "start",
+      "inspect",
+      "query",
+      "cancel"
+    ],
+    "intent": "new immutable private capsule synced with parent before prepare and one commit",
+    "recovery": "no commit replay; endpoint/source bound query or cancellation",
+    "mcp_integrated": false,
+    "durable_terminal_journal": false
+  }
+}
