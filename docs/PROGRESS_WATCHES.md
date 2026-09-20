@@ -2,9 +2,9 @@
 
 `work_order_progress::watches` evaluates bounded temporal predicates over the
 existing progress/1.12 archive. It neither dispatches native work nor supplies
-creation reconciliation or completed-goods evidence. This first increment is the
-pure evaluator; durable registration/cancellation and MCP routing are separate
-integration work. Existing native protocols and admission are unchanged.
+creation reconciliation or completed-goods evidence. The evaluator is integrated with the
+durable registration/cancellation book and existing MCP query flow; see
+PROGRESS_WATCH_BOOK.md and PROGRESS_WATCH_MCP.md. Existing native protocols and admission are unchanged.
 
 A definition seals an ASCII key, native order ID, goal, absolute game-tick deadline,
 cadence, required stable samples, archive identity and exact origin record. The

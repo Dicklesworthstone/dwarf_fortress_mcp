@@ -1,0 +1,22 @@
+{
+  "accepted_request_cases": 17,
+  "actual_mcp_or_native_or_filesystem_executed": false,
+  "book_index_model_bytes": 5713,
+  "full_response_model_bytes": 98823,
+  "full_response_reservation_bytes": 147456,
+  "max_watch_model_bytes": 2563,
+  "mcp_tools_wired": 11,
+  "rejected_request_cases": 55,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.progress-watch-mcp-reference/1",
+  "scope": "Independent Python JSON envelope/size model and lexical source checks, not Rust or MCP execution",
+  "source_sha256": {
+    "architecture/progress_watch_requests_v1.json": "5959fbb6c71de0166dddca8be54065f56f2c5406c9a4a4b2dfd2661f18737f04",
+    "crates/dfmcp-mcp/src/live_work_order_progress_server.rs": "a16ffc0ceb17e7fa8948b8b14e62bf2e3ea43d844df5df4f2127d67cc74337b5",
+    "crates/dfmcp-mcp/src/progress_watches.rs": "e059f0b4a0b4a0d5ce6223a0d6271e028d6bfb91158ac7c2b5cc5cbe45380331",
+    "crates/dfmcp-mcp/src/progress_watches_tests.rs": "b449de15187925a08905bbbf0bc1d46a89669c5101e071a329134e3bac77ce7b",
+    "scripts/check_progress_watch_mcp_reference.py": "2519059d78d365b8ed176dd3016ac833cce858dda215732be04b462db6da42f5"
+  },
+  "status": "passed_reference_only"
+}

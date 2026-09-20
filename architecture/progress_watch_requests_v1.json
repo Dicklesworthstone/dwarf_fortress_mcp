@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Wire envelope only. Exact archive, latest origin, authority, finite schedule and cancellation semantics require runtime verification.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "threshold": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "goal": {
+                "const": "remaining_at_most"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "threshold": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "threshold"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "archive_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "cadence_game_ticks": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "deadline_game_tick": {
+          "maximum": 1731730813747199,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "goal": {
+          "enum": [
+            "validated",
+            "active",
+            "remaining_at_most"
+          ]
+        },
+        "key": {
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "type": "string"
+        },
+        "mode": {
+          "const": "watch_register"
+        },
+        "native_order_id": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "origin_number": {
+          "maximum": 4096,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stable_samples": {
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threshold": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "archive_id",
+        "key",
+        "native_order_id",
+        "goal",
+        "deadline_game_tick",
+        "cadence_game_ticks",
+        "stable_samples",
+        "origin_number",
+        "origin_digest"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "watch_list"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "definition_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "type": "string"
+        },
+        "mode": {
+          "const": "watch_status"
+        }
+      },
+      "required": [
+        "mode",
+        "archive_id",
+        "key",
+        "definition_digest"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "archive_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "definition_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "expected_archive_head": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "type": "string"
+        },
+        "mode": {
+          "const": "watch_cancel"
+        }
+      },
+      "required": [
+        "mode",
+        "archive_id",
+        "key",
+        "definition_digest",
+        "expected_archive_head"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Progress/1.12 durable watch requests inside fortress.query history"
+}
