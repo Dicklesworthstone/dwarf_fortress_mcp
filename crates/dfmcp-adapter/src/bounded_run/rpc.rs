@@ -265,6 +265,13 @@ impl<S: Read + Write> RunRpcClient<S> {
     }
 }
 impl RunRpcClient<RunTcpStream> {
+    /// Narrow an existing connection and its actual socket to the remaining
+    /// foreground context. This can never renew the original deadline.
+    pub fn restrict_deadline(&mut self, context: &OperationContext) -> Result<()> {
+        self.deadline = self.deadline.min(deadline(context)?);
+        self.stream.deadline = self.stream.deadline.min(self.deadline);
+        remaining(self.deadline).map(|_| ())
+    }
     pub fn connect(endpoint: SocketAddr, token: Vec<u8>, nonce: Vec<u8>, context: &OperationContext) -> Result<Self> {
         let end = deadline(context)?;
         if !endpoint.ip().is_loopback() || endpoint.port() == 0 {
