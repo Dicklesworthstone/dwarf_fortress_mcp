@@ -1,0 +1,32 @@
+{
+  "assertions": 4774,
+  "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+  "dfhack_handler_executed": false,
+  "flags": [
+    "-std=c++17",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-pedantic",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all"
+  ],
+  "groups": 5,
+  "independent_vectors": 4,
+  "live_game_executed": false,
+  "mutants_rejected": [
+    "commit_witness_removed",
+    "terminal_replay_fence_removed",
+    "readback_equality_removed",
+    "uncertainty_fence_removed"
+  ],
+  "rust_executed": false,
+  "schema": "dfmcp.bounded-dig-engine-evidence/1",
+  "source_sha256": {
+    "bridge/common/dig_designation.h": "c86313d2aec3940622c113b5378bb3069111fdef1932a145371f796ddd4d808e",
+    "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
+    "scripts/test_bounded_dig_engine.py": "25a75186b7dd189eb3f42779bc3b4cfbcbf6b21c9a6b510a7a3208fd8328c039",
+    "tests/native/dig/engine.cpp": "d6b64ec344c6b5bd33b8f9816018e79a8af5155c2503a102ff7f0c0bf3d638f5"
+  },
+  "status": "passed_native_engine_only"
+}
