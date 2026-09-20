@@ -23,5 +23,10 @@
   "cross_controller_lease": false,
   "durable_across_plugin_restart": false,
   "production_admitted": false,
-  "rust_mcp_integration": false
+  "rust_mcp_integration": false,
+  "developer_client": "scripts/order_run_client.py",
+  "developer_effect_journal": "dfmcp.order-run-journal/1",
+  "developer_journal_limits": {"bytes": 2097152, "events": 4096, "intents": 256, "line_bytes": 8192},
+  "developer_commit_requires_reviewed_digest": true,
+  "developer_dispatch_marker_synced_before_commit": true
 }
