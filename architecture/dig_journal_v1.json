@@ -1,0 +1,64 @@
+{
+  "schema": "dfmcp.dig-journal/1",
+  "native_protocol": "1.16",
+  "modes": [
+    "control",
+    "recover",
+    "offline"
+  ],
+  "binding": [
+    "endpoint",
+    "generation",
+    "df_version",
+    "dfhack_version",
+    "folder",
+    "site",
+    "operator_map_scope"
+  ],
+  "states": {
+    "Intent": 0,
+    "Prepared": 1,
+    "DispatchStarted": 2,
+    "Tracking": 3,
+    "CancelRequested": 4,
+    "Terminal": 5
+  },
+  "header_magic": "DFMDJ001",
+  "frame_magic": "DFMDJR01",
+  "footer_magic": "DFMDJEND",
+  "header_hash_domain": "dfmcp-dig-journal/1",
+  "frame_hash_domain": "dfmcp-dig-journal-frame/1",
+  "limits": {
+    "keys": 128,
+    "events": 896,
+    "journal_bytes": 16777216,
+    "binding_bytes": 940,
+    "body_bytes": 16870,
+    "frame_bytes": 16962,
+    "page_records": 8,
+    "wall_milliseconds": 60000
+  },
+  "prepare_requires_synced_intent": true,
+  "commit_requires_synced_dispatch": true,
+  "terminal_requires_sync": true,
+  "restore_dispatch_permit": false,
+  "replayed_prepare_can_commit": false,
+  "native_unknown_can_resolve": false,
+  "automatic_tail_repair": false,
+  "new_key_while_unsettled": false,
+  "global_native_lease": false,
+  "guard_required_at_native_edges": true,
+  "guard_implements_runtime_operator_lease_checkpoint_policy": true,
+  "production_admitted": false,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "reference_vectors": {
+    "header_id": "b0b5bf8cb76333f1c02ed8dd37555e75a894fcfb0a36a8235cf1d8a4fa8296c3",
+    "heads": [
+      "80839171d1ef5caf5a01c05d81d0de07f2f218476e6ee3f954166f022418f4ed",
+      "1fdaa6967cefd71e0ea924af26482cdf37948ee0c964c1ecd47f8306e09a3830",
+      "d48f3778ee4077f052d17a832648b7aa69661d6c0043256b12d4079e6b656613",
+      "56b6382b026c680a84599ba28f4df38f6acc3e16c9c0838d6fdb134b4d383303"
+    ]
+  }
+}
