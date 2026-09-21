@@ -595,6 +595,130 @@ def capsule(path: Path, new_intent: dict | None = None) -> Iterator[Capsule]:
         os.close(parent)
 
 
+
+MAX_TERMINAL_RECEIPT = 2048
+
+
+def terminal_name(owner: Capsule) -> str:
+    # Content identity avoids filename-length problems and binds the *complete*
+    # original capsule, including its endpoint, source and confirmation inputs.
+    return '.dfmcp-dig-terminal-' + hashlib.sha256(owner.raw).hexdigest() + '.json'
+
+
+def terminal_payload(owner: Capsule, raw: bytes) -> bytes:
+    record = effect(raw, owner.intent)
+    require(record['state'] in ('designated', 'refused'), 'only terminal native proof may be retained')
+    payload = {'format': 'dfmcp.dig-terminal/1',
+               'intent_sha256': hashlib.sha256(owner.raw).hexdigest(), 'effect_hex': raw.hex()}
+    data = canonical({'receipt': payload, 'sha256': hashlib.sha256(canonical(payload)).hexdigest()}) + b'\n'
+    require(len(data) <= MAX_TERMINAL_RECEIPT, 'terminal receipt exceeds its bound')
+    return data
+
+
+def verify_terminal(owner: Capsule, data: bytes) -> dict:
+    require(1 <= len(data) <= MAX_TERMINAL_RECEIPT, 'empty or oversized terminal receipt')
+    loaded = json.loads(data, object_pairs_hook=unique_object)
+    require(isinstance(loaded, dict) and set(loaded) == {'receipt', 'sha256'}, 'invalid terminal envelope')
+    payload = loaded['receipt']
+    require(isinstance(payload, dict) and set(payload) == {'format', 'intent_sha256', 'effect_hex'}
+            and payload['format'] == 'dfmcp.dig-terminal/1'
+            and payload['intent_sha256'] == hashlib.sha256(owner.raw).hexdigest(),
+            'terminal receipt belongs to a different intent')
+    native = exact_hex(payload['effect_hex'], 207, 334)
+    # Recompute the complete native proof, not just an outer JSON checksum.
+    require(data == terminal_payload(owner, native), 'corrupt or noncanonical terminal receipt')
+    return {'effect': effect(native, owner.intent),
+            'terminal_receipt_sha256': hashlib.sha256(data).hexdigest()}
+
+
+def terminal_receipt(owner: Capsule, native: bytes | None = None) -> dict | None:
+    """Read or exclusively publish immutable proof under the existing intent lock.
+
+    A failed/partial write is retained and refused, never repaired or overwritten.
+    A complete write whose acknowledgement or sync was lost can be reverified and
+    re-synced. Even offline acknowledgement syncs both descriptors; no native call,
+    credential, receipt rewrite or renewed mutation authority is involved.
+    """
+    import fcntl
+    owner.verify()
+    expected = terminal_payload(owner, native) if native is not None else None
+    name = terminal_name(owner)
+    flags = os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    created = False
+    try:
+        if expected is not None:
+            try:
+                fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | flags, 0o600, dir_fd=owner.parent)
+                created = True
+            except FileExistsError:
+                fd = os.open(name, os.O_RDONLY | flags, dir_fd=owner.parent)
+        else:
+            fd = os.open(name, os.O_RDONLY | flags, dir_fd=owner.parent)
+    except FileNotFoundError:
+        require(expected is None, 'terminal publication lost its parent')
+        owner.verify()
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and stat.S_IMODE(before.st_mode) == 0o600
+                and before.st_uid == os.fstat(owner.parent).st_uid and before.st_nlink == 1,
+                'terminal receipt must be a private owned single-link regular file')
+        if created:
+            view = memoryview(expected)
+            while view:
+                count = os.write(fd, view)
+                require(count > 0, 'short terminal receipt write')
+                view = view[count:]
+            data = expected
+        else:
+            require(1 <= before.st_size <= MAX_TERMINAL_RECEIPT, 'empty or oversized terminal receipt; no repair')
+            data = bytearray()
+            while len(data) <= before.st_size:
+                part = os.read(fd, before.st_size + 1 - len(data))
+                if not part:
+                    break
+                data += part
+            data = bytes(data)
+            after = os.fstat(fd)
+            require((before.st_mtime_ns, before.st_ctime_ns, before.st_size)
+                    == (after.st_mtime_ns, after.st_ctime_ns, after.st_size)
+                    and len(data) == before.st_size, 'terminal receipt changed during read')
+            require(expected is None or data == expected, 'conflicting terminal evidence; never overwrite proof')
+        result = verify_terminal(owner, data)
+        pinned = Capsule(owner.path.parent / name, fd, owner.parent, data, owner.intent)
+        pinned.verify(); owner.verify()
+        os.fsync(fd); os.fsync(owner.parent)
+        pinned.verify(); owner.verify()
+        return result
+    finally:
+        os.close(fd)
+
+
+def retained_result(owner: Capsule, receipt: dict) -> dict:
+    result = recovered_result({'manifest': owner.intent['manifest'], 'effect': receipt['effect']}, False)
+    result.update(receipt, terminal_receipt_retained=True, native_calls=0,
+                  evidence_source='retained_terminal_receipt',
+                  recovery='Retain intent and terminal receipt. Historical configuration proof is not current terrain or excavation completion.')
+    return result
+
+
+def finish_recovery(owner: Capsule, native: dict, dispatched: bool, replay: bool = False) -> dict:
+    owner.verify()
+    require(native['manifest'] == owner.intent['manifest'], 'receipt source differs from retained intent')
+    record = effect(native['effect_raw'], owner.intent) if 'effect_raw' in native else None
+    require(record == native.get('effect'), 'native effect presentation disagrees with proof')
+    receipt = terminal_receipt(owner, native['effect_raw']) if record is not None and record['state'] in (
+        'designated', 'refused') else terminal_receipt(owner)
+    require(receipt is None or receipt['effect'] == record, 'native result regressed behind retained terminal proof')
+    result = recovered_result(native, dispatched, replay)
+    result.update(terminal_receipt_retained=receipt is not None, evidence_source='native_reply')
+    if receipt is not None:
+        result.update(receipt)
+    owner.verify()
+    return result
+
+
 def observed_result(result: dict, allow_hidden: bool) -> dict:
     o = result['observation']
     preview = plan_for(o['region'], allow_hidden, bytes.fromhex(o['witness'])).hex()
@@ -625,13 +749,16 @@ def start(client: Client, path: Path, key: str, selected: dict, allow_hidden: bo
     intent = build_intent(client.address, key, selected, allow_hidden, observed['raw'], observed['manifest'])
     with capsule(path, intent) as owner:
         client.remaining(); owner.verify()
+        retained = terminal_receipt(owner)
+        if retained is not None:
+            return retained_result(owner, retained)
         prepared = client.prepare(intent)
         if prepared['replayed']:
-            return recovered_result(prepared, False, True)  # Never dispatch a replayed preparation.
+            return finish_recovery(owner, prepared, False, True)  # Never dispatch a replayed preparation.
         owner.verify(); client.remaining()
         committed = client.commit(intent, prepared)
         owner.verify()
-        return recovered_result(committed, True)
+        return finish_recovery(owner, committed, True)
 
 
 def environment(control: bool, saved_endpoint: str | None = None) -> tuple[str, bytes]:
@@ -671,17 +798,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == 'inspect':  # Deliberately BEFORE any environment/token/client access.
             with capsule(args.record) as owner:
-                result = {'ok': True, 'profile': 'dig/1.16', 'intent': owner.intent,
-                          'effect_status': 'unknown', 'native_calls': 0,
-                          'retry_commit_permitted': False, 'excavation_completion_proven': False}
+                retained = terminal_receipt(owner)
+                result = retained_result(owner, retained) if retained is not None else {
+                    'ok': True, 'profile': 'dig/1.16', 'effect_status': 'unknown', 'native_calls': 0,
+                    'terminal_receipt_retained': False, 'retry_commit_permitted': False,
+                    'excavation_completion_proven': False}
+                result['intent'] = owner.intent
         elif args.command in ('query', 'cancel'):
             with capsule(args.record) as owner:
-                address, token = environment(args.command == 'cancel', owner.intent['endpoint'])
-                with Client(address, token, args.timeout_ms) as client:
-                    owner.verify()
-                    result = recovered_result(client.cancel(owner.intent) if args.command == 'cancel'
-                                              else client.query(owner.intent), False)
-                    owner.verify()
+                retained = terminal_receipt(owner)
+                if retained is not None:
+                    result = retained_result(owner, retained)
+                else:
+                    address, token = environment(args.command == 'cancel', owner.intent['endpoint'])
+                    with Client(address, token, args.timeout_ms) as client:
+                        owner.verify()
+                        native = client.cancel(owner.intent) if args.command == 'cancel' else client.query(owner.intent)
+                        result = finish_recovery(owner, native, False)
         else:
             selected = {k: getattr(args, k) for k in REGION_KEYS}; region(selected)
             address, token = environment(args.command == 'start')

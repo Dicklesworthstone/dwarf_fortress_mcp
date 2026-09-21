@@ -558,7 +558,12 @@ class DigClientTests(unittest.TestCase):
             self.assertNotIn(TOKEN.decode(), result.stdout)
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/dig_designation_client.py'), 'inspect', '--record', str(self.path)],
                                 env={}, capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr); self.assertEqual(json.loads(result.stdout)['effect_status'], 'unknown')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        recovered = json.loads(result.stdout)
+        self.assertEqual(recovered['effect_status'], 'designated')
+        self.assertTrue(recovered['terminal_receipt_retained'])
+        self.assertEqual(recovered['native_calls'], 0)
+        self.assertFalse(recovered['excavation_completion_proven'])
 
     def test_maximal_capture_and_intent_fit_their_actual_serialized_bounds(self):
         selected = dict(zip(d.REGION_KEYS, (32759, 32759, 32766, 8, 8)))
