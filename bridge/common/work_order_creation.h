@@ -188,10 +188,18 @@ public:
         const auto expected = r.before.expected_after().encode();
         const auto config = configuration(r.before.next_order, r.spec);
         interrupt(); r.state = State::Unknown; unresolved_ = true;
+        // An insertion can succeed before its writer throws. Recover only from
+        // immediate native evidence under the same suspension, never by retrying
+        // creation or by treating an unchanged queue as proof of non-creation.
+        try { write(r.before.next_order, r.spec); }
+        catch (...) { /* The complete queue and configuration readback decide. */ }
         try {
-            write(r.before.next_order, r.spec);
             const auto after = inspect(read);
             if (after.encode() != expected || verify(r.before.next_order, r.spec) != config) return r;
+            // Configuration verification is another native callback. Bind its
+            // result to the same queue, clock and mutation sequence before we
+            // publish Created and release the unresolved-creation guard.
+            if (inspect(read).encode() != expected) return r;
             auto next = r; next.state = State::Created; next.after_known = true; next.after_tick = after.tick;
             next.after_witness = after.witness(); next.configuration_witness = dfmcp_snapshot::sha256(config);
             next.receipt = next.proof(); r = std::move(next); unresolved_ = false;
