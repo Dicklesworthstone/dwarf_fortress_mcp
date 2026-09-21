@@ -1,0 +1,110 @@
+{
+  "schema_version": "dfmcp.workforce-mcp/1.17",
+  "status": "source_present_uncompiled_development",
+  "native_protocol": "1.17",
+  "entry_point": "dfmcp-live-workforce-dev-server",
+  "tools": [
+    "fortress.open_session",
+    "fortress.observe",
+    "fortress.query",
+    "fortress.plan",
+    "fortress.commit",
+    "fortress.wait",
+    "fortress.cancel",
+    "fortress.checkpoint",
+    "fortress.restore",
+    "fortress.explain",
+    "fortress.doctor"
+  ],
+  "modes": [
+    "offline",
+    "recover",
+    "control"
+  ],
+  "default_mode": "offline",
+  "operator_only": [
+    "world_folder",
+    "site_id",
+    "journal_path",
+    "endpoint",
+    "bearer_token",
+    "labor_enablement"
+  ],
+  "selection": {
+    "closed_object": true,
+    "unit_ids": {
+      "minimum_count": 1,
+      "maximum_count": 32,
+      "sorted_unique": true,
+      "maximum": 2147483647
+    },
+    "max_request_utf8_bytes": 2048
+  },
+  "queries": {
+    "records": {
+      "states": [
+        "all",
+        "pending",
+        "unresolved",
+        "terminal"
+      ],
+      "limit": [
+        1,
+        8
+      ],
+      "continuation_binds": [
+        "session",
+        "journal",
+        "head",
+        "filter",
+        "limit"
+      ]
+    },
+    "details": {
+      "exact_selection_witness_required": true,
+      "offset": [
+        0,
+        63
+      ],
+      "limit": [
+        1,
+        8
+      ],
+      "native_capture": false
+    }
+  },
+  "workflow": [
+    "observe",
+    "inspect_captured_details",
+    "prepare",
+    "review_exact_plan",
+    "confirmed_commit_once",
+    "reconcile_or_cancel"
+  ],
+  "output_reservations": {
+    "compact_bytes": 32768,
+    "detail_bytes": 196608,
+    "token_proxy_bytes": 4
+  },
+  "session_limits": {
+    "max_work_bytes": 1073741824,
+    "max_wall_millis": 60000,
+    "max_output_tokens": 65536,
+    "max_game_ticks": 0,
+    "max_actions": 1
+  },
+  "confirmed_commit_required": true,
+  "replayed_assignment_allowed": false,
+  "failed_refresh_clears_selection": true,
+  "native_query_on_permanent_unknown": false,
+  "recovery_promotes_authority": false,
+  "cancel_undoes_assignment": false,
+  "explicit_recovery_release_implies_quiescence": false,
+  "current_workforce_proven_by_historical_receipt": false,
+  "global_labor_lease": false,
+  "production_admitted": false,
+  "rust_tests_executed": false,
+  "registered_rust_test_groups": 18,
+  "semantic_session": "dfmcp_adapter::workforce_session::WorkforceSession",
+  "minimum_source_commit": "e41ba26c180c65bda0c5b3eba4a9402313ce3c98"
+}

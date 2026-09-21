@@ -22,6 +22,7 @@ pub mod job_control_session;
 pub mod live_control_server;
 pub mod live_run_server;
 pub mod live_order_run_server;
+pub mod live_workforce_server;
 pub mod live_job_control_server;
 pub mod live_work_orders_server;
 pub mod live_work_order_progress_server;
