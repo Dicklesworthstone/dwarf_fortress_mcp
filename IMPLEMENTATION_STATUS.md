@@ -43,6 +43,30 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Typed Rust mining adapter for the existing dig/1.16 development profile
+
+`docs/DIG_RUST.md` and `architecture/dig_rust_v1_16.json` describe the new
+`dfmcp_adapter::dig_designation` capture/plan/effect codec and fixed six-method RPC
+source. Captures retain complete bounded halo evidence with payload-free hidden
+cells. Sealed plans use unchanged native digest/token domains. Designated receipts
+require the exact predicted terrain, priority and shared-block scheduling witness.
+
+The client pins one region and native software/incarnation, checks current Query,
+Observe, Plan and Guarded Designate scopes, and includes whole affected map blocks
+in write authorization. Only its own fresh preparation can enter one commit
+attempt. Replayed/query evidence does not grant dispatch; lost or invalid replies
+fence the stream without automatic reconnect. Absolute deadlines and connection
+byte reservations cannot be renewed by later calls.
+
+Twenty-two Rust groups are registered: ten codec and twelve RPC scenarios. **All
+are UNCOMPILED AND UNEXECUTED** because Rust, Cargo and rustfmt are unavailable.
+Independent Python reconstruction matches all four existing native fixture Git
+blobs; this is not execution of Rust or the new RPC client. No real SDK, live game,
+full qualification or production admission is established. The native wire and
+existing Python recovery remain unchanged. A durable Rust mining coordinator,
+confirmation/lease/checkpoint integration and MCP designation routing are still
+missing; the low-level client is not a substitute for those boundaries.
+
 ### Selected work-order approval and progress monitoring
 
 `docs/WORK_ORDER_PROGRESS.md` and `docs/WORK_ORDER_PROGRESS_MCP.md` describe a

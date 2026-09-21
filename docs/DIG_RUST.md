@@ -48,3 +48,58 @@ source, tests and admission evidence.
 
 The native contract remains `docs/DIG_DESIGNATION.md`. Existing CLI recovery is
 covered separately by `docs/DIG_TERMINAL_RECOVERY.md` and `docs/DIG_STORE_RECOVERY.md`.
+
+## Fixed, capability-scoped native RPC
+
+`dig_designation::rpc` now supplies `DigSource`, `DigRpcClient`, typed preparation
+replay metadata and a loopback TCP implementation. It binds only the existing six
+1.16 methods: Handshake, ReadDesignation, PrepareDesignation, CommitDesignation,
+QueryDesignation and CancelDesignation. Each connection is pinned to one region
+and one native software/incarnation manifest; an observation additionally proves
+its folder/site against the current OperationContext fortress identity.
+
+Query authorization covers the whole halo, including during negotiation, so a
+properly scoped grant need not be broadened to global Query. Reads additionally
+require Observe over the halo. Prepare requires Plan and Designate at Guarded
+risk over all shared blocks touched by native scheduling, and Observe over the
+halo. Commit/cancel require the same Query/Observe/Designate scopes. Querying a
+retained effect requires only Query. Current cancellation, risk, expiry and
+limited-use grant checks use the existing core authority implementation. Returned
+observations recheck authority against their actual fortress and game tick.
+
+Only a fresh Prepared response issued on that exact connection can make its
+sealed plan dispatchable. Imported, queried or replayed Prepared evidence cannot
+manufacture this permit. Commit consumes the permit before any dispatch and is
+attempted at most once per connection, even after failure. Cancel consumes a
+matching permit and never sends CommitDesignation. Malformed, lost, contradictory
+or source-shifted replies fence the connection. Query absence is not proof of
+nonapplication. There is no automatic reconnect or commit replay.
+
+Requests are at most 2 KiB, replies 32 KiB, and notification traffic is bounded to
+eight frames/256 KiB per call. Unknown/duplicate fields, wrong wire types,
+nonminimal/overflowing integers, aliased method IDs and noncanonical refusals
+fail closed. A complete native effect is validated by the sealed codec above.
+A 300 KiB worst-case byte allowance is consumed before each attempted native call;
+negotiation reserves seven such calls plus 24 greeting bytes. That connection
+budget cannot be renewed by passing another context. The absolute TCP deadline,
+at most 60 seconds from connect, includes negotiation and can only narrow; partial
+reads/writes never renew it. Entity budgets cover the full halo before dispatch.
+
+These are synchronous adapter calls: the eventual runtime must own them inside
+its supervised blocking region and repeat runtime/operator/custody checks at its
+actual effect boundary. The low-level adapter **does not implement a durable Rust
+coordinator**. Do not use a fresh connection/key to bypass an unresolved effect.
+Before MCP integration, the coordinator must persist exact source-bound intent
+and dispatch state, fence unresolved work across restart, enforce confirmation and
+lease/checkpoint policy, and sync terminal evidence before acknowledgement. The
+existing Python directory registry is not silently adopted as that Rust journal.
+
+Twelve additional Rust RPC groups are registered (22 total), using fragmented
+in-memory streams and real core authorization types. They cover lifecycle/replay,
+ambiguous commit, scoped grants, post-capture expiry, cancellation, malformed
+frames, binding aliases, missing records and nonrenewable work allowances. **All
+22 Rust groups remain uncompiled and unexecuted.** No TCP/native/Rust/MCP execution,
+full qualification or production admission is claimed by this RPC increment.
+
+With the pinned Rust toolchain and locked dependencies available, the targeted
+command is `cargo test --locked --offline -p dfmcp-adapter dig_designation`.

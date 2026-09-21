@@ -4,6 +4,8 @@
 //! A designation receipt proves historical configuration, not excavation, safety,
 //! current terrain or authority. Hidden and missing cells have no attribute payload.
 
+pub mod rpc;
+
 use std::collections::BTreeSet;
 
 use dfmcp_core::{Digest32, ErrorCode, FortressId, MapCoord, MapCuboid, Result};

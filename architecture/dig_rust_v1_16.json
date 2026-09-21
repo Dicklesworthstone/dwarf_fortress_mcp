@@ -6,7 +6,7 @@
   "typed_capture": true,
   "sealed_plan": true,
   "verified_native_effect": true,
-  "rpc_source_present": false,
+  "rpc_source_present": true,
   "capture_magic": "DFMDG016",
   "effect_magic": "DFMDGE16",
   "retained_plan_magic": "DFMDGP16",
@@ -22,11 +22,56 @@
   "hidden_neighbor_policy_explicit": true,
   "shared_block_write_scope": true,
   "designation_proves_excavation": false,
-  "rust_tests_registered": 10,
+  "rust_tests_registered": 22,
   "rust_tests_executed": false,
   "rust_compiled": false,
   "native_wire_changed": false,
   "production_admitted": false,
   "mcp_route_added": false,
-  "rust_durable_coordinator_added": false
+  "rust_durable_coordinator_added": false,
+  "rpc": {
+    "module": "dfmcp_adapter::dig_designation::rpc",
+    "methods": [
+      "Handshake",
+      "ReadDesignation",
+      "PrepareDesignation",
+      "CommitDesignation",
+      "QueryDesignation",
+      "CancelDesignation"
+    ],
+    "request_bytes": 2048,
+    "reply_bytes": 32768,
+    "notifications_per_call": 8,
+    "notification_bytes_per_call": 262144,
+    "reserved_bytes_per_call": 307200,
+    "reserved_connect_bytes": 2150424,
+    "maximum_wall_millis": 60000,
+    "region_pinned": true,
+    "loopback_only": true,
+    "fresh_same_connection_preparation_required": true,
+    "commit_attempts_per_connection": 1,
+    "automatic_reconnect": false,
+    "renewable_connection_byte_budget": false,
+    "query_creates_dispatch_authority": false,
+    "authorization": {
+      "read": [
+        "Query(full_halo)",
+        "Observe(full_halo)"
+      ],
+      "prepare": [
+        "Query(full_halo)",
+        "Observe(full_halo)",
+        "Plan(shared_blocks)",
+        "Designate(shared_blocks)"
+      ],
+      "commit_cancel": [
+        "Query(full_halo)",
+        "Observe(full_halo)",
+        "Designate(shared_blocks)"
+      ],
+      "query": [
+        "Query(full_halo)"
+      ]
+    }
+  }
 }

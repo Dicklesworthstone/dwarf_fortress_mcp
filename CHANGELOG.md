@@ -8,6 +8,15 @@ readiness.
 
 ### Added
 
+- Typed dig/1.16 Rust capture, sealed-plan and native-effect validation, plus a fixed
+  six-method RPC client with full-halo/shared-block authorization, source/region
+  pinning, nonrenewable connection budgets and same-connection one-attempt commit.
+  Query/replayed preparations cannot grant dispatch. Twenty-two Rust regression
+  groups are registered but UNCOMPILED AND UNEXECUTED; independent Python checks
+  reconstruct the four existing native fixture identities only. No native wire,
+  durable Rust coordinator, MCP designation route or admission is added. See
+  `docs/DIG_RUST.md` for the implemented boundary and remaining integration.
+
 - Read-only work-order-progress/1.12 capture and MCP monitoring: complete selected
   presence, approval/activity flags, remaining-work counters, conservative finite
   template recognition, exact-witness foreground refresh and epoch/reset-safe
