@@ -1,0 +1,32 @@
+{
+  "schema_version": "dfmcp.dig-rust/1.16",
+  "status": "source_present_uncompiled_development",
+  "native_protocol": "1.16",
+  "module": "dfmcp_adapter::dig_designation",
+  "typed_capture": true,
+  "sealed_plan": true,
+  "verified_native_effect": true,
+  "rpc_source_present": false,
+  "capture_magic": "DFMDG016",
+  "effect_magic": "DFMDGE16",
+  "retained_plan_magic": "DFMDGP16",
+  "bounds": {
+    "target_width": 8,
+    "target_height": 8,
+    "halo_cells": 300,
+    "capture_bytes": 16384,
+    "effect_bytes": 334,
+    "retained_plan_bytes": 16527
+  },
+  "hidden_payload": false,
+  "hidden_neighbor_policy_explicit": true,
+  "shared_block_write_scope": true,
+  "designation_proves_excavation": false,
+  "rust_tests_registered": 10,
+  "rust_tests_executed": false,
+  "rust_compiled": false,
+  "native_wire_changed": false,
+  "production_admitted": false,
+  "mcp_route_added": false,
+  "rust_durable_coordinator_added": false
+}

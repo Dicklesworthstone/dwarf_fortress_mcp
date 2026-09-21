@@ -1,0 +1,14 @@
+{
+  "schema": "dfmcp.dig-rust-fixtures/1",
+  "status": "independent_fixture_reconstruction_only",
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "real_dfhack_sdk": false,
+  "live_game": false,
+  "fixture_git_blobs": {
+    "cancelled.hex": "5f39a3bef246356e2b91a5164a26449bd6683cea",
+    "designated.hex": "5f99edd339cf90beb8e3fea9cd355c986318b6a4",
+    "observation.hex": "f9acd7c7d331ff355681cd05170404a4af0ecc2f",
+    "prepared.hex": "e3e64f2dffe1b80af89eaac0dde7be2177291894"
+  }
+}

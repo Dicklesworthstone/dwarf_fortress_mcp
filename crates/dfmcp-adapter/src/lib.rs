@@ -14,6 +14,7 @@ pub mod dfhack_rpc {
 }
 pub mod dfhack_wire;
 pub mod dfhack_wire_v1_1;
+pub mod dig_designation;
 pub mod dispatcher;
 pub mod fenced_live_source;
 pub mod fenced_live_source_v1_1;
