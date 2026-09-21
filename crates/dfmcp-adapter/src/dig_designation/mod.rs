@@ -4,7 +4,6 @@
 //! A designation receipt proves historical configuration, not excavation, safety,
 //! current terrain or authority. Hidden and missing cells have no attribute payload.
 
-pub mod journal;
 pub mod rpc;
 
 use std::collections::BTreeSet;
