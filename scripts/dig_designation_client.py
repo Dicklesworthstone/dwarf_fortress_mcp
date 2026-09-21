@@ -741,24 +741,9 @@ def recovered_result(result: dict, dispatched: bool, prepared_replay: bool = Fal
 
 def start(client: Client, path: Path, key: str, selected: dict, allow_hidden: bool,
           expected_witness: str, confirmed_plan: str) -> dict:
-    key_bytes(key); region(selected); flag(allow_hidden)
-    witness = exact_hex(expected_witness, 32); confirmed = exact_hex(confirmed_plan, 32)
-    require(confirmed == plan_for(selected, allow_hidden, witness), 'confirmation differs from requested sealed plan')
-    observed = client.observe(selected)
-    require(hashlib.sha256(observed['raw']).digest() == witness, 'terrain changed since observation; no intent dispatched')
-    intent = build_intent(client.address, key, selected, allow_hidden, observed['raw'], observed['manifest'])
-    with capsule(path, intent) as owner:
-        client.remaining(); owner.verify()
-        retained = terminal_receipt(owner)
-        if retained is not None:
-            return retained_result(owner, retained)
-        prepared = client.prepare(intent)
-        if prepared['replayed']:
-            return finish_recovery(owner, prepared, False, True)  # Never dispatch a replayed preparation.
-        owner.verify(); client.remaining()
-        committed = client.commit(intent, prepared)
-        owner.verify()
-        return finish_recovery(owner, committed, True)
+    from dig_designation_store import start_designation
+    return start_designation(sys.modules[__name__], client, path, key, selected, allow_hidden,
+                             expected_witness, confirmed_plan)
 
 
 def environment(control: bool, saved_endpoint: str | None = None) -> tuple[str, bytes]:
@@ -794,9 +779,18 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument('--key', required=True)
             p.add_argument('--expected-witness', required=True)
             p.add_argument('--confirm-plan', required=True)
+    records = sub.add_parser('records', help='offline discovery in one private intent directory')
+    records.add_argument('--directory', type=Path, required=True)
+    records.add_argument('--limit', type=int, default=8)
+    records.add_argument('--continuation')
+    records.add_argument('--timeout-ms', type=int, default=10000)
     args = parser.parse_args(argv)
     try:
-        if args.command == 'inspect':  # Deliberately BEFORE any environment/token/client access.
+        if args.command == 'records':
+            from dig_designation_store import records_result
+            result = records_result(sys.modules[__name__], args.directory, args.limit,
+                                    args.continuation, args.timeout_ms)
+        elif args.command == 'inspect':  # Deliberately BEFORE any environment/token/client access.
             with capsule(args.record) as owner:
                 retained = terminal_receipt(owner)
                 result = retained_result(owner, retained) if retained is not None else {

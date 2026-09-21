@@ -207,6 +207,12 @@ class DigClientTests(unittest.TestCase):
         with d.capsule(self.path, intent() if value is None else value):
             pass
 
+    def case_path(self, name: str) -> Path:
+        # Independent protocol faults must not bypass the new store-wide fence.
+        directory = self.root / name
+        directory.mkdir(mode=0o700)
+        return directory / 'intent.json'
+
     def start(self, client: d.Client) -> dict:
         value = intent(client.address)
         return d.start(client, self.path, 'dig-001', REGION, False, value['witness'], value['plan_digest'])
@@ -412,7 +418,7 @@ class DigClientTests(unittest.TestCase):
 
     def test_native_unknown_and_forged_or_prepared_commit_never_retry(self):
         for index, mode in enumerate(('unknown', 'forged', 'prepared')):
-            self.path = self.root / f'{index}.json'
+            self.path = self.case_path(f'case-{index}')
             game = FakeGame(); game.commit_mode = mode
             with Peer(game) as peer, d.Client(peer.address, TOKEN, 3000) as client:
                 if mode == 'unknown':
@@ -427,7 +433,7 @@ class DigClientTests(unittest.TestCase):
 
     def test_replayed_preparations_never_dispatch_even_with_new_capsule(self):
         for index, record in enumerate((VECTORS['prepared'], VECTORS['designated'], outcome(1), VECTORS['cancelled'])):
-            self.path = self.root / f'{index}.json'
+            self.path = self.case_path(f'case-{index}')
             game = FakeGame(); game.record = record; game.replayed = True
             with Peer(game) as peer, d.Client(peer.address, TOKEN, 3000) as client:
                 result = self.start(client)
@@ -450,7 +456,7 @@ class DigClientTests(unittest.TestCase):
     def test_independent_file_and_directory_sync_failures_prevent_prepare(self):
         real_sync = os.fsync
         for failing in (1, 2):
-            self.path = self.root / f'sync-{failing}.json'
+            self.path = self.case_path(f'sync-{failing}')
             game = FakeGame(); count = []
             def sync(fd):
                 count.append(fd)
@@ -465,7 +471,7 @@ class DigClientTests(unittest.TestCase):
 
     def test_capsule_changed_between_stages_fences_dispatch_or_acknowledgement(self):
         for index, stage in enumerate(('prepare', 'commit')):
-            self.path = self.root / f'substituted-{index}.json'
+            self.path = self.case_path(f'substituted-{index}')
             game = FakeGame()
             def corrupt():
                 raw = bytearray(self.path.read_bytes()); raw[10] ^= 1; self.path.write_bytes(raw)

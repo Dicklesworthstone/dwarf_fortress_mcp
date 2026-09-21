@@ -29,7 +29,7 @@ class TerminalRecoveryTests(unittest.TestCase):
 
     def create(self, value=None):
         with d.capsule(self.path, value or intent()) as owner:
-            return self.root / d.terminal_name(owner)
+            return self.path.parent / d.terminal_name(owner)
 
     def start(self, client):
         value = intent(client.address)
@@ -115,8 +115,10 @@ class TerminalRecoveryTests(unittest.TestCase):
 
     def test_file_and_parent_sync_failures_cannot_acknowledge_but_can_recover_complete_proof(self):
         real_sync = os.fsync
-        for failure in (3, 4):  # intent file/parent precede terminal file/parent
-            self.path = self.root / f'sync-{failure}.json'
+        for failure in (7, 8):  # intent, registry header and registration precede terminal proof
+            directory = self.root / f'sync-{failure}'
+            directory.mkdir(mode=0o700)
+            self.path = directory / 'intent.json'
             calls = []
             def sync(fd):
                 calls.append(stat.S_ISDIR(os.fstat(fd).st_mode))
@@ -128,7 +130,7 @@ class TerminalRecoveryTests(unittest.TestCase):
                 with patch.object(d.os, 'fsync', side_effect=sync), self.assertRaises(OSError):
                     self.start(client)
             self.assertEqual(game.calls.count('CommitDesignation'), 1)
-            self.assertEqual(calls, [False, True, False, True][:failure])
+            self.assertEqual(calls, ([False, True] * 4)[:failure])
             # Reopen verifies and re-syncs, rather than inferring that the failed
             # invocation durably acknowledged its otherwise complete proof.
             observed = []
