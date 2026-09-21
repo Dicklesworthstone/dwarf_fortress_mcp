@@ -22,13 +22,13 @@
   "hidden_neighbor_policy_explicit": true,
   "shared_block_write_scope": true,
   "designation_proves_excavation": false,
-  "rust_tests_registered": 22,
+  "rust_tests_registered": 54,
   "rust_tests_executed": false,
   "rust_compiled": false,
   "native_wire_changed": false,
   "production_admitted": false,
   "mcp_route_added": false,
-  "rust_durable_coordinator_added": false,
+  "rust_durable_coordinator_added": true,
   "rpc": {
     "module": "dfmcp_adapter::dig_designation::rpc",
     "methods": [
@@ -73,5 +73,12 @@
         "Query(full_halo)"
       ]
     }
+  },
+  "coordinator": {
+    "module": "dfmcp_adapter::dig_designation::journal",
+    "contract": "architecture/dig_journal_v1.json",
+    "private_storage_source_present": true,
+    "runtime_policy_implementation_supplied": false,
+    "mcp_integration_present": false
   }
 }
