@@ -169,10 +169,19 @@ public:
         }
         // Fence competing preparations and retain unknown outcome BEFORE the sole setter.
         interrupt(); r.state = State::Unknown;
+        const auto issued_sequence = sequence_;
+        // A throwing setter can still have changed the native flag. Always try
+        // the same immediate readback, under the caller's existing suspension,
+        // but never retry the setter or promote a later query from Unknown.
+        try { write(r.before.job, r.desired); }
+        catch (...) { /* Only fresh, exact readback can establish the outcome. */ }
         try {
-            write(r.before.job, r.desired);
+            if (sequence_ != issued_sequence) return r;
             auto after = inspect(r.before.job, read);
-            // The controlled flag and local sequence are the only allowed changes.
+            // Normalizing the local sequence must not hide an intervening edge,
+            // including one raised by the readback callback itself.
+            if (after.sequence != issued_sequence) return r;
+            // The controlled flag and our one sequence increment are the only allowed changes.
             auto comparable = after; comparable.sequence = r.before.sequence;
             comparable.suspended = r.before.suspended;
             if (comparable.encode() != r.before.encode()) return r;
