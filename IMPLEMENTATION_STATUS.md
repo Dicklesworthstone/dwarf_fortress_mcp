@@ -43,6 +43,32 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable Rust mining coordinator and private-file recovery
+
+`docs/DIG_RUST_COORDINATOR.md` and `architecture/dig_journal_v1.json` describe
+source-bound dig/1.16 intent, dispatch, cancellation and terminal-proof journaling.
+The coordinator syncs before native preparation/commit and before acknowledging
+terminal evidence. Reopened, replayed and queried preparations never regain
+commit permission. Unsettled work fences new keys across all selected regions in
+that journal. Current authority and a mandatory supervising-runtime guard are
+rechecked at native edges, including after dispatch synchronization.
+
+`journal::private_file::open_private_dig` supplies Linux x86_64/aarch64 backing:
+exact 0600 single-link files under owned 0700 directories, descriptor-pinned
+no-follow opens, exclusive file locking, append-only extent checks and file plus
+parent-directory synchronization. Offline replay is read-only down to storage
+methods and cannot create, sync, truncate or repair files. Partial/corrupt history
+fails closed. Typed get/list discovery binds current session and exact journal head.
+
+Sixteen coordinator groups and sixteen Linux storage/runner tests are registered,
+but **all 32 are UNCOMPILED AND UNEXECUTED**. The independently executed Python
+framing reference rejects 7,752 single-byte corruptions and 7,748 incomplete
+prefixes and checks 100 state/phase pairs; it does not execute Rust or filesystem
+custody. No real SDK, live game, power-loss, full qualification or admission is
+established. Runtime ownership, actual lease/checkpoint policy, full Agent Turn
+output reservation and the MCP designation route remain unfinished. The native
+protocol and existing Python recovery are unchanged.
+
 ### Typed Rust mining adapter for the existing dig/1.16 development profile
 
 `docs/DIG_RUST.md` and `architecture/dig_rust_v1_16.json` describe the new
@@ -63,9 +89,9 @@ are UNCOMPILED AND UNEXECUTED** because Rust, Cargo and rustfmt are unavailable.
 Independent Python reconstruction matches all four existing native fixture Git
 blobs; this is not execution of Rust or the new RPC client. No real SDK, live game,
 full qualification or production admission is established. The native wire and
-existing Python recovery remain unchanged. A durable Rust mining coordinator,
-confirmation/lease/checkpoint integration and MCP designation routing are still
-missing; the low-level client is not a substitute for those boundaries.
+existing Python recovery remain unchanged. The subsequent durable coordinator
+and private-file source are described above. Runtime lease/checkpoint integration
+and MCP designation routing remain missing; low-level clients do not replace them.
 
 ### Selected work-order approval and progress monitoring
 

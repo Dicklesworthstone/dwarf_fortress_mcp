@@ -13,6 +13,8 @@ use crate::control_effect_journal::EffectJournalStorage;
 use super::{DigEffect, DigObservation, DigPhase, DigPlan, Reader, error, hash, validate_key};
 use super::rpc::{DigSource, RPC_BYTES, authorize};
 
+pub mod private_file;
+pub mod session;
 mod record;
 pub use record::{DigBinding, DigRecord, DigState, DigSummary};
 use record::{MAX_BINDING_BYTES, MAX_BODY_BYTES, check, reserve, transition};
@@ -322,7 +324,7 @@ impl<S: EffectJournalStorage> DigJournal<S> {
         plan: &DigPlan, budget: &mut Allowance) -> Result<()>
     {
         let context = self.edge(source, guard, DigStage::Observe, plan, budget)?;
-        let capture = source.observe(plan.before().region(), &context)?;
+        let capture: DigObservation = source.observe(plan.before().region(), &context)?;
         self.binding.source(source)?; self.binding.capture(&capture)?;
         if capture != *plan.before() { return Err(error(ErrorCode::StaleAnchor, "dig terrain changed; no dispatch permitted")); }
         authorize(&budget.current()?, self.binding.fortress_id(), capture.tick(), capture.region(), true, false, false)?;

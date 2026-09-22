@@ -129,3 +129,44 @@ header identity are fixed in the contract and actual Rust test assertions. The
 four original native fixtures were reconstructed with exact Git blob equality.
 This is reference/framing evidence, **not execution of Rust, its filesystem or
 network I/O, the real DFHack SDK, a live fortress, or the qualification ladder**.
+
+## Concrete Linux private-file backing
+
+`journal::private_file::open_private_dig(path, context, mode, expected)` now opens
+the real backing file for `DigJournal`. The path and expected binding belong to
+the trusted operator/runtime, not client tool arguments. There is no native I/O,
+capability grant, Python-capsule migration or inferred production admission.
+
+On Linux x86_64/aarch64, each path component is opened no-follow through a pinned
+directory descriptor. The final file must be regular, single-link, exact 0600,
+and owned by the same root/effective-user owner as its exact-0700 parent. An
+exclusive nonblocking file lock is held through replay and subsequent operations.
+Named and opened inode/owner identities, parent identity, permissions and extent
+are rechecked at storage boundaries. Writes require both append mode and the
+expected end position. Every synchronization performs file sync followed by
+parent-directory sync and then repeats custody checks. No truncation is supported.
+
+Missing files may be created exclusively only in Control mode with an exact
+binding. A new nonzero journal nonce comes from `/dev/urandom`; header and directory
+entry use the same checked synchronization path as later frames. Existing empty,
+incomplete, corrupt or mismatched journals are not initialized, rewritten or
+repaired. Wrong expected bindings fail before online resynchronization. Recovery
+and Control reopen never restore a dispatch permit.
+
+Offline opens retain the lock but use an O_RDONLY file. Write, flush, sync and
+truncate all explicitly refuse; ordinary historical get/list does not rewrite
+or synchronize the file. Missing recovery files do not create directories or a
+new journal. Unsupported platforms return a refusal before opening any path.
+The open/replay path shares one cooperative deadline; kernel filesystem calls
+are not falsely described as forcibly interruptible.
+
+Sixteen additional Linux storage/runner tests are registered: fifteen substantive
+tests and one child-process lock probe. They cover real-file coordinator lifecycle,
+lost-reply recovery, non-restored preparation permission, offline no-write behavior,
+exclusive locks across processes, independent file/parent sync failures, path/mode/
+link rejection, inode/parent substitution, corrupt/torn history and current scope.
+The child probe is owned and kill/reaped on failure or timeout. **None has been
+compiled or executed here.** Together with the sixteen coordinator groups, this
+increment registers 32 new Rust tests; the earlier 22 codec/RPC tests also remain
+unexecuted in this environment. The passing Python reference is still only an
+independent framing/state model, not Rust or actual storage execution.

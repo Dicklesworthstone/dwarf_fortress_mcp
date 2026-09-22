@@ -1,0 +1,20 @@
+{
+  "schema_version": "dfmcp.dig-session/1",
+  "status": "source_present_uncompiled_development",
+  "module": "dfmcp_adapter::dig_designation::journal::session",
+  "native_protocol": "1.16",
+  "same_source_across_observe_prepare_commit": true,
+  "commit_accepts_connection_factory": false,
+  "recovery_factory_max_calls": 1,
+  "reopen_restores_dispatch_permission": false,
+  "cached_observations": 1,
+  "retained_native_connections": 1,
+  "source_reservation_bytes": 3993624,
+  "permanent_unknown_is_resolved": false,
+  "checkpoint_policy_supplied_by_host": true,
+  "runtime_guard_required": true,
+  "rust_tests_registered": 16,
+  "rust_tests_executed": false,
+  "production_admitted": false,
+  "native_wire_changed": false
+}

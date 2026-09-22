@@ -60,5 +60,28 @@
       "d48f3778ee4077f052d17a832648b7aa69661d6c0043256b12d4079e6b656613",
       "56b6382b026c680a84599ba28f4df38f6acc3e16c9c0838d6fdb134b4d383303"
     ]
-  }
+  },
+  "private_storage": {
+    "platforms": [
+      "linux-x86_64",
+      "linux-aarch64"
+    ],
+    "regular_file_mode": "0600",
+    "directory_mode": "0700",
+    "owner": "root_or_effective_uid",
+    "single_link": true,
+    "exclusive_file_lock": true,
+    "directory_descriptor_pinned": true,
+    "nofollow_components": true,
+    "append_only": true,
+    "file_and_parent_sync": true,
+    "offline_sync": false,
+    "offline_create": false,
+    "tail_repair": false,
+    "shared_open_deadline": true,
+    "rust_tests_executed": false,
+    "registered_rust_tests": 16
+  },
+  "runtime_policy_implementation_supplied": false,
+  "registered_coordinator_rust_tests": 16
 }

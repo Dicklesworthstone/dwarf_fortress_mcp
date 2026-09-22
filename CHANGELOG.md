@@ -8,14 +8,25 @@ readiness.
 
 ### Added
 
+- Durable dig/1.16 Rust coordination with intent/dispatch-before-native sync,
+  terminal-proof-before-acknowledgement sync, non-restorable commit permission,
+  cross-key unresolved-work fencing, fixed recovery modes and typed offline
+  record discovery. Require supervising runtime guards at native edges.
+- Linux private-file backing with exact owned modes, exclusive locking,
+  descriptor-pinned opens, append-only checks, file/parent sync and strictly
+  read-only offline replay. No tail repair, native wire or admission changes.
+  Thirty-two coordinator/storage tests are registered but uncompiled/unexecuted;
+  the passing independent Python framing checks are not Rust or filesystem
+  execution. See `docs/DIG_RUST_COORDINATOR.md` for remaining runtime/MCP work.
+
 - Typed dig/1.16 Rust capture, sealed-plan and native-effect validation, plus a fixed
   six-method RPC client with full-halo/shared-block authorization, source/region
   pinning, nonrenewable connection budgets and same-connection one-attempt commit.
   Query/replayed preparations cannot grant dispatch. Twenty-two Rust regression
   groups are registered but UNCOMPILED AND UNEXECUTED; independent Python checks
-  reconstruct the four existing native fixture identities only. No native wire,
-  durable Rust coordinator, MCP designation route or admission is added. See
-  `docs/DIG_RUST.md` for the implemented boundary and remaining integration.
+  reconstruct the four existing native fixture identities only. The subsequent
+  coordinator/storage increment is described above; neither increment changes
+  native wire, adds MCP designation routing or grants production admission.
 
 - Read-only work-order-progress/1.12 capture and MCP monitoring: complete selected
   presence, approval/activity flags, remaining-work counters, conservative finite
