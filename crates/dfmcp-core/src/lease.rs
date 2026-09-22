@@ -217,6 +217,42 @@ impl LeaseManager {
         Ok(lease_id)
     }
 
+    /// Verify the live manager record, not a caller-supplied copy of a lease.
+    /// The full shared write area must fit an exclusive, currently held lease.
+    /// This is process-local ownership; callers must separately bind a fortress
+    /// and preserve durable unresolved-work fencing across process restarts.
+    pub fn verify_exclusive_spatial(
+        &self,
+        lease_id: LeaseId,
+        holder: SessionId,
+        area: MapCuboid,
+        current_tick: GameTick,
+    ) -> Result<()> {
+        MapCuboid::new(area.min, area.max)?;
+        let record = self.leases.get(&lease_id).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::LeaseDenied, "spatial lease is no longer retained")
+        })?;
+        if record.holder_session != holder
+            || current_tick < record.acquired_tick
+            || current_tick >= record.expires_at_tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::LeaseDenied,
+                "spatial lease holder or validity interval does not match",
+            ));
+        }
+        if let LeaseKind::SpatialExclusive(held) = &record.kind {
+            MapCuboid::new(held.min, held.max)?;
+            if held.contains_cuboid(area) {
+                return Ok(());
+            }
+        }
+        Err(DfmcpError::new(
+            ErrorCode::LeaseDenied,
+            "an exclusive spatial lease covering every affected block is required",
+        ))
+    }
+
     /// Extend the TTL of an active lease.
     pub fn renew_lease(
         &mut self,
@@ -399,6 +435,57 @@ mod tests {
         manager.release_lease(l2, s2)?;
         assert_eq!(manager.active_lease_count(), 0);
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod spatial_verification_tests {
+    use super::*;
+    use crate::MapCoord;
+
+    fn area() -> MapCuboid {
+        MapCuboid { min: MapCoord::new(0, 0, 2), max: MapCoord::new(31, 31, 2) }
+    }
+    #[test]
+    fn spatial_verification_checks_holder_scope_and_half_open_lifetime() -> Result<()> {
+        let mut book = LeaseManager::new();
+        let owner = SessionId::new(1);
+        let id = book.acquire_spatial_lease(owner, area(), true, GameTick(100), 10)?;
+        for tick in [100, 109] { book.verify_exclusive_spatial(id, owner, area(), GameTick(tick))?; }
+        for tick in [99, 110, u64::MAX] {
+            assert!(book.verify_exclusive_spatial(id, owner, area(), GameTick(tick)).is_err());
+        }
+        assert!(book.verify_exclusive_spatial(id, SessionId::new(2), area(), GameTick(100)).is_err());
+        let outside = MapCuboid { max: MapCoord::new(32, 31, 2), ..area() };
+        assert!(book.verify_exclusive_spatial(id, owner, outside, GameTick(100)).is_err());
+        let reversed = MapCuboid { min: area().max, max: area().min };
+        assert!(book.verify_exclusive_spatial(id, owner, reversed, GameTick(100)).is_err());
+        Ok(())
+    }
+    #[test]
+    fn stale_tokens_cannot_follow_release_or_reacquisition() -> Result<()> {
+        let mut book = LeaseManager::new();
+        let owner = SessionId::new(1);
+        let old = book.acquire_spatial_lease(owner, area(), true, GameTick(0), 10)?;
+        book.release_lease(old, owner)?;
+        let current = book.acquire_spatial_lease(owner, area(), true, GameTick(0), 10)?;
+        assert_ne!(old, current);
+        assert!(book.verify_exclusive_spatial(old, owner, area(), GameTick(0)).is_err());
+        book.verify_exclusive_spatial(current, owner, area(), GameTick(0))?;
+        book.cleanup_expired_leases(GameTick(10));
+        assert!(book.verify_exclusive_spatial(current, owner, area(), GameTick(10)).is_err());
+        Ok(())
+    }
+    #[test]
+    fn shared_entity_or_fabricated_tokens_do_not_cover_spatial_writes() -> Result<()> {
+        let mut book = LeaseManager::new();
+        let owner = SessionId::new(1);
+        let shared = book.acquire_spatial_lease(owner, area(), false, GameTick(0), 10)?;
+        let entity = book.acquire_entity_lease(owner, EntityId::new(1), true, GameTick(0), 10)?;
+        for id in [shared, entity, LeaseId::new(999)] {
+            assert!(book.verify_exclusive_spatial(id, owner, area(), GameTick(0)).is_err());
+        }
         Ok(())
     }
 }

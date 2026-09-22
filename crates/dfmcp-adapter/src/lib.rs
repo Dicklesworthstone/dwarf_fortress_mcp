@@ -14,6 +14,7 @@ pub mod dfhack_rpc {
 }
 pub mod dfhack_wire;
 pub mod dfhack_wire_v1_1;
+pub mod dig_control_policy;
 pub mod dig_designation;
 pub mod dispatcher;
 pub mod fenced_live_source;
@@ -103,8 +104,8 @@ pub use dispatcher::{EffectJournal, EffectJournalRecord, MutationDispatcher};
 pub use fenced_live_source::FencedLiveSource;
 pub use fenced_live_source_v1_1::FencedLiveSourceV1_1;
 pub use ipc::{
-    FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcConnectionState, IpcFrame, IpcMessageType,
-    IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
+    FRAME_HEADER_SIZE, IncrementalFrameDecoder, IpcFrame, IpcMessageType,
+    IpcConnectionState, IpcTelemetry, MAX_FRAME_PAYLOAD_SIZE, ReconnectionPolicy, compute_crc32,
 };
 pub use legacy_bridge_probe::{LegacyBridgeProbeAdapter, LegacyBridgeProbeConfig};
 pub use live_adapter::{LiveReadAdapter, LiveReadAdapterConfig};

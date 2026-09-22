@@ -1,0 +1,17 @@
+{
+  "schema_version": "dfmcp.dig-control-policy/1",
+  "status": "source_present_uncompiled_development",
+  "module": "dfmcp_adapter::dig_control_policy",
+  "policy_digest_domain": "dfmcp-dig-control-policy/1",
+  "review_digest_domain": "dfmcp-dig-control-review/1",
+  "max_protected_regions": 32,
+  "write_scope": "whole_affected_map_blocks",
+  "live_lease_verification": true,
+  "checkpoint_default": "required_and_refused_without_real_verifier",
+  "development_checkpoint_exception": "explicit_trusted_disposable_fortress_only",
+  "review_is_human_attestation": false,
+  "policy_is_production_admission": false,
+  "query_retirement_require_new_mining_lease": false,
+  "rust_tests_registered": 10,
+  "rust_tests_executed": false
+}
