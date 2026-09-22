@@ -14,6 +14,7 @@ use super::{DigEffect, DigObservation, DigPhase, DigPlan, Reader, error, hash, v
 use super::rpc::{DigSource, RPC_BYTES, authorize};
 
 pub mod private_file;
+pub mod session;
 mod record;
 pub use record::{DigBinding, DigRecord, DigState, DigSummary};
 use record::{MAX_BINDING_BYTES, MAX_BODY_BYTES, check, reserve, transition};
