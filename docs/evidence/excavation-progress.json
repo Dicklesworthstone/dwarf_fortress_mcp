@@ -1,0 +1,47 @@
+{
+  "actual_loopback_tcp_executed": true,
+  "actual_posix_files_and_cross_process_lock_executed": true,
+  "actual_python_implementation_executed": true,
+  "actual_subprocess_cli_executed": true,
+  "full_repository_qualification": false,
+  "journal_cli_tests_executed": 21,
+  "mutants_rejected": [
+    {
+      "mutant": "same_tick_counts_as_progress",
+      "reason": "assertion_failure_not_syntax_error",
+      "rejected_by": "test_excavation_observer.ObserverTests.test_distinct_advancing_ticks_and_sampled_stability"
+    },
+    {
+      "mutant": "restart_preserves_interrupted_streak",
+      "reason": "assertion_failure_not_syntax_error",
+      "rejected_by": "test_track_excavation.TrackerTests.test_unfinished_read_is_visible_and_resets_recovered_streak"
+    },
+    {
+      "mutant": "parent_sync_omitted",
+      "reason": "assertion_failure_not_syntax_error",
+      "rejected_by": "test_track_excavation.TrackerTests.test_terminal_file_and_directory_sync_failures_cannot_acknowledge"
+    },
+    {
+      "mutant": "visible_walls_count_as_goal",
+      "reason": "assertion_failure_not_syntax_error",
+      "rejected_by": "test_excavation_observer.ObserverTests.test_hidden_missing_contradictions_and_interruption_reset_streak"
+    }
+  ],
+  "native_fixture_bytes": 455,
+  "observer_tests_executed": 14,
+  "power_loss_campaign": false,
+  "python_test_total": 35,
+  "real_dfhack_or_live_game_executed": false,
+  "rust_or_mcp_executed": false,
+  "schema": "dfmcp.excavation-progress-evidence/1",
+  "shape_liquid_designation_cases": 576,
+  "source_sha256": {
+    "crates/dfmcp-adapter/tests/fixtures/map_v1_5.hex": "f7dcc70de8cbf5a2a316a574b39c2b3d796dc5f4328a49322e14c556a4c8d67a",
+    "scripts/excavation_observer.py": "2642c09dd5c173c034c5d1e5dd462e843e2dc331645ea4a6215adb27f08181d8",
+    "scripts/test_excavation_observer.py": "75beaa410dbe1e4a97248a642193d89dab7abd3fa77a5dce326e0ab8c1c137a9",
+    "scripts/test_track_excavation.py": "cc426f65b9e025b1f4fc4727de235ee97c25dc340f7e382cb259c2b5c63613ec",
+    "scripts/track_excavation.py": "46da5ef4bfa2c53ed1c4470dad225fe148ea302ad67d373881c91157c12c957d"
+  },
+  "status": "passed_python_loopback_posix_cli_only",
+  "test_command": "PYTHONPATH=scripts python3 -m unittest test_excavation_observer test_track_excavation -v"
+}

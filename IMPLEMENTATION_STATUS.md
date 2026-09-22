@@ -43,6 +43,33 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Executable sampled excavation goals and restart-safe monitoring
+
+`docs/EXCAVATION_PROGRESS.md` describes `scripts/track_excavation.py`: a standalone,
+read-only Python developer workflow over the unchanged map/1.5 source. It tracks
+an explicit visible FLOOR/zero-liquid/no-designation condition for one bounded
+rectangle. Distinct advancing-tick samples, a fixed stability span/deadline and
+maximum sample gap prevent paused repeats or interrupted observations from
+manufacturing sampled goal satisfaction. Hidden/missing cells remain unknown;
+source identity, map dimensions and clock regressions invalidate the goal.
+
+Private append-only goal journals retain complete native sample bytes, source
+manifests and the declared goal. Read-start intent is synced before connection;
+interrupted reads reset the next streak on replay. File and parent-directory sync
+precede acknowledgement. Offline inspection is read-only; cancellation stops only
+this monitor. Complete bounded JSON includes an authority-free Agent Turn spine.
+Terminal history is immutable and can be inspected without credentials or native
+access. Corrupt/torn history is preserved and refused, never repaired or reset.
+
+All 35 actual Python/loopback/POSIX/subprocess test groups pass, including the
+unchanged 455-byte native fixture, 576 shape/liquid/designation combinations,
+restart/failure/custody cases and complete output. Four deliberately weakened
+implementations fail regression assertions. This is executed Python evidence,
+not a Rust/MCP integration, real DFHack campaign, power-loss proof or full
+qualification. A satisfied floor goal is historical sampled evidence, not mining
+causality, continuous stability, safety or a cleared native-effect obligation.
+Existing dig journals, dependencies, native protocols and admission are unchanged.
+
 ### Policy-guarded development mining control through MCP
 
 `docs/DIG_CONTROL_POLICY.md` and `docs/DIG_CONTROL_MCP.md` describe the separate

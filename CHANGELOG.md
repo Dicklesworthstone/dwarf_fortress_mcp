@@ -8,6 +8,18 @@ readiness.
 
 ### Added
 
+- Executable read-only excavation floor-goal monitoring over unchanged map/1.5:
+  strict capture decoding, distinct advancing-tick sampled stability, fixed
+  deadlines, unknown terrain and source/clock invalidation without native mutation.
+- Durable `track_excavation.py` start/sample/inspect/cancel workflow with complete
+  native evidence, read-intent-before-connection synchronization, file/parent
+  synchronization before acknowledgement and restart-safe interruption handling.
+  Cancellation stops only the monitor; no native effect obligation is cleared.
+- Thirty-five actual Python/loopback/POSIX/subprocess tests pass and four weakened
+  implementations are rejected by regression assertions. Complete Agent Turn
+  output is bounded. This is not Rust/MCP, live DFHack or power-loss qualification;
+  see `docs/EXCAVATION_PROGRESS.md` for the standalone workflow and evidence limits.
+
 - Policy-guarded mining control through the separate `dfmcp-dig-control-dev-server`:
   observe, prepare, exact-plan/review-seal commit, query reconciliation and native
   preparation retirement over the existing Rust session/coordinator and six-method wire.

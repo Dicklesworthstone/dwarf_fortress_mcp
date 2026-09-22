@@ -1,0 +1,83 @@
+{
+  "schema_version": "dfmcp.excavation-progress-contract/1",
+  "status": "executed_python_development_only",
+  "entrypoint": "scripts/track_excavation.py",
+  "observer": "scripts/excavation_observer.py",
+  "native_profile": "map/1.5",
+  "methods": [
+    "Handshake",
+    "ReadObservation"
+  ],
+  "commands": [
+    "start",
+    "sample",
+    "inspect",
+    "cancel"
+  ],
+  "goal": {
+    "predicate": "all_visible_floor_and_liquid_depth_zero_and_dig_zero",
+    "maximum_width": 8,
+    "maximum_height": 8,
+    "depth": 1,
+    "distinct_advancing_ticks_required": true,
+    "continuous_stability_proven": false,
+    "mining_action_attribution_proven": false
+  },
+  "states": [
+    "pending",
+    "unknown",
+    "stabilizing",
+    "satisfied",
+    "expired",
+    "invalidated",
+    "cancelled"
+  ],
+  "terminal_states": [
+    "satisfied",
+    "expired",
+    "invalidated",
+    "cancelled"
+  ],
+  "journal": {
+    "format": "dfmcp.excavation-goal/1",
+    "frame_domain": "dfmcp-excavation-journal/1",
+    "domain_nul_separator": true,
+    "events": [
+      "begin",
+      "read_started",
+      "sample",
+      "read_failed",
+      "cancel"
+    ],
+    "sync_file_and_parent_before_acknowledgement": true,
+    "read_intent_before_connection": true,
+    "unfinished_read_resets_streak": true,
+    "tail_repair": false,
+    "offline_inspection_writes": false
+  },
+  "bounds": {
+    "frame_bytes": 16384,
+    "journal_bytes": 2097152,
+    "journal_events": 260,
+    "subsequent_read_attempts": 128,
+    "output_bytes": 32768,
+    "connection_wire_bytes": 4194304,
+    "maximum_wall_millis": 60000
+  },
+  "environment": [
+    "DFMCP_ALLOW_UNADMITTED_EXCAVATION_V1_5",
+    "DFMCP_MAP_TOKEN",
+    "DFMCP_MAP_ENDPOINT"
+  ],
+  "native_effect_obligations_changed": false,
+  "mutations_dispatched": false,
+  "mcp_integration_added": false,
+  "production_admitted": false,
+  "tests": {
+    "python_groups_executed": 35,
+    "mutants_rejected": 4,
+    "rust_executed": false,
+    "real_dfhack_executed": false,
+    "power_loss_exercised": false
+  }
+}

@@ -45,8 +45,9 @@ def goal(**kwargs):
 
 class Peer:
     """One connection with independent method/shape assertions, always joined."""
-    def __init__(self, raw=None, manifest=MANIFEST, fault=None):
+    def __init__(self, raw=None, manifest=MANIFEST, fault=None, scenarios=None):
         self.raw, self.manifest, self.fault = raw or raw_capture(), manifest, fault
+        self.scenarios = scenarios or [(self.raw, manifest, fault)]
         self.calls, self.errors = [], []
         self.sock = socket.socket()
         self.sock.bind(('127.0.0.1', 0))
@@ -75,6 +76,13 @@ class Peer:
         self.send(struct.pack('<h2xi', -1, len(raw)) + raw)
 
     def run(self):
+        try:
+            for self.raw, self.manifest, self.fault in self.scenarios:
+                self.serve_one()
+        finally:
+            self.sock.close()
+
+    def serve_one(self):
         try:
             sock, _ = self.sock.accept()
             self.connection = sock
@@ -129,8 +137,6 @@ class Peer:
             pass
         except BaseException as cause:
             self.errors.append(cause)
-        finally:
-            self.sock.close()
 
     def __enter__(self):
         self.thread.start()
