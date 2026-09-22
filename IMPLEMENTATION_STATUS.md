@@ -43,6 +43,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Policy-guarded development mining control through MCP
+
+`docs/DIG_CONTROL_POLICY.md` and `docs/DIG_CONTROL_MCP.md` describe the separate
+`dfmcp-dig-control-dev-server`. It composes the existing native connection owner,
+Rust journal and verified receipt path with actual core spatial-lease checks,
+protected shared blocks and a policy-bound review seal. Observe/prepare/commit
+retain the original native connection; commit has no reconnect factory or retry.
+Query reconciliation and native preparation retirement retain unresolved work.
+The existing Query-only recovery server remains unchanged.
+
+New designation requires current Query/Observe/Plan/Guarded Designate authority,
+a live exclusive host lease covering every shared scheduling block, protected-region
+exclusion, the exact native plan digest and the consumed review seal. Policy and
+runtime checks repeat after dispatch-state synchronization. The checkpoint default
+is Required and refuses because this profile has no verified game-checkpoint
+provider. Only explicit trusted operator selection of a disposable fortress allows
+the development no-checkpoint exception; no checkpoint or rollback is fabricated.
+
+Every response uses the shared Agent Turn, reserves complete output/final custody
+reads, and keeps the pending identity visible independent of history pagination.
+Async handlers use inherited runtime-owned blocking tasks and joined results.
+Session release preserves all durable history and does not claim native quiescence.
+Lease scope is host/journal-local, not a global controller fence. Actual game
+checkpoint/restore, structural safety and excavation completion remain absent.
+
+Three core lease, seven policy, seventeen handler and five runtime tests are
+registered across the two increments; **all 32 are UNCOMPILED AND UNEXECUTED**.
+The executed JSON Schema checker passes 28 valid and 102 invalid cases. It does
+not execute Rust parsing, MCP routing, native I/O, storage or runtime behavior.
+No real SDK, live fortress, power-loss, full qualification, dependency change,
+native-wire change or production admission is established by this source.
+
 ### Owned mining sessions and query-only MCP recovery
 
 `docs/DIG_SESSION.md` describes the session owner retaining the original native
@@ -69,8 +101,9 @@ Eighteen adapter session tests and 22 MCP/runtime tests are registered across th
 two increments; **all 40 are UNCOMPILED AND UNEXECUTED**. The executed published
 query-schema checker passes 24 valid and 87 invalid cases, not Rust parsing, MCP
 routing/rendering, I/O or runtime execution. Native SDK, live game, full Rust
-qualification and power-loss durability remain unverified. A mutation-enabled MCP
-route still requires actual host lease/checkpoint policy and its own integration.
+qualification and power-loss durability remain unverified. The subsequent separate
+policy-guarded development control route is described above; the recovery profile
+remains Query-only and cannot opt into mutation.
 
 ### Durable Rust mining coordinator and private-file recovery
 
@@ -95,8 +128,9 @@ framing reference rejects 7,752 single-byte corruptions and 7,748 incomplete
 prefixes and checks 100 state/phase pairs; it does not execute Rust or filesystem
 custody. No real SDK, live game, power-loss, full qualification or admission is
 established. The subsequent owned session and query-only recovery MCP integration
-are described above. Actual mutation lease/checkpoint policy and the MCP
-designation route remain unfinished. Native protocol and Python recovery are unchanged.
+are described above, along with the separate policy-guarded development control
+route. Actual game-checkpoint/restore and global controller fencing remain absent.
+Native protocol and Python recovery are unchanged.
 
 ### Typed Rust mining adapter for the existing dig/1.16 development profile
 
@@ -119,8 +153,8 @@ Independent Python reconstruction matches all four existing native fixture Git
 blobs; this is not execution of Rust or the new RPC client. No real SDK, live game,
 full qualification or production admission is established. The native wire and
 existing Python recovery remain unchanged. The subsequent durable coordinator
-and private-file source are described above. Runtime lease/checkpoint integration
-and MCP designation routing remain missing; low-level clients do not replace them.
+and private-file source are described above, followed by owned session, recovery
+MCP and policy-guarded development control integration. None is production admission.
 
 ### Selected work-order approval and progress monitoring
 
@@ -237,14 +271,14 @@ force. Cached queries and diagnostics recheck current authority and custody; exa
 also reverify their record bytes. No archive bytes are rewritten or migrated.
 
 Archive queries reuse the ten stateless graph, terrain, inventory and workforce analysis variants,
-plus bounded history listing and exact-record historical queries. Their Agent Turns explicitly
-mark all facts historical and current freshness unproved. Older-record workforce analysis and
-route drill-downs stay pinned to the selected record without replacing the session's latest
-retained observation. Whole-row output includes full historical metadata within the response budget.
-Archive-only schema discovery excludes watch/baseline mutations and uses session/head-bound history
-continuations. No live acquisition or monitor evaluation is routed, even with injected Observe
-capability. Persisted watch evidence is not loaded; empty active work is scoped to this archive
-session and does not prove that no persisted monitoring or game actions exist.
+plus bounded history listing and exact-record historical queries. Route drill-downs stay pinned to
+the selected record without replacing the session's latest retained observation. Their Agent Turns
+explicitly mark all facts historical and current freshness unproved. Whole-row output includes full
+historical metadata within the response budget. Archive-only schema discovery excludes watch/baseline
+mutations and uses session/head-bound history continuations. No live acquisition or monitor evaluation
+is routed, even with injected Observe capability. Persisted watch evidence is not loaded; empty
+active work is scoped to this archive session and does not prove that no persisted monitoring or
+game actions exist.
 
 Fourteen Rust scenarios are registered: six private-file adapter integration tests and eight archive
 bootstrap/actual-MCP-handler tests. **None has been compiled or executed here**: Rust, Cargo and

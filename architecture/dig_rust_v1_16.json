@@ -22,12 +22,12 @@
   "hidden_neighbor_policy_explicit": true,
   "shared_block_write_scope": true,
   "designation_proves_excavation": false,
-  "rust_tests_registered": 54,
+  "rust_tests_registered": 72,
   "rust_tests_executed": false,
   "rust_compiled": false,
   "native_wire_changed": false,
   "production_admitted": false,
-  "mcp_route_added": false,
+  "mcp_route_added": true,
   "rust_durable_coordinator_added": true,
   "rpc": {
     "module": "dfmcp_adapter::dig_designation::rpc",
@@ -78,7 +78,15 @@
     "module": "dfmcp_adapter::dig_designation::journal",
     "contract": "architecture/dig_journal_v1.json",
     "private_storage_source_present": true,
-    "runtime_policy_implementation_supplied": false,
-    "mcp_integration_present": false
+    "runtime_policy_implementation_supplied": true,
+    "mcp_integration_present": true
+  },
+  "rust_tests_count_scope": "dig_designation adapter module including 18 owned-session tests; policy and MCP suites are separate",
+  "mcp": {
+    "recovery_contract": "architecture/dig_recovery_mcp.json",
+    "control_contract": "architecture/dig_control_mcp.json",
+    "policy_contract": "architecture/dig_control_policy.json",
+    "checkpoint_default": "required_and_refused_without_real_verifier",
+    "verified_game_checkpoint_implemented": false
   }
 }

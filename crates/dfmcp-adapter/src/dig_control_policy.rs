@@ -81,6 +81,7 @@ impl DigControlPolicy {
         Ok(Self { binding, journal, session, lease, protected, checkpoint, digest })
     }
     pub fn digest(&self) -> Digest32 { self.digest }
+    pub fn journal_id(&self) -> Digest32 { self.journal }
     pub fn lease_id(&self) -> LeaseId { self.lease }
     pub fn checkpoint_policy(&self) -> DigCheckpointPolicy { self.checkpoint }
     pub fn protected_areas(&self) -> &[MapCuboid] { &self.protected }

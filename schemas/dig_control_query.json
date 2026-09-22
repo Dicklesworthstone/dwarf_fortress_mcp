@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dfmcp.dig-control-query/1",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "records"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "continuation": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "minLength": 64,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "selection_tiles"
+        },
+        "witness": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 299
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        }
+      },
+      "required": [
+        "mode",
+        "witness",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "plan_tiles"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+          "minLength": 1,
+          "maxLength": 128,
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        },
+        "plan_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 299
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        }
+      },
+      "required": [
+        "mode",
+        "idempotency_key",
+        "plan_digest",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "schema"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

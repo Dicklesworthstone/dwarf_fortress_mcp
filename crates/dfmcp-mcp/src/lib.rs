@@ -16,6 +16,7 @@ pub mod admission;
 pub mod agent_facade;
 pub mod agent_turn;
 pub mod doctor;
+pub mod dig_control_server;
 pub mod dig_recovery_server;
 pub mod ee_memory;
 pub mod http_transport;
@@ -48,7 +49,7 @@ pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
 pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
 pub use http_transport::{
     HttpSessionResumeToken, HttpTransportSessionManager, MAX_HTTP_MESSAGE_BYTES,
-    MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
+    MAX_HTTP_SESSIONS, MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,
 };
 pub use server::validate_localhost_bind;

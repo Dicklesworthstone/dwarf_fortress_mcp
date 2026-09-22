@@ -8,6 +8,19 @@ readiness.
 
 ### Added
 
+- Policy-guarded mining control through the separate `dfmcp-dig-control-dev-server`:
+  observe, prepare, exact-plan/review-seal commit, query reconciliation and native
+  preparation retirement over the existing Rust session/coordinator and six-method wire.
+- Actual host spatial-lease verification, protected shared-block footprints and
+  explicit checkpoint policy. Required is the default and refuses without a real
+  verifier; only trusted disposable-fortress configuration permits uncheckpointed
+  development designation. The query-only recovery server remains unchanged.
+- Complete Agent Turn output reservation and pending-work discovery, inherited
+  Asupersync blocking ownership and one-attempt original-connection dispatch.
+  Thirty-two new core/policy/MCP/runtime Rust tests are registered but uncompiled
+  and unexecuted. The published query-schema suite passed 28 valid and 102 invalid
+  cases; this is not Rust or native execution. See `docs/DIG_CONTROL_MCP.md`.
+
 - Durable dig/1.16 Rust coordination with intent/dispatch-before-native sync,
   terminal-proof-before-acknowledgement sync, non-restorable commit permission,
   cross-key unresolved-work fencing, fixed recovery modes and typed offline
@@ -17,7 +30,8 @@ readiness.
   read-only offline replay. No tail repair, native wire or admission changes.
   Thirty-two coordinator/storage tests are registered but uncompiled/unexecuted;
   the passing independent Python framing checks are not Rust or filesystem
-  execution. See `docs/DIG_RUST_COORDINATOR.md` for remaining runtime/MCP work.
+  execution. Subsequent ownership, recovery and control integrations are documented
+  in `docs/DIG_SESSION.md`, `docs/DIG_RECOVERY_MCP.md` and `docs/DIG_CONTROL_MCP.md`.
 
 - Typed dig/1.16 Rust capture, sealed-plan and native-effect validation, plus a fixed
   six-method RPC client with full-halo/shared-block authorization, source/region
@@ -26,7 +40,7 @@ readiness.
   groups are registered but UNCOMPILED AND UNEXECUTED; independent Python checks
   reconstruct the four existing native fixture identities only. The subsequent
   coordinator/storage increment is described above; neither increment changes
-  native wire, adds MCP designation routing or grants production admission.
+  native wire or grants production admission. The subsequent MCP route is described above.
 
 - Read-only work-order-progress/1.12 capture and MCP monitoring: complete selected
   presence, approval/activity flags, remaining-work counters, conservative finite
