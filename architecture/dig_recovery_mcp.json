@@ -4,17 +4,10 @@
   "native_protocol": "1.16",
   "binary": "dfmcp-dig-recovery-dev-server",
   "module": "dfmcp_mcp::dig_recovery_server",
-  "modes": [
-    "offline",
-    "recover"
-  ],
+  "modes": ["offline", "recover"],
   "default_mode": "offline",
-  "capabilities": [
-    "query"
-  ],
-  "native_delegated_effect_methods": [
-    "QueryDesignation"
-  ],
+  "capabilities": ["query"],
+  "native_delegated_effect_methods": ["QueryDesignation"],
   "underlying_rpc_methods_bound": 6,
   "creates_journal": false,
   "native_mutation": false,
@@ -43,19 +36,26 @@
     "DFMCP_DIG_SCOPE",
     "DFMCP_DIG_JOURNAL",
     "DFMCP_DIG_RECOVERY_ONLINE",
-    "DFMCP_DIG_TOKEN"
+    "DFMCP_DIG_TOKEN",
+    "DFMCP_DIG_GOAL_JOURNALS"
   ],
   "query_schema": "schemas/dig_recovery_query.json",
-  "rust_tests_registered": 22,
+  "rust_tests_registered": 41,
   "rust_compiled": false,
   "rust_tests_executed": false,
   "executed_schema_valid_cases": 24,
   "executed_schema_invalid_cases": 87,
+  "prior_schema_evidence_not_new_runtime_qualification": true,
+  "optional_excavation_inventory": "architecture/excavation_mcp_inventory.json",
   "sources": [
     "crates/dfmcp-mcp/src/dig_recovery_server.rs",
     "crates/dfmcp-mcp/src/dig_recovery_server/presentation.rs",
     "crates/dfmcp-mcp/src/dig_recovery_server/runtime.rs",
     "crates/dfmcp-mcp/src/dig_recovery_server/tests.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/archive.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/private_file.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/tests.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-dig-recovery-dev-server.rs"
   ]
 }

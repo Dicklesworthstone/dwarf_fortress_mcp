@@ -1,0 +1,378 @@
+{
+  "accepted": [
+    {
+      "frames": [
+        0
+      ],
+      "head": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "floor_baseline",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "stabilizing",
+      "streak": 1
+    },
+    {
+      "frames": [
+        1
+      ],
+      "head": "8c9b67851ace6f11333119b8b9074fc2784d9daf77bfff5d6bcd23f11ec49543",
+      "id": "8c9b67851ace6f11333119b8b9074fc2784d9daf77bfff5d6bcd23f11ec49543",
+      "name": "wall_baseline",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "pending",
+      "streak": 0
+    },
+    {
+      "frames": [
+        2
+      ],
+      "head": "34d5cc5baa3e308d463c7880b5761deb5b340a11c759141810f7fa25664057e0",
+      "id": "34d5cc5baa3e308d463c7880b5761deb5b340a11c759141810f7fa25664057e0",
+      "name": "hidden_baseline",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "unknown",
+      "streak": 0
+    },
+    {
+      "frames": [
+        3
+      ],
+      "head": "c3f5a23903862b08e506089df0a0263a82f05ab19ff445049e8e26065a50380c",
+      "id": "c3f5a23903862b08e506089df0a0263a82f05ab19ff445049e8e26065a50380c",
+      "name": "missing_baseline",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "unknown",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4,
+        5
+      ],
+      "head": "1fd05bd0433dd9cdc1d68843ab89eb6b4966c78282e8193064fc620c74f1c278",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "same_tick",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "stabilizing",
+      "streak": 1
+    },
+    {
+      "frames": [
+        0,
+        4,
+        6
+      ],
+      "head": "5b2639e068db56ecfdee399051717911f834c99cf948fa25d8f52a299bedd0b4",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "satisfied",
+      "pending_read": false,
+      "sample_tick": 20,
+      "status": "satisfied",
+      "streak": 2
+    },
+    {
+      "frames": [
+        7,
+        8,
+        9
+      ],
+      "head": "ecc71a12b78d1417e6dc10c72c470c03b8ea03c7b7e52751829aaaa0d808750e",
+      "id": "627231f7edad1537304083585575fbc414bbc6b7c2c9d5950c491ea38247997d",
+      "name": "deadline_inclusive",
+      "pending_read": false,
+      "sample_tick": 100,
+      "status": "satisfied",
+      "streak": 2
+    },
+    {
+      "frames": [
+        7,
+        8,
+        10
+      ],
+      "head": "1054e48f524acbd8a6949706e31d77c27820a6da90a5b935a25c99f78a0852f5",
+      "id": "627231f7edad1537304083585575fbc414bbc6b7c2c9d5950c491ea38247997d",
+      "name": "deadline_expired",
+      "pending_read": false,
+      "sample_tick": 101,
+      "status": "expired",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4,
+        11
+      ],
+      "head": "0e738e239164d846d51275714f549af6366a283ea178e61b4248aa82657f4d63",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "read_failed",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "unknown",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4
+      ],
+      "head": "c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "read_unfinished",
+      "pending_read": true,
+      "sample_tick": 10,
+      "status": "unknown",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4,
+        12,
+        13
+      ],
+      "head": "a9aa26c1de7a26e736d71b2147a0c33d04cd91712976d0fb4d4cd2f9ec7260ce",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "interrupted_resume",
+      "pending_read": false,
+      "sample_tick": 20,
+      "status": "stabilizing",
+      "streak": 1
+    },
+    {
+      "frames": [
+        0,
+        4,
+        14
+      ],
+      "head": "e8060e427b187abc08fec63cfff4da55d818e8f07dd57a68f77cfc9fec6d136f",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "gap_reset",
+      "pending_read": false,
+      "sample_tick": 31,
+      "status": "stabilizing",
+      "streak": 1
+    },
+    {
+      "frames": [
+        0,
+        4,
+        15
+      ],
+      "head": "1f08f295ec5ca69a58331decfb22bbc8ff7c7f5efa92b9eb41f404b09d4c4085",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "generation_changed",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "invalidated",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4,
+        16
+      ],
+      "head": "b953d0c116fe79704a6bd879305fdecae33150fd420c7762405e6143e8d2f489",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "dimensions_changed",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "invalidated",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        4,
+        17
+      ],
+      "head": "79c892d1ab9f5596696f2164d6184768519f0aff6d5cdefeffbc9694e38d8bb0",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "clock_regression",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "invalidated",
+      "streak": 0
+    },
+    {
+      "frames": [
+        0,
+        18
+      ],
+      "head": "13b16c85b8e5eb57b07e60c67e282091cf48f0595a196a5a5333742482430d83",
+      "id": "d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295",
+      "name": "cancelled_monitor",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "cancelled",
+      "streak": 0
+    },
+    {
+      "frames": [
+        19
+      ],
+      "head": "800016c4fb277b4c87c681af2a7ac6148e7f245d175780a9ede8367d3dfb39ab",
+      "id": "800016c4fb277b4c87c681af2a7ac6148e7f245d175780a9ede8367d3dfb39ab",
+      "name": "single_sample",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "satisfied",
+      "streak": 1
+    },
+    {
+      "frames": [
+        20
+      ],
+      "head": "43314276977092dde7d09cf7fd2863dad5069bc8eea16f8c81c1dc0ddec337ef",
+      "id": "43314276977092dde7d09cf7fd2863dad5069bc8eea16f8c81c1dc0ddec337ef",
+      "name": "unicode_identity",
+      "pending_read": false,
+      "sample_tick": 10,
+      "status": "stabilizing",
+      "streak": 1
+    }
+  ],
+  "canonical_strings": [
+    {
+      "ascii_json": "\"\\\"\\\\\\b\\t\\n\\f\\r\\u0000\\u001f\\u007f\"",
+      "text": "\"\\\b\t\n\f\r\u0000\u001f\u007f"
+    },
+    {
+      "ascii_json": "\"rock-\\u00e9-\\ud83c\\udfd4\"",
+      "text": "rock-\u00e9-\ud83c\udfd4"
+    },
+    {
+      "ascii_json": "\"\\u2028\\u2029\"",
+      "text": "\u2028\u2029"
+    },
+    {
+      "ascii_json": "\"\\ud800\\udc00\\uffff\"",
+      "text": "\ud800\udc00\uffff"
+    }
+  ],
+  "frames": [
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000020200000000000000000001271f271f02000000020200000000000000000001271f271f02000000020200000000000000000001271f271f02000000020200000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"8c9b67851ace6f11333119b8b9074fc2784d9daf77bfff5d6bcd23f11ec49543\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000401010101\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"34d5cc5baa3e308d463c7880b5761deb5b340a11c759141810f7fa25664057e0\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000400000000\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"c3f5a23903862b08e506089df0a0263a82f05ab19ff445049e8e26065a50380c\"}\n",
+    "{\"event\":{\"kind\":\"read_started\"},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"1fd05bd0433dd9cdc1d68843ab89eb6b4966c78282e8193064fc620c74f1c278\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"5b2639e068db56ecfdee399051717911f834c99cf948fa25d8f52a299bedd0b4\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000005a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"627231f7edad1537304083585575fbc414bbc6b7c2c9d5950c491ea38247997d\"}\n",
+    "{\"event\":{\"kind\":\"read_started\"},\"previous\":\"627231f7edad1537304083585575fbc414bbc6b7c2c9d5950c491ea38247997d\",\"sequence\":1,\"sha256\":\"138af62b0d93c4da7f1e90edefd9a0510b0c041450bc3982c02dd96d337f6f93\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000006401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"138af62b0d93c4da7f1e90edefd9a0510b0c041450bc3982c02dd96d337f6f93\",\"sequence\":2,\"sha256\":\"ecc71a12b78d1417e6dc10c72c470c03b8ea03c7b7e52751829aaaa0d808750e\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000006501000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"138af62b0d93c4da7f1e90edefd9a0510b0c041450bc3982c02dd96d337f6f93\",\"sequence\":2,\"sha256\":\"1054e48f524acbd8a6949706e31d77c27820a6da90a5b935a25c99f78a0852f5\"}\n",
+    "{\"event\":{\"kind\":\"read_failed\"},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"0e738e239164d846d51275714f549af6366a283ea178e61b4248aa82657f4d63\"}\n",
+    "{\"event\":{\"kind\":\"read_started\"},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"9f9dc02ce7068c028a38438e6ce30a1970076ccd879162d65b1b6160996bee78\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"9f9dc02ce7068c028a38438e6ce30a1970076ccd879162d65b1b6160996bee78\",\"sequence\":3,\"sha256\":\"a9aa26c1de7a26e736d71b2147a0c33d04cd91712976d0fb4d4cd2f9ec7260ce\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001f01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"e8060e427b187abc08fec63cfff4da55d818e8f07dd57a68f77cfc9fec6d136f\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":8}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"1f08f295ec5ca69a58331decfb22bbc8ff7c7f5efa92b9eb41f404b09d4c4085\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002100000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"b953d0c116fe79704a6bd879305fdecae33150fd420c7762405e6143e8d2f489\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000901000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"79c892d1ab9f5596696f2164d6184768519f0aff6d5cdefeffbc9694e38d8bb0\"}\n",
+    "{\"event\":{\"kind\":\"cancel\"},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"13b16c85b8e5eb57b07e60c67e282091cf48f0595a196a5a5333742482430d83\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":1,\"site\":1,\"stable_ticks\":0},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"800016c4fb277b4c87c681af2a7ac6148e7f245d175780a9ede8367d3dfb39ab\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"cavern-\\u00e9-\\ud83c\\udfd4\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a0100000001000e63617665726e2dc3a92df09f8f940000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"43314276977092dde7d09cf7fd2863dad5069bc8eea16f8c81c1dc0ddec337ef\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"fe7cf7f83292953b5580049bf940b5db7eb0d1c90113ab7513fae603a11b8fd8\"}\n",
+    "{\"event\":{\"kind\":\"read_failed\"},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"ae9dd3ed560982c6c114ed8dfcea02d13d22dc92ed6a7936ad9f7e5c488073c0\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"c52b9bd5209a8c4344975cadcb8929b578ad36352251946128af45cdd0a1956d\"}\n",
+    "{\"event\":{\"kind\":\"satisfied\"},\"previous\":\"d38acefeb77a2ce8fb66ab8ae6be9cfd2723a11a94b65e44b0ac31092940a295\",\"sequence\":1,\"sha256\":\"cd1f400ac19a0cdb313faacd1af1c564d9ee5e199f92cc0894c97954a6b910e9\"}\n",
+    "{\"event\":{\"kind\":\"cancel\"},\"previous\":\"800016c4fb277b4c87c681af2a7ac6148e7f245d175780a9ede8367d3dfb39ab\",\"sequence\":1,\"sha256\":\"96f4d20cc69f2e11adebbccf39b7b445b11149d84dbf7db9d7dfee93effceede\"}\n",
+    "{\"event\":{\"kind\":\"sample\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000001401000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000100000002000000010000000202000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"c1a0a1e677d6f92afb75442bdabda764022074f5286f045146f3ab817173c2c0\",\"sequence\":2,\"sha256\":\"537c057621f2a3fac1185a739bfe3b810376e8ae5552147fbf4c1decf941e306\"}\n",
+    "{\"event\":{\"endpoint\":\"192.0.2.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"509e5dc8dd0827512d9a745448cd03532dce414af4a0d03343cc88ec083b0ad4\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"8feaeaf7ccfb453a733d788049fb81e75ce34036511572a6ca60ffe769356a99\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":true,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"3774c9f1cf8fe047d196a58078037d785fadd35d6e15d380688e456c565fafc5\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2.0,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"c2595844886c114026bf36e5af6dd064711249e71ac2a1ac34c05ee5a1611c1a\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"extra\":1,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":7}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"b5f8c3d0c042036077caaf75f6319dbfec9f16eb78771f06d5a7f75ad6f367af\"}\n",
+    "{\"event\":{\"endpoint\":\"127.0.0.1:5000\",\"format\":\"dfmcp.excavation-goal/1\",\"goal\":{\"deadline_tick\":100,\"folder\":\"region1\",\"max_gap_ticks\":20,\"region\":{\"origin\":[15,15,2],\"size\":[2,2,1]},\"required_samples\":2,\"site\":1,\"stable_ticks\":10},\"kind\":\"begin\",\"nonce\":\"0101010101010101010101010101010101010101010101010101010101010101\",\"sample\":{\"capture_hex\":\"44464d4d31353030000000000000000a01000000010007726567696f6e310000002000000020000000030000000f0000000f000000020000000200000002000000010000000402000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f02000000030300000000000000000001271f271f\",\"manifest\":{\"df_version\":\"df\",\"dfhack_version\":\"dfhack\",\"generation\":0}}},\"previous\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":0,\"sha256\":\"aa8a1bdd8e8b788e25ce9491e99c8c93f30001aa46b56c31c8868b2170bb6f5f\"}\n"
+  ],
+  "rejected": [
+    {
+      "frames": [
+        0,
+        21
+      ],
+      "name": "sample_without_intent"
+    },
+    {
+      "frames": [
+        0,
+        22
+      ],
+      "name": "failure_without_intent"
+    },
+    {
+      "frames": [
+        0,
+        23
+      ],
+      "name": "new_header_in_history"
+    },
+    {
+      "frames": [
+        0,
+        24
+      ],
+      "name": "serialized_success_is_not_evidence"
+    },
+    {
+      "frames": [
+        19,
+        25
+      ],
+      "name": "terminal_extension"
+    },
+    {
+      "frames": [
+        0,
+        4,
+        26
+      ],
+      "name": "region_substitution"
+    },
+    {
+      "frames": [
+        27
+      ],
+      "name": "non_loopback"
+    },
+    {
+      "frames": [
+        28
+      ],
+      "name": "zero_incarnation"
+    },
+    {
+      "frames": [
+        29
+      ],
+      "name": "boolean_sample_bound"
+    },
+    {
+      "frames": [
+        30
+      ],
+      "name": "float_sample_bound"
+    },
+    {
+      "frames": [
+        31
+      ],
+      "name": "unknown_goal_field"
+    },
+    {
+      "frames": [
+        32
+      ],
+      "name": "zero_map_incarnation"
+    }
+  ],
+  "schema": "dfmcp.excavation-inventory-fixtures/1"
+}

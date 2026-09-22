@@ -1,0 +1,47 @@
+{
+  "accepted_examples": 18,
+  "actual_mcp_or_runtime_executed": false,
+  "actual_python_monitor_replay_executed": true,
+  "canonical_string_examples": 4,
+  "commands": [
+    "python3 scripts/check_excavation_inventory_fixtures.py",
+    "python3 scripts/check_excavation_inventory_fixtures.py --python-monitor",
+    "python3 -m py_compile scripts/check_excavation_inventory_fixtures.py"
+  ],
+  "fixture_sha256": "cb80ec7d20d938ddbe0c3ed6aab02af9f2a4595f0db06d592ce59cfc4abcc926",
+  "frames_recomputed": 60,
+  "full_repository_qualification": false,
+  "limitations": "The fixture/checker and unchanged Python monitor ran. The new Rust parser, goal evaluator, custody and MCP integration did not run. Native protocols, production admission and the control server are unchanged.",
+  "new_rust_compiled": false,
+  "new_rust_filesystem_custody_executed": false,
+  "new_rust_tests_executed": false,
+  "new_rust_tests_registered": 29,
+  "power_loss_campaign": false,
+  "python_monitor_executed": true,
+  "python_row_size_reference": {
+    "actual_rust_renderer_executed": false,
+    "four_maximum_field_unavailable_rows_bytes": 6381,
+    "row_reservation_bytes": 8192
+  },
+  "real_dfhack_or_native_io_executed": false,
+  "rejected_examples": 12,
+  "rust_executed": false,
+  "schema": "dfmcp.excavation-inventory-evidence/1",
+  "source_sha256": {
+    "architecture/dig_recovery_mcp.json": "b114f0896c449f0fae58889ec3ac5ded388b2294d1064a5c9c8f24451e3987a3",
+    "architecture/excavation_mcp_inventory.json": "07cad7778a8f38404b7f08296f7513d4bcd7a1dfcff19e60907fa4bc58316650",
+    "crates/dfmcp-adapter/src/excavation_goal.rs": "e9b186f66a7a0291beb73b4573c2eaf0db830b9fd7638e1a755be61e2e8ef360",
+    "crates/dfmcp-adapter/src/excavation_goal/tests.rs": "fc7d27e59446545e18945de423b81a2789e041ca9374e177da6ef139b2986e4d",
+    "crates/dfmcp-mcp/src/dig_recovery_server.rs": "44c7ffbe34f5b006de2e7dfddc5a273fe6a0d32a48622c6d59b92cbf295376dc",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals.rs": "48c55b023a9f2a7bb7e40e1cec430f358947f2be569737b6b1fb9fb66effc95e",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/archive.rs": "590cdb0fb326c503c4cde7e919ca39c14b458254092c14b021bb6da2de250f86",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/private_file.rs": "3e88a6e661448d6cd1e82dabe12be8a37ad6cdb58933ebb7612b8382b91d963a",
+    "crates/dfmcp-mcp/src/dig_recovery_server/goals/tests.rs": "866b2e0f2290919222c892f5ace4eb44268670de33827d6fba136206bc3e78d5",
+    "crates/dfmcp-mcp/src/dig_recovery_server/runtime.rs": "3d542159bf72e04a3bb3e8d37442b831785998a20225e3b72dd0d15fd7c70ab0",
+    "scripts/check_excavation_inventory_fixtures.py": "5b31ca5e40938048c6ad87bed4258e6e73ff4c82ea839ad174e5e7eb2fd78993",
+    "scripts/excavation_observer.py": "2642c09dd5c173c034c5d1e5dd462e843e2dc331645ea4a6215adb27f08181d8",
+    "scripts/track_excavation.py": "46da5ef4bfa2c53ed1c4470dad225fe148ea302ad67d373881c91157c12c957d",
+    "tests/fixtures/excavation_inventory.json": "cb80ec7d20d938ddbe0c3ed6aab02af9f2a4595f0db06d592ce59cfc4abcc926"
+  },
+  "status": "passed_python_fixture_and_existing_monitor_replay_only"
+}

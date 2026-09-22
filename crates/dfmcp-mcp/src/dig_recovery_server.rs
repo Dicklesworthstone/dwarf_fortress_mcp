@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 
 mod presentation;
 mod runtime;
+mod goals;
 use presentation::{OUTPUT_BYTES, digest, failure, inventory, mode_name, packet};
 use runtime::{Config, RequestControl, QueryOnly};
 
@@ -30,7 +31,7 @@ const OPEN_BYTES: u64 = 3 * VIEW_BYTES;
 const FAMILY: u128 = 16u128 << 57;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 type Native = QueryOnly<DigRpcClient<DigTcpStream>>;
-struct Entry { state: State<PrivateDigFile, Native>, config: Config }
+struct Entry { state: State<PrivateDigFile, Native>, config: Config, goals: goals::Inventory }
 static SESSION: Mutex<Option<Entry>> = Mutex::new(None);
 
 fn error(code: ErrorCode, text: &str) -> dfmcp_core::DfmcpError { dfmcp_core::DfmcpError::new(code, text) }
@@ -239,12 +240,25 @@ fn with_session(control:RequestControl,raw:String,op:&str,wall:Option<u64>,actio
         let id=session_id(&raw)?;let mut locked=lock()?;
         let entry=locked.as_mut().filter(|e|e.state.id==id).ok_or_else(||error(ErrorCode::SessionNotFound,"mining recovery session absent"))?;
         runtime::boundary(&control,&entry.config)?;
-        let c=entry.state.context(wall)?;
+        let original=entry.state.context(wall)?;
+        Work::new(&original,control.started)?; // Validate the original ceiling before goal reservations.
+        let mut c=entry.goals.reserve(&original)?;
+        let overall=Work::new(&c,control.started)?; // Refuse before goal/native I/O.
         let config=entry.config.clone();let binding=entry.state.binding.clone();
+        let snapshots=entry.goals.load(&c,&binding,control.started,||runtime::boundary(&control,&config))?;
+        entry.goals.narrow(&mut c);
+        let prior_cursors=entry.state.cursors.clone();
         let mut guard=runtime::Guard::new(&control,&config,&binding);
-        let output=run_action(&mut entry.state,c,control.started,op,action,
+        let output=run_action(&mut entry.state,c.clone(),control.started,op,action,
             |b,r,c|runtime::connect(&control,&config,b,r,c),&mut guard);
-        runtime::boundary(&control,&config)?;
+        // Native history pagination is published only when the final combined
+        // native/goal handoff is complete, not at the earlier native-only render.
+        let staged_cursors=std::mem::replace(&mut entry.state.cursors,prior_cursors);
+        let output=snapshots.finish(&mut entry.goals,output,OUTPUT_BYTES as usize,||{
+            runtime::boundary(&control,&config)?;overall.current(&c)?;Ok(())
+        })?;
+        let rendered:Value=serde_json::from_str(&output).map_err(|_|exhausted())?;
+        if rendered["result"]["ok"]==true {entry.state.cursors=staged_cursors;}
         Ok(output)
     })();
     match result {Ok(s)=>s,Err(e)=>unbound(op,&e)}
@@ -257,7 +271,10 @@ fn open(control:RequestControl,wall:Option<u64>,bytes:Option<u64>,tokens:Option<
         let mut locked=lock()?;if locked.is_some(){return Err(error(ErrorCode::Conflict,"release the current recovery session first"));}
         let next=NEXT.fetch_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
         let id=SessionId::new((1u128<<127)|FAMILY|u128::from(next));
-        let c=context(id,RequestId::new(1),config.fortress(),config.scope,0,budget);
+        let original=context(id,RequestId::new(1),config.fortress(),config.scope,0,budget);
+        Work::new(&original,control.started)?; // Reservations cannot admit an oversized original request.
+        let mut goals=goals::Inventory::new(config.goal_files.clone());
+        let mut c=goals.reserve(&original)?;
         let mut work=Work::new(&c,control.started)?;
         // Validate the operator's exact scope/fortress through read-only custody
         // before any recovery-mode resynchronization of an existing journal.
@@ -272,13 +289,19 @@ fn open(control:RequestControl,wall:Option<u64>,bytes:Option<u64>,tokens:Option<
         }else{inspected};
         let session=DigSession::new(journal,&work.view(&c)?)?;
         let mut state=State::new(session,&c)?;
+        state.budget=budget; // Goal reservations are per request, not cumulative narrowing.
+        let snapshots=goals.load(&c,&state.binding,control.started,||runtime::boundary(&control,&config))?;
+        goals.narrow(&mut c);
         let view=state.control.view(&work.view(&c)?)?;
         runtime::boundary(&control,&config)?;work.current(&c)?;
         let output=packet("fortress.open_session",json!({"ok":true,"session_id":id.to_string(),
             "mode":mode_name(config.mode()),"capabilities":["query"],"journal":inventory(&view),
             "native_calls":0,"mutation_admissible":false}),Some(&c),Some(config.mode()),Some(&state.binding),Some(&view));
         if output.len() as u64>OUTPUT_BYTES{return Err(exhausted());}
-        *locked=Some(Entry{state,config});Ok(output)
+        let output=snapshots.finish(&mut goals,output,OUTPUT_BYTES as usize,||{
+            runtime::boundary(&control,&config)?;work.current(&c)?;Ok(())
+        })?;
+        *locked=Some(Entry{state,config,goals});Ok(output)
     })();
     match result{Ok(s)=>s,Err(e)=>unbound("fortress.open_session",&e)}
 }
@@ -299,6 +322,7 @@ fn release(control:RequestControl,raw:String,force:bool)->String {
             "release_for_recovery":force,"native_calls":0,"journal_changed":false,"effects_cancelled":false,
             "quiescence_of_game_effects_proven":false}),Some(&c),Some(entry.state.control.mode()),Some(&entry.state.binding),view.as_ref());
         if output.len() as u64>OUTPUT_BYTES{return Err(exhausted());}
+        let output=entry.goals.release(output,OUTPUT_BYTES as usize)?;
         control.checkpoint()?;drop(locked.take());Ok(output)
     })();
     match result{Ok(s)=>s,Err(e)=>unbound("fortress.cancel",&e)}
@@ -308,7 +332,7 @@ fn release(control:RequestControl,raw:String,force:bool)->String {
 pub async fn fortress_open_session(max_wall_millis:Option<u64>,max_bytes:Option<u64>,max_output_tokens:Option<u32>)->String {
     runtime::owned("fortress.open_session",move|c|open(c,max_wall_millis,max_bytes,max_output_tokens)).await
 }
-#[tool(name="fortress.observe",description="Orient to verified mining journal inventory, not live terrain. Includes any unsettled key even when it is not on the first records page. Zero native calls.")]
+#[tool(name="fortress.observe",description="Orient to verified mining journal inventory, not live terrain. Includes any unsettled key even when it is not on the first records page. Optional operator-selected excavation journals are also replayed into active work. Zero native calls.")]
 pub async fn fortress_observe(session_id:String)->String {
     runtime::owned("fortress.observe",move|c|with_session(c,session_id,"fortress.observe",None,Ok(Action::Inventory))).await
 }
@@ -356,7 +380,7 @@ pub fn run_stdio() {
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan)
         .tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint)
         .tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted query-only mining recovery. Discover the original journal and unsettled key first. Historical designation receipts do not prove current terrain, safety or excavation completion. Only an explicit wait in operator-enabled recover mode can query native evidence; it cannot dispatch or cancel mining. Missing native records never prove nonapplication. Session release preserves all obligations. Paths, scope, fortress, credentials and mode are operator-owned. No production admission or mutation authority exists.")
+        .instructions("Unadmitted query-only mining recovery. Discover the original journal and unsettled key first. Historical designation receipts do not prove current terrain, safety or excavation completion. Only an explicit wait in operator-enabled recover mode can query native evidence; it cannot dispatch or cancel mining. Missing native records never prove nonapplication. Session release preserves all obligations. Paths, scope, fortress, credentials and mode are operator-owned. No production admission or mutation authority exists. Optional excavation-goal journals are independently verified historical terrain evidence, never native-effect completion or permission to retry. Goal sampling remains in the standalone tracker.")
         .build();
     crate::run_modern_stdio(server);
 }

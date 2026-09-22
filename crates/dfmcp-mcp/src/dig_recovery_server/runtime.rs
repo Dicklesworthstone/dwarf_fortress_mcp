@@ -11,12 +11,13 @@ use dfmcp_core::{ErrorCode, MapCoord, MapCuboid, OperationContext, Result};
 use fastmcp_rust::asupersync::Cx;
 use super::{error,unbound};
 
-const ENVIRONMENT:[&str;7]=["DFMCP_ALLOW_UNADMITTED_DIG_RECOVERY_V1_16","DFMCP_DIG_WORLD_FOLDER",
-    "DFMCP_DIG_SITE_ID","DFMCP_DIG_SCOPE","DFMCP_DIG_JOURNAL","DFMCP_DIG_RECOVERY_ONLINE","DFMCP_DIG_TOKEN"];
+const ENVIRONMENT:[&str;8]=["DFMCP_ALLOW_UNADMITTED_DIG_RECOVERY_V1_16","DFMCP_DIG_WORLD_FOLDER",
+    "DFMCP_DIG_SITE_ID","DFMCP_DIG_SCOPE","DFMCP_DIG_JOURNAL","DFMCP_DIG_RECOVERY_ONLINE","DFMCP_DIG_TOKEN",super::goals::ENVIRONMENT];
 fn denied()->dfmcp_core::DfmcpError {error(ErrorCode::CapabilityDenied,"mining recovery boundary refused")}
 #[derive(Clone,Debug,PartialEq,Eq)]
 pub(super) struct Config {
     pub path:PathBuf, pub scope:MapCuboid, folder:String, site:u32, online:bool,
+    pub goal_files:super::goals::Files,
 }
 impl Config {
     pub fn mode(&self)->DigMode {if self.online{DigMode::Recover}else{DigMode::Offline}}
@@ -51,7 +52,7 @@ fn configured(folder:String,site:String,area:String,path:String,online:bool)->Re
     let number:u32=site.parse().map_err(|_|denied())?;
     if number>i32::MAX as u32||number.to_string()!=site{return Err(denied());}
     if !path.starts_with('/')||path[1..].split('/').any(|p|p.is_empty()||p=="."||p=="..") {return Err(denied());}
-    Ok(Config{folder,site:number,online,path:PathBuf::from(path),scope:scope(&area)?})
+    Ok(Config{folder,site:number,online,path:PathBuf::from(path),scope:scope(&area)?,goal_files:super::goals::Files::default()})
 }
 pub(super) fn configuration()->Result<Config> {
     let opt=value("DFMCP_ALLOW_UNADMITTED_DIG_RECOVERY_V1_16",1)?;
@@ -61,8 +62,10 @@ pub(super) fn configuration()->Result<Config> {
     let online=environment_contract(&opt,online.as_deref(),
         std::env::vars_os().map(|(k,_)|k.to_string_lossy().into_owned()),
         crate::admission::current_admission_provenance().is_some())?;
-    configured(value("DFMCP_DIG_WORLD_FOLDER",512)?,value("DFMCP_DIG_SITE_ID",10)?,
-        value("DFMCP_DIG_SCOPE",128)?,value("DFMCP_DIG_JOURNAL",4096)?,online)
+    let mut config=configured(value("DFMCP_DIG_WORLD_FOLDER",512)?,value("DFMCP_DIG_SITE_ID",10)?,
+        value("DFMCP_DIG_SCOPE",128)?,value("DFMCP_DIG_JOURNAL",4096)?,online)?;
+    config.goal_files=super::goals::Files::environment()?;
+    Ok(config)
 }
 
 pub(super) struct RequestControl {pub started:Instant,parent:Cx,worker:Cx,abandoned:Arc<AtomicBool>}
