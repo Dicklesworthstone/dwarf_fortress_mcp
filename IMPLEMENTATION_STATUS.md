@@ -43,6 +43,35 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Owned mining sessions and query-only MCP recovery
+
+`docs/DIG_SESSION.md` describes the session owner retaining the original native
+connection across observation, preparation and commit. Commit accepts no factory;
+reopen, query and replayed preparation cannot restore dispatch permission. A
+verified constant-sized inventory exposes the sole pending key independent of
+history pagination, and recovery work shares one shrinking allowance.
+
+`docs/DIG_RECOVERY_MCP.md` documents the registered
+`dfmcp-dig-recovery-dev-server`: existing Rust-journal bootstrap, discovery,
+retained-plan/tile inspection and one-shot native query reconciliation through
+the eleven-tool MCP waist. Offline is the default. Only Query grants exist; a
+separate source wrapper rejects terrain acquisition and every native mutation.
+No journal creation, Python-capsule migration, native cancellation or production
+admission is added. Session release preserves all original obligations.
+
+Async handlers use inherited Asupersync-owned blocking tasks and joined results,
+with cancellation/configuration checks and no fallback threads. Complete Agent
+Turns retain pending work even beyond page one, distinguish historical proof from
+current terrain and reserve output plus final custody verification before work.
+Cursor state is published only after a complete verified response is renderable.
+
+Eighteen adapter session tests and 22 MCP/runtime tests are registered across the
+two increments; **all 40 are UNCOMPILED AND UNEXECUTED**. The executed published
+query-schema checker passes 24 valid and 87 invalid cases, not Rust parsing, MCP
+routing/rendering, I/O or runtime execution. Native SDK, live game, full Rust
+qualification and power-loss durability remain unverified. A mutation-enabled MCP
+route still requires actual host lease/checkpoint policy and its own integration.
+
 ### Durable Rust mining coordinator and private-file recovery
 
 `docs/DIG_RUST_COORDINATOR.md` and `architecture/dig_journal_v1.json` describe
@@ -65,9 +94,9 @@ but **all 32 are UNCOMPILED AND UNEXECUTED**. The independently executed Python
 framing reference rejects 7,752 single-byte corruptions and 7,748 incomplete
 prefixes and checks 100 state/phase pairs; it does not execute Rust or filesystem
 custody. No real SDK, live game, power-loss, full qualification or admission is
-established. Runtime ownership, actual lease/checkpoint policy, full Agent Turn
-output reservation and the MCP designation route remain unfinished. The native
-protocol and existing Python recovery are unchanged.
+established. The subsequent owned session and query-only recovery MCP integration
+are described above. Actual mutation lease/checkpoint policy and the MCP
+designation route remain unfinished. Native protocol and Python recovery are unchanged.
 
 ### Typed Rust mining adapter for the existing dig/1.16 development profile
 

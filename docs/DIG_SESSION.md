@@ -77,14 +77,27 @@ interruption for kernel filesystem operations.
 cargo test --locked --offline -p dfmcp-adapter dig_designation::journal::session
 ```
 
-Sixteen Rust tests are registered. Fifteen use injected storage/native/runtime
+Eighteen Rust tests are registered. Seventeen use injected storage/native/runtime
 interfaces to exercise ownership, lost replies, restart, replay, mode and authority
 refusal, cancellation, source lifetime, clock floors, cached witnesses and retained
 uncertainty. One composes the actual DigRpcClient with the actual session/journal
 and a fragmented in-memory wire, asserting the complete outgoing method sequence
 across separate observation, prepare and commit operations.
 
-All sixteen tests are UNCOMPILED AND UNEXECUTED in the editing environment: Rust,
+All eighteen tests are UNCOMPILED AND UNEXECUTED in the editing environment: Rust,
 Cargo and rustfmt are unavailable. No actual runtime, TCP, real DFHack SDK, live
 fortress, power-loss campaign or full qualification is established by this source.
 Native framing, coordinator history bytes and Python recovery are unchanged.
+
+## Whole-session orientation and recovery integration
+
+`view` supplies a verified journal root, count and the sole nonterminal record,
+independent of its position in a historical page. It rechecks current authority
+and complete custody; dropping a connection does not erase the pending identity.
+Reconciliation lookup, connection and journal work use one shared allowance,
+without restarting the wall deadline or refunding lookup bytes.
+
+The query-only MCP integration is documented in `DIG_RECOVERY_MCP.md`. It owns
+blocking execution and exposes recovery, not mutation-enabled control. Its native
+wrapper independently refuses all methods except query. The eighteen adapter
+session tests and the separate MCP/runtime tests remain uncompiled/unexecuted.

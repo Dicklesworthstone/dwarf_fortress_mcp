@@ -1,0 +1,61 @@
+{
+  "schema_version": "dfmcp.dig-recovery-mcp/1",
+  "status": "source_present_uncompiled_development",
+  "native_protocol": "1.16",
+  "binary": "dfmcp-dig-recovery-dev-server",
+  "module": "dfmcp_mcp::dig_recovery_server",
+  "modes": [
+    "offline",
+    "recover"
+  ],
+  "default_mode": "offline",
+  "capabilities": [
+    "query"
+  ],
+  "native_delegated_effect_methods": [
+    "QueryDesignation"
+  ],
+  "underlying_rpc_methods_bound": 6,
+  "creates_journal": false,
+  "native_mutation": false,
+  "acquires_terrain": false,
+  "python_capsule_migration": false,
+  "runtime": "inherited_Cx_spawn_blocking_and_join",
+  "fallback_threads": false,
+  "production_admitted": false,
+  "native_wire_changed": false,
+  "dependency_changed": false,
+  "bounds": {
+    "sessions": 1,
+    "query_bytes": 2048,
+    "output_bytes": 32768,
+    "record_page_rows": 8,
+    "tile_page_rows": 16,
+    "presentation_cursors": 64,
+    "max_wall_millis": 60000,
+    "max_work_bytes": 1073741824,
+    "min_proxy_output_tokens": 8192
+  },
+  "operator_environment": [
+    "DFMCP_ALLOW_UNADMITTED_DIG_RECOVERY_V1_16",
+    "DFMCP_DIG_WORLD_FOLDER",
+    "DFMCP_DIG_SITE_ID",
+    "DFMCP_DIG_SCOPE",
+    "DFMCP_DIG_JOURNAL",
+    "DFMCP_DIG_RECOVERY_ONLINE",
+    "DFMCP_DIG_TOKEN"
+  ],
+  "query_schema": "schemas/dig_recovery_query.json",
+  "rust_tests_registered": 22,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "executed_schema_valid_cases": 24,
+  "executed_schema_invalid_cases": 87,
+  "sources": [
+    "crates/dfmcp-mcp/src/dig_recovery_server.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/presentation.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/runtime.rs",
+    "crates/dfmcp-mcp/src/dig_recovery_server/tests.rs",
+    "crates/dfmcp-mcp/src/bin/dfmcp-dig-recovery-dev-server.rs"
+  ]
+}

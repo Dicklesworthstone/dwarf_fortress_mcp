@@ -416,3 +416,28 @@ fn actual_fragmented_rpc_permit_survives_across_separate_session_operations() ->
     assert_eq!(methods, [0, 0, 0, 0, 0, 0, 2, 3, 3, 4, 3, 5]);
     Ok(())
 }
+
+#[test]
+fn session_view_keeps_pending_identity_after_abandoning_the_connection() -> Result<()> {
+    let mut s = session(Memory::default(), DigMode::Control, true)?;
+    let game = Game::new()?; let mut guard = Guard::default();
+    let p = prepared(&mut s, game, &mut guard)?;
+    let before = s.view(&context()?)?;
+    assert_eq!(before.total_records, 1);
+    assert!(before.pending.as_ref().is_some_and(|r| r.dispatchable));
+    s.abandon_preparation();
+    let after = s.view(&context()?)?;
+    assert_eq!(before.head, after.head);
+    assert!(after.pending.as_ref().is_some_and(|r| r.key == p.plan().key() && !r.dispatchable));
+    Ok(())
+}
+#[test]
+fn session_view_rechecks_current_authority_and_persistent_custody() -> Result<()> {
+    let memory = Memory::default();
+    let mut s = session(memory.clone(), DigMode::Control, true)?;
+    let mut denied = context()?; denied.grants.clear();
+    assert!(s.view(&denied).is_err());
+    memory.0.borrow_mut().get_mut()[0] ^= 1;
+    assert!(s.view(&context()?).is_err());
+    Ok(())
+}

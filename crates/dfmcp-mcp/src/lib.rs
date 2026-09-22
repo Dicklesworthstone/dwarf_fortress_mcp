@@ -16,6 +16,7 @@ pub mod admission;
 pub mod agent_facade;
 pub mod agent_turn;
 pub mod doctor;
+pub mod dig_recovery_server;
 pub mod ee_memory;
 pub mod http_transport;
 pub mod job_control_session;

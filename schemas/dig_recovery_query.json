@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dfmcp.dig-recovery-query/1",
+  "title": "Dig/1.16 recovery-only queries",
+  "oneOf": [
+    {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": {
+        "mode": {"const": "records"},
+        "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 8},
+        "continuation": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "minLength": 64, "maxLength": 64}
+      }
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "idempotency_key", "plan_digest", "offset"],
+      "properties": {
+        "mode": {"const": "tiles"},
+        "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 128, "not": {"pattern": "[^A-Za-z0-9_.-]"}},
+        "plan_digest": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 299},
+        "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 16}
+      }
+    },
+    {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "schema"}}}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "accepted_cases": 24,
+  "checker_sha256": "b8602b5fda1b4dbaeeee932cc7cdaa6677cf85cb7618c141283a4bffef492aae",
+  "mcp_dispatch_executed": false,
+  "native_or_filesystem_executed": false,
+  "rejected_cases": 87,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "schema": "dfmcp.dig-recovery-query-schema-evidence/1",
+  "schema_sha256": "4ec52061e44ad5ce16c2f618c751a511539da21b611215f503a94104d14d7430",
+  "status": "passed_json_schema_only"
+}

@@ -13,8 +13,10 @@
   "permanent_unknown_is_resolved": false,
   "checkpoint_policy_supplied_by_host": true,
   "runtime_guard_required": true,
-  "rust_tests_registered": 16,
+  "rust_tests_registered": 18,
   "rust_tests_executed": false,
   "production_admitted": false,
-  "native_wire_changed": false
+  "native_wire_changed": false,
+  "verified_pending_inventory_independent_of_page": true,
+  "recovery_uses_single_allowance": true
 }

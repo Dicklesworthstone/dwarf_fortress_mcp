@@ -6,7 +6,7 @@
 use dfmcp_core::{Digest32, ErrorCode, GameTick, OperationContext, Result};
 
 use super::{Allowance, DigBinding, DigCursor, DigGuard, DigJournal, DigMode, DigPage,
-    DigRecord, DigState, MAX_FRAME_BYTES, exhausted, unknown};
+    DigRecord, DigState, DigSummary, MAX_FRAME_BYTES, exhausted, unknown};
 use super::record::MAX_BODY_BYTES;
 use super::super::{DigObservation, DigPlan, DigRegion, error, validate_key};
 use super::super::rpc::{CONNECT_BYTES, RPC_BYTES, DigSource, authorize};
@@ -25,6 +25,18 @@ pub trait DigSessionGuard: DigGuard {
 /// Reserve negotiation and six native calls on the original connection. Later
 /// request budgets cannot replenish the RPC client's absolute connection budget.
 pub const SOURCE_RESERVATION_BYTES: u64 = CONNECT_BYTES + 6 * RPC_BYTES;
+
+/// Constant-sized orientation for every response. The journal invariant permits
+/// at most one nonterminal key, regardless of its position in a records page.
+#[derive(Clone, Debug)]
+pub struct DigSessionView {
+    pub journal_id: Digest32,
+    pub head: Digest32,
+    pub events: u64,
+    pub byte_len: usize,
+    pub total_records: usize,
+    pub pending: Option<DigSummary>,
+}
 
 pub struct DigSession<S, N> {
     journal: DigJournal<S>,
@@ -237,6 +249,28 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
         self.journal.get(key, digest, &current)
     }
 
+    pub fn view(&mut self, context: &OperationContext) -> Result<DigSessionView> {
+        let current = self.current(context)?;
+        let mut work = Allowance::new(&current)?;
+        self.journal.verify(&mut work)?;
+        work.charge(1024)?;
+        let mut unsettled = self.journal.records.values().filter(|r| !r.state.terminal());
+        let pending = unsettled.next().map(|r| DigSummary {
+            key: r.plan.key().to_owned(), plan_digest: r.plan.digest(), state: r.state,
+            native_phase: r.effect.as_ref().map(super::super::DigEffect::phase),
+            receipt: r.effect.as_ref().and_then(super::super::DigEffect::receipt),
+            dispatchable: self.source.is_some() && r.state == DigState::Prepared
+                && self.journal.fresh_key.as_deref() == Some(r.plan.key()),
+        });
+        if unsettled.next().is_some() {
+            return Err(error(ErrorCode::InternalInvariantViolation, "multiple unsettled mining keys violate journal custody"));
+        }
+        work.current()?;
+        Ok(DigSessionView { journal_id: self.journal.id, head: self.journal.head,
+            events: self.journal.events, byte_len: self.journal.raw.len(),
+            total_records: self.journal.records.len(), pending })
+    }
+
     pub fn list(&mut self, context: &OperationContext, limit: usize,
         cursor: Option<&DigCursor>) -> Result<DigPage>
     {
@@ -267,15 +301,25 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
     where F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
         G: DigSessionGuard,
     {
-        let record = self.get(key, digest, context)?;
-        if !record.needs_reconciliation() { return Ok(record); }
+        // Lookup, connection and coordinator work share one allowance. Do not
+        // restart the deadline or refund lookup bytes before online recovery.
         let current = self.current(context)?;
-        self.journal.online(&current, false)?;
+        let mut work = Allowance::new(&current)?;
+        self.journal.verify(&mut work)?;
+        work.charge(MAX_BODY_BYTES)?;
+        let record = self.journal.known(key, digest)?;
+        if record.plan.before().region().halo_count() > current.budget.max_entities as usize {
+            return Err(exhausted());
+        }
+        if !record.needs_reconciliation() { return Ok(record); }
+        self.journal.online(&work.current()?, false)?;
         let region = record.plan.before().region();
-        authorize(&current, self.binding().fortress_id(), record.plan.before().tick(),
+        authorize(&work.current()?, self.binding().fortress_id(), record.plan.before().tick(),
             region, false, cancel, false)?;
+        if work.bytes < SOURCE_RESERVATION_BYTES + self.journal_reservation() {
+            return Err(exhausted());
+        }
         self.abandon_preparation();
-        let mut work = self.begin(&current, true, true)?;
         let mut source = self.connect(region, &mut work, factory, guard)?;
         let operation = Self::reserve(&mut work, self.journal_reservation())?;
         let result = if cancel {
