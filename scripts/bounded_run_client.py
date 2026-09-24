@@ -440,13 +440,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--timeout-ms', type=int, default=10000)
     parser.add_argument('--wait-ms', type=int, default=0, help='foreground query-only wait, at most 60000 ms')
     args = parser.parse_args(argv)
+    import bounded_run_outcomes as outcomes
     try:
         require(args.operation == 'observe' or args.record is not None, '--record is required')
         require(args.operation == 'start' or all(v is None for v in (args.key, args.ticks, args.wall_ms)), 'start-only fields supplied')
         require(args.operation == 'query' or args.wait_ms == 0, '--wait-ms belongs only to query')
         if args.operation == 'inspect':
-            with capsule(args.record) as intent:
-                result = {'intent': intent, 'evidence_scope': 'recorded_intent_only', 'effect_status': 'unknown', 'native_contacted': False}
+            result = outcomes.inspect(args.record)
         else:
             require(os.environ.get('DFMCP_ALLOW_UNADMITTED_RUN_V1_13') == '1'
                     and 'DFMCP_ADMITTED_BRIDGE_PROTOCOL' not in os.environ, 'exact unadmitted developer opt-in required')
@@ -454,17 +454,29 @@ def main(argv: list[str] | None = None) -> int:
             token = os.environ.get('DFMCP_RUN_TOKEN', '').encode('utf-8')
             if args.operation in ('query', 'cancel'):
                 # Resolve private custody and endpoint before contacting a native source.
-                with capsule(args.record) as intent:
+                with outcomes.OutcomeStore(args.record) as store:
+                    intent = store.intent
                     require(intent['endpoint'] == f'{address[0]}:{address[1]}', 'operator endpoint differs from recorded intent')
-                    with Client(address, token, args.timeout_ms) as client:
-                        result = recover(client, intent, args.operation == 'cancel', args.wait_ms)
+                    if store.load() is not None:
+                        result = store.view()  # Historical evidence never triggers another native effect.
+                    else:
+                        with Client(address, token, args.timeout_ms) as client:
+                            store.check()
+                            result = store.retain(recover(client, intent, args.operation == 'cancel', args.wait_ms))
             else:
                 if args.operation == 'start':
                     key_bytes(args.key); integer(args.ticks, 1, 1200); integer(args.wall_ms, 1, 60000)
-                with Client(address, token, args.timeout_ms) as client:
-                    result = (client.call('ObserveRun') if args.operation == 'observe'
-                              else start(client, address, args.record, args.key, args.ticks, args.wall_ms))
-        print(json.dumps({'ok': True, 'profile': PROFILE, 'runtime_admitted': False, 'result': result}, sort_keys=True))
+                if args.operation == 'observe':
+                    with Client(address, token, args.timeout_ms) as client:
+                        result = client.call('ObserveRun')
+                else:
+                    with outcomes.new_run(args.record):
+                        with Client(address, token, args.timeout_ms) as client:
+                            result = start(client, address, args.record, args.key, args.ticks, args.wall_ms)
+                    result = outcomes.retain(args.record, result)
+        packet = {'ok': True, 'profile': PROFILE, 'runtime_admitted': False, 'result': result}
+        require(len(canonical(packet)) <= outcomes.MAX_OUTPUT, 'complete run response exceeds output bound')
+        print(canonical(packet).decode())
         return 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
         # No raw frames, credentials, or server-controlled error strings are printed.
