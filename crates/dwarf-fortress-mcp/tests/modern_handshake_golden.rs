@@ -151,7 +151,7 @@ fn assert_modern_envelope(value: &Value, expected_id: u64) {
 }
 
 #[test]
-#[ignore = "KNOWN UPSTREAM BLOCKER, NOT A PASS: fastmcp_rust v0.8.0 stops writing responses at tools/list after a successful modern server/discover, so this blocking stdio harness cannot complete. The defect is still DRAFT/unfiled in docs/DOGFOODING_FASTMCP.md; remove this ignore only with a conforming pin bump. In-process semantic coverage is not transport conformance."]
+#[ignore = "KNOWN UPSTREAM BLOCKER, NOT A PASS: fastmcp_rust v0.8.0 stops writing responses at tools/list after a successful modern server/discover, so this blocking stdio harness cannot complete. The defect is still DRAFT/unfiled in docs/DOGFOODING_FASTMCP.md; remove this ignore only with a conforming pin bump. In-process semantic coverage is not transport conformance. See bead df-fastmcp-conformance-5pj.2."]
 fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn Error>> {
     let mut client = StdioClient::spawn()?;
 

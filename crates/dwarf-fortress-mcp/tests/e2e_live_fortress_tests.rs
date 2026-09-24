@@ -103,7 +103,7 @@ fn sample_context(session_id: SessionId, snapshot: &WorldSnapshot) -> OperationC
 /// can carry out excavation / construction work orders against a live simulation.
 /// Run with `cargo test -- --ignored` once that dispatcher lands.
 #[test]
-#[ignore = "in-memory MutationDispatcher only supports pause; run with --ignored once the DFHack-backed dispatcher lands"]
+#[ignore = "in-memory MutationDispatcher only supports pause; run with --ignored once the DFHack-backed dispatcher lands. See bead df-dfhack-bridge-plane-c-pic.4."]
 fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 1. Initialize world snapshot & spatial index
     let mut snapshot = sample_world_snapshot();

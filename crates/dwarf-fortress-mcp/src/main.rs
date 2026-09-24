@@ -31,7 +31,9 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let command = env::args().nth(1).map_or_else(|| "help".to_owned(), |value| value);
+    let command = env::args()
+        .nth(1)
+        .map_or_else(|| "help".to_owned(), |value| value);
     match command.as_str() {
         "help" | "--help" | "-h" => print_help(),
         "version" | "--version" | "-V" => print_version(),
@@ -175,20 +177,15 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
         1,
         MAX_CITIZENS_PER_PAGE,
     )?;
-    let hard_citizen_limit = u32::try_from(MAX_CAPSULE_CITIZENS)
-        .map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
+    let hard_citizen_limit =
+        u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
     let max_citizens = bounded_env_u32(
         "DFMCP_BRIDGE_MAX_CITIZENS",
         hard_citizen_limit,
         0,
         hard_citizen_limit,
     )?;
-    let connect_millis = bounded_env_u64(
-        "DFMCP_BRIDGE_CONNECT_MILLIS",
-        2_000,
-        1,
-        60_000,
-    )?;
+    let connect_millis = bounded_env_u64("DFMCP_BRIDGE_CONNECT_MILLIS", 2_000, 1, 60_000)?;
     let read_millis = bounded_env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?;
     let write_millis = bounded_env_u64("DFMCP_BRIDGE_WRITE_MILLIS", 5_000, 1, 60_000)?;
     let nonce = bridge_nonce(address)?;
@@ -204,18 +201,9 @@ fn bridge(endpoint: Option<String>) -> Result<(), Box<dyn Error>> {
         },
         credentials,
     )?;
-    let capsule = read_complete_observation_bounded(
-        &mut source,
-        page_size,
-        true,
-        max_citizens,
-    )?;
+    let capsule = read_complete_observation_bounded(&mut source, page_size, true, max_citizens)?;
     let fortress_id = derive_live_fortress_id(&capsule)?;
-    let projection = project_live_capsule(
-        &capsule,
-        fortress_id,
-        ObservationCursor::ORIGIN,
-    )?;
+    let projection = project_live_capsule(&capsule, fortress_id, ObservationCursor::ORIGIN)?;
     projection.validate_against(&capsule)?;
     let complete_domains = projection
         .receipt

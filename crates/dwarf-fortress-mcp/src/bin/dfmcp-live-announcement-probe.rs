@@ -13,11 +13,9 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
-    BridgeCredentialsV1_1, LiveConnectionConfig, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE,
-    connect_authenticated_live_source_v1_1, derive_live_fortress_id,
-    parse_loopback_endpoint, project_live_capsule_v1_1,
-    read_complete_observation_v1_1_bounded,
+    BridgeCredentialsV1_1, LiveConnectionConfig, MAX_ANNOUNCEMENTS_PER_BATCH, MAX_CAPSULE_CITIZENS,
+    MAX_V1_1_CITIZENS_PER_PAGE, connect_authenticated_live_source_v1_1, derive_live_fortress_id,
+    parse_loopback_endpoint, project_live_capsule_v1_1, read_complete_observation_v1_1_bounded,
 };
 use dfmcp_core::{Digest32, ObservationCursor};
 use serde_json::json;
@@ -86,9 +84,9 @@ fn read() -> Result<(), Box<dyn Error>> {
     }
     let endpoint_text = env_string("DFMCP_BRIDGE_ENDPOINT", "127.0.0.1:5000")?;
     let endpoint = parse_loopback_endpoint(&endpoint_text)?;
-    let token = env::var("DFMCP_BRIDGE_TOKEN").map_err(|_| {
-        "DFMCP_BRIDGE_TOKEN is required and must match the protocol-1.1 DFHack process"
-    })?;
+    let token = env::var("DFMCP_BRIDGE_TOKEN").map_err(
+        |_| "DFMCP_BRIDGE_TOKEN is required and must match the protocol-1.1 DFHack process",
+    )?;
     let nonce = probe_nonce(&endpoint_text)?;
     let credentials = BridgeCredentialsV1_1::new(token.into_bytes(), nonce)?;
     let config = LiveConnectionConfig {
@@ -99,12 +97,7 @@ fn read() -> Result<(), Box<dyn Error>> {
             1,
             60_000,
         )?),
-        read_timeout: Duration::from_millis(env_u64(
-            "DFMCP_BRIDGE_READ_MILLIS",
-            5_000,
-            1,
-            60_000,
-        )?),
+        read_timeout: Duration::from_millis(env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?),
         write_timeout: Duration::from_millis(env_u64(
             "DFMCP_BRIDGE_WRITE_MILLIS",
             5_000,
@@ -120,8 +113,8 @@ fn read() -> Result<(), Box<dyn Error>> {
         1,
         MAX_V1_1_CITIZENS_PER_PAGE,
     )?;
-    let max_citizens_hard = u32::try_from(MAX_CAPSULE_CITIZENS)
-        .map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
+    let max_citizens_hard =
+        u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
     let max_citizens = env_u32(
         "DFMCP_BRIDGE_MAX_CITIZENS",
         max_citizens_hard,
@@ -129,20 +122,10 @@ fn read() -> Result<(), Box<dyn Error>> {
         max_citizens_hard,
     )?;
     let include_names = env_bool("DFMCP_BRIDGE_INCLUDE_NAMES", true)?;
-    let announcement_after_id = env_i32(
-        "DFMCP_ANNOUNCEMENT_AFTER_ID",
-        -1,
-        -1,
-        i32::MAX,
-    )?;
+    let announcement_after_id = env_i32("DFMCP_ANNOUNCEMENT_AFTER_ID", -1, -1, i32::MAX)?;
     let max_announcements_hard = u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH)
         .map_err(|_| "MAX_ANNOUNCEMENTS_PER_BATCH does not fit u32")?;
-    let max_announcements = env_u32(
-        "DFMCP_MAX_ANNOUNCEMENTS",
-        128,
-        1,
-        max_announcements_hard,
-    )?;
+    let max_announcements = env_u32("DFMCP_MAX_ANNOUNCEMENTS", 128, 1, max_announcements_hard)?;
 
     let mut source = connect_authenticated_live_source_v1_1(&config, credentials)?;
     let capsule = read_complete_observation_v1_1_bounded(
@@ -154,11 +137,7 @@ fn read() -> Result<(), Box<dyn Error>> {
         max_announcements,
     )?;
     let fortress_id = derive_live_fortress_id(&capsule.base)?;
-    let projection = project_live_capsule_v1_1(
-        &capsule,
-        fortress_id,
-        ObservationCursor::ORIGIN,
-    )?;
+    let projection = project_live_capsule_v1_1(&capsule, fortress_id, ObservationCursor::ORIGIN)?;
     projection.validate_against(&capsule)?;
 
     let suffix = projection
@@ -262,12 +241,7 @@ fn env_string(name: &str, default: &str) -> Result<String, Box<dyn Error>> {
     }
 }
 
-fn parse_u64(
-    name: &str,
-    raw: &str,
-    minimum: u64,
-    maximum: u64,
-) -> Result<u64, Box<dyn Error>> {
+fn parse_u64(name: &str, raw: &str, minimum: u64, maximum: u64) -> Result<u64, Box<dyn Error>> {
     let value = raw
         .parse::<u64>()
         .map_err(|_| format!("{name} must be a decimal u64"))?;
@@ -277,12 +251,7 @@ fn parse_u64(
     Ok(value)
 }
 
-fn env_u64(
-    name: &str,
-    default: u64,
-    minimum: u64,
-    maximum: u64,
-) -> Result<u64, Box<dyn Error>> {
+fn env_u64(name: &str, default: u64, minimum: u64, maximum: u64) -> Result<u64, Box<dyn Error>> {
     match env::var(name) {
         Ok(raw) => parse_u64(name, &raw, minimum, maximum),
         Err(env::VarError::NotPresent) => Ok(default),
@@ -290,22 +259,12 @@ fn env_u64(
     }
 }
 
-fn parse_u32(
-    name: &str,
-    raw: &str,
-    minimum: u32,
-    maximum: u32,
-) -> Result<u32, Box<dyn Error>> {
+fn parse_u32(name: &str, raw: &str, minimum: u32, maximum: u32) -> Result<u32, Box<dyn Error>> {
     let value = parse_u64(name, raw, u64::from(minimum), u64::from(maximum))?;
     Ok(u32::try_from(value).map_err(|_| format!("{name} does not fit u32"))?)
 }
 
-fn env_u32(
-    name: &str,
-    default: u32,
-    minimum: u32,
-    maximum: u32,
-) -> Result<u32, Box<dyn Error>> {
+fn env_u32(name: &str, default: u32, minimum: u32, maximum: u32) -> Result<u32, Box<dyn Error>> {
     match env::var(name) {
         Ok(raw) => parse_u32(name, &raw, minimum, maximum),
         Err(env::VarError::NotPresent) => Ok(default),
@@ -313,12 +272,7 @@ fn env_u32(
     }
 }
 
-fn parse_i32(
-    name: &str,
-    raw: &str,
-    minimum: i32,
-    maximum: i32,
-) -> Result<i32, Box<dyn Error>> {
+fn parse_i32(name: &str, raw: &str, minimum: i32, maximum: i32) -> Result<i32, Box<dyn Error>> {
     let value = raw
         .parse::<i32>()
         .map_err(|_| format!("{name} must be a decimal i32"))?;
@@ -328,12 +282,7 @@ fn parse_i32(
     Ok(value)
 }
 
-fn env_i32(
-    name: &str,
-    default: i32,
-    minimum: i32,
-    maximum: i32,
-) -> Result<i32, Box<dyn Error>> {
+fn env_i32(name: &str, default: i32, minimum: i32, maximum: i32) -> Result<i32, Box<dyn Error>> {
     match env::var(name) {
         Ok(raw) => parse_i32(name, &raw, minimum, maximum),
         Err(env::VarError::NotPresent) => Ok(default),

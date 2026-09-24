@@ -8,10 +8,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dfmcp_adapter::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeCredentials, DfHackProbeClient,
-    LiveConnectionConfig, LiveObservationReceipt, LiveObservationSource,
-    MAX_CAPSULE_CITIZENS, MAX_CITIZENS_PER_PAGE, ObservationAssembler,
-    ProbeHandshakeRequest, ProbeObservationRequest, connect_authenticated_live_source,
-    derive_live_fortress_id, parse_loopback_endpoint, project_live_capsule,
+    LiveConnectionConfig, LiveObservationReceipt, LiveObservationSource, MAX_CAPSULE_CITIZENS,
+    MAX_CITIZENS_PER_PAGE, ObservationAssembler, ProbeHandshakeRequest, ProbeObservationRequest,
+    connect_authenticated_live_source, derive_live_fortress_id, parse_loopback_endpoint,
+    project_live_capsule,
 };
 use dfmcp_core::{Digest32, ErrorCode, ObservationCursor};
 use serde_json::{Value as JsonValue, json};
@@ -75,7 +75,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn reject_extra_arguments(mut arguments: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
+fn reject_extra_arguments(
+    mut arguments: impl Iterator<Item = String>,
+) -> Result<(), Box<dyn Error>> {
     if let Some(extra) = arguments.next() {
         return Err(format!("unexpected extra argument {extra:?}").into());
     }
@@ -150,10 +152,10 @@ fn endpoint_text() -> Result<String, Box<dyn Error>> {
 fn configured_token() -> Result<Vec<u8>, Box<dyn Error>> {
     match env::var("DFMCP_BRIDGE_TOKEN") {
         Ok(value) => Ok(value.into_bytes()),
-        Err(env::VarError::NotPresent) => Err("DFMCP_BRIDGE_TOKEN is required for this case".into()),
-        Err(env::VarError::NotUnicode(_)) => {
-            Err("DFMCP_BRIDGE_TOKEN must be valid UTF-8".into())
+        Err(env::VarError::NotPresent) => {
+            Err("DFMCP_BRIDGE_TOKEN is required for this case".into())
         }
+        Err(env::VarError::NotUnicode(_)) => Err("DFMCP_BRIDGE_TOKEN must be valid UTF-8".into()),
     }
 }
 
@@ -252,10 +254,13 @@ fn case_token(case: &str) -> Result<Vec<u8>, Box<dyn Error>> {
         "presented_token_short" => Ok(vec![b's'; SHORT_TOKEN_BYTES]),
         "presented_token_long" => Ok(vec![b'l'; LONG_TOKEN_BYTES]),
         "wrong_token" => Ok(wrong_token()),
-        "configured_token_short" | "configured_token_long" | "correct_token"
-        | "nonce_short" | "nonce_long" | "nonce_mismatch" | "protocol_mismatch" => {
-            configured_token()
-        }
+        "configured_token_short"
+        | "configured_token_long"
+        | "correct_token"
+        | "nonce_short"
+        | "nonce_long"
+        | "nonce_mismatch"
+        | "protocol_mismatch" => configured_token(),
         _ => Err(format!("unknown R2 handshake case {case:?}").into()),
     }
 }
@@ -382,13 +387,7 @@ fn run_observation_case(case: &str) -> Result<(), Box<dyn Error>> {
         _ => return Err(format!("unknown observation case {case:?}").into()),
     };
     let (request_offset, reply) = if needs_total {
-        let baseline = raw_observation(
-            &mut client,
-            &nonce,
-            0,
-            MAX_CITIZENS_PER_PAGE,
-            true,
-        )?;
+        let baseline = raw_observation(&mut client, &nonce, 0, MAX_CITIZENS_PER_PAGE, true)?;
         if !baseline.accepted {
             return Err(format!(
                 "offset case baseline was rejected with {:?}",
@@ -401,7 +400,10 @@ fn run_observation_case(case: &str) -> Result<(), Box<dyn Error>> {
         } else {
             baseline.citizen_count_total
         };
-        (offset, raw_observation(&mut client, &nonce, offset, 1, true)?)
+        (
+            offset,
+            raw_observation(&mut client, &nonce, offset, 1, true)?,
+        )
     } else {
         (
             requested_offset,
@@ -411,10 +413,8 @@ fn run_observation_case(case: &str) -> Result<(), Box<dyn Error>> {
     if reply.bridge_generation != 0 && reply.bridge_generation != negotiated_generation {
         return Err("observation reply changed bridge generation after handshake".into());
     }
-    let running_rejected = case == "running_multipage_rejected"
-        && reply.accepted
-        && !reply.paused
-        && !reply.complete;
+    let running_rejected =
+        case == "running_multipage_rejected" && reply.accepted && !reply.paused && !reply.complete;
     if case == "running_multipage_rejected" && !running_rejected {
         return Err(
             "running_multipage_rejected requires a running fortress and a nonterminal first page"
@@ -479,18 +479,11 @@ fn run_capsule(page_size: u32, include_names: bool) -> Result<(), Box<dyn Error>
     let address = parse_loopback_endpoint(&endpoint)?;
     let nonce = fresh_nonce(&endpoint, b"dfmcp-live-probe-capsule-nonce-v1\0")?;
     let credentials = BridgeCredentials::new(configured_token()?, nonce)?;
-    let mut source = connect_authenticated_live_source(
-        &live_connection_config(address)?,
-        credentials,
-    )?;
-    let hard_limit = u32::try_from(MAX_CAPSULE_CITIZENS)
-        .map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
-    let maximum = bounded_env_u32(
-        "DFMCP_BRIDGE_MAX_CITIZENS",
-        hard_limit,
-        0,
-        hard_limit,
-    )?;
+    let mut source =
+        connect_authenticated_live_source(&live_connection_config(address)?, credentials)?;
+    let hard_limit =
+        u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| "MAX_CAPSULE_CITIZENS does not fit u32")?;
+    let maximum = bounded_env_u32("DFMCP_BRIDGE_MAX_CITIZENS", hard_limit, 0, hard_limit)?;
     let mut assembler = ObservationAssembler::with_names(source.bridge_manifest(), include_names);
     let mut page_count = 0u32;
     loop {

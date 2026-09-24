@@ -40,7 +40,8 @@ fn protocol_1_1_development_server_requires_exact_opt_in() -> Result<(), Box<dyn
 }
 
 #[test]
-fn protocol_1_1_development_server_rejects_production_admission_state() -> Result<(), Box<dyn Error>> {
+fn protocol_1_1_development_server_rejects_production_admission_state() -> Result<(), Box<dyn Error>>
+{
     let mut command = server_command();
     clean_admission_environment(&mut command);
     let output = command
@@ -56,7 +57,8 @@ fn protocol_1_1_development_server_rejects_production_admission_state() -> Resul
 }
 
 #[test]
-fn protocol_1_1_development_server_rejects_protocol_bound_admission_state() -> Result<(), Box<dyn Error>> {
+fn protocol_1_1_development_server_rejects_protocol_bound_admission_state()
+-> Result<(), Box<dyn Error>> {
     let mut command = server_command();
     clean_admission_environment(&mut command);
     let output = command
@@ -79,7 +81,10 @@ fn near_miss_opt_in_values_fail_before_bridge_configuration() -> Result<(), Box<
         let output = command
             .env("DFMCP_ALLOW_UNADMITTED_LIVE_V1_1", value)
             .output()?;
-        assert!(!output.status.success(), "near-miss opt-in {value:?} was accepted");
+        assert!(
+            !output.status.success(),
+            "near-miss opt-in {value:?} was accepted"
+        );
         let stderr = String::from_utf8(output.stderr)?;
         assert!(stderr.contains("DFMCP_ALLOW_UNADMITTED_LIVE_V1_1=1 is required"));
         assert!(!stderr.contains("DFMCP_BRIDGE_TOKEN is required"));
