@@ -25,6 +25,19 @@ categories = ["development-tools", "games"]
 # pinned to an exact upstream revision for dogfooding. Modern-only MCP
 # 2026-07-28: default features off (no legacy-2024-11-05 graph), Tasks on.
 fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "180a7c88890705217bb8e202d19555adabf24187", default-features = false, features = ["tasks"] }
+# k2y migration completion (2026-09-22): the 180a7c8 facade no longer
+# re-exports the asupersync runtime (that re-export is gated behind the
+# forbidden `testing-lab` feature); production callers depend on the
+# published runtime directly. `Cx` flows from the facade; `RuntimeBuilder`,
+# `create_reactor`, `cap`, and `CancelKind` come from the published crate at
+# the exact version the facade itself builds against.
+asupersync = "=0.5.0"
+# Direct component crates required by the 180a7c8 `#[tool]` derive expansion,
+# which emits `::fastmcp_server::` / `::fastmcp_core::` item paths. Same
+# git revision as the facade; owned-prefix admissible per the dependency
+# allowlist (owned_mcp_prefixes = ["fastmcp"]).
+fastmcp-core = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "180a7c88890705217bb8e202d19555adabf24187", default-features = false }
+fastmcp-server = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "180a7c88890705217bb8e202d19555adabf24187", default-features = false, features = ["tasks"] }
 # Fundamental serialization (ADR-012 admits these; exact pins mirror the
 # fastmcp_rust workspace to avoid duplicate major versions).
 serde = { version = "=1.0.229", features = ["derive"] }

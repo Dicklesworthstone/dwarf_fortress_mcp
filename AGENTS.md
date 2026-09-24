@@ -337,6 +337,12 @@ resolution, rustfmt, warning-denied Clippy, debug/release tests, warning-denied 
 checks, and every repository, bridge, publication, bootstrap, MCP, acceptance, compatibility, floor,
 doctor, receipt, launcher, and ticket gate.
 
+Bead-graph governance: `scripts/check_bead_coverage.py` (run by `scripts/verify.sh`)
+mechanically enforces that every `WP-xx` in `design/registries/WORK_PACKAGES.md` maps to at
+least one bead and that every `#[ignore]` in the workspace cites a known bead id explaining the
+block. Implementation work without a corresponding bead is a governance violation; a skipped
+test without an owning bead is a silent regression vector.
+
 `DFMCP_STATIC_ONLY=1`, `DFMCP_ALLOW_MISSING_RUST=1`, or dirty-tree escape hatches create development
 evidence only. A dirty run must not produce a receipt whose status is indistinguishable from a clean
 release-admissible `passed` receipt.

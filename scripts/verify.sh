@@ -104,6 +104,10 @@ info "Enforcing closed dependency universe"
 python3 scripts/check_dependency_policy.py
 ok "Dependency policy"
 
+info "Checking bead-graph coverage"
+python3 scripts/check_bead_coverage.py
+ok "Bead coverage"
+
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
 python3 scripts/test_read_stable_repository_file.py

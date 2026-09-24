@@ -75,6 +75,7 @@ premature; this row supersedes it.
 | Date | Suite/revision | Scope exercised | Result | Evidence artifact |
 |---|---|---|---|---|
 | 2026-08-31 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | Modern handshake (negative cases only) | PASS on negative fixtures; full lifecycle hangs at `tools/list` after `server/discover` (DRAFT bug) | `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs` |
+| 2026-09-22 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | External stdio client: DRAFT-A reproduced (R1), DRAFT-B re-confirmed by ignored golden test, DOC-QUESTION C captured | Defects filed upstream: #73 (discover silence), #74 (tools/list dispatch), #75 (UriParams facade re-export) | `/tmp/dfmcp_dogfood_captures/`, `repro_fastmcp_stdio.py`, issues #73/#74/#75 |
 
 ## Open defects under the v0.8.0 pin (`12d3469`)
 
@@ -84,10 +85,22 @@ project is online).
 
 | Finding | Minimal repro | Expected | Actual | Filing status |
 |---|---|---|---|---|
-| `server/discover` silently fails when `_meta` carries only `protocolVersion` + `clientCapabilities` (no `clientInfo`). | Send one `server/discover` request with `_meta = {protocolVersion: "2026-07-28", clientCapabilities: {}}`. | JSON-RPC response (either discover result or an error envelope). | No response is ever written to stdout; the server keeps reading stdin until the pipe closes. | DRAFT — pending upload |
-| After a successful modern `server/discover`, a follow-up `tools/list` (same `_meta`) is not dispatched. | Send `server/discover` then `tools/list` with full modern `_meta` (incl. `clientInfo`). | Two JSON-RPC responses. | Only the discover response is written; `tools/list` hangs forever. | DRAFT — pending upload |
+| `server/discover` silently fails when `_meta` carries only `protocolVersion` + `clientCapabilities` (no `clientInfo`). | Send one `server/discover` request with `_meta = {protocolVersion: "2026-07-28", clientCapabilities: {}}`. | JSON-RPC response (either discover result or an error envelope). | No response is ever written to stdout; the server keeps reading stdin until the pipe closes. | FILED upstream 2026-09-22: fastmcp_rust#73 |
+| After a successful modern `server/discover`, a follow-up `tools/list` (same `_meta`) is not dispatched. | Send `server/discover` then `tools/list` with full modern `_meta` (incl. `clientInfo`). | Two JSON-RPC responses. | Only the discover response is written; `tools/list` hangs forever. | FILED upstream 2026-09-22: fastmcp_rust#74 |
 
 The modern golden test supplies `io.modelcontextprotocol/clientInfo` so it
 can reach and preserve the second-request reproduction. No server-side
 workaround is present. Both findings remain DRAFT and must be filed upstream
 before any downstream workaround would be permitted.
+
+Additional findings from the 2026-09-22 reality-check pass (repro harness:
+`/tmp/dfmcp_work/repro_fastmcp_stdio.py`, byte captures under `/tmp/dfmcp_dogfood_captures/`
+once executed):
+
+| Finding | Minimal repro | Expected | Actual | Filing status |
+|---|---|---|---|---|
+| (DOC-QUESTION DRAFT-C) A legacy `initialize` carrying `protocolVersion: "2026-07-28"` is refused with `-32600` whose `data.supported` advertises `["2026-07-28","2024-11-05"]`. | Send one classic `initialize` with a modern `protocolVersion`. | A modern-only build advertising the banned legacy era in an error path is at minimum a documentation question. | Pinned as intended by `assert_era_refusal` in `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs`. | DOC-QUESTION — raised for the upstream tracker alongside DRAFT-A/B, not a defect claim |
+| (DRAFT-D, API gap) The facade trait `ResourceHandler::read_with_uri` takes `&UriParams`, but the facade does not re-export `UriParams`; downstream crates cannot name the type and must spell the transparent underlying `HashMap<String, String>`. | Implement `ResourceHandler` with a `template()` in a downstream crate and override `read_with_uri`. | A public alias for the parameter type (e.g. `fastmcp_rust::prelude::UriParams`). | Alias is `pub type UriParams = HashMap<String, String>` inside `fastmcp-server::handler`, not re-exported. | FILED upstream 2026-09-22: fastmcp_rust#75 |
+
+dfmcp-side note: `dfmcp-mcp/src/resources.rs` uses the alias-transparency spelling and must be
+revisited when the pin advances past a facade fix.

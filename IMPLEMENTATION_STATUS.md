@@ -697,3 +697,30 @@ Consequences:
 9. Negative evidence may reject a claim but cannot certify success.
 10. Derived indexes, recommendations, history and path models never grant authority.
 11. Unit tests never substitute for disposable-fort evidence where Dwarf Fortress behavior matters.
+
+## Reality-check addendum (2026-09-22, `reality-check-for-project` audit pass)
+
+An external agent pass executed the comprehensive reality check against this repository
+(`docs/reality-checks/2026-09-22-phase-0c-reality-check.md`) and adds this dated, evidence-labeled
+addendum rather than editing the phase table above:
+
+- [FACT] The workspace now contains an authenticated read-only live plane beyond the phase-0C
+  laboratory slice described earlier in this file: `dfmcp-mcp::run_live_stdio` (`serve-live`),
+  `bridge_r0_authenticated_read_only` implementation phase, token + nonce bridge credentials,
+  loopback endpoint parsing, single-use inode-bound admission tickets
+  (`DFMCP_ADMISSION_TICKET`, 300 s lifetime), live capsule projection, and a DFHack-side plugin
+  exposing `DFhackCExport RPCService *plugin_rpcconnect` (V1 and V1.1 wire codecs). The
+  eleven-tool waist is preserved; mutation-stage tools fail closed.
+- [FACT] The full workspace (7 crates, ~164k src LOC) materialized on the reference machine via
+  the remote build-tree sync on 2026-09-22 and is coherent after one additive repair
+  (`dfmcp-core::Digest32::new` constructor alias for adapter-revision call sites).
+- [TARGET/UNVERIFIED] Whether this live plane passes the full workspace gates on the reference
+  machine is recorded by the qualification receipts, not by this addendum. No receipt existed at
+  addendum time; the run was in flight.
+- [FACT] The bead database materialized from an unflushed frankensqlite WAL on first write
+  (123 beads hidden behind `br stats` = 0); visibility/regression guards now run in
+  `scripts/verify.sh` via `scripts/check_bead_coverage.py`.
+- [FACT] Upstream fastmcp conformance defects DRAFT-A/B were reproduced with byte captures by an
+  external stdio harness; DRAFT-C is a documentation question (era-refusal `supported` list is
+  pinned intended); DRAFT-D is a facade API gap (`UriParams` not re-exported). See
+  `docs/DOGFOODING_FASTMCP.md`.

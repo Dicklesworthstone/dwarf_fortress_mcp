@@ -7,10 +7,45 @@ vision contrasted against ground truth (code, tests, live binary runs, bead cove
 matches `IMPLEMENTATION_STATUS.md` almost exactly — the status discipline here is exceptional and
 there is essentially **no overclaiming in the guarded docs**. The gap between vision and reality
 is the *entire remaining project*: 0 of 12 GOALs, 0 of 15 SLOs, and 0 of the 12 gate exits
-(GATE-010 onward) have evidence. The single most dangerous finding is process-level, not
-code-level: **the bead database is empty (0 beads)** while the plan defines WP-00..WP-21,
-INV-001..050, and TEST-001..024 — i.e., ~0% of the promised work is tracked in the execution
-system the project's own methodology requires.
+(GATE-010 onward) have acceptance evidence. The most dangerous finding is **process-visibility**:
+at measurement time the bead database read as empty (0 issues; `issues.jsonl` 0 lines), while the
+plan defines WP-00..WP-21 / INV-001..050 / TEST-001..024. Writing the first new bead flushed a
+frankensqlite WAL that materialized the project's **real, hidden bead program** (see §7): 59
+closed `dfmcp-wp*`/`dfmcp-wp-*` beads that produced the current codebase, plus today's open
+epics. The tracked program exists but was invisible to `br stats`/`issues.jsonl` until a write
+forced WAL replay — a durability/visibility bug worth its own bead (filed under the governance
+bead's scope; `bv` now reports `source_authority: complete, readiness: proven`).
+
+> **Correction log (2026-09-22, execution phase).** During bead execution this report's ground
+> truth shifted twice, and honesty requires the deltas to be stated inline:
+>
+> 1. **The tree materialized 10×.** At ~17:21Z the workspace's dfmcp-mcp crate grew from the
+>    audited ~2.1k LOC (6 files) to ~69k LOC (162 files) — a RCH worker-tree sync pulled the
+>    coherent remote tree (real bridge work: `serve-live` authenticated read-only MCP server over
+>    bridge protocol V1 with token+nonce auth, single-use admission tickets, dig control/recovery,
+>    work orders, workforce, spatial watch; the DFHack plugin now has a real
+>    `DFhackCExport RPCService *plugin_rpcconnect`). `IMPLEMENTATION_STATUS.md` and this report's
+>    earlier "no socket code on either side" claims are **stale against this tree**. The sync was
+>    also *torn*: local `dfmcp-core` lacked `Digest32::new` that `dfmcp-adapter` calls (repaired
+>    additively in `digest.rs`; one test target needed a re-warm RCH cache).
+> 2. **The era-refusal repro was reclassified.** An external `initialize` @ 2026-07-28 being
+>    refused with `-32600` and `supported=["2026-07-28","2024-11-05"]` is NOT a defect: the modern
+>    handshake is `server/discover` with `_meta`, and the dual-era `supported` list is pinned as
+>    intended by `assert_era_refusal` in `modern_handshake_golden.rs`. Filed as a DOC-QUESTION
+>    (DRAFT-C) in `docs/DOGFOODING_FASTMCP.md`, not a defect claim.
+> 3. **Consequence for priorities:** "wiring finished code" is literally the top gap — the live
+>    bridge plane exists in-tree while the status documents describe phase 0C laboratory-only.
+>    Reconciling the status documents against the materialized tree (with evidence) became the
+>    highest-leverage documentation deliverable.
+> 4. **The 180a7c8 pin migration (bead `dfmcp-k2y`) was left mid-flight and blocked all
+>    verification** (86 compile errors: `fastmcp_rust::asupersync` unresolved — in 180a7c8 that
+>    re-export is gated behind the *forbidden* `testing-lab` feature; the `#[tool]` derive now
+>    emits `::fastmcp_server::`/`::fastmcp_core::` paths). Completed the mechanical remainder in
+>    k2y's stated direction: published `asupersync = "=0.5.0"` dependency (all used paths
+>    verified against the published source), direct owned-prefix `fastmcp-core`/`fastmcp-server`
+>    deps at the same rev, and the `fastmcp_rust::asupersync` → `asupersync` path migration.
+>    Earlier claim in this report that "asupersync is unadmitted / engine fully synchronous" is
+>    thereby superseded: the runtime entry is asupersync-based as of this migration.
 
 **Ground-truth evidence captured this pass:**
 
@@ -85,8 +120,10 @@ system the project's own methodology requires.
 
 **3. What is blocking us** (in causal order):
 
-1. **Execution system is empty** — 0 beads; the WP/INV/TEST registries have no operational
-   counterpart, so nothing is pickable by `br ready` agent swarms.
+1. **Execution system was invisible** — at measurement time `br stats` reported 0 issues while
+   123 beads existed behind an un-flushed frankensqlite WAL; the WP/INV/TEST registries' operational
+   counterpart only became usable once the WAL replayed (§7). Visibility and reconciliation bugs in
+   the tracking layer are themselves tracked now (governance bead).
 2. **Upstream fastmcp conformance FAIL** — WP-13 exit requires the defect loop (file → fix → pin
    bump → conformance note); two DRAFT defects are still unfiled, golden lifecycle test is
    `#[ignore]`d.
@@ -100,14 +137,22 @@ system the project's own methodology requires.
 6. Weak chaos/crash harness — TEST-016 (kill at every durable transition) has no durable
    transitions to kill yet; the deterministic-lab benchmark promise (GOAL-012) is underpowered.
 
-**4. If we implemented all open and in-progress beads, would the gap close?** — Moot and worse
-than moot: there are **zero beads**. Bead completion is 0/0. The plan documents define the work;
-the execution system tracks none of it. This is the frankenjax "NO_BEAD" failure mode at 100%
-coverage: every vision goal is uncovered by the tracking system.
+**4. If we implemented all open and in-progress beads, would the gap close?** — **For the
+critical path to the next two milestones: yes, now.** After reconciliation (§7), every open
+Phase 0B/0C item and the named "next executable milestone" has exactly one canonical bead, and
+the complementary gaps (anchor v2, publication, runtime admission, evidence machinery, security
+corpus) are covered by the reality-check beads. **For the full vision: no.** Phases 5–11 have
+only partial bead coverage: shadow planning (GATE-050), the reversible-effect families beyond
+pause (GATE-060: labor, burrows, stockpiles, work orders), the cognition-plane generations
+(GATE-040/SUBSTRATE-G4), multi-agent control (GATE-100), and release qualification beyond DSR
+assets (GATE-110) have no beads yet. That is defensible (gates 0B–3 precede them), but per Rule 3
+it must be a stated *sequencing decision*, not an oversight — the governance bead's WP-coverage
+checker will force each later phase to beadify before its predecessors close.
 
-**5. Goals with zero bead coverage:** all of them (see §2). Most critical NO_BEAD items if only
-one thing is fixed this week: the WP-13 conformance loop, the bead bootstrap itself, and the
-GATE-010 qualification receipt.
+**5. Goals with zero bead coverage (current, post-reconciliation):** the five phase-5..11 areas
+above, plus one near-term hole the reconciliation created deliberately: nothing covers the WAL
+visibility bug itself (measurement said 0 while 123 beads existed) — recorded in
+`df-bead-graph-governance-pq2` scope. Everything nearer-term is covered exactly once.
 
 ---
 
@@ -134,7 +179,7 @@ GATE-010 qualification receipt.
 | V17 | Local qualification receipts (GATE-010; qualify_local.sh; DSR) | **NOT_STARTED (here)** | No `target/qualification/`; no `.git`; nightly present (1.100.0-nightly) but gates unrun |
 | V18 | Doctor: bridge/compat/ledger/replay diagnosis + sealed repair plans (GATE-110) | **PARTIAL** | Lab doctor healthy-report works; nothing to diagnose yet (no bridge/ledger) |
 | V19 | Eidetic memory boundary (advisory only; EIDETIC_MEMORY) | **WORKING (boundary)** | `ee_memory.rs` inert by design; `ee_batch_item.v1.json` schema pinned |
-| V20 | Bead coverage of the entire WP/INV/TEST program (skill Rule 3) | **NO_BEAD** | `br stats`: Total 0 |
+| V20 | Bead coverage of the entire WP/INV/TEST program (skill Rule 3) | **PARTIAL → RECONCILED** | Was invisible (WAL artifact, read as 0); real program: 59 closed historical beads + today's epics; reconciliation added 32 net-new beads, deduped 9, cross-linked 10 (§7). Phases 5–11 remain un-beaded by sequencing decision |
 
 Sanity cross-check against IMPLEMENTATION_STATUS.md: **no material overclaim found** — the status
 file is accurate and slightly conservative (the world/intent algorithm cores are stronger than
@@ -339,3 +384,57 @@ These convert BP items from "do it carefully" into named techniques with failure
   need this document for context.
 
 *(Beads generated in §7.)*
+
+## 7. Bead reconciliation and final landscape (Phase 3a + refinement outcome)
+
+**What happened:** the first bead write flushed `.beads/beads.db-wal`, materializing the real
+program: 59 closed historical beads (`dfmcp-wp00..wp21`, `dfmcp-wp-{dfh,frk,lea,mcp,pln,tst,wld}*`,
+`dfmcp-*`), today's open epics (`df-fastmcp-conformance-5pj`, `df-dfhack-bridge-plane-c-pic`,
+`df-franken-storage-mvcc-54h`, `df-action-coordinator-exec-ero`, `df-qualification-pipeline-qqq`),
+and two in-progress items (`df-qualification-pipeline-qqq.1` git bootstrap; `dfmcp-k2y` asupersync
+0.5 MCP-entry migration, assignee CalmWaterfall, pin target `180a7c8…` ≠ checked-out `12d3469…`).
+
+**Reality-check bead generation:** 41 beads created via `br` from the final bridge plan
+(self-contained descriptions with background/reasoning/subtasks/acceptance/registry refs; test
+companions where the test effort is a distinct work product). Refinement then reconciled against
+the existing graph — never duplicating an owned epic:
+
+- **Closed as duplicates (9), each with a cross-reference comment:** dogfood file/pin-bump/minimize
+  superseded by `5pj.1/.2` (after augmenting them); tasks-store binding → `5pj.3`; bridge handshake →
+  `pic.1`; payload codecs → `pic.3`; fault campaigns → `pic.5`; qualify receipt → `qqq`; git restore →
+  `qqq.1` (in progress); legacy `dfmcp-wp13-modern-handshake-golden-7nu` → `5pj.2` (its id is cited
+  in the `#[ignore]` string — update the string when `5pj.2` lands).
+- **Augmented (8):** `5pj.1` (+ third era-advertisement defect, capture discipline), `5pj.2`
+  (+ pin-bump discipline, retracted-PASS warning), `5pj.3` (+ totality/cancel-guard/indeterminate
+  contract), `pic.1` (+ 16 field groups, EvidenceRecord per transition, fail-closed unknown fields),
+  `pic.3` (+ golden vectors, bounded decode, digest mutation vectors), `pic.5` (+ covering-array
+  methodology with coverage-proof artifact), `tasks-projection-tests` (+ parent reference),
+  `session-scoped-capability-negotiation` (+ prior-art pointer to closed `wp13-gate2-session-authority`).
+- **Cross-linked (10):** live-observe milestone → `pic.1/.2/.3` + `pub-obs`; `pic.5` → fault-schedule
+  harness; dogfood minimization feeds `5pj.1`; noninterference + certified-topk → graph projection;
+  registry-v0 → qualification pipeline; asupersync admission → `dfmcp-k2y` (runtime conflict avoidance,
+  pin-divergence note).
+
+**Final graph (bv-validated):** 124 total — 53 open, 2 in-progress, 16 blocked (mostly by design:
+later-phase beads behind earlier gates), 69 closed, 37 ready. `bv --robot-triage`:
+`source_authority.state=complete`, `claim_safe=true`, `readiness=proven`, 124 valid, 0 errors, no
+cycles (`br dep cycles`). P0 ready work: bridge handshake + daemon, dogfood minimization,
+session-scoped negotiation, bead-graph governance.
+
+**Scorecard (skill format):**
+
+| Claim class | Count | Supported | Overstated | No-evidence-yet |
+|---|---:|---:|---:|---:|
+| Status-discipline (docs match code) | 14 areas | 14 | 0 | 0 |
+| Constitutional mechanics (deps, pin, forbid, validators) | 6 | 6 | 0 | 0 |
+| Lab behavior (plan/commit/idempotency/restore/obligation) | 8 | 8 | 0 | 0 |
+| Transport lifecycle (modern handshake e2e) | 2 | 0 | 0 | 2 (conformance FAIL recorded; live repro) |
+| Gates/SLOs/releases (GATE-010..110, SLO-001..015, DSR) | 15 | 0 | 0 | 15 |
+| Bead coverage of vision | phases 0B–3 | covered | — | phases 5–11 un-beaded (sequencing) |
+
+**Recommendation:** (1) keep `df-qualification-pipeline-qqq.1` unblocked and land the git
+bootstrap — it gates every receipt; (2) run the dogfood minimization bead and file the three
+upstream defects this week — WP-13 closure is on the critical path of everything MCP; (3) wire the
+governance bead's coverage checker into `verify.sh` so bead visibility can never silently regress
+again; (4) beadify Phase 5–11 only when their predecessors close (the checker enforces the
+sequencing).
