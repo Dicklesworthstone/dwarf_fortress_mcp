@@ -230,7 +230,10 @@ impl LeaseManager {
     ) -> Result<()> {
         MapCuboid::new(area.min, area.max)?;
         let record = self.leases.get(&lease_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::LeaseDenied, "spatial lease is no longer retained")
+            DfmcpError::new(
+                ErrorCode::LeaseDenied,
+                "spatial lease is no longer retained",
+            )
         })?;
         if record.holder_session != holder
             || current_tick < record.acquired_tick
@@ -445,22 +448,45 @@ mod spatial_verification_tests {
     use crate::MapCoord;
 
     fn area() -> MapCuboid {
-        MapCuboid { min: MapCoord::new(0, 0, 2), max: MapCoord::new(31, 31, 2) }
+        MapCuboid {
+            min: MapCoord::new(0, 0, 2),
+            max: MapCoord::new(31, 31, 2),
+        }
     }
     #[test]
     fn spatial_verification_checks_holder_scope_and_half_open_lifetime() -> Result<()> {
         let mut book = LeaseManager::new();
         let owner = SessionId::new(1);
         let id = book.acquire_spatial_lease(owner, area(), true, GameTick(100), 10)?;
-        for tick in [100, 109] { book.verify_exclusive_spatial(id, owner, area(), GameTick(tick))?; }
-        for tick in [99, 110, u64::MAX] {
-            assert!(book.verify_exclusive_spatial(id, owner, area(), GameTick(tick)).is_err());
+        for tick in [100, 109] {
+            book.verify_exclusive_spatial(id, owner, area(), GameTick(tick))?;
         }
-        assert!(book.verify_exclusive_spatial(id, SessionId::new(2), area(), GameTick(100)).is_err());
-        let outside = MapCuboid { max: MapCoord::new(32, 31, 2), ..area() };
-        assert!(book.verify_exclusive_spatial(id, owner, outside, GameTick(100)).is_err());
-        let reversed = MapCuboid { min: area().max, max: area().min };
-        assert!(book.verify_exclusive_spatial(id, owner, reversed, GameTick(100)).is_err());
+        for tick in [99, 110, u64::MAX] {
+            assert!(
+                book.verify_exclusive_spatial(id, owner, area(), GameTick(tick))
+                    .is_err()
+            );
+        }
+        assert!(
+            book.verify_exclusive_spatial(id, SessionId::new(2), area(), GameTick(100))
+                .is_err()
+        );
+        let outside = MapCuboid {
+            max: MapCoord::new(32, 31, 2),
+            ..area()
+        };
+        assert!(
+            book.verify_exclusive_spatial(id, owner, outside, GameTick(100))
+                .is_err()
+        );
+        let reversed = MapCuboid {
+            min: area().max,
+            max: area().min,
+        };
+        assert!(
+            book.verify_exclusive_spatial(id, owner, reversed, GameTick(100))
+                .is_err()
+        );
         Ok(())
     }
     #[test]
@@ -471,10 +497,16 @@ mod spatial_verification_tests {
         book.release_lease(old, owner)?;
         let current = book.acquire_spatial_lease(owner, area(), true, GameTick(0), 10)?;
         assert_ne!(old, current);
-        assert!(book.verify_exclusive_spatial(old, owner, area(), GameTick(0)).is_err());
+        assert!(
+            book.verify_exclusive_spatial(old, owner, area(), GameTick(0))
+                .is_err()
+        );
         book.verify_exclusive_spatial(current, owner, area(), GameTick(0))?;
         book.cleanup_expired_leases(GameTick(10));
-        assert!(book.verify_exclusive_spatial(current, owner, area(), GameTick(10)).is_err());
+        assert!(
+            book.verify_exclusive_spatial(current, owner, area(), GameTick(10))
+                .is_err()
+        );
         Ok(())
     }
     #[test]
@@ -484,7 +516,10 @@ mod spatial_verification_tests {
         let shared = book.acquire_spatial_lease(owner, area(), false, GameTick(0), 10)?;
         let entity = book.acquire_entity_lease(owner, EntityId::new(1), true, GameTick(0), 10)?;
         for id in [shared, entity, LeaseId::new(999)] {
-            assert!(book.verify_exclusive_spatial(id, owner, area(), GameTick(0)).is_err());
+            assert!(
+                book.verify_exclusive_spatial(id, owner, area(), GameTick(0))
+                    .is_err()
+            );
         }
         Ok(())
     }

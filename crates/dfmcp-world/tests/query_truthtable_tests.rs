@@ -342,14 +342,23 @@ fn test_query_budget_enforcement_and_continuations() -> Result<(), Box<dyn Error
     assert_eq!(res_limit.matched, 3);
     assert!(res_limit.truncated);
     assert!(
-        res_limit.continuation.as_deref().is_some_and(|token| token.starts_with("q1:2:"))
+        res_limit
+            .continuation
+            .as_deref()
+            .is_some_and(|token| token.starts_with("q1:2:"))
     );
     let next_query = WorldQuery {
         continuation: res_limit.continuation,
         ..q_limit
     };
     let next = execute_query(&snapshot, &next_query, 100)?;
-    assert_eq!(next.entities.iter().map(|entity| entity.id.get()).collect::<Vec<_>>(), vec![3]);
+    assert_eq!(
+        next.entities
+            .iter()
+            .map(|entity| entity.id.get())
+            .collect::<Vec<_>>(),
+        vec![3]
+    );
     assert!(!next.truncated);
     assert!(next.continuation.is_none());
 
@@ -373,7 +382,10 @@ fn test_query_budget_enforcement_and_continuations() -> Result<(), Box<dyn Error
     assert_eq!(res_byte_bounded.entities.len(), 1);
     assert!(res_byte_bounded.truncated);
     assert!(
-        res_byte_bounded.continuation.as_deref().is_some_and(|token| token.starts_with("q1:1:"))
+        res_byte_bounded
+            .continuation
+            .as_deref()
+            .is_some_and(|token| token.starts_with("q1:1:"))
     );
 
     Ok(())

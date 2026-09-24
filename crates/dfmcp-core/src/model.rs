@@ -624,12 +624,7 @@ mod tests {
         let context = limited_context(1);
         assert!(
             context
-                .authorize(
-                    Capability::ConfigureLabor,
-                    RiskTier::Reversible,
-                    &[],
-                    None,
-                )
+                .authorize(Capability::ConfigureLabor, RiskTier::Reversible, &[], None,)
                 .is_err()
         );
     }
@@ -646,12 +641,7 @@ mod tests {
         assert_eq!(context.grants[0].remaining_uses, Some(0));
         assert!(
             context
-                .authorize_and_consume(
-                    Capability::ConfigureLabor,
-                    RiskTier::Reversible,
-                    &[],
-                    None,
-                )
+                .authorize_and_consume(Capability::ConfigureLabor, RiskTier::Reversible, &[], None,)
                 .is_err()
         );
         Ok(())

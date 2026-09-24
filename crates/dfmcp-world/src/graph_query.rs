@@ -47,7 +47,9 @@ impl GraphBudget {
             || self.max_work == 0
             || self.max_work > MAX_WORK
         {
-            return Err(budget_error("graph budget is outside the implementation bounds"));
+            return Err(budget_error(
+                "graph budget is outside the implementation bounds",
+            ));
         }
         Ok(())
     }
@@ -136,18 +138,25 @@ impl GraphTraversal {
                     return Ok(Some(ObservedGraphPath { vertices, edges }));
                 }
                 (Some(parent), Some(edge), Some(revision)) => {
-                    let parent = records.get(&parent).copied().ok_or_else(|| {
-                        invariant("path witness references an unvisited parent")
-                    })?;
+                    let parent = records
+                        .get(&parent)
+                        .copied()
+                        .ok_or_else(|| invariant("path witness references an unvisited parent"))?;
                     if parent.depth.checked_add(1) != Some(current.depth)
                         || parent.root != current.root
                     {
-                        return Err(invariant("path witness parent depth or source is inconsistent"));
+                        return Err(invariant(
+                            "path witness parent depth or source is inconsistent",
+                        ));
                     }
                     edges.push((edge, revision));
                     current = parent;
                 }
-                _ => return Err(invariant("path witness has inconsistent parent/edge fields")),
+                _ => {
+                    return Err(invariant(
+                        "path witness has inconsistent parent/edge fields",
+                    ));
+                }
             }
         }
         Err(invariant("path witness contains a parent cycle"))
@@ -240,7 +249,9 @@ impl Index {
         for (&id, entity) in &snapshot.graph.entities {
             index.charge(1)?;
             if id == EntityId::NIL || entity.id != id {
-                return Err(invariant("graph vertex key is inconsistent with its stable identity"));
+                return Err(invariant(
+                    "graph vertex key is inconsistent with its stable identity",
+                ));
             }
             index.ordinals.insert(id, index.ids.len());
             index.ids.push(id);
@@ -258,18 +269,30 @@ impl Index {
                 continue;
             }
             if edge.kind.as_str().len() > 128 {
-                return Err(budget_error("selected graph edge kind exceeds its byte bound"));
+                return Err(budget_error(
+                    "selected graph edge kind exceeds its byte bound",
+                ));
             }
             if id != edge.id || edge.id == EdgeId::NIL {
-                return Err(invariant("graph edge key is inconsistent with its stable identity"));
+                return Err(invariant(
+                    "graph edge key is inconsistent with its stable identity",
+                ));
             }
             let (Some(&from), Some(&to)) =
                 (index.ordinals.get(&edge.from), index.ordinals.get(&edge.to))
             else {
                 return Err(invariant("selected graph edge has an unobserved endpoint"));
             };
-            index.outgoing[from].push(Arc { target: to, edge: id, revision: edge.revision });
-            index.incoming[to].push(Arc { target: from, edge: id, revision: edge.revision });
+            index.outgoing[from].push(Arc {
+                target: to,
+                edge: id,
+                revision: edge.revision,
+            });
+            index.incoming[to].push(Arc {
+                target: from,
+                edge: id,
+                revision: edge.revision,
+            });
             canonical.extend_from_slice(&id.get().to_be_bytes());
             put_u64(&mut canonical, edge.revision);
             canonical.push(u8::from(matches!(&edge.kind, EdgeKind::Custom(_))));
@@ -285,10 +308,14 @@ impl Index {
     }
 
     fn charge(&mut self, units: u64) -> Result<()> {
-        self.work = self.work.checked_add(units)
+        self.work = self
+            .work
+            .checked_add(units)
             .ok_or_else(|| budget_error("graph work counter overflow"))?;
         if self.work > self.budget.max_work {
-            return Err(budget_error("graph traversal exhausted its operation budget"));
+            return Err(budget_error(
+                "graph traversal exhausted its operation budget",
+            ));
         }
         Ok(())
     }
@@ -301,7 +328,9 @@ impl Index {
 
     fn frontier(&self, size: usize) -> Result<()> {
         if size > self.budget.max_frontier {
-            return Err(budget_error("graph traversal exhausted its frontier budget"));
+            return Err(budget_error(
+                "graph traversal exhausted its frontier budget",
+            ));
         }
         Ok(())
     }
@@ -339,7 +368,9 @@ pub fn traverse_graph(
         || query.roots.len() > budget.max_vertices
         || query.max_depth > MAX_DEPTH
     {
-        return Err(budget_error("graph roots or depth exceed the traversal bounds"));
+        return Err(budget_error(
+            "graph roots or depth exceed the traversal bounds",
+        ));
     }
     let mut index = Index::build(snapshot, &query.edge_kinds, budget)?;
     let roots: BTreeSet<_> = query.roots.iter().copied().collect();
@@ -431,7 +462,11 @@ pub fn traverse_graph(
         put_u64(&mut decisions, id.get());
     }
     let witness = index.witness(snapshot, scope_digest, &decisions);
-    Ok(GraphTraversal { visits, depth_frontier, witness })
+    Ok(GraphTraversal {
+        visits,
+        depth_frontier,
+        witness,
+    })
 }
 
 fn neighbors(index: &Index, node: usize, direction: GraphDirection) -> Vec<Arc> {
@@ -506,9 +541,13 @@ pub fn analyze_dependencies(
             }
         }
         members.sort();
-        let cyclic = members.len() > 1
-            || index.outgoing[start].iter().any(|arc| arc.target == start);
-        components.push(DependencyComponent { id: members[0], members, cyclic });
+        let cyclic =
+            members.len() > 1 || index.outgoing[start].iter().any(|arc| arc.target == start);
+        components.push(DependencyComponent {
+            id: members[0],
+            members,
+            cyclic,
+        });
     }
     let count = components.len();
     let mut prerequisites = vec![BTreeSet::new(); count];
@@ -533,7 +572,10 @@ pub fn analyze_dependencies(
     index.frontier(ready.len())?;
     let mut order = Vec::new();
     let mut depths = vec![0usize; count];
-    let mut blocked: Vec<_> = components.iter().map(|component| component.cyclic).collect();
+    let mut blocked: Vec<_> = components
+        .iter()
+        .map(|component| component.cyclic)
+        .collect();
     while let Some((_, component)) = ready.pop_first() {
         index.charge(1)?;
         order.push(component);
@@ -543,9 +585,9 @@ pub fn analyze_dependencies(
             index.arc()?;
             blocked[dependent] |= component_blocked;
             depths[dependent] = depths[dependent].max(next_depth);
-            pending[dependent] = pending[dependent].checked_sub(1).ok_or_else(|| {
-                invariant("dependency count underflow in condensation")
-            })?;
+            pending[dependent] = pending[dependent]
+                .checked_sub(1)
+                .ok_or_else(|| invariant("dependency count underflow in condensation"))?;
             if pending[dependent] == 0 {
                 ready.insert((components[dependent].id, dependent));
                 index.frontier(ready.len())?;
@@ -560,13 +602,15 @@ pub fn analyze_dependencies(
     let critical_chain = if acyclic {
         let mut chain = Vec::new();
         index.charge(count as u64)?;
-        let mut current = (0..count)
-            .min_by_key(|&i| (std::cmp::Reverse(depths[i]), components[i].id));
+        let mut current =
+            (0..count).min_by_key(|&i| (std::cmp::Reverse(depths[i]), components[i].id));
         while let Some(node) = current {
             index.charge(1)?;
             chain.push(components[node].id);
             index.charge(prerequisites[node].len() as u64)?;
-            current = prerequisites[node].iter().copied()
+            current = prerequisites[node]
+                .iter()
+                .copied()
                 .min_by_key(|&i| (std::cmp::Reverse(depths[i]), components[i].id));
         }
         Some(chain)
@@ -605,6 +649,10 @@ pub fn analyze_dependencies(
     }
     let witness = index.witness(snapshot, scope_digest, &decisions);
     Ok(DependencyAnalysis {
-        components, blocked_by_cycles, dependency_order, critical_chain, witness,
+        components,
+        blocked_by_cycles,
+        dependency_order,
+        critical_chain,
+        witness,
     })
 }

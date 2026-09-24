@@ -2,9 +2,7 @@
 
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
 
-use crate::{
-    EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, Value, WorldSnapshot,
-};
+use crate::{EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, Value, WorldSnapshot};
 
 const MAX_QUERY_KINDS: usize = 64;
 const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
@@ -298,16 +296,14 @@ fn evaluate_truth(
             .map_or(PredicateTruth::Unknown, |known| {
                 PredicateTruth::from_bool(compare(known, *op, value))
             }),
-        Predicate::EdgeExists { edge_id, kind } => PredicateTruth::from_bool(
-            snapshot
-                .graph
-                .edges
-                .get(edge_id)
-                .is_some_and(|edge| match kind.as_ref() {
+        Predicate::EdgeExists { edge_id, kind } => {
+            PredicateTruth::from_bool(snapshot.graph.edges.get(edge_id).is_some_and(|edge| {
+                match kind.as_ref() {
                     Some(expected) => &edge.kind == expected,
                     None => true,
-                }),
-        ),
+                }
+            }))
+        }
         Predicate::Paused(expected) => PredicateTruth::from_bool(snapshot.paused == *expected),
         Predicate::All(predicates) => {
             let mut result = PredicateTruth::True;
@@ -780,8 +776,7 @@ mod tests {
         execute_query,
     };
     use crate::{
-        EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value, WorldGraph,
-        WorldSnapshot,
+        EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value, WorldGraph, WorldSnapshot,
     };
 
     fn snapshot() -> WorldSnapshot {
@@ -848,8 +843,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_facts_remain_unknown_through_boolean_logic()
-    -> Result<(), dfmcp_core::DfmcpError> {
+    fn omitted_facts_remain_unknown_through_boolean_logic() -> Result<(), dfmcp_core::DfmcpError> {
         let snapshot = snapshot();
         let omitted_absolute = Predicate::FieldCompare {
             entity_id: EntityId::new(1),

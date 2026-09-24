@@ -328,7 +328,10 @@ impl<T> EpistemicClaim<T> {
     pub fn can_satisfy_mutation_precondition(&self) -> bool {
         self.value.is_some()
             && self.anchor.is_some()
-            && self.confidence.epistemic_state.may_satisfy_mutation_precondition()
+            && self
+                .confidence
+                .epistemic_state
+                .may_satisfy_mutation_precondition()
     }
 }
 
@@ -465,8 +468,10 @@ impl CoverageDomain {
         if let Some(reason) = self.reason.as_ref() {
             validate_bounded_text(reason, "coverage reason", MAX_AGENT_DETAIL_BYTES)?;
         }
-        if matches!(self.status, CoverageStatus::Partial | CoverageStatus::Omitted)
-            && self.reason.is_none()
+        if matches!(
+            self.status,
+            CoverageStatus::Partial | CoverageStatus::Omitted
+        ) && self.reason.is_none()
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
@@ -687,7 +692,11 @@ impl Recommendation {
                 "recommendation identity must not be zero",
             ));
         }
-        validate_bounded_text(&self.reason, "recommendation reason", MAX_AGENT_DETAIL_BYTES)?;
+        validate_bounded_text(
+            &self.reason,
+            "recommendation reason",
+            MAX_AGENT_DETAIL_BYTES,
+        )?;
         if let Some(invocation) = self.invocation.as_ref() {
             invocation.validate()?;
         }

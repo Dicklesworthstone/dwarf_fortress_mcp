@@ -35,9 +35,11 @@ pub fn execute_bounded_query(
     byte_limit: Option<usize>,
 ) -> Result<QueryResult> {
     query.validate(hard_limit)?;
-    let per_entity = query.kinds.len().max(1).saturating_add(
-        query.predicate.as_ref().map_or(1, Predicate::complexity),
-    );
+    let per_entity = query
+        .kinds
+        .len()
+        .max(1)
+        .saturating_add(query.predicate.as_ref().map_or(1, Predicate::complexity));
     if snapshot.graph.entities.len().saturating_mul(per_entity) > MAX_QUERY_WORK {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
@@ -56,11 +58,14 @@ pub fn execute_bounded_query(
         None => 0,
     };
     let mut inner = query.clone();
-    inner.continuation = query.continuation.as_ref().map(|_| {
-        ContinuationToken::new(snapshot.fortress_id, snapshot.cursor, offset).encode()
-    });
+    inner.continuation = query
+        .continuation
+        .as_ref()
+        .map(|_| ContinuationToken::new(snapshot.fortress_id, snapshot.cursor, offset).encode());
     let mut result = match byte_limit {
-        Some(limit) => crate::query::execute_bounded_query(snapshot, &inner, hard_limit, Some(limit))?,
+        Some(limit) => {
+            crate::query::execute_bounded_query(snapshot, &inner, hard_limit, Some(limit))?
+        }
         None => crate::query::execute_query(snapshot, &inner, hard_limit)?,
     };
     if let Some(token) = result.continuation.take() {
@@ -112,7 +117,10 @@ fn encode_edge_kind(bytes: &mut Vec<u8>, kind: &EdgeKind) -> Result<()> {
 
 fn encode_kind_name(bytes: &mut Vec<u8>, name: &str) -> Result<()> {
     if name.len() > MAX_KIND_BYTES {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "query kind name exceeds its bound"));
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query kind name exceeds its bound",
+        ));
     }
     put_str(bytes, name);
     Ok(())
@@ -131,7 +139,12 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             put_u64(bytes, entity_id.get());
             encode_entity_kind(bytes, kind)?;
         }
-        Predicate::FieldCompare { entity_id, field, op, value } => {
+        Predicate::FieldCompare {
+            entity_id,
+            field,
+            op,
+            value,
+        } => {
             bytes.push(4);
             put_u64(bytes, entity_id.get());
             put_str(bytes, field);
@@ -161,7 +174,11 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             bytes.push(u8::from(*paused));
         }
         Predicate::All(children) | Predicate::Any(children) => {
-            bytes.push(if matches!(predicate, Predicate::All(_)) { 7 } else { 8 });
+            bytes.push(if matches!(predicate, Predicate::All(_)) {
+                7
+            } else {
+                8
+            });
             put_u64(bytes, children.len() as u64);
             for child in children {
                 encode_predicate(bytes, child)?;
@@ -173,7 +190,10 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
         }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "query identity exceeds its aggregate byte bound"));
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query identity exceeds its aggregate byte bound",
+        ));
     }
     Ok(())
 }
@@ -192,27 +212,48 @@ fn encode_cursor(offset: u32, identity: Digest32) -> String {
 
 fn decode_cursor(token: &str, identity: Digest32) -> Result<u32> {
     if token.starts_with("cont:") || token.starts_with("offset:") {
-        return Err(DfmcpError::new(ErrorCode::CursorGap, "legacy query continuation has no query/state binding; restart the query"));
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "legacy query continuation has no query/state binding; restart the query",
+        ));
     }
     let mut parts = token.split(':');
     let (Some(prefix), Some(offset), Some(digest), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())
     else {
-        return Err(DfmcpError::new(ErrorCode::InvalidRequest, "invalid query continuation shape"));
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "invalid query continuation shape",
+        ));
     };
-    if prefix != PREFIX || offset.is_empty() || !offset.bytes().all(|byte| byte.is_ascii_digit())
-        || digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    if prefix != PREFIX
+        || offset.is_empty()
+        || !offset.bytes().all(|byte| byte.is_ascii_digit())
+        || digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        return Err(DfmcpError::new(ErrorCode::InvalidRequest, "invalid query continuation encoding"));
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "invalid query continuation encoding",
+        ));
     }
     let parsed = offset.parse::<u32>().map_err(|_| {
-        DfmcpError::new(ErrorCode::InvalidRequest, "query continuation offset exceeds u32")
+        DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "query continuation offset exceeds u32",
+        )
     })?;
     if parsed == 0 || offset.starts_with('0') {
-        return Err(DfmcpError::new(ErrorCode::CursorGap, "query continuation offset is not canonical or makes no progress"));
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "query continuation offset is not canonical or makes no progress",
+        ));
     }
     if digest != cursor_digest(parsed, identity).to_string() {
-        return Err(DfmcpError::new(ErrorCode::StaleAnchor, "query continuation belongs to a different query or snapshot, or was modified"));
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "query continuation belongs to a different query or snapshot, or was modified",
+        ));
     }
     Ok(parsed)
 }

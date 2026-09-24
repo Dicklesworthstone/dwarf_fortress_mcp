@@ -11,6 +11,15 @@ impl Digest32 {
         Self(bytes)
     }
 
+    /// Constructor alias used by newer adapter-revision call sites
+    /// (`Digest32::new(sha256(..))`). Identical to [`Self::from_bytes`];
+    /// retained so crate revisions that predate/postdate the version-universe
+    /// re-sync compile against the same core surface.
+    #[must_use]
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0

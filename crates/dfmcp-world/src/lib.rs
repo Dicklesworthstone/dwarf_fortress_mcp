@@ -59,5 +59,5 @@ pub use query::{
 };
 pub use query_page::{execute_bounded_query, execute_query};
 pub use sqlite_ledger::{
-    CapsuleRow, DeltaRow, SnapshotRow, SqliteProductionLedger, SqliteLedgerConfig,
+    CapsuleRow, DeltaRow, SnapshotRow, SqliteLedgerConfig, SqliteProductionLedger,
 };

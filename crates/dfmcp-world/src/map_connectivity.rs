@@ -3,7 +3,7 @@
 //! Connected areas and single-point failures in the existing observed route
 //! model. A cut in this graph is NOT a native path, evacuation or safety proof.
 //! Iterative low-link DFS is bounded even on a 16,384-tile single corridor.
-use crate::map_region::{Cell, MapError, MapRegion, Shape, MAX_ROUTE_WORK};
+use crate::map_region::{Cell, MAX_ROUTE_WORK, MapError, MapRegion, Shape};
 
 pub const CONNECTIVITY_POLICY: &str = "observed-route-components-lowlink/1";
 const NONE: usize = usize::MAX;
@@ -11,16 +11,26 @@ const DEGREE: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Classification {
-    Candidate, Hidden, Unallocated, UnsupportedShape, Liquid, BuildingOccupied,
-    UnitOccupied, WalkabilityUnestablished,
+    Candidate,
+    Hidden,
+    Unallocated,
+    UnsupportedShape,
+    Liquid,
+    BuildingOccupied,
+    UnitOccupied,
+    WalkabilityUnestablished,
 }
 impl Classification {
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Candidate => "candidate", Self::Hidden => "hidden",
-            Self::Unallocated => "unallocated", Self::UnsupportedShape => "unsupported_shape",
-            Self::Liquid => "liquid", Self::BuildingOccupied => "building_occupied",
-            Self::UnitOccupied => "unit_occupied", Self::WalkabilityUnestablished => "walkability_unestablished",
+            Self::Candidate => "candidate",
+            Self::Hidden => "hidden",
+            Self::Unallocated => "unallocated",
+            Self::UnsupportedShape => "unsupported_shape",
+            Self::Liquid => "liquid",
+            Self::BuildingOccupied => "building_occupied",
+            Self::UnitOccupied => "unit_occupied",
+            Self::WalkabilityUnestablished => "walkability_unestablished",
         }
     }
 }
@@ -32,12 +42,20 @@ pub fn classify(cell: Cell) -> Classification {
         Cell::Unallocated => Classification::Unallocated,
         Cell::Visible(tile) if tile.candidate() => Classification::Candidate,
         Cell::Visible(tile) => {
-            if !matches!(tile.shape, Shape::Floor | Shape::StairUp | Shape::StairDown | Shape::StairUpDown) {
+            if !matches!(
+                tile.shape,
+                Shape::Floor | Shape::StairUp | Shape::StairDown | Shape::StairUpDown
+            ) {
                 Classification::UnsupportedShape
-            } else if tile.liquid_depth != 0 { Classification::Liquid }
-            else if tile.building_occupancy != 0 { Classification::BuildingOccupied }
-            else if tile.unit_occupancy != 0 { Classification::UnitOccupied }
-            else { Classification::WalkabilityUnestablished }
+            } else if tile.liquid_depth != 0 {
+                Classification::Liquid
+            } else if tile.building_occupancy != 0 {
+                Classification::BuildingOccupied
+            } else if tile.unit_occupancy != 0 {
+                Classification::UnitOccupied
+            } else {
+                Classification::WalkabilityUnestablished
+            }
         }
     }
 }
@@ -82,12 +100,20 @@ pub struct Connectivity {
     pub work_units: u64,
 }
 
-struct Work<F> { used: u64, maximum: u64, check: F }
+struct Work<F> {
+    used: u64,
+    maximum: u64,
+    check: F,
+}
 impl<F: FnMut() -> Result<(), MapError>> Work<F> {
     fn charge(&mut self) -> Result<(), MapError> {
-        if self.used >= self.maximum { return Err(MapError::BudgetExceeded); }
+        if self.used >= self.maximum {
+            return Err(MapError::BudgetExceeded);
+        }
         self.used += 1;
-        if self.used == 1 || self.used % 128 == 0 { (self.check)()?; }
+        if self.used == 1 || self.used % 128 == 0 {
+            (self.check)()?;
+        }
         Ok(())
     }
 }
@@ -95,27 +121,53 @@ impl<F: FnMut() -> Result<(), MapError>> Work<F> {
 /// Candidate adjacency is the same six-neighbor, dry floor/complementary-stair
 /// graph as MapRegion::route. Differential tests compare it with that public
 /// route oracle rather than assuming two independently edited policies agree.
-fn neighbors<F: FnMut() -> Result<(), MapError>>(map: &MapRegion, index: usize,
-    work: &mut Work<F>) -> Result<[usize; DEGREE], MapError> {
+fn neighbors<F: FnMut() -> Result<(), MapError>>(
+    map: &MapRegion,
+    index: usize,
+    work: &mut Work<F>,
+) -> Result<[usize; DEGREE], MapError> {
     let mut out = [NONE; DEGREE];
-    if !map.candidate(index) { return Ok(out); }
+    if !map.candidate(index) {
+        return Ok(out);
+    }
     let position = map.region.position(index).ok_or(MapError::InvalidRegion)?;
     let mut length = 0;
     for axis in 0..3 {
         for increase in [false, true] {
             work.charge()?;
-            let coordinate = if increase { position[axis].checked_add(1) } else { position[axis].checked_sub(1) };
-            let Some(coordinate) = coordinate else { continue; };
-            let mut next = position; next[axis] = coordinate;
-            let Some(target) = map.region.index(next) else { continue; };
-            if !map.candidate(target) { continue; }
+            let coordinate = if increase {
+                position[axis].checked_add(1)
+            } else {
+                position[axis].checked_sub(1)
+            };
+            let Some(coordinate) = coordinate else {
+                continue;
+            };
+            let mut next = position;
+            next[axis] = coordinate;
+            let Some(target) = map.region.index(next) else {
+                continue;
+            };
+            if !map.candidate(target) {
+                continue;
+            }
             if axis == 2 {
-                let (Cell::Visible(a), Cell::Visible(b)) = (map.cells[index], map.cells[target]) else { continue; };
+                let (Cell::Visible(a), Cell::Visible(b)) = (map.cells[index], map.cells[target])
+                else {
+                    continue;
+                };
                 let up = |s| matches!(s, Shape::StairUp | Shape::StairUpDown);
                 let down = |s| matches!(s, Shape::StairDown | Shape::StairUpDown);
-                if !(if increase { up(a.shape) && down(b.shape) } else { down(a.shape) && up(b.shape) }) { continue; }
+                if !(if increase {
+                    up(a.shape) && down(b.shape)
+                } else {
+                    down(a.shape) && up(b.shape)
+                }) {
+                    continue;
+                }
             }
-            out[length] = target; length += 1;
+            out[length] = target;
+            length += 1;
         }
     }
     out[..length].sort_unstable();
@@ -128,13 +180,22 @@ pub fn analyze(map: &MapRegion, maximum_work: u64) -> Result<Connectivity, MapEr
 
 /// The caller may inject a cooperative deadline check; failure returns no partial
 /// analysis. No recursion, I/O, mutable map, cached generation or detached work.
-pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(map: &MapRegion,
-    maximum_work: u64, mut check: F) -> Result<Connectivity, MapError> {
-    if maximum_work == 0 || maximum_work > MAX_ROUTE_WORK { return Err(MapError::BudgetExceeded); }
+pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(
+    map: &MapRegion,
+    maximum_work: u64,
+    mut check: F,
+) -> Result<Connectivity, MapError> {
+    if maximum_work == 0 || maximum_work > MAX_ROUTE_WORK {
+        return Err(MapError::BudgetExceeded);
+    }
     check()?;
     map.validate()?;
     let n = map.cells.len();
-    let mut work = Work { used: 0, maximum: maximum_work, check };
+    let mut work = Work {
+        used: 0,
+        maximum: maximum_work,
+        check,
+    };
     let mut adjacent = Vec::with_capacity(n);
     let mut candidate_tiles = 0u32;
     let mut arcs = 0u32;
@@ -145,8 +206,15 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(map: &MapRegion,
         arcs += row.iter().filter(|&&v| v != NONE).count() as u32;
         adjacent.push(row);
     }
-    let mut result = Connectivity { components: Vec::new(), bottlenecks: Vec::new(), bridges: Vec::new(),
-        component_of: vec![None; n], candidate_tiles, edges: arcs / 2, work_units: 0 };
+    let mut result = Connectivity {
+        components: Vec::new(),
+        bottlenecks: Vec::new(),
+        bridges: Vec::new(),
+        component_of: vec![None; n],
+        candidate_tiles,
+        edges: arcs / 2,
+        work_units: 0,
+    };
     let mut discovered = vec![0usize; n];
     let mut low = vec![0usize; n];
     let mut parent = vec![NONE; n];
@@ -157,15 +225,26 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(map: &MapRegion,
     let mut timer = 0usize;
     for root in 0..n {
         work.charge()?;
-        if !map.candidate(root) || discovered[root] != 0 { continue; }
+        if !map.candidate(root) || discovered[root] != 0 {
+            continue;
+        }
         let component = result.components.len();
         let position = map.region.position(root).ok_or(MapError::InvalidRegion)?;
-        result.components.push(Component { representative: root, tiles: 0, edges: 0,
-            min: position, max: position, touches_region_boundary: false });
+        result.components.push(Component {
+            representative: root,
+            tiles: 0,
+            edges: 0,
+            min: position,
+            max: position,
+            touches_region_boundary: false,
+        });
         // Each frame holds the next neighbor offset. A vertex is discovered and
         // pushed once, and each geometric adjacency is visited at most once.
         let mut stack = vec![(root, 0usize)];
-        timer += 1; discovered[root] = timer; low[root] = timer; subtree[root] = 1;
+        timer += 1;
+        discovered[root] = timer;
+        low[root] = timer;
+        subtree[root] = 1;
         result.component_of[root] = Some(component);
         while let Some((node, next_edge)) = stack.last().copied() {
             work.charge()?;
@@ -174,20 +253,29 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(map: &MapRegion,
                 let frame = stack.last_mut().ok_or(MapError::InvalidRegion)?;
                 frame.1 += 1;
                 if discovered[target] == 0 {
-                    timer += 1; discovered[target] = timer; low[target] = timer;
-                    subtree[target] = 1; parent[target] = node;
+                    timer += 1;
+                    discovered[target] = timer;
+                    low[target] = timer;
+                    subtree[target] = 1;
+                    parent[target] = node;
                     result.component_of[target] = Some(component);
                     stack.push((target, 0));
-                } else if target != parent[node] { low[node] = low[node].min(discovered[target]); }
+                } else if target != parent[node] {
+                    low[node] = low[node].min(discovered[target]);
+                }
             } else {
                 stack.pop();
                 let p = parent[node];
                 if p != NONE {
-                    subtree[p] += subtree[node]; low[p] = low[p].min(low[node]);
+                    subtree[p] += subtree[node];
+                    low[p] = low[p].min(low[node]);
                     if low[node] >= discovered[p] {
                         let next = split_count[p];
-                        if next >= DEGREE { return Err(MapError::InvalidRegion); }
-                        split_sizes[p][next] = subtree[node]; split_count[p] += 1;
+                        if next >= DEGREE {
+                            return Err(MapError::InvalidRegion);
+                        }
+                        split_sizes[p][next] = subtree[node];
+                        split_count[p] += 1;
                     }
                     bridge_child[node] = low[node] > discovered[p];
                 }
@@ -197,31 +285,62 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(map: &MapRegion,
     }
     for node in 0..n {
         work.charge()?;
-        let Some(component) = result.component_of[node] else { continue; };
+        let Some(component) = result.component_of[node] else {
+            continue;
+        };
         let position = map.region.position(node).ok_or(MapError::InvalidRegion)?;
         let c = &mut result.components[component];
-        c.edges += adjacent[node].iter().filter(|&&target| target != NONE && node < target).count() as u32;
+        c.edges += adjacent[node]
+            .iter()
+            .filter(|&&target| target != NONE && node < target)
+            .count() as u32;
         for (axis, coordinate) in position.iter().copied().enumerate() {
-            c.min[axis] = c.min[axis].min(coordinate); c.max[axis] = c.max[axis].max(coordinate);
+            c.min[axis] = c.min[axis].min(coordinate);
+            c.max[axis] = c.max[axis].max(coordinate);
             let relative = coordinate - map.region.origin[axis];
             c.touches_region_boundary |= relative == 0 || relative + 1 == map.region.size[axis];
         }
         let mut parts = split_sizes[node][..split_count[node]].to_vec();
         let separated: u32 = parts.iter().sum();
-        let remainder = c.tiles.checked_sub(1).and_then(|v| v.checked_sub(separated))
+        let remainder = c
+            .tiles
+            .checked_sub(1)
+            .and_then(|v| v.checked_sub(separated))
             .ok_or(MapError::InvalidRegion)?;
-        if remainder > 0 { parts.push(remainder); }
+        if remainder > 0 {
+            parts.push(remainder);
+        }
         if parts.len() > 1 {
             parts.sort_unstable_by(|a, b| b.cmp(a));
-            let mut pairs = 0u64; let mut prior = 0u64;
-            for &size in &parts { pairs += prior * u64::from(size); prior += u64::from(size); }
-            result.bottlenecks.push(Bottleneck { tile: node, component,
-                partition_sizes: parts, separated_tile_pairs: pairs });
+            let mut pairs = 0u64;
+            let mut prior = 0u64;
+            for &size in &parts {
+                pairs += prior * u64::from(size);
+                prior += u64::from(size);
+            }
+            result.bottlenecks.push(Bottleneck {
+                tile: node,
+                component,
+                partition_sizes: parts,
+                separated_tile_pairs: pairs,
+            });
         }
         if bridge_child[node] {
-            let p = parent[node]; let sizes = [subtree[node], c.tiles - subtree[node]];
-            result.bridges.push(if node < p { Bridge { endpoints: [node, p], component, side_sizes: sizes } }
-                else { Bridge { endpoints: [p, node], component, side_sizes: [sizes[1], sizes[0]] } });
+            let p = parent[node];
+            let sizes = [subtree[node], c.tiles - subtree[node]];
+            result.bridges.push(if node < p {
+                Bridge {
+                    endpoints: [node, p],
+                    component,
+                    side_sizes: sizes,
+                }
+            } else {
+                Bridge {
+                    endpoints: [p, node],
+                    component,
+                    side_sizes: [sizes[1], sizes[0]],
+                }
+            });
         }
     }
     result.bridges.sort_unstable_by_key(|edge| edge.endpoints);
