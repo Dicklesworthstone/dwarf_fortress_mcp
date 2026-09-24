@@ -127,8 +127,9 @@ class OutcomeStore:
     custody is not a global controller lease or protection against owner rollback.
     Even offline inspection opens only read-only descriptors and never fsyncs.
     """
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, parent_fd: int | None = None):
         self.path = path
+        self.borrowed_parent = parent_fd
         self.parent = self.source = self.outcome = None
         self.intent = None
         self.source_data = self.outcome_data = None
@@ -137,7 +138,9 @@ class OutcomeStore:
     def __enter__(self) -> OutcomeStore:
         import fcntl
         try:
-            self.parent = _open_parent(self.path)
+            # dup shares the batch owner's lock; check() still proves exact named-parent identity.
+            self.parent = (_open_parent(self.path) if self.borrowed_parent is None
+                           else os.dup(self.borrowed_parent))
             fcntl.flock(self.parent, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.source = os.open(self.path.name, OPEN_READ, dir_fd=self.parent)
             fcntl.flock(self.source, fcntl.LOCK_SH | fcntl.LOCK_NB)
