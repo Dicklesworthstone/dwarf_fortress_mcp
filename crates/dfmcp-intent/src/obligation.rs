@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{ActionId, DfmcpError, ErrorCode, Evidence, EvidenceKind, GameTick, Result};
+use dfmcp_core::{
+    ActionId, DfmcpError, ErrorCode, Evidence, EvidenceKind, GameTick, Result, StateAnchor,
+};
 use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
 use crate::plan::ObligationSpec;
@@ -63,6 +65,9 @@ pub struct BoundedObligation {
 #[derive(Clone, Debug, Default)]
 pub struct ObligationRuntime {
     obligations: BTreeMap<ActionId, BoundedObligation>,
+    // Kept separately to preserve the public BoundedObligation record shape.
+    // At most one anchor per registered action; terminal anchors are immutable.
+    observation_anchors: BTreeMap<ActionId, StateAnchor>,
 }
 
 impl ObligationRuntime {
@@ -70,10 +75,14 @@ impl ObligationRuntime {
     pub fn new() -> Self {
         Self {
             obligations: BTreeMap::new(),
+            observation_anchors: BTreeMap::new(),
         }
     }
 
-    /// Register a new bounded obligation.
+    /// Register a bounded obligation using the legacy tick-only interface.
+    ///
+    /// Its source is bound by the first accepted observation, not at registration.
+    /// Use [`Self::register_obligation_at`] when the creation snapshot is available.
     pub fn register_obligation(
         &mut self,
         action_id: ActionId,
@@ -145,6 +154,50 @@ impl ObligationRuntime {
         Ok(())
     }
 
+    /// Register against one complete creation snapshot without counting it as a
+    /// stability sample. All later observations must remain in its fortress and
+    /// observation epoch, with nonregressing ticks and sequences.
+    pub fn register_obligation_at(
+        &mut self,
+        action_id: ActionId,
+        spec: ObligationSpec,
+        snapshot: &WorldSnapshot,
+    ) -> Result<()> {
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::ChecksumMismatch,
+                "obligation registration requires a valid world snapshot",
+            ));
+        }
+        self.register_obligation(action_id, spec, snapshot.tick)?;
+        self.observation_anchors.insert(action_id, snapshot.anchor());
+        Ok(())
+    }
+
+    /// Forget only the unfinished stability streak after a failed or interrupted
+    /// read. Identity, poll cadence, elapsed time and the fixed deadline survive.
+    /// Historical terminal outcomes and cancellation drains are not rewritten.
+    pub fn observation_interrupted(&mut self, action_id: ActionId) -> Result<()> {
+        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation")
+        })?;
+        if let ObligationStatus::Active {
+            consecutive_stable_observations,
+            ..
+        } = &mut obligation.status
+        {
+            *consecutive_stable_observations = 0;
+        }
+        Ok(())
+    }
+
+    /// Last accepted observation anchor, or the creation anchor for an unsampled
+    /// anchored registration. A legacy registration returns None until sampled.
+    #[must_use]
+    pub fn last_observation_anchor(&self, action_id: ActionId) -> Option<StateAnchor> {
+        self.observation_anchors.get(&action_id).copied()
+    }
+
     /// Evaluate supplied evidence atomically across all active obligations.
     ///
     /// Poll cadence limits positive stability samples, not the failure evidence
@@ -161,16 +214,31 @@ impl ObligationRuntime {
         // Validate the entire batch before publishing any transition. Otherwise a
         // later action's stale tick could leave earlier actions falsely fulfilled
         // even though this call returned an error (df-action-coordinator-exec-ero.4).
+        let incoming = snapshot.anchor();
         for obligation in self.obligations.values() {
-            if matches!(obligation.status, ObligationStatus::Active { .. })
-                && (snapshot.tick < obligation.registered_tick
-                    || obligation
-                        .last_evaluated_tick
-                        .is_some_and(|last_tick| snapshot.tick < last_tick))
+            if !matches!(obligation.status, ObligationStatus::Active { .. }) {
+                continue;
+            }
+            if snapshot.tick < obligation.registered_tick
+                || obligation
+                    .last_evaluated_tick
+                    .is_some_and(|last_tick| snapshot.tick < last_tick)
             {
                 return Err(DfmcpError::new(
                     ErrorCode::StaleAnchor,
                     "obligation observation tick regressed",
+                ));
+            }
+            if let Some(previous) = self.observation_anchors.get(&obligation.action_id)
+                && (incoming.fortress_id != previous.fortress_id
+                    || incoming.cursor.epoch != previous.cursor.epoch
+                    || incoming.cursor.sequence < previous.cursor.sequence
+                    || incoming.tick < previous.tick
+                    || (incoming.cursor == previous.cursor && incoming != *previous))
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::StaleAnchor,
+                    "obligation observation changed lineage, regressed, or forked a cursor",
                 ));
             }
         }
@@ -184,6 +252,10 @@ impl ObligationRuntime {
                 continue;
             };
             let previous_stable = *consecutive_stable_observations;
+            // Track every accepted read, independently of the positive-sample
+            // cadence. Otherwise an off-cadence read could be silently rewound.
+            self.observation_anchors
+                .insert(obligation.action_id, incoming);
             let new_elapsed = snapshot.tick.0.saturating_sub(obligation.registered_tick.0);
 
             // Failure evidence takes precedence even between scheduled polls or
@@ -282,10 +354,14 @@ impl ObligationRuntime {
             || obligation
                 .last_evaluated_tick
                 .is_some_and(|last_tick| current_tick < last_tick)
+            || self
+                .observation_anchors
+                .get(&action_id)
+                .is_some_and(|anchor| current_tick < anchor.tick)
         {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
-                "cancellation tick precedes obligation registration or evaluation",
+                "cancellation tick precedes obligation registration or observation",
             ));
         }
 
