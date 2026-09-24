@@ -194,8 +194,8 @@ impl MemoryAdapter {
         let cursor_regressed = incoming.cursor.epoch < current.cursor.epoch
             || (incoming.cursor.epoch == current.cursor.epoch
                 && incoming.cursor.sequence <= current.cursor.sequence);
-        let tick_regressed_without_epoch = incoming.cursor.epoch == current.cursor.epoch
-            && incoming.tick < current.tick;
+        let tick_regressed_without_epoch =
+            incoming.cursor.epoch == current.cursor.epoch && incoming.tick < current.tick;
         if cursor_regressed || tick_regressed_without_epoch {
             return Err(DfmcpError::new(
                 ErrorCode::CursorGap,
@@ -1306,8 +1306,8 @@ mod tests {
     use dfmcp_adapter::{GameAdapter, ObservationRequest, Projection};
     use dfmcp_core::{
         Capability, CapabilityGrant, CapabilityScope, CommitState, DfmcpError, ErrorCode,
-        FortressId, GameTick, IntentId, MapCoord, MapCuboid, ObservationCursor,
-        OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
+        FortressId, GameTick, IntentId, MapCoord, MapCuboid, ObservationCursor, OperationContext,
+        RequestId, RiskTier, SessionId, WorkBudget,
     };
     use dfmcp_intent::{
         Action, Constraint, DigMode, Intent, ObligationSpec, RequestedAction, StaticPlanner,
@@ -1576,12 +1576,14 @@ mod tests {
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
 
         let mut injected = adapter.snapshot().clone();
-        injected.tick = injected.tick.checked_add(1).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::BudgetExceeded, "test tick overflow")
-        })?;
-        injected.cursor = injected.cursor.checked_next().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
-        })?;
+        injected.tick = injected
+            .tick
+            .checked_add(1)
+            .ok_or_else(|| DfmcpError::new(ErrorCode::BudgetExceeded, "test tick overflow"))?;
+        injected.cursor = injected
+            .cursor
+            .checked_next()
+            .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow"))?;
         injected.refresh_hash();
         adapter.inject_snapshot(injected)?;
 
@@ -1607,7 +1609,9 @@ mod tests {
             true,
             WorldGraph::default(),
         ));
-        assert!(matches!(adapter.advance_ticks(0), Err(ref error) if error.code == ErrorCode::InvalidRequest));
+        assert!(
+            matches!(adapter.advance_ticks(0), Err(ref error) if error.code == ErrorCode::InvalidRequest)
+        );
     }
 
     #[test]

@@ -23,13 +23,28 @@ pub use layout::{BlueprintExcavation, BlueprintLayout, ExcavationRole};
 /// Room blueprint archetype templates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BlueprintTemplate {
-    BedroomCluster { rooms_count: u32, room_size: (u8, u8) },
-    DiningHall { width: u8, height: u8 },
-    WorkshopHub { bays_count: u32 },
-    StockpileVault { width: u8, height: u8, category: String },
+    BedroomCluster {
+        rooms_count: u32,
+        room_size: (u8, u8),
+    },
+    DiningHall {
+        width: u8,
+        height: u8,
+    },
+    WorkshopHub {
+        bays_count: u32,
+    },
+    StockpileVault {
+        width: u8,
+        height: u8,
+        category: String,
+    },
     /// One-tile perimeter on one z-level. The optional north-edge crossing is
     /// left unexcavated; its span does not request or prove bridge construction.
-    DefensiveMoat { perimeter_cuboid: MapCuboid, drawbridge_span: u8 },
+    DefensiveMoat {
+        perimeter_cuboid: MapCuboid,
+        drawbridge_span: u8,
+    },
 }
 
 /// Result of the legacy index's limited magma/span preflight.
@@ -53,29 +68,52 @@ impl BlueprintPlanner {
     /// Check a bounded excavation area against a complete one-tile hazard halo.
     /// `Safe` means only that this limited index check found no listed hazard.
     #[must_use]
-    pub fn assess_hazards(&self, area: &MapCuboid, spatial_index: &ChunkSpatialIndex) -> HazardAssessment {
+    pub fn assess_hazards(
+        &self,
+        area: &MapCuboid,
+        spatial_index: &ChunkSpatialIndex,
+    ) -> HazardAssessment {
         let halo = match hazard_halo(area) {
             Ok(halo) => halo,
-            Err(error) => return HazardAssessment::IncompleteKnowledge { reason: error.message },
+            Err(error) => {
+                return HazardAssessment::IncompleteKnowledge {
+                    reason: error.message,
+                };
+            }
         };
         let Some(expected_tiles) = halo.tile_count() else {
-            return HazardAssessment::IncompleteKnowledge { reason: "hazard halo tile count overflow".to_owned() };
+            return HazardAssessment::IncompleteKnowledge {
+                reason: "hazard halo tile count overflow".to_owned(),
+            };
         };
         if expected_tiles > MAX_HAZARD_TILES {
-            return HazardAssessment::IncompleteKnowledge { reason: "hazard halo exceeds the blueprint work budget".to_owned() };
+            return HazardAssessment::IncompleteKnowledge {
+                reason: "hazard halo exceeds the blueprint work budget".to_owned(),
+            };
         }
         let tiles = match spatial_index.find_cuboid(&halo) {
             Ok(tiles) => tiles,
-            Err(error) => return HazardAssessment::IncompleteKnowledge { reason: error.message },
+            Err(error) => {
+                return HazardAssessment::IncompleteKnowledge {
+                    reason: error.message,
+                };
+            }
         };
         if u64::try_from(tiles.len()).ok() != Some(expected_tiles) {
             return HazardAssessment::IncompleteKnowledge {
-                reason: format!("hazard scan observed {} of {expected_tiles} required halo tiles", tiles.len()),
+                reason: format!(
+                    "hazard scan observed {} of {expected_tiles} required halo tiles",
+                    tiles.len()
+                ),
             };
         }
         for (coord, properties) in tiles {
-            if properties.tile_type == TileType::MagmaWall || properties.temperature == TemperatureBand::MagmaHot {
-                return HazardAssessment::MagmaProximity { hazard_coord: coord };
+            if properties.tile_type == TileType::MagmaWall
+                || properties.temperature == TemperatureBand::MagmaHot
+            {
+                return HazardAssessment::MagmaProximity {
+                    hazard_coord: coord,
+                };
             }
         }
         let width = inclusive_span(area.min.x, area.max.x);
@@ -97,20 +135,32 @@ impl BlueprintPlanner {
         spatial_index: &ChunkSpatialIndex,
     ) -> Result<Intent> {
         let deadline = GameTick(anchor.tick.0.checked_add(1_000).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::BudgetExceeded, "blueprint obligation deadline overflows the game tick range")
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "blueprint obligation deadline overflows the game tick range",
+            )
         })?);
         let layout = self.layout(origin, template)?;
         // Sum the *actual* repeated halo work, not just unique excavated tiles.
         let mut scan_tiles = 0_u64;
         for part in layout.excavations() {
             let count = hazard_halo(&part.area)?.tile_count().ok_or_else(|| {
-                DfmcpError::new(ErrorCode::BudgetExceeded, "blueprint hazard tile count overflow")
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "blueprint hazard tile count overflow",
+                )
             })?;
             scan_tiles = scan_tiles.checked_add(count).ok_or_else(|| {
-                DfmcpError::new(ErrorCode::BudgetExceeded, "blueprint hazard tile count overflow")
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "blueprint hazard tile count overflow",
+                )
             })?;
             if scan_tiles > MAX_HAZARD_TILES {
-                return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "blueprint hazard scans exceed 131072 tile visits"));
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "blueprint hazard scans exceed 131072 tile visits",
+                ));
             }
         }
         for part in layout.excavations() {
@@ -122,18 +172,32 @@ impl BlueprintPlanner {
             summary: layout.summary().to_owned(),
             terminal_condition: Predicate::False,
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
-            requested_actions: layout.excavations().iter().map(|part| {
-                dig_request(part.area, part.mode, deadline)
-            }).collect(),
+            requested_actions: layout
+                .excavations()
+                .iter()
+                .map(|part| dig_request(part.area, part.mode, deadline))
+                .collect(),
         })
     }
 
-    fn require_safe(&self, label: &str, area: &MapCuboid, spatial_index: &ChunkSpatialIndex) -> Result<()> {
+    fn require_safe(
+        &self,
+        label: &str,
+        area: &MapCuboid,
+        spatial_index: &ChunkSpatialIndex,
+    ) -> Result<()> {
         match self.assess_hazards(area, spatial_index) {
             HazardAssessment::Safe => Ok(()),
-            HazardAssessment::MagmaProximity { hazard_coord } => Err(invalid(format!("{label} plan rejected: magma hazard at {hazard_coord:?}"))),
-            HazardAssessment::UnsupportedCaveInRisk { span_width } => Err(invalid(format!("{label} plan rejected: unsupported span {span_width}"))),
-            HazardAssessment::IncompleteKnowledge { reason } => Err(DfmcpError::new(ErrorCode::PreconditionsFailed, format!("{label} hazard assessment is incomplete: {reason}"))),
+            HazardAssessment::MagmaProximity { hazard_coord } => Err(invalid(format!(
+                "{label} plan rejected: magma hazard at {hazard_coord:?}"
+            ))),
+            HazardAssessment::UnsupportedCaveInRisk { span_width } => Err(invalid(format!(
+                "{label} plan rejected: unsupported span {span_width}"
+            ))),
+            HazardAssessment::IncompleteKnowledge { reason } => Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!("{label} hazard assessment is incomplete: {reason}"),
+            )),
         }
     }
 }
@@ -144,8 +208,10 @@ fn hazard_halo(area: &MapCuboid) -> Result<MapCuboid> {
     if area.min.x > area.max.x || area.min.y > area.max.y || area.min.z > area.max.z {
         return Err(invalid("hazard scan requires an ordered cuboid"));
     }
-    let low = checked_coord_offset(area.min, -1, -1, -1).ok_or_else(|| invalid("hazard halo crosses the coordinate boundary"))?;
-    let high = checked_coord_offset(area.max, 1, 1, 1).ok_or_else(|| invalid("hazard halo crosses the coordinate boundary"))?;
+    let low = checked_coord_offset(area.min, -1, -1, -1)
+        .ok_or_else(|| invalid("hazard halo crosses the coordinate boundary"))?;
+    let high = checked_coord_offset(area.max, 1, 1, 1)
+        .ok_or_else(|| invalid("hazard halo crosses the coordinate boundary"))?;
     MapCuboid::new(low, high)
 }
 
@@ -209,8 +275,14 @@ mod tests {
             for y in -1..=1 {
                 for x in -1..=1 {
                     index.insert_or_update_chunk(&MapChunk {
-                        coord: ChunkCoord { x, y, z }, revision: 1, width: 16, height: 16,
-                        terrain_runs: vec![TerrainRun { tile_code: 2, length: 256 }],
+                        coord: ChunkCoord { x, y, z },
+                        revision: 1,
+                        width: 16,
+                        height: 16,
+                        terrain_runs: vec![TerrainRun {
+                            tile_code: 2,
+                            length: 256,
+                        }],
                         sparse_overlays: BTreeMap::new(),
                     })?;
                 }
@@ -220,15 +292,24 @@ mod tests {
     }
 
     fn anchor() -> StateAnchor {
-        StateAnchor { fortress_id: FortressId::new(1), cursor: ObservationCursor::ORIGIN,
-            tick: GameTick(100), state_hash: Digest32::ZERO }
+        StateAnchor {
+            fortress_id: FortressId::new(1),
+            cursor: ObservationCursor::ORIGIN,
+            tick: GameTick(100),
+            state_hash: Digest32::ZERO,
+        }
     }
 
     #[test]
     fn bedroom_cluster_compilation_is_bounded_and_fail_closed() -> Result<()> {
         let intent = BlueprintPlanner.compile_blueprint_intent(
-            IntentId::new(1), anchor(), MapCoord { x: 0, y: 0, z: 100 },
-            BlueprintTemplate::BedroomCluster { rooms_count: 4, room_size: (3, 3) },
+            IntentId::new(1),
+            anchor(),
+            MapCoord { x: 0, y: 0, z: 100 },
+            BlueprintTemplate::BedroomCluster {
+                rooms_count: 4,
+                room_size: (3, 3),
+            },
             &covered_spatial_index()?,
         )?;
         assert_eq!(intent.requested_actions.len(), 10);
@@ -239,24 +320,58 @@ mod tests {
 
     #[test]
     fn huge_dining_hall_is_rejected_for_cave_in_risk() -> Result<()> {
-        assert!(BlueprintPlanner.compile_blueprint_intent(
-            IntentId::new(2), anchor(), MapCoord { x: 0, y: 0, z: 100 },
-            BlueprintTemplate::DiningHall { width: 12, height: 12 }, &covered_spatial_index()?,
-        ).is_err());
+        assert!(
+            BlueprintPlanner
+                .compile_blueprint_intent(
+                    IntentId::new(2),
+                    anchor(),
+                    MapCoord { x: 0, y: 0, z: 100 },
+                    BlueprintTemplate::DiningHall {
+                        width: 12,
+                        height: 12
+                    },
+                    &covered_spatial_index()?,
+                )
+                .is_err()
+        );
         Ok(())
     }
 
     #[test]
     fn coordinate_boundaries_and_zero_dimensions_are_rejected() -> Result<()> {
         let index = covered_spatial_index()?;
-        assert!(BlueprintPlanner.compile_blueprint_intent(
-            IntentId::new(3), anchor(), MapCoord { x: i32::MAX, y: 0, z: 100 },
-            BlueprintTemplate::DiningHall { width: 2, height: 2 }, &index,
-        ).is_err());
-        assert!(BlueprintPlanner.compile_blueprint_intent(
-            IntentId::new(4), anchor(), MapCoord { x: 0, y: 0, z: 100 },
-            BlueprintTemplate::DiningHall { width: 0, height: 2 }, &index,
-        ).is_err());
+        assert!(
+            BlueprintPlanner
+                .compile_blueprint_intent(
+                    IntentId::new(3),
+                    anchor(),
+                    MapCoord {
+                        x: i32::MAX,
+                        y: 0,
+                        z: 100
+                    },
+                    BlueprintTemplate::DiningHall {
+                        width: 2,
+                        height: 2
+                    },
+                    &index,
+                )
+                .is_err()
+        );
+        assert!(
+            BlueprintPlanner
+                .compile_blueprint_intent(
+                    IntentId::new(4),
+                    anchor(),
+                    MapCoord { x: 0, y: 0, z: 100 },
+                    BlueprintTemplate::DiningHall {
+                        width: 0,
+                        height: 2
+                    },
+                    &index,
+                )
+                .is_err()
+        );
         Ok(())
     }
 }

@@ -52,7 +52,10 @@ impl InventoryStockpile {
     /// Get declared stock count for an item token (defaults to zero).
     #[must_use]
     pub fn get_stock(&self, token: &str) -> u32 {
-        self.item_counts.get(token).copied().map_or(0, |count| count)
+        self.item_counts
+            .get(token)
+            .copied()
+            .map_or(0, |count| count)
     }
 }
 
@@ -176,7 +179,9 @@ mod tests {
         let actions = compiler.compile_quota_work_orders("DRINK", 50, &inventory)?;
         assert_eq!(actions.len(), 2);
         match &actions[0] {
-            Action::CreateWorkOrder { job_token, amount, .. } => {
+            Action::CreateWorkOrder {
+                job_token, amount, ..
+            } => {
                 assert_eq!(job_token, "MakeWoodenBarrel");
                 assert_eq!(*amount, 8);
             }

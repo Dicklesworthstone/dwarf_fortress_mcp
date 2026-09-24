@@ -552,7 +552,9 @@ mod tests {
             is_quiescent: true,
         };
         let result = runtime.finalize_cancel(action_id, GameTick(19), &certificate);
-        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::CancellationIncomplete));
+        assert!(
+            matches!(result, Err(ref error) if error.code == ErrorCode::CancellationIncomplete)
+        );
         Ok(())
     }
 }

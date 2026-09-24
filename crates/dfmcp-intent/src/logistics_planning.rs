@@ -125,7 +125,9 @@ impl ProductionPlan {
                 ErrorCode::PreconditionsFailed,
                 format!(
                     "{} production resources are short; '{}' requires {} additional modeled units",
-                    self.shortages.len(), shortage.item_token, shortage.missing_units,
+                    self.shortages.len(),
+                    shortage.item_token,
+                    shortage.missing_units,
                 ),
             ));
         }
@@ -161,7 +163,10 @@ impl Work {
 }
 
 fn work_exhausted() -> DfmcpError {
-    DfmcpError::new(ErrorCode::BudgetExceeded, "production planning work exhausted")
+    DfmcpError::new(
+        ErrorCode::BudgetExceeded,
+        "production planning work exhausted",
+    )
 }
 
 fn invalid(message: &str) -> DfmcpError {
@@ -177,7 +182,9 @@ fn overflow(token: &str) -> DfmcpError {
 
 fn validate_token(token: &str) -> Result<()> {
     if token.is_empty() || token.len() > MAX_TOKEN_BYTES || token.contains('\0') {
-        return Err(invalid("production strings must contain 1..256 UTF-8 bytes without NUL"));
+        return Err(invalid(
+            "production strings must contain 1..256 UTF-8 bytes without NUL",
+        ));
     }
     Ok(())
 }
@@ -191,7 +198,9 @@ fn validate_limits(limits: ProductionPlanningLimits) -> Result<()> {
         || limits.max_edges > 8_192
         || limits.max_work > 10_000_000
     {
-        return Err(invalid("production planning limits exceed the fixed model bounds"));
+        return Err(invalid(
+            "production planning limits exceed the fixed model bounds",
+        ));
     }
     Ok(())
 }
@@ -202,7 +211,9 @@ fn normalized_recipe(recipe: &ProductionRecipe, work: &mut Work) -> Result<Produ
     validate_token(&recipe.job_token)?;
     // Account for the generated work-order name before allocating it.
     if recipe.job_token.len() > MAX_TOKEN_BYTES - "Auto-JIT: ".len() {
-        return Err(invalid("production job token exceeds the work-order name budget"));
+        return Err(invalid(
+            "production job token exceeds the work-order name budget",
+        ));
     }
     match &recipe.workshop {
         BuildingKind::Workshop(name)
@@ -214,7 +225,9 @@ fn normalized_recipe(recipe: &ProductionRecipe, work: &mut Work) -> Result<Produ
         BuildingKind::FarmPlot | BuildingKind::Bridge | BuildingKind::Well => {}
     }
     if recipe.output_batch_size == 0 || recipe.input_tokens.len() > MAX_INPUTS {
-        return Err(invalid("production recipe requires a positive yield and at most 64 inputs"));
+        return Err(invalid(
+            "production recipe requires a positive yield and at most 64 inputs",
+        ));
     }
     let mut inputs = BTreeMap::<String, u32>::new();
     for (token, amount) in &recipe.input_tokens {
@@ -251,7 +264,10 @@ fn topological_order(
         for (input, _) in &recipe.input_tokens {
             work.charge()?;
             let count = incoming.get_mut(input).ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "production graph lost an input")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "production graph lost an input",
+                )
             })?;
             *count += 1; // At most 250 active recipes and 64 distinct inputs each.
         }
@@ -268,10 +284,16 @@ fn topological_order(
             for (input, _) in &recipe.input_tokens {
                 work.charge()?;
                 let count = incoming.get_mut(input).ok_or_else(|| {
-                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "production graph lost an input")
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "production graph lost an input",
+                    )
                 })?;
                 *count = count.checked_sub(1).ok_or_else(|| {
-                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "production indegree underflow")
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "production indegree underflow",
+                    )
                 })?;
                 if *count == 0 {
                     ready.insert(input.clone());
@@ -306,7 +328,10 @@ impl ProductionLogisticsCompiler {
         if quotas.is_empty() || quotas.len() > MAX_QUOTAS {
             return Err(invalid("production planning requires 1..64 quotas"));
         }
-        let mut work = Work { used: 0, limit: limits.max_work };
+        let mut work = Work {
+            used: 0,
+            limit: limits.max_work,
+        };
         let mut goals = BTreeMap::<String, u32>::new();
         for quota in quotas {
             work.charge()?;
@@ -316,7 +341,10 @@ impl ProductionLogisticsCompiler {
         }
         let mut nodes: BTreeSet<String> = goals.keys().cloned().collect();
         if nodes.len() > limits.max_resources {
-            return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "production resource limit exceeded"));
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "production resource limit exceeded",
+            ));
         }
         let mut active = BTreeMap::<String, ProductionRecipe>::new();
         let mut edge_count = 0usize;
@@ -343,36 +371,59 @@ impl ProductionLogisticsCompiler {
                     continue;
                 };
                 let count = shortage.div_ceil(recipe.output_batch_size);
-                count.checked_mul(recipe.output_batch_size).ok_or_else(|| overflow(token))?;
+                count
+                    .checked_mul(recipe.output_batch_size)
+                    .ok_or_else(|| overflow(token))?;
                 batches.insert(token.clone(), count);
                 for (input, amount) in &recipe.input_tokens {
                     work.charge()?;
                     let additional = amount.checked_mul(count).ok_or_else(|| overflow(input))?;
                     let total = required.entry(input.clone()).or_default();
-                    *total = total.checked_add(additional).ok_or_else(|| overflow(input))?;
+                    *total = total
+                        .checked_add(additional)
+                        .ok_or_else(|| overflow(input))?;
                 }
             }
             if pending.is_empty() {
-                return ExpandedModel { order, required, batches, goals, active, rounds }
-                    .finish(inventory, work);
+                return ExpandedModel {
+                    order,
+                    required,
+                    batches,
+                    goals,
+                    active,
+                    rounds,
+                }
+                .finish(inventory, work);
             }
             for token in pending {
                 work.charge()?;
                 if active.len() >= limits.max_orders {
-                    return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "production order limit exceeded"));
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "production order limit exceeded",
+                    ));
                 }
                 let recipe = self.recipes.get(&token).ok_or_else(|| {
-                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "production recipe disappeared")
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "production recipe disappeared",
+                    )
                 })?;
                 let recipe = normalized_recipe(recipe, &mut work)?;
                 edge_count += recipe.input_tokens.len();
                 if edge_count > limits.max_edges {
-                    return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "production edge limit exceeded"));
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "production edge limit exceeded",
+                    ));
                 }
                 for (input, _) in &recipe.input_tokens {
                     work.charge()?;
                     if !nodes.contains(input) && nodes.len() >= limits.max_resources {
-                        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "production resource limit exceeded"));
+                        return Err(DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "production resource limit exceeded",
+                        ));
                     }
                     nodes.insert(input.clone());
                 }
@@ -389,7 +440,8 @@ impl ProductionLogisticsCompiler {
         inventory: &InventoryStockpile,
         limits: ProductionPlanningLimits,
     ) -> Result<Vec<Action>> {
-        self.plan_quotas(quotas, inventory, limits)?.into_work_orders()
+        self.plan_quotas(quotas, inventory, limits)?
+            .into_work_orders()
     }
 }
 
@@ -404,7 +456,14 @@ struct ExpandedModel {
 
 impl ExpandedModel {
     fn finish(self, inventory: &InventoryStockpile, mut work: Work) -> Result<ProductionPlan> {
-        let Self { order, required, batches, goals, active, rounds } = self;
+        let Self {
+            order,
+            required,
+            batches,
+            goals,
+            active,
+            rounds,
+        } = self;
         let mut requirements = Vec::with_capacity(required.len());
         let mut shortages = Vec::new();
         for (token, total) in &required {
@@ -422,13 +481,19 @@ impl ExpandedModel {
                 .map_err(|_| overflow(token))?;
             if missing > 0 {
                 shortages.push(ProductionShortage {
-                    item_token: token.clone(), required_units: *total, stock_units: stock,
+                    item_token: token.clone(),
+                    required_units: *total,
+                    stock_units: stock,
                     missing_units: missing,
                 });
             }
             requirements.push(ProductionRequirement {
-                item_token: token.clone(), minimum_stock: minimum, consumed_units: *total - minimum,
-                stock_units: stock, planned_units: planned, missing_units: missing,
+                item_token: token.clone(),
+                minimum_stock: minimum,
+                consumed_units: *total - minimum,
+                stock_units: stock,
+                planned_units: planned,
+                missing_units: missing,
                 surplus_units: available.saturating_sub(u64::from(*total)),
             });
         }
@@ -436,28 +501,54 @@ impl ExpandedModel {
         let mut indices = BTreeMap::<String, usize>::new();
         for token in order.into_iter().rev() {
             work.charge()?;
-            let Some(&count) = batches.get(&token) else { continue; };
+            let Some(&count) = batches.get(&token) else {
+                continue;
+            };
             let recipe = active.get(&token).ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "production recipe disappeared")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "production recipe disappeared",
+                )
             })?;
             let mut depends_on = Vec::new();
             let mut inputs = Vec::with_capacity(recipe.input_tokens.len());
             for (input, amount) in &recipe.input_tokens {
                 work.charge()?;
-                inputs.push((input.clone(), amount.checked_mul(count).ok_or_else(|| overflow(input))?));
-                if let Some(&index) = indices.get(input) { depends_on.push(index); }
+                inputs.push((
+                    input.clone(),
+                    amount.checked_mul(count).ok_or_else(|| overflow(input))?,
+                ));
+                if let Some(&index) = indices.get(input) {
+                    depends_on.push(index);
+                }
             }
             depends_on.sort_unstable();
             let threshold = required.get(&token).copied().ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "production requirement disappeared")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "production requirement disappeared",
+                )
             })?;
             indices.insert(token.clone(), steps.len());
             steps.push(ProductionStep {
-                output_token: token, job_token: recipe.job_token.clone(), workshop: recipe.workshop.clone(),
-                batches: count, output_units: count.checked_mul(recipe.output_batch_size).ok_or_else(work_exhausted)?,
-                input_units: inputs, depends_on, inventory_threshold: threshold,
+                output_token: token,
+                job_token: recipe.job_token.clone(),
+                workshop: recipe.workshop.clone(),
+                batches: count,
+                output_units: count
+                    .checked_mul(recipe.output_batch_size)
+                    .ok_or_else(work_exhausted)?,
+                input_units: inputs,
+                depends_on,
+                inventory_threshold: threshold,
             });
         }
-        Ok(ProductionPlan { requirements, shortages, steps, work_used: work.used, expansion_rounds: rounds })
+        Ok(ProductionPlan {
+            requirements,
+            shortages,
+            steps,
+            work_used: work.used,
+            expansion_rounds: rounds,
+        })
     }
 }
