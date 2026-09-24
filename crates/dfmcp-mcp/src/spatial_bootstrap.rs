@@ -3,13 +3,23 @@
 use super::*;
 use std::net::SocketAddr;
 
-pub(in super::super) fn connect_and_capture(endpoint: SocketAddr, token: Vec<u8>, nonce: Vec<u8>,
-    limits: CitizenSpatialLimits, budget: WorkBudget)
-    -> Result<(CitizenSpatialRpcClient<DeadlineStream>, LiveSpatialCitizenState)> {
+pub(in super::super) fn connect_and_capture(
+    endpoint: SocketAddr,
+    token: Vec<u8>,
+    nonce: Vec<u8>,
+    limits: CitizenSpatialLimits,
+    budget: WorkBudget,
+) -> Result<(
+    CitizenSpatialRpcClient<DeadlineStream>,
+    LiveSpatialCitizenState,
+)> {
     let started = Instant::now();
-    establish(limits, budget,
+    establish(
+        limits,
+        budget,
         |remaining| CitizenSpatialRpcClient::connect(endpoint, token, nonce, remaining, limits),
-        || started.elapsed())
+        || started.elapsed(),
+    )
 }
 
 pub(super) fn allowance(budget: WorkBudget, elapsed: Duration) -> Result<Duration> {
@@ -21,9 +31,12 @@ pub(super) fn allowance(budget: WorkBudget, elapsed: Duration) -> Result<Duratio
             "spatial source operation exhausted its shared connection/capture/validation deadline"))
 }
 
-pub(super) fn establish<S: Source>(limits: CitizenSpatialLimits, budget: WorkBudget,
-    connect: impl FnOnce(Duration) -> Result<S>, mut elapsed: impl FnMut() -> Duration)
-    -> Result<(S, LiveSpatialCitizenState)> {
+pub(super) fn establish<S: Source>(
+    limits: CitizenSpatialLimits,
+    budget: WorkBudget,
+    connect: impl FnOnce(Duration) -> Result<S>,
+    mut elapsed: impl FnMut() -> Duration,
+) -> Result<(S, LiveSpatialCitizenState)> {
     budget.validate()?;
     limits.validate()?;
     let mut source = connect(allowance(budget, elapsed())?)?;
@@ -32,11 +45,17 @@ pub(super) fn establish<S: Source>(limits: CitizenSpatialLimits, budget: WorkBud
     check_bounds(&observation, limits)?;
     let mut state = LiveSpatialCitizenState::default();
     state.publish(observation)?;
-    let snapshot = state.snapshot().ok_or_else(|| error(ErrorCode::InternalInvariantViolation,
-        "spatial bootstrap did not produce a complete canonical snapshot"))?;
+    let snapshot = state.snapshot().ok_or_else(|| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "spatial bootstrap did not produce a complete canonical snapshot",
+        )
+    })?;
     if snapshot.graph.entities.len() > budget.max_entities as usize {
-        return Err(error(ErrorCode::BudgetExceeded,
-            "spatial bootstrap projection exceeds the negotiated entity allowance"));
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "spatial bootstrap projection exceeds the negotiated entity allowance",
+        ));
     }
     allowance(budget, elapsed())?;
     // Every failure above drops the unpublished source. Neither a session entry

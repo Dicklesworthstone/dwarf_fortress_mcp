@@ -26,9 +26,9 @@ use dfmcp_adapter::{
     QueryRequest,
 };
 use dfmcp_core::{
-    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, EntityId,
-    ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId,
-    Result, RiskTier, SessionId, StateAnchor, WorkBudget,
+    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, Digest32, DfmcpError,
+    EntityId, ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext,
+    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
@@ -47,19 +47,22 @@ struct NegotiatedCapability {
 
 /// Per-session state. Lives behind an `Arc<Mutex<…>>` so multiple tool calls
 /// within the same session share state without crossing `static` boundaries.
-struct LabSession {
-    session_id: SessionId,
+pub(crate) struct LabSession {
+    pub(crate) session_id: SessionId,
     #[allow(dead_code)]
-    fortress_id: FortressId,
+    pub(crate) fortress_id: FortressId,
     /// The capabilities the caller negotiated in `fortress_open_session`.
     /// Transport identity grants nothing; these are the only authority.
-    grants: Vec<CapabilityGrant>,
+    pub(crate) grants: Vec<CapabilityGrant>,
     /// The budget the caller negotiated.
-    budget: WorkBudget,
+    pub(crate) budget: WorkBudget,
+    /// The seven MCP_SURFACE.md §Versioning negotiation items recorded at
+    /// `fortress_open_session`.
+    pub(crate) negotiation: SessionNegotiation,
     /// Per-session request counter (used as dfmcp RequestId).
     next_request_id: u128,
     /// The owned lab adapter.
-    adapter: MemoryAdapter,
+    pub(crate) adapter: MemoryAdapter,
     /// Pending prepared plan awaiting commit.
     pending: Option<PendingPlan>,
     /// Most recent committed action id (for wait/cancel).
@@ -73,6 +76,71 @@ struct PendingPlan {
     #[allow(dead_code)]
     plan: PreparedPlan,
     digest: String,
+}
+
+/// MCP_SURFACE.md §Versioning: the seven negotiation items every session
+/// records. The laboratory fills the bridge and manifest slots with honest
+/// absence markers; the authenticated live plane fills them from the admitted
+/// compatibility tuple instead.
+struct SessionNegotiation {
+    mcp_protocol_version: &'static str,
+    dfmcp_protocol_version: &'static str,
+    schema_catalog_digest: String,
+    bridge_protocol_version: &'static str,
+    canonical_schema_version: &'static str,
+    manifests: &'static str,
+    compatibility_level: String,
+}
+
+impl SessionNegotiation {
+    fn laboratory(compatibility_level: String) -> Self {
+        Self {
+            mcp_protocol_version: "2026-07-28",
+            dfmcp_protocol_version: "dfmcp/0",
+            schema_catalog_digest: schema_catalog_digest(),
+            bridge_protocol_version: "dfmcp.bridge/v1 (proposed; laboratory has no live bridge)",
+            canonical_schema_version: "0.1.0",
+            manifests: "absent: deterministic laboratory adapter",
+            compatibility_level,
+        }
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        json!({
+            "mcp_protocol_version": self.mcp_protocol_version,
+            "dfmcp_protocol_version": self.dfmcp_protocol_version,
+            "schema_catalog_digest": self.schema_catalog_digest,
+            "bridge_protocol_version": self.bridge_protocol_version,
+            "canonical_schema_version": self.canonical_schema_version,
+            "manifests": self.manifests,
+            "compatibility_level": self.compatibility_level,
+        })
+    }
+}
+
+/// Deterministic digest over the frozen 11-tool schema catalog (SCHEMAS
+/// registry: every tool input schema at 0.1.0). Identical for every session
+/// and stable across processes for an identical tool registry.
+fn schema_catalog_digest() -> String {
+    const TOOLS: [&str; 11] = [
+        "fortress.cancel",
+        "fortress.checkpoint",
+        "fortress.commit",
+        "fortress.doctor",
+        "fortress.explain",
+        "fortress.open_session",
+        "fortress.observe",
+        "fortress.plan",
+        "fortress.query",
+        "fortress.restore",
+        "fortress.wait",
+    ];
+    let mut catalog = String::from("dfmcp.schema-catalog/1\n");
+    for tool in TOOLS {
+        catalog.push_str(tool);
+        catalog.push_str(":0.1.0\n");
+    }
+    Digest32::of_bytes(catalog.as_bytes()).to_hex()
 }
 
 /// Process-wide session registry, keyed by `SessionId`. Replaces the previous
@@ -110,6 +178,11 @@ fn sessions() -> MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LabSession>>>
     }
 }
 
+/// Number of currently registered sessions (resource-plane diagnostics).
+pub(crate) fn active_session_count() -> usize {
+    sessions().len()
+}
+
 fn next_session_counter() -> Result<u128> {
     let mut counter = match NEXT_SESSION_COUNTER.lock() {
         Ok(guard) => guard,
@@ -131,7 +204,7 @@ fn next_session_counter() -> Result<u128> {
     Ok(id)
 }
 
-fn parse_session_id_arg(value: &str) -> Result<SessionId> {
+pub(crate) fn parse_session_id_arg(value: &str) -> Result<SessionId> {
     if value.len() != U128_HEX_ID_BYTES || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(DfmcpError::new(
             ErrorCode::InvalidRequest,
@@ -153,7 +226,7 @@ fn parse_session_id_arg(value: &str) -> Result<SessionId> {
     Ok(SessionId::new(parsed))
 }
 
-fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSession>>> {
+pub(crate) fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSession>>> {
     let guard = sessions();
     guard.get(&session_id).cloned().ok_or_else(|| {
         DfmcpError::new(
@@ -163,7 +236,7 @@ fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSession>>> {
     })
 }
 
-fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {
+pub(crate) fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {
     if let Some(id_str) = session_id {
         let parsed = parse_session_id_arg(&id_str)?;
         lookup_session(parsed)
@@ -228,12 +301,25 @@ fn context_for(session: &LabSession, request_id: u128) -> OperationContext {
     }
 }
 
-fn next_context(session: &mut LabSession) -> Result<(u128, OperationContext)> {
+pub(crate) fn next_context(session: &mut LabSession) -> Result<(u128, OperationContext)> {
     let request_id = next_request_id(session)?;
     Ok((request_id, context_for(session, request_id)))
 }
 
-fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
+/// Entry-level authorization gate (CAPABILITIES.md enforcement point: MCP
+/// intake). Deterministic denial BEFORE any state is read or any effect is
+/// prepared. `ctx` carries exactly the session's negotiated grants —
+/// transport identity grants nothing — and the adapter re-authorizes at the
+/// effect boundary.
+fn authorize_entry(
+    ctx: &OperationContext,
+    capability: Capability,
+    risk: RiskTier,
+) -> Result<()> {
+    ctx.authorize(capability, risk, &[], None)
+}
+
+pub(crate) fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
     json!({
         "fortress_id": format!("{}", anchor.fortress_id),
         "epoch": anchor.cursor.epoch,
@@ -246,7 +332,7 @@ fn error_payload(operation: &str, message: &str) -> String {
     coded_error_payload(operation, ErrorCode::InvalidRequest, message)
 }
 
-fn coded_error_payload(operation: &str, code: ErrorCode, message: &str) -> String {
+pub(crate) fn coded_error_payload(operation: &str, code: ErrorCode, message: &str) -> String {
     json!({
         "ok": false,
         "error": {
@@ -260,7 +346,7 @@ fn coded_error_payload(operation: &str, code: ErrorCode, message: &str) -> Strin
     .to_string()
 }
 
-fn dfmcp_error_payload(operation: &str, error: &DfmcpError) -> String {
+pub(crate) fn dfmcp_error_payload(operation: &str, error: &DfmcpError) -> String {
     json!({
         "ok": false,
         "error": {
@@ -274,7 +360,7 @@ fn dfmcp_error_payload(operation: &str, error: &DfmcpError) -> String {
     .to_string()
 }
 
-fn mutex_poisoned_payload(operation: &str) -> String {
+pub(crate) fn mutex_poisoned_payload(operation: &str) -> String {
     coded_error_payload(
         operation,
         ErrorCode::InternalInvariantViolation,
@@ -282,7 +368,7 @@ fn mutex_poisoned_payload(operation: &str) -> String {
     )
 }
 
-fn snapshot_json(snapshot: &WorldSnapshot) -> serde_json::Value {
+pub(crate) fn snapshot_json(snapshot: &WorldSnapshot) -> serde_json::Value {
     json!({
         "ok": true,
         "fortress_id": format!("{}", snapshot.fortress_id),
@@ -499,6 +585,7 @@ pub fn fortress_open_session(
         fortress_id,
         grants: grants.clone(),
         budget,
+        negotiation: SessionNegotiation::laboratory(String::from("pending")),
         next_request_id: 0,
         adapter: MemoryAdapter::new(seed_snapshot(fortress_id, paused)),
         pending: None,
@@ -506,6 +593,7 @@ pub fn fortress_open_session(
         commit_receipts: BTreeMap::new(),
     };
     let identity = probe_session.adapter.identity();
+    let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
     let session_counter = match next_session_counter() {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
@@ -530,6 +618,7 @@ pub fn fortress_open_session(
         fortress_id,
         grants,
         budget,
+        negotiation: negotiation.clone(),
         next_request_id: 0,
         adapter,
         pending: None,
@@ -575,6 +664,7 @@ pub fn fortress_open_session(
         "fortress_loaded": true,
         "fortress_id": format!("{fortress_id}"),
         "granted_capabilities": granted_strings,
+        "negotiation": negotiation.to_json(),
         "budget": {
             "max_wall_millis": budget.max_wall_millis,
             "max_game_ticks": budget.max_game_ticks,
@@ -611,6 +701,9 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.observe", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+        return dfmcp_error_payload("fortress.observe", &error);
+    }
     let request = ObservationRequest {
         since: None,
         projection: Projection::Summary,
@@ -674,6 +767,9 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.query", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
+        return dfmcp_error_payload("fortress.query", &error);
+    }
     let request = QueryRequest {
         anchor: ctx.anchor,
         query: WorldQuery {
@@ -734,6 +830,9 @@ pub fn fortress_plan(
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.plan", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Plan, RiskTier::ReadOnly) {
+        return dfmcp_error_payload("fortress.plan", &error);
+    }
     let snapshot = guard.adapter.snapshot();
 
     let paused_target = paused_target.is_some_and(|value| value);
@@ -805,6 +904,17 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
         Ok(value) => value,
         Err(_) => return mutex_poisoned_payload("fortress.commit"),
     };
+    {
+        let (_, entry_ctx) = match next_context(&mut guard) {
+            Ok(value) => value,
+            Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+        };
+        if let Err(error) =
+            authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
+        {
+            return dfmcp_error_payload("fortress.commit", &error);
+        }
+    }
 
     // Receipt replay is independent of whichever later plan is currently
     // pending. Reauthorize first, then return the exact stable payload without
@@ -920,6 +1030,15 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(_) => return mutex_poisoned_payload("fortress.wait"),
     };
+    {
+        let (_, entry_ctx) = match next_context(&mut guard) {
+            Ok(value) => value,
+            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+        };
+        if let Err(error) = authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return dfmcp_error_payload("fortress.wait", &error);
+        }
+    }
     let Some(action_id) = guard.last_action else {
         return coded_error_payload(
             "fortress.wait",
@@ -975,6 +1094,17 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
         Ok(value) => value,
         Err(_) => return mutex_poisoned_payload("fortress.cancel"),
     };
+    {
+        let (_, entry_ctx) = match next_context(&mut guard) {
+            Ok(value) => value,
+            Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+        };
+        if let Err(error) =
+            authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
+        {
+            return dfmcp_error_payload("fortress.cancel", &error);
+        }
+    }
     let Some(action_id) = guard.last_action else {
         return coded_error_payload(
             "fortress.cancel",
@@ -1049,6 +1179,9 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Checkpoint, RiskTier::Reversible) {
+        return dfmcp_error_payload("fortress.checkpoint", &error);
+    }
     match guard.adapter.checkpoint(&label, &ctx) {
         Ok(receipt) => json!({
             "ok": true,
@@ -1106,6 +1239,9 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.restore", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Restore, RiskTier::Guarded) {
+        return dfmcp_error_payload("fortress.restore", &error);
+    }
     match guard
         .adapter
         .restore(CheckpointId::new(parsed_checkpoint), &ctx)
@@ -1150,7 +1286,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.explain", &error),
     };
-    if let Err(error) = ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
+    if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
         return dfmcp_error_payload("fortress.explain", &error);
     }
     let snapshot = guard.adapter.snapshot();
@@ -1228,6 +1364,9 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
     };
+    if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
+        return dfmcp_error_payload("fortress.doctor", &error);
+    }
     let health_res = guard.adapter.health(&ctx);
 
     let active_sessions_count = sessions().len();
@@ -1292,6 +1431,9 @@ pub fn run_stdio() {
         .tool(FortressRestore)
         .tool(FortressExplain)
         .tool(FortressDoctor)
+        .resource(crate::resources::SessionSummaryResource)
+        .resource(crate::resources::SessionCapabilitiesResource)
+        .resource(crate::resources::DoctorBundleResource)
         .request_timeout(30)
         .instructions(
             "Dwarf Fortress semantic control plane (laboratory slice). Call fortress_open_session \

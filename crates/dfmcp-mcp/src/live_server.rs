@@ -59,10 +59,19 @@ const DEFAULT_CAPABILITIES: [(&str, &str); 3] = [
 ];
 
 const OMITTED_LIVE_DOMAINS: [(&str, &str); 7] = [
-    ("fortress.items", "bridge protocol V1 does not observe items"),
+    (
+        "fortress.items",
+        "bridge protocol V1 does not observe items",
+    ),
     ("fortress.jobs", "bridge protocol V1 does not observe jobs"),
-    ("fortress.map", "bridge protocol V1 does not observe map state"),
-    ("fortress.economy", "bridge protocol V1 does not observe economy state"),
+    (
+        "fortress.map",
+        "bridge protocol V1 does not observe map state",
+    ),
+    (
+        "fortress.economy",
+        "bridge protocol V1 does not observe economy state",
+    ),
     (
         "fortress.welfare",
         "bridge protocol V1 does not observe detailed welfare state",
@@ -137,8 +146,7 @@ impl LiveSession {
 
 static LIVE_SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LiveSession>>>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
-static NEXT_LIVE_SESSION_ID: LazyLock<Mutex<u128>> =
-    LazyLock::new(|| Mutex::new(1u128 << 127));
+static NEXT_LIVE_SESSION_ID: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1u128 << 127));
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
@@ -317,9 +325,13 @@ fn requested_budget(
 ) -> Result<WorkBudget> {
     let budget = WorkBudget {
         max_wall_millis: max_wall_millis
-            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis, |value| value),
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis, |value| {
+                value
+            }),
         max_game_ticks: max_game_ticks
-            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks, |value| value),
+            .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks, |value| {
+                value
+            }),
         max_entities: max_entities
             .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities, |value| value),
         max_bytes: max_bytes.map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes, |value| value),
@@ -449,10 +461,8 @@ fn bridge_token() -> Result<Vec<u8>> {
 fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSource> {
     let endpoint = bridge_endpoint()?;
     let address = parse_loopback_endpoint(&endpoint)?;
-    let credentials = BridgeCredentials::new(
-        bridge_token()?,
-        bridge_nonce(session_id, &endpoint)?,
-    )?;
+    let credentials =
+        BridgeCredentials::new(bridge_token()?, bridge_nonce(session_id, &endpoint)?)?;
     let connect_millis = env_u64("DFMCP_BRIDGE_CONNECT_MILLIS", 2_000, 1, 60_000)?;
     let read_millis = env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?;
     let write_millis = env_u64("DFMCP_BRIDGE_WRITE_MILLIS", 5_000, 1, 60_000)?;
@@ -469,10 +479,7 @@ fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSource> {
     )
 }
 
-fn capability_grants(
-    fortress_id: FortressId,
-    capabilities: &[Capability],
-) -> Vec<CapabilityGrant> {
+fn capability_grants(fortress_id: FortressId, capabilities: &[Capability]) -> Vec<CapabilityGrant> {
     capabilities
         .iter()
         .copied()
@@ -589,11 +596,26 @@ fn briefing_json(session: &LiveSession) -> JsonValue {
 
 fn affordances_json(session: &LiveSession) -> Vec<JsonValue> {
     [
-        (Capability::Observe, "observe-live", "fortress.observe", "observe"),
+        (
+            Capability::Observe,
+            "observe-live",
+            "fortress.observe",
+            "observe",
+        ),
         (Capability::Query, "query-live", "fortress.query", "query"),
-        (Capability::Query, "explain-live", "fortress.explain", "explain"),
+        (
+            Capability::Query,
+            "explain-live",
+            "fortress.explain",
+            "explain",
+        ),
         (Capability::Observe, "wait-live", "fortress.wait", "wait"),
-        (Capability::Doctor, "doctor-live", "fortress.doctor", "doctor"),
+        (
+            Capability::Doctor,
+            "doctor-live",
+            "fortress.doctor",
+            "doctor",
+        ),
     ]
     .into_iter()
     .map(|(capability, id, tool, family)| {
@@ -880,9 +902,7 @@ fn world_value_json(value: &WorldValue) -> JsonValue {
             "hex": hex_bytes(value),
             "byte_length": value.len(),
         }),
-        WorldValue::List(values) => {
-            JsonValue::Array(values.iter().map(world_value_json).collect())
-        }
+        WorldValue::List(values) => JsonValue::Array(values.iter().map(world_value_json).collect()),
         WorldValue::Object(values) => {
             let mut object = JsonMap::new();
             for (key, value) in values {
@@ -897,21 +917,13 @@ fn fact_json(fact: &Fact) -> JsonValue {
     let (presence, epistemic_state, reason, stale_anchor) = match fact.presence.as_ref() {
         None | Some(FactPresence::Known(_)) => ("known", "observed", None, None),
         Some(FactPresence::Absent) => ("absent", "observed", None, None),
-        Some(FactPresence::Unknown(value)) => {
-            ("unknown", "unknown", Some(value.clone()), None)
-        }
+        Some(FactPresence::Unknown(value)) => ("unknown", "unknown", Some(value.clone()), None),
         Some(FactPresence::Unsupported(value)) => {
             ("unsupported", "unknown", Some(value.clone()), None)
         }
-        Some(FactPresence::Omitted(value)) => {
-            ("omitted", "unknown", Some(value.clone()), None)
-        }
-        Some(FactPresence::Redacted(value)) => {
-            ("redacted", "unknown", Some(value.clone()), None)
-        }
-        Some(FactPresence::Stale(anchor)) => {
-            ("stale", "stale", None, Some(anchor_json(*anchor)))
-        }
+        Some(FactPresence::Omitted(value)) => ("omitted", "unknown", Some(value.clone()), None),
+        Some(FactPresence::Redacted(value)) => ("redacted", "unknown", Some(value.clone()), None),
+        Some(FactPresence::Stale(anchor)) => ("stale", "stale", None, Some(anchor_json(*anchor))),
     };
     json!({
         "value": world_value_json(&fact.value),
@@ -932,12 +944,9 @@ fn parse_entity_id(value: &str) -> Result<EntityId> {
             "entity_id must be a bounded decimal u64",
         ));
     }
-    let parsed = value.parse::<u64>().map_err(|_| {
-        error(
-            ErrorCode::InvalidRequest,
-            "entity_id must be a decimal u64",
-        )
-    })?;
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| error(ErrorCode::InvalidRequest, "entity_id must be a decimal u64"))?;
     if parsed == 0 {
         return Err(error(
             ErrorCode::InvalidRequest,
@@ -1319,12 +1328,9 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         }
     };
     let (kind, continuity, reset_reason, changes) = match &frame.payload {
-        ObservationPayload::Heartbeat(_) => (
-            "heartbeat",
-            ContinuityStatus::Heartbeat,
-            None,
-            Vec::new(),
-        ),
+        ObservationPayload::Heartbeat(_) => {
+            ("heartbeat", ContinuityStatus::Heartbeat, None, Vec::new())
+        }
         ObservationPayload::Snapshot(_) if current.cursor.epoch != prior.cursor.epoch => (
             "snapshot",
             ContinuityStatus::Reset,
@@ -1527,11 +1533,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
     )
 }
 
-fn read_only_tool_error(
-    session_id: Option<String>,
-    operation: &str,
-    phase: AgentPhase,
-) -> String {
+fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: AgentPhase) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, phase, &failure),
@@ -1590,7 +1592,9 @@ fn read_only_tool_error(
     )
 }
 
-#[tool(description = "Unavailable in authenticated live bridge protocol V1; fails closed without preparing an effect.")]
+#[tool(
+    description = "Unavailable in authenticated live bridge protocol V1; fails closed without preparing an effect."
+)]
 pub fn fortress_plan(
     session_id: Option<String>,
     _summary: Option<String>,
@@ -1599,12 +1603,16 @@ pub fn fortress_plan(
     read_only_tool_error(session_id, "fortress.plan", AgentPhase::Propose)
 }
 
-#[tool(description = "Unavailable in authenticated live bridge protocol V1; fails closed without committing an effect.")]
+#[tool(
+    description = "Unavailable in authenticated live bridge protocol V1; fails closed without committing an effect."
+)]
 pub fn fortress_commit(session_id: Option<String>, _plan_digest: String) -> String {
     read_only_tool_error(session_id, "fortress.commit", AgentPhase::Commit)
 }
 
-#[tool(description = "Report that the authenticated read-only session has no active mutation work, then suggest a live observation pulse when useful.")]
+#[tool(
+    description = "Report that the authenticated read-only session has no active mutation work, then suggest a live observation pulse when useful."
+)]
 pub fn fortress_wait(session_id: Option<String>) -> String {
     let operation = "fortress.wait";
     let session = match resolve_session(session_id) {
@@ -1673,17 +1681,23 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
     )
 }
 
-#[tool(description = "Unavailable in authenticated live bridge protocol V1; fails closed without cancellation effects.")]
+#[tool(
+    description = "Unavailable in authenticated live bridge protocol V1; fails closed without cancellation effects."
+)]
 pub fn fortress_cancel(session_id: Option<String>, _mode: Option<String>) -> String {
     read_only_tool_error(session_id, "fortress.cancel", AgentPhase::Reconcile)
 }
 
-#[tool(description = "Unavailable in authenticated live bridge protocol V1; no game/save checkpoint is created.")]
+#[tool(
+    description = "Unavailable in authenticated live bridge protocol V1; no game/save checkpoint is created."
+)]
 pub fn fortress_checkpoint(session_id: Option<String>, _label: Option<String>) -> String {
     read_only_tool_error(session_id, "fortress.checkpoint", AgentPhase::Commit)
 }
 
-#[tool(description = "Unavailable in authenticated live bridge protocol V1; no restore or epoch mutation is attempted.")]
+#[tool(
+    description = "Unavailable in authenticated live bridge protocol V1; no restore or epoch mutation is attempted."
+)]
 pub fn fortress_restore(session_id: Option<String>, _checkpoint_id: String) -> String {
     read_only_tool_error(session_id, "fortress.restore", AgentPhase::Reconcile)
 }
@@ -1995,12 +2009,8 @@ mod tests {
     #[test]
     fn live_budget_is_bounded() {
         assert!(requested_budget(None, None, None, None, None, None).is_ok());
-        assert!(
-            requested_budget(Some(60_001), None, None, None, None, None).is_err()
-        );
-        assert!(
-            requested_budget(None, None, Some(100_002), None, None, None).is_err()
-        );
+        assert!(requested_budget(Some(60_001), None, None, None, None, None).is_err());
+        assert!(requested_budget(None, None, Some(100_002), None, None, None).is_err());
     }
 
     #[test]
@@ -2064,8 +2074,17 @@ mod tests {
 
     #[test]
     fn session_error_continuity_is_explicit_at_call_sites() {
-        assert_eq!(recovery_class(ErrorCode::InvalidRequest), RecoveryClass::NeverUnchanged);
-        assert_eq!(recovery_class(ErrorCode::CursorGap), RecoveryClass::RefreshAndRetry);
-        assert_eq!(recovery_class(ErrorCode::AdapterFailure), RecoveryClass::Backoff);
+        assert_eq!(
+            recovery_class(ErrorCode::InvalidRequest),
+            RecoveryClass::NeverUnchanged
+        );
+        assert_eq!(
+            recovery_class(ErrorCode::CursorGap),
+            RecoveryClass::RefreshAndRetry
+        );
+        assert_eq!(
+            recovery_class(ErrorCode::AdapterFailure),
+            RecoveryClass::Backoff
+        );
     }
 }

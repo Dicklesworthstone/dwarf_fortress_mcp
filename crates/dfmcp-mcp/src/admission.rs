@@ -30,8 +30,7 @@ use serde_json::{Number, Value};
 use std::os::unix::fs::MetadataExt;
 
 const TICKET_ENVIRONMENT_VARIABLE: &str = "DFMCP_ADMISSION_TICKET";
-const ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT_VARIABLE: &str =
-    "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
+const ADMITTED_BRIDGE_PROTOCOL_ENVIRONMENT_VARIABLE: &str = "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
 const TICKET_SCHEMA: &str = "dfmcp.live-admission-ticket/2";
 const AUTHORIZED_STATE: &str = "authorized_to_exec";
 const READ_ONLY_MODE: &str = "authenticated_live_read_only";
@@ -274,7 +273,10 @@ fn unsigned_ticket_value(ticket: &AdmissionTicket) -> Value {
                 .collect(),
         ),
     );
-    fields.insert("process_id".to_owned(), number(u64::from(ticket.process_id)));
+    fields.insert(
+        "process_id".to_owned(),
+        number(u64::from(ticket.process_id)),
+    );
     fields.insert("schema".to_owned(), Value::String(ticket.schema.clone()));
     fields.insert(
         "server_binary_bytes".to_owned(),
@@ -332,7 +334,9 @@ fn validate_ticket_semantics(
         return Err(invalid("admission ticket is not authorized to execute"));
     }
     if ticket.mode != READ_ONLY_MODE {
-        return Err(invalid("admission ticket does not select read-only live mode"));
+        return Err(invalid(
+            "admission ticket does not select read-only live mode",
+        ));
     }
     admitted_live_runner(&ticket.bridge_protocol)?;
     if ticket.bridge_protocol != context.bridge_protocol {
@@ -602,7 +606,9 @@ fn read_stable_ticket(path: &Path) -> Result<Vec<u8>, AdmissionError> {
     let bytes_length = u64::try_from(bytes.len())
         .map_err(|_| invalid("admission ticket read length does not fit u64"))?;
     if bytes_length > MAX_TICKET_BYTES {
-        return Err(invalid("admission ticket exceeded its byte bound while read"));
+        return Err(invalid(
+            "admission ticket exceeded its byte bound while read",
+        ));
     }
     let after = file.metadata().map_err(|source| {
         invalid(format!(

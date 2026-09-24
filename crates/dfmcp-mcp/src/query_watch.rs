@@ -6,8 +6,10 @@
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use dfmcp_core::{Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext,
-    Result, RiskTier, SessionId, StateAnchor};
+use dfmcp_core::{
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
+    SessionId, StateAnchor,
+};
 use dfmcp_world::{FactPresence, FactSource, Value as WorldValue, WorldSnapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -28,10 +30,18 @@ pub(super) use replay::Replay as HistoricalWatchReplay;
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
     inspection::extend_schema(counts::extend_schema(schema)?)
 }
-pub(super) fn condition_query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
+pub(super) fn condition_query(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+) -> Result<Value> {
     inspection::query(snapshot, context, input)
 }
-pub(super) fn quantity_query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
+pub(super) fn quantity_query(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+) -> Result<Value> {
     counts::quantity::query(snapshot, context, input)
 }
 
@@ -43,7 +53,12 @@ const MAX_CONDITIONS: usize = 64;
 const MAX_CONDITION_DEPTH: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum Literal {
     Null,
     Bool(bool),
@@ -55,23 +70,60 @@ enum Literal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Comparison { Eq, Ne, Lt, Le, Gt, Ge }
+enum Comparison {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Condition {
-    Field { entity_id: String, generation: u32, field: String, comparison: Comparison, value: Literal },
-    EntityCount { scope: counts::Scope, kind: counts::Kind, predicate: counts::Predicate,
-        comparison: Comparison, value: u64 },
-    ItemQuantity { scope: counts::Scope, quantity_unit: counts::quantity::QuantityUnit,
-        predicate: counts::Predicate, comparison: Comparison, value: u64 },
-    TerrainCount { areas: Vec<counts::terrain::Area>, predicate: counts::Predicate,
-        comparison: Comparison, value: u64 },
-    Paused { value: bool },
-    TickAtLeast { value: u64 },
-    All { args: Vec<Condition> },
-    Any { args: Vec<Condition> },
-    Not { arg: Box<Condition> },
+    Field {
+        entity_id: String,
+        generation: u32,
+        field: String,
+        comparison: Comparison,
+        value: Literal,
+    },
+    EntityCount {
+        scope: counts::Scope,
+        kind: counts::Kind,
+        predicate: counts::Predicate,
+        comparison: Comparison,
+        value: u64,
+    },
+    ItemQuantity {
+        scope: counts::Scope,
+        quantity_unit: counts::quantity::QuantityUnit,
+        predicate: counts::Predicate,
+        comparison: Comparison,
+        value: u64,
+    },
+    TerrainCount {
+        areas: Vec<counts::terrain::Area>,
+        predicate: counts::Predicate,
+        comparison: Comparison,
+        value: u64,
+    },
+    Paused {
+        value: bool,
+    },
+    TickAtLeast {
+        value: u64,
+    },
+    All {
+        args: Vec<Condition>,
+    },
+    Any {
+        args: Vec<Condition>,
+    },
+    Not {
+        arg: Box<Condition>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -94,10 +146,16 @@ enum Request {
         poll_interval_ticks: Option<u64>,
         stable_observations: Option<u32>,
     },
-    PollWatch { watch: String },
+    PollWatch {
+        watch: String,
+    },
     Watches,
-    CancelWatch { watch: String },
-    ReleaseWatch { watch: String },
+    CancelWatch {
+        watch: String,
+    },
+    ReleaseWatch {
+        watch: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,32 +171,62 @@ struct Definition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Truth { True, False, Unknown }
+enum Truth {
+    True,
+    False,
+    Unknown,
+}
 
 impl Truth {
-    fn from_bool(value: bool) -> Self { if value { Self::True } else { Self::False } }
+    fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
     fn text(self) -> &'static str {
-        match self { Self::True => "true", Self::False => "false", Self::Unknown => "unknown" }
+        match self {
+            Self::True => "true",
+            Self::False => "false",
+            Self::Unknown => "unknown",
+        }
     }
     fn not(self) -> Self {
-        match self { Self::True => Self::False, Self::False => Self::True, Self::Unknown => Self::Unknown }
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unknown => Self::Unknown,
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Status { Waiting, Candidate, BlockedUnknown, Satisfied, Failed, Expired, Invalidated, Cancelled }
+enum Status {
+    Waiting,
+    Candidate,
+    BlockedUnknown,
+    Satisfied,
+    Failed,
+    Expired,
+    Invalidated,
+    Cancelled,
+}
 
 impl Status {
     fn text(self) -> &'static str {
         match self {
-            Self::Waiting => "waiting", Self::Candidate => "candidate",
-            Self::BlockedUnknown => "blocked_unknown", Self::Satisfied => "satisfied",
-            Self::Failed => "failed", Self::Expired => "expired",
-            Self::Invalidated => "invalidated", Self::Cancelled => "cancelled",
+            Self::Waiting => "waiting",
+            Self::Candidate => "candidate",
+            Self::BlockedUnknown => "blocked_unknown",
+            Self::Satisfied => "satisfied",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+            Self::Invalidated => "invalidated",
+            Self::Cancelled => "cancelled",
         }
     }
     fn terminal(self) -> bool {
-        matches!(self, Self::Satisfied | Self::Failed | Self::Expired | Self::Invalidated | Self::Cancelled)
+        matches!(
+            self,
+            Self::Satisfied | Self::Failed | Self::Expired | Self::Invalidated | Self::Cancelled
+        )
     }
 }
 
@@ -165,33 +253,68 @@ struct Store {
 
 static WATCHES: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(Store::default()));
 
-fn failure(code: ErrorCode, message: impl Into<String>) -> DfmcpError { DfmcpError::new(code, message) }
-fn invalid(message: &str) -> DfmcpError { failure(ErrorCode::InvalidRequest, message) }
-fn bounded(message: &str) -> DfmcpError { failure(ErrorCode::BudgetExceeded, message) }
-fn lock(store: &Mutex<Store>) -> Result<MutexGuard<'_, Store>> {
-    store.lock().map_err(|_| failure(ErrorCode::InternalInvariantViolation, "condition-watch store is poisoned"))
+fn failure(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
+    DfmcpError::new(code, message)
 }
-fn anchor(value: StateAnchor) -> Value { super::core_query::anchor_json(value) }
+fn invalid(message: &str) -> DfmcpError {
+    failure(ErrorCode::InvalidRequest, message)
+}
+fn bounded(message: &str) -> DfmcpError {
+    failure(ErrorCode::BudgetExceeded, message)
+}
+fn lock(store: &Mutex<Store>) -> Result<MutexGuard<'_, Store>> {
+    store.lock().map_err(|_| {
+        failure(
+            ErrorCode::InternalInvariantViolation,
+            "condition-watch store is poisoned",
+        )
+    })
+}
+fn anchor(value: StateAnchor) -> Value {
+    super::core_query::anchor_json(value)
+}
 fn digest(value: &Value) -> Result<Digest32> {
-    serde_json::to_vec(value).map(|bytes| Digest32::of_bytes(&bytes))
-        .map_err(|_| failure(ErrorCode::InternalInvariantViolation, "watch evidence cannot be encoded"))
+    serde_json::to_vec(value)
+        .map(|bytes| Digest32::of_bytes(&bytes))
+        .map_err(|_| {
+            failure(
+                ErrorCode::InternalInvariantViolation,
+                "watch evidence cannot be encoded",
+            )
+        })
 }
 fn positive_id(value: &str) -> Result<EntityId> {
-    if value.is_empty() || value.len() > 20 || value.starts_with('0')
-        || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(invalid("watch entity IDs must be canonical positive decimal u64 strings"));
+    if value.is_empty()
+        || value.len() > 20
+        || value.starts_with('0')
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(invalid(
+            "watch entity IDs must be canonical positive decimal u64 strings",
+        ));
     }
-    value.parse::<u64>().map(EntityId::new).map_err(|_| invalid("watch entity ID exceeds u64"))
+    value
+        .parse::<u64>()
+        .map(EntityId::new)
+        .map_err(|_| invalid("watch entity ID exceeds u64"))
 }
 fn name(value: &str, maximum: usize) -> Result<()> {
     if value.is_empty() || value.len() > maximum || value.contains('\0') {
-        return Err(invalid("watch key, label, or field name violates its byte bound"));
+        return Err(invalid(
+            "watch key, label, or field name violates its byte bound",
+        ));
     }
     Ok(())
 }
 fn validate_handle(value: &str) -> Result<()> {
-    let Some(hash) = value.strip_prefix("watch:") else { return Err(invalid("invalid watch handle")); };
-    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+    let Some(hash) = value.strip_prefix("watch:") else {
+        return Err(invalid("invalid watch handle"));
+    };
+    if hash.len() != 64
+        || !hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
         return Err(invalid("invalid watch handle"));
     }
     Ok(())
@@ -204,17 +327,29 @@ fn validate_input(input: &Value) -> Result<()> {
     while let Some((value, depth)) = pending.pop() {
         nodes += 1;
         bytes = bytes.saturating_add(32);
-        if depth > 24 || nodes > MAX_INPUT_NODES { return Err(bounded("watch input exceeds depth/node bounds")); }
+        if depth > 24 || nodes > MAX_INPUT_NODES {
+            return Err(bounded("watch input exceeds depth/node bounds"));
+        }
         match value {
             Value::String(text) => bytes = bytes.saturating_add(text.len()),
             Value::Array(values) => {
-                if values.len().saturating_add(pending.len()).saturating_add(nodes) > MAX_INPUT_NODES {
+                if values
+                    .len()
+                    .saturating_add(pending.len())
+                    .saturating_add(nodes)
+                    > MAX_INPUT_NODES
+                {
                     return Err(bounded("watch input exceeds its node bound"));
                 }
                 pending.extend(values.iter().map(|value| (value, depth + 1)));
             }
             Value::Object(values) => {
-                if values.len().saturating_add(pending.len()).saturating_add(nodes) > MAX_INPUT_NODES {
+                if values
+                    .len()
+                    .saturating_add(pending.len())
+                    .saturating_add(nodes)
+                    > MAX_INPUT_NODES
+                {
                     return Err(bounded("watch input exceeds its node bound"));
                 }
                 for (key, value) in values {
@@ -224,7 +359,9 @@ fn validate_input(input: &Value) -> Result<()> {
             }
             _ => {}
         }
-        if bytes > MAX_INPUT_BYTES { return Err(bounded("watch input exceeds its aggregate byte bound")); }
+        if bytes > MAX_INPUT_BYTES {
+            return Err(bounded("watch input exceeds its aggregate byte bound"));
+        }
     }
     Ok(())
 }
@@ -233,37 +370,66 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     name(&definition.key, 64)?;
     name(&definition.label, 256)?;
     if !(1..=64).contains(&definition.stable_observations)
-        || !(1..=1_000_000).contains(&definition.poll_interval_ticks) {
-        return Err(invalid("watch stability must be 1..64 and cadence 1..1000000 game ticks"));
+        || !(1..=1_000_000).contains(&definition.poll_interval_ticks)
+    {
+        return Err(invalid(
+            "watch stability must be 1..64 and cadence 1..1000000 game ticks",
+        ));
     }
     let mut pending = vec![(&definition.condition, 1usize)];
-    if let Some(condition) = &definition.failure_condition { pending.push((condition, 1)); }
+    if let Some(condition) = &definition.failure_condition {
+        pending.push((condition, 1));
+    }
     let mut nodes = 0usize;
     while let Some((condition, depth)) = pending.pop() {
         nodes += 1;
         if nodes > MAX_CONDITIONS || depth > MAX_CONDITION_DEPTH {
-            return Err(bounded("watch conditions exceed their shared depth/node budget"));
+            return Err(bounded(
+                "watch conditions exceed their shared depth/node budget",
+            ));
         }
         match condition {
-            Condition::Field { entity_id, generation, field, value, .. } => {
+            Condition::Field {
+                entity_id,
+                generation,
+                field,
+                value,
+                ..
+            } => {
                 positive_id(entity_id)?;
-                if *generation == 0 { return Err(invalid("watch entity generation must be positive")); }
+                if *generation == 0 {
+                    return Err(invalid("watch entity generation must be positive"));
+                }
                 name(field, 128)?;
                 if let Literal::Text(text) = value
-                    && (text.len() > 1_024 || text.contains('\0')) {
-                    return Err(invalid("watch text literal exceeds its byte bound or contains NUL"));
+                    && (text.len() > 1_024 || text.contains('\0'))
+                {
+                    return Err(invalid(
+                        "watch text literal exceeds its byte bound or contains NUL",
+                    ));
                 }
             }
-            Condition::EntityCount { predicate, .. } | Condition::ItemQuantity { predicate, .. }
-                | Condition::TerrainCount { predicate, .. } => {
-                if let Condition::TerrainCount { areas, .. } = condition { counts::terrain::validate(areas)?; }
+            Condition::EntityCount { predicate, .. }
+            | Condition::ItemQuantity { predicate, .. }
+            | Condition::TerrainCount { predicate, .. } => {
+                if let Condition::TerrainCount { areas, .. } = condition {
+                    counts::terrain::validate(areas)?;
+                }
                 nodes = nodes.saturating_add(counts::validate(predicate, depth + 1)?);
                 if nodes.saturating_add(pending.len()) > MAX_CONDITIONS {
-                    return Err(bounded("population predicates exceed the shared success/failure node budget"));
+                    return Err(bounded(
+                        "population predicates exceed the shared success/failure node budget",
+                    ));
                 }
             }
             Condition::All { args } | Condition::Any { args } => {
-                if args.is_empty() || args.len().saturating_add(nodes).saturating_add(pending.len()) > MAX_CONDITIONS {
+                if args.is_empty()
+                    || args
+                        .len()
+                        .saturating_add(nodes)
+                        .saturating_add(pending.len())
+                        > MAX_CONDITIONS
+                {
                     return Err(bounded("watch boolean groups must be nonempty and bounded"));
                 }
                 pending.extend(args.iter().map(|child| (child, depth + 1)));
@@ -283,14 +449,28 @@ fn compare(actual: &WorldValue, operation: Comparison, expected: &Literal) -> Tr
         (WorldValue::I64(left), Literal::I64(right)) => Some(left.cmp(right)),
         (WorldValue::U64(left), Literal::U64(right)) => Some(left.cmp(right)),
         (WorldValue::Text(left), Literal::Text(right)) => Some(left.cmp(right)),
-        (WorldValue::Fixed { units: left, scale: ls }, Literal::Fixed { units: right, scale: rs }) if ls == rs => Some(left.cmp(right)),
+        (
+            WorldValue::Fixed {
+                units: left,
+                scale: ls,
+            },
+            Literal::Fixed {
+                units: right,
+                scale: rs,
+            },
+        ) if ls == rs => Some(left.cmp(right)),
         _ => None,
     };
-    let Some(order) = order else { return Truth::Unknown; };
+    let Some(order) = order else {
+        return Truth::Unknown;
+    };
     Truth::from_bool(match operation {
-        Comparison::Eq => order.is_eq(), Comparison::Ne => !order.is_eq(),
-        Comparison::Lt => order.is_lt(), Comparison::Le => !order.is_gt(),
-        Comparison::Gt => order.is_gt(), Comparison::Ge => !order.is_lt(),
+        Comparison::Eq => order.is_eq(),
+        Comparison::Ne => !order.is_eq(),
+        Comparison::Lt => order.is_lt(),
+        Comparison::Le => !order.is_gt(),
+        Comparison::Gt => order.is_gt(),
+        Comparison::Ge => !order.is_lt(),
     })
 }
 
@@ -303,22 +483,56 @@ struct Probe {
 impl Probe {
     #[cfg(test)]
     fn evaluate(&mut self, condition: &Condition, snapshot: &WorldSnapshot) -> Result<Truth> {
-        self.evaluate_bounded(condition, snapshot, &mut counts::EvaluationBudget::new(60_000))
+        self.evaluate_bounded(
+            condition,
+            snapshot,
+            &mut counts::EvaluationBudget::new(60_000),
+        )
     }
 
-    fn evaluate_bounded(&mut self, condition: &Condition, snapshot: &WorldSnapshot,
-        budget: &mut counts::EvaluationBudget) -> Result<Truth> {
+    fn evaluate_bounded(
+        &mut self,
+        condition: &Condition,
+        snapshot: &WorldSnapshot,
+        budget: &mut counts::EvaluationBudget,
+    ) -> Result<Truth> {
         budget.charge()?;
         match condition {
-            Condition::EntityCount { kind, predicate, comparison, value, .. } => {
-                counts::evaluate(self, snapshot, *kind, predicate, *comparison, *value, budget)
-            }
-            Condition::ItemQuantity { predicate, comparison, value, .. } => {
-                counts::quantity::evaluate(self, snapshot, predicate, *comparison, *value, budget)
-            }
-            Condition::TerrainCount { areas, predicate, comparison, value } => {
-                counts::terrain::evaluate(self, snapshot, areas, predicate, *comparison, *value, budget)
-            }
+            Condition::EntityCount {
+                kind,
+                predicate,
+                comparison,
+                value,
+                ..
+            } => counts::evaluate(
+                self,
+                snapshot,
+                *kind,
+                predicate,
+                *comparison,
+                *value,
+                budget,
+            ),
+            Condition::ItemQuantity {
+                predicate,
+                comparison,
+                value,
+                ..
+            } => counts::quantity::evaluate(self, snapshot, predicate, *comparison, *value, budget),
+            Condition::TerrainCount {
+                areas,
+                predicate,
+                comparison,
+                value,
+            } => counts::terrain::evaluate(
+                self,
+                snapshot,
+                areas,
+                predicate,
+                *comparison,
+                *value,
+                budget,
+            ),
             Condition::All { args } | Condition::Any { args } => {
                 let all = matches!(condition, Condition::All { .. });
                 let mut decisive = false;
@@ -333,58 +547,85 @@ impl Probe {
                         _ => {}
                     }
                 }
-                Ok(if decisive { Truth::from_bool(!all) }
-                    else if unknown { Truth::Unknown } else { Truth::from_bool(all) })
+                Ok(if decisive {
+                    Truth::from_bool(!all)
+                } else if unknown {
+                    Truth::Unknown
+                } else {
+                    Truth::from_bool(all)
+                })
             }
             Condition::Not { arg } => Ok(self.evaluate_bounded(arg, snapshot, budget)?.not()),
             Condition::Paused { value } => {
                 let truth = Truth::from_bool(snapshot.paused == *value);
-                self.facts.push(json!({"field":"canonical.paused","truth":truth.text(),
+                self.facts
+                    .push(json!({"field":"canonical.paused","truth":truth.text(),
                     "source_digest":snapshot.state_hash.to_string()}));
                 Ok(truth)
             }
             Condition::TickAtLeast { value } => {
                 let truth = Truth::from_bool(snapshot.tick.0 >= *value);
-                self.facts.push(json!({"field":"canonical.game_tick","truth":truth.text(),
+                self.facts
+                    .push(json!({"field":"canonical.game_tick","truth":truth.text(),
                     "source_digest":snapshot.state_hash.to_string()}));
                 Ok(truth)
             }
-            Condition::Field { entity_id, generation, field, comparison, value } => {
+            Condition::Field {
+                entity_id,
+                generation,
+                field,
+                comparison,
+                value,
+            } => {
                 let id = positive_id(entity_id)?;
                 let entity = snapshot.graph.entities.get(&id);
                 let fact = entity.and_then(|entity| entity.fields.get(field));
                 let mut reason = None;
                 let truth = match entity {
-                    None => { reason = Some("entity_not_observed"); Truth::Unknown }
+                    None => {
+                        reason = Some("entity_not_observed");
+                        Truth::Unknown
+                    }
                     Some(entity) if entity.generation != *generation => {
                         self.invalid_generation = true;
                         reason = Some("entity_generation_changed");
                         Truth::Unknown
                     }
                     Some(_) => match fact {
-                        None => { reason = Some("field_not_observed"); Truth::Unknown }
+                        None => {
+                            reason = Some("field_not_observed");
+                            Truth::Unknown
+                        }
                         Some(fact) => {
                             let known = match &fact.presence {
                                 None => true,
                                 Some(FactPresence::Known(value)) => value == &fact.value,
                                 _ => false,
                             };
-                            if !known { reason = Some("field_not_consistently_known"); Truth::Unknown }
-                            else if !matches!(&fact.source, FactSource::DfhackField(_)) {
-                                reason = Some("source_is_not_an_observed_dfhack_field"); Truth::Unknown
+                            if !known {
+                                reason = Some("field_not_consistently_known");
+                                Truth::Unknown
+                            } else if !matches!(&fact.source, FactSource::DfhackField(_)) {
+                                reason = Some("source_is_not_an_observed_dfhack_field");
+                                Truth::Unknown
                             } else if fact.source_digest == Digest32::ZERO {
-                                reason = Some("source_digest_not_established"); Truth::Unknown
+                                reason = Some("source_digest_not_established");
+                                Truth::Unknown
                             } else if fact.observed_at != snapshot.tick {
-                                reason = Some("field_is_not_observed_at_this_game_tick"); Truth::Unknown
+                                reason = Some("field_is_not_observed_at_this_game_tick");
+                                Truth::Unknown
                             } else {
                                 let truth = compare(&fact.value, *comparison, value);
-                                if truth == Truth::Unknown { reason = Some("incompatible_value_type_or_scale"); }
+                                if truth == Truth::Unknown {
+                                    reason = Some("incompatible_value_type_or_scale");
+                                }
                                 truth
                             }
                         }
                     },
                 };
-                self.facts.push(json!({"entity_id":entity_id,"generation":generation,
+                self.facts
+                    .push(json!({"entity_id":entity_id,"generation":generation,
                     "field":field,"truth":truth.text(),"reason":reason,
                     "revision":entity.map(|entity|entity.revision),
                     "source_digest":fact.map(|fact|fact.source_digest.to_string()),
@@ -406,18 +647,29 @@ impl Watch {
 
     #[cfg(test)]
     fn advance(&mut self, snapshot: &WorldSnapshot, initial: bool) -> Result<()> {
-        self.advance_bounded(snapshot, initial, &mut counts::EvaluationBudget::new(60_000))
+        self.advance_bounded(
+            snapshot,
+            initial,
+            &mut counts::EvaluationBudget::new(60_000),
+        )
     }
 
-    fn advance_bounded(&mut self, snapshot: &WorldSnapshot, initial: bool,
-        budget: &mut counts::EvaluationBudget) -> Result<()> {
+    fn advance_bounded(
+        &mut self,
+        snapshot: &WorldSnapshot,
+        initial: bool,
+        budget: &mut counts::EvaluationBudget,
+    ) -> Result<()> {
         budget.check()?;
-        if self.status.terminal() { return Ok(()); }
+        if self.status.terminal() {
+            return Ok(());
+        }
         let current = snapshot.anchor();
         let previous = self.last_seen;
         let incompatible = current.fortress_id != self.created_at.fortress_id
             || current.cursor.epoch != self.created_at.cursor.epoch
-            || current.tick < previous.tick || current.cursor.sequence < previous.cursor.sequence
+            || current.tick < previous.tick
+            || current.cursor.sequence < previous.cursor.sequence
             || (current.cursor == previous.cursor && current != previous);
         if incompatible {
             self.status = Status::Invalidated;
@@ -427,7 +679,9 @@ impl Watch {
                 "prior_anchor":anchor(previous)});
             return self.seal();
         }
-        if !initial && current == previous { return Ok(()); }
+        if !initial && current == previous {
+            return Ok(());
+        }
         self.last_seen = current;
         if current.tick.0 > self.definition.deadline_tick {
             self.status = Status::Expired;
@@ -436,7 +690,9 @@ impl Watch {
             return self.seal();
         }
         let gap = !initial && current.cursor.sequence > previous.cursor.sequence.saturating_add(1);
-        if gap { self.streak = 0; }
+        if gap {
+            self.streak = 0;
+        }
         let mut probe = Probe::default();
         let truth = probe.evaluate_bounded(&self.definition.condition, snapshot, budget)?;
         let failure_truth = match &self.definition.failure_condition {
@@ -444,7 +700,11 @@ impl Watch {
             None => Truth::False,
         };
         let due = self.last_sample_tick.is_none_or(|last| {
-            current.tick.0.checked_sub(last).is_some_and(|elapsed| elapsed >= self.definition.poll_interval_ticks)
+            current
+                .tick
+                .0
+                .checked_sub(last)
+                .is_some_and(|elapsed| elapsed >= self.definition.poll_interval_ticks)
         });
         self.evaluation = json!({"condition":truth.text(),"failure_condition":failure_truth.text(),
             "sample_due":due,"skipped_observations_reset_streak":gap,
@@ -458,7 +718,9 @@ impl Watch {
         } else {
             if due {
                 self.last_sample_tick = Some(current.tick.0);
-                self.samples = self.samples.checked_add(1)
+                self.samples = self
+                    .samples
+                    .checked_add(1)
                     .ok_or_else(|| bounded("watch sample counter exhausted"))?;
             }
             if truth == Truth::Unknown || failure_truth == Truth::Unknown {
@@ -468,10 +730,14 @@ impl Watch {
                 self.status = Status::Waiting;
                 self.streak = 0;
             } else {
-                if due { self.streak += 1; }
+                if due {
+                    self.streak += 1;
+                }
                 self.status = if self.streak >= self.definition.stable_observations {
                     Status::Satisfied
-                } else { Status::Candidate };
+                } else {
+                    Status::Candidate
+                };
             }
             if !self.status.terminal() && current.tick.0 == self.definition.deadline_tick {
                 self.status = Status::Expired;
@@ -482,14 +748,19 @@ impl Watch {
     }
 
     fn awaiting_recovery_observation(&self) -> bool {
-        self.recovery.is_some() && self.status == Status::BlockedUnknown
+        self.recovery.is_some()
+            && self.status == Status::BlockedUnknown
             && self.evaluation.get("reason").and_then(Value::as_str)
                 == Some("restart_gap_requires_fresh_observation")
     }
 
     fn summary(&self, current: StateAnchor) -> Value {
         let awaiting = self.awaiting_recovery_observation();
-        let historical = self.evaluation.get("terminal_evidence_retained").and_then(Value::as_bool) == Some(true);
+        let historical = self
+            .evaluation
+            .get("terminal_evidence_retained")
+            .and_then(Value::as_bool)
+            == Some(true);
         let mut result = json!({"watch":self.handle,"key":self.definition.key,"label":self.definition.label,
             "status":self.status.text(),"terminal":self.status.terminal(),
             "stable_observations":self.streak,"required_stable_observations":self.definition.stable_observations,
@@ -518,18 +789,26 @@ impl Watch {
 }
 
 fn active_work(store: &Store, context: &OperationContext) -> Vec<Value> {
-    store.entries.iter().filter(|((session, _), watch)| *session == context.session_id && !watch.status.terminal())
+    store
+        .entries
+        .iter()
+        .filter(|((session, _), watch)| *session == context.session_id && !watch.status.terminal())
         .map(|(_, watch)| {
             let mut value = watch.summary(context.anchor);
             value["obligation_id"] = json!(watch.handle);
             value["kind"] = json!("foreground_observation_watch");
             value["game_effect"] = json!("none");
-            let next_kind = if watch.awaiting_recovery_observation() { "await_watch" } else { "poll_watch" };
+            let next_kind = if watch.awaiting_recovery_observation() {
+                "await_watch"
+            } else {
+                "poll_watch"
+            };
             value["next_step"] = json!({"tool":"fortress.query","arguments":{
                 "session_id":context.session_id.to_string(),"query":{"schema":"dfmcp.query/1",
                     "query":{"kind":next_kind,"watch":watch.handle}}}});
             value
-        }).collect()
+        })
+        .collect()
 }
 
 fn payload(context: &OperationContext, kind: &str) -> Value {
@@ -542,135 +821,267 @@ fn payload(context: &OperationContext, kind: &str) -> Value {
 fn authorize(snapshot: &WorldSnapshot, context: &OperationContext) -> Result<()> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if snapshot.anchor() != context.anchor {
-        return Err(failure(ErrorCode::StaleAnchor,"watch context does not name the supplied snapshot"));
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "watch context does not name the supplied snapshot",
+        ));
     }
     if snapshot.graph.entities.len() > context.budget.max_entities as usize {
         return Err(bounded("watch input exceeds the session's entity budget"));
     }
     if !snapshot.hash_is_valid() {
-        return Err(failure(ErrorCode::InternalInvariantViolation,"watch snapshot hash is invalid"));
+        return Err(failure(
+            ErrorCode::InternalInvariantViolation,
+            "watch snapshot hash is invalid",
+        ));
     }
     Ok(())
 }
 
 fn publish_plain<F>(context: &OperationContext, value: Value, publish: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
-    let size = serde_json::to_vec(&value).map_err(|_| invalid("watch result cannot be encoded"))?.len();
-    let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
-    if size as u64 > maximum { return Err(bounded("watch result and active-work summary exceed the output budget")); }
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    let size = serde_json::to_vec(&value)
+        .map_err(|_| invalid("watch result cannot be encoded"))?
+        .len();
+    let maximum = context
+        .budget
+        .max_bytes
+        .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
+    if size as u64 > maximum {
+        return Err(bounded(
+            "watch result and active-work summary exceed the output budget",
+        ));
+    }
     publish(value)
 }
 
-fn publish_work<F>(store: &Store, context: &OperationContext, mut value: Value, publish: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+fn publish_work<F>(
+    store: &Store,
+    context: &OperationContext,
+    mut value: Value,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     value["_condition_watch_work"] = json!(active_work(store, context));
-    durability::publish(store,context,value,|value|publish_plain(context,value,publish))
+    durability::publish(store, context, value, |value| {
+        publish_plain(context, value, publish)
+    })
 }
 
 /// Pure queries retain the current watch projection without sampling it.
 pub fn with_active_work<F>(context: &OperationContext, value: Value, publish: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let store = lock(&WATCHES)?;
     publish_work(&store, context, value, publish)
 }
 
-pub fn execute<F>(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value, publish: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+pub fn execute<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     execute_in(&WATCHES, snapshot, context, input, publish)
 }
 
-fn execute_in<F>(storage: &Mutex<Store>, snapshot: &WorldSnapshot, context: &OperationContext,
-    input: &Value, publish: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+fn execute_in<F>(
+    storage: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let mut evaluation_budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
     validate_input(input)?;
     if input["query"]["kind"] == "watches"
-        && input["query"].as_object().is_none_or(|query| query.len() != 1) {
+        && input["query"]
+            .as_object()
+            .is_none_or(|query| query.len() != 1)
+    {
         return Err(invalid("watches does not accept additional arguments"));
     }
     let envelope: Envelope = serde_json::from_value(input.clone())
         .map_err(|_| invalid("invalid condition-watch request"))?;
-    if envelope.schema != "dfmcp.query/1" { return Err(invalid("watch schema must be dfmcp.query/1")); }
-    if envelope.expected_anchor.as_ref().is_some_and(|value| value != &anchor(context.anchor)) {
-        return Err(failure(ErrorCode::StaleAnchor,"watch expected_anchor differs from the complete current anchor"));
+    if envelope.schema != "dfmcp.query/1" {
+        return Err(invalid("watch schema must be dfmcp.query/1"));
+    }
+    if envelope
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|value| value != &anchor(context.anchor))
+    {
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "watch expected_anchor differs from the complete current anchor",
+        ));
     }
     let mut store = lock(storage)?;
     match envelope.query {
-        Request::Watch { key, label, condition, failure_condition, deadline_tick, poll_interval_ticks, stable_observations } => {
-            let definition = Definition { label:label.unwrap_or_else(||key.clone()),key,condition,failure_condition,
-                deadline_tick,poll_interval_ticks:poll_interval_ticks.unwrap_or(1),stable_observations:stable_observations.unwrap_or(2) };
+        Request::Watch {
+            key,
+            label,
+            condition,
+            failure_condition,
+            deadline_tick,
+            poll_interval_ticks,
+            stable_observations,
+        } => {
+            let definition = Definition {
+                label: label.unwrap_or_else(|| key.clone()),
+                key,
+                condition,
+                failure_condition,
+                deadline_tick,
+                poll_interval_ticks: poll_interval_ticks.unwrap_or(1),
+                stable_observations: stable_observations.unwrap_or(2),
+            };
             validate_definition(&definition)?;
             if let Some((_, prior)) = store.entries.iter().find(|((session, _), watch)| {
-                *session==context.session_id && watch.definition.key==definition.key
+                *session == context.session_id && watch.definition.key == definition.key
             }) {
-                if prior.definition != definition { return Err(failure(ErrorCode::Conflict,"watch key already identifies another definition")); }
-                let mut value = payload(context,"watch");
+                if prior.definition != definition {
+                    return Err(failure(
+                        ErrorCode::Conflict,
+                        "watch key already identifies another definition",
+                    ));
+                }
+                let mut value = payload(context, "watch");
                 value["record"] = prior.detail(context.anchor);
                 value["replayed"] = json!(true);
-                return publish_work(&store,context,value,publish);
+                return publish_work(&store, context, value, publish);
             }
             if deadline_tick <= context.anchor.tick.0
-                || deadline_tick.checked_sub(context.anchor.tick.0).is_none_or(|ticks|ticks>context.budget.max_game_ticks) {
-                return Err(invalid("new watch deadline must be future and within the negotiated game-tick horizon"));
+                || deadline_tick
+                    .checked_sub(context.anchor.tick.0)
+                    .is_none_or(|ticks| ticks > context.budget.max_game_ticks)
+            {
+                return Err(invalid(
+                    "new watch deadline must be future and within the negotiated game-tick horizon",
+                ));
             }
-            let count = store.entries.keys().filter(|(session,_)|*session==context.session_id).count();
-            if count>=MAX_PER_SESSION || store.entries.len()>=MAX_TOTAL {
-                return Err(bounded("watch retention is full; release a terminal watch before registering more"));
+            let count = store
+                .entries
+                .keys()
+                .filter(|(session, _)| *session == context.session_id)
+                .count();
+            if count >= MAX_PER_SESSION || store.entries.len() >= MAX_TOTAL {
+                return Err(bounded(
+                    "watch retention is full; release a terminal watch before registering more",
+                ));
             }
-            let serial = store.serial.checked_add(1).ok_or_else(||bounded("watch identity space exhausted"))?;
-            let identity = digest(&json!({"domain":"dfmcp-condition-watch-v1","session":context.session_id.to_string(),
-                "serial":serial,"anchor":anchor(context.anchor),"definition":definition}))?;
-            let mut watch = Watch {handle:format!("watch:{identity}"),definition,created_at:context.anchor,
-                last_seen:context.anchor,last_sample_tick:None,streak:0,samples:0,status:Status::Waiting,
-                evaluation:Value::Null,evidence_digest:identity,recovery:None};
-            watch.advance_bounded(snapshot,true,&mut evaluation_budget)?;
-            let key = (context.session_id,watch.handle.clone());
-            let mut value = payload(context,"watch");
+            let serial = store
+                .serial
+                .checked_add(1)
+                .ok_or_else(|| bounded("watch identity space exhausted"))?;
+            let identity = digest(
+                &json!({"domain":"dfmcp-condition-watch-v1","session":context.session_id.to_string(),
+                "serial":serial,"anchor":anchor(context.anchor),"definition":definition}),
+            )?;
+            let mut watch = Watch {
+                handle: format!("watch:{identity}"),
+                definition,
+                created_at: context.anchor,
+                last_seen: context.anchor,
+                last_sample_tick: None,
+                streak: 0,
+                samples: 0,
+                status: Status::Waiting,
+                evaluation: Value::Null,
+                evidence_digest: identity,
+                recovery: None,
+            };
+            watch.advance_bounded(snapshot, true, &mut evaluation_budget)?;
+            let key = (context.session_id, watch.handle.clone());
+            let mut value = payload(context, "watch");
             value["record"] = watch.detail(context.anchor);
             value["replayed"] = json!(false);
             // Build a bounded candidate store. The caller's pure publisher must
             // accept the full response, then durable watches sync before root swap.
-            let mut candidate = Store {serial,entries:store.entries.clone()};
-            candidate.entries.insert(key,watch);
-            let encoded = publish_work(&candidate,context,value,|value| {
-                let encoded=publish(value)?; evaluation_budget.check()?; Ok(encoded)
+            let mut candidate = Store {
+                serial,
+                entries: store.entries.clone(),
+            };
+            candidate.entries.insert(key, watch);
+            let encoded = publish_work(&candidate, context, value, |value| {
+                let encoded = publish(value)?;
+                evaluation_budget.check()?;
+                Ok(encoded)
             })?;
             *store = candidate;
             Ok(encoded)
         }
         Request::Watches => {
-            let mut value = payload(context,"watches");
-            value["records"] = json!(store.entries.iter().filter(|((session,_) ,_)|*session==context.session_id)
-                .map(|(_,watch)|watch.summary(context.anchor)).collect::<Vec<_>>());
+            let mut value = payload(context, "watches");
+            value["records"] = json!(
+                store
+                    .entries
+                    .iter()
+                    .filter(|((session, _), _)| *session == context.session_id)
+                    .map(|(_, watch)| watch.summary(context.anchor))
+                    .collect::<Vec<_>>()
+            );
             value["maximum_per_session"] = json!(MAX_PER_SESSION);
-            publish_work(&store,context,value,publish)
+            publish_work(&store, context, value, publish)
         }
-        Request::PollWatch { watch } | Request::CancelWatch { watch } | Request::ReleaseWatch { watch } => {
+        Request::PollWatch { watch }
+        | Request::CancelWatch { watch }
+        | Request::ReleaseWatch { watch } => {
             validate_handle(&watch)?;
-            let key = (context.session_id,watch.clone());
-            let kind = input["query"]["kind"].as_str().ok_or_else(||invalid("watch operation missing"))?;
-            let mut candidate = Store {serial:store.serial,entries:store.entries.clone()};
-            let mut value = payload(context,kind);
-            if kind=="release_watch" {
-                if candidate.entries.get(&key).is_some_and(|watch|!watch.status.terminal()) {
-                    return Err(failure(ErrorCode::Conflict,"cancel a nonterminal watch before releasing it"));
+            let key = (context.session_id, watch.clone());
+            let kind = input["query"]["kind"]
+                .as_str()
+                .ok_or_else(|| invalid("watch operation missing"))?;
+            let mut candidate = Store {
+                serial: store.serial,
+                entries: store.entries.clone(),
+            };
+            let mut value = payload(context, kind);
+            if kind == "release_watch" {
+                if candidate
+                    .entries
+                    .get(&key)
+                    .is_some_and(|watch| !watch.status.terminal())
+                {
+                    return Err(failure(
+                        ErrorCode::Conflict,
+                        "cancel a nonterminal watch before releasing it",
+                    ));
                 }
                 value["released"] = json!(candidate.entries.remove(&key).is_some());
                 value["watch"] = json!(watch);
             } else {
-                let record = candidate.entries.get_mut(&key)
-                    .ok_or_else(||invalid("watch is not retained by this session"))?;
-                if kind=="cancel_watch" && !record.status.terminal() {
+                let record = candidate
+                    .entries
+                    .get_mut(&key)
+                    .ok_or_else(|| invalid("watch is not retained by this session"))?;
+                if kind == "cancel_watch" && !record.status.terminal() {
                     record.status = Status::Cancelled;
                     record.last_seen = context.anchor;
-                    record.evaluation = json!({"reason":"foreground_watch_cancelled_without_game_effect"});
+                    record.evaluation =
+                        json!({"reason":"foreground_watch_cancelled_without_game_effect"});
                     record.seal()?;
-                } else if kind=="poll_watch" { record.advance_bounded(snapshot,false,&mut evaluation_budget)?; }
+                } else if kind == "poll_watch" {
+                    record.advance_bounded(snapshot, false, &mut evaluation_budget)?;
+                }
                 value["record"] = record.detail(context.anchor);
             }
-            let encoded = publish_work(&candidate,context,value,|value| {
-                let encoded=publish(value)?; evaluation_budget.check()?; Ok(encoded)
+            let encoded = publish_work(&candidate, context, value, |value| {
+                let encoded = publish(value)?;
+                evaluation_budget.check()?;
+                Ok(encoded)
             })?;
             *store = candidate;
             Ok(encoded)

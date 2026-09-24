@@ -453,7 +453,8 @@ mod tests {
     }
 
     #[test]
-    fn attach_preserves_tool_specific_fields() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn attach_preserves_tool_specific_fields() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
         let encoded = AgentTurnBuilder::new("fortress.query", AgentPhase::Inspect)
             .attach(json!({"ok": true, "matched": 7}));
         let value: Value = serde_json::from_str(&encoded)?;
@@ -463,15 +464,13 @@ mod tests {
     }
 
     #[test]
-    fn non_object_payload_fails_closed_with_the_original_turn() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn non_object_payload_fails_closed_with_the_original_turn()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         let encoded = AgentTurnBuilder::new("fortress.observe", AgentPhase::Orient)
             .attach(json!(["not", "an", "object"]));
         let value: Value = serde_json::from_str(&encoded)?;
         assert_eq!(value["ok"], false);
-        assert_eq!(
-            value["error"]["code"],
-            "internal_invariant_violation"
-        );
+        assert_eq!(value["error"]["code"], "internal_invariant_violation");
         assert_eq!(value["agent_turn"]["operation"], "fortress.observe");
         Ok(())
     }
@@ -485,9 +484,6 @@ mod tests {
             json!({"scope": "last_action"}),
         );
         assert_eq!(guidance["class"], "reconciliation_required");
-        assert_eq!(
-            guidance["minimum_safe_next_step"]["tool"],
-            "fortress.wait"
-        );
+        assert_eq!(guidance["minimum_safe_next_step"]["tool"], "fortress.wait");
     }
 }

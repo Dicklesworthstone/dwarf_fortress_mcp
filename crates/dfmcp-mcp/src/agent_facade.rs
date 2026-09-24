@@ -122,9 +122,9 @@ fn normalize_anchor(mut anchor: Value, payload: &Value, prior: Option<&Value>) -
                 .map(|_| json!(1))
         });
     if let Some(object) = anchor.as_object_mut() {
-        object.entry("game_tick".to_owned()).or_insert_with(|| {
-            game_tick.unwrap_or(Value::Null)
-        });
+        object
+            .entry("game_tick".to_owned())
+            .or_insert_with(|| game_tick.unwrap_or(Value::Null));
     }
     anchor
 }
@@ -637,7 +637,10 @@ fn briefing(state: &SessionOrientation) -> Value {
 }
 
 fn coverage(payload: &Value) -> Value {
-    let truncated = matches!(payload.get("truncated").and_then(Value::as_bool), Some(true));
+    let truncated = matches!(
+        payload.get("truncated").and_then(Value::as_bool),
+        Some(true)
+    );
     json!({
         "status": if truncated { "partial" } else { "complete_for_named_projection" },
         "complete_domains": ["laboratory.pause_state", "laboratory.protocol_state"],
@@ -758,7 +761,10 @@ fn continuity_status(
     payload: &Value,
 ) -> ContinuityStatus {
     if !ok {
-        return if matches!(error_code(payload), "indeterminate_effect" | "indeterminate") {
+        return if matches!(
+            error_code(payload),
+            "indeterminate_effect" | "indeterminate"
+        ) {
             ContinuityStatus::Indeterminate
         } else if previous_anchor.is_some() {
             ContinuityStatus::Stale
@@ -773,7 +779,9 @@ fn continuity_status(
         return ContinuityStatus::Reset;
     }
     match (previous_anchor, current_anchor) {
-        (Some(previous), Some(current)) if previous == current && operation == "fortress.observe" => {
+        (Some(previous), Some(current))
+            if previous == current && operation == "fortress.observe" =>
+        {
             ContinuityStatus::Heartbeat
         }
         (Some(_), Some(_)) => ContinuityStatus::Continuous,
@@ -885,7 +893,12 @@ fn project_response(
         .attention(attention(operation, is_ok(&payload), &payload, &state))
         .active_work(active_work(&state))
         .affordances(affordances(&state))
-        .recommendations(recommendations(operation, is_ok(&payload), &payload, &state))
+        .recommendations(recommendations(
+            operation,
+            is_ok(&payload),
+            &payload,
+            &state,
+        ))
         .uncertainty(uncertainties(&state))
         .coverage(coverage(&payload))
         .budget(budget(&state))
@@ -1128,7 +1141,11 @@ mod tests {
         assert!(response["agent_turn"]["request_id"].is_null());
         assert!(response["agent_turn"]["turn_id"].is_string());
         assert!(response["agent_turn"]["affordances"].as_array().is_some());
-        assert!(response["agent_turn"]["recommendations"].as_array().is_some());
+        assert!(
+            response["agent_turn"]["recommendations"]
+                .as_array()
+                .is_some()
+        );
         Ok(())
     }
 
@@ -1171,10 +1188,7 @@ mod tests {
             first["agent_turn"]["continuity"]["status"].as_str(),
             Some("continuous") | Some("heartbeat")
         ));
-        assert_eq!(
-            second["agent_turn"]["continuity"]["status"],
-            "heartbeat"
-        );
+        assert_eq!(second["agent_turn"]["continuity"]["status"], "heartbeat");
         Ok(())
     }
 
@@ -1200,7 +1214,8 @@ mod tests {
     }
 
     #[test]
-    fn errors_keep_recovery_and_orientation() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn errors_keep_recovery_and_orientation() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
         let response = parsed(&fortress_observe(None))?;
         assert_eq!(response["ok"], false);
         assert_eq!(response["agent_turn"]["operation"], "fortress.observe");

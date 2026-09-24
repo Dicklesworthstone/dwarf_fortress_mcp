@@ -9,11 +9,21 @@ const MAX_CLOSE_RECEIPTS: usize = 32;
 static CLOSED: LazyLock<Mutex<VecDeque<(SessionId, String)>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
 
-pub(super) struct Slot { held: bool }
+pub(super) struct Slot {
+    held: bool,
+}
 impl Slot {
     pub(super) fn reserve() -> Result<Self> {
-        SLOTS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < 2).then_some(n + 1))
-            .map_err(|_| error(ErrorCode::BudgetExceeded, "spatial/1.8 retains at most two sessions"))?;
+        SLOTS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < 2).then_some(n + 1)
+            })
+            .map_err(|_| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "spatial/1.8 retains at most two sessions",
+                )
+            })?;
         Ok(Self { held: true })
     }
     fn release(&mut self) {
@@ -23,24 +33,48 @@ impl Slot {
         }
     }
 }
-impl Drop for Slot { fn drop(&mut self) { self.release(); } }
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
 
-struct ClosedSource { archive: bool }
+struct ClosedSource {
+    archive: bool,
+}
 impl Source for ClosedSource {
     fn read(&mut self, _: Duration) -> Result<LiveSpatialCitizenObservation> {
-        Err(error(ErrorCode::SessionNotFound, "spatial session is closed"))
+        Err(error(
+            ErrorCode::SessionNotFound,
+            "spatial session is closed",
+        ))
     }
-    fn poisoned(&self) -> bool { true }
+    fn poisoned(&self) -> bool {
+        true
+    }
     fn fence(&mut self) {}
-    fn pages(&self) -> u32 { 0 }
-    fn archive_only(&self) -> bool { self.archive }
-    fn closed(&self) -> bool { true }
+    fn pages(&self) -> u32 {
+        0
+    }
+    fn archive_only(&self) -> bool {
+        self.archive
+    }
+    fn closed(&self) -> bool {
+        true
+    }
 }
 
 fn receipt(id: SessionId) -> Result<String> {
-    lock(&CLOSED)?.iter().find(|(session, _)| *session == id).map(|(_, out)| out.clone())
-        .ok_or_else(|| error(ErrorCode::SessionNotFound,
-            "spatial session is not open and no recent close receipt is retained"))
+    lock(&CLOSED)?
+        .iter()
+        .find(|(session, _)| *session == id)
+        .map(|(_, out)| out.clone())
+        .ok_or_else(|| {
+            error(
+                ErrorCode::SessionNotFound,
+                "spatial session is not open and no recent close receipt is retained",
+            )
+        })
 }
 
 fn render(session: &Session, poisoned: bool, released: Value) -> Result<String> {
@@ -63,9 +97,15 @@ fn render(session: &Session, poisoned: bool, released: Value) -> Result<String> 
         .coverage(json!({"status":"partial","complete_domains":["session_resource_release"],
             "omitted_domains":["current_game_state","durable_watch_evidence","game_effect_outcomes"]}))
         .attach(value);
-    let maximum = session.budget.max_bytes.min(u64::from(session.budget.max_output_tokens) * 4);
+    let maximum = session
+        .budget
+        .max_bytes
+        .min(u64::from(session.budget.max_output_tokens) * 4);
     if out.len() as u64 > maximum {
-        return Err(error(ErrorCode::BudgetExceeded, "session close receipt does not fit; no resources were released"));
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "session close receipt does not fit; no resources were released",
+        ));
     }
     Ok(out)
 }
@@ -83,17 +123,26 @@ pub(super) fn close(raw: Option<String>, discard_process_local: bool) -> Result<
         Ok(guard) => (guard, false),
         Err(poison) => (poison.into_inner(), true),
     };
-    if session.source.closed() { return receipt(id); }
+    if session.source.closed() {
+        return receipt(id);
+    }
     let mut sessions = lock(&SESSIONS)?;
     let mut receipts = lock(&CLOSED)?;
-    if !sessions.get(&id).is_some_and(|current| Arc::ptr_eq(current, &handle)) {
-        return Err(error(ErrorCode::SessionNotFound, "spatial session ownership changed before close"));
+    if !sessions
+        .get(&id)
+        .is_some_and(|current| Arc::ptr_eq(current, &handle))
+    {
+        return Err(error(
+            ErrorCode::SessionNotFound,
+            "spatial session ownership changed before close",
+        ));
     }
     // The semantic layer locks baseline/watch registries in their normal order,
     // validates explicit consent for volatile records, and renders before release.
     // Neither source health nor expired Query authority prevents resource cleanup.
-    let out = semantic_query::release_session_resources(id, discard_process_local,
-        |released| render(&session, poisoned, released))?;
+    let out = semantic_query::release_session_resources(id, discard_process_local, |released| {
+        render(&session, poisoned, released)
+    })?;
     // No fallible operation after this point. Already-resolved waiters still own
     // an Arc, but context()/refresh() reject this ClosedSource before reading data.
     let archive = session.source.archive_only();
@@ -107,7 +156,9 @@ pub(super) fn close(raw: Option<String>, discard_process_local: bool) -> Result<
     // A long-lived session may close after many newer sessions. Retain its new
     // receipt by close order so it is not immediately evicted by an older ID.
     receipts.push_back((id, out.clone()));
-    while receipts.len() > MAX_CLOSE_RECEIPTS { receipts.pop_front(); }
+    while receipts.len() > MAX_CLOSE_RECEIPTS {
+        receipts.pop_front();
+    }
     Ok(out)
 }
 
@@ -115,12 +166,17 @@ pub(super) fn cancel(raw: Option<String>, scope: Option<String>, discard: Option
     let result = match scope.as_deref() {
         Some("session") => close(raw, discard.unwrap_or(false)),
         None if discard.is_none() => return no_effect(raw, "fortress.cancel"),
-        _ => Err(error(ErrorCode::InvalidRequest,
-            "session teardown requires scope=session; ordinary game-effect cancellation remains unavailable")),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "session teardown requires scope=session; ordinary game-effect cancellation remains unavailable",
+        )),
     };
     // A cleanup refusal must not itself sample watches, access a damaged journal
     // or reveal cached world facts through the usual operational error briefing.
-    match result { Ok(out) => out, Err(e) => failure(None, None, "fortress.cancel", &e) }
+    match result {
+        Ok(out) => out,
+        Err(e) => failure(None, None, "fortress.cancel", &e),
+    }
 }
 
 #[cfg(all(test, unix))]

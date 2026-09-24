@@ -3,17 +3,27 @@
 use super::*;
 use std::time::Instant;
 
-pub(super) fn cancel<S: EffectJournalStorage>(journal: &mut ControlEffectJournal<S>,
-    context: &OperationContext, key: &str, plan: Digest32,
-    max_bytes: Option<u64>, max_output_tokens: Option<u32>) -> Result<Value> {
+pub(super) fn cancel<S: EffectJournalStorage>(
+    journal: &mut ControlEffectJournal<S>,
+    context: &OperationContext,
+    key: &str,
+    plan: Digest32,
+    max_bytes: Option<u64>,
+    max_output_tokens: Option<u32>,
+) -> Result<Value> {
     context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)?;
     let started = Instant::now();
     let bytes = max_bytes.unwrap_or(context.budget.max_bytes);
     let tokens = max_output_tokens.unwrap_or(context.budget.max_output_tokens);
-    if bytes == 0 || bytes > context.budget.max_bytes || tokens == 0
-        || tokens > context.budget.max_output_tokens {
-        return Err(err(ErrorCode::BudgetExceeded,
-            "cancellation response budgets must be positive and only narrow the session limits"));
+    if bytes == 0
+        || bytes > context.budget.max_bytes
+        || tokens == 0
+        || tokens > context.budget.max_output_tokens
+    {
+        return Err(err(
+            ErrorCode::BudgetExceeded,
+            "cancellation response budgets must be positive and only narrow the session limits",
+        ));
     }
     let maximum = bytes.min(u64::from(tokens) * 4);
     let mut metadata = journal_json(journal);
@@ -34,12 +44,16 @@ pub(super) fn cancel<S: EffectJournalStorage>(journal: &mut ControlEffectJournal
             "response_budget":{"max_bytes":maximum,"max_output_tokens":tokens,
                 "token_estimate":"ceil_utf8_bytes_div_4","includes_agent_turn":true}});
         if packet("fortress.cancel", value.clone(), false).len() as u64 > maximum {
-            return Err(err(ErrorCode::BudgetExceeded,
-                "complete cancellation acknowledgement does not fit; no cancellation was written"));
+            return Err(err(
+                ErrorCode::BudgetExceeded,
+                "complete cancellation acknowledgement does not fit; no cancellation was written",
+            ));
         }
         if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
-            return Err(err(ErrorCode::BudgetExceeded,
-                "cancellation deadline exhausted before journal publication"));
+            return Err(err(
+                ErrorCode::BudgetExceeded,
+                "cancellation deadline exhausted before journal publication",
+            ));
         }
         Ok(value)
     })
@@ -47,8 +61,10 @@ pub(super) fn cancel<S: EffectJournalStorage>(journal: &mut ControlEffectJournal
     // already checked above. File sync is synchronous, not hard-preemptible.
 }
 
-pub(super) fn explanation<S: EffectJournalStorage>(journal: &ControlEffectJournal<S>,
-    record: &DurablePauseRecord) -> Value {
+pub(super) fn explanation<S: EffectJournalStorage>(
+    journal: &ControlEffectJournal<S>,
+    record: &DurablePauseRecord,
+) -> Value {
     json!({"ok":true,"effect":record_json(record),"cancelled":true,
         "commit_permitted":false,"reconciliation_performed":false,
         "native_cancellation_performed":false,"mutation_dispatched":false,

@@ -1,15 +1,15 @@
 //! Quantified conditions over the named observed projection, never a complete
 //! world-count or absence claim. Dynamic membership is reevaluated each sample.
 use super::*;
-use std::time::Instant;
 use dfmcp_world::{EntityKind, EntityRecord};
+use std::time::Instant;
 
 #[path = "query_watch_quantity.rs"]
 pub(super) mod quantity;
-#[path = "query_watch_terrain.rs"]
-pub(super) mod terrain;
 #[path = "query_watch_relationship.rs"]
 mod relationships;
+#[path = "query_watch_terrain.rs"]
+pub(super) mod terrain;
 
 pub(super) const MAX_EVALUATION_WORK: u64 = 1_000_000;
 
@@ -22,7 +22,11 @@ pub(super) struct EvaluationBudget {
 }
 impl EvaluationBudget {
     pub(super) fn new(wall_millis: u64) -> Self {
-        Self { used: 0, started: Instant::now(), wall_millis }
+        Self {
+            used: 0,
+            started: Instant::now(),
+            wall_millis,
+        }
     }
     pub(super) fn check(&self) -> Result<()> {
         if self.started.elapsed().as_millis() >= u128::from(self.wall_millis) {
@@ -32,27 +36,43 @@ impl EvaluationBudget {
     }
     pub(super) fn charge(&mut self) -> Result<()> {
         if self.used >= MAX_EVALUATION_WORK {
-            return Err(bounded("watch evaluation exhausted its shared entity/predicate work allowance"));
+            return Err(bounded(
+                "watch evaluation exhausted its shared entity/predicate work allowance",
+            ));
         }
         self.used += 1;
-        if self.used == 1 || self.used % 128 == 0 { self.check()?; }
+        if self.used == 1 || self.used % 128 == 0 {
+            self.check()?;
+        }
         Ok(())
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Scope { ObservedProjection }
+pub(super) enum Scope {
+    ObservedProjection,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Kind { Unit, Job, Building, Item, TileFeature, Announcement }
+pub(super) enum Kind {
+    Unit,
+    Job,
+    Building,
+    Item,
+    TileFeature,
+    Announcement,
+}
 impl Kind {
     fn entity_kind(self) -> EntityKind {
         match self {
-            Self::Unit => EntityKind::Unit, Self::Job => EntityKind::Job,
-            Self::Building => EntityKind::Building, Self::Item => EntityKind::Item,
-            Self::TileFeature => EntityKind::TileFeature, Self::Announcement => EntityKind::Announcement,
+            Self::Unit => EntityKind::Unit,
+            Self::Job => EntityKind::Job,
+            Self::Building => EntityKind::Building,
+            Self::Item => EntityKind::Item,
+            Self::TileFeature => EntityKind::TileFeature,
+            Self::Announcement => EntityKind::Announcement,
         }
     }
 }
@@ -64,12 +84,26 @@ impl Kind {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Predicate {
     Always {},
-    Field { field: String, comparison: Comparison, value: Literal },
-    Related { entity_id: String, generation: u32, relation: relationships::Relation,
-        direction: relationships::Direction },
-    All { args: Vec<Predicate> },
-    Any { args: Vec<Predicate> },
-    Not { arg: Box<Predicate> },
+    Field {
+        field: String,
+        comparison: Comparison,
+        value: Literal,
+    },
+    Related {
+        entity_id: String,
+        generation: u32,
+        relation: relationships::Relation,
+        direction: relationships::Direction,
+    },
+    All {
+        args: Vec<Predicate>,
+    },
+    Any {
+        args: Vec<Predicate>,
+    },
+    Not {
+        arg: Box<Predicate>,
+    },
 }
 
 /// Counts against the enclosing success/failure tree's shared 64-node bound.
@@ -79,25 +113,43 @@ pub(super) fn validate(predicate: &Predicate, depth: usize) -> Result<usize> {
     while let Some((predicate, depth)) = pending.pop() {
         nodes += 1;
         if depth > MAX_CONDITION_DEPTH || nodes > MAX_CONDITIONS {
-            return Err(bounded("count predicate exceeds the watch's shared depth/node bounds"));
+            return Err(bounded(
+                "count predicate exceeds the watch's shared depth/node bounds",
+            ));
         }
         match predicate {
             Predicate::Always {} => {}
-            Predicate::Related { entity_id, generation, .. } => {
+            Predicate::Related {
+                entity_id,
+                generation,
+                ..
+            } => {
                 positive_id(entity_id)?;
-                if *generation == 0 { return Err(invalid("relationship root generation must be positive")); }
+                if *generation == 0 {
+                    return Err(invalid("relationship root generation must be positive"));
+                }
             }
             Predicate::Field { field, value, .. } => {
                 name(field, 128)?;
                 if let Literal::Text(text) = value
-                    && (text.len() > 1024 || text.contains('\0')) {
-                    return Err(invalid("count predicate text exceeds its byte bound or contains NUL"));
+                    && (text.len() > 1024 || text.contains('\0'))
+                {
+                    return Err(invalid(
+                        "count predicate text exceeds its byte bound or contains NUL",
+                    ));
                 }
             }
             Predicate::Not { arg } => pending.push((arg, depth + 1)),
             Predicate::All { args } | Predicate::Any { args } => {
-                if args.is_empty() || nodes.saturating_add(pending.len()).saturating_add(args.len()) > MAX_CONDITIONS {
-                    return Err(bounded("count predicate groups must be nonempty and bounded"));
+                if args.is_empty()
+                    || nodes
+                        .saturating_add(pending.len())
+                        .saturating_add(args.len())
+                        > MAX_CONDITIONS
+                {
+                    return Err(bounded(
+                        "count predicate groups must be nonempty and bounded",
+                    ));
                 }
                 pending.extend(args.iter().map(|arg| (arg, depth + 1)));
             }
@@ -106,25 +158,41 @@ pub(super) fn validate(predicate: &Predicate, depth: usize) -> Result<usize> {
     Ok(nodes)
 }
 
-fn row_truth_bound(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnapshot,
-    relations: &relationships::Bindings, budget: &mut EvaluationBudget) -> Result<Truth> {
+fn row_truth_bound(
+    predicate: &Predicate,
+    entity: &EntityRecord,
+    snapshot: &WorldSnapshot,
+    relations: &relationships::Bindings,
+    budget: &mut EvaluationBudget,
+) -> Result<Truth> {
     budget.charge()?;
     Ok(match predicate {
         Predicate::Always {} => Truth::True,
-        Predicate::Related { entity_id, generation, relation, direction } =>
-            relations.row_truth(entity, entity_id, *generation, *relation, *direction)?,
-        Predicate::Field { field, comparison, value } => {
-            match entity.fields.get(field) {
-                Some(fact) if matches!(&fact.source, FactSource::DfhackField(_))
-                    && fact.source_digest != Digest32::ZERO && fact.observed_at == snapshot.tick
+        Predicate::Related {
+            entity_id,
+            generation,
+            relation,
+            direction,
+        } => relations.row_truth(entity, entity_id, *generation, *relation, *direction)?,
+        Predicate::Field {
+            field,
+            comparison,
+            value,
+        } => match entity.fields.get(field) {
+            Some(fact)
+                if matches!(&fact.source, FactSource::DfhackField(_))
+                    && fact.source_digest != Digest32::ZERO
+                    && fact.observed_at == snapshot.tick
                     && match &fact.presence {
                         None => true,
                         Some(FactPresence::Known(known)) => known == &fact.value,
                         _ => false,
-                    } => compare(&fact.value, *comparison, value),
-                _ => Truth::Unknown,
+                    } =>
+            {
+                compare(&fact.value, *comparison, value)
             }
-        }
+            _ => Truth::Unknown,
+        },
         Predicate::Not { arg } => row_truth_bound(arg, entity, snapshot, relations, budget)?.not(),
         Predicate::All { args } | Predicate::Any { args } => {
             let all = matches!(predicate, Predicate::All { .. });
@@ -138,17 +206,28 @@ fn row_truth_bound(predicate: &Predicate, entity: &EntityRecord, snapshot: &Worl
                     _ => {}
                 }
             }
-            if decisive { Truth::from_bool(!all) }
-            else if unknown { Truth::Unknown } else { Truth::from_bool(all) }
+            if decisive {
+                Truth::from_bool(!all)
+            } else if unknown {
+                Truth::Unknown
+            } else {
+                Truth::from_bool(all)
+            }
         }
     })
 }
 
 #[cfg(test)]
-fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnapshot,
-    budget: &mut EvaluationBudget) -> Result<Truth> {
+fn row_truth(
+    predicate: &Predicate,
+    entity: &EntityRecord,
+    snapshot: &WorldSnapshot,
+    budget: &mut EvaluationBudget,
+) -> Result<Truth> {
     let relations = relationships::bind(predicate, snapshot, budget)?;
-    Ok(relations.guard(row_truth_bound(predicate, entity, snapshot, &relations, budget)?))
+    Ok(relations.guard(row_truth_bound(
+        predicate, entity, snapshot, &relations, budget,
+    )?))
 }
 
 /// True/false only when every integer in the sound interval agrees. In
@@ -156,21 +235,40 @@ fn row_truth(predicate: &Predicate, entity: &EntityRecord, snapshot: &WorldSnaps
 /// truth merely because one possible count differs from the requested value.
 fn interval_truth(lower: u64, upper: u64, comparison: Comparison, value: u64) -> Truth {
     let (yes, no) = match comparison {
-        Comparison::Eq => (lower == upper && lower == value, value < lower || value > upper),
-        Comparison::Ne => (value < lower || value > upper, lower == upper && lower == value),
+        Comparison::Eq => (
+            lower == upper && lower == value,
+            value < lower || value > upper,
+        ),
+        Comparison::Ne => (
+            value < lower || value > upper,
+            lower == upper && lower == value,
+        ),
         Comparison::Lt => (upper < value, lower >= value),
         Comparison::Le => (upper <= value, lower > value),
         Comparison::Gt => (lower > value, upper <= value),
         Comparison::Ge => (lower >= value, upper < value),
     };
-    if yes { Truth::True } else if no { Truth::False } else { Truth::Unknown }
+    if yes {
+        Truth::True
+    } else if no {
+        Truth::False
+    } else {
+        Truth::Unknown
+    }
 }
 fn example(entity: &EntityRecord) -> Value {
     json!({"entity_id":entity.id.to_string(),"generation":entity.generation,"revision":entity.revision})
 }
 
-pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
-    predicate: &Predicate, comparison: Comparison, value: u64, budget: &mut EvaluationBudget) -> Result<Truth> {
+pub(super) fn evaluate(
+    probe: &mut Probe,
+    snapshot: &WorldSnapshot,
+    kind: Kind,
+    predicate: &Predicate,
+    comparison: Comparison,
+    value: u64,
+    budget: &mut EvaluationBudget,
+) -> Result<Truth> {
     let relations = relationships::bind(predicate, snapshot, budget)?;
     let mut population = 0u64;
     let mut matched = 0u64;
@@ -180,16 +278,22 @@ pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
     let expected_kind = kind.entity_kind();
     for entity in snapshot.graph.entities.values() {
         budget.charge()?;
-        if entity.kind != expected_kind { continue; }
+        if entity.kind != expected_kind {
+            continue;
+        }
         population += 1;
         match row_truth_bound(predicate, entity, snapshot, &relations, budget)? {
             Truth::True => {
                 matched += 1;
-                if matching_examples.len() < 2 { matching_examples.push(example(entity)); }
+                if matching_examples.len() < 2 {
+                    matching_examples.push(example(entity));
+                }
             }
             Truth::Unknown => {
                 unknown += 1;
-                if unknown_examples.len() < 2 { unknown_examples.push(example(entity)); }
+                if unknown_examples.len() < 2 {
+                    unknown_examples.push(example(entity));
+                }
             }
             Truth::False => {}
         }
@@ -215,15 +319,23 @@ pub(super) fn evaluate(probe: &mut Probe, snapshot: &WorldSnapshot, kind: Kind,
 /// definitions are retained verbatim. Older binaries reject the new op rather
 /// than interpreting it as a different condition.
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
-    let extension: Value = serde_json::from_str(include_str!("../../../schemas/mcp_watch_count_v1.json"))
-        .map_err(|_| invalid("embedded count-condition schema is invalid"))?;
-    let definitions = extension["$defs"].as_object().ok_or_else(|| invalid("count schema definitions absent"))?;
-    let target = schema["$defs"].as_object_mut().ok_or_else(|| invalid("query schema definitions absent"))?;
+    let extension: Value =
+        serde_json::from_str(include_str!("../../../schemas/mcp_watch_count_v1.json"))
+            .map_err(|_| invalid("embedded count-condition schema is invalid"))?;
+    let definitions = extension["$defs"]
+        .as_object()
+        .ok_or_else(|| invalid("count schema definitions absent"))?;
+    let target = schema["$defs"]
+        .as_object_mut()
+        .ok_or_else(|| invalid("query schema definitions absent"))?;
     for (key, definition) in definitions {
-        if target.contains_key(key) { return Err(invalid("count schema definition already registered")); }
+        if target.contains_key(key) {
+            return Err(invalid("count schema definition already registered"));
+        }
         target.insert(key.clone(), definition.clone());
     }
-    schema["$defs"]["watch_condition"]["oneOf"].as_array_mut()
+    schema["$defs"]["watch_condition"]["oneOf"]
+        .as_array_mut()
         .ok_or_else(|| invalid("watch condition schema variants absent"))?
         .push(extension["condition"].clone());
     terrain::extend_schema(quantity::extend_schema(schema)?)

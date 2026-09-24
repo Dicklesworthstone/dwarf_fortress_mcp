@@ -14,6 +14,9 @@ dfmcp-intent = { path = "../dfmcp-intent" }
 dfmcp-adapter = { path = "../dfmcp-adapter" }
 dfmcp-lab = { path = "../dfmcp-lab" }
 fastmcp-rust = { workspace = true }
+asupersync = { workspace = true }
+fastmcp-core = { workspace = true }
+fastmcp-server = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

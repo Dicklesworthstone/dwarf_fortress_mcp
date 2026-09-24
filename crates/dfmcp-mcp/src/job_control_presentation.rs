@@ -1,11 +1,15 @@
 //! Bounded, authority-free presentation and opaque recovery continuations.
 
-use std::collections::{BTreeMap, VecDeque};
+use crate::{
+    AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, empty_active_work,
+};
 use dfmcp_adapter::job_suspension::JobObservation;
-use dfmcp_adapter::job_suspension::coordinator::{DurableJobRecord, DurableJobState, JobJournalSummary};
+use dfmcp_adapter::job_suspension::coordinator::{
+    DurableJobRecord, DurableJobState, JobJournalSummary,
+};
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, OperationContext, Result, SessionId};
 use serde_json::{Value, json};
-use crate::{AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, empty_active_work};
+use std::collections::{BTreeMap, VecDeque};
 
 pub(super) const BASE_RESERVE: u64 = 12 * 1024;
 pub(super) const RECORD_RESERVE: u64 = 12 * 1024;
@@ -16,13 +20,22 @@ pub(super) fn error(code: ErrorCode, message: &str) -> DfmcpError {
 }
 
 pub(super) fn digest(text: &str) -> Result<Digest32> {
-    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-        return Err(error(ErrorCode::InvalidRequest, "expected a canonical lowercase SHA-256 digest"));
+    if text.len() != 64
+        || !text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "expected a canonical lowercase SHA-256 digest",
+        ));
     }
     let mut bytes = [0; 32];
     for (index, pair) in text.as_bytes().chunks_exact(2).enumerate() {
-        let pair = std::str::from_utf8(pair).map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
-        bytes[index] = u8::from_str_radix(pair, 16).map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
+        let pair = std::str::from_utf8(pair)
+            .map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
+        bytes[index] = u8::from_str_radix(pair, 16)
+            .map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
     }
     Ok(Digest32::from_bytes(bytes))
 }
@@ -56,7 +69,8 @@ pub(super) fn observation_json(o: &JobObservation) -> Value {
 }
 
 pub(super) fn record_json(record: &DurableJobRecord) -> Value {
-    let plan = record.plan(); let effect = record.effect();
+    let plan = record.plan();
+    let effect = record.effect();
     json!({"idempotency_key":plan.key(), "plan_digest":plan.digest().to_string(),
         "expected_witness":plan.observation().witness().to_string(),
         "desired_suspended":plan.desired(), "state":state_name(record.state()),
@@ -86,70 +100,131 @@ pub(super) fn summary_json(s: &JobJournalSummary) -> Value {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Filter { All, Pending, Reconciliation }
+pub(super) enum Filter {
+    All,
+    Pending,
+    Reconciliation,
+}
 impl Filter {
     pub(super) fn parse(value: &str) -> Result<Self> {
         match value {
-            "all" => Ok(Self::All), "pending" => Ok(Self::Pending),
+            "all" => Ok(Self::All),
+            "pending" => Ok(Self::Pending),
             "reconciliation_required" => Ok(Self::Reconciliation),
-            _ => Err(error(ErrorCode::InvalidRequest,
-                "job state filter must be all, pending, or reconciliation_required")),
+            _ => Err(error(
+                ErrorCode::InvalidRequest,
+                "job state filter must be all, pending, or reconciliation_required",
+            )),
         }
     }
     pub(super) fn name(self) -> &'static str {
-        match self { Self::All => "all", Self::Pending => "pending", Self::Reconciliation => "reconciliation_required" }
+        match self {
+            Self::All => "all",
+            Self::Pending => "pending",
+            Self::Reconciliation => "reconciliation_required",
+        }
     }
     pub(super) fn matches(self, state: DurableJobState) -> bool {
-        match self { Self::All => true, Self::Pending => !state.terminal(), Self::Reconciliation => state.reconciliation_required() }
+        match self {
+            Self::All => true,
+            Self::Pending => !state.terminal(),
+            Self::Reconciliation => state.reconciliation_required(),
+        }
     }
     pub(super) fn total(self, summary: &JobJournalSummary) -> usize {
-        match self { Self::All => summary.records, Self::Pending => summary.prepared + summary.unresolved,
-            Self::Reconciliation => summary.unresolved }
+        match self {
+            Self::All => summary.records,
+            Self::Pending => summary.prepared + summary.unresolved,
+            Self::Reconciliation => summary.unresolved,
+        }
     }
 }
 
 #[derive(Clone)]
 struct Cursor {
-    session: SessionId, journal: Digest32, head: Digest32,
-    after: String, filter: Filter, limit: usize,
+    session: SessionId,
+    journal: Digest32,
+    head: Digest32,
+    after: String,
+    filter: Filter,
+    limit: usize,
 }
 /// A checksum is not authority. Accept only a token actually issued in this
 /// session, retaining up to 64 cursors for replay after a lost page response.
 #[derive(Default)]
-pub(super) struct Continuations { issued: BTreeMap<String, Cursor>, order: VecDeque<String> }
+pub(super) struct Continuations {
+    issued: BTreeMap<String, Cursor>,
+    order: VecDeque<String>,
+}
 impl Continuations {
-    pub(super) fn issue(&mut self, session: SessionId, summary: &JobJournalSummary,
-        after: String, filter: Filter, limit: usize) -> String
-    {
+    pub(super) fn issue(
+        &mut self,
+        session: SessionId,
+        summary: &JobJournalSummary,
+        after: String,
+        filter: Filter,
+        limit: usize,
+    ) -> String {
         let mut bytes = b"dfmcp-job-mcp-page/1\0".to_vec();
         bytes.extend_from_slice(&session.get().to_be_bytes());
-        bytes.extend_from_slice(summary.journal_id.as_bytes()); bytes.extend_from_slice(summary.head.as_bytes());
+        bytes.extend_from_slice(summary.journal_id.as_bytes());
+        bytes.extend_from_slice(summary.head.as_bytes());
         bytes.extend_from_slice(&(limit as u32).to_be_bytes());
-        bytes.extend_from_slice(filter.name().as_bytes()); bytes.push(0); bytes.extend_from_slice(after.as_bytes());
+        bytes.extend_from_slice(filter.name().as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(after.as_bytes());
         let token = Digest32::of_bytes(&bytes).to_string();
         if !self.issued.contains_key(&token) {
             if self.order.len() == 64 {
-                if let Some(old) = self.order.pop_front() { self.issued.remove(&old); }
+                if let Some(old) = self.order.pop_front() {
+                    self.issued.remove(&old);
+                }
             }
             self.order.push_back(token.clone());
-            self.issued.insert(token.clone(), Cursor { session, journal: summary.journal_id,
-                head: summary.head, after, filter, limit });
+            self.issued.insert(
+                token.clone(),
+                Cursor {
+                    session,
+                    journal: summary.journal_id,
+                    head: summary.head,
+                    after,
+                    filter,
+                    limit,
+                },
+            );
         }
         token
     }
-    pub(super) fn resolve(&self, token: &str, session: SessionId, summary: &JobJournalSummary,
-        filter: Filter, limit: usize) -> Result<String>
-    {
+    pub(super) fn resolve(
+        &self,
+        token: &str,
+        session: SessionId,
+        summary: &JobJournalSummary,
+        filter: Filter,
+        limit: usize,
+    ) -> Result<String> {
         digest(token)?;
-        let cursor = self.issued.get(token).ok_or_else(|| error(ErrorCode::InvalidRequest,
-            "job continuation was not issued here or has expired; restart discovery"))?;
-        if cursor.session != session || cursor.journal != summary.journal_id
-            || cursor.filter != filter || cursor.limit != limit
+        let cursor = self.issued.get(token).ok_or_else(|| {
+            error(
+                ErrorCode::InvalidRequest,
+                "job continuation was not issued here or has expired; restart discovery",
+            )
+        })?;
+        if cursor.session != session
+            || cursor.journal != summary.journal_id
+            || cursor.filter != filter
+            || cursor.limit != limit
         {
-            return Err(error(ErrorCode::Conflict, "job continuation belongs to another session, journal, filter, or limit"));
+            return Err(error(
+                ErrorCode::Conflict,
+                "job continuation belongs to another session, journal, filter, or limit",
+            ));
         }
         if cursor.head != summary.head {
-            return Err(error(ErrorCode::StaleAnchor, "job journal changed; restart discovery without a continuation"));
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "job journal changed; restart discovery without a continuation",
+            ));
         }
         Ok(cursor.after.clone())
     }
@@ -181,9 +256,11 @@ pub(super) fn packet(operation: &str, result: Value, view: TurnView<'_>) -> Stri
     };
     let mut active = empty_active_work();
     // Counts are complete for the journal, not a falsely empty list of work.
-    active["counts"] = view.summary.map_or(Value::Null, |s| json!({
-        "prepared":s.prepared,"reconciliation_required":s.unresolved,"terminal":s.terminal}));
-    active["details_omitted"] = json!(view.summary.is_none_or(|s|s.prepared + s.unresolved != 0));
+    active["counts"] = view.summary.map_or(Value::Null, |s| {
+        json!({
+        "prepared":s.prepared,"reconciliation_required":s.unresolved,"terminal":s.terminal})
+    });
+    active["details_omitted"] = json!(view.summary.is_none_or(|s| s.prepared + s.unresolved != 0));
     active["discovery"] = json!({"tool":"fortress.query", "state":"pending",
         "session_id":view.context.map(|c|c.session_id.to_string()), "limit":8});
     if result.get("closed").and_then(Value::as_bool) == Some(true) {
@@ -210,10 +287,14 @@ pub(super) fn packet(operation: &str, result: Value, view: TurnView<'_>) -> Stri
         .uncertainty(vec![json!({"code":"unadmitted_selected_job_scope",
             "detail":"Job observations and journal receipts are not a canonical world snapshot, current live-state proof, or completed production goal."})]);
     if let Some(c) = view.context {
-        builder = builder.session_id(c.session_id.to_string()).request_id(c.request_id.to_string())
-            .budget(json!({"admitted":{"max_wall_millis":c.budget.max_wall_millis,
+        builder = builder
+            .session_id(c.session_id.to_string())
+            .request_id(c.request_id.to_string())
+            .budget(
+                json!({"admitted":{"max_wall_millis":c.budget.max_wall_millis,
                 "max_bytes":c.budget.max_bytes,"max_output_tokens":c.budget.max_output_tokens},
-                "output_token_accounting":"four_byte_proxy","consumed":{},"remaining":null}));
+                "output_token_accounting":"four_byte_proxy","consumed":{},"remaining":null}),
+            );
     }
     if let Some(o) = view.selected {
         builder = builder.anchor(json!({"domain":"selected_native_job",

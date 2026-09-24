@@ -8,7 +8,9 @@ fn remaining(context: &OperationContext, started: Instant) -> Result<OperationCo
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let elapsed = started.elapsed().as_millis();
     if elapsed >= u128::from(context.budget.max_wall_millis) {
-        return Err(exhausted("endpoint comparison exhausted its shared wall-time allowance"));
+        return Err(exhausted(
+            "endpoint comparison exhausted its shared wall-time allowance",
+        ));
     }
     let mut result = context.clone();
     result.budget.max_wall_millis -= elapsed as u64;
@@ -34,23 +36,34 @@ pub(in super::super) fn compare_endpoints(
     validate_selection(selection)?;
     let basis = before.anchor();
     let target = after.anchor();
-    if basis.fortress_id != context.anchor.fortress_id || target.fortress_id != basis.fortress_id
-        || basis.cursor.epoch != target.cursor.epoch || target.cursor.sequence < basis.cursor.sequence
-        || target.tick < basis.tick || (target.cursor == basis.cursor && target != basis)
+    if basis.fortress_id != context.anchor.fortress_id
+        || target.fortress_id != basis.fortress_id
+        || basis.cursor.epoch != target.cursor.epoch
+        || target.cursor.sequence < basis.cursor.sequence
+        || target.tick < basis.tick
+        || (target.cursor == basis.cursor && target != basis)
     {
-        return Err(failure(ErrorCode::StaleAnchor,
-            "endpoint comparison requires forward, unforked observations in one fortress and epoch"));
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "endpoint comparison requires forward, unforked observations in one fortress and epoch",
+        ));
     }
     let hard_limit = context.budget.max_entities.min(128);
     let limit = limit.unwrap_or(hard_limit.min(16));
     if limit == 0 || limit > hard_limit {
-        return Err(invalid("historical change limit exceeds the negotiated row allowance"));
+        return Err(invalid(
+            "historical change limit exceeds the negotiated row allowance",
+        ));
     }
     for snapshot in [before, after] {
         if snapshot.graph.entities.len() > context.budget.max_entities as usize {
-            return Err(exhausted("historical endpoint exceeds the entity scan budget"));
+            return Err(exhausted(
+                "historical endpoint exceeds the entity scan budget",
+            ));
         }
-        if !snapshot.hash_is_valid() { return Err(invariant("historical endpoint hash is invalid")); }
+        if !snapshot.hash_is_valid() {
+            return Err(invariant("historical endpoint hash is invalid"));
+        }
     }
     let mut old_context = remaining(context, started)?;
     old_context.anchor = basis;
@@ -68,11 +81,17 @@ pub(in super::super) fn compare_endpoints(
     }))?);
     let (changes, refreshed) = compare_rows(&old_rows, &new_rows);
     let mut counts = BTreeMap::from([
-        ("entered_result", 0usize), ("left_result", 0usize), ("changed_in_result", 0usize),
+        ("entered_result", 0usize),
+        ("left_result", 0usize),
+        ("changed_in_result", 0usize),
     ]);
     for change in &changes {
-        let name = change["kind"].as_str().ok_or_else(|| invariant("change kind absent"))?;
-        let count = counts.get_mut(name).ok_or_else(|| invariant("unknown endpoint change kind"))?;
+        let name = change["kind"]
+            .as_str()
+            .ok_or_else(|| invariant("change kind absent"))?;
+        let count = counts
+            .get_mut(name)
+            .ok_or_else(|| invariant("unknown endpoint change kind"))?;
         *count += 1;
     }
     // The established qh1 codec binds the new domain-separated identity. Baseline
@@ -91,23 +110,43 @@ pub(in super::super) fn compare_endpoints(
             "temporal_coverage":"endpoint_comparison_only", "intermediate_observations_evaluated":false},
         "note":"Entered/left means selected at one endpoint only, not born, dead, created or deleted. Generation reuse is a separate departure and arrival; changes between endpoints are not inferred."
     });
-    let maximum = usize::try_from(context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4))
-        .map_err(|_| exhausted("historical comparison byte allowance overflow"))?;
+    let maximum = usize::try_from(
+        context
+            .budget
+            .max_bytes
+            .min(u64::from(context.budget.max_output_tokens) * 4),
+    )
+    .map_err(|_| exhausted("historical comparison byte allowance overflow"))?;
     let mut end = start;
     for change in changes.iter().skip(start).take(limit as usize) {
         let mut candidate = payload.clone();
-        candidate["changes"].as_array_mut().ok_or_else(|| invariant("change array absent"))?.push(change.clone());
+        candidate["changes"]
+            .as_array_mut()
+            .ok_or_else(|| invariant("change array absent"))?
+            .push(change.clone());
         candidate["returned"] = json!(end + 1 - start);
         candidate["truncated"] = json!(end + 1 < changes.len());
-        candidate["continuation"] = if end + 1 < changes.len() { json!(cursor(end + 1, identity)?) } else { Value::Null };
-        if encode(&candidate)?.len() > maximum { break; }
+        candidate["continuation"] = if end + 1 < changes.len() {
+            json!(cursor(end + 1, identity)?)
+        } else {
+            Value::Null
+        };
+        if encode(&candidate)?.len() > maximum {
+            break;
+        }
         payload = candidate;
         end += 1;
     }
     if start < changes.len() && end == start {
-        return Err(exhausted("one complete before/after change cannot fit; narrow selected fields or increase the response budget"));
+        return Err(exhausted(
+            "one complete before/after change cannot fit; narrow selected fields or increase the response budget",
+        ));
     }
-    if encode(&payload)?.len() > maximum { return Err(exhausted("historical comparison metadata exceeds the response budget")); }
+    if encode(&payload)?.len() > maximum {
+        return Err(exhausted(
+            "historical comparison metadata exceeds the response budget",
+        ));
+    }
     remaining(context, started)?;
     Ok(payload)
 }

@@ -12,9 +12,14 @@ impl WatchJournalGuard {
     /// closed. A release does not need renewed game-data authority: the callback
     /// receives ownership counts, never definitions, observations or evidence.
     /// The full close acknowledgement must render before either registry changes.
-    pub(crate) fn release_session<F>(session: SessionId, discard_process_local: bool,
-        publish: F) -> Result<String>
-    where F: FnOnce(Value) -> Result<String> {
+    pub(crate) fn release_session<F>(
+        session: SessionId,
+        discard_process_local: bool,
+        publish: F,
+    ) -> Result<String>
+    where
+        F: FnOnce(Value) -> Result<String>,
+    {
         // Poisoned registries remain poisoned for ordinary operations. Teardown
         // can still discard this session's safely owned allocations; it never
         // treats their possibly incomplete contents as verified world evidence.
@@ -26,11 +31,17 @@ impl WatchJournalGuard {
             Ok(guard) => (guard, false),
             Err(poison) => (poison.into_inner(), true),
         };
-        let count = watches.entries.keys().filter(|(id, _)| *id == session).count();
+        let count = watches
+            .entries
+            .keys()
+            .filter(|(id, _)| *id == session)
+            .count();
         let durable = registry.contains_key(&session);
         if count > 0 && !durable && !discard_process_local {
-            return Err(failure(ErrorCode::Conflict,
-                "closing would discard process-local watches; explicitly set discard_process_local_work=true"));
+            return Err(failure(
+                ErrorCode::Conflict,
+                "closing would discard process-local watches; explicitly set discard_process_local_work=true",
+            ));
         }
         let out = publish(json!({
             "watch_handles_released": count,

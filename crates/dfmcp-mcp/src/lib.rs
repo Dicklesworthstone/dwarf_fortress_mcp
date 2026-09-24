@@ -15,26 +15,27 @@
 pub mod admission;
 pub mod agent_facade;
 pub mod agent_turn;
-pub mod doctor;
 pub mod dig_control_server;
 pub mod dig_recovery_server;
+pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
 pub mod job_control_session;
 pub mod live_control_server;
-pub mod live_run_server;
-pub mod live_order_run_server;
-pub mod live_workforce_server;
 pub mod live_job_control_server;
-pub mod live_work_orders_server;
-pub mod live_work_order_progress_server;
 pub mod live_jobs_server;
 pub mod live_map_server;
 pub mod live_operations_server;
-pub mod live_spatial_server;
-pub mod live_spatial_citizens_server;
+pub mod live_order_run_server;
+pub mod live_run_server;
 mod live_server;
 mod live_server_v1_1;
+pub mod live_spatial_citizens_server;
+pub mod live_spatial_server;
+pub mod live_work_order_progress_server;
+pub mod live_work_orders_server;
+pub mod live_workforce_server;
+pub mod resources;
 pub mod server;
 pub mod tasks;
 
@@ -49,7 +50,7 @@ pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
 pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
 pub use http_transport::{
     HttpSessionResumeToken, HttpTransportSessionManager, MAX_HTTP_MESSAGE_BYTES,
-    MAX_HTTP_SESSIONS, MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_TOTAL_BUFFER_BYTES,
+    MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,
 };
 pub use server::validate_localhost_bind;
@@ -58,12 +59,12 @@ pub use tasks::{McpTaskProjection, McpTaskStatus, cancel_action_task, project_ac
 /// Own the runtime while polling a presentation-plane operation. An inherited
 /// context keeps its original drivers, cancellation, budget, and runtime mask.
 fn run_with_runtime_cx<F: std::future::Future>(
-    operation: impl FnOnce(fastmcp_rust::asupersync::Cx) -> F,
+    operation: impl FnOnce(asupersync::Cx) -> F,
 ) -> Result<F::Output, Box<dyn std::error::Error>> {
-    use fastmcp_rust::asupersync::{Budget, Cx, runtime::RuntimeBuilder};
+    use asupersync::{Budget, Cx, runtime::RuntimeBuilder};
 
     let inherited = Cx::current();
-    let reactor = fastmcp_rust::asupersync::runtime::reactor::create_reactor()?;
+    let reactor = asupersync::runtime::reactor::create_reactor()?;
     let runtime = RuntimeBuilder::new()
         .worker_threads(1)
         .with_reactor(reactor)
@@ -102,7 +103,7 @@ pub fn run_live_v1_1_development_stdio() {
 #[cfg(test)]
 mod runtime_entry_tests {
     use super::run_with_runtime_cx;
-    use fastmcp_rust::asupersync::{Cx, cx::cap, runtime::SpawnError};
+    use asupersync::{Cx, cx::cap, runtime::SpawnError};
     use std::error::Error;
     use std::task::Poll;
     use std::time::Duration;
@@ -118,9 +119,12 @@ mod runtime_entry_tests {
                 assert!(child_cx.checkpoint().is_ok());
                 (42, std::thread::current().id())
             })?;
-            let (answer, worker) = fastmcp_rust::asupersync::time::timeout(
-                cx.now(), Duration::from_secs(5), child.join(&cx),
-            ).await??;
+            let (answer, worker) = asupersync::time::timeout(
+                cx.now(),
+                Duration::from_secs(5),
+                child.join(&cx),
+            )
+            .await??;
             assert_eq!(answer, 42);
             assert_ne!(worker, caller);
             Ok::<_, Box<dyn Error>>(())
@@ -148,7 +152,10 @@ mod runtime_entry_tests {
                         assert!(cx.io().is_none());
                         assert!(cx.timer_driver().is_none());
                         assert!(!cx.capabilities().spawn);
-                        assert!(matches!(cx.spawn_blocking(|_| 42), Err(SpawnError::RuntimeUnavailable)));
+                        assert!(matches!(
+                            cx.spawn_blocking(|_| 42),
+                            Err(SpawnError::RuntimeUnavailable)
+                        ));
                         let ambient = Cx::current().ok_or("runtime entry lost its context");
                         match ambient {
                             Ok(ambient) => {
@@ -157,20 +164,34 @@ mod runtime_entry_tests {
                             }
                             Err(error) => return Poll::Ready(Err(error)),
                         }
-                        if polls == 1 { context.waker().wake_by_ref(); Poll::Pending } else { Poll::Ready(Ok(())) }
-                    }).await
+                        if polls == 1 {
+                            context.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(Ok(()))
+                        }
+                    })
+                    .await
                 })??;
-                assert!(Cx::current().ok_or("restriction lost")?.timer_driver().is_none());
+                assert!(
+                    Cx::current()
+                        .ok_or("restriction lost")?
+                        .timer_driver()
+                        .is_none()
+                );
             }
             let restored = Cx::current().ok_or("parent context lost")?;
             assert_eq!(restored.task_id(), task);
             assert_eq!(restored.capabilities(), parent_caps);
             assert!(restored.timer_driver().is_some());
-            parent.cancel_with(fastmcp_rust::asupersync::types::CancelKind::User, Some("inherited entry cancellation"));
+            parent.cancel_with(
+                asupersync::types::CancelKind::User,
+                Some("inherited entry cancellation"),
+            );
             run_with_runtime_cx(|cx| async move {
                 assert_eq!(cx.task_id(), task);
                 assert!(cx.checkpoint().is_err());
-                assert!(cx.cancelled_by(fastmcp_rust::asupersync::types::CancelKind::User));
+                assert!(cx.cancelled_by(asupersync::types::CancelKind::User));
             })?;
             Ok::<_, Box<dyn Error>>(())
         })??;

@@ -17,37 +17,29 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::agent_turn::{
-    AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile,
-    RecoveryClass, empty_active_work, recommendation, recovery_guidance,
-    uncertainty,
+    AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, RecoveryClass,
+    empty_active_work, recommendation, recovery_guidance, uncertainty,
 };
 use dfmcp_adapter::{
-    AuthenticatedLiveSourceV1_1, BridgeCredentialsV1_1, GameAdapter,
-    InterestSet, LiveConnectionConfig, LiveReadAdapterV1_1,
-    LiveReadBootstrapConfigV1_1, ObservationPayload, ObservationRequest,
-    PrimedLiveSourceV1_1, Projection, QueryRequest,
-    bootstrap_live_read_adapter_v1_1, build_live_announcement_briefing,
-    connect_authenticated_live_source_v1_1, parse_loopback_endpoint,
-    summarize_live_announcement_change, DEFAULT_LIVE_ANNOUNCEMENT_PAGE_SIZE,
-    DEFAULT_MAX_LIVE_ANNOUNCEMENTS, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE,
+    AuthenticatedLiveSourceV1_1, BridgeCredentialsV1_1, DEFAULT_LIVE_ANNOUNCEMENT_PAGE_SIZE,
+    DEFAULT_MAX_LIVE_ANNOUNCEMENTS, GameAdapter, InterestSet, LiveConnectionConfig,
+    LiveReadAdapterV1_1, LiveReadBootstrapConfigV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
+    MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE, ObservationPayload, ObservationRequest,
+    PrimedLiveSourceV1_1, Projection, QueryRequest, bootstrap_live_read_adapter_v1_1,
+    build_live_announcement_briefing, connect_authenticated_live_source_v1_1,
+    parse_loopback_endpoint, summarize_live_announcement_change,
 };
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32,
-    EntityId, ErrorCode, FortressId, OperationContext, RequestId, Result,
-    RiskTier, SessionId, StateAnchor, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, EntityId, ErrorCode,
+    FortressId, OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_world::{
-    EntityKind, Fact, FactPresence, QueryOrder, Value as WorldValue,
-    WorldQuery,
-};
+use dfmcp_world::{EntityKind, Fact, FactPresence, QueryOrder, Value as WorldValue, WorldQuery};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 const DEVELOPMENT_OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_LIVE_V1_1";
-const LIVE_IMPLEMENTATION_PHASE: &str =
-    "bridge_r1_retained_announcements_unadmitted_development";
+const LIVE_IMPLEMENTATION_PHASE: &str = "bridge_r1_retained_announcements_unadmitted_development";
 const MAX_LIVE_MCP_SESSIONS: usize = 32;
 const MAX_CAPABILITY_REQUESTS: usize = 8;
 const MAX_CAPABILITY_NAME_BYTES: usize = 64;
@@ -78,7 +70,10 @@ const OMITTED_LIVE_DOMAINS: [(&str, &str); 7] = [
     ("fortress.items", "protocol 1.1 does not observe items"),
     ("fortress.jobs", "protocol 1.1 does not observe jobs"),
     ("fortress.map", "protocol 1.1 does not observe map state"),
-    ("fortress.economy", "protocol 1.1 does not observe economy state"),
+    (
+        "fortress.economy",
+        "protocol 1.1 does not observe economy state",
+    ),
     (
         "fortress.welfare",
         "protocol 1.1 does not observe detailed welfare state",
@@ -102,8 +97,7 @@ const FORBIDDEN_ADMISSION_ENVIRONMENT: [&str; 7] = [
     "DFMCP_ADMITTED_LAUNCH_DIGEST",
 ];
 
-type LiveMcpSourceV1_1 =
-    PrimedLiveSourceV1_1<AuthenticatedLiveSourceV1_1>;
+type LiveMcpSourceV1_1 = PrimedLiveSourceV1_1<AuthenticatedLiveSourceV1_1>;
 type LiveMcpAdapterV1_1 = LiveReadAdapterV1_1<LiveMcpSourceV1_1>;
 type LiveSessionHandleV1_1 = Arc<Mutex<LiveSessionV1_1>>;
 type LiveSessionRegistryV1_1 = BTreeMap<SessionId, LiveSessionHandleV1_1>;
@@ -186,8 +180,7 @@ fn development_opt_in_value(value: Option<&str>) -> Result<()> {
 
 fn forbidden_admission_environment_name(name: &str) -> bool {
     FORBIDDEN_ADMISSION_ENVIRONMENT.iter().any(|candidate| {
-        name == *candidate
-            || (candidate.ends_with('_') && name.starts_with(*candidate))
+        name == *candidate || (candidate.ends_with('_') && name.starts_with(*candidate))
     })
 }
 
@@ -255,9 +248,9 @@ fn next_session_id() -> Result<SessionId> {
 
 fn parse_session_id(value: &str) -> Result<SessionId> {
     if value.len() != U128_HEX_ID_BYTES
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
-        })
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
         return Err(error(
             ErrorCode::InvalidRequest,
@@ -295,9 +288,7 @@ fn resolve_session(value: Option<String>) -> Result<LiveSessionHandleV1_1> {
     })
 }
 
-fn lock_session(
-    session: &LiveSessionHandleV1_1,
-) -> Result<MutexGuard<'_, LiveSessionV1_1>> {
+fn lock_session(session: &LiveSessionHandleV1_1) -> Result<MutexGuard<'_, LiveSessionV1_1>> {
     session.lock().map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -313,9 +304,7 @@ fn parse_requested_capabilities(
         Some(value) => value,
         None => DEFAULT_CAPABILITIES
             .iter()
-            .map(|(capability, risk)| {
-                ((*capability).to_owned(), (*risk).to_owned())
-            })
+            .map(|(capability, risk)| ((*capability).to_owned(), (*risk).to_owned()))
             .collect(),
     };
     if raw.len() > MAX_CAPABILITY_REQUESTS {
@@ -403,14 +392,11 @@ fn requested_budget(
     let budget = WorkBudget {
         max_wall_millis: max_wall_millis
             .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_wall_millis),
-        max_game_ticks: max_game_ticks
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks),
-        max_entities: max_entities
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities),
+        max_game_ticks: max_game_ticks.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_game_ticks),
+        max_entities: max_entities.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities),
         max_bytes: max_bytes.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes),
         max_output_tokens: max_output_tokens.map_or(DEFAULT_RESPONSE_TOKENS, |value| value),
-        max_actions: max_actions
-            .unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions),
+        max_actions: max_actions.unwrap_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions),
     };
     budget.validate()?;
     if budget.max_wall_millis > LIVE_BUDGET_CEILING.max_wall_millis
@@ -425,9 +411,7 @@ fn requested_budget(
             "requested budget exceeds the protocol-1.1 server ceiling",
         ));
     }
-    if budget.max_bytes < MIN_RESPONSE_BYTES
-        || budget.max_output_tokens < MIN_RESPONSE_TOKENS
-    {
+    if budget.max_bytes < MIN_RESPONSE_BYTES || budget.max_output_tokens < MIN_RESPONSE_TOKENS {
         return Err(error(
             ErrorCode::BudgetExceeded,
             "protocol-1.1 session budget is too small for the mandatory Agent Turn spine",
@@ -564,10 +548,8 @@ fn bridge_token() -> Result<Vec<u8>> {
 fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSourceV1_1> {
     let endpoint = bridge_endpoint()?;
     let address = parse_loopback_endpoint(&endpoint)?;
-    let credentials = BridgeCredentialsV1_1::new(
-        bridge_token()?,
-        bridge_nonce(session_id, &endpoint)?,
-    )?;
+    let credentials =
+        BridgeCredentialsV1_1::new(bridge_token()?, bridge_nonce(session_id, &endpoint)?)?;
     let connect_millis = env_u64("DFMCP_BRIDGE_CONNECT_MILLIS", 2_000, 1, 60_000)?;
     let read_millis = env_u64("DFMCP_BRIDGE_READ_MILLIS", 5_000, 1, 60_000)?;
     let write_millis = env_u64("DFMCP_BRIDGE_WRITE_MILLIS", 5_000, 1, 60_000)?;
@@ -584,10 +566,7 @@ fn live_source(session_id: SessionId) -> Result<AuthenticatedLiveSourceV1_1> {
     )
 }
 
-fn capability_grants(
-    fortress_id: FortressId,
-    capabilities: &[Capability],
-) -> Vec<CapabilityGrant> {
+fn capability_grants(fortress_id: FortressId, capabilities: &[Capability]) -> Vec<CapabilityGrant> {
     capabilities
         .iter()
         .copied()
@@ -805,11 +784,36 @@ fn announcement_attention(session: &LiveSessionV1_1) -> Vec<JsonValue> {
 
 fn affordances_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
     [
-        (Capability::Observe, "observe-live-v1-1", "fortress.observe", "observe"),
-        (Capability::Query, "query-live-v1-1", "fortress.query", "query"),
-        (Capability::Query, "explain-live-v1-1", "fortress.explain", "explain"),
-        (Capability::Observe, "wait-live-v1-1", "fortress.wait", "wait"),
-        (Capability::Doctor, "doctor-live-v1-1", "fortress.doctor", "doctor"),
+        (
+            Capability::Observe,
+            "observe-live-v1-1",
+            "fortress.observe",
+            "observe",
+        ),
+        (
+            Capability::Query,
+            "query-live-v1-1",
+            "fortress.query",
+            "query",
+        ),
+        (
+            Capability::Query,
+            "explain-live-v1-1",
+            "fortress.explain",
+            "explain",
+        ),
+        (
+            Capability::Observe,
+            "wait-live-v1-1",
+            "fortress.wait",
+            "wait",
+        ),
+        (
+            Capability::Doctor,
+            "doctor-live-v1-1",
+            "fortress.doctor",
+            "doctor",
+        ),
     ]
     .into_iter()
     .map(|(capability, id, tool, family)| {
@@ -934,7 +938,9 @@ fn attach_turn(
         && payload.get("truncated").and_then(JsonValue::as_bool) == Some(true)
     {
         coverage["status"] = json!("partial");
-        coverage["continuation"] = payload.get("continuation").cloned()
+        coverage["continuation"] = payload
+            .get("continuation")
+            .cloned()
             .map_or(JsonValue::Null, |value| value);
         if let Some(domains) = coverage["partial_domains"].as_array_mut() {
             domains.push(json!({
@@ -1011,12 +1017,10 @@ fn attach_turn(
 
 fn recovery_class(code: ErrorCode) -> RecoveryClass {
     match code {
-        ErrorCode::CursorGap
-        | ErrorCode::StaleAnchor
-        | ErrorCode::PreconditionsFailed => RecoveryClass::RefreshAndRetry,
-        ErrorCode::AdapterUnavailable | ErrorCode::AdapterFailure => {
-            RecoveryClass::Backoff
+        ErrorCode::CursorGap | ErrorCode::StaleAnchor | ErrorCode::PreconditionsFailed => {
+            RecoveryClass::RefreshAndRetry
         }
+        ErrorCode::AdapterUnavailable | ErrorCode::AdapterFailure => RecoveryClass::Backoff,
         ErrorCode::EffectIndeterminate => RecoveryClass::ReconciliationRequired,
         ErrorCode::VersionMismatch | ErrorCode::CompatibilityUnknown => {
             RecoveryClass::OperatorActionRequired
@@ -1177,9 +1181,7 @@ fn world_value_json(value: &WorldValue) -> JsonValue {
             "hex": hex_bytes(value),
             "byte_length": value.len(),
         }),
-        WorldValue::List(values) => {
-            JsonValue::Array(values.iter().map(world_value_json).collect())
-        }
+        WorldValue::List(values) => JsonValue::Array(values.iter().map(world_value_json).collect()),
         WorldValue::Object(values) => {
             let mut object = JsonMap::new();
             for (key, value) in values {
@@ -1194,21 +1196,13 @@ fn fact_json(fact: &Fact) -> JsonValue {
     let (presence, epistemic_state, reason, stale_anchor) = match fact.presence.as_ref() {
         None | Some(FactPresence::Known(_)) => ("known", "observed", None, None),
         Some(FactPresence::Absent) => ("absent", "observed", None, None),
-        Some(FactPresence::Unknown(value)) => {
-            ("unknown", "unknown", Some(value.clone()), None)
-        }
+        Some(FactPresence::Unknown(value)) => ("unknown", "unknown", Some(value.clone()), None),
         Some(FactPresence::Unsupported(value)) => {
             ("unsupported", "unknown", Some(value.clone()), None)
         }
-        Some(FactPresence::Omitted(value)) => {
-            ("omitted", "unknown", Some(value.clone()), None)
-        }
-        Some(FactPresence::Redacted(value)) => {
-            ("redacted", "unknown", Some(value.clone()), None)
-        }
-        Some(FactPresence::Stale(anchor)) => {
-            ("stale", "stale", None, Some(anchor_json(*anchor)))
-        }
+        Some(FactPresence::Omitted(value)) => ("omitted", "unknown", Some(value.clone()), None),
+        Some(FactPresence::Redacted(value)) => ("redacted", "unknown", Some(value.clone()), None),
+        Some(FactPresence::Stale(anchor)) => ("stale", "stale", None, Some(anchor_json(*anchor))),
     };
     json!({
         "value": world_value_json(&fact.value),
@@ -1229,12 +1223,9 @@ fn parse_entity_id(value: &str) -> Result<EntityId> {
             "entity_id must be a bounded decimal u64",
         ));
     }
-    let parsed = value.parse::<u64>().map_err(|_| {
-        error(
-            ErrorCode::InvalidRequest,
-            "entity_id must be a decimal u64",
-        )
-    })?;
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| error(ErrorCode::InvalidRequest, "entity_id must be a decimal u64"))?;
     if parsed == 0 {
         return Err(error(
             ErrorCode::InvalidRequest,
@@ -1244,10 +1235,7 @@ fn parse_entity_id(value: &str) -> Result<EntityId> {
     Ok(EntityId::new(parsed))
 }
 
-fn validate_bootstrap_budget(
-    adapter: &LiveMcpAdapterV1_1,
-    budget: WorkBudget,
-) -> Result<()> {
+fn validate_bootstrap_budget(adapter: &LiveMcpAdapterV1_1, budget: WorkBudget) -> Result<()> {
     let capsule = adapter.last_capsule().ok_or_else(|| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -1382,19 +1370,14 @@ pub fn fortress_open_session(
             );
         }
     };
-    let environment_max_citizens = match env_u32(
-        "DFMCP_BRIDGE_MAX_CITIZENS",
-        hard_citizens,
-        0,
-        hard_citizens,
-    ) {
-        Ok(value) => value,
-        Err(failure) => {
-            return unbound_error(operation, AgentPhase::Bootstrap, &failure);
-        }
-    };
-    let max_citizens =
-        environment_max_citizens.min(budget.max_entities.saturating_sub(1));
+    let environment_max_citizens =
+        match env_u32("DFMCP_BRIDGE_MAX_CITIZENS", hard_citizens, 0, hard_citizens) {
+            Ok(value) => value,
+            Err(failure) => {
+                return unbound_error(operation, AgentPhase::Bootstrap, &failure);
+            }
+        };
+    let max_citizens = environment_max_citizens.min(budget.max_entities.saturating_sub(1));
     let citizen_page_size = match env_u32(
         "DFMCP_BRIDGE_PAGE_SIZE",
         MAX_V1_1_CITIZENS_PER_PAGE,
@@ -1412,17 +1395,13 @@ pub fn fortress_open_session(
             return unbound_error(operation, AgentPhase::Bootstrap, &failure);
         }
     };
-    let announcement_after_id = match env_i32(
-        "DFMCP_BRIDGE_ANNOUNCEMENT_AFTER_ID",
-        -1,
-        -1,
-        i32::MAX,
-    ) {
-        Ok(value) => value,
-        Err(failure) => {
-            return unbound_error(operation, AgentPhase::Bootstrap, &failure);
-        }
-    };
+    let announcement_after_id =
+        match env_i32("DFMCP_BRIDGE_ANNOUNCEMENT_AFTER_ID", -1, -1, i32::MAX) {
+            Ok(value) => value,
+            Err(failure) => {
+                return unbound_error(operation, AgentPhase::Bootstrap, &failure);
+            }
+        };
     let hard_announcements = match u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH) {
         Ok(value) => value,
         Err(_) => {
@@ -1717,12 +1696,9 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
     };
     let reset = current.cursor.epoch != prior.cursor.epoch;
     let (kind, continuity, reset_reason, mut changes) = match &frame.payload {
-        ObservationPayload::Heartbeat(_) => (
-            "heartbeat",
-            ContinuityStatus::Heartbeat,
-            None,
-            Vec::new(),
-        ),
+        ObservationPayload::Heartbeat(_) => {
+            ("heartbeat", ContinuityStatus::Heartbeat, None, Vec::new())
+        }
         ObservationPayload::Snapshot(_) if reset => (
             "snapshot",
             ContinuityStatus::Reset,
@@ -1850,11 +1826,7 @@ pub fn fortress_query(
     structured_query::query(session_id, mode, limit, continuation, query)
 }
 
-fn read_only_tool_error(
-    session_id: Option<String>,
-    operation: &str,
-    phase: AgentPhase,
-) -> String {
+fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: AgentPhase) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, phase, &failure),
@@ -1913,7 +1885,9 @@ fn read_only_tool_error(
     )
 }
 
-#[tool(description = "Unavailable in read-only protocol 1.1; fails closed without preparing an effect.")]
+#[tool(
+    description = "Unavailable in read-only protocol 1.1; fails closed without preparing an effect."
+)]
 pub fn fortress_plan(
     session_id: Option<String>,
     _summary: Option<String>,
@@ -1922,12 +1896,16 @@ pub fn fortress_plan(
     read_only_tool_error(session_id, "fortress.plan", AgentPhase::Propose)
 }
 
-#[tool(description = "Unavailable in read-only protocol 1.1; fails closed without committing an effect.")]
+#[tool(
+    description = "Unavailable in read-only protocol 1.1; fails closed without committing an effect."
+)]
 pub fn fortress_commit(session_id: Option<String>, _plan_digest: String) -> String {
     read_only_tool_error(session_id, "fortress.commit", AgentPhase::Commit)
 }
 
-#[tool(description = "Report that protocol 1.1 has no active mutation work, then recommend a read-only observation only when useful.")]
+#[tool(
+    description = "Report that protocol 1.1 has no active mutation work, then recommend a read-only observation only when useful."
+)]
 pub fn fortress_wait(session_id: Option<String>) -> String {
     let operation = "fortress.wait";
     let session = match resolve_session(session_id) {
@@ -1997,7 +1975,9 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
     )
 }
 
-#[tool(description = "Unavailable in read-only protocol 1.1; fails closed without cancellation effects.")]
+#[tool(
+    description = "Unavailable in read-only protocol 1.1; fails closed without cancellation effects."
+)]
 pub fn fortress_cancel(session_id: Option<String>, _mode: Option<String>) -> String {
     read_only_tool_error(session_id, "fortress.cancel", AgentPhase::Reconcile)
 }
@@ -2007,7 +1987,9 @@ pub fn fortress_checkpoint(session_id: Option<String>, _label: Option<String>) -
     read_only_tool_error(session_id, "fortress.checkpoint", AgentPhase::Commit)
 }
 
-#[tool(description = "Unavailable in read-only protocol 1.1; no restore or epoch mutation is attempted.")]
+#[tool(
+    description = "Unavailable in read-only protocol 1.1; no restore or epoch mutation is attempted."
+)]
 pub fn fortress_restore(session_id: Option<String>, _checkpoint_id: String) -> String {
     read_only_tool_error(session_id, "fortress.restore", AgentPhase::Reconcile)
 }
@@ -2368,19 +2350,10 @@ mod tests {
     fn response_budget_reserves_mandatory_agent_turn_space() {
         assert!(requested_budget(None, None, None, None, None, None).is_ok());
         assert!(
-            requested_budget(None, None, None, Some(MIN_RESPONSE_BYTES - 1), None, None)
-                .is_err()
+            requested_budget(None, None, None, Some(MIN_RESPONSE_BYTES - 1), None, None).is_err()
         );
         assert!(
-            requested_budget(
-                None,
-                None,
-                None,
-                None,
-                Some(MIN_RESPONSE_TOKENS - 1),
-                None,
-            )
-            .is_err()
+            requested_budget(None, None, None, None, Some(MIN_RESPONSE_TOKENS - 1), None,).is_err()
         );
     }
 

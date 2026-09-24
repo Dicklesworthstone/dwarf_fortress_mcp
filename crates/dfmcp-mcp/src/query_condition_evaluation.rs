@@ -13,10 +13,17 @@ struct Input {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Inspection {
-    ConditionEvaluation { condition: Condition, failure_condition: Option<Condition> },
+    ConditionEvaluation {
+        condition: Condition,
+        failure_condition: Option<Condition>,
+    },
 }
 
-pub(super) fn query(snapshot: &WorldSnapshot, context: &OperationContext, input: &Value) -> Result<Value> {
+pub(super) fn query(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+) -> Result<Value> {
     let mut budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
     validate_input(input)?;
@@ -25,15 +32,31 @@ pub(super) fn query(snapshot: &WorldSnapshot, context: &OperationContext, input:
     if parsed.schema != "dfmcp.query/1" {
         return Err(invalid("condition_evaluation requires dfmcp.query/1"));
     }
-    if parsed.expected_anchor.as_ref().is_some_and(|a| a != &anchor(context.anchor)) {
-        return Err(failure(ErrorCode::StaleAnchor, "condition inspection names another observation"));
+    if parsed
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|a| a != &anchor(context.anchor))
+    {
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "condition inspection names another observation",
+        ));
     }
-    let Inspection::ConditionEvaluation { condition, failure_condition } = parsed.query;
+    let Inspection::ConditionEvaluation {
+        condition,
+        failure_condition,
+    } = parsed.query;
     // Reuse the authoritative joint success/failure validator. This temporary
     // definition is validation data ONLY: it has no Watch, handle or Store entry.
-    let definition = Definition { key: "inspection".into(), label: "inspection".into(),
-        condition, failure_condition, deadline_tick: 0, poll_interval_ticks: 1,
-        stable_observations: 1 };
+    let definition = Definition {
+        key: "inspection".into(),
+        label: "inspection".into(),
+        condition,
+        failure_condition,
+        deadline_tick: 0,
+        poll_interval_ticks: 1,
+        stable_observations: 1,
+    };
     validate_definition(&definition)?;
     let predicate_digest = digest(&json!({"domain":"dfmcp-condition-inspection-predicate/1",
         "condition":definition.condition,"failure_condition":definition.failure_condition}))?;
@@ -45,11 +68,17 @@ pub(super) fn query(snapshot: &WorldSnapshot, context: &OperationContext, input:
     };
     // Match watch precedence, including non-short-circuited generation checks.
     // Do not invent cadence, stability, deadlines or terminal watch outcomes.
-    let status = if probe.invalid_generation { "invalidated_reference" }
-        else if failure_condition == Truth::True { "failure_condition_met" }
-        else if condition == Truth::Unknown || failure_condition == Truth::Unknown { "blocked_unknown" }
-        else if condition == Truth::True { "condition_met" }
-        else { "condition_not_met" };
+    let status = if probe.invalid_generation {
+        "invalidated_reference"
+    } else if failure_condition == Truth::True {
+        "failure_condition_met"
+    } else if condition == Truth::Unknown || failure_condition == Truth::Unknown {
+        "blocked_unknown"
+    } else if condition == Truth::True {
+        "condition_met"
+    } else {
+        "condition_not_met"
+    };
     let evaluation = json!({"status":status,"condition_truth":condition.text(),
         "failure_condition_truth":failure_condition.text(),
         "generation_mismatch":probe.invalid_generation,
@@ -66,9 +95,18 @@ pub(super) fn query(snapshot: &WorldSnapshot, context: &OperationContext, input:
         "coverage":{"domain":"explicit_predicates_at_selected_observation","absence_proven":false,
             "continuous_between_observations":false,"mutation_success_proven":false},
         "interpretation":"Predicate evidence at one selected capture, not a retained watch sample, stable goal completion, native job readiness or permission to act."});
-    let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4);
-    if serde_json::to_vec(&result).map_err(|_| invalid("condition evidence cannot be encoded"))?.len() as u64 > maximum {
-        return Err(bounded("complete condition evidence exceeds the result budget"));
+    let maximum = context
+        .budget
+        .max_bytes
+        .min(u64::from(context.budget.max_output_tokens) * 4);
+    if serde_json::to_vec(&result)
+        .map_err(|_| invalid("condition evidence cannot be encoded"))?
+        .len() as u64
+        > maximum
+    {
+        return Err(bounded(
+            "complete condition evidence exceeds the result budget",
+        ));
     }
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     budget.check()?;
@@ -76,10 +114,14 @@ pub(super) fn query(snapshot: &WorldSnapshot, context: &OperationContext, input:
 }
 
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
-    let extension: Value = serde_json::from_str(include_str!("../../../schemas/mcp_condition_evaluation_v1.json"))
-        .map_err(|_| invalid("embedded condition inspection schema is invalid"))?;
-    schema["$defs"]["query"]["oneOf"].as_array_mut()
-        .ok_or_else(|| invalid("query schema variants absent"))?.push(extension);
+    let extension: Value = serde_json::from_str(include_str!(
+        "../../../schemas/mcp_condition_evaluation_v1.json"
+    ))
+    .map_err(|_| invalid("embedded condition inspection schema is invalid"))?;
+    schema["$defs"]["query"]["oneOf"]
+        .as_array_mut()
+        .ok_or_else(|| invalid("query schema variants absent"))?
+        .push(extension);
     Ok(schema)
 }
 

@@ -18,19 +18,35 @@ enum RegistrationRequest {
 // Decode through the existing single-watch request so field types, unknown-field
 // refusal and condition operators cannot drift into an alternative watch dialect.
 fn definition(input: Value) -> Result<Definition> {
-    let mut object = input.as_object().cloned()
+    let mut object = input
+        .as_object()
+        .cloned()
         .ok_or_else(|| invalid("each watch registration must be an object"))?;
     if object.contains_key("kind") {
-        return Err(invalid("watch definitions inside register_watches omit kind"));
+        return Err(invalid(
+            "watch definitions inside register_watches omit kind",
+        ));
     }
     object.insert("kind".into(), json!("watch"));
     match serde_json::from_value::<super::super::Request>(Value::Object(object))
-        .map_err(|_| invalid("invalid watch in registration set"))? {
-        super::super::Request::Watch { key, label, condition, failure_condition,
-            deadline_tick, poll_interval_ticks, stable_observations } => {
+        .map_err(|_| invalid("invalid watch in registration set"))?
+    {
+        super::super::Request::Watch {
+            key,
+            label,
+            condition,
+            failure_condition,
+            deadline_tick,
+            poll_interval_ticks,
+            stable_observations,
+        } => {
             let result = Definition {
-                label: label.unwrap_or_else(|| key.clone()), key, condition, failure_condition,
-                deadline_tick, poll_interval_ticks: poll_interval_ticks.unwrap_or(1),
+                label: label.unwrap_or_else(|| key.clone()),
+                key,
+                condition,
+                failure_condition,
+                deadline_tick,
+                poll_interval_ticks: poll_interval_ticks.unwrap_or(1),
                 stable_observations: stable_observations.unwrap_or(2),
             };
             validate_definition(&result)?;
@@ -40,15 +56,28 @@ fn definition(input: Value) -> Result<Definition> {
     }
 }
 
-pub(crate) fn execute<F>(snapshot: &WorldSnapshot, context: &OperationContext,
-    input: &Value, publisher: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+pub(crate) fn execute<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     execute_in(&WATCHES, snapshot, context, input, publisher)
 }
 
-fn execute_in<F>(storage: &Mutex<Store>, snapshot: &WorldSnapshot,
-    context: &OperationContext, input: &Value, publisher: F) -> Result<String>
-where F: FnOnce(Value) -> Result<String> {
+fn execute_in<F>(
+    storage: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let mut work = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
     // These are aggregate limits for the ENTIRE set, not renewed per definition.
@@ -58,12 +87,21 @@ where F: FnOnce(Value) -> Result<String> {
     if envelope.schema != "dfmcp.query/1" {
         return Err(invalid("register_watches requires dfmcp.query/1"));
     }
-    if envelope.expected_anchor.as_ref().is_some_and(|a| a != &anchor(context.anchor)) {
-        return Err(failure(ErrorCode::StaleAnchor, "registration set names another observation"));
+    if envelope
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|a| a != &anchor(context.anchor))
+    {
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "registration set names another observation",
+        ));
     }
     let RegistrationRequest::RegisterWatches { watches } = envelope.query;
     if watches.is_empty() || watches.len() > MAX_PER_SESSION {
-        return Err(invalid("register_watches accepts one to eight unique watch keys"));
+        return Err(invalid(
+            "register_watches accepts one to eight unique watch keys",
+        ));
     }
     let mut definitions = BTreeMap::new();
     for input in watches {
@@ -76,34 +114,52 @@ where F: FnOnce(Value) -> Result<String> {
         "definitions":definitions.values().collect::<Vec<_>>()}))?;
     let mut store = lock(storage)?;
     work.check()?;
-    let existing: BTreeMap<_, _> = store.entries.iter()
+    let existing: BTreeMap<_, _> = store
+        .entries
+        .iter()
         .filter(|((session, _), _)| *session == context.session_id)
-        .map(|((_, handle), watch)| (watch.definition.key.clone(), handle.clone())).collect();
+        .map(|((_, handle), watch)| (watch.definition.key.clone(), handle.clone()))
+        .collect();
     let mut new_count = 0usize;
     // Validate ALL identities and deadlines before even evaluating the first new
     // watch. Expired/recovered/terminal existing keys replay without renewal.
     for (key, definition) in &definitions {
         if let Some(handle) = existing.get(key) {
             if record(&store, context.session_id, handle)?.definition != *definition {
-                return Err(failure(ErrorCode::Conflict,
-                    "a registration key already names another definition; no watches were installed"));
+                return Err(failure(
+                    ErrorCode::Conflict,
+                    "a registration key already names another definition; no watches were installed",
+                ));
             }
         } else {
             if definition.deadline_tick <= context.anchor.tick.0
-                || definition.deadline_tick.checked_sub(context.anchor.tick.0)
-                    .is_none_or(|ticks| ticks > context.budget.max_game_ticks) {
-                return Err(invalid("every new watch deadline must be future and within the session horizon"));
+                || definition
+                    .deadline_tick
+                    .checked_sub(context.anchor.tick.0)
+                    .is_none_or(|ticks| ticks > context.budget.max_game_ticks)
+            {
+                return Err(invalid(
+                    "every new watch deadline must be future and within the session horizon",
+                ));
             }
             new_count += 1;
         }
     }
     if existing.len().saturating_add(new_count) > MAX_PER_SESSION
-        || store.entries.len().saturating_add(new_count) > MAX_TOTAL {
-        return Err(bounded("complete monitoring set does not fit watch retention; nothing was registered"));
+        || store.entries.len().saturating_add(new_count) > MAX_TOTAL
+    {
+        return Err(bounded(
+            "complete monitoring set does not fit watch retention; nothing was registered",
+        ));
     }
-    store.serial.checked_add(new_count as u64)
+    store
+        .serial
+        .checked_add(new_count as u64)
         .ok_or_else(|| bounded("watch identity space exhausted"))?;
-    let mut candidate = Store { serial: store.serial, entries: store.entries.clone() };
+    let mut candidate = Store {
+        serial: store.serial,
+        entries: store.entries.clone(),
+    };
     let mut rows = Vec::with_capacity(definitions.len());
     let mut pending = Vec::new();
     for (key, definition) in definitions {
@@ -117,19 +173,37 @@ where F: FnOnce(Value) -> Result<String> {
                     "session":context.session_id.to_string(),"serial":candidate.serial,
                     "anchor":anchor(context.anchor),"definition":definition}))?;
                 let handle = format!("watch:{identity}");
-                let mut watch = Watch { handle: handle.clone(), definition,
-                    created_at: context.anchor, last_seen: context.anchor,
-                    last_sample_tick: None, streak: 0, samples: 0, status: Status::Waiting,
-                    evaluation: Value::Null, evidence_digest: identity, recovery: None };
+                let mut watch = Watch {
+                    handle: handle.clone(),
+                    definition,
+                    created_at: context.anchor,
+                    last_seen: context.anchor,
+                    last_sample_tick: None,
+                    streak: 0,
+                    samples: 0,
+                    status: Status::Waiting,
+                    evaluation: Value::Null,
+                    evidence_digest: identity,
+                    recovery: None,
+                };
                 watch.advance_bounded(snapshot, true, &mut work)?;
-                if candidate.entries.insert((context.session_id, handle.clone()), watch).is_some() {
-                    return Err(failure(ErrorCode::InternalInvariantViolation, "watch identity collision"));
+                if candidate
+                    .entries
+                    .insert((context.session_id, handle.clone()), watch)
+                    .is_some()
+                {
+                    return Err(failure(
+                        ErrorCode::InternalInvariantViolation,
+                        "watch identity collision",
+                    ));
                 }
                 handle
             }
         };
         let watch = record(&candidate, context.session_id, &handle)?;
-        if !watch.status.terminal() { pending.push(handle); }
+        if !watch.status.terminal() {
+            pending.push(handle);
+        }
         let mut row = watch.summary(context.anchor);
         row["replayed"] = json!(replayed);
         row["sample_count"] = json!(watch.samples);
@@ -146,7 +220,9 @@ where F: FnOnce(Value) -> Result<String> {
     value["native_captures"] = json!(0);
     value["game_effect_success_proven"] = json!(false);
     value["detail_query_kind"] = json!("poll_watch");
-    value["next_step"] = if pending.is_empty() { Value::Null } else {
+    value["next_step"] = if pending.is_empty() {
+        Value::Null
+    } else {
         json!({"tool":"fortress.query","arguments":{"session_id":context.session_id.to_string(),
             "query":{"schema":"dfmcp.query/1","query":{"kind":"await_watches","watches":pending}}}})
     };
@@ -156,8 +232,15 @@ where F: FnOnce(Value) -> Result<String> {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         work.check()?;
         let encoded = publisher(value)?;
-        if encoded.len() as u64 > context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4) {
-            return Err(bounded("complete monitoring-set acknowledgement exceeds the output budget"));
+        if encoded.len() as u64
+            > context
+                .budget
+                .max_bytes
+                .min(u64::from(context.budget.max_output_tokens) * 4)
+        {
+            return Err(bounded(
+                "complete monitoring-set acknowledgement exceeds the output budget",
+            ));
         }
         work.check()?;
         Ok(encoded)

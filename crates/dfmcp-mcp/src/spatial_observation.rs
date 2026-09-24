@@ -16,9 +16,12 @@ fn custody(session: &mut Session, context: &OperationContext) -> Result<()> {
     if let Some(journal) = session.journal.as_mut() {
         journal.validate_custody(context)?;
         if journal.recovery_only()
-            || journal.state().snapshot().map(|snapshot| snapshot.anchor()) != Some(context.anchor) {
-            return Err(error(ErrorCode::CorruptLedger,
-                "live spatial journal is read-only or disagrees with the published anchor"));
+            || journal.state().snapshot().map(|snapshot| snapshot.anchor()) != Some(context.anchor)
+        {
+            return Err(error(
+                ErrorCode::CorruptLedger,
+                "live spatial journal is read-only or disagrees with the published anchor",
+            ));
         }
     }
     Ok(())
@@ -31,7 +34,10 @@ struct Candidate {
     target: OperationContext,
 }
 
-fn check_bounds(observation: &LiveSpatialCitizenObservation, limits: CitizenSpatialLimits) -> Result<()> {
+fn check_bounds(
+    observation: &LiveSpatialCitizenObservation,
+    limits: CitizenSpatialLimits,
+) -> Result<()> {
     let op = observation.spatial().operations();
     let counts = limits.spatial.operations;
     if op.jobs.jobs.len() > counts.jobs as usize
@@ -39,25 +45,38 @@ fn check_bounds(observation: &LiveSpatialCitizenObservation, limits: CitizenSpat
         || op.items.len() > counts.items as usize
         || observation.citizens().len() > limits.citizens as usize
         || observation.spatial().terrain().map.region != limits.spatial.region
-        || observation.encode_payload()?.len() > counts.payload_bytes {
-        return Err(error(ErrorCode::BudgetExceeded,
-            "spatial/1.8 observation exceeds negotiated acquisition bounds"));
+        || observation.encode_payload()?.len() > counts.payload_bytes
+    {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "spatial/1.8 observation exceeds negotiated acquisition bounds",
+        ));
     }
     Ok(())
 }
 
-fn stage(session: &Session, context: &OperationContext,
-    observation: LiveSpatialCitizenObservation, require_query: bool) -> Result<Candidate> {
+fn stage(
+    session: &Session,
+    context: &OperationContext,
+    observation: LiveSpatialCitizenObservation,
+    require_query: bool,
+) -> Result<Candidate> {
     check_bounds(&observation, session.limits)?;
     // The candidate includes entity-generation history. A rejected projection
     // must not burn a generation or advance the session's source observation.
     let mut state = session.state.clone();
     let outcome = state.publish(observation.clone())?;
-    let snapshot = state.snapshot().ok_or_else(|| error(ErrorCode::InternalInvariantViolation,
-        "staged spatial observation has no canonical snapshot"))?;
+    let snapshot = state.snapshot().ok_or_else(|| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "staged spatial observation has no canonical snapshot",
+        )
+    })?;
     if snapshot.graph.entities.len() > context.budget.max_entities as usize {
-        return Err(error(ErrorCode::BudgetExceeded,
-            "staged spatial projection exceeds the request entity allowance"));
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "staged spatial projection exceeds the request entity allowance",
+        ));
     }
     let mut target = context.clone();
     target.anchor = snapshot.anchor();
@@ -68,7 +87,12 @@ fn stage(session: &Session, context: &OperationContext,
     if require_query || session.journal.is_some() {
         target.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     }
-    Ok(Candidate { observation, state, outcome, target })
+    Ok(Candidate {
+        observation,
+        state,
+        outcome,
+        target,
+    })
 }
 
 pub(super) fn refresh(session: &mut Session, context: &OperationContext) -> Result<JobPublication> {
@@ -78,34 +102,60 @@ pub(super) fn refresh(session: &mut Session, context: &OperationContext) -> Resu
 
 /// Query-triggered recovery requires both grants at the target even without a
 /// journal. Ordinary Observe-only sessions retain their original read semantics.
-pub(super) fn refresh_for_query(session: &mut Session, context: &OperationContext) -> Result<JobPublication> {
+pub(super) fn refresh_for_query(
+    session: &mut Session,
+    context: &OperationContext,
+) -> Result<JobPublication> {
     let started = Instant::now();
     refresh_checked(session, context, true, || started.elapsed())
 }
 
-fn refresh_with_clock(session: &mut Session, context: &OperationContext,
-    elapsed: impl FnMut() -> Duration) -> Result<JobPublication> {
+fn refresh_with_clock(
+    session: &mut Session,
+    context: &OperationContext,
+    elapsed: impl FnMut() -> Duration,
+) -> Result<JobPublication> {
     refresh_checked(session, context, false, elapsed)
 }
 
-fn refresh_checked(session: &mut Session, context: &OperationContext, require_query: bool,
-    mut elapsed: impl FnMut() -> Duration) -> Result<JobPublication> {
+fn refresh_checked(
+    session: &mut Session,
+    context: &OperationContext,
+    require_query: bool,
+    mut elapsed: impl FnMut() -> Duration,
+) -> Result<JobPublication> {
     if session.source.closed() {
-        return Err(error(ErrorCode::SessionNotFound, "spatial session is closed"));
+        return Err(error(
+            ErrorCode::SessionNotFound,
+            "spatial session is closed",
+        ));
     }
     if session.source.archive_only() {
-        return Err(error(ErrorCode::CapabilityDenied, "archive-only sessions cannot acquire live observations"));
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "archive-only sessions cannot acquire live observations",
+        ));
     }
     context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-    if require_query { context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?; }
+    if require_query {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    }
     if context.session_id != session.id || context.anchor != session.anchor()? {
-        return Err(error(ErrorCode::StaleAnchor, "spatial refresh names another session or observation"));
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "spatial refresh names another session or observation",
+        ));
     }
     if session.source.poisoned() {
-        return Err(error(ErrorCode::AdapterUnavailable, "spatial source is fenced; use query recover_source or close/reopen"));
+        return Err(error(
+            ErrorCode::AdapterUnavailable,
+            "spatial source is fenced; use query recover_source or close/reopen",
+        ));
     }
     if let Err(failure) = custody(session, context) {
-        if failure.code == ErrorCode::CorruptLedger { session.source.fence(); }
+        if failure.code == ErrorCode::CorruptLedger {
+            session.source.fence();
+        }
         return Err(failure);
     }
     // Preflight refusal has not touched the source and does not poison it.
@@ -121,7 +171,8 @@ fn refresh_checked(session: &mut Session, context: &OperationContext, require_qu
         match session.journal.as_mut() {
             Some(journal) => {
                 let mut write_context = context.clone();
-                write_context.budget.max_bytes = session.limits.spatial.operations.payload_bytes as u64;
+                write_context.budget.max_bytes =
+                    session.limits.spatial.operations.payload_bytes as u64;
                 write_context.budget.max_wall_millis = allowance.as_millis() as u64;
                 // append revalidates custody and Observe at its own canonical
                 // candidate anchor, then syncs before publishing the journal root.
@@ -140,13 +191,15 @@ fn refresh_checked(session: &mut Session, context: &OperationContext, require_qu
     })();
     // A consumed-but-rejected capture cannot be silently treated as the current
     // source. Preserve the old world until explicit recovery or close/reopen.
-    if result.is_err() { session.source.fence(); }
+    if result.is_err() {
+        session.source.fence();
+    }
     result
 }
 
 #[cfg(all(test, unix))]
-#[path = "spatial_observation_tests.rs"]
-mod tests;
-#[cfg(all(test, unix))]
 #[path = "spatial_observation_handler_tests.rs"]
 mod handler_tests;
+#[cfg(all(test, unix))]
+#[path = "spatial_observation_tests.rs"]
+mod tests;

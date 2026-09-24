@@ -9,24 +9,37 @@ struct Receipt {
     response: String,
     budget: WorkBudget,
 }
-static CLOSED: LazyLock<Mutex<VecDeque<Receipt>>> = LazyLock::new(|| {
-    Mutex::new(VecDeque::with_capacity(RETAINED_CLOSE_RECEIPTS))
-});
+static CLOSED: LazyLock<Mutex<VecDeque<Receipt>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::with_capacity(RETAINED_CLOSE_RECEIPTS)));
 
 fn ceiling(budget: WorkBudget, bytes: Option<u64>, tokens: Option<u32>) -> Result<u64> {
     let bytes = bytes.unwrap_or(budget.max_bytes);
     let tokens = tokens.unwrap_or(budget.max_output_tokens);
     if bytes == 0 || bytes > budget.max_bytes || tokens == 0 || tokens > budget.max_output_tokens {
-        return Err(err(ErrorCode::BudgetExceeded, "close budgets must be positive and only narrow session limits"));
+        return Err(err(
+            ErrorCode::BudgetExceeded,
+            "close budgets must be positive and only narrow session limits",
+        ));
     }
     Ok(bytes.min(u64::from(tokens) * 4))
 }
-fn replay(receipts: &VecDeque<Receipt>, id: SessionId,
-    bytes: Option<u64>, tokens: Option<u32>) -> Result<String> {
-    let receipt = receipts.iter().find(|r| r.id == id)
-        .ok_or_else(|| err(ErrorCode::SessionNotFound, "control session is absent and no close receipt is retained"))?;
+fn replay(
+    receipts: &VecDeque<Receipt>,
+    id: SessionId,
+    bytes: Option<u64>,
+    tokens: Option<u32>,
+) -> Result<String> {
+    let receipt = receipts.iter().find(|r| r.id == id).ok_or_else(|| {
+        err(
+            ErrorCode::SessionNotFound,
+            "control session is absent and no close receipt is retained",
+        )
+    })?;
     if receipt.response.len() as u64 > ceiling(receipt.budget, bytes, tokens)? {
-        return Err(err(ErrorCode::BudgetExceeded, "retained control close receipt exceeds the requested output budget"));
+        return Err(err(
+            ErrorCode::BudgetExceeded,
+            "retained control close receipt exceeds the requested output budget",
+        ));
     }
     Ok(receipt.response.clone())
 }
@@ -63,8 +76,17 @@ fn response(id: SessionId) -> String {
 /// registries are ready. Old Arc holders see None and cannot perform more work.
 /// Lock order: per-session -> SESSIONS -> CLOSED. Resolution never waits for a
 /// per-session lock while holding SESSIONS, and replay never acquires SESSIONS.
-pub(super) fn close(raw: Option<String>, bytes: Option<u64>, tokens: Option<u32>) -> Result<String> {
-    let raw = raw.ok_or_else(|| err(ErrorCode::InvalidRequest, "session closure requires a control session ID"))?;
+pub(super) fn close(
+    raw: Option<String>,
+    bytes: Option<u64>,
+    tokens: Option<u32>,
+) -> Result<String> {
+    let raw = raw.ok_or_else(|| {
+        err(
+            ErrorCode::InvalidRequest,
+            "session closure requires a control session ID",
+        )
+    })?;
     let id = parse_session_id(&raw)?;
     let handle = {
         let sessions = lock(&SESSIONS)?;
@@ -85,12 +107,25 @@ pub(super) fn close(raw: Option<String>, bytes: Option<u64>, tokens: Option<u32>
     let budget = session.budget;
     let out = response(id);
     if out.len() as u64 > ceiling(budget, bytes, tokens)? {
-        return Err(err(ErrorCode::BudgetExceeded, "complete control close acknowledgement does not fit; session remains open"));
+        return Err(err(
+            ErrorCode::BudgetExceeded,
+            "complete control close acknowledgement does not fit; session remains open",
+        ));
     }
-    let receipt = Receipt { id, response: out.clone(), budget };
+    let receipt = Receipt {
+        id,
+        response: out.clone(),
+        budget,
+    };
     let mut sessions = lock(&SESSIONS)?;
-    if !sessions.get(&id).is_some_and(|registered| Arc::ptr_eq(registered, &handle)) {
-        return Err(err(ErrorCode::Conflict, "control session registry changed before release"));
+    if !sessions
+        .get(&id)
+        .is_some_and(|registered| Arc::ptr_eq(registered, &handle))
+    {
+        return Err(err(
+            ErrorCode::Conflict,
+            "control session registry changed before release",
+        ));
     }
     let mut closed = lock(&CLOSED)?;
     // All fallible validation and allocation of the response precede this point.
@@ -98,7 +133,9 @@ pub(super) fn close(raw: Option<String>, bytes: Option<u64>, tokens: Option<u32>
     // journal is closed before capacity can be reused by another opening.
     drop(owned.take());
     sessions.remove(&id);
-    if closed.len() == RETAINED_CLOSE_RECEIPTS { closed.pop_front(); }
+    if closed.len() == RETAINED_CLOSE_RECEIPTS {
+        closed.pop_front();
+    }
     closed.push_back(receipt);
     Ok(out)
 }
