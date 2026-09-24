@@ -1,10 +1,10 @@
 //! Borrow the operations component and canonical identity of ONE published state.
 //! Never project an embedded operations capture into a new generation universe.
+use crate::live_operations::{LiveOperationsObservation, LiveOperationsState};
+use crate::live_spatial::citizens::LiveSpatialCitizenState;
+use crate::live_spatial::{LiveSpatialState, SpatialStateView};
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 use dfmcp_world::WorldSnapshot;
-use crate::live_operations::{LiveOperationsObservation, LiveOperationsState};
-use crate::live_spatial::{LiveSpatialState, SpatialStateView};
-use crate::live_spatial::citizens::LiveSpatialCitizenState;
 
 mod sealed {
     pub trait Sealed {}
@@ -23,26 +23,45 @@ pub trait OperationsStateView: sealed::Sealed {
 }
 
 impl OperationsStateView for LiveOperationsState {
-    fn operations_observation(&self) -> Option<&LiveOperationsObservation> { self.observation() }
-    fn operations_snapshot(&self) -> Option<&WorldSnapshot> { self.snapshot() }
-    fn operations_source_digest(&self) -> Result<Digest32> { self.source_digest() }
+    fn operations_observation(&self) -> Option<&LiveOperationsObservation> {
+        self.observation()
+    }
+    fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
+        self.snapshot()
+    }
+    fn operations_source_digest(&self) -> Result<Digest32> {
+        self.source_digest()
+    }
 }
 
 impl OperationsStateView for LiveSpatialState {
     fn operations_observation(&self) -> Option<&LiveOperationsObservation> {
         self.spatial_observation().map(|value| value.operations())
     }
-    fn operations_snapshot(&self) -> Option<&WorldSnapshot> { SpatialStateView::snapshot(self) }
-    fn operations_source_digest(&self) -> Result<Digest32> { SpatialStateView::source_digest(self) }
+    fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
+        SpatialStateView::snapshot(self)
+    }
+    fn operations_source_digest(&self) -> Result<Digest32> {
+        SpatialStateView::source_digest(self)
+    }
 }
 
 impl OperationsStateView for LiveSpatialCitizenState {
     fn operations_observation(&self) -> Option<&LiveOperationsObservation> {
-        self.observation_full().map(|value| value.spatial().operations())
+        self.observation_full()
+            .map(|value| value.spatial().operations())
     }
-    fn operations_snapshot(&self) -> Option<&WorldSnapshot> { SpatialStateView::snapshot(self) }
+    fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
+        SpatialStateView::snapshot(self)
+    }
     fn operations_source_digest(&self) -> Result<Digest32> {
-        self.observation_full().ok_or_else(||DfmcpError::new(ErrorCode::InvalidRequest,
-            "coherent citizen/spatial observation absent"))?.source_digest()
+        self.observation_full()
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "coherent citizen/spatial observation absent",
+                )
+            })?
+            .source_digest()
     }
 }

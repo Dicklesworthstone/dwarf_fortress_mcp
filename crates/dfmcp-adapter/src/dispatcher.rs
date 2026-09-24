@@ -150,9 +150,16 @@ impl EffectJournal {
                 ))
             };
         }
-        let unique_actions: BTreeSet<ActionId> =
-            receipt.actions.iter().map(|action| action.action_id).collect();
-        let unique_steps: BTreeSet<_> = receipt.actions.iter().map(|action| action.step_id).collect();
+        let unique_actions: BTreeSet<ActionId> = receipt
+            .actions
+            .iter()
+            .map(|action| action.action_id)
+            .collect();
+        let unique_steps: BTreeSet<_> = receipt
+            .actions
+            .iter()
+            .map(|action| action.step_id)
+            .collect();
         let final_anchor_matches = receipt
             .actions
             .last()
@@ -295,7 +302,10 @@ impl MutationDispatcher {
             {
                 return Err(DfmcpError::new(
                     ErrorCode::PreconditionsFailed,
-                    format!("preconditions for step {} are not established true", step.id.get()),
+                    format!(
+                        "preconditions for step {} are not established true",
+                        step.id.get()
+                    ),
                 ));
             }
         }
@@ -439,7 +449,7 @@ impl MutationDispatcher {
                     .all(|predicate| evaluate(snapshot, predicate))
                 {
                     return Err(DfmcpError::new(
-                        ErrorCode::PostconditionsFailed,
+                        ErrorCode::AdapterRejected,
                         format!(
                             "postconditions for step {} are not established true",
                             step.id.get()
@@ -730,11 +740,7 @@ mod tests {
         let snapshot = sample_snapshot();
         let plan = unpause_plan(&snapshot)?;
         let mut journal = EffectJournal::new();
-        let expired = journal.record_prepare(
-            "bounded".to_owned(),
-            &plan,
-            plan.expires_at_tick,
-        );
+        let expired = journal.record_prepare("bounded".to_owned(), &plan, plan.expires_at_tick);
         assert!(matches!(expired, Err(ref error) if error.code == ErrorCode::InvalidPlan));
         let oversized = journal.record_prepare(
             "x".repeat(MAX_IDEMPOTENCY_KEY_BYTES.saturating_add(1)),

@@ -10,9 +10,7 @@ use std::collections::BTreeSet;
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
-use crate::{
-    BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeManifest, CompatibilityLevel,
-};
+use crate::{BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, BridgeManifest, CompatibilityLevel};
 
 const MAX_VERSION_BYTES: usize = 128;
 const MAX_METHODS: usize = 32;
@@ -90,9 +88,7 @@ impl LiveCompatibilityPolicy {
         if self.required_methods.is_empty() || self.required_methods.len() > MAX_METHODS {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "compatibility policy must contain 1..={MAX_METHODS} required methods"
-                ),
+                format!("compatibility policy must contain 1..={MAX_METHODS} required methods"),
             ));
         }
         for method in &self.required_methods {
@@ -197,11 +193,7 @@ mod tests {
 
     #[test]
     fn exact_manifest_is_admitted() -> Result<()> {
-        let policy = LiveCompatibilityPolicy::exact(
-            "0.51.11",
-            "0.51.11-r1",
-            "0.1.0",
-        )?;
+        let policy = LiveCompatibilityPolicy::exact("0.51.11", "0.51.11-r1", "0.1.0")?;
         let verdict = policy.require_canonical_observation(&manifest())?;
         assert_eq!(verdict.level, CompatibilityLevel::Exact);
         assert!(verdict.canonical_observation_allowed);
@@ -210,11 +202,7 @@ mod tests {
 
     #[test]
     fn unknown_game_version_fails_closed_by_default() -> Result<()> {
-        let policy = LiveCompatibilityPolicy::exact(
-            "0.51.12",
-            "0.51.11-r1",
-            "0.1.0",
-        )?;
+        let policy = LiveCompatibilityPolicy::exact("0.51.12", "0.51.11-r1", "0.1.0")?;
         assert!(policy.require_canonical_observation(&manifest()).is_err());
         let verdict = policy.evaluate(&manifest())?;
         assert_eq!(verdict.level, CompatibilityLevel::DegradedReadOnly);
@@ -224,11 +212,7 @@ mod tests {
 
     #[test]
     fn bridge_or_method_mismatch_is_incompatible_even_for_diagnostics() -> Result<()> {
-        let mut policy = LiveCompatibilityPolicy::exact(
-            "0.51.11",
-            "0.51.11-r1",
-            "0.2.0",
-        )?;
+        let mut policy = LiveCompatibilityPolicy::exact("0.51.11", "0.51.11-r1", "0.2.0")?;
         policy.allow_version_mismatch_for_diagnostics = true;
         let verdict = policy.evaluate(&manifest())?;
         assert_eq!(verdict.level, CompatibilityLevel::Incompatible);

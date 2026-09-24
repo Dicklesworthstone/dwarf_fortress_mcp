@@ -212,8 +212,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-        CitizenRecord,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage, CitizenRecord,
     };
 
     fn manifest() -> BridgeManifest {
@@ -331,23 +330,11 @@ mod tests {
     #[test]
     fn announcement_drift_between_pages_is_transactionally_rejected() -> Result<()> {
         let mut assembler = ObservationAssemblerV1_1::new(manifest());
-        assembler.push_page(page(
-            0,
-            2,
-            &[1],
-            false,
-            announcement_batch(9, "first")?,
-        ))?;
+        assembler.push_page(page(0, 2, &[1], false, announcement_batch(9, "first")?))?;
         let offset = assembler.next_offset()?;
         assert!(
             assembler
-                .push_page(page(
-                    1,
-                    2,
-                    &[2],
-                    true,
-                    announcement_batch(9, "changed")?,
-                ))
+                .push_page(page(1, 2, &[2], true, announcement_batch(9, "changed")?,))
                 .is_err()
         );
         assert_eq!(assembler.next_offset()?, offset);
@@ -370,17 +357,9 @@ mod tests {
     #[test]
     fn combined_capsule_tampering_fails_closed() -> Result<()> {
         let mut assembler = ObservationAssemblerV1_1::new(manifest());
-        assembler.push_page(page(
-            0,
-            1,
-            &[1],
-            true,
-            announcement_batch(9, "stable")?,
-        ))?;
+        assembler.push_page(page(0, 1, &[1], true, announcement_batch(9, "stable")?))?;
         let mut capsule = assembler.finalize()?;
-        capsule.announcement_batch.announcements[0]
-            .text
-            .push('!');
+        capsule.announcement_batch.announcements[0].text.push('!');
         assert!(capsule.validate().is_err());
         Ok(())
     }
@@ -403,13 +382,7 @@ mod tests {
     #[test]
     fn incomplete_assembly_cannot_publish() -> Result<()> {
         let mut assembler = ObservationAssemblerV1_1::new(manifest());
-        assembler.push_page(page(
-            0,
-            2,
-            &[1],
-            false,
-            announcement_batch(9, "stable")?,
-        ))?;
+        assembler.push_page(page(0, 2, &[1], false, announcement_batch(9, "stable")?))?;
         assert!(assembler.finalize().is_err());
         Ok(())
     }

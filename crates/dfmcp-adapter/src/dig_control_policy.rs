@@ -4,13 +4,15 @@
 //! designation: this profile has no game-save verifier. An operator may instead
 //! explicitly select a disposable-fortress development policy. Neither mode
 //! claims structural safety, a global controller lease, or production admission.
-use dfmcp_core::{Digest32, ErrorCode, GameTick, LeaseId, LeaseManager, MapCuboid,
-    OperationContext, Result, SessionId, cuboids_intersect};
-use crate::dig_designation::{DigPlan, DigRegion};
 use crate::bounded_run::{error, hash};
-use crate::dig_designation::journal::{DigBinding, DigGuard, DigStage};
 use crate::dig_designation::journal::session::DigSessionGuard;
+use crate::dig_designation::journal::{DigBinding, DigGuard, DigStage};
 use crate::dig_designation::rpc::authorize;
+use crate::dig_designation::{DigPlan, DigRegion};
+use dfmcp_core::{
+    Digest32, ErrorCode, GameTick, LeaseId, LeaseManager, MapCuboid, OperationContext, Result,
+    SessionId, cuboids_intersect,
+};
 
 fn append_text(bytes: &mut Vec<u8>, value: &str) {
     // Every source string is validated by DigBinding before this serializer.
@@ -40,27 +42,47 @@ pub struct DigControlPolicy {
     digest: Digest32,
 }
 fn coordinates(area: MapCuboid) -> [i32; 6] {
-    [area.min.x, area.min.y, area.min.z, area.max.x, area.max.y, area.max.z]
+    [
+        area.min.x, area.min.y, area.min.z, area.max.x, area.max.y, area.max.z,
+    ]
 }
 fn valid_area(area: MapCuboid) -> Result<()> {
     MapCuboid::new(area.min, area.max)?;
     if coordinates(area).iter().any(|n| !(0..=32767).contains(n)) {
-        return Err(error(ErrorCode::InvalidRequest, "protected region exceeds native map bounds"));
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "protected region exceeds native map bounds",
+        ));
     }
     Ok(())
 }
 fn append_area(bytes: &mut Vec<u8>, area: MapCuboid) {
-    for value in coordinates(area) { bytes.extend_from_slice(&value.to_be_bytes()); }
+    for value in coordinates(area) {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
 }
 impl DigControlPolicy {
-    pub fn new(binding: DigBinding, journal: Digest32, session: SessionId, lease: LeaseId,
-        mut protected: Vec<MapCuboid>, checkpoint: DigCheckpointPolicy) -> Result<Self>
-    {
-        if session == SessionId::NIL || lease == LeaseId::NIL || journal == Digest32::ZERO
-            || protected.len() > MAX_PROTECTED_AREAS {
-            return Err(error(ErrorCode::InvalidRequest, "invalid mining policy identity or protected-region bound"));
+    pub fn new(
+        binding: DigBinding,
+        journal: Digest32,
+        session: SessionId,
+        lease: LeaseId,
+        mut protected: Vec<MapCuboid>,
+        checkpoint: DigCheckpointPolicy,
+    ) -> Result<Self> {
+        if session == SessionId::NIL
+            || lease == LeaseId::NIL
+            || journal == Digest32::ZERO
+            || protected.len() > MAX_PROTECTED_AREAS
+        {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "invalid mining policy identity or protected-region bound",
+            ));
         }
-        for area in &protected { valid_area(*area)?; }
+        for area in &protected {
+            valid_area(*area)?;
+        }
         protected.sort_by_key(|area| coordinates(*area));
         protected.dedup();
         let mut bytes = Vec::new();
@@ -74,48 +96,109 @@ impl DigControlPolicy {
         bytes.extend_from_slice(journal.as_bytes());
         bytes.extend_from_slice(&session.get().to_be_bytes());
         bytes.extend_from_slice(&lease.get().to_be_bytes());
-        bytes.push(match checkpoint { DigCheckpointPolicy::Required => 0, DigCheckpointPolicy::DisposableFortress => 1 });
+        bytes.push(match checkpoint {
+            DigCheckpointPolicy::Required => 0,
+            DigCheckpointPolicy::DisposableFortress => 1,
+        });
         bytes.extend_from_slice(&(protected.len() as u16).to_be_bytes());
-        for area in &protected { append_area(&mut bytes, *area); }
+        for area in &protected {
+            append_area(&mut bytes, *area);
+        }
         let digest = hash(b"dfmcp-dig-control-policy/1", &bytes);
-        Ok(Self { binding, journal, session, lease, protected, checkpoint, digest })
+        Ok(Self {
+            binding,
+            journal,
+            session,
+            lease,
+            protected,
+            checkpoint,
+            digest,
+        })
     }
-    pub fn digest(&self) -> Digest32 { self.digest }
-    pub fn journal_id(&self) -> Digest32 { self.journal }
-    pub fn lease_id(&self) -> LeaseId { self.lease }
-    pub fn checkpoint_policy(&self) -> DigCheckpointPolicy { self.checkpoint }
-    pub fn protected_areas(&self) -> &[MapCuboid] { &self.protected }
-    pub fn binding(&self) -> &DigBinding { &self.binding }
+    pub fn digest(&self) -> Digest32 {
+        self.digest
+    }
+    pub fn journal_id(&self) -> Digest32 {
+        self.journal
+    }
+    pub fn lease_id(&self) -> LeaseId {
+        self.lease
+    }
+    pub fn checkpoint_policy(&self) -> DigCheckpointPolicy {
+        self.checkpoint
+    }
+    pub fn protected_areas(&self) -> &[MapCuboid] {
+        &self.protected
+    }
+    pub fn binding(&self) -> &DigBinding {
+        &self.binding
+    }
 
     fn scope(&self, context: &OperationContext, region: DigRegion) -> Result<()> {
-        if context.session_id != self.session || context.anchor.fortress_id != self.binding.fortress_id()
+        if context.session_id != self.session
+            || context.anchor.fortress_id != self.binding.fortress_id()
             || !self.binding.scope().contains_cuboid(region.halo())
-            || !self.binding.scope().contains_cuboid(region.write_area()) {
-            return Err(error(ErrorCode::CapabilityDenied, "mining policy belongs to another session, fortress or scope"));
+            || !self.binding.scope().contains_cuboid(region.write_area())
+        {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "mining policy belongs to another session, fortress or scope",
+            ));
         }
         Ok(())
     }
     fn source(&self, plan: &DigPlan, context: &OperationContext) -> Result<()> {
         self.scope(context, plan.before().region())?;
         if plan.before().generation() != self.binding.manifest().generation
-            || plan.before().folder() != self.binding.folder() || plan.before().site() != self.binding.site() {
-            return Err(error(ErrorCode::StaleAnchor, "mining review belongs to a different source"));
+            || plan.before().folder() != self.binding.folder()
+            || plan.before().site() != self.binding.site()
+        {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "mining review belongs to a different source",
+            ));
         }
         Ok(())
     }
     /// Evaluate current authority, the manager's actual lease and protected
     /// shared blocks. A retained digest or client boolean cannot replace these.
-    pub fn evaluate(&self, plan: &DigPlan, context: &OperationContext, leases: &LeaseManager) -> Result<()> {
+    pub fn evaluate(
+        &self,
+        plan: &DigPlan,
+        context: &OperationContext,
+        leases: &LeaseManager,
+    ) -> Result<()> {
         self.source(plan, context)?;
-        authorize(context, self.binding.fortress_id(), plan.before().tick(), plan.before().region(), true, true, true)?;
-        leases.verify_exclusive_spatial(self.lease, self.session, plan.before().region().write_area(),
-            GameTick(context.anchor.tick.get().max(plan.before().tick())))?;
-        if self.protected.iter().any(|area| cuboids_intersect(area, &plan.before().region().write_area())) {
-            return Err(error(ErrorCode::CapabilityDenied, "mining scheduling writes intersect a protected region"));
+        authorize(
+            context,
+            self.binding.fortress_id(),
+            plan.before().tick(),
+            plan.before().region(),
+            true,
+            true,
+            true,
+        )?;
+        leases.verify_exclusive_spatial(
+            self.lease,
+            self.session,
+            plan.before().region().write_area(),
+            GameTick(context.anchor.tick.get().max(plan.before().tick())),
+        )?;
+        if self
+            .protected
+            .iter()
+            .any(|area| cuboids_intersect(area, &plan.before().region().write_area()))
+        {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "mining scheduling writes intersect a protected region",
+            ));
         }
         if self.checkpoint == DigCheckpointPolicy::Required {
-            return Err(error(ErrorCode::CheckpointRequired,
-                "a verified game checkpoint is required; this development profile cannot supply one"));
+            return Err(error(
+                ErrorCode::CheckpointRequired,
+                "a verified game checkpoint is required; this development profile cannot supply one",
+            ));
         }
         Ok(())
     }
@@ -127,25 +210,41 @@ impl DigControlPolicy {
     /// The caller must retain this non-cloneable review only for its own fresh
     /// preparation. The checksum binds review content; it is not a signature or
     /// evidence that a human actually reviewed the plan.
-    pub fn review(&self, plan: &DigPlan, context: &OperationContext, leases: &LeaseManager) -> Result<DigReview> {
+    pub fn review(
+        &self,
+        plan: &DigPlan,
+        context: &OperationContext,
+        leases: &LeaseManager,
+    ) -> Result<DigReview> {
         self.evaluate(plan, context, leases)?;
-        Ok(DigReview { seal: self.seal(plan) })
+        Ok(DigReview {
+            seal: self.seal(plan),
+        })
     }
 }
 
 #[derive(Debug)]
-pub struct DigReview { seal: Digest32 }
+pub struct DigReview {
+    seal: Digest32,
+}
 impl DigReview {
-    pub fn seal(&self) -> Digest32 { self.seal }
+    pub fn seal(&self) -> Digest32 {
+        self.seal
+    }
     pub fn confirm(self, supplied: Digest32) -> Result<ConfirmedDigReview> {
         if supplied != self.seal {
-            return Err(error(ErrorCode::CapabilityDenied, "exact mining review seal was not confirmed"));
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "exact mining review seal was not confirmed",
+            ));
         }
         Ok(ConfirmedDigReview { seal: self.seal })
     }
 }
 #[derive(Debug)]
-pub struct ConfirmedDigReview { seal: Digest32 }
+pub struct ConfirmedDigReview {
+    seal: Digest32,
+}
 
 /// The runtime remains mandatory and is checked first, including after journal
 /// synchronization. The lease book is borrowed, never reconstructed from input.
@@ -156,9 +255,18 @@ pub struct PolicyDigGuard<'a, G> {
     confirmation: Option<&'a ConfirmedDigReview>,
 }
 impl<'a, G: DigSessionGuard> PolicyDigGuard<'a, G> {
-    pub fn new(policy: &'a DigControlPolicy, leases: &'a LeaseManager, runtime: &'a mut G,
-        confirmation: Option<&'a ConfirmedDigReview>) -> Self {
-        Self { policy, leases, runtime, confirmation }
+    pub fn new(
+        policy: &'a DigControlPolicy,
+        leases: &'a LeaseManager,
+        runtime: &'a mut G,
+        confirmation: Option<&'a ConfirmedDigReview>,
+    ) -> Self {
+        Self {
+            policy,
+            leases,
+            runtime,
+            confirmation,
+        }
     }
 }
 impl<G: DigSessionGuard> DigGuard for PolicyDigGuard<'_, G> {
@@ -169,8 +277,14 @@ impl<G: DigSessionGuard> DigGuard for PolicyDigGuard<'_, G> {
             self.policy.evaluate(plan, context, self.leases)?;
         }
         if stage == DigStage::Commit
-            && !self.confirmation.is_some_and(|review| review.seal == self.policy.seal(plan)) {
-            return Err(error(ErrorCode::CapabilityDenied, "mining commit has no current exact reviewed confirmation"));
+            && !self
+                .confirmation
+                .is_some_and(|review| review.seal == self.policy.seal(plan))
+        {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "mining commit has no current exact reviewed confirmation",
+            ));
         }
         // Query/cancellation must remain possible after lease expiry or an
         // unavailable checkpoint. They cannot initiate a new designation.
@@ -178,14 +292,34 @@ impl<G: DigSessionGuard> DigGuard for PolicyDigGuard<'_, G> {
     }
 }
 impl<G: DigSessionGuard> DigSessionGuard for PolicyDigGuard<'_, G> {
-    fn connect(&mut self, binding: &DigBinding, region: DigRegion, context: &OperationContext) -> Result<()> {
+    fn connect(
+        &mut self,
+        binding: &DigBinding,
+        region: DigRegion,
+        context: &OperationContext,
+    ) -> Result<()> {
         self.runtime.connect(binding, region, context)?;
-        if binding != self.policy.binding() { return Err(error(ErrorCode::StaleAnchor, "mining policy source changed")); }
+        if binding != self.policy.binding() {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "mining policy source changed",
+            ));
+        }
         self.policy.scope(context, region)
     }
-    fn observe(&mut self, binding: &DigBinding, region: DigRegion, context: &OperationContext) -> Result<()> {
+    fn observe(
+        &mut self,
+        binding: &DigBinding,
+        region: DigRegion,
+        context: &OperationContext,
+    ) -> Result<()> {
         self.runtime.observe(binding, region, context)?;
-        if binding != self.policy.binding() { return Err(error(ErrorCode::StaleAnchor, "mining observation policy source changed")); }
+        if binding != self.policy.binding() {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "mining observation policy source changed",
+            ));
+        }
         self.policy.scope(context, region)
     }
 }

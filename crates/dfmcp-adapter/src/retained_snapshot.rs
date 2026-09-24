@@ -44,14 +44,30 @@ impl SnapshotAssembler {
         if !(1..=MAX_SNAPSHOT_BYTES).contains(&maximum)
             || !(MIN_PAGE_BYTES..=MAX_PAGE_BYTES).contains(&page_bytes)
         {
-            return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "invalid native snapshot or page bound"));
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "invalid native snapshot or page bound",
+            ));
         }
-        Ok(Self { maximum, page_bytes, manifest: None, bytes: Vec::new(), complete: false, failed: false })
+        Ok(Self {
+            maximum,
+            page_bytes,
+            manifest: None,
+            bytes: Vec::new(),
+            complete: false,
+            failed: false,
+        })
     }
 
-    pub fn offset(&self) -> usize { self.bytes.len() }
-    pub fn manifest(&self) -> Option<&SnapshotManifest> { self.manifest.as_ref() }
-    pub fn complete(&self) -> bool { self.complete && !self.failed }
+    pub fn offset(&self) -> usize {
+        self.bytes.len()
+    }
+    pub fn manifest(&self) -> Option<&SnapshotManifest> {
+        self.manifest.as_ref()
+    }
+    pub fn complete(&self) -> bool {
+        self.complete && !self.failed
+    }
 
     /// A failed page permanently poisons this assembly. No partial result is exposed.
     pub fn push(&mut self, page: SnapshotPage) -> Result<()> {
@@ -69,8 +85,10 @@ impl SnapshotAssembler {
             return Err(invalid("native snapshot assembly is already terminal"));
         }
         let manifest = &page.manifest;
-        if manifest.generation == 0 || manifest.token == [0; 16]
-            || manifest.total_bytes == 0 || manifest.total_bytes > self.maximum
+        if manifest.generation == 0
+            || manifest.token == [0; 16]
+            || manifest.total_bytes == 0
+            || manifest.total_bytes > self.maximum
             || manifest.payload_digest == Digest32::ZERO
         {
             return Err(invalid("invalid native snapshot manifest"));
@@ -80,22 +98,45 @@ impl SnapshotAssembler {
                 return Err(invalid("invalid native snapshot software identity"));
             }
         }
-        if self.manifest.as_ref().is_some_and(|prior| prior != manifest) {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor, "native snapshot identity changed between pages"));
+        if self
+            .manifest
+            .as_ref()
+            .is_some_and(|prior| prior != manifest)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "native snapshot identity changed between pages",
+            ));
         }
-        if page.offset != self.bytes.len() || page.bytes.is_empty() || page.bytes.len() > self.page_bytes {
-            return Err(invalid("native snapshot page offset, progress, or width is invalid"));
+        if page.offset != self.bytes.len()
+            || page.bytes.is_empty()
+            || page.bytes.len() > self.page_bytes
+        {
+            return Err(invalid(
+                "native snapshot page offset, progress, or width is invalid",
+            ));
         }
-        let end = page.offset.checked_add(page.bytes.len()).ok_or_else(|| invalid("native page length overflow"))?;
-        if end > manifest.total_bytes || page.complete != (end == manifest.total_bytes)
+        let end = page
+            .offset
+            .checked_add(page.bytes.len())
+            .ok_or_else(|| invalid("native page length overflow"))?;
+        if end > manifest.total_bytes
+            || page.complete != (end == manifest.total_bytes)
             || (!page.complete && page.bytes.len() != self.page_bytes)
         {
-            return Err(invalid("native snapshot page completeness does not match its byte range"));
+            return Err(invalid(
+                "native snapshot page completeness does not match its byte range",
+            ));
         }
         if self.manifest.is_none() {
-            self.bytes.try_reserve_exact(manifest.total_bytes).map_err(|_| {
-                DfmcpError::new(ErrorCode::BudgetExceeded, "cannot reserve bounded native snapshot storage")
-            })?;
+            self.bytes
+                .try_reserve_exact(manifest.total_bytes)
+                .map_err(|_| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "cannot reserve bounded native snapshot storage",
+                    )
+                })?;
             self.manifest = Some(page.manifest);
         }
         self.bytes.extend_from_slice(&page.bytes);
@@ -108,8 +149,12 @@ impl SnapshotAssembler {
         if !self.complete || self.failed {
             return Err(invalid("native snapshot is incomplete or poisoned"));
         }
-        let manifest = self.manifest.ok_or_else(|| invalid("native snapshot has no manifest"))?;
-        if self.bytes.len() != manifest.total_bytes || Digest32::of_bytes(&self.bytes) != manifest.payload_digest {
+        let manifest = self
+            .manifest
+            .ok_or_else(|| invalid("native snapshot has no manifest"))?;
+        if self.bytes.len() != manifest.total_bytes
+            || Digest32::of_bytes(&self.bytes) != manifest.payload_digest
+        {
             return Err(invalid("native snapshot whole-payload digest mismatch"));
         }
         Ok((manifest, self.bytes))
@@ -123,10 +168,17 @@ mod tests {
     fn page(data: &[u8], offset: usize, width: usize) -> SnapshotPage {
         let end = offset.saturating_add(width).min(data.len());
         SnapshotPage {
-            manifest: SnapshotManifest { token: [1; 16], generation: 7,
-                df_version: "df".to_owned(), dfhack_version: "dfhack".to_owned(),
-                total_bytes: data.len(), payload_digest: Digest32::of_bytes(data) },
-            offset, bytes: data[offset..end].to_vec(), complete: end == data.len(),
+            manifest: SnapshotManifest {
+                token: [1; 16],
+                generation: 7,
+                df_version: "df".to_owned(),
+                dfhack_version: "dfhack".to_owned(),
+                total_bytes: data.len(),
+                payload_digest: Digest32::of_bytes(data),
+            },
+            offset,
+            bytes: data[offset..end].to_vec(),
+            complete: end == data.len(),
         }
     }
 
@@ -159,7 +211,11 @@ mod tests {
                 _ => next.manifest.payload_digest = Digest32::of_bytes(b"different"),
             }
             assert!(assembly.push(next).is_err());
-            assert!(assembly.push(page(&data, MIN_PAGE_BYTES, MIN_PAGE_BYTES)).is_err());
+            assert!(
+                assembly
+                    .push(page(&data, MIN_PAGE_BYTES, MIN_PAGE_BYTES))
+                    .is_err()
+            );
             assert!(assembly.finish().is_err());
         }
         Ok(())
@@ -176,7 +232,9 @@ mod tests {
                 0 => next.offset = 0,
                 1 => next.offset += 1,
                 2 => next.bytes.clear(),
-                3 => { next.bytes.pop(); }
+                3 => {
+                    next.bytes.pop();
+                }
                 4 => next.bytes.push(42),
                 _ => next.complete = true,
             }

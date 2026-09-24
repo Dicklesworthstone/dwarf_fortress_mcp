@@ -3,8 +3,10 @@
 //! a journal, manufacture grants, or bypass per-call production authorization.
 use std::ops::Bound::{Excluded, Unbounded};
 
-use super::{authorize, corrupt, exhausted, io_error, Budget, DurableJobRecord,
-    DurableJobState, EffectJournalStorage, JobControlJournal, MAX_BODY};
+use super::{
+    Budget, DurableJobRecord, DurableJobState, EffectJournalStorage, JobControlJournal, MAX_BODY,
+    authorize, corrupt, exhausted, io_error,
+};
 use dfmcp_core::{Digest32, FortressId, OperationContext, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,28 +58,44 @@ impl<S: EffectJournalStorage> JobControlJournal<S> {
         let mut terminal = 0;
         for record in self.records.values() {
             budget.remaining()?;
-            if record.state.terminal() { terminal += 1; }
-            else if record.state == DurableJobState::Prepared { prepared += 1; }
-            else { unresolved += 1; }
+            if record.state.terminal() {
+                terminal += 1;
+            } else if record.state == DurableJobState::Prepared {
+                prepared += 1;
+            } else {
+                unresolved += 1;
+            }
         }
         self.validate_access(context)?;
         Ok(JobJournalSummary {
-            fortress_id: self.fortress, journal_id: self.id, head: self.head,
-            retained_bytes: self.length, transitions: self.transitions,
-            records: self.records.len(), prepared, unresolved, terminal,
+            fortress_id: self.fortress,
+            journal_id: self.id,
+            head: self.head,
+            retained_bytes: self.length,
+            transitions: self.transitions,
+            records: self.records.len(),
+            prepared,
+            unresolved,
+            terminal,
             read_only: self.read_only,
         })
     }
 
     /// Deterministic whole-record keyset page, including terminal records.
     /// A continuation must carry this head, not an index into changing state.
-    pub fn records_page(&self, expected_head: Digest32, after: Option<&str>,
-        limit: usize, context: &OperationContext) -> Result<JobRecordPage>
-    {
+    pub fn records_page(
+        &self,
+        expected_head: Digest32,
+        after: Option<&str>,
+        limit: usize,
+        context: &OperationContext,
+    ) -> Result<JobRecordPage> {
         self.validate_access(context)?;
         if expected_head != self.head {
-            return Err(super::fail(dfmcp_core::ErrorCode::StaleAnchor,
-                "job journal changed; restart effect discovery"));
+            return Err(super::fail(
+                dfmcp_core::ErrorCode::StaleAnchor,
+                "job journal changed; restart effect discovery",
+            ));
         }
         if limit == 0 || limit > 64 || limit > context.budget.max_entities as usize {
             return Err(exhausted());
@@ -86,7 +104,9 @@ impl<S: EffectJournalStorage> JobControlJournal<S> {
             Some(key) => {
                 super::validate_key(key)?;
                 if !self.records.contains_key(key) {
-                    return Err(super::conflict("job discovery continuation names no retained key"));
+                    return Err(super::conflict(
+                        "job discovery continuation names no retained key",
+                    ));
                 }
                 Excluded(key)
             }
@@ -100,10 +120,18 @@ impl<S: EffectJournalStorage> JobControlJournal<S> {
             records.push(record.clone());
         }
         let more = values.next().is_some();
-        let next_after = if more { records.last().map(|r| r.plan.key().to_owned()) } else { None };
+        let next_after = if more {
+            records.last().map(|r| r.plan.key().to_owned())
+        } else {
+            None
+        };
         self.validate_access(context)?;
         budget.remaining()?;
-        Ok(JobRecordPage { head: self.head, records, next_after })
+        Ok(JobRecordPage {
+            head: self.head,
+            records,
+            next_after,
+        })
     }
 }
 

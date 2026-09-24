@@ -23,8 +23,8 @@ use dfmcp_core::{DfmcpError, ErrorCode, Result};
 use crate::{
     BRIDGE_PROTOCOL_MAJOR, BRIDGE_PROTOCOL_MINOR, CitizenRecord, DFHACK_RPC_VERSION,
     MAX_CITIZENS_PER_PAGE, MAX_RACE_NAME_BYTES, MAX_RPC_PAYLOAD_BYTES,
-    MAX_TEXT_NOTIFICATIONS_PER_CALL, MAX_TEXT_NOTIFICATION_TOTAL_BYTES,
-    MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
+    MAX_TEXT_NOTIFICATION_TOTAL_BYTES, MAX_TEXT_NOTIFICATIONS_PER_CALL, MAX_UNIT_NAME_BYTES,
+    MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
 };
 
 pub const MAX_PROBE_FIELD_BYTES: usize = 4_096;
@@ -175,10 +175,8 @@ impl ProbeHandshakeReply {
                     "accepted probe handshake has an incomplete compatibility manifest",
                 ));
             }
-            let expected = BTreeSet::from([
-                HANDSHAKE_METHOD.to_owned(),
-                OBSERVATION_METHOD.to_owned(),
-            ]);
+            let expected =
+                BTreeSet::from([HANDSHAKE_METHOD.to_owned(), OBSERVATION_METHOD.to_owned()]);
             if self.supported_methods != expected {
                 return Err(error(
                     ErrorCode::VersionMismatch,
@@ -278,12 +276,14 @@ impl ProbeObservationReply {
         validate_probe_field(self.failure_code.as_bytes(), "failure code")?;
         validate_probe_field(self.failure_message.as_bytes(), "failure message")?;
         validate_probe_field(&self.client_nonce, "echoed client nonce")?;
-        if self.citizens.len() > usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
-            error(
-                ErrorCode::InternalInvariantViolation,
-                "citizen page ceiling does not fit usize",
-            )
-        })? {
+        if self.citizens.len()
+            > usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "citizen page ceiling does not fit usize",
+                )
+            })?
+        {
             return Err(error(
                 ErrorCode::BudgetExceeded,
                 "probe observation reply exceeds the citizen-page ceiling",
@@ -331,8 +331,7 @@ impl ProbeObservationReply {
             if returned > request.max_citizens
                 || self.citizen_offset.saturating_add(returned) > self.citizen_count_total
                 || self.complete
-                    != (self.citizen_offset.saturating_add(returned)
-                        == self.citizen_count_total)
+                    != (self.citizen_offset.saturating_add(returned) == self.citizen_count_total)
                 || (!self.complete && returned != request.max_citizens)
             {
                 return Err(error(
@@ -474,9 +473,10 @@ impl<'a> ProtoReader<'a> {
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for index in 0..10u32 {
-            let byte = *self.bytes.get(self.offset).ok_or_else(|| {
-                error(ErrorCode::AdapterRejected, "truncated protobuf varint")
-            })?;
+            let byte = *self
+                .bytes
+                .get(self.offset)
+                .ok_or_else(|| error(ErrorCode::AdapterRejected, "truncated protobuf varint"))?;
             self.offset = self.offset.saturating_add(1);
             if index == 9 && byte > 1 {
                 return Err(error(
@@ -537,9 +537,7 @@ impl<'a> ProtoReader<'a> {
         if actual != expected {
             return Err(error(
                 ErrorCode::AdapterRejected,
-                format!(
-                    "protobuf field {field} uses wire type {actual:?}, expected {expected:?}"
-                ),
+                format!("protobuf field {field} uses wire type {actual:?}, expected {expected:?}"),
             ));
         }
         Ok(())
@@ -576,12 +574,7 @@ impl<'a> ProtoReader<'a> {
         }
     }
 
-    fn length_delimited(
-        &mut self,
-        wire: WireType,
-        field: u32,
-        maximum: usize,
-    ) -> Result<&'a [u8]> {
+    fn length_delimited(&mut self, wire: WireType, field: u32, maximum: usize) -> Result<&'a [u8]> {
         Self::require_wire(wire, WireType::LengthDelimited, field)?;
         let length = usize::try_from(self.varint()?).map_err(|_| {
             error(
@@ -890,11 +883,7 @@ fn decode_citizen(bytes: &[u8]) -> Result<CitizenRecord> {
                 reader.string(wire, field, MAX_RACE_NAME_BYTES)?,
                 "race",
             )?,
-            4 => set_once(
-                &mut profession,
-                reader.sint32(wire, field)?,
-                "profession",
-            )?,
+            4 => set_once(&mut profession, reader.sint32(wire, field)?, "profession")?,
             5 => set_once(&mut x, reader.sint32(wire, field)?, "x")?,
             6 => set_once(&mut y, reader.sint32(wire, field)?, "y")?,
             7 => set_once(&mut z, reader.sint32(wire, field)?, "z")?,
@@ -1033,12 +1022,14 @@ fn decode_observation_reply(
             )?,
             18 => set_once(&mut complete, reader.boolean(wire, field)?, "complete")?,
             19 => {
-                if citizens.len() >= usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
-                    error(
-                        ErrorCode::InternalInvariantViolation,
-                        "citizen page ceiling does not fit usize",
-                    )
-                })? {
+                if citizens.len()
+                    >= usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
+                        error(
+                            ErrorCode::InternalInvariantViolation,
+                            "citizen page ceiling does not fit usize",
+                        )
+                    })?
+                {
                     return Err(error(
                         ErrorCode::BudgetExceeded,
                         "probe observation reply exceeds the citizen-page ceiling",
@@ -1430,11 +1421,7 @@ mod tests {
     fn raw_probe_can_send_an_oversized_protocol_page_bound() -> Result<()> {
         let nonce = vec![7; 16];
         let mut reads = transport_prefix()?;
-        reads.extend_from_slice(&rejected_observation_reply(
-            "INVALID_BOUND",
-            &nonce,
-            42,
-        )?);
+        reads.extend_from_slice(&rejected_observation_reply("INVALID_BOUND", &nonce, 42)?);
         let mut client = DfHackProbeClient::negotiate_transport(ScriptedIo::new(reads))?;
         let request = ProbeObservationRequest {
             protocol_major: BRIDGE_PROTOCOL_MAJOR,

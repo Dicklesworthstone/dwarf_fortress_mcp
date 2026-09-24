@@ -3,7 +3,7 @@
 //! Single-publication bootstrap for protocol-1.1 live observations.
 //!
 //! Fortress identity depends on the first complete citizen-plus-announcement
-//! capsule, while [`LiveReadAdapterV1_1`](crate::LiveReadAdapterV1_1) requires
+//! capsule, while [`LiveReadAdapterV1_1`] requires
 //! that identity in immutable configuration. Reading the live source again
 //! could derive identity from one observation and publish another. This module
 //! acquires one complete transactional capsule, derives identity from its base,
@@ -14,12 +14,10 @@
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::{
-    AnnouncementContinuity, AnnouncementCoverage, BridgeManifest,
-    LiveAnnouncementBatch, LiveObservationCapsuleV1_1,
-    LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
-    LiveReadAdapterConfigV1_1, LiveReadAdapterV1_1,
-    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_V1_1_CITIZENS_PER_PAGE,
-    ObservationPageV1_1, derive_live_fortress_id,
+    AnnouncementContinuity, AnnouncementCoverage, BridgeManifest, LiveAnnouncementBatch,
+    LiveObservationCapsuleV1_1, LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
+    LiveReadAdapterConfigV1_1, LiveReadAdapterV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
+    MAX_V1_1_CITIZENS_PER_PAGE, ObservationPageV1_1, derive_live_fortress_id,
     read_publishable_observation_v1_1,
 };
 
@@ -102,11 +100,7 @@ pub struct PrimedLiveSourceV1_1<T> {
 impl<T: LiveObservationSourceV1_1> PrimedLiveSourceV1_1<T> {
     pub fn new(source: T, primed: LiveObservationCapsuleV1_1) -> Result<Self> {
         primed.validate()?;
-        if !primed
-            .announcement_batch
-            .coverage
-            .complete_through_latest
-        {
+        if !primed.announcement_batch.coverage.complete_through_latest {
             return Err(error(
                 ErrorCode::PreconditionsFailed,
                 "primed protocol-1.1 capsule must contain a complete retained suffix",
@@ -120,10 +114,7 @@ impl<T: LiveObservationSourceV1_1> PrimedLiveSourceV1_1<T> {
                 "source manifest changed between the first protocol-1.1 capsule and adapter bootstrap",
             ));
         }
-        let expected_announcement_after_id = primed
-            .announcement_batch
-            .coverage
-            .requested_after_id;
+        let expected_announcement_after_id = primed.announcement_batch.coverage.requested_after_id;
         Ok(Self {
             source,
             primed: Some(primed),
@@ -184,9 +175,7 @@ impl<T: LiveObservationSourceV1_1> PrimedLiveSourceV1_1<T> {
         } else {
             next_after_id == complete.coverage.latest_available_id
         };
-        let continuity = if announcement_after_id
-            == complete.coverage.requested_after_id
-        {
+        let continuity = if announcement_after_id == complete.coverage.requested_after_id {
             complete.coverage.continuity
         } else {
             AnnouncementContinuity::CompleteSuffix
@@ -216,9 +205,7 @@ impl<T: LiveObservationSourceV1_1> PrimedLiveSourceV1_1<T> {
     }
 }
 
-impl<T: LiveObservationSourceV1_1> LiveObservationSourceV1_1
-    for PrimedLiveSourceV1_1<T>
-{
+impl<T: LiveObservationSourceV1_1> LiveObservationSourceV1_1 for PrimedLiveSourceV1_1<T> {
     fn bridge_manifest_v1_1(&self) -> BridgeManifest {
         self.primed.as_ref().map_or_else(
             || self.source.bridge_manifest_v1_1(),
@@ -249,13 +236,12 @@ impl<T: LiveObservationSourceV1_1> LiveObservationSourceV1_1
                 "primed replay citizen page size is outside the protocol-1.1 bound",
             ));
         }
-        let maximum_announcements = u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH)
-            .map_err(|_| {
-                error(
-                    ErrorCode::InternalInvariantViolation,
-                    "announcement page ceiling does not fit u32",
-                )
-            })?;
+        let maximum_announcements = u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "announcement page ceiling does not fit u32",
+            )
+        })?;
         if max_announcements == 0 || max_announcements > maximum_announcements {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -307,11 +293,8 @@ impl<T: LiveObservationSourceV1_1> LiveObservationSourceV1_1
             ));
         }
 
-        let announcement_batch = Self::announcement_page(
-            capsule,
-            announcement_after_id,
-            max_announcements,
-        )?;
+        let announcement_batch =
+            Self::announcement_page(capsule, announcement_after_id, max_announcements)?;
         let total = capsule.base.citizen_coverage.total;
         let bounded_offset = offset.min(total);
         let start = usize::try_from(bounded_offset).map_err(|_| {
@@ -358,8 +341,7 @@ impl<T: LiveObservationSourceV1_1> LiveObservationSourceV1_1
             if announcement_batch.coverage.complete_through_latest {
                 self.primed = None;
             } else {
-                self.expected_announcement_after_id =
-                    announcement_batch.coverage.next_after_id;
+                self.expected_announcement_after_id = announcement_batch.coverage.next_after_id;
             }
         }
         Ok(page)
@@ -371,10 +353,7 @@ pub fn bootstrap_live_read_adapter_v1_1<T: LiveObservationSourceV1_1>(
     config: LiveReadBootstrapConfigV1_1,
 ) -> Result<LiveReadAdapterV1_1<PrimedLiveSourceV1_1<T>>> {
     config.validate()?;
-    let capsule = read_publishable_observation_v1_1(
-        &mut source,
-        &config.publication_config(),
-    )?;
+    let capsule = read_publishable_observation_v1_1(&mut source, &config.publication_config())?;
     let source_digest = capsule.content_digest;
     let fortress_id = derive_live_fortress_id(&capsule.base)?;
     let primed = PrimedLiveSourceV1_1::new(source, capsule)?;
@@ -412,14 +391,14 @@ mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
     use dfmcp_core::{
-        Capability, CapabilityGrant, CapabilityScope, OperationContext,
-        RequestId, RiskTier, SessionId, WorkBudget,
+        Capability, CapabilityGrant, CapabilityScope, OperationContext, RequestId, RiskTier,
+        SessionId, WorkBudget,
     };
 
     use super::*;
     use crate::{
-        AnnouncementBatchRecord, CitizenRecord, GameAdapter, InterestSet,
-        ObservationPayload, ObservationRequest, Projection,
+        AnnouncementBatchRecord, CitizenRecord, GameAdapter, InterestSet, ObservationPayload,
+        ObservationRequest, Projection,
     };
 
     #[derive(Clone)]
@@ -534,10 +513,7 @@ mod tests {
         )
     }
 
-    fn page(
-        ids: &[i32],
-        announcement_batch: LiveAnnouncementBatch,
-    ) -> ObservationPageV1_1 {
+    fn page(ids: &[i32], announcement_batch: LiveAnnouncementBatch) -> ObservationPageV1_1 {
         ObservationPageV1_1 {
             bridge_generation: 42,
             world_loaded: true,
@@ -548,8 +524,7 @@ mod tests {
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_count_total: u32::try_from(ids.len())
-                .map_or(u32::MAX, |value| value),
+            citizen_count_total: u32::try_from(ids.len()).map_or(u32::MAX, |value| value),
             citizen_offset: 0,
             complete: true,
             citizens: ids.iter().copied().map(citizen).collect(),
@@ -558,10 +533,7 @@ mod tests {
     }
 
     fn complete_page(ids: &[i32]) -> Result<ObservationPageV1_1> {
-        Ok(page(
-            ids,
-            announcement_batch(-1, &[10, 11, 12], true)?,
-        ))
+        Ok(page(ids, announcement_batch(-1, &[10, 11, 12], true)?))
     }
 
     fn config() -> LiveReadBootstrapConfigV1_1 {

@@ -12,11 +12,10 @@
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use crate::{
-    AnnouncementContinuity, AnnouncementCoverage, LiveAnnouncementBatch,
-    LiveObservationCapsule, LiveObservationCapsuleV1_1,
-    LiveObservationSourceV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_CANONICAL_CAPSULE_V1_1_BYTES, MAX_CAPSULE_CITIZENS,
-    MAX_V1_1_CITIZENS_PER_PAGE, read_complete_observation_v1_1_bounded,
+    AnnouncementContinuity, AnnouncementCoverage, LiveAnnouncementBatch, LiveObservationCapsule,
+    LiveObservationCapsuleV1_1, LiveObservationSourceV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
+    MAX_CANONICAL_CAPSULE_V1_1_BYTES, MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE,
+    read_complete_observation_v1_1_bounded,
 };
 
 const CAPSULE_V1_1_DOMAIN: &[u8] = b"dfmcp.live-observation-capsule.v3\0";
@@ -37,9 +36,7 @@ pub struct LiveObservationPublicationConfigV1_1 {
 
 impl LiveObservationPublicationConfigV1_1 {
     pub fn validate(&self) -> Result<()> {
-        if self.citizen_page_size == 0
-            || self.citizen_page_size > MAX_V1_1_CITIZENS_PER_PAGE
-        {
+        if self.citizen_page_size == 0 || self.citizen_page_size > MAX_V1_1_CITIZENS_PER_PAGE {
             return Err(error(
                 ErrorCode::InvalidRequest,
                 format!(
@@ -74,14 +71,10 @@ impl LiveObservationPublicationConfigV1_1 {
                 "announcement capsule ceiling does not fit u32",
             )
         })?;
-        if self.announcement_page_size == 0
-            || self.announcement_page_size > hard_announcements
-        {
+        if self.announcement_page_size == 0 || self.announcement_page_size > hard_announcements {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "announcement page size must be in 1..={hard_announcements}"
-                ),
+                format!("announcement page size must be in 1..={hard_announcements}"),
             ));
         }
         if self.max_total_announcements == 0
@@ -141,10 +134,8 @@ pub fn read_publishable_observation_v1_1<T: LiveObservationSourceV1_1>(
                     "announcement publication lost its initial coverage",
                 )
             })?;
-            if batch.coverage.oldest_available_id
-                != expected_coverage.oldest_available_id
-                || batch.coverage.latest_available_id
-                    != expected_coverage.latest_available_id
+            if batch.coverage.oldest_available_id != expected_coverage.oldest_available_id
+                || batch.coverage.latest_available_id != expected_coverage.latest_available_id
             {
                 return Err(error(
                     ErrorCode::StaleAnchor,
@@ -174,8 +165,7 @@ pub fn read_publishable_observation_v1_1<T: LiveObservationSourceV1_1>(
                 "announcement page length does not fit u32",
             )
         })?;
-        if !batch.coverage.complete_through_latest
-            && page_returned != config.announcement_page_size
+        if !batch.coverage.complete_through_latest && page_returned != config.announcement_page_size
         {
             return Err(error(
                 ErrorCode::AdapterRejected,
@@ -298,10 +288,7 @@ fn combine_capsule(
     let mut canonical_bytes = Vec::new();
     canonical_bytes.extend_from_slice(CAPSULE_V1_1_DOMAIN);
     push_bytes(&mut canonical_bytes, &base.canonical_bytes)?;
-    push_bytes(
-        &mut canonical_bytes,
-        &announcement_batch.canonical_bytes,
-    )?;
+    push_bytes(&mut canonical_bytes, &announcement_batch.canonical_bytes)?;
     if canonical_bytes.len() > MAX_CANONICAL_CAPSULE_V1_1_BYTES {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -336,10 +323,7 @@ mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
     use super::*;
-    use crate::{
-        AnnouncementBatchRecord, BridgeManifest, CitizenRecord,
-        ObservationPageV1_1,
-    };
+    use crate::{AnnouncementBatchRecord, BridgeManifest, CitizenRecord, ObservationPageV1_1};
 
     #[derive(Clone)]
     struct ExpectedPage {
@@ -375,9 +359,7 @@ mod tests {
                     "scripted protocol-1.1 source exhausted its pages",
                 )
             })?;
-            if expected.after != announcement_after_id
-                || expected.maximum != max_announcements
-            {
+            if expected.after != announcement_after_id || expected.maximum != max_announcements {
                 return Err(error(
                     ErrorCode::InternalInvariantViolation,
                     "publication driver requested the wrong announcement cursor or page size",
@@ -448,7 +430,10 @@ mod tests {
         current_year_tick: u32,
     ) -> Result<LiveAnnouncementBatch> {
         let returned = u32::try_from(records.len()).map_err(|_| {
-            error(ErrorCode::BudgetExceeded, "test batch length does not fit u32")
+            error(
+                ErrorCode::BudgetExceeded,
+                "test batch length does not fit u32",
+            )
         })?;
         let next_after_id = records
             .last()
@@ -596,7 +581,12 @@ mod tests {
         };
         let failure = read_publishable_observation_v1_1(&mut source, &config(2, 4))
             .err()
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "moving suffix published"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "moving suffix published",
+                )
+            })?;
         assert_eq!(failure.code, ErrorCode::PreconditionsFailed);
         assert_eq!(source.calls, 1);
         Ok(())
@@ -642,7 +632,12 @@ mod tests {
         };
         let failure = read_publishable_observation_v1_1(&mut source, &config(2, 4))
             .err()
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "drifted suffix published"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "drifted suffix published",
+                )
+            })?;
         assert_eq!(failure.code, ErrorCode::StaleAnchor);
         Ok(())
     }
@@ -687,7 +682,12 @@ mod tests {
         };
         let failure = read_publishable_observation_v1_1(&mut source, &config(2, 4))
             .err()
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "drifted window published"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "drifted window published",
+                )
+            })?;
         assert_eq!(failure.code, ErrorCode::StaleAnchor);
         Ok(())
     }
@@ -715,7 +715,12 @@ mod tests {
         };
         let failure = read_publishable_observation_v1_1(&mut source, &config(2, 4))
             .err()
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "underfilled page published"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "underfilled page published",
+                )
+            })?;
         assert_eq!(failure.code, ErrorCode::AdapterRejected);
         Ok(())
     }
@@ -743,7 +748,12 @@ mod tests {
         };
         let failure = read_publishable_observation_v1_1(&mut source, &config(2, 2))
             .err()
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "over-ceiling suffix published"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "over-ceiling suffix published",
+                )
+            })?;
         assert_eq!(failure.code, ErrorCode::BudgetExceeded);
         assert!(
             failure

@@ -15,9 +15,9 @@ use std::io::{Read, Write};
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::{
-    BridgeManifest, DfHackRpcClientV1_1, LiveObservationCapsuleV1_1,
-    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE,
-    ObservationAssemblerV1_1, ObservationPageV1_1,
+    BridgeManifest, DfHackRpcClientV1_1, LiveObservationCapsuleV1_1, MAX_ANNOUNCEMENTS_PER_BATCH,
+    MAX_CAPSULE_CITIZENS, MAX_V1_1_CITIZENS_PER_PAGE, ObservationAssemblerV1_1,
+    ObservationPageV1_1,
 };
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
@@ -94,9 +94,7 @@ pub fn read_complete_observation_v1_1_bounded<T: LiveObservationSourceV1_1>(
     if page_size == 0 || page_size > MAX_V1_1_CITIZENS_PER_PAGE {
         return Err(error(
             ErrorCode::InvalidRequest,
-            format!(
-                "protocol-1.1 citizen page size must be in 1..={MAX_V1_1_CITIZENS_PER_PAGE}"
-            ),
+            format!("protocol-1.1 citizen page size must be in 1..={MAX_V1_1_CITIZENS_PER_PAGE}"),
         ));
     }
     if announcement_after_id < -1 {
@@ -152,9 +150,7 @@ pub fn read_complete_observation_v1_1_bounded<T: LiveObservationSourceV1_1>(
     let rounded_pages = if max_citizens == 0 {
         0
     } else {
-        max_citizens
-            .saturating_add(page_size.saturating_sub(1))
-            / page_size
+        max_citizens.saturating_add(page_size.saturating_sub(1)) / page_size
     };
     let maximum_pages = rounded_pages.saturating_add(1);
 
@@ -200,8 +196,8 @@ pub fn read_complete_observation_v1_1_bounded<T: LiveObservationSourceV1_1>(
                 ),
             ));
         }
-        let returned_announcements =
-            u32::try_from(page.announcement_batch.announcements.len()).map_err(|_| {
+        let returned_announcements = u32::try_from(page.announcement_batch.announcements.len())
+            .map_err(|_| {
                 error(
                     ErrorCode::BudgetExceeded,
                     "returned announcement count does not fit u32",
@@ -233,8 +229,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-        CitizenRecord, LiveAnnouncementBatch,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage, CitizenRecord,
+        LiveAnnouncementBatch,
     };
 
     #[derive(Clone)]
@@ -326,7 +322,9 @@ mod tests {
         records: Vec<AnnouncementBatchRecord>,
         complete_through_latest: bool,
     ) -> Result<LiveAnnouncementBatch> {
-        let latest_available_id = records.last().map_or(requested_after_id, |record| record.report_id);
+        let latest_available_id = records
+            .last()
+            .map_or(requested_after_id, |record| record.report_id);
         LiveAnnouncementBatch::new(
             42,
             true,
@@ -391,14 +389,7 @@ mod tests {
             page(0, 3, &[1, 2], false, batch.clone()),
             page(2, 3, &[3], true, batch),
         ]);
-        let capsule = read_complete_observation_v1_1_bounded(
-            &mut source,
-            2,
-            true,
-            3,
-            9,
-            128,
-        )?;
+        let capsule = read_complete_observation_v1_1_bounded(&mut source, 2, true, 3, 9, 128)?;
         assert_eq!(source.calls, 2);
         assert_eq!(capsule.base.citizens.len(), 3);
         assert_eq!(capsule.announcement_batch.announcements.len(), 1);
@@ -411,17 +402,7 @@ mod tests {
             page(0, 2, &[1], false, announcements("first")?),
             page(1, 2, &[2], true, announcements("changed")?),
         ]);
-        assert!(
-            read_complete_observation_v1_1_bounded(
-                &mut source,
-                1,
-                true,
-                2,
-                9,
-                128,
-            )
-            .is_err()
-        );
+        assert!(read_complete_observation_v1_1_bounded(&mut source, 1, true, 2, 9, 128,).is_err());
         assert_eq!(source.calls, 2);
         Ok(())
     }
@@ -430,61 +411,19 @@ mod tests {
     fn invalid_bounds_are_rejected_before_source_io() {
         let mut source = source(Vec::new());
         assert!(
-            read_complete_observation_v1_1_bounded(
-                &mut source,
-                0,
-                true,
-                10,
-                -1,
-                128,
-            )
-            .is_err()
+            read_complete_observation_v1_1_bounded(&mut source, 0, true, 10, -1, 128,).is_err()
         );
         assert!(
-            read_complete_observation_v1_1_bounded(
-                &mut source,
-                1,
-                true,
-                10,
-                -2,
-                128,
-            )
-            .is_err()
+            read_complete_observation_v1_1_bounded(&mut source, 1, true, 10, -2, 128,).is_err()
         );
-        assert!(
-            read_complete_observation_v1_1_bounded(
-                &mut source,
-                1,
-                true,
-                10,
-                -1,
-                0,
-            )
-            .is_err()
-        );
+        assert!(read_complete_observation_v1_1_bounded(&mut source, 1, true, 10, -1, 0,).is_err());
         assert_eq!(source.calls, 0);
     }
 
     #[test]
     fn caller_citizen_ceiling_aborts_after_first_page() -> Result<()> {
-        let mut source = source(vec![page(
-            0,
-            3,
-            &[1, 2],
-            false,
-            announcements("stable")?,
-        )]);
-        assert!(
-            read_complete_observation_v1_1_bounded(
-                &mut source,
-                2,
-                true,
-                2,
-                9,
-                128,
-            )
-            .is_err()
-        );
+        let mut source = source(vec![page(0, 3, &[1, 2], false, announcements("stable")?)]);
+        assert!(read_complete_observation_v1_1_bounded(&mut source, 2, true, 2, 9, 128,).is_err());
         assert_eq!(source.calls, 1);
         Ok(())
     }
@@ -497,15 +436,8 @@ mod tests {
             true,
         )?;
         let mut source = source(vec![page(0, 1, &[1], true, batch)]);
-        let failure = read_complete_observation_v1_1_bounded(
-            &mut source,
-            1,
-            true,
-            1,
-            9,
-            1,
-        )
-        .expect_err("the returned vector exceeds the caller announcement ceiling");
+        let failure = read_complete_observation_v1_1_bounded(&mut source, 1, true, 1, 9, 1)
+            .expect_err("the returned vector exceeds the caller announcement ceiling");
         assert_eq!(failure.code, ErrorCode::BudgetExceeded);
         assert_eq!(source.calls, 1);
         Ok(())
@@ -515,15 +447,8 @@ mod tests {
     fn echoed_announcement_cursor_must_match_the_request() -> Result<()> {
         let batch = announcement_batch(8, vec![announcement(10, "wrong cursor")], true)?;
         let mut source = source(vec![page(0, 1, &[1], true, batch)]);
-        let failure = read_complete_observation_v1_1_bounded(
-            &mut source,
-            1,
-            true,
-            1,
-            9,
-            128,
-        )
-        .expect_err("the source echoed a different announcement cursor");
+        let failure = read_complete_observation_v1_1_bounded(&mut source, 1, true, 1, 9, 128)
+            .expect_err("the source echoed a different announcement cursor");
         assert_eq!(failure.code, ErrorCode::AdapterRejected);
         assert_eq!(source.calls, 1);
         Ok(())
@@ -538,14 +463,7 @@ mod tests {
             true,
             announcements("empty fortress report")?,
         )]);
-        let capsule = read_complete_observation_v1_1_bounded(
-            &mut source,
-            64,
-            true,
-            0,
-            9,
-            128,
-        )?;
+        let capsule = read_complete_observation_v1_1_bounded(&mut source, 64, true, 0, 9, 128)?;
         assert!(capsule.base.citizens.is_empty());
         assert_eq!(capsule.announcement_batch.coverage.next_after_id, 10);
         Ok(())

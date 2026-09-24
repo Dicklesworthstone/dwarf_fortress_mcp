@@ -8,7 +8,9 @@
 //! generation, site identity, complete citizen coverage, projected entity
 //! count, snapshot root, and a digest of all projected fact provenance.
 
-use dfmcp_core::{DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result};
+use dfmcp_core::{
+    DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
+};
 use dfmcp_world::WorldSnapshot;
 
 use crate::LiveObservationCapsule;
@@ -54,10 +56,7 @@ pub struct LiveObservationReceipt {
 }
 
 impl LiveObservationReceipt {
-    pub fn issue(
-        capsule: &LiveObservationCapsule,
-        snapshot: &WorldSnapshot,
-    ) -> Result<Self> {
+    pub fn issue(capsule: &LiveObservationCapsule, snapshot: &WorldSnapshot) -> Result<Self> {
         capsule.validate()?;
         if !snapshot.hash_is_valid() {
             return Err(error(
@@ -79,12 +78,13 @@ impl LiveObservationReceipt {
                     "live projected entity count overflows u64",
                 )
             })?;
-        let projected_entity_count = u64::try_from(snapshot.graph.entities.len()).map_err(|_| {
-            error(
-                ErrorCode::BudgetExceeded,
-                "projected entity count does not fit u64",
-            )
-        })?;
+        let projected_entity_count =
+            u64::try_from(snapshot.graph.entities.len()).map_err(|_| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "projected entity count does not fit u64",
+                )
+            })?;
         if projected_entity_count != expected_entities {
             return Err(error(
                 ErrorCode::InternalInvariantViolation,
@@ -148,11 +148,7 @@ impl LiveObservationReceipt {
         Digest32::of_bytes(&self.canonical_bytes())
     }
 
-    pub fn verify(
-        &self,
-        capsule: &LiveObservationCapsule,
-        snapshot: &WorldSnapshot,
-    ) -> Result<()> {
+    pub fn verify(&self, capsule: &LiveObservationCapsule, snapshot: &WorldSnapshot) -> Result<()> {
         if self.receipt_digest != self.compute_digest() {
             return Err(error(
                 ErrorCode::ChecksumMismatch,
@@ -170,10 +166,7 @@ impl LiveObservationReceipt {
     }
 }
 
-fn fact_provenance(
-    snapshot: &WorldSnapshot,
-    expected_source: Digest32,
-) -> Result<(u64, Digest32)> {
+fn fact_provenance(snapshot: &WorldSnapshot, expected_source: Digest32) -> Result<(u64, Digest32)> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"dfmcp-live-fact-provenance-v1\0");
     let mut count = 0u64;
@@ -217,8 +210,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        BridgeManifest, CitizenRecord, ObservationAssembler, ObservationPage,
-        project_live_capsule,
+        BridgeManifest, CitizenRecord, ObservationAssembler, ObservationPage, project_live_capsule,
     };
 
     fn fixture() -> Result<(LiveObservationCapsule, WorldSnapshot)> {

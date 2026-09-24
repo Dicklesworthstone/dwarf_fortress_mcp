@@ -77,9 +77,7 @@ impl AnnouncementBatchRecord {
         if self.text.len() > MAX_ANNOUNCEMENT_TEXT_BYTES {
             return Err(error(
                 ErrorCode::BudgetExceeded,
-                format!(
-                    "announcement text exceeds the {MAX_ANNOUNCEMENT_TEXT_BYTES}-byte ceiling"
-                ),
+                format!("announcement text exceeds the {MAX_ANNOUNCEMENT_TEXT_BYTES}-byte ceiling"),
             ));
         }
         if self.year < 0 {
@@ -150,7 +148,10 @@ pub struct AnnouncementCoverage {
 impl AnnouncementCoverage {
     #[must_use]
     pub const fn has_gap(self) -> bool {
-        matches!(self.continuity, AnnouncementContinuity::GapBeforeRetainedWindow)
+        matches!(
+            self.continuity,
+            AnnouncementContinuity::GapBeforeRetainedWindow
+        )
     }
 
     #[must_use]
@@ -524,7 +525,10 @@ mod tests {
 
     fn batch(records: Vec<AnnouncementBatchRecord>) -> Result<LiveAnnouncementBatch> {
         let returned = u32::try_from(records.len()).map_err(|_| {
-            error(ErrorCode::BudgetExceeded, "test record count does not fit u32")
+            error(
+                ErrorCode::BudgetExceeded,
+                "test record count does not fit u32",
+            )
         })?;
         LiveAnnouncementBatch::new(
             42,
@@ -711,23 +715,25 @@ mod tests {
         let records = (0..=MAX_ANNOUNCEMENTS_PER_BATCH)
             .map(|index| record(i32::try_from(index).unwrap_or(i32::MAX) + 10))
             .collect::<Vec<_>>();
-        assert!(LiveAnnouncementBatch::new(
-            42,
-            true,
-            105,
-            12_345,
-            7,
-            AnnouncementCoverage {
-                requested_after_id: 9,
-                oldest_available_id: 1,
-                latest_available_id: 600,
-                returned: u32::try_from(records.len()).unwrap_or(u32::MAX),
-                complete_through_latest: true,
-                continuity: AnnouncementContinuity::CompleteSuffix,
-                next_after_id: records.last().map_or(9, |value| value.report_id),
-            },
-            records,
-        )
-        .is_err());
+        assert!(
+            LiveAnnouncementBatch::new(
+                42,
+                true,
+                105,
+                12_345,
+                7,
+                AnnouncementCoverage {
+                    requested_after_id: 9,
+                    oldest_available_id: 1,
+                    latest_available_id: 600,
+                    returned: u32::try_from(records.len()).unwrap_or(u32::MAX),
+                    complete_through_latest: true,
+                    continuity: AnnouncementContinuity::CompleteSuffix,
+                    next_after_id: records.last().map_or(9, |value| value.report_id),
+                },
+                records,
+            )
+            .is_err()
+        );
     }
 }

@@ -3,7 +3,7 @@
 //! Bounded driver for obtaining one complete canonical live observation.
 //!
 //! This layer owns pagination policy but no transport implementation. A source
-//! may be the real [`DfHackRpcClient`](crate::DfHackRpcClient) or a deterministic
+//! may be the real [`DfHackRpcClient`] or a deterministic
 //! laboratory double. It refuses empty nonterminal pages, total counts above
 //! the caller or capsule ceiling, page-count overruns, and assembler drift.
 //!
@@ -75,9 +75,7 @@ pub fn read_complete_observation_bounded<T: LiveObservationSource>(
     if page_size == 0 || page_size > MAX_CITIZENS_PER_PAGE {
         return Err(error(
             ErrorCode::InvalidRequest,
-            format!(
-                "live observation page size must be in 1..={MAX_CITIZENS_PER_PAGE}"
-            ),
+            format!("live observation page size must be in 1..={MAX_CITIZENS_PER_PAGE}"),
         ));
     }
 
@@ -108,9 +106,7 @@ pub fn read_complete_observation_bounded<T: LiveObservationSource>(
     let rounded_pages = if max_citizens == 0 {
         0
     } else {
-        max_citizens
-            .saturating_add(page_size.saturating_sub(1))
-            / page_size
+        max_citizens.saturating_add(page_size.saturating_sub(1)) / page_size
     };
     let maximum_pages = rounded_pages.saturating_add(1);
 
@@ -261,12 +257,7 @@ mod tests {
         }
     }
 
-    fn page_without_names(
-        offset: u32,
-        total: u32,
-        ids: &[i32],
-        complete: bool,
-    ) -> ObservationPage {
+    fn page_without_names(offset: u32, total: u32, ids: &[i32], complete: bool) -> ObservationPage {
         let mut page = page(offset, total, ids, complete);
         for citizen in &mut page.citizens {
             citizen.name.clear();

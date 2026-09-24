@@ -73,10 +73,7 @@ impl<T: LiveObservationSource> FencedLiveSource<T> {
 
     fn record_failure(&mut self, failure: &DfmcpError) {
         let rendered = format!("{}: {}", failure.code.as_str(), failure.message);
-        self.poisoned_reason = Some(bounded_utf8_prefix(
-            &rendered,
-            MAX_POISON_REASON_BYTES,
-        ));
+        self.poisoned_reason = Some(bounded_utf8_prefix(&rendered, MAX_POISON_REASON_BYTES));
     }
 }
 
@@ -208,7 +205,10 @@ mod tests {
         let mut source = FencedLiveSource::new(scripted)?;
         assert!(source.read_observation_page(0, 1, true).is_err());
         assert!(source.is_poisoned());
-        assert_eq!(source.poisoned_reason(), Some("adapter_failure: truncated reply"));
+        assert_eq!(
+            source.poisoned_reason(),
+            Some("adapter_failure: truncated reply")
+        );
         assert!(source.read_observation_page(0, 1, true).is_err());
         assert_eq!(source.source().calls, 1);
         Ok(())

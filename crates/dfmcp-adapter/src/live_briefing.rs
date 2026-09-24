@@ -253,25 +253,62 @@ fn coverage() -> Vec<LiveCoverageEntry> {
         complete(LiveCoverageDomain::CitizenRoster),
         complete(LiveCoverageDomain::CitizenBasicStatus),
         complete(LiveCoverageDomain::CitizenPosition),
-        omitted(LiveCoverageDomain::Map, "DFHack read bridge V1 does not observe map tiles"),
-        omitted(LiveCoverageDomain::Items, "DFHack read bridge V1 does not observe items"),
-        omitted(LiveCoverageDomain::Buildings, "DFHack read bridge V1 does not observe buildings"),
-        omitted(LiveCoverageDomain::Jobs, "DFHack read bridge V1 does not observe jobs"),
-        omitted(LiveCoverageDomain::WorkOrders, "DFHack read bridge V1 does not observe work orders"),
-        omitted(LiveCoverageDomain::Economy, "DFHack read bridge V1 has no economic aggregates"),
-        omitted(LiveCoverageDomain::FoodAndDrink, "DFHack read bridge V1 has no food or drink inventory"),
-        omitted(LiveCoverageDomain::WelfareAndThoughts, "DFHack read bridge V1 has no thoughts, needs, or stress"),
-        omitted(LiveCoverageDomain::Health, "DFHack read bridge V1 has only basic alive/sane status"),
-        omitted(LiveCoverageDomain::Military, "DFHack read bridge V1 intentionally omits military state"),
-        omitted(LiveCoverageDomain::Threats, "DFHack read bridge V1 has no hostile-unit or siege projection"),
-        omitted(LiveCoverageDomain::Announcements, "DFHack read bridge V1 has no announcement stream"),
-        omitted(LiveCoverageDomain::HistoricalContext, "DFHack read bridge V1 has no historical graph"),
+        omitted(
+            LiveCoverageDomain::Map,
+            "DFHack read bridge V1 does not observe map tiles",
+        ),
+        omitted(
+            LiveCoverageDomain::Items,
+            "DFHack read bridge V1 does not observe items",
+        ),
+        omitted(
+            LiveCoverageDomain::Buildings,
+            "DFHack read bridge V1 does not observe buildings",
+        ),
+        omitted(
+            LiveCoverageDomain::Jobs,
+            "DFHack read bridge V1 does not observe jobs",
+        ),
+        omitted(
+            LiveCoverageDomain::WorkOrders,
+            "DFHack read bridge V1 does not observe work orders",
+        ),
+        omitted(
+            LiveCoverageDomain::Economy,
+            "DFHack read bridge V1 has no economic aggregates",
+        ),
+        omitted(
+            LiveCoverageDomain::FoodAndDrink,
+            "DFHack read bridge V1 has no food or drink inventory",
+        ),
+        omitted(
+            LiveCoverageDomain::WelfareAndThoughts,
+            "DFHack read bridge V1 has no thoughts, needs, or stress",
+        ),
+        omitted(
+            LiveCoverageDomain::Health,
+            "DFHack read bridge V1 has only basic alive/sane status",
+        ),
+        omitted(
+            LiveCoverageDomain::Military,
+            "DFHack read bridge V1 intentionally omits military state",
+        ),
+        omitted(
+            LiveCoverageDomain::Threats,
+            "DFHack read bridge V1 has no hostile-unit or siege projection",
+        ),
+        omitted(
+            LiveCoverageDomain::Announcements,
+            "DFHack read bridge V1 has no announcement stream",
+        ),
+        omitted(
+            LiveCoverageDomain::HistoricalContext,
+            "DFHack read bridge V1 has no historical graph",
+        ),
     ]
 }
 
-fn bounded_ids<'a>(
-    units: impl Iterator<Item = &'a CitizenRecord>,
-) -> (Vec<i32>, bool) {
+fn bounded_ids<'a>(units: impl Iterator<Item = &'a CitizenRecord>) -> (Vec<i32>, bool) {
     let mut ids = Vec::new();
     let mut truncated = false;
     for unit in units {
@@ -292,7 +329,8 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
     let mut items = Vec::new();
     let source = capsule.content_digest;
 
-    let (not_alive, not_alive_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.alive));
+    let (not_alive, not_alive_truncated) =
+        bounded_ids(capsule.citizens.iter().filter(|unit| !unit.alive));
     if !not_alive.is_empty() || not_alive_truncated {
         let mut score = BTreeMap::new();
         score.insert("affected_units".to_owned(), bounded_i64(not_alive.len()));
@@ -301,14 +339,16 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
             attention_id: "live.basic_status.not_alive".to_owned(),
             severity: LiveAttentionSeverity::Critical,
             category: "citizen_basic_status".to_owned(),
-            finding: "one or more records in the complete citizen roster are not marked alive".to_owned(),
+            finding: "one or more records in the complete citizen roster are not marked alive"
+                .to_owned(),
             affected_unit_ids: not_alive,
             score_components: score,
             source_digest: source,
         });
     }
 
-    let (not_sane, not_sane_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.sane));
+    let (not_sane, not_sane_truncated) =
+        bounded_ids(capsule.citizens.iter().filter(|unit| !unit.sane));
     if !not_sane.is_empty() || not_sane_truncated {
         let mut score = BTreeMap::new();
         score.insert("affected_units".to_owned(), bounded_i64(not_sane.len()));
@@ -324,7 +364,8 @@ fn attention(capsule: &LiveObservationCapsule) -> Vec<LiveAttentionItem> {
         });
     }
 
-    let (inactive, inactive_truncated) = bounded_ids(capsule.citizens.iter().filter(|unit| !unit.active));
+    let (inactive, inactive_truncated) =
+        bounded_ids(capsule.citizens.iter().filter(|unit| !unit.active));
     if !inactive.is_empty() || inactive_truncated {
         let mut score = BTreeMap::new();
         score.insert("affected_units".to_owned(), bounded_i64(inactive.len()));
@@ -527,7 +568,10 @@ mod tests {
             ]),
         };
         let total = u32::try_from(citizens.len()).map_err(|_| {
-            error(ErrorCode::BudgetExceeded, "test citizen count does not fit u32")
+            error(
+                ErrorCode::BudgetExceeded,
+                "test citizen count does not fit u32",
+            )
         })?;
         let mut assembler = ObservationAssembler::new(bridge);
         assembler.push_page(ObservationPage {
@@ -565,7 +609,10 @@ mod tests {
         let source = capsule(1, vec![citizen(1, false, 10)])?;
         let briefing = build_live_briefing(&source)?;
         assert_eq!(briefing.attention.len(), 1);
-        assert_eq!(briefing.attention[0].attention_id, "live.basic_status.not_sane");
+        assert_eq!(
+            briefing.attention[0].attention_id,
+            "live.basic_status.not_sane"
+        );
         assert_eq!(briefing.attention[0].source_digest, source.content_digest);
         Ok(())
     }

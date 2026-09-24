@@ -89,19 +89,13 @@ impl LiveConnectionConfig {
         if self.client_name.is_empty() || self.client_name.len() > MAX_CLIENT_NAME_BYTES {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "bridge client name must be in 1..={MAX_CLIENT_NAME_BYTES} bytes"
-                ),
+                format!("bridge client name must be in 1..={MAX_CLIENT_NAME_BYTES} bytes"),
             ));
         }
-        if self.client_version.is_empty()
-            || self.client_version.len() > MAX_CLIENT_VERSION_BYTES
-        {
+        if self.client_version.is_empty() || self.client_version.len() > MAX_CLIENT_VERSION_BYTES {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "bridge client version must be in 1..={MAX_CLIENT_VERSION_BYTES} bytes"
-                ),
+                format!("bridge client version must be in 1..={MAX_CLIENT_VERSION_BYTES} bytes"),
             ));
         }
         Ok(())
@@ -115,15 +109,14 @@ pub fn connect_authenticated_live_source(
     credentials: BridgeCredentials,
 ) -> Result<AuthenticatedLiveSource> {
     config.validate()?;
-    let stream = TcpStream::connect_timeout(&config.endpoint, config.connect_timeout).map_err(
-        |source| {
+    let stream =
+        TcpStream::connect_timeout(&config.endpoint, config.connect_timeout).map_err(|source| {
             error(
                 ErrorCode::AdapterUnavailable,
                 format!("failed to connect to the loopback DFHack bridge: {source}"),
             )
             .retryable(true)
-        },
-    )?;
+        })?;
     stream
         .set_read_timeout(Some(config.read_timeout))
         .map_err(|source| {

@@ -7,12 +7,10 @@ use std::net::TcpStream;
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::{
-    BridgeCredentialsV1_1, DfHackRpcClientV1_1, FencedLiveSourceV1_1,
-    LiveConnectionConfig,
+    BridgeCredentialsV1_1, DfHackRpcClientV1_1, FencedLiveSourceV1_1, LiveConnectionConfig,
 };
 
-pub type AuthenticatedLiveSourceV1_1 =
-    FencedLiveSourceV1_1<DfHackRpcClientV1_1<TcpStream>>;
+pub type AuthenticatedLiveSourceV1_1 = FencedLiveSourceV1_1<DfHackRpcClientV1_1<TcpStream>>;
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
@@ -29,8 +27,8 @@ pub fn connect_authenticated_live_source_v1_1(
             "protocol-1.1 live bridge endpoint must be numeric loopback",
         ));
     }
-    let stream = TcpStream::connect_timeout(&config.endpoint, config.connect_timeout)
-        .map_err(|source| {
+    let stream =
+        TcpStream::connect_timeout(&config.endpoint, config.connect_timeout).map_err(|source| {
             error(
                 ErrorCode::AdapterUnavailable,
                 format!(
@@ -100,10 +98,7 @@ mod tests {
     #[test]
     fn non_loopback_endpoint_fails_before_network_io() -> Result<()> {
         let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 5000);
-        let failure = connect_authenticated_live_source_v1_1(
-            &config(endpoint),
-            credentials()?,
-        );
+        let failure = connect_authenticated_live_source_v1_1(&config(endpoint), credentials()?);
         assert!(failure.is_err());
         Ok(())
     }
@@ -111,10 +106,7 @@ mod tests {
     #[test]
     fn closed_loopback_endpoint_is_retryable_failure() -> Result<()> {
         let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
-        let failure = connect_authenticated_live_source_v1_1(
-            &config(endpoint),
-            credentials()?,
-        );
+        let failure = connect_authenticated_live_source_v1_1(&config(endpoint), credentials()?);
         assert!(failure.is_err());
         Ok(())
     }

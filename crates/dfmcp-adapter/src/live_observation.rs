@@ -11,8 +11,8 @@
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, sha256};
 
 use crate::dfhack_rpc::{
-    MAX_CITIZENS_PER_PAGE, MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES,
-    MAX_WORLD_FOLDER_BYTES, MAX_WORLD_NAME_BYTES,
+    MAX_CITIZENS_PER_PAGE, MAX_RACE_NAME_BYTES, MAX_UNIT_NAME_BYTES, MAX_WORLD_FOLDER_BYTES,
+    MAX_WORLD_NAME_BYTES,
 };
 use crate::{BridgeManifest, CitizenRecord, ObservationPage};
 
@@ -202,19 +202,15 @@ impl LiveObservationCapsule {
             }
         }
 
-        let recomputed = canonical_bytes(
-            &self.bridge,
-            &summary,
-            self.names_included,
-            &self.citizens,
-        )?;
+        let recomputed =
+            canonical_bytes(&self.bridge, &summary, self.names_included, &self.citizens)?;
         if recomputed != self.canonical_bytes {
             return Err(error(
                 ErrorCode::CorruptLedger,
                 "live observation fields do not reproduce the stored canonical bytes",
             ));
         }
-        if sha256(&self.canonical_bytes) != self.content_digest {
+        if Digest32::new(sha256(&self.canonical_bytes)) != self.content_digest {
             return Err(error(
                 ErrorCode::CorruptLedger,
                 "live observation capsule digest does not match its canonical bytes",
@@ -441,19 +437,15 @@ impl ObservationAssembler {
             ));
         }
 
-        let canonical_bytes = canonical_bytes(
-            &self.bridge,
-            &summary,
-            self.names_included,
-            &self.citizens,
-        )?;
+        let canonical_bytes =
+            canonical_bytes(&self.bridge, &summary, self.names_included, &self.citizens)?;
         if canonical_bytes.len() > MAX_CANONICAL_CAPSULE_BYTES {
             return Err(error(
                 ErrorCode::BudgetExceeded,
                 "canonical live observation exceeds the 64 MiB capsule ceiling",
             ));
         }
-        let content_digest = sha256(&canonical_bytes);
+        let content_digest = Digest32::new(sha256(&canonical_bytes));
         let capsule = LiveObservationCapsule {
             bridge: self.bridge,
             paused: summary.paused,
@@ -631,12 +623,7 @@ mod tests {
         }
     }
 
-    fn page_without_names(
-        offset: u32,
-        total: u32,
-        ids: &[i32],
-        complete: bool,
-    ) -> ObservationPage {
+    fn page_without_names(offset: u32, total: u32, ids: &[i32], complete: bool) -> ObservationPage {
         let mut page = page(offset, total, ids, complete);
         for citizen in &mut page.citizens {
             citizen.name.clear();

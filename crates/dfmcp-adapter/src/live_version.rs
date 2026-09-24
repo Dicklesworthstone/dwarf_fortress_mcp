@@ -23,9 +23,7 @@ fn validate_text(value: &str, field: &str) -> Result<()> {
     if value.is_empty() || value.len() > MAX_IDENTITY_TEXT_BYTES {
         return Err(error(
             ErrorCode::AdapterRejected,
-            format!(
-                "live identity field {field} must contain 1..={MAX_IDENTITY_TEXT_BYTES} bytes"
-            ),
+            format!("live identity field {field} must contain 1..={MAX_IDENTITY_TEXT_BYTES} bytes"),
         ));
     }
     Ok(())
@@ -283,7 +281,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{BridgeManifest, ObservationAssembler, ObservationPage};
+    use crate::dfhack_wire::{BridgeManifest, ObservationPage};
+    use crate::live_observation::ObservationAssembler;
 
     fn capsule(
         digest_discriminator: u8,
@@ -328,7 +327,13 @@ mod tests {
         let mut tracker = LiveVersionTracker::new(FortressId::new(7), 4)?;
         let bootstrap = tracker.observe(&capsule(1, 10, 3, "region1", "0.51.11")?)?;
         assert_eq!(bootstrap.continuity, ContinuityStatus::Bootstrap);
-        assert_eq!(bootstrap.cursor, ObservationCursor { epoch: 4, sequence: 0 });
+        assert_eq!(
+            bootstrap.cursor,
+            ObservationCursor {
+                epoch: 4,
+                sequence: 0
+            }
+        );
 
         let heartbeat = tracker.observe(&capsule(1, 10, 3, "region1", "0.51.11")?)?;
         assert_eq!(heartbeat.continuity, ContinuityStatus::Heartbeat);
@@ -336,7 +341,13 @@ mod tests {
 
         let changed = tracker.observe(&capsule(2, 10, 3, "region1", "0.51.11")?)?;
         assert_eq!(changed.continuity, ContinuityStatus::Continuous);
-        assert_eq!(changed.cursor, ObservationCursor { epoch: 4, sequence: 1 });
+        assert_eq!(
+            changed.cursor,
+            ObservationCursor {
+                epoch: 4,
+                sequence: 1
+            }
+        );
         Ok(())
     }
 
@@ -351,7 +362,13 @@ mod tests {
             Some(LiveEpochResetReason::BridgeRestart)
         );
         assert_eq!(restarted.previous_cursor, Some(first.cursor));
-        assert_eq!(restarted.cursor, ObservationCursor { epoch: 5, sequence: 0 });
+        assert_eq!(
+            restarted.cursor,
+            ObservationCursor {
+                epoch: 5,
+                sequence: 0
+            }
+        );
         Ok(())
     }
 

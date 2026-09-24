@@ -38,10 +38,19 @@ const COMPLETE_DOMAINS: [&str; 3] = [
     "fortress.citizens.identity_position_status",
 ];
 const OMITTED_DOMAINS: [(&str, &str); 7] = [
-    ("fortress.items", "bridge protocol V1 does not observe items"),
+    (
+        "fortress.items",
+        "bridge protocol V1 does not observe items",
+    ),
     ("fortress.jobs", "bridge protocol V1 does not observe jobs"),
-    ("fortress.map", "bridge protocol V1 does not observe map state"),
-    ("fortress.economy", "bridge protocol V1 does not observe economy state"),
+    (
+        "fortress.map",
+        "bridge protocol V1 does not observe map state",
+    ),
+    (
+        "fortress.economy",
+        "bridge protocol V1 does not observe economy state",
+    ),
     (
         "fortress.welfare",
         "bridge protocol V1 does not observe detailed welfare state",
@@ -686,9 +695,7 @@ fn insert_fact(
         Fact::known(
             value,
             observed_at,
-            FactSource::DfhackField(format!(
-                "dfmcp_bridge.ReadObservation.{source_field}"
-            )),
+            FactSource::DfhackField(format!("dfmcp_bridge.ReadObservation.{source_field}")),
             source_digest,
         ),
     );
@@ -707,9 +714,7 @@ fn insert_omitted_fact(
         Fact::with_presence(
             FactPresence::Omitted(reason.to_owned()),
             observed_at,
-            FactSource::DfhackField(format!(
-                "dfmcp_bridge.ReadObservation.{source_field}"
-            )),
+            FactSource::DfhackField(format!("dfmcp_bridge.ReadObservation.{source_field}")),
             source_digest,
         ),
     );
@@ -827,23 +832,29 @@ mod tests {
     fn build_capsule(page_sizes: &[&[i32]]) -> Result<LiveObservationCapsule> {
         let total = page_sizes.iter().try_fold(0u32, |total, page| {
             let len = u32::try_from(page.len()).map_err(|_| {
-                error(ErrorCode::BudgetExceeded, "test page length does not fit u32")
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "test page length does not fit u32",
+                )
             })?;
-            total.checked_add(len).ok_or_else(|| {
-                error(ErrorCode::BudgetExceeded, "test citizen count overflowed")
-            })
+            total
+                .checked_add(len)
+                .ok_or_else(|| error(ErrorCode::BudgetExceeded, "test citizen count overflowed"))
         })?;
         let mut assembler = ObservationAssembler::new(manifest());
         let mut offset = 0u32;
         for (index, ids) in page_sizes.iter().enumerate() {
             let length = u32::try_from(ids.len()).map_err(|_| {
-                error(ErrorCode::BudgetExceeded, "test page length does not fit u32")
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "test page length does not fit u32",
+                )
             })?;
             let complete = index + 1 == page_sizes.len();
             assembler.push_page(page(offset, total, ids, complete))?;
-            offset = offset.checked_add(length).ok_or_else(|| {
-                error(ErrorCode::BudgetExceeded, "test page offset overflowed")
-            })?;
+            offset = offset
+                .checked_add(length)
+                .ok_or_else(|| error(ErrorCode::BudgetExceeded, "test page offset overflowed"))?;
         }
         assembler.finalize()
     }
@@ -914,11 +925,8 @@ mod tests {
     #[test]
     fn omitted_names_remain_omitted_in_facts_and_coverage() -> Result<()> {
         let capsule = build_name_omitted_capsule()?;
-        let projection = project_live_capsule(
-            &capsule,
-            FortressId::new(9),
-            ObservationCursor::ORIGIN,
-        )?;
+        let projection =
+            project_live_capsule(&capsule, FortressId::new(9), ObservationCursor::ORIGIN)?;
         let entity_id = raw_unit_id_to_entity_id(7)?;
         let entity = projection
             .snapshot
@@ -946,11 +954,8 @@ mod tests {
     #[test]
     fn membership_edges_are_deterministic_and_provenanced() -> Result<()> {
         let capsule = build_capsule(&[&[0, 1]])?;
-        let projection = project_live_capsule(
-            &capsule,
-            FortressId::new(9),
-            ObservationCursor::ORIGIN,
-        )?;
+        let projection =
+            project_live_capsule(&capsule, FortressId::new(9), ObservationCursor::ORIGIN)?;
         for edge in projection.snapshot.graph.edges.values() {
             assert_eq!(edge.kind, EdgeKind::MemberOf);
             assert_eq!(edge.to, FORTRESS_ENTITY_ID);
@@ -966,11 +971,8 @@ mod tests {
     #[test]
     fn every_projected_fact_cites_the_capsule_digest() -> Result<()> {
         let capsule = build_capsule(&[&[0, 1]])?;
-        let projection = project_live_capsule(
-            &capsule,
-            FortressId::new(9),
-            ObservationCursor::ORIGIN,
-        )?;
+        let projection =
+            project_live_capsule(&capsule, FortressId::new(9), ObservationCursor::ORIGIN)?;
         for entity in projection.snapshot.graph.entities.values() {
             for fact in entity.fields.values() {
                 assert_eq!(fact.source_digest, capsule.content_digest);
@@ -1000,9 +1002,7 @@ mod tests {
     #[test]
     fn projection_rejects_invalid_identity_clock_epoch_and_roster() -> Result<()> {
         let valid = build_capsule(&[&[1]])?;
-        assert!(
-            project_live_capsule(&valid, FortressId::NIL, ObservationCursor::ORIGIN).is_err()
-        );
+        assert!(project_live_capsule(&valid, FortressId::NIL, ObservationCursor::ORIGIN).is_err());
         assert!(
             project_live_capsule(
                 &valid,

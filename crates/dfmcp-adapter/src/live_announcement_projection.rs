@@ -28,14 +28,12 @@ pub fn report_id_to_announcement_entity_id(report_id: i32) -> Result<EntityId> {
             "announcement report ID must not be negative",
         ));
     }
-    let ordinal = u64::from(report_id as u32)
-        .checked_add(1)
-        .ok_or_else(|| {
-            error(
-                ErrorCode::InternalInvariantViolation,
-                "announcement entity ordinal overflowed",
-            )
-        })?;
+    let ordinal = u64::from(report_id as u32).checked_add(1).ok_or_else(|| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "announcement entity ordinal overflowed",
+        )
+    })?;
     Ok(EntityId::new(ANNOUNCEMENT_ENTITY_NAMESPACE | ordinal))
 }
 
@@ -281,9 +279,7 @@ fn validate_entity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_announcement_batch::{
-        AnnouncementCoverage, LiveAnnouncementBatch,
-    };
+    use crate::live_announcement_batch::{AnnouncementCoverage, LiveAnnouncementBatch};
 
     fn record(report_id: i32) -> AnnouncementBatchRecord {
         AnnouncementBatchRecord {
@@ -360,11 +356,15 @@ mod tests {
         let batch = batch(AnnouncementContinuity::CompleteSuffix)?;
         let mut projection = project_live_announcement_batch(&batch, GameTick::new(42), 1, 7)?;
         let entity_id = report_id_to_announcement_entity_id(10)?;
-        let entity = projection.entities.get_mut(&entity_id).ok_or_else(|| {
-            error(ErrorCode::InternalInvariantViolation, "test entity missing")
-        })?;
+        let entity = projection
+            .entities
+            .get_mut(&entity_id)
+            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "test entity missing"))?;
         let text = entity.fields.get_mut("text").ok_or_else(|| {
-            error(ErrorCode::InternalInvariantViolation, "test text fact missing")
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "test text fact missing",
+            )
         })?;
         text.value = Value::Text("tampered".to_owned());
         assert!(projection.validate_against(&batch).is_err());

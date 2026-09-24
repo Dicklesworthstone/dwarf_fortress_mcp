@@ -3,7 +3,7 @@
 //! Single-read bootstrap for the canonical live adapter.
 //!
 //! A live fortress ID depends on the first complete observation, while
-//! [`LiveReadAdapter`](crate::LiveReadAdapter) needs that ID in its immutable
+//! [`LiveReadAdapter`] needs that ID in its immutable
 //! configuration. Reading twice would be expensive and could bind the identity
 //! to one game state while publishing another. This module reads once, derives
 //! the identity, then replays that exact verified capsule through a temporary
@@ -37,9 +37,7 @@ impl LiveReadBootstrapConfig {
         if self.page_size == 0 || self.page_size > MAX_CITIZENS_PER_PAGE {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "live bootstrap page size must be in 1..={MAX_CITIZENS_PER_PAGE}"
-                ),
+                format!("live bootstrap page size must be in 1..={MAX_CITIZENS_PER_PAGE}"),
             ));
         }
         let hard_total = u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| {
@@ -133,9 +131,10 @@ impl<T: LiveObservationSource> PrimedLiveSource<T> {
 
 impl<T: LiveObservationSource> LiveObservationSource for PrimedLiveSource<T> {
     fn bridge_manifest(&self) -> BridgeManifest {
-        self.primed
-            .as_ref()
-            .map_or_else(|| self.source.bridge_manifest(), |capsule| capsule.bridge.clone())
+        self.primed.as_ref().map_or_else(
+            || self.source.bridge_manifest(),
+            |capsule| capsule.bridge.clone(),
+        )
     }
 
     fn read_observation_page(
@@ -266,8 +265,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CitizenRecord, GameAdapter, InterestSet, ObservationPayload, ObservationRequest,
-        Projection,
+        CitizenRecord, GameAdapter, InterestSet, ObservationPayload, ObservationRequest, Projection,
     };
 
     #[derive(Clone)]
@@ -401,9 +399,7 @@ mod tests {
         )?;
         assert_eq!(adapter.source().source().calls, 1);
         assert_eq!(
-            adapter
-                .last_capsule()
-                .map(|capsule| capsule.content_digest),
+            adapter.last_capsule().map(|capsule| capsule.content_digest),
             Some(source_digest)
         );
         let anchor = adapter

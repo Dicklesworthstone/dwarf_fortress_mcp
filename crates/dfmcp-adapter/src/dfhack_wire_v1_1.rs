@@ -19,8 +19,8 @@ use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::{
     AnnouncementReplyContext, BridgeManifest, CitizenRecord, LiveAnnouncementBatch,
-    MAX_ANNOUNCEMENTS_PER_BATCH, MAX_ANNOUNCEMENT_TEXT_BYTES,
-    decode_announcement_reply_fields, encode_announcement_request_fields,
+    MAX_ANNOUNCEMENTS_PER_BATCH, decode_announcement_reply_fields,
+    encode_announcement_request_fields,
 };
 
 pub const DFHACK_RPC_V1_1_VERSION: i32 = 1;
@@ -267,9 +267,10 @@ impl<'a> ProtoReader<'a> {
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for index in 0..10u32 {
-            let byte = *self.bytes.get(self.offset).ok_or_else(|| {
-                error(ErrorCode::AdapterRejected, "truncated protobuf varint")
-            })?;
+            let byte = *self
+                .bytes
+                .get(self.offset)
+                .ok_or_else(|| error(ErrorCode::AdapterRejected, "truncated protobuf varint"))?;
             self.offset = self.offset.saturating_add(1);
             if index == 9 && byte > 1 {
                 return Err(error(
@@ -331,9 +332,7 @@ impl<'a> ProtoReader<'a> {
         if actual != expected {
             return Err(error(
                 ErrorCode::AdapterRejected,
-                format!(
-                    "protobuf field {field} uses wire type {actual:?}, expected {expected:?}"
-                ),
+                format!("protobuf field {field} uses wire type {actual:?}, expected {expected:?}"),
             ));
         }
         Ok(())
@@ -370,12 +369,7 @@ impl<'a> ProtoReader<'a> {
         }
     }
 
-    fn length_delimited(
-        &mut self,
-        wire: WireType,
-        field: u32,
-        maximum: usize,
-    ) -> Result<&'a [u8]> {
+    fn length_delimited(&mut self, wire: WireType, field: u32, maximum: usize) -> Result<&'a [u8]> {
         Self::require_wire(wire, WireType::LengthDelimited, field)?;
         let length = usize::try_from(self.varint()?).map_err(|_| {
             error(
@@ -521,7 +515,11 @@ fn encode_handshake_request(
     client_name: &str,
     client_version: &str,
 ) -> Result<Vec<u8>> {
-    validate_text(client_name, "bridge client name", MAX_V1_1_CLIENT_NAME_BYTES)?;
+    validate_text(
+        client_name,
+        "bridge client name",
+        MAX_V1_1_CLIENT_NAME_BYTES,
+    )?;
     validate_text(
         client_version,
         "bridge client version",
@@ -548,9 +546,7 @@ fn encode_observation_request(
     if maximum == 0 || maximum > MAX_V1_1_CITIZENS_PER_PAGE {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            format!(
-                "requested citizen page size must be in 1..={MAX_V1_1_CITIZENS_PER_PAGE}"
-            ),
+            format!("requested citizen page size must be in 1..={MAX_V1_1_CITIZENS_PER_PAGE}"),
         ));
     }
     let hard_announcements = u32::try_from(MAX_ANNOUNCEMENTS_PER_BATCH).map_err(|_| {
@@ -562,9 +558,7 @@ fn encode_observation_request(
     if max_announcements == 0 || max_announcements > hard_announcements {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            format!(
-                "requested announcement count must be in 1..={hard_announcements}"
-            ),
+            format!("requested announcement count must be in 1..={hard_announcements}"),
         ));
     }
     let mut writer = ProtoWriter::default();
@@ -575,10 +569,7 @@ fn encode_observation_request(
     writer.uint32(5, offset);
     writer.uint32(6, maximum);
     writer.boolean(7, include_names);
-    let extension = encode_announcement_request_fields(
-        announcement_after_id,
-        max_announcements,
-    )?;
+    let extension = encode_announcement_request_fields(announcement_after_id, max_announcements)?;
     writer.bytes.extend_from_slice(&extension);
     Ok(writer.finish())
 }
@@ -761,11 +752,7 @@ fn decode_citizen(bytes: &[u8]) -> Result<CitizenRecord> {
                 reader.string(wire, field, MAX_V1_1_RACE_NAME_BYTES)?,
                 "race",
             )?,
-            4 => set_once(
-                &mut profession,
-                reader.sint32(wire, field)?,
-                "profession",
-            )?,
+            4 => set_once(&mut profession, reader.sint32(wire, field)?, "profession")?,
             5 => set_once(&mut x, reader.sint32(wire, field)?, "x")?,
             6 => set_once(&mut y, reader.sint32(wire, field)?, "y")?,
             7 => set_once(&mut z, reader.sint32(wire, field)?, "z")?,
@@ -915,12 +902,14 @@ fn decode_observation_reply(
             )?,
             18 => set_once(&mut complete, reader.boolean(wire, field)?, "complete")?,
             19 => {
-                if citizens.len() >= usize::try_from(MAX_V1_1_CITIZENS_PER_PAGE).map_err(|_| {
-                    error(
-                        ErrorCode::InternalInvariantViolation,
-                        "citizen hard limit does not fit usize",
-                    )
-                })? {
+                if citizens.len()
+                    >= usize::try_from(MAX_V1_1_CITIZENS_PER_PAGE).map_err(|_| {
+                        error(
+                            ErrorCode::InternalInvariantViolation,
+                            "citizen hard limit does not fit usize",
+                        )
+                    })?
+                {
                     return Err(error(
                         ErrorCode::BudgetExceeded,
                         "observation reply exceeds the citizen hard limit",
@@ -1458,9 +1447,15 @@ mod tests {
         writer.string(13, "The Balanced Realm")?;
         writer.string(14, "region1")?;
         writer.sint32(15, 7);
-        writer.uint32(16, u32::try_from(ids.len()).map_err(|_| {
-            error(ErrorCode::BudgetExceeded, "test citizen count does not fit u32")
-        })?);
+        writer.uint32(
+            16,
+            u32::try_from(ids.len()).map_err(|_| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "test citizen count does not fit u32",
+                )
+            })?,
+        );
         writer.uint32(17, 0);
         writer.boolean(18, true);
         for id in ids {
@@ -1534,21 +1529,9 @@ mod tests {
     #[test]
     fn negotiate_and_read_citizens_and_announcements() -> Result<()> {
         let nonce = vec![9; MIN_V1_1_NONCE_BYTES];
-        let credentials = BridgeCredentialsV1_1::new(
-            vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES],
-            nonce.clone(),
-        )?;
-        let stream = scripted_session(
-            &nonce,
-            &[1, 2],
-            true,
-            9,
-            &[10, 11],
-            1,
-            11,
-            false,
-            true,
-        )?;
+        let credentials =
+            BridgeCredentialsV1_1::new(vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[1, 2], true, 9, &[10, 11], 1, 11, false, true)?;
         let mut client = DfHackRpcClientV1_1::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
         assert_eq!(client.method_ids(), (41, 42));
         assert_eq!(client.manifest().bridge_generation, 42);
@@ -1563,21 +1546,9 @@ mod tests {
     #[test]
     fn retained_window_gap_survives_transport_decode() -> Result<()> {
         let nonce = vec![9; MIN_V1_1_NONCE_BYTES];
-        let credentials = BridgeCredentialsV1_1::new(
-            vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES],
-            nonce.clone(),
-        )?;
-        let stream = scripted_session(
-            &nonce,
-            &[1],
-            true,
-            1,
-            &[10, 11],
-            10,
-            11,
-            true,
-            true,
-        )?;
+        let credentials =
+            BridgeCredentialsV1_1::new(vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[1], true, 1, &[10, 11], 10, 11, true, true)?;
         let mut client = DfHackRpcClientV1_1::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
         let page = client.read_observation(0, 1, true, 1, 128)?;
         assert!(page.announcement_batch.coverage.has_gap());
@@ -1587,21 +1558,9 @@ mod tests {
     #[test]
     fn names_omitted_projection_rejects_returned_names() -> Result<()> {
         let nonce = vec![9; MIN_V1_1_NONCE_BYTES];
-        let credentials = BridgeCredentialsV1_1::new(
-            vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES],
-            nonce.clone(),
-        )?;
-        let stream = scripted_session(
-            &nonce,
-            &[1],
-            true,
-            -1,
-            &[],
-            -1,
-            -1,
-            false,
-            true,
-        )?;
+        let credentials =
+            BridgeCredentialsV1_1::new(vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[1], true, -1, &[], -1, -1, false, true)?;
         let mut client = DfHackRpcClientV1_1::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
         assert!(client.read_observation(0, 1, false, -1, 128).is_err());
         Ok(())
@@ -1610,21 +1569,9 @@ mod tests {
     #[test]
     fn invalid_announcement_request_is_rejected_before_io() -> Result<()> {
         let nonce = vec![9; MIN_V1_1_NONCE_BYTES];
-        let credentials = BridgeCredentialsV1_1::new(
-            vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES],
-            nonce.clone(),
-        )?;
-        let stream = scripted_session(
-            &nonce,
-            &[1],
-            true,
-            -1,
-            &[],
-            -1,
-            -1,
-            false,
-            true,
-        )?;
+        let credentials =
+            BridgeCredentialsV1_1::new(vec![7; MIN_V1_1_BRIDGE_TOKEN_BYTES], nonce.clone())?;
+        let stream = scripted_session(&nonce, &[1], true, -1, &[], -1, -1, false, true)?;
         let mut client = DfHackRpcClientV1_1::negotiate(stream, credentials, "dfmcp", "0.0.1")?;
         assert!(client.read_observation(0, 1, true, -2, 128).is_err());
         assert!(client.read_observation(0, 1, true, -1, 0).is_err());

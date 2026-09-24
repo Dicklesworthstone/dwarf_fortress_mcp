@@ -175,8 +175,7 @@ fn transceiver_rejects_frame_header_above_byte_budget() {
 #[test]
 fn legacy_probe_health_propagates_context_cancellation() {
     let stream = MockDuplexStream::new();
-    let mut adapter =
-        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
+    let mut adapter = LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
     let mut context = test_context();
     context.cancellation_requested = true;
     let result = adapter.health(&context);
@@ -189,8 +188,7 @@ fn legacy_probe_health_never_claims_dfhack_state() -> Result<(), Box<dyn Error>>
     let response = IpcFrame::new(IpcMessageType::HealthResponse, vec![0x00, 0x01])?;
     stream.queue_response(&response)?;
 
-    let mut adapter =
-        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
+    let mut adapter = LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
     let health = adapter.health(&test_context())?;
     assert_eq!(health.status, HealthStatus::Degraded);
     assert_eq!(health.paused, None);
@@ -223,8 +221,7 @@ fn configured_version_expectations_do_not_claim_a_handshake() {
 #[test]
 fn legacy_probe_checkpoint_and_restore_fail_closed() {
     let stream = MockDuplexStream::new();
-    let mut adapter =
-        LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
+    let mut adapter = LegacyBridgeProbeAdapter::new(stream, LegacyBridgeProbeConfig::default());
     let context = test_context();
 
     assert!(adapter.checkpoint("pre-siege-save", &context).is_err());

@@ -11,8 +11,8 @@
 use std::collections::BTreeSet;
 
 use dfmcp_core::{
-    CoverageDomain, CoverageReport, CoverageStatus, DfmcpError, Digest32, ErrorCode,
-    FortressId, ObservationCursor, Result, StateAnchor,
+    CoverageDomain, CoverageReport, CoverageStatus, DfmcpError, Digest32, ErrorCode, FortressId,
+    ObservationCursor, Result, StateAnchor,
 };
 use dfmcp_world::{WorldGraph, WorldSnapshot};
 
@@ -97,8 +97,7 @@ impl LiveWorldProjectionV1_1 {
             || self.receipt.source_citizen_capsule_digest != capsule.base.content_digest
             || self.receipt.source_announcement_batch_digest
                 != capsule.announcement_batch.content_digest
-            || self.receipt.source_bridge_generation
-                != capsule.base.bridge.bridge_generation
+            || self.receipt.source_bridge_generation != capsule.base.bridge.bridge_generation
             || self.receipt.snapshot_anchor != self.snapshot.anchor()
         {
             return Err(error(
@@ -279,9 +278,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-        BridgeManifest, CitizenRecord, LiveAnnouncementBatch,
-        ObservationAssemblerV1_1, ObservationPageV1_1,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage, BridgeManifest,
+        CitizenRecord, LiveAnnouncementBatch, ObservationAssemblerV1_1, ObservationPageV1_1,
     };
 
     fn manifest() -> BridgeManifest {
@@ -389,11 +387,8 @@ mod tests {
     #[test]
     fn combined_projection_contains_citizens_and_announcements() -> Result<()> {
         let capsule = capsule(true, AnnouncementContinuity::CompleteSuffix)?;
-        let projection = project_live_capsule_v1_1(
-            &capsule,
-            FortressId::new(7),
-            ObservationCursor::ORIGIN,
-        )?;
+        let projection =
+            project_live_capsule_v1_1(&capsule, FortressId::new(7), ObservationCursor::ORIGIN)?;
         assert_eq!(projection.snapshot.graph.entities.len(), 3);
         assert_eq!(projection.snapshot.graph.edges.len(), 1);
         assert_eq!(
@@ -411,11 +406,8 @@ mod tests {
     #[test]
     fn partial_suffix_has_bounded_continuation() -> Result<()> {
         let capsule = capsule(false, AnnouncementContinuity::CompleteSuffix)?;
-        let projection = project_live_capsule_v1_1(
-            &capsule,
-            FortressId::new(7),
-            ObservationCursor::ORIGIN,
-        )?;
+        let projection =
+            project_live_capsule_v1_1(&capsule, FortressId::new(7), ObservationCursor::ORIGIN)?;
         assert_eq!(
             projection.receipt.coverage().continuation.as_deref(),
             Some("announcement_after_id=10")
@@ -434,21 +426,20 @@ mod tests {
 
     #[test]
     fn retained_window_gap_never_becomes_complete_history() -> Result<()> {
-        let capsule = capsule(
-            true,
-            AnnouncementContinuity::GapBeforeRetainedWindow,
-        )?;
-        let projection = project_live_capsule_v1_1(
-            &capsule,
-            FortressId::new(7),
-            ObservationCursor::ORIGIN,
-        )?;
+        let capsule = capsule(true, AnnouncementContinuity::GapBeforeRetainedWindow)?;
+        let projection =
+            project_live_capsule_v1_1(&capsule, FortressId::new(7), ObservationCursor::ORIGIN)?;
         let history = projection
             .receipt
             .coverage()
             .domains
             .get(ANNOUNCEMENT_HISTORY_DOMAIN)
-            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "history domain missing"))?;
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "history domain missing",
+                )
+            })?;
         assert_eq!(history.status, CoverageStatus::Partial);
         assert!(
             history
@@ -462,11 +453,8 @@ mod tests {
     #[test]
     fn graph_tampering_invalidates_projection() -> Result<()> {
         let capsule = capsule(true, AnnouncementContinuity::CompleteSuffix)?;
-        let mut projection = project_live_capsule_v1_1(
-            &capsule,
-            FortressId::new(7),
-            ObservationCursor::ORIGIN,
-        )?;
+        let mut projection =
+            project_live_capsule_v1_1(&capsule, FortressId::new(7), ObservationCursor::ORIGIN)?;
         let announcement_id = crate::report_id_to_announcement_entity_id(10)?;
         projection.snapshot.graph.entities.remove(&announcement_id);
         assert!(projection.validate_against(&capsule).is_err());
@@ -476,11 +464,8 @@ mod tests {
     #[test]
     fn receipt_tampering_invalidates_projection() -> Result<()> {
         let capsule = capsule(true, AnnouncementContinuity::CompleteSuffix)?;
-        let mut projection = project_live_capsule_v1_1(
-            &capsule,
-            FortressId::new(7),
-            ObservationCursor::ORIGIN,
-        )?;
+        let mut projection =
+            project_live_capsule_v1_1(&capsule, FortressId::new(7), ObservationCursor::ORIGIN)?;
         projection.receipt.source_capsule_digest = Digest32::ZERO;
         assert!(projection.validate_against(&capsule).is_err());
         Ok(())

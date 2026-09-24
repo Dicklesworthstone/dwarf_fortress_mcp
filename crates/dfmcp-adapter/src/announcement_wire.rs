@@ -12,8 +12,8 @@ use dfmcp_core::{DfmcpError, ErrorCode, Result};
 
 use crate::live_announcement_batch::{
     AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-    AnnouncementReplyContext, LiveAnnouncementBatch, MAX_ANNOUNCEMENTS_PER_BATCH,
-    MAX_ANNOUNCEMENT_TEXT_BYTES,
+    AnnouncementReplyContext, LiveAnnouncementBatch, MAX_ANNOUNCEMENT_TEXT_BYTES,
+    MAX_ANNOUNCEMENTS_PER_BATCH,
 };
 
 pub const ANNOUNCEMENT_AFTER_ID_FIELD: u32 = 8;
@@ -143,9 +143,10 @@ impl<'a> ProtoReader<'a> {
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for index in 0..10u32 {
-            let byte = *self.bytes.get(self.offset).ok_or_else(|| {
-                error(ErrorCode::AdapterRejected, "truncated protobuf varint")
-            })?;
+            let byte = *self
+                .bytes
+                .get(self.offset)
+                .ok_or_else(|| error(ErrorCode::AdapterRejected, "truncated protobuf varint"))?;
             self.offset = self.offset.saturating_add(1);
             if index == 9 && byte > 1 {
                 return Err(error(
@@ -206,9 +207,7 @@ impl<'a> ProtoReader<'a> {
         if actual != expected {
             return Err(error(
                 ErrorCode::AdapterRejected,
-                format!(
-                    "protobuf field {field} uses wire type {actual:?}, expected {expected:?}"
-                ),
+                format!("protobuf field {field} uses wire type {actual:?}, expected {expected:?}"),
             ));
         }
         Ok(())
@@ -244,12 +243,7 @@ impl<'a> ProtoReader<'a> {
         }
     }
 
-    fn length_delimited(
-        &mut self,
-        wire: WireType,
-        field: u32,
-        maximum: usize,
-    ) -> Result<&'a [u8]> {
+    fn length_delimited(&mut self, wire: WireType, field: u32, maximum: usize) -> Result<&'a [u8]> {
         Self::require_wire(wire, WireType::LengthDelimited, field)?;
         let length = usize::try_from(self.varint()?).map_err(|_| {
             error(
@@ -281,14 +275,12 @@ impl<'a> ProtoReader<'a> {
 
     fn string(&mut self, wire: WireType, field: u32, maximum: usize) -> Result<String> {
         let bytes = self.length_delimited(wire, field, maximum)?;
-        std::str::from_utf8(bytes)
-            .map(str::to_owned)
-            .map_err(|_| {
-                error(
-                    ErrorCode::AdapterRejected,
-                    format!("protobuf string field {field} is not valid UTF-8"),
-                )
-            })
+        std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
+            error(
+                ErrorCode::AdapterRejected,
+                format!("protobuf string field {field} is not valid UTF-8"),
+            )
+        })
     }
 
     fn advance_exact(&mut self, length: usize, field: u32) -> Result<()> {
@@ -379,10 +371,7 @@ fn validate_request(after_report_id: i32, maximum: u32) -> Result<()> {
 
 /// Encode only the protocol-1.1 extension fields for `ReadObservationRequest`.
 /// The caller appends these bytes to the canonical request fields 1-7.
-pub fn encode_announcement_request_fields(
-    after_report_id: i32,
-    maximum: u32,
-) -> Result<Vec<u8>> {
+pub fn encode_announcement_request_fields(after_report_id: i32, maximum: u32) -> Result<Vec<u8>> {
     validate_request(after_report_id, maximum)?;
     let mut writer = ProtoWriter::default();
     writer.sint32(ANNOUNCEMENT_AFTER_ID_FIELD, after_report_id);
@@ -404,22 +393,14 @@ fn decode_record(bytes: &[u8]) -> Result<AnnouncementBatchRecord> {
     while let Some((field, wire)) = reader.next_key()? {
         match field {
             1 => set_once(&mut report_id, reader.sint32(wire, field)?, "report_id")?,
-            2 => set_once(
-                &mut report_type,
-                reader.sint32(wire, field)?,
-                "report_type",
-            )?,
+            2 => set_once(&mut report_type, reader.sint32(wire, field)?, "report_type")?,
             3 => set_once(
                 &mut text,
                 reader.string(wire, field, MAX_ANNOUNCEMENT_TEXT_BYTES)?,
                 "text",
             )?,
             4 => set_once(&mut year, reader.sint32(wire, field)?, "year")?,
-            5 => set_once(
-                &mut year_tick,
-                reader.sint32(wire, field)?,
-                "year_tick",
-            )?,
+            5 => set_once(&mut year_tick, reader.sint32(wire, field)?, "year_tick")?,
             6 => set_once(
                 &mut repeat_count,
                 reader.sint32(wire, field)?,
@@ -510,8 +491,7 @@ pub fn decode_announcement_reply_fields(
                         "announcement reply exceeds the record-count ceiling",
                     ));
                 }
-                let nested =
-                    reader.length_delimited(wire, field, MAX_ANNOUNCEMENT_RECORD_BYTES)?;
+                let nested = reader.length_delimited(wire, field, MAX_ANNOUNCEMENT_RECORD_BYTES)?;
                 records.push(decode_record(nested)?);
             }
             _ => reader.skip(wire, field)?,
@@ -550,10 +530,7 @@ pub fn decode_announcement_reply_fields(
             oldest_available_id: required(oldest, "announcement_oldest_available_id")?,
             latest_available_id: required(latest, "announcement_latest_available_id")?,
             returned,
-            complete_through_latest: required(
-                complete,
-                "announcement_complete_through_latest",
-            )?,
+            complete_through_latest: required(complete, "announcement_complete_through_latest")?,
             continuity,
             next_after_id,
         },
@@ -716,11 +693,12 @@ mod tests {
         nested.sint32(1, 10);
         nested.sint32(2, 7);
         nested.key(3, WireType::LengthDelimited);
-        nested.varint(
-            u64::try_from(MAX_ANNOUNCEMENT_TEXT_BYTES + 1).map_err(|_| {
-                error(ErrorCode::InternalInvariantViolation, "test length overflow")
-            })?,
-        );
+        nested.varint(u64::try_from(MAX_ANNOUNCEMENT_TEXT_BYTES + 1).map_err(|_| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "test length overflow",
+            )
+        })?);
         let mut payload = reply(9, 1, 10, &[], false, true)?;
         let mut record = ProtoWriter::default();
         record.bytes(ANNOUNCEMENT_RECORD_FIELD, &nested.finish())?;

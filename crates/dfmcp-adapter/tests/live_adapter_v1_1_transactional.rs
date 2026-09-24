@@ -3,16 +3,14 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use dfmcp_adapter::{
-    AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-    BridgeManifest, CitizenRecord, GameAdapter, InterestSet,
-    LiveAnnouncementBatch, LiveObservationSourceV1_1, LiveReadAdapterConfigV1_1,
-    LiveReadAdapterV1_1, ObservationPageV1_1, ObservationRequest,
+    AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage, BridgeManifest,
+    CitizenRecord, GameAdapter, InterestSet, LiveAnnouncementBatch, LiveObservationSourceV1_1,
+    LiveReadAdapterConfigV1_1, LiveReadAdapterV1_1, ObservationPageV1_1, ObservationRequest,
     Projection,
 };
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, DfmcpError, ErrorCode,
-    FortressId, OperationContext, RequestId, Result, RiskTier, SessionId,
-    StateAnchor, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, DfmcpError, ErrorCode, FortressId,
+    OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 
 #[derive(Clone)]
@@ -51,10 +49,7 @@ fn manifest() -> BridgeManifest {
         world_loaded: true,
         fortress_mode: true,
         bridge_generation: 42,
-        supported_methods: BTreeSet::from([
-            "Handshake".to_owned(),
-            "ReadObservation".to_owned(),
-        ]),
+        supported_methods: BTreeSet::from(["Handshake".to_owned(), "ReadObservation".to_owned()]),
     }
 }
 
@@ -171,10 +166,7 @@ fn context(anchor: StateAnchor) -> OperationContext {
 fn larger_candidate_over_budget_does_not_advance_anchor() -> Result<()> {
     let source = ScriptedSource {
         manifest: manifest(),
-        pages: VecDeque::from([
-            page(12_345, &[])?,
-            page(12_346, &[10])?,
-        ]),
+        pages: VecDeque::from([page(12_345, &[])?, page(12_346, &[10])?]),
     };
     let mut adapter = LiveReadAdapterV1_1::new(
         source,
@@ -199,12 +191,15 @@ fn larger_candidate_over_budget_does_not_advance_anchor() -> Result<()> {
         max_output_tokens: 16_384,
         continuation: None,
     };
-    let failure = adapter.observe(&request, &context(prior)).err().ok_or_else(|| {
-        DfmcpError::new(
-            ErrorCode::InternalInvariantViolation,
-            "over-budget candidate unexpectedly published",
-        )
-    })?;
+    let failure = adapter
+        .observe(&request, &context(prior))
+        .err()
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "over-budget candidate unexpectedly published",
+            )
+        })?;
     assert_eq!(failure.code, ErrorCode::BudgetExceeded);
     assert_eq!(adapter.current_anchor(), Some(prior));
     let current = adapter.current_projection().ok_or_else(|| {

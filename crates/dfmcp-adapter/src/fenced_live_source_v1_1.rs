@@ -24,7 +24,11 @@ fn bounded_reason(value: &str) -> String {
         if output.len() >= MAX_POISON_REASON_BYTES {
             break;
         }
-        let sanitized = if character.is_control() { ' ' } else { character };
+        let sanitized = if character.is_control() {
+            ' '
+        } else {
+            character
+        };
         if output.len() + sanitized.len_utf8() > MAX_POISON_REASON_BYTES {
             break;
         }
@@ -71,9 +75,7 @@ impl<T> FencedLiveSourceV1_1<T> {
         if let Some(reason) = self.poisoned_reason {
             return Err(error(
                 ErrorCode::PreconditionsFailed,
-                format!(
-                    "cannot extract a protocol-1.1 source after transport poisoning: {reason}"
-                ),
+                format!("cannot extract a protocol-1.1 source after transport poisoning: {reason}"),
             ));
         }
         Ok(self.source)
@@ -83,9 +85,7 @@ impl<T> FencedLiveSourceV1_1<T> {
         if let Some(reason) = self.poisoned_reason.as_deref() {
             return Err(error(
                 ErrorCode::AdapterUnavailable,
-                format!(
-                    "protocol-1.1 live source is permanently fenced after failure: {reason}"
-                ),
+                format!("protocol-1.1 live source is permanently fenced after failure: {reason}"),
             ));
         }
         Ok(())

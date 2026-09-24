@@ -31,6 +31,8 @@ use crate::{
 
 const LIVE_ADAPTER_SCHEMA: &[u8] = b"dfmcp-live-read-adapter-v1";
 
+pub const DWARF_FORTRESS_TICKS_PER_YEAR: u64 = crate::TICKS_PER_YEAR;
+
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
 }
@@ -55,9 +57,7 @@ impl LiveReadAdapterConfig {
         if self.page_size == 0 || self.page_size > MAX_CITIZENS_PER_PAGE {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                format!(
-                    "live adapter page size must be in 1..={MAX_CITIZENS_PER_PAGE}"
-                ),
+                format!("live adapter page size must be in 1..={MAX_CITIZENS_PER_PAGE}"),
             ));
         }
         let hard_total = u32::try_from(MAX_CAPSULE_CITIZENS).map_err(|_| {
@@ -400,12 +400,13 @@ fn ensure_snapshot_budget(
             "live snapshot entity count cannot be represented",
         )
     })?;
-    let snapshot_bytes = u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
-        error(
-            ErrorCode::BudgetExceeded,
-            "live snapshot byte count cannot be represented",
-        )
-    })?;
+    let snapshot_bytes =
+        u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "live snapshot byte count cannot be represented",
+            )
+        })?;
     if entity_count > request.max_entities || snapshot_bytes > request.max_bytes {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -427,11 +428,7 @@ fn adapter_identity(manifest: &BridgeManifest) -> AdapterIdentity {
         dwarf_fortress_version: manifest.df_version.clone(),
         dfhack_version: manifest.dfhack_version.clone(),
         compatibility: CompatibilityLevel::DegradedReadOnly,
-        capabilities: BTreeSet::from([
-            Capability::Observe,
-            Capability::Query,
-            Capability::Doctor,
-        ]),
+        capabilities: BTreeSet::from([Capability::Observe, Capability::Query, Capability::Doctor]),
         schema_digest: Digest32::of_bytes(LIVE_ADAPTER_SCHEMA),
     }
 }
@@ -489,9 +486,7 @@ fn observation_evidence(
 fn read_only_rejection<T>(operation: &str) -> Result<T> {
     Err(error(
         ErrorCode::AdapterRejected,
-        format!(
-            "live DFHack adapter protocol V1 is read-only; {operation} is not implemented"
-        ),
+        format!("live DFHack adapter protocol V1 is read-only; {operation} is not implemented"),
     ))
 }
 
@@ -518,8 +513,7 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
             current_anchor: Some(projection.snapshot.anchor()),
             warnings: vec![
                 "authenticated live bridge protocol V1 is read-only".to_owned(),
-                "items, jobs, map, economy, welfare, military, and history are omitted"
-                    .to_owned(),
+                "items, jobs, map, economy, welfare, military, and history are omitted".to_owned(),
             ],
         })
     }
@@ -544,7 +538,10 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
         }
 
         let (payload, mut warnings) = match request.since {
-            None => (ObservationPayload::Snapshot(projection.snapshot.clone()), Vec::new()),
+            None => (
+                ObservationPayload::Snapshot(projection.snapshot.clone()),
+                Vec::new(),
+            ),
             Some(cursor) if cursor == current_anchor.cursor => {
                 (ObservationPayload::Heartbeat(current_anchor), Vec::new())
             }
@@ -742,9 +739,7 @@ impl<T: LiveObservationSource> GameAdapter for LiveReadAdapter<T> {
 mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
-    use dfmcp_core::{
-        CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget,
-    };
+    use dfmcp_core::{CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget};
     use dfmcp_world::{QueryOrder, WorldQuery};
 
     use super::*;
@@ -889,10 +884,8 @@ mod tests {
 
     #[test]
     fn bootstrap_establishes_the_first_honest_anchor() -> Result<()> {
-        let mut adapter = LiveReadAdapter::new(
-            source(42, vec![page(42, 12_345, &[0, 1])]),
-            config(),
-        )?;
+        let mut adapter =
+            LiveReadAdapter::new(source(42, vec![page(42, 12_345, &[0, 1])]), config())?;
         assert!(adapter.current_anchor().is_none());
         let projection = adapter.bootstrap()?;
         assert_eq!(projection.snapshot.cursor.epoch, 3);
@@ -906,10 +899,7 @@ mod tests {
     #[test]
     fn unchanged_read_becomes_a_heartbeat() -> Result<()> {
         let first = page(42, 12_345, &[0, 1]);
-        let mut adapter = LiveReadAdapter::new(
-            source(42, vec![first.clone(), first]),
-            config(),
-        )?;
+        let mut adapter = LiveReadAdapter::new(source(42, vec![first.clone(), first]), config())?;
         let anchor = adapter.bootstrap()?.snapshot.anchor();
         let frame = adapter.observe(
             &observation_request(Some(anchor.cursor)),
@@ -923,10 +913,7 @@ mod tests {
     #[test]
     fn ordinary_change_advances_sequence_and_returns_snapshot() -> Result<()> {
         let mut adapter = LiveReadAdapter::new(
-            source(
-                42,
-                vec![page(42, 12_345, &[0]), page(42, 12_346, &[0, 1])],
-            ),
+            source(42, vec![page(42, 12_345, &[0]), page(42, 12_346, &[0, 1])]),
             config(),
         )?;
         let prior = adapter.bootstrap()?.snapshot.anchor();
@@ -950,14 +937,7 @@ mod tests {
     fn older_same_epoch_cursor_is_rejected_as_a_gap() -> Result<()> {
         let changed = page(42, 12_346, &[0, 1]);
         let mut adapter = LiveReadAdapter::new(
-            source(
-                42,
-                vec![
-                    page(42, 12_345, &[0]),
-                    changed.clone(),
-                    changed,
-                ],
-            ),
+            source(42, vec![page(42, 12_345, &[0]), changed.clone(), changed]),
             config(),
         )?;
         let basis = adapter.bootstrap()?.snapshot.anchor();
@@ -1009,7 +989,12 @@ mod tests {
         };
         assert_eq!(snapshot.cursor.epoch, prior.cursor.epoch + 1);
         assert_eq!(snapshot.cursor.sequence, 0);
-        assert!(frame.warnings.iter().any(|warning| warning.contains("epoch")));
+        assert!(
+            frame
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("epoch"))
+        );
         Ok(())
     }
 
@@ -1038,10 +1023,8 @@ mod tests {
     fn world_identity_switch_fails_closed_without_advancing_anchor() -> Result<()> {
         let mut switched = page(42, 12_346, &[0]);
         switched.world_folder = "region2".to_owned();
-        let mut adapter = LiveReadAdapter::new(
-            source(42, vec![page(42, 12_345, &[0]), switched]),
-            config(),
-        )?;
+        let mut adapter =
+            LiveReadAdapter::new(source(42, vec![page(42, 12_345, &[0]), switched]), config())?;
         let prior = adapter.bootstrap()?.snapshot.anchor();
         assert!(
             adapter
@@ -1058,10 +1041,7 @@ mod tests {
     #[test]
     fn candidate_over_budget_does_not_advance_anchor() -> Result<()> {
         let mut adapter = LiveReadAdapter::new(
-            source(
-                42,
-                vec![page(42, 12_345, &[0]), page(42, 12_346, &[0, 1])],
-            ),
+            source(42, vec![page(42, 12_345, &[0]), page(42, 12_346, &[0, 1])]),
             config(),
         )?;
         let prior = adapter.bootstrap()?.snapshot.anchor();
@@ -1076,10 +1056,8 @@ mod tests {
 
     #[test]
     fn pinned_query_returns_provenanced_rows() -> Result<()> {
-        let mut adapter = LiveReadAdapter::new(
-            source(42, vec![page(42, 12_345, &[0, 1])]),
-            config(),
-        )?;
+        let mut adapter =
+            LiveReadAdapter::new(source(42, vec![page(42, 12_345, &[0, 1])]), config())?;
         let anchor = adapter.bootstrap()?.snapshot.anchor();
         let response = adapter.query(
             &QueryRequest {
@@ -1103,10 +1081,7 @@ mod tests {
 
     #[test]
     fn mutation_surface_remains_absent() -> Result<()> {
-        let mut adapter = LiveReadAdapter::new(
-            source(42, vec![page(42, 12_345, &[0])]),
-            config(),
-        )?;
+        let mut adapter = LiveReadAdapter::new(source(42, vec![page(42, 12_345, &[0])]), config())?;
         let anchor = adapter.bootstrap()?.snapshot.anchor();
         assert!(
             adapter

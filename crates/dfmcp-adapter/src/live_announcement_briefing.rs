@@ -11,9 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
-use crate::live_announcement_batch::{
-    AnnouncementBatchRecord, LiveAnnouncementBatch,
-};
+use crate::live_announcement_batch::{AnnouncementBatchRecord, LiveAnnouncementBatch};
 
 pub const MAX_ANNOUNCEMENT_BRIEFING_RECORDS: usize = 64;
 pub const MAX_ANNOUNCEMENT_ATTENTION_ITEMS: usize = 66;
@@ -106,8 +104,7 @@ pub fn build_live_announcement_briefing(
     batch.validate()?;
     let mut latest_records = batch.announcements.clone();
     latest_records.reverse();
-    let records_truncated_for_briefing =
-        latest_records.len() > MAX_ANNOUNCEMENT_BRIEFING_RECORDS;
+    let records_truncated_for_briefing = latest_records.len() > MAX_ANNOUNCEMENT_BRIEFING_RECORDS;
     latest_records.truncate(MAX_ANNOUNCEMENT_BRIEFING_RECORDS);
 
     let mut attention = Vec::new();
@@ -274,9 +271,7 @@ pub fn summarize_live_announcement_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_announcement_batch::{
-        AnnouncementContinuity, AnnouncementCoverage,
-    };
+    use crate::live_announcement_batch::{AnnouncementContinuity, AnnouncementCoverage};
 
     fn record(report_id: i32, text: &str, announcement: bool) -> AnnouncementBatchRecord {
         AnnouncementBatchRecord {
@@ -314,7 +309,10 @@ mod tests {
                 oldest_available_id: oldest,
                 latest_available_id: latest,
                 returned: u32::try_from(records.len()).map_err(|_| {
-                    error(ErrorCode::BudgetExceeded, "test record count does not fit u32")
+                    error(
+                        ErrorCode::BudgetExceeded,
+                        "test record count does not fit u32",
+                    )
                 })?,
                 complete_through_latest: complete,
                 continuity,

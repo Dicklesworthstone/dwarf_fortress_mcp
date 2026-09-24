@@ -12,22 +12,20 @@
 use std::collections::BTreeSet;
 
 use dfmcp_core::{
-    ActionId, Capability, CheckpointId, DfmcpError, Digest32, EntityId,
-    ErrorCode, Evidence, EvidenceId, EvidenceKind, FortressId,
-    ObservationCursor, OperationContext, Result, RiskTier, StateAnchor,
+    ActionId, Capability, CheckpointId, DfmcpError, Digest32, EntityId, ErrorCode, Evidence,
+    EvidenceId, EvidenceKind, FortressId, ObservationCursor, OperationContext, Result, RiskTier,
+    StateAnchor,
 };
 use dfmcp_intent::PreparedPlan;
 use dfmcp_world::execute_bounded_query;
 
 use crate::{
-    ActionReceipt, AdapterHealth, AdapterIdentity, BridgeManifest, CancelMode,
-    CancelReceipt, CheckpointReceipt, CommitReceipt, CompatibilityLevel,
-    GameAdapter, HealthStatus, LiveObservationCapsuleV1_1,
-    LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
-    LiveWorldProjectionV1_1, MAX_CAPSULE_CITIZENS, ObservationFrame,
-    ObservationPayload, ObservationRequest, PrepareReceipt, Projection,
-    QueryRequest, QueryResponse, QueryRow, RestoreReceipt,
-    project_live_capsule_v1_1, read_publishable_observation_v1_1,
+    ActionReceipt, AdapterHealth, AdapterIdentity, BridgeManifest, CancelMode, CancelReceipt,
+    CheckpointReceipt, CommitReceipt, CompatibilityLevel, GameAdapter, HealthStatus,
+    LiveObservationCapsuleV1_1, LiveObservationPublicationConfigV1_1, LiveObservationSourceV1_1,
+    LiveWorldProjectionV1_1, MAX_CAPSULE_CITIZENS, ObservationFrame, ObservationPayload,
+    ObservationRequest, PrepareReceipt, Projection, QueryRequest, QueryResponse, QueryRow,
+    RestoreReceipt, project_live_capsule_v1_1, read_publishable_observation_v1_1,
 };
 
 const LIVE_ADAPTER_V1_1_SCHEMA: &[u8] = b"dfmcp-live-read-adapter-v1-1";
@@ -413,12 +411,13 @@ fn ensure_snapshot_budget(
             "protocol-1.1 snapshot entity count cannot be represented",
         )
     })?;
-    let snapshot_bytes = u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
-        error(
-            ErrorCode::BudgetExceeded,
-            "protocol-1.1 snapshot byte count cannot be represented",
-        )
-    })?;
+    let snapshot_bytes =
+        u64::try_from(projection.snapshot.canonical_bytes().len()).map_err(|_| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "protocol-1.1 snapshot byte count cannot be represented",
+            )
+        })?;
     if entity_count > request.max_entities || snapshot_bytes > request.max_bytes {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -436,11 +435,7 @@ fn adapter_identity(manifest: &BridgeManifest) -> AdapterIdentity {
         dwarf_fortress_version: manifest.df_version.clone(),
         dfhack_version: manifest.dfhack_version.clone(),
         compatibility: CompatibilityLevel::DegradedReadOnly,
-        capabilities: BTreeSet::from([
-            Capability::Observe,
-            Capability::Query,
-            Capability::Doctor,
-        ]),
+        capabilities: BTreeSet::from([Capability::Observe, Capability::Query, Capability::Doctor]),
         schema_digest: Digest32::of_bytes(LIVE_ADAPTER_V1_1_SCHEMA),
     }
 }
@@ -498,9 +493,7 @@ fn observation_evidence(
 fn read_only_rejection<T>(operation: &str) -> Result<T> {
     Err(error(
         ErrorCode::AdapterRejected,
-        format!(
-            "DFHack adapter protocol 1.1 is read-only; {operation} is not implemented"
-        ),
+        format!("DFHack adapter protocol 1.1 is read-only; {operation} is not implemented"),
     ))
 }
 
@@ -556,7 +549,10 @@ impl<T: LiveObservationSourceV1_1> GameAdapter for LiveReadAdapterV1_1<T> {
         }
 
         let (payload, mut warnings) = match request.since {
-            None => (ObservationPayload::Snapshot(projection.snapshot.clone()), Vec::new()),
+            None => (
+                ObservationPayload::Snapshot(projection.snapshot.clone()),
+                Vec::new(),
+            ),
             Some(cursor) if cursor == current_anchor.cursor => {
                 (ObservationPayload::Heartbeat(current_anchor), Vec::new())
             }
@@ -581,8 +577,7 @@ impl<T: LiveObservationSourceV1_1> GameAdapter for LiveReadAdapterV1_1<T> {
         };
         if outcome.changed && request.since.is_none() {
             warnings.push(if outcome.reset {
-                "protocol-1.1 source continuity reset into a new observation epoch"
-                    .to_owned()
+                "protocol-1.1 source continuity reset into a new observation epoch".to_owned()
             } else {
                 "protocol-1.1 source advanced to a new canonical snapshot".to_owned()
             });
@@ -693,8 +688,7 @@ impl<T: LiveObservationSourceV1_1> GameAdapter for LiveReadAdapterV1_1<T> {
             truncated: result.truncated,
             continuation: result.continuation,
             score_ledger: vec![
-                "deterministic canonical protocol-1.1 world query; no relevance scoring"
-                    .to_owned(),
+                "deterministic canonical protocol-1.1 world query; no relevance scoring".to_owned(),
             ],
         })
     }
@@ -763,17 +757,15 @@ mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
     use dfmcp_core::{
-        CapabilityGrant, CapabilityScope, CoverageStatus, RequestId, SessionId,
-        WorkBudget,
+        CapabilityGrant, CapabilityScope, CoverageStatus, RequestId, SessionId, WorkBudget,
     };
     use dfmcp_world::{EntityKind, QueryOrder, WorldQuery};
 
     use super::*;
     use crate::{
-        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
-        CitizenRecord, InterestSet, LiveAnnouncementBatch,
-        MAX_ANNOUNCEMENTS_PER_BATCH, MAX_V1_1_CITIZENS_PER_PAGE,
-        ObservationPageV1_1,
+        AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage, CitizenRecord,
+        InterestSet, LiveAnnouncementBatch, MAX_ANNOUNCEMENTS_PER_BATCH,
+        MAX_V1_1_CITIZENS_PER_PAGE, ObservationPageV1_1,
     };
 
     #[derive(Clone)]
@@ -910,8 +902,7 @@ mod tests {
             world_name: "The Balanced Realm".to_owned(),
             world_folder: "region1".to_owned(),
             site_id: 7,
-            citizen_count_total: u32::try_from(citizen_ids.len())
-                .map_or(u32::MAX, |value| value),
+            citizen_count_total: u32::try_from(citizen_ids.len()).map_or(u32::MAX, |value| value),
             citizen_offset: 0,
             complete: true,
             citizens: citizen_ids.iter().copied().map(citizen).collect(),
@@ -1028,10 +1019,8 @@ mod tests {
     #[test]
     fn unchanged_combined_capsule_becomes_a_heartbeat() -> Result<()> {
         let first = complete_page(42, 12_345, &[0], &[10])?;
-        let mut adapter = LiveReadAdapterV1_1::new(
-            source(42, vec![first.clone(), first]),
-            config(),
-        )?;
+        let mut adapter =
+            LiveReadAdapterV1_1::new(source(42, vec![first.clone(), first]), config())?;
         let anchor = adapter.bootstrap()?.snapshot.anchor();
         let frame = adapter.observe(
             &observation_request(Some(anchor.cursor)),
@@ -1108,10 +1097,8 @@ mod tests {
         let mut adapter_config = config();
         adapter_config.announcement_page_size = 2;
         adapter_config.max_total_announcements = 4;
-        let mut adapter = LiveReadAdapterV1_1::new(
-            source(42, vec![first, second]),
-            adapter_config,
-        )?;
+        let mut adapter =
+            LiveReadAdapterV1_1::new(source(42, vec![first, second]), adapter_config)?;
         let projection = adapter.bootstrap()?;
         assert_eq!(
             projection
@@ -1152,10 +1139,7 @@ mod tests {
         let mut adapter_config = config();
         adapter_config.announcement_page_size = 2;
         adapter_config.max_total_announcements = 2;
-        let mut adapter = LiveReadAdapterV1_1::new(
-            source(42, vec![partial]),
-            adapter_config,
-        )?;
+        let mut adapter = LiveReadAdapterV1_1::new(source(42, vec![partial]), adapter_config)?;
         assert!(adapter.bootstrap().is_err());
         assert!(adapter.current_anchor().is_none());
         assert!(adapter.current_projection().is_none());
@@ -1182,22 +1166,18 @@ mod tests {
         );
         let mut adapter_config = config();
         adapter_config.announcement_after_id = 1;
-        let mut adapter = LiveReadAdapterV1_1::new(
-            source(42, vec![retained.clone(), retained]),
-            adapter_config,
-        )?;
+        let mut adapter =
+            LiveReadAdapterV1_1::new(source(42, vec![retained.clone(), retained]), adapter_config)?;
         let anchor = adapter.bootstrap()?.snapshot.anchor();
         assert_eq!(
-            adapter
-                .current_projection()
-                .and_then(|projection| {
-                    projection
-                        .receipt
-                        .coverage()
-                        .domains
-                        .get("fortress.announcements.history")
-                        .map(|domain| domain.status)
-                }),
+            adapter.current_projection().and_then(|projection| {
+                projection
+                    .receipt
+                    .coverage()
+                    .domains
+                    .get("fortress.announcements.history")
+                    .map(|domain| domain.status)
+            }),
             Some(CoverageStatus::Partial)
         );
         let frame = adapter.observe(

@@ -153,10 +153,7 @@ impl BridgeManifest {
                 "bridge generation zero is reserved",
             ));
         }
-        let expected = BTreeSet::from([
-            HANDSHAKE_METHOD.to_owned(),
-            OBSERVATION_METHOD.to_owned(),
-        ]);
+        let expected = BTreeSet::from([HANDSHAKE_METHOD.to_owned(), OBSERVATION_METHOD.to_owned()]);
         if self.supported_methods != expected {
             return Err(error(
                 ErrorCode::VersionMismatch,
@@ -318,9 +315,10 @@ impl<'a> ProtoReader<'a> {
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for index in 0..10u32 {
-            let byte = *self.bytes.get(self.offset).ok_or_else(|| {
-                error(ErrorCode::AdapterRejected, "truncated protobuf varint")
-            })?;
+            let byte = *self
+                .bytes
+                .get(self.offset)
+                .ok_or_else(|| error(ErrorCode::AdapterRejected, "truncated protobuf varint"))?;
             self.offset = self.offset.saturating_add(1);
             if index == 9 && byte > 1 {
                 return Err(error(
@@ -382,9 +380,7 @@ impl<'a> ProtoReader<'a> {
         if actual != expected {
             return Err(error(
                 ErrorCode::AdapterRejected,
-                format!(
-                    "protobuf field {field} uses wire type {actual:?}, expected {expected:?}"
-                ),
+                format!("protobuf field {field} uses wire type {actual:?}, expected {expected:?}"),
             ));
         }
         Ok(())
@@ -421,12 +417,7 @@ impl<'a> ProtoReader<'a> {
         }
     }
 
-    fn length_delimited(
-        &mut self,
-        wire: WireType,
-        field: u32,
-        maximum: usize,
-    ) -> Result<&'a [u8]> {
+    fn length_delimited(&mut self, wire: WireType, field: u32, maximum: usize) -> Result<&'a [u8]> {
         Self::require_wire(wire, WireType::LengthDelimited, field)?;
         let length = usize::try_from(self.varint()?).map_err(|_| {
             error(
@@ -597,9 +588,7 @@ fn encode_observation_request(
     if maximum == 0 || maximum > MAX_CITIZENS_PER_PAGE {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            format!(
-                "requested citizen page size must be in 1..={MAX_CITIZENS_PER_PAGE}"
-            ),
+            format!("requested citizen page size must be in 1..={MAX_CITIZENS_PER_PAGE}"),
         ));
     }
     let mut writer = ProtoWriter::default();
@@ -785,11 +774,7 @@ fn decode_citizen(bytes: &[u8]) -> Result<CitizenRecord> {
                 reader.string(wire, field, MAX_RACE_NAME_BYTES)?,
                 "race",
             )?,
-            4 => set_once(
-                &mut profession,
-                reader.sint32(wire, field)?,
-                "profession",
-            )?,
+            4 => set_once(&mut profession, reader.sint32(wire, field)?, "profession")?,
             5 => set_once(&mut x, reader.sint32(wire, field)?, "x")?,
             6 => set_once(&mut y, reader.sint32(wire, field)?, "y")?,
             7 => set_once(&mut z, reader.sint32(wire, field)?, "z")?,
@@ -933,12 +918,14 @@ fn decode_observation_reply(
             )?,
             18 => set_once(&mut complete, reader.boolean(wire, field)?, "complete")?,
             19 => {
-                if citizens.len() >= usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
-                    error(
-                        ErrorCode::InternalInvariantViolation,
-                        "citizen hard limit does not fit usize",
-                    )
-                })? {
+                if citizens.len()
+                    >= usize::try_from(MAX_CITIZENS_PER_PAGE).map_err(|_| {
+                        error(
+                            ErrorCode::InternalInvariantViolation,
+                            "citizen hard limit does not fit usize",
+                        )
+                    })?
+                {
                     return Err(error(
                         ErrorCode::BudgetExceeded,
                         "observation reply exceeds the citizen hard limit",
@@ -1427,9 +1414,15 @@ mod tests {
         writer.string(13, "The Balanced Realm")?;
         writer.string(14, "region1")?;
         writer.sint32(15, 7);
-        writer.uint32(16, u32::try_from(ids.len()).map_err(|_| {
-            error(ErrorCode::BudgetExceeded, "test citizen count does not fit u32")
-        })?);
+        writer.uint32(
+            16,
+            u32::try_from(ids.len()).map_err(|_| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "test citizen count does not fit u32",
+                )
+            })?,
+        );
         writer.uint32(17, 0);
         writer.boolean(18, true);
         for id in ids {
@@ -1443,22 +1436,13 @@ mod tests {
         rpc_result(&writer.finish())
     }
 
-    fn scripted_session(
-        nonce: &[u8],
-        ids: &[i32],
-        include_names: bool,
-    ) -> Result<ScriptedIo> {
+    fn scripted_session(nonce: &[u8], ids: &[i32], include_names: bool) -> Result<ScriptedIo> {
         let generation = 42;
         let mut reads = encode_handshake_header(RESPONSE_MAGIC).to_vec();
         reads.extend_from_slice(&bind_reply(41)?);
         reads.extend_from_slice(&bind_reply(42)?);
         reads.extend_from_slice(&handshake_reply(nonce, generation)?);
-        reads.extend_from_slice(&observation_reply(
-            nonce,
-            generation,
-            ids,
-            include_names,
-        )?);
+        reads.extend_from_slice(&observation_reply(nonce, generation, ids, include_names)?);
         Ok(ScriptedIo::new(reads))
     }
 
@@ -1517,12 +1501,8 @@ mod tests {
         reads.extend_from_slice(&bind_reply(41)?);
         reads.extend_from_slice(&bind_reply(42)?);
         reads.extend_from_slice(&handshake_reply(&response_nonce, generation)?);
-        let result = DfHackRpcClient::negotiate(
-            ScriptedIo::new(reads),
-            credentials,
-            "dfmcp",
-            "0.0.1",
-        );
+        let result =
+            DfHackRpcClient::negotiate(ScriptedIo::new(reads), credentials, "dfmcp", "0.0.1");
         assert!(result.is_err());
         Ok(())
     }

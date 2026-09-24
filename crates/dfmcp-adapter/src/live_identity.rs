@@ -34,9 +34,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{
-        BridgeManifest, CitizenRecord, ObservationAssembler, ObservationPage,
-    };
+    use crate::{BridgeManifest, CitizenRecord, ObservationAssembler, ObservationPage};
 
     fn manifest() -> BridgeManifest {
         BridgeManifest {
