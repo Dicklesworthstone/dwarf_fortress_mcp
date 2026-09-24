@@ -145,7 +145,11 @@ impl ObligationRuntime {
         Ok(())
     }
 
-    /// Advance game tick and evaluate all active obligations against the new world snapshot.
+    /// Evaluate supplied evidence atomically across all active obligations.
+    ///
+    /// Poll cadence limits positive stability samples, not the failure evidence
+    /// a caller has already supplied. An off-cadence contradiction resets the
+    /// streak without moving the next eligible poll. Terminal records are immutable.
     pub fn step_tick(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
@@ -153,109 +157,113 @@ impl ObligationRuntime {
                 "obligations cannot be evaluated against an invalid world snapshot",
             ));
         }
-        for obligation in self.obligations.values_mut() {
-            let mut next_status = None;
 
-            if let ObligationStatus::Active {
-                ticks_elapsed,
-                consecutive_stable_observations,
-            } = &obligation.status
-            {
-                if snapshot.tick < obligation.registered_tick
+        // Validate the entire batch before publishing any transition. Otherwise a
+        // later action's stale tick could leave earlier actions falsely fulfilled
+        // even though this call returned an error (df-action-coordinator-exec-ero.4).
+        for obligation in self.obligations.values() {
+            if matches!(obligation.status, ObligationStatus::Active { .. })
+                && (snapshot.tick < obligation.registered_tick
                     || obligation
                         .last_evaluated_tick
-                        .is_some_and(|last_tick| snapshot.tick < last_tick)
-                {
-                    return Err(DfmcpError::new(
-                        ErrorCode::StaleAnchor,
-                        "obligation observation tick regressed",
-                    ));
-                }
-                if obligation
-                    .last_evaluated_tick
-                    .is_some_and(|last_tick| snapshot.tick == last_tick)
-                {
-                    continue;
-                }
-                let cadence_basis = obligation
-                    .last_evaluated_tick
-                    .map_or(obligation.registered_tick, |tick| tick);
-                let cadence_due = snapshot.tick.0.saturating_sub(cadence_basis.0)
-                    >= obligation.spec.poll_interval_ticks;
-                if !cadence_due && snapshot.tick < obligation.spec.deadline_tick {
-                    continue;
-                }
+                        .is_some_and(|last_tick| snapshot.tick < last_tick))
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::StaleAnchor,
+                    "obligation observation tick regressed",
+                ));
+            }
+        }
+
+        for obligation in self.obligations.values_mut() {
+            let ObligationStatus::Active {
+                consecutive_stable_observations,
+                ..
+            } = &obligation.status
+            else {
+                continue;
+            };
+            let previous_stable = *consecutive_stable_observations;
+            let new_elapsed = snapshot.tick.0.saturating_sub(obligation.registered_tick.0);
+
+            // Failure evidence takes precedence even between scheduled polls or
+            // when a second observation at the same game tick changes the facts.
+            if obligation
+                .spec
+                .failure
+                .as_ref()
+                .is_some_and(|predicate| evaluate(snapshot, predicate))
+            {
+                obligation.status = ObligationStatus::Failed {
+                    failed_at_tick: snapshot.tick,
+                    reason: "obligation failure predicate triggered".to_owned(),
+                };
+                continue;
+            }
+            if snapshot.tick > obligation.spec.deadline_tick {
+                obligation.status = ObligationStatus::Failed {
+                    failed_at_tick: snapshot.tick,
+                    reason: format!(
+                        "obligation deadline tick {} was missed",
+                        obligation.spec.deadline_tick.0
+                    ),
+                };
+                continue;
+            }
+
+            let cadence_basis = obligation
+                .last_evaluated_tick
+                .unwrap_or(obligation.registered_tick);
+            let distinct_tick = obligation.last_evaluated_tick != Some(snapshot.tick);
+            let sample_due = distinct_tick
+                && (snapshot.tick.0.saturating_sub(cadence_basis.0)
+                    >= obligation.spec.poll_interval_ticks
+                    || snapshot.tick == obligation.spec.deadline_tick);
+            let satisfied = evaluate(snapshot, &obligation.spec.terminal);
+            let next_stable = if !satisfied {
+                0
+            } else if sample_due {
+                previous_stable.saturating_add(1)
+            } else {
+                previous_stable
+            };
+            if sample_due {
                 obligation.last_evaluated_tick = Some(snapshot.tick);
-                let new_elapsed = snapshot.tick.0.saturating_sub(obligation.registered_tick.0);
-
-                // 1. Explicit failure predicates take precedence.
-                if let Some(fail_pred) = &obligation.spec.failure
-                    && evaluate(snapshot, fail_pred)
-                {
-                    next_status = Some(ObligationStatus::Failed {
-                        failed_at_tick: snapshot.tick,
-                        reason: "obligation failure predicate triggered".to_owned(),
-                    });
-                }
-
-                // 2. A terminal observation at the deadline is eligible, but
-                // terminal state first observed after the deadline is not.
-                if next_status.is_none() && snapshot.tick > obligation.spec.deadline_tick {
-                    next_status = Some(ObligationStatus::Failed {
-                        failed_at_tick: snapshot.tick,
-                        reason: format!(
-                            "obligation deadline tick {} was missed",
-                            obligation.spec.deadline_tick.0
-                        ),
-                    });
-                }
-
-                // 3. Check terminal predicate and stability window.
-                if next_status.is_none() {
-                    let satisfied = evaluate(snapshot, &obligation.spec.terminal);
-                    if satisfied {
-                        let new_stable = consecutive_stable_observations.saturating_add(1);
-                        if new_stable >= obligation.spec.stable_for_observations {
-                            let evidence = vec![Evidence {
-                                id: dfmcp_core::EvidenceId::new(obligation.action_id.get()),
-                                kind: EvidenceKind::Postcondition,
-                                subject: None,
-                                anchor: snapshot.anchor(),
-                                digest: snapshot.state_hash,
-                                summary: "obligation terminal predicate stability window satisfied"
-                                    .to_owned(),
-                            }];
-
-                            next_status = Some(ObligationStatus::Fulfilled {
-                                fulfilled_at_tick: snapshot.tick,
-                                evidence,
-                            });
-                        } else {
-                            next_status = Some(ObligationStatus::Active {
-                                ticks_elapsed: new_elapsed,
-                                consecutive_stable_observations: new_stable,
-                            });
-                        }
-                    } else if snapshot.tick >= obligation.spec.deadline_tick {
-                        next_status = Some(ObligationStatus::Failed {
-                            failed_at_tick: snapshot.tick,
-                            reason: format!(
-                                "obligation deadline tick {} reached without fulfilling terminal predicate",
-                                obligation.spec.deadline_tick.0
-                            ),
-                        });
-                    } else {
-                        next_status = Some(ObligationStatus::Active {
-                            ticks_elapsed: new_elapsed.max(*ticks_elapsed),
-                            consecutive_stable_observations: 0,
-                        });
-                    }
-                }
             }
 
-            if let Some(status) = next_status {
-                obligation.status = status;
-            }
+            obligation.status = if sample_due
+                && satisfied
+                && next_stable >= obligation.spec.stable_for_observations
+            {
+                ObligationStatus::Fulfilled {
+                    fulfilled_at_tick: snapshot.tick,
+                    evidence: vec![Evidence {
+                        id: dfmcp_core::EvidenceId::new(obligation.action_id.get()),
+                        kind: EvidenceKind::Postcondition,
+                        subject: None,
+                        anchor: snapshot.anchor(),
+                        digest: snapshot.state_hash,
+                        summary: "obligation terminal predicate stability window satisfied"
+                            .to_owned(),
+                    }],
+                }
+            } else if snapshot.tick >= obligation.spec.deadline_tick {
+                // A matching final endpoint is insufficient when the required
+                // stability count has not been reached. Do not wait for a later
+                // tick to discover that no eligible sample remains.
+                ObligationStatus::Failed {
+                    failed_at_tick: snapshot.tick,
+                    reason: format!(
+                        "obligation deadline tick {} reached without fulfilling terminal predicate stability",
+                        obligation.spec.deadline_tick.0
+                    ),
+                }
+            } else {
+                ObligationStatus::Active {
+                    ticks_elapsed: new_elapsed,
+                    consecutive_stable_observations: next_stable,
+                }
+            };
         }
 
         Ok(())
@@ -270,10 +278,14 @@ impl ObligationRuntime {
             )
         })?;
 
-        if current_tick < obligation.registered_tick {
+        if current_tick < obligation.registered_tick
+            || obligation
+                .last_evaluated_tick
+                .is_some_and(|last_tick| current_tick < last_tick)
+        {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
-                "cancellation tick precedes obligation registration",
+                "cancellation tick precedes obligation registration or evaluation",
             ));
         }
 
