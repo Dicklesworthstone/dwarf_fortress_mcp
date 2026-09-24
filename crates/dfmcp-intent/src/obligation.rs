@@ -14,6 +14,8 @@ use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 
 use crate::plan::ObligationSpec;
 
+mod drain;
+
 const MAX_TRACKED_OBLIGATIONS: usize = 65_536;
 
 /// Quantitative progress certificate emitted during cancellation drain.
@@ -68,6 +70,7 @@ pub struct ObligationRuntime {
     // Kept separately to preserve the public BoundedObligation record shape.
     // At most one anchor per registered action; terminal anchors are immutable.
     observation_anchors: BTreeMap<ActionId, StateAnchor>,
+    drain_progress: BTreeMap<ActionId, DrainProgressCertificate>,
 }
 
 impl ObligationRuntime {
@@ -76,6 +79,7 @@ impl ObligationRuntime {
         Self {
             obligations: BTreeMap::new(),
             observation_anchors: BTreeMap::new(),
+            drain_progress: BTreeMap::new(),
         }
     }
 
@@ -339,104 +343,6 @@ impl ObligationRuntime {
         }
 
         Ok(())
-    }
-
-    /// Request cancellation and begin draining.
-    pub fn request_cancel(&mut self, action_id: ActionId, current_tick: GameTick) -> Result<()> {
-        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                format!("obligation {:?} not found", action_id),
-            )
-        })?;
-
-        if current_tick < obligation.registered_tick
-            || obligation
-                .last_evaluated_tick
-                .is_some_and(|last_tick| current_tick < last_tick)
-            || self
-                .observation_anchors
-                .get(&action_id)
-                .is_some_and(|anchor| current_tick < anchor.tick)
-        {
-            return Err(DfmcpError::new(
-                ErrorCode::StaleAnchor,
-                "cancellation tick precedes obligation registration or observation",
-            ));
-        }
-
-        match obligation.status {
-            ObligationStatus::Active { .. } => {
-                obligation.status = ObligationStatus::Draining {
-                    drain_started_tick: current_tick,
-                };
-                Ok(())
-            }
-            ObligationStatus::Fulfilled { .. } => Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "cannot cancel already fulfilled obligation",
-            )),
-            ObligationStatus::Failed { .. } => Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "cannot cancel already failed obligation",
-            )),
-            ObligationStatus::Draining { drain_started_tick } => {
-                if current_tick < drain_started_tick {
-                    Err(DfmcpError::new(
-                        ErrorCode::StaleAnchor,
-                        "repeated cancellation request tick precedes drain start",
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
-            ObligationStatus::Cancelled { .. } => Ok(()),
-            ObligationStatus::Pending => Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "cannot cancel an obligation that has not become active",
-            )),
-        }
-    }
-
-    /// Finalize cancellation only after a quantitative certificate proves quiescence.
-    pub fn finalize_cancel(
-        &mut self,
-        action_id: ActionId,
-        current_tick: GameTick,
-        certificate: &DrainProgressCertificate,
-    ) -> Result<()> {
-        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                format!("obligation {:?} not found", action_id),
-            )
-        })?;
-
-        match obligation.status {
-            ObligationStatus::Draining { drain_started_tick }
-                if current_tick >= drain_started_tick
-                    && certificate.action_id == action_id
-                    && certificate.drain_started_tick == drain_started_tick
-                    && certificate.current_tick == current_tick
-                    && certificate.current_tick >= certificate.drain_started_tick
-                    && certificate.is_quiescent
-                    && certificate.steps_remaining == 0 =>
-            {
-                obligation.status = ObligationStatus::Cancelled {
-                    cancelled_at_tick: current_tick,
-                };
-                Ok(())
-            }
-            ObligationStatus::Cancelled { .. } => Ok(()),
-            ObligationStatus::Draining { .. } => Err(DfmcpError::new(
-                ErrorCode::CancellationIncomplete,
-                "cancellation drain certificate does not prove current quiescence",
-            )),
-            _ => Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "cancellation can be finalized only from the draining state",
-            )),
-        }
     }
 
     /// Look up status of an obligation.

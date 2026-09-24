@@ -13,7 +13,7 @@ fn test_cancellation_drain_transition() -> Result<()> {
     let action_id = ActionId::new(10);
 
     let spec = ObligationSpec {
-        terminal: Predicate::True,
+        terminal: Predicate::Paused(false),
         failure: None,
         deadline_tick: GameTick(200),
         poll_interval_ticks: 1,
@@ -22,26 +22,23 @@ fn test_cancellation_drain_transition() -> Result<()> {
 
     runtime.register_obligation(action_id, spec, GameTick(100))?;
 
-    // Request cancel
-    runtime.request_cancel(action_id, GameTick(110))?;
+    // Register the compensation inventory before reporting any completed work.
+    runtime.request_cancel_with_steps(action_id, GameTick(110), 1)?;
     assert!(matches!(
         runtime.get_status(action_id),
         Some(ObligationStatus::Draining { .. })
     ));
 
-    // Finalize cancel
-    runtime.finalize_cancel(
+    let certificate = DrainProgressCertificate {
         action_id,
-        GameTick(115),
-        &DrainProgressCertificate {
-            action_id,
-            drain_started_tick: GameTick(110),
-            current_tick: GameTick(115),
-            steps_compensated: 1,
-            steps_remaining: 0,
-            is_quiescent: true,
-        },
-    )?;
+        drain_started_tick: GameTick(110),
+        current_tick: GameTick(115),
+        steps_compensated: 1,
+        steps_remaining: 0,
+        is_quiescent: true,
+    };
+    runtime.record_drain_progress(&certificate)?;
+    runtime.finalize_cancel(action_id, GameTick(115), &certificate)?;
     assert!(matches!(
         runtime.get_status(action_id),
         Some(ObligationStatus::Cancelled { .. })
