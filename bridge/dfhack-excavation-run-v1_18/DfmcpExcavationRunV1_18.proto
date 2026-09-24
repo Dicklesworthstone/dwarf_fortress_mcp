@@ -1,0 +1,38 @@
+syntax = "proto2";
+package dfmcp.excavation_run.v1_18;
+
+message Request {
+  required bytes bearer_token = 1;
+  required bytes client_nonce = 2;
+  required uint32 protocol_major = 3;
+  required uint32 protocol_minor = 4;
+  optional string idempotency_key = 5;
+  optional uint32 game_ticks = 6;
+  optional uint32 wall_ms = 7;
+  optional bytes expected_capture = 8;
+  optional bytes plan_digest = 9;
+  optional bytes prepare_token = 10;
+  optional uint32 x = 11;
+  optional uint32 y = 12;
+  optional uint32 z = 13;
+  optional uint32 width = 14;
+  optional uint32 height = 15;
+  optional uint32 stable_samples = 16;
+  optional uint32 stable_ticks = 17;
+  optional uint32 interval_ticks = 18;
+  optional uint32 max_gap_ticks = 19;
+}
+message Reply {
+  required bool accepted = 1;
+  required uint32 failure_code = 2;
+  required bytes client_nonce = 3;
+  required uint32 protocol_major = 4;
+  required uint32 protocol_minor = 5;
+  required uint64 bridge_generation = 6;
+  required string df_version = 7;
+  required string dfhack_version = 8;
+  optional bytes observation = 9;
+  optional bytes effect_record = 10;
+  optional bool owner_active = 11;
+  optional uint32 retained_records = 12;
+}

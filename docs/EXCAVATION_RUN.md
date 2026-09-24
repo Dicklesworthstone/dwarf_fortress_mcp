@@ -2,7 +2,8 @@
 
 The native-independent engine in `bridge/common/excavation_run.h` composes the
 unchanged bounded-run clock owner with a strict floor-goal monitor. This increment
-is an executable C++ engine, not yet a DFHack RPC, Rust adapter or MCP endpoint.
+provides an executable C++ engine. The subsequent isolated native RPC integration
+is specified in `EXCAVATION_RUN_NATIVE.md`; Rust/MCP integration is not supplied.
 It advances `df-dfhack-bridge-plane-c-pic.4/.5` and
 `df-action-coordinator-exec-ero.4`; their broader acceptance remains open.
 
@@ -20,7 +21,7 @@ folder/site, map dimensions, exact rectangle and all cells. Missing and hidden
 cells have presence tags and no attribute payload. Equality revalidation occurs
 before prepare and again before the first unpause. No field is borrowed from a
 different plugin's observation universe. The engine treats the supplied plan
-identity as opaque; the eventual wire boundary must recompute its commitment.
+identity as opaque; the 1.18 wire boundary recomputes its separate commitment.
 
 ## Native-owned progress and stopping
 
@@ -65,3 +66,4 @@ The tested unchanged `bounded_run.h` matches repository blob
 `b8f54a21bee65670389e34ed2f69e2b0d1adc4fc`. This is not real DFHack SDK/plugin,
 live-fortress, Rust/MCP, physical power-loss or full repository qualification.
 Existing native profiles, dependencies and production admission are unchanged.
+The separate 1.18 handler also has executed SDK-double tests, not a real SDK build.

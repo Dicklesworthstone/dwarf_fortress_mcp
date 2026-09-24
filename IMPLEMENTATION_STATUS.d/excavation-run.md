@@ -1,13 +1,21 @@
-# Excavation-conditioned clock control: engine evidence only
+# Excavation-conditioned clock control: native source and double-based execution
 
-`docs/EXCAVATION_RUN.md` specifies the new bounded native-independent C++ engine.
-It turns a strict dry visible floor condition into a native stop trigger, preserving
-sample stability, source identity, cancellation and failed-pause ownership.
-Both GCC and Clang execute 16 scenarios / 7030 assertions with warning denial and
-UBSan; four separately compiled mutants fail. The existing clock header is exact.
+`docs/EXCAVATION_RUN.md` and `docs/EXCAVATION_RUN_NATIVE.md` specify the bounded
+floor-condition engine and isolated six-method excavation-run/1.18 native plugin.
+The native update owner advances toward sampled dry visible floor satisfaction
+and stops on limits, unknown/wet targets, capture failure or cancellation. Source
+changes never pause a replacement; failed pause verification retains ownership.
+Clock safety remains independent of terrain acquisition. Query/terminal replay
+never samples or repeats an unpause. Unload is vetoed until the owner drains.
 
-There is not yet an RPC, Rust adapter or MCP route for this increment. It supplies
-neither durable intent custody nor global controller exclusion, game checkpoints,
-mining causality, structural safety or production admission. No real SDK/plugin,
-live fortress, physical power loss or full qualification was exercised. Work items
+GCC and Clang each execute 7030 engine plus 961 actual-handler assertions, with
+warnings denied and nonrecovering UBSan. Five native encoding vectors match an
+independent Python reconstruction. Eight compiled mutants fail. SDK/protobuf
+interfaces are explicit doubles, not an actual DFHack or generated-protobuf build.
+
+No Rust adapter, MCP route, durable external coordinator, global clock fence,
+checkpoint, mining causality, structural safety or continuous-history proof is
+supplied. No live fortress, physical power-loss or full qualification was run.
+Existing native profiles, dependencies, compatibility registry and production
+runner map are unchanged. No live tuple is admitted. Work items
 `df-dfhack-bridge-plane-c-pic.4/.5` and `df-action-coordinator-exec-ero.4` stay open.

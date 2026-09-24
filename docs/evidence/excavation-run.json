@@ -1,0 +1,85 @@
+{
+  "flags": [
+    "-std=c++17",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-pedantic",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all"
+  ],
+  "full_repository_qualification": false,
+  "live_fortress": false,
+  "power_loss_qualification": false,
+  "production_admission": false,
+  "real_dfhack_sdk": false,
+  "real_protobuf_runtime": false,
+  "runs": {
+    "bridge-clang": {
+      "assertions": 961,
+      "compiler": "clang version 17.0.0 (https://github.com/swiftlang/llvm-project.git 10999b6d034fe318f3d56c83bddb6572593a8bb0)",
+      "independent_vectors": 5,
+      "maximum_record_bytes": 1991,
+      "rejected_mutants": [
+        "hidden_payload_read",
+        "unknown_fields_accepted",
+        "clock_gate_removed",
+        "replacement_setter"
+      ],
+      "scenarios": 12
+    },
+    "bridge-gcc": {
+      "assertions": 961,
+      "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+      "independent_vectors": 5,
+      "maximum_record_bytes": 1991,
+      "rejected_mutants": [
+        "hidden_payload_read",
+        "unknown_fields_accepted",
+        "clock_gate_removed",
+        "replacement_setter"
+      ],
+      "scenarios": 12
+    },
+    "engine-clang": {
+      "assertions": 7030,
+      "compiler": "clang version 17.0.0 (https://github.com/swiftlang/llvm-project.git 10999b6d034fe318f3d56c83bddb6572593a8bb0)",
+      "rejected_mutants": [
+        "same_tick_samples",
+        "gap_streak_survives",
+        "wall_is_floor",
+        "stale_capture_accepted"
+      ],
+      "scenarios": 16
+    },
+    "engine-gcc": {
+      "assertions": 7030,
+      "compiler": "g++ (Debian 14.2.0-19) 14.2.0",
+      "rejected_mutants": [
+        "same_tick_samples",
+        "gap_streak_survives",
+        "wall_is_floor",
+        "stale_capture_accepted"
+      ],
+      "scenarios": 16
+    }
+  },
+  "rust_mcp": false,
+  "schema": "dfmcp.excavation-run-executed-evidence/1",
+  "scope": "actual C++ engine and plugin translation unit; explicit DFHack SDK and protobuf API doubles",
+  "source_sha256": {
+    "bridge/common/bounded_run.h": "32749d57f27c05481b559b71e7db0533179763b67086683512a8addbceadc777",
+    "bridge/common/bounded_run_wire.h": "2d335ef34a90e3cc55eb567d5aa05f3467e83aee0b388808b4f1910dcf3c77af",
+    "bridge/common/excavation_run.h": "78a1c03cf479867a97141b520167763e4009ed65f76f48410a1c298e4c77eeb4",
+    "bridge/common/excavation_run_wire.h": "9e312ad8c69004e1aaee504c83419c77b12db52b1e55be78b33603e921387b53",
+    "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
+    "bridge/dfhack-excavation-run-v1_18/DfmcpExcavationRunV1_18.proto": "010fa34d8a354f900ec2caef8508b4b0a901d84a73f84f583aa407d6a496adc3",
+    "bridge/dfhack-excavation-run-v1_18/dfmcp_excavation_run_v1_18.cpp": "4f6423dbdefbc0f04aff795f16f13594b66b3b4b4e8f511db91102563facdb81",
+    "bridge/dfhack-excavation-run-v1_18/native_capture.h": "70c5170281ceac1fe50d296cf8cf3efdf819ab4be820df1278434c18b22adda6",
+    "scripts/test_excavation_run_bridge.py": "ea52148628d4df4becf2904a0411366a5b67b50b2211fb55fd2723cf50ac7227",
+    "scripts/test_excavation_run_engine.py": "6ad7c215e368352c219ea32c1218477ee834b4b429d7dc22d542ffdc13f723ee",
+    "tests/native/excavation_run/engine.cpp": "7730d687bdcd776df0bae49b50a14c53ac68321f5e1d53252b75a73eeb59c0c5",
+    "tests/native/excavation_run/handler.cpp": "3a48f302cd049fd9bbfe8c7447c50d696d5ce62c5044b16a1e51a8ff593e0e43",
+    "tests/native/excavation_run/stubs.h": "52da2035a29ed5c89e82265ee51f0e53abc6e9c3084b0dbfba85c6360cbfe7b6"
+  }
+}
