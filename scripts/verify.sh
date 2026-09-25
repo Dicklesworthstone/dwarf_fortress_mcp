@@ -136,6 +136,12 @@ python3 scripts/test_admitted_live_launcher.py
 python3 scripts/test_live_admission_ticket.py
 ok "Python contract tests"
 
+info "Running read-only excavation and blueprint goal regressions"
+PYTHONPATH=scripts python3 -m unittest \
+  test_excavation_observer test_track_excavation \
+  test_excavation_blueprint test_track_excavation_blueprint -v
+ok "Excavation and blueprint goal regressions"
+
 info "Checking script syntax"
 python3 -m py_compile \
   scripts/validate_repo.py \

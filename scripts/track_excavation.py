@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist and sample read-only excavation floor goals; never dispatch mining.
+"""Persist and sample read-only floor or blueprint goals; never dispatch mining.
 
 Start creates a new private journal. Sample performs at most one bounded map
 read. Inspect and cancel never connect; cancellation stops this monitor only.
@@ -21,6 +21,7 @@ import time
 from typing import Callable, Iterator
 
 import excavation_observer as e
+import excavation_blueprint as b
 
 MAX_FRAME = 16384
 MAX_JOURNAL = 2 * 1024 * 1024
@@ -31,6 +32,63 @@ ENVIRONMENT = {'DFMCP_ALLOW_UNADMITTED_EXCAVATION_V1_5', 'DFMCP_MAP_TOKEN', 'DFM
 DOMAIN = b'dfmcp-excavation-journal/1\0'
 
 
+@dataclass(frozen=True)
+class GoalProfile:
+    format: str
+    domain: bytes
+    max_frame: int
+    max_journal: int
+    max_sample: int
+
+
+FLOOR_PROFILE = GoalProfile('dfmcp.excavation-goal/1', DOMAIN, MAX_FRAME, MAX_JOURNAL, 2048)
+BLUEPRINT_PROFILE = GoalProfile(b.GOAL_FORMAT, b'dfmcp-excavation-blueprint-journal/1\0',
+                               65536, 8 * 1024 * 1024, b.MAX_SAMPLE_BYTES)
+
+
+def profile_for_format(value: object) -> GoalProfile:
+    e.require(type(value) is str, 'invalid goal profile')
+    if value == FLOOR_PROFILE.format:
+        return FLOOR_PROFILE
+    if value == BLUEPRINT_PROFILE.format:
+        return BLUEPRINT_PROFILE
+    raise e.Rejected('unsupported goal profile')
+
+
+def profile_for_goal(goal: e.Goal | b.BlueprintGoal) -> GoalProfile:
+    if type(goal) is e.Goal:
+        return FLOOR_PROFILE
+    e.require(type(goal) is b.BlueprintGoal, 'unsupported goal type')
+    return BLUEPRINT_PROFILE
+
+
+def advance_goal(goal: e.Goal | b.BlueprintGoal, prior: e.Progress | None, capture: e.Capture) -> e.Progress:
+    evaluator = e.advance if profile_for_goal(goal) is FLOOR_PROFILE else b.advance
+    return evaluator(goal, prior, capture)
+
+
+def decode_record(line: bytes) -> dict:
+    # The deepest valid blueprint frame reaches eight containers. Enforce this
+    # before the JSON parser, including for unrecognized or corrupt histories.
+    depth, quoted, escaped = 0, False, False
+    for byte in line:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == 92:
+                escaped = True
+            elif byte == 34:
+                quoted = False
+        elif byte == 34:
+            quoted = True
+        elif byte in (91, 123):
+            depth += 1
+            e.require(depth <= 8, 'journal nesting bound exceeded')
+        elif byte in (93, 125):
+            depth -= 1
+    return json.loads(line, object_pairs_hook=e.unique_object)
+
+
 def sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -39,11 +97,11 @@ def sample_value(capture: e.Capture) -> dict:
     return {'manifest': capture.manifest.json(), 'capture_hex': capture.raw.hex()}
 
 
-def sample_decode(value: object, region: e.Region) -> e.Capture:
+def sample_decode(value: object, region: e.Region, maximum: int = 2048) -> e.Capture:
     e.require(isinstance(value, dict) and set(value) == {'manifest', 'capture_hex'}, 'invalid sample fields')
     raw = value['capture_hex']
-    e.require(isinstance(raw, str) and 2 <= len(raw) <= 4096 and len(raw) % 2 == 0,
-              'sample extent exceeds floor-goal bound')
+    e.require(isinstance(raw, str) and 2 <= len(raw) <= 2 * maximum and len(raw) % 2 == 0,
+              'sample extent exceeds goal profile bound')
     data = bytes.fromhex(raw)
     e.require(data.hex() == raw, 'noncanonical sample hexadecimal')
     return e.decode_capture(data, e.Manifest.from_json(value['manifest']), region)
@@ -51,7 +109,7 @@ def sample_decode(value: object, region: e.Region) -> e.Capture:
 
 @dataclass(frozen=True)
 class History:
-    goal: e.Goal
+    goal: e.Goal | b.BlueprintGoal
     endpoint: str
     progress: e.Progress
     pending_read: bool
@@ -60,26 +118,40 @@ class History:
     identity: str
     head: str
 
+    @property
+    def profile(self) -> GoalProfile:
+        return profile_for_goal(self.goal)
 
-def frame(event: dict, sequence: int, previous: str) -> bytes:
+
+def frame(event: dict, sequence: int, previous: str, profile: GoalProfile = FLOOR_PROFILE) -> bytes:
     record = {'event': event, 'sequence': sequence, 'previous': previous}
-    return e.canonical({**record, 'sha256': sha(DOMAIN + e.canonical(record))}) + b'\n'
+    return e.canonical({**record, 'sha256': sha(profile.domain + e.canonical(record))}) + b'\n'
 
 
 def replay(raw: bytes, checkpoint: Callable[[], object] = lambda: None) -> History:
-    e.require(1 <= len(raw) <= MAX_JOURNAL and raw.endswith(b'\n'), 'empty, oversized or torn journal')
-    lines = raw.splitlines(keepends=True)
-    e.require(len(lines) <= MAX_EVENTS, 'journal event bound exceeded')
+    e.require(type(raw) is bytes and 1 <= len(raw) <= BLUEPRINT_PROFILE.max_journal
+              and raw.endswith(b'\n'), 'empty, oversized or torn journal')
+    # A newline storm must not allocate a list proportional to the byte bound.
+    lines = raw.split(b'\n', MAX_EVENTS)
+    e.require(lines[-1] == b'' and len(lines) <= MAX_EVENTS + 1, 'journal event bound exceeded')
     history = None
+    profile = None
     previous = '0' * 64
-    for sequence, line in enumerate(lines):
+    for sequence, content in enumerate(lines[:-1]):
         checkpoint()
-        e.require(1 <= len(line) <= MAX_FRAME, 'journal frame bound exceeded')
-        record = json.loads(line, object_pairs_hook=e.unique_object)
+        line = content + b'\n'
+        maximum = profile.max_frame if profile else BLUEPRINT_PROFILE.max_frame
+        e.require(1 <= len(line) <= maximum, 'journal frame bound exceeded')
+        record = decode_record(line)
+        if profile is None:
+            e.require(type(record) is dict and type(record.get('event')) is dict, 'invalid journal header')
+            profile = profile_for_format(record['event'].get('format'))
+            e.require(len(raw) <= profile.max_journal and len(line) <= profile.max_frame,
+                      'journal exceeds declared profile bounds')
         e.require(isinstance(record, dict) and set(record) == {'event', 'sequence', 'previous', 'sha256'},
                   'invalid journal envelope')
         e.integer(record['sequence'], sequence, sequence)
-        e.require(record['previous'] == previous and line == frame(record['event'], sequence, previous),
+        e.require(record['previous'] == previous and line == frame(record['event'], sequence, previous, profile),
                   'journal chain, encoding or checksum mismatch')
         event = record['event']
         e.require(isinstance(event, dict) and isinstance(event.get('kind'), str), 'invalid event')
@@ -87,13 +159,14 @@ def replay(raw: bytes, checkpoint: Callable[[], object] = lambda: None) -> Histo
         head = record['sha256']
         if history is None:
             e.require(kind == 'begin' and set(event) == {'kind', 'format', 'nonce', 'endpoint', 'goal', 'sample'}
-                      and event['format'] == 'dfmcp.excavation-goal/1', 'journal must begin with a complete goal')
+                      and event['format'] == profile.format, 'journal must begin with a complete goal')
             nonce = event['nonce']
             e.require(isinstance(nonce, str) and len(nonce) == 64 and bytes.fromhex(nonce).hex() == nonce
                       and nonce != '0' * 64, 'invalid journal incarnation')
             e.endpoint(event['endpoint'])
-            goal = e.Goal.from_json(event['goal'])
-            progress = e.advance(goal, None, sample_decode(event['sample'], goal.region))
+            goal_type = e.Goal if profile is FLOOR_PROFILE else b.BlueprintGoal
+            goal = goal_type.from_json(event['goal'])
+            progress = advance_goal(goal, None, sample_decode(event['sample'], goal.region, profile.max_sample))
             history = History(goal, event['endpoint'], progress, False, 0, 1, head, head)
         else:
             e.require(history.progress.status not in e.TERMINAL, 'terminal goal history cannot change')
@@ -105,7 +178,8 @@ def replay(raw: bytes, checkpoint: Callable[[], object] = lambda: None) -> Histo
                 pending, attempts = True, attempts + 1
             elif kind == 'sample':
                 e.require(pending and set(event) == {'kind', 'sample'}, 'sample lacks durable read intent')
-                progress = e.advance(history.goal, progress, sample_decode(event['sample'], history.goal.region))
+                progress = advance_goal(history.goal, progress,
+                                        sample_decode(event['sample'], history.goal.region, profile.max_sample))
                 pending = False
             elif kind == 'read_failed':
                 e.require(pending and set(event) == {'kind'}, 'failure lacks durable read intent')
@@ -170,7 +244,8 @@ class Journal:
     def contents(self) -> bytes:
         self.custody()
         before = os.fstat(self.fd)
-        e.require(0 <= before.st_size <= MAX_JOURNAL, 'journal byte bound exceeded')
+        maximum = self.history.profile.max_journal if self.history else BLUEPRINT_PROFILE.max_journal
+        e.require(0 <= before.st_size <= maximum, 'journal byte bound exceeded')
         os.lseek(self.fd, 0, os.SEEK_SET)
         raw = bytearray()
         while len(raw) <= before.st_size:
@@ -208,12 +283,14 @@ class Journal:
         self.verify()
         sequence = self.history.events if self.history else 0
         previous = self.history.head if self.history else '0' * 64
-        addition = frame(event, sequence, previous)
-        e.require(len(addition) <= MAX_FRAME, 'frame exceeds bound')
+        profile = self.history.profile if self.history else profile_for_format(event.get('format'))
+        addition = frame(event, sequence, previous, profile)
+        e.require(len(addition) <= profile.max_frame, 'frame exceeds bound')
         candidate = self.raw + addition
         # Derive/validate the whole result BEFORE writing and reserve its response.
         history = replay(candidate, self.budget.remaining_ms)
-        encode_result(report(history, False, 0))
+        encode_result(report(history, False, 0),
+                      'start-blueprint' if profile is BLUEPRINT_PROFILE else 'inspect')
         try:
             os.lseek(self.fd, 0, os.SEEK_END)
             view = memoryview(addition)
@@ -284,13 +361,16 @@ def environment(saved_endpoint: str | None = None) -> tuple[str, bytes]:
 
 def report(history: History, sampled_this_call: bool, native_reads_attempted: int) -> dict:
     p = history.progress.interrupted('unfinished_read') if history.pending_read else history.progress
-    return {'ok': True, 'schema': 'dfmcp.excavation-progress/1', 'goal': history.goal.json(),
+    blueprint = history.goal.blueprint if history.profile is BLUEPRINT_PROFILE else None
+    diagnosis = b.diagnose(blueprint, p.latest) if blueprint else None
+    result = {'ok': True, 'schema': 'dfmcp.excavation-progress/1', 'goal': history.goal.json(),
             'journal_id': history.identity, 'journal_head': history.head, 'journal_events': history.events,
             'goal_status': p.status, 'terminal': p.status in e.TERMINAL,
-            'floor_goal_satisfied_at_sample': p.status == 'satisfied',
+            'floor_goal_satisfied_at_sample': blueprint is None and p.status == 'satisfied',
             'source': p.first.binding(), 'endpoint': history.endpoint,
             'last_observed_tick': p.latest.tick, 'last_observation_witness': p.latest.witness,
-            'counts_at_last_observation': e.classify(p.latest), 'matching_samples': p.streak,
+            'counts_at_last_observation': diagnosis['counts'] if diagnosis else e.classify(p.latest),
+            'matching_samples': p.streak,
             'matching_since_tick': p.since_tick, 'observations_retained': p.observations,
             'read_attempts': history.attempts, 'pending_read': history.pending_read,
             'interruption': p.interruption, 'sampled_this_call': sampled_this_call,
@@ -300,6 +380,11 @@ def report(history: History, sampled_this_call: bool, native_reads_attempted: in
             'native_effect_obligations_changed': False, 'game_mutations_dispatched': False,
             'retry_designation_permitted': False,
             'next_step': 'inspect_retained_evidence' if p.status in e.TERMINAL else 'explicit_sample_or_cancel_monitor'}
+    if blueprint:
+        result.update(schema='dfmcp.excavation-blueprint-progress/1', blueprint_digest=blueprint.digest,
+                      blueprint_goal_satisfied_at_sample=p.status == 'satisfied',
+                      blueprint_at_last_observation=diagnosis)
+    return result
 
 
 def encode_result(value: dict, operation: str = 'inspect') -> bytes:
@@ -313,7 +398,8 @@ def encode_result(value: dict, operation: str = 'inspect') -> bytes:
     reference = {'journal_id': value.get('journal_id'), 'head': value.get('journal_head')}
     value['agent_turn'] = {
         'schema': 'dfmcp.agent_turn/1', 'operation': 'excavation.' + operation,
-        'phase': {'start': 'bootstrap', 'sample': 'verify', 'cancel': 'reconcile'}.get(operation, 'inspect'),
+        'phase': {'start': 'bootstrap', 'start-blueprint': 'bootstrap',
+                  'sample': 'verify', 'cancel': 'reconcile'}.get(operation, 'inspect'),
         'session_id': None, 'turn_id': None, 'request_id': None, 'anchor': None,
         'continuity': {'status': 'indeterminate' if status in ('unknown', 'invalidated') else 'stale',
                        'basis': None, 'gap': 'sampled_endpoints_only', 'reset_reason': value.get('interruption')},
@@ -328,8 +414,8 @@ def encode_result(value: dict, operation: str = 'inspect') -> bytes:
         'recommendations': [{'operation': 'sample' if pending else 'inspect',
                              'journal_id': value.get('journal_id'), 'authority_granted': False}],
         'uncertainty': [{'epistemic': 'unknown', 'message':
-            'Sampled dry-floor evidence does not prove continuous stability, mining causality, safety or native effect completion.'}],
-        'coverage': {'status': 'partial', 'scope': goal.get('region') if goal else None,
+            'Sampled terrain evidence does not prove continuous stability, mining causality, safety or native effect completion.'}],
+        'coverage': {'status': 'partial', 'scope': value.get('source', {}).get('region'),
                      'complete_domains': ['retained_goal_history'] if known else [],
                      'omitted_domains': ['continuous_game_history', 'current_world', 'native_effect_inventory']},
         'budget': {'maximum_output_bytes': MAX_OUTPUT, 'token_count_measured': False},
@@ -344,15 +430,58 @@ def encode_result(value: dict, operation: str = 'inspect') -> bytes:
 def start(path: Path, region: e.Region, folder: str, site: int, max_game_ticks: int,
           stable_ticks=10, required_samples=2, max_gap_ticks=1200, timeout_ms=10000) -> dict:
     budget = Budget(timeout_ms)
-    e.integer(max_game_ticks, 1, 403200)
     template = e.Goal(region, folder, site, e.MAX_TICK, stable_ticks, required_samples, max_gap_ticks)
-    e.require(stable_ticks <= max_game_ticks, 'stability span exceeds goal horizon')
+    return _start(path, template, max_game_ticks, budget)
+
+
+def read_blueprint(path: Path, budget: Budget) -> b.Blueprint:
+    # This operator-selected input is copied into the journal; later commands
+    # never reopen it. It is not a client-controlled MCP filesystem capability.
+    budget.remaining_ms()
+    e.require(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and 1 <= len(str(path)) <= 4096,
+              'blueprint input requires a bounded POSIX path')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        e.require(stat.S_ISREG(before.st_mode) and 1 <= before.st_size <= b.MAX_SPEC_BYTES,
+                  'blueprint input must be a bounded regular file')
+        raw = bytearray()
+        while len(raw) <= before.st_size:
+            budget.remaining_ms()
+            chunk = os.read(fd, before.st_size + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+        after = os.fstat(fd)
+        named = os.stat(path, follow_symlinks=False)
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        e.require(len(raw) == before.st_size and identity(before) == identity(after) == identity(named),
+                  'blueprint input changed during read')
+        budget.remaining_ms()
+        blueprint = b.Blueprint.decode(bytes(raw))
+        budget.remaining_ms()
+        return blueprint
+    finally:
+        os.close(fd)
+
+
+def start_blueprint(path: Path, specification: Path, folder: str, site: int, max_game_ticks: int,
+                    stable_ticks=10, required_samples=2, max_gap_ticks=1200, timeout_ms=10000) -> dict:
+    budget = Budget(timeout_ms)
+    blueprint = read_blueprint(specification, budget)
+    template = b.BlueprintGoal(blueprint, folder, site, e.MAX_TICK, stable_ticks, required_samples, max_gap_ticks)
+    return _start(path, template, max_game_ticks, budget)
+
+
+def _start(path: Path, template: e.Goal | b.BlueprintGoal, max_game_ticks: int, budget: Budget) -> dict:
+    e.integer(max_game_ticks, 1, 403200)
+    e.require(template.stable_ticks <= max_game_ticks, 'stability span exceeds goal horizon')
     address, token = environment()
     with open_journal(path, budget, writable=True, create=True) as journal:
-        with e.MapClient(address, token, region, budget.remaining_ms()) as client:
+        with e.MapClient(address, token, template.region, budget.remaining_ms()) as client:
             initial = client.observe()
         goal = replace(template, deadline_tick=initial.tick + max_game_ticks)
-        event = {'kind': 'begin', 'format': 'dfmcp.excavation-goal/1', 'nonce': secrets.token_hex(32),
+        event = {'kind': 'begin', 'format': profile_for_goal(goal).format, 'nonce': secrets.token_hex(32),
                  'endpoint': address, 'goal': goal.json(), 'sample': sample_value(initial)}
         journal.append(event)
         return report(journal.history, True, 1)
@@ -365,7 +494,7 @@ def sample(path: Path, timeout_ms=10000) -> dict:
         if h.progress.status in e.TERMINAL:
             return report(h, False, 0)  # No token, opt-in or native access for terminal history.
         e.require(h.attempts < MAX_READS and h.events + 3 <= MAX_EVENTS
-                  and len(journal.raw) + 3 * MAX_FRAME <= MAX_JOURNAL,
+                  and len(journal.raw) + 3 * h.profile.max_frame <= h.profile.max_journal,
                   'goal retention exhausted; cancel monitor or inspect without eviction')
         address, token = environment(h.endpoint)
         journal.sync()
@@ -401,13 +530,16 @@ def cancel(path: Path, timeout_ms=10000) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('start', 'sample', 'inspect', 'cancel'):
+    for name in ('start', 'start-blueprint', 'sample', 'inspect', 'cancel'):
         command = sub.add_parser(name)
         command.add_argument('--journal', type=Path, required=True)
         command.add_argument('--timeout-ms', type=int, default=10000)
-        if name == 'start':
-            for field in ('x', 'y', 'z', 'width', 'height'):
-                command.add_argument('--' + field, type=int, required=True)
+        if name in ('start', 'start-blueprint'):
+            if name == 'start':
+                for field in ('x', 'y', 'z', 'width', 'height'):
+                    command.add_argument('--' + field, type=int, required=True)
+            else:
+                command.add_argument('--blueprint', type=Path, required=True)
             command.add_argument('--world-folder', required=True)
             command.add_argument('--site', type=int, required=True)
             command.add_argument('--max-game-ticks', type=int, required=True)
@@ -420,12 +552,16 @@ def main(argv: list[str] | None = None) -> int:
             region = e.Region((args.x, args.y, args.z), (args.width, args.height, 1))
             result = start(args.journal, region, args.world_folder, args.site, args.max_game_ticks,
                            args.stable_ticks, args.required_samples, args.max_gap_ticks, args.timeout_ms)
+        elif args.command == 'start-blueprint':
+            result = start_blueprint(args.journal, args.blueprint, args.world_folder, args.site, args.max_game_ticks,
+                                     args.stable_ticks, args.required_samples, args.max_gap_ticks, args.timeout_ms)
         else:
             result = {'sample': sample, 'inspect': inspect, 'cancel': cancel}[args.command](args.journal, args.timeout_ms)
         print(encode_result(result, args.command).decode('ascii'))
         return 0 if result['ok'] else 2
     except (e.Rejected, OSError, ValueError, KeyError, TypeError, struct.error, RecursionError):
-        print(encode_result({'ok': False, 'schema': 'dfmcp.excavation-progress/1', 'goal_status': 'unknown',
+        schema = 'dfmcp.excavation-blueprint-progress/1' if args.command == 'start-blueprint' else 'dfmcp.excavation-progress/1'
+        print(encode_result({'ok': False, 'schema': schema, 'goal_status': 'unknown',
             'error': 'Read, deadline, goal or journal verification failed. Preserve the original journal; no repair performed.',
             'current_conditions_proven': False, 'mining_action_completed_proven': False,
             'native_effect_obligations_changed': False, 'game_mutations_dispatched': False,
