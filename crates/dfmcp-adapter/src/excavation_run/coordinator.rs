@@ -56,6 +56,14 @@ impl ExcavationBinding {
     pub fn dimensions(&self) -> [u32; 3] { self.dimensions }
     pub fn df_version(&self) -> &str { &self.df_version }
     pub fn dfhack_version(&self) -> &str { &self.dfhack_version }
+    /// Handshake generation for a recovery-only source. Folder/site/map remain
+    /// the journal's EXPECTED historical scope, not a new observation or grant.
+    pub(super) fn recovery_generation(&self, generation: u64) -> Result<Self> {
+        require(generation >= self.generation && generation < u64::MAX,
+            "excavation recovery generation regressed")?;
+        let mut binding = self.clone(); binding.generation = generation;
+        Ok(binding)
+    }
     fn capture_matches(&self, capture: &ExcavationCapture) -> bool {
         self.generation == capture.generation() && &self.fortress == capture.fortress()
             && self.dimensions == capture.dimensions()
@@ -173,7 +181,7 @@ fn authorize(context: &OperationContext, binding: &ExcavationBinding, clock: boo
     if clock { context.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?; }
     Ok(())
 }
-fn authorize_start(context: &OperationContext, binding: &ExcavationBinding,
+pub(super) fn authorize_start(context: &OperationContext, binding: &ExcavationBinding,
     plan: &ExcavationRunPlan) -> Result<()>
 {
     authorize(context, binding, true)?;

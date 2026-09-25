@@ -6,6 +6,7 @@
 //! permission to dispatch it. Beads: df-dfhack-bridge-plane-c-pic.4/.5.
 
 pub mod coordinator;
+pub mod rpc;
 mod record;
 pub use record::{ExcavationRunRecord, ExcavationTrigger};
 pub use crate::bounded_run::{RunPhase, RunReason, RunSpec};
