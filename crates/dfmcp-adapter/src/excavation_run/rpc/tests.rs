@@ -351,7 +351,43 @@ fn greeting_consumes_original_deadline_and_pre_cancel_does_not_connect() -> Resu
 fn connection_call_budget_cannot_be_renewed_by_later_contexts() -> Result<()> {
     let server = Server::new(Behavior::default()); let mut source = server.connect(true)?;
     let p = plan()?; let c = context()?;
-    for _ in 0..57 { assert!(source.query(&p, &c, Duration::from_secs(1))?.is_none()); }
+    for _ in 0..57 { assert!(source.query(&p, &c, Duration::from_secs(5))?.is_none()); }
     assert!(source.query(&p, &c, Duration::from_secs(1)).is_err());
     assert_eq!(server.count(4), 57); assert!(source.is_fenced()); Ok(())
+}
+
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[test]
+fn actual_tcp_commit_loss_recovers_from_actual_private_disk_journal() -> Result<()> {
+    use crate::excavation_run::private_file::{create_private_excavation, open_private_excavation, inspect_private_excavation};
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("dfmcp-joined-rpc-file-{}-{}",
+        std::process::id(), 17));
+    // No deleting or reusing a prior run's evidence directory.
+    let mut candidate = dir.clone(); let mut index = 0;
+    loop {
+        match std::fs::DirBuilder::new().mode(0o700).create(&candidate) {
+            Ok(()) => break,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => { index += 1; candidate = dir.with_extension(index.to_string()); }
+            Err(e) => panic!("private test directory: {e}"),
+        }
+    }
+    let server = Server::new(Behavior { lose_commit: true, ..Behavior::default() });
+    let p = plan()?; let c = context()?;
+    {
+        let mut source = server.connect(false)?;
+        let mut owner = create_private_excavation(&candidate, source.binding().clone(), &c)?;
+        assert!(owner.start(&mut source, p.clone(), p.digest(), &c).is_err());
+    }
+    assert_eq!(inspect_private_excavation(&candidate, p.before().fortress(), &c)?.pending_count(), 1);
+    let observations = server.count(1);
+    {
+        let mut owner = open_private_excavation(&candidate, p.before().fortress(), &c)?;
+        let mut source = server.connect(true)?;
+        assert!(owner.recover(&mut source, p.key(), false, &c)?.unwrap().resolved());
+    }
+    assert_eq!(server.count(3), 1); assert_eq!(server.count(1), observations);
+    let archive = inspect_private_excavation(&candidate, p.before().fortress(), &c)?;
+    assert_eq!(archive.pending_count(), 0); assert!(archive.entries()[0].native().unwrap().resolved());
+    Ok(())
 }

@@ -1,0 +1,42 @@
+{
+  "base_commit": "49f1444741e172cb3fe1babccdcd0b8dd4691194",
+  "clippy_executed": false,
+  "full_repository_qualification": false,
+  "git_blobs": {
+    "crates/dfmcp-adapter/src/excavation_run/coordinator.rs": "da00489a5e94265a93d911bed9b8e0ffcbfbd7f0",
+    "crates/dfmcp-adapter/src/excavation_run/mod.rs": "8cddf6f2c1ab63d33543ca1cf6e2f2f832eb4d19",
+    "crates/dfmcp-adapter/src/excavation_run/private_file.rs": "c153d186eed5388301ca81575e5f1d5d4091e9ae",
+    "crates/dfmcp-adapter/src/excavation_run/private_file/linux.rs": "af11d239c31d3a0f99232b12af9cbfe0a224bf19",
+    "crates/dfmcp-adapter/src/excavation_run/private_file/linux/tests.rs": "aab6c725049a560745efaf454a4c7c86e9508404",
+    "crates/dfmcp-adapter/src/excavation_run/rpc.rs": "cf07fb0aa9f59195305d9dfb7583ebe5adcbb6a9",
+    "crates/dfmcp-adapter/src/excavation_run/rpc/codec.rs": "3686678380068e035ebb170fa91deace7d131014",
+    "crates/dfmcp-adapter/src/excavation_run/rpc/link.rs": "c1b7e782c18586355ed2ae1d07def4ef8b1a9a5d",
+    "crates/dfmcp-adapter/src/excavation_run/rpc/tests.rs": "ebd73e89401a43e59e368f91973f4ea47db3aa98",
+    "crates/dfmcp-adapter/src/excavation_run/workflow.rs": "0cbc96f78ff327ab7e61b2dffb6ee38002b8f6f1",
+    "crates/dfmcp-adapter/tests/fixtures/excavation_run_rpc_v1_18.txt": "4e5b800f9d3bf35a8bced1e79432eadfc61a2abc",
+    "scripts/check_excavation_rust_rpc_vectors.py": "e4d0a43f7eb9d8dcf4ef6c1f3a634807da56f55c",
+    "scripts/probe_excavation_linux_custody.py": "06371b4352167a80cc62668b5ddc8e8789125fce"
+  },
+  "live_fortress": false,
+  "power_loss_tested": false,
+  "primitive_checks": [
+    "linux_flag_values",
+    "proc_fd_directory_identity",
+    "cross_process_directory_lock",
+    "distinct_open_file_lock",
+    "file_and_directory_sync_then_readback",
+    "symlink_refusal_and_hardlink_detection",
+    "nonblocking_special_file_classification",
+    "replacement_directory_is_not_pinned_directory"
+  ],
+  "production_admission": false,
+  "python_linux_primitive_checks_passed": 8,
+  "python_request_vectors_passed": 6,
+  "real_dfhack_sdk": false,
+  "rust_compiled": false,
+  "rust_tests_added": 34,
+  "rust_tests_executed": false,
+  "rustfmt_executed": false,
+  "schema": "dfmcp.excavation-rust-io-source-evidence/1",
+  "scope": "Rust source only; independent Python requests and Linux primitives executed"
+}

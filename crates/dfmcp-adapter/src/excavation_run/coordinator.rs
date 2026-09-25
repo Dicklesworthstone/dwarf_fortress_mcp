@@ -335,6 +335,7 @@ impl<S: EffectJournalStorage> ExcavationCoordinator<S> {
     pub fn entries(&self) -> impl Iterator<Item = &ExcavationEntry> { self.entries.values() }
     pub fn pending_count(&self) -> usize { self.entries.values().filter(|e| e.unresolved()).count() }
     pub fn is_fenced(&self) -> bool { self.fenced }
+    pub(super) fn storage_bytes(&self) -> usize { self.bytes.len() }
     fn current(&mut self, work: &mut Work<'_>) -> Result<()> {
         if self.fenced { return Err(corrupt()); }
         let result = read_storage(&mut self.storage, work);
