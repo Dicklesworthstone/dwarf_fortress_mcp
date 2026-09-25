@@ -18,6 +18,7 @@ pub mod dig_control_policy;
 pub mod dig_designation;
 pub mod dispatcher;
 pub mod excavation_goal;
+pub mod excavation_run;
 pub mod fenced_live_source;
 pub mod fenced_live_source_v1_1;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
