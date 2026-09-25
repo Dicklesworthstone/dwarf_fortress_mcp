@@ -8,6 +8,7 @@
 pub mod coordinator;
 pub mod private_file;
 pub mod rpc;
+pub mod session;
 pub mod workflow;
 mod record;
 pub use record::{ExcavationRunRecord, ExcavationTrigger};
