@@ -22,6 +22,7 @@ pub mod ee_memory;
 pub mod http_transport;
 pub mod job_control_session;
 pub mod live_control_server;
+pub mod live_excavation_run_server;
 pub mod live_job_control_server;
 pub mod live_jobs_server;
 pub mod live_map_server;

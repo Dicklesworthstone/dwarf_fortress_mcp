@@ -1,0 +1,63 @@
+{
+  "evidence_class": "executed_python_references_and_static_rust_inventory_only",
+  "full_repository_qualification": false,
+  "live_fortress": false,
+  "mcp_execution": false,
+  "native_fixture_reference": {
+    "fixture_blobs": {
+      "intent": "5a997f043d15461e8b1da330f90dd526b2cc25d5",
+      "prepared": "d335287ca02259886aabf94cd52beed8ed5b63c0",
+      "stopped": "cad4fd3a2874e93d68b18261fb6e73430ca0793e"
+    },
+    "inventory_vectors": {
+      "empty": "bbfbebc25dfc02666084a76ee467e135a016f4d31b98a015642f865c99e5bbd9",
+      "prepared": "17d20b80afbe66efd532e118315ab6e0511edc09f6287e3ef5d09bd21d10edb1",
+      "stopped": "a6ec8fbbe769f93bb06235b5d083206e195b59fde28ad4ebdbfe94524474a726"
+    },
+    "native_plan": "5055fc61017140b5d058ea0cafd418e0831e16d51b5fdfbca95a7403dcc1e787",
+    "native_token": "f55fb500d29b2132caece85ed6b7d390",
+    "rust_codec_executed": false
+  },
+  "output_reference": {
+    "conservative_reference_bytes": {
+      "explain": 25404,
+      "records": 19143,
+      "schema": 19652
+    },
+    "limit": 32768,
+    "rust_renderer_executed": false
+  },
+  "real_dfhack_sdk": false,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "sampling_reference": {
+    "cases": 288,
+    "scope": "independent arithmetic feasibility reference, not native callbacks or Rust evaluation"
+  },
+  "schema": "dfmcp.excavation-mcp-reference-evidence/1",
+  "schema_checks": {
+    "accepted": 53,
+    "rejected": 104,
+    "scope": "JSON value shape only; byte extent, duplicate fields and integer lexical forms require Rust parsing"
+  },
+  "static_source": {
+    "binary_groups_unexecuted": 1,
+    "registered_tools_static": 11,
+    "runtime_groups_unexecuted": 4,
+    "rust_mcp_groups_unexecuted": 12,
+    "source_sha256": {
+      "crates/dfmcp-adapter/src/excavation_run/session.rs": "17ee8b7c38bbcc763fbc20d03803ffd9122ce2a0f3d11ed3726f46aeaa933d19",
+      "crates/dfmcp-adapter/src/excavation_run/session/native.rs": "a87d842e5ec5139aeef70cba1e5f400dca884ba8c045cef6279018fabb07861c",
+      "crates/dfmcp-adapter/src/excavation_run/session/tests.rs": "3ef278a32d36f00dc83a5c2b8097be77ddafb7ed159c1ac3e8bbdd47c5567ed1",
+      "crates/dfmcp-mcp/src/bin/dfmcp-excavation-run-dev-server.rs": "f4c84d54120dbfd695da580412d24106518ea5cb6a029bc34e546c56d00092e5",
+      "crates/dfmcp-mcp/src/lib.rs": "624d65eae29d84ac5b637042dd1cf17eadf7549d4d30c70c2ed3926f87c16d7e",
+      "crates/dfmcp-mcp/src/live_excavation_run_server.rs": "098ce62ae2bdc5acdd9fd8ba04c5528caa7c604ee76094bd8e91710088a4334e",
+      "crates/dfmcp-mcp/src/live_excavation_run_server/presentation.rs": "af1181ac46ff60351f86ebd0435869505a1340ce3ced2d044132ec3eb38fb410",
+      "crates/dfmcp-mcp/src/live_excavation_run_server/requests.rs": "258f13a7795437f8c7e483ccaa46cac461f6aaa57e7ced8ff5ee1eff11c8a63e",
+      "crates/dfmcp-mcp/src/live_excavation_run_server/runtime.rs": "bbe1ebba3ae1d281dbd423d2025330d6efc7fd52faa765758b4f52ac4c4ca20b",
+      "crates/dfmcp-mcp/src/live_excavation_run_server/tests.rs": "b49bba72ead73113e79c0733480325b245895727e4f01ae92737fed09360fd39",
+      "schemas/mcp_excavation_run_v1.json": "f7d82ded192d4428491a169505b67d03b133007d5ac3f67c9f8cfebbff8039d2",
+      "scripts/check_excavation_mcp_reference.py": "95996b08be0d54b736b00e8efb7d5cd3fcf1ba01127837778366ae6a03dd9f65"
+    }
+  }
+}

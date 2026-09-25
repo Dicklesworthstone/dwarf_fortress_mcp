@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dfmcp.mcp-excavation-run/1",
+  "title": "Isolated excavation-run/1.18 request bodies",
+  "description": "Shape contract for closed JSON request strings (maximum 2048 UTF-8 bytes). Native sampling relationships, exact review identity, current authority, complete response and custody are additionally checked in Rust. False confirmation cannot dispatch. No paths, tokens, arbitrary commands or native protocol selectors.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/identity"
+    },
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/commit"
+    },
+    {
+      "$ref": "#/$defs/query"
+    },
+    {
+      "$ref": "#/$defs/cancel"
+    }
+  ],
+  "$defs": {
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "not": {
+        "pattern": "[^A-Za-z0-9._-]"
+      }
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "not": {
+        "pattern": "[^0-9a-f]"
+      }
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "plan_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "key",
+        "plan_digest"
+      ],
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "observation_witness": {
+          "$ref": "#/$defs/digest"
+        },
+        "game_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1200
+        },
+        "wall_millis": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "samples": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stable_ticks": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interval_ticks": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_gap_ticks": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "observation_witness",
+        "game_ticks",
+        "wall_millis"
+      ],
+      "additionalProperties": false
+    },
+    "commit": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "plan_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "plan_digest",
+        "confirm"
+      ],
+      "additionalProperties": false
+    },
+    "query": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "records"
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "unresolved",
+                    "terminal"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "continuation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/digest"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "schema"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "cancel": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "plan"
+            },
+            "key": {
+              "$ref": "#/$defs/key"
+            },
+            "plan_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          },
+          "required": [
+            "scope",
+            "key",
+            "plan_digest"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "effect"
+            },
+            "key": {
+              "$ref": "#/$defs/key"
+            },
+            "plan_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          },
+          "required": [
+            "scope",
+            "key",
+            "plan_digest"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "session"
+            },
+            "release_for_recovery": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "open_session": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "offline",
+                "recover",
+                "control"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_wall_millis": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_bytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 16809985,
+              "maximum": 67108864
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 8192,
+              "maximum": 65536
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_game_ticks": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at_tick": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+}
