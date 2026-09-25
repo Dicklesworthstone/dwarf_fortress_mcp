@@ -1,0 +1,28 @@
+{
+  "schema": "dfmcp.excavation-run-rust-source-check/1",
+  "rust_compiled": false,
+  "rust_tests_executed": 0,
+  "rust_tests_added": 22,
+  "independent_python_fixtures_checked": 7,
+  "cargo_attempt": "cargo: command not found",
+  "native_or_live_executed": false,
+  "full_qualification": false,
+  "git_blobs": {
+    "crates/dfmcp-adapter/src/excavation_run/coordinator/tests.rs": "51e6f0b651161e27e03cc2fcba0944d7f6f7eb11",
+    "crates/dfmcp-adapter/src/excavation_run/coordinator.rs": "1aad875694bcfba6ffd2a488f9bc5ab70fc294f7",
+    "crates/dfmcp-adapter/src/excavation_run/mod.rs": "2b397723020e7964a652ce08d57af76ded4568d8",
+    "crates/dfmcp-adapter/src/excavation_run/record.rs": "679fbc5981719d457f9923a2c0ecbfeb04b85a7d",
+    "crates/dfmcp-adapter/src/excavation_run/tests.rs": "5aa750b41d2f79113b29676a63036b5b8ac7327c",
+    "crates/dfmcp-adapter/src/lib.rs": "6dd80fca2cbf5373596b83917d40fb6c6d0b906e",
+    "scripts/check_excavation_run_rust_vectors.py": "328d416eb385726b24f1d7dcecfc4c329d401d4e"
+  },
+  "source_sha256": {
+    "crates/dfmcp-adapter/src/excavation_run/coordinator/tests.rs": "c8eb1b46ca23c041f0e4ca17d096e35e83d4a2c0f6e0542317c438594be9c396",
+    "crates/dfmcp-adapter/src/excavation_run/coordinator.rs": "88e83c3c878c2f69564aca9d2d645772634b011067e063b3ed62998c64cbf015",
+    "crates/dfmcp-adapter/src/excavation_run/mod.rs": "b3973d8fba891e4d1c585a4aa51901de4020b33d7dca17f7cc56b0b6d013399e",
+    "crates/dfmcp-adapter/src/excavation_run/record.rs": "b85b3bfd5077e0b4ee385600d75c2c93f3896eecad3e61530faf5f7133531c8e",
+    "crates/dfmcp-adapter/src/excavation_run/tests.rs": "13525689dc1b4ac1d1fd2bfb1b34f66ab4db947fe17a9e5e2122002fab93be82",
+    "crates/dfmcp-adapter/src/lib.rs": "c3ef932a36a4842d4e900a3468e6fa1f319212830daafbe04e803b9ff4ef2751",
+    "scripts/check_excavation_run_rust_vectors.py": "abf1768f18615a21de6fb3f8583eb9993dd8cbd922fa348efda550cb417a66ce"
+  }
+}

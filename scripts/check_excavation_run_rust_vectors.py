@@ -39,10 +39,22 @@ def vectors():
     prepared = prefix + bytes(5) + struct.pack('>QBIQQQB', 0, 0, 0, 0, 806500, 806500, 0)
     stopped = (prefix + bytes([3, 3, 1, 1, 1])
                + struct.pack('>QBIQQQB', 806504, 1, 2, 806501, 806504, 806504, 1) + field(after))
-    return {'capture': before, 'plan': plan, 'token': token,
+    result = {'capture': before, 'plan': plan, 'token': token,
             'intent': b'DFMEP018' + key + spec + field(before),
             'prepared': prepared + digest('dfmcp-excavation-run-receipt/1', prepared),
             'stopped': stopped + digest('dfmcp-excavation-run-receipt/1', stopped)}
+    binding = (field(b'127.0.0.1:5000') + struct.pack('>QI', 41, 2) + field(b'region1')
+               + struct.pack('>III', 64, 64, 8) + field(b'df') + field(b'dfhack'))
+    journal, head = b'DFMEJ018', bytes(32)
+    payloads = [b'\0' + binding, b'\1' + field(result['intent']),
+                b'\2' + key + field(result['prepared']), b'\3' + key + plan,
+                b'\4' + key + field(result['stopped'])]
+    for sequence, payload in enumerate(payloads):
+        frame = struct.pack('>II', len(payload), sequence) + head + payload
+        head = digest('dfmcp-excavation-coordinator/1', frame)
+        journal += frame + head
+    result['journal'] = journal
+    return result
 
 
 def main():
@@ -59,7 +71,7 @@ def main():
         if path.read_bytes() != expected:
             raise SystemExit('fixture differs: ' + name)
         print(f'{name}: {len(raw)} bytes; independent SHA-256 {hashlib.sha256(raw).hexdigest()}')
-    print('PASS: six independent fixtures; Rust compilation/execution NOT performed')
+    print(f'PASS: {len(vectors())} independent fixtures; Rust compilation/execution NOT performed')
 
 
 if __name__ == '__main__':
