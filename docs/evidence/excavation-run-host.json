@@ -1,0 +1,58 @@
+{
+  "base_commit": "5690b765200ada8621a27677c6532bd6357874e0",
+  "command": "PYTHONPATH=scripts python3 -W error -m unittest -v test_excavation_run_client test_excavation_run_store",
+  "cpp_executed_this_increment": false,
+  "full_repository_qualification": false,
+  "git_blobs": {
+    "scripts/excavation_run_client.py": "28572846754f0f3497ff6bbf9fc94de6ba6137ce",
+    "scripts/excavation_run_rpc.py": "d1cf9dcd0fd0c10d98d827efe8a4d0c86bda7eb3",
+    "scripts/excavation_run_store.py": "397e7d755655a4d4c77d7e5654ffc644a8c28c2e",
+    "scripts/excavation_run_wire.py": "bee06edb4ebf430966e9e40fd24b5f9e95b360d5",
+    "scripts/test_excavation_run_client.py": "bc90724c2f3e8c78287856e6d0e20f331c295081",
+    "scripts/test_excavation_run_store.py": "db1635398b242c6211e2fc7d841a606c758157c9"
+  },
+  "live_fortress": false,
+  "mutations": [
+    {
+      "exit_code": 1,
+      "focused_test": "test_excavation_run_store.LifecycleTests.test_file_and_directory_sync_failures_prevent_commit",
+      "mutant": "skip_intent_file_sync",
+      "rejected": true
+    },
+    {
+      "exit_code": 1,
+      "focused_test": "test_excavation_run_store.LifecycleTests.test_stale_confirmation_and_existing_native_key_never_prepare",
+      "mutant": "skip_exact_confirmation",
+      "rejected": true
+    },
+    {
+      "exit_code": 1,
+      "focused_test": "test_excavation_run_store.LifecycleTests.test_new_key_cannot_bypass_unresolved_or_corrupt_journal_before_connection",
+      "mutant": "skip_pending_fence",
+      "rejected": true
+    },
+    {
+      "exit_code": 1,
+      "focused_test": "test_excavation_run_store.LifecycleTests.test_confirmed_start_publishes_intent_and_dispatch_before_native_effect",
+      "mutant": "skip_dispatch_journal",
+      "rejected": true
+    }
+  ],
+  "power_loss_qualification": false,
+  "production_admission": false,
+  "real_dfhack_sdk": false,
+  "real_protobuf_runtime": false,
+  "result": "passed",
+  "rust_mcp": false,
+  "schema": "dfmcp.excavation-run-host-executed-evidence/1",
+  "scope": "Python codec, fixed RPC, POSIX journal/CLI; joined TCP protocol doubles and subprocesses",
+  "source_sha256": {
+    "scripts/excavation_run_client.py": "ab1bd968f5e6f085fa3bf36620aa5186fe5c3318e3b3bcef2a3ab168f95952af",
+    "scripts/excavation_run_rpc.py": "ab27819c87a91024eb2b67c29616e3dcc5092b54e915b94ab03e3abf9c2c7efa",
+    "scripts/excavation_run_store.py": "444669638eb172f2cec51be3eea3a6ea30367fe6dad4deda43e1a6995627da28",
+    "scripts/excavation_run_wire.py": "1a5de4d33371df9e8446782c516208c5ff8c2c9016d808174bf535e55a3c6d83",
+    "scripts/test_excavation_run_client.py": "f711b564f6bcf1e0a0a122927d49ad13aa2a6a8417ee6ff4f9ba6a139fe0574e",
+    "scripts/test_excavation_run_store.py": "9d8250add6336858808f8c1f230f2c1d6491340d4c6d0411f7bccd48131f25f3"
+  },
+  "tests": 48
+}
