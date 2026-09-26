@@ -1,0 +1,142 @@
+{
+  "schema": "dfmcp.build-placement-mcp/1",
+  "status": "implemented_unadmitted_development_only",
+  "binary": "dfmcp-build-placement-dev-server",
+  "module": "dfmcp_mcp::build_placement_server",
+  "backend_contract": "architecture/build_placement_rust_v1_19.json",
+  "protocol": "1.19",
+  "session_family": 19,
+  "tools": [
+    "fortress.open_session",
+    "fortress.observe",
+    "fortress.query",
+    "fortress.plan",
+    "fortress.commit",
+    "fortress.wait",
+    "fortress.cancel",
+    "fortress.checkpoint",
+    "fortress.restore",
+    "fortress.explain",
+    "fortress.doctor"
+  ],
+  "configuration": {
+    "allowed_environment_names": [
+      "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
+      "DFMCP_BUILD_WORLD_FOLDER",
+      "DFMCP_BUILD_SITE_ID",
+      "DFMCP_BUILD_SCOPE",
+      "DFMCP_BUILD_JOURNAL",
+      "DFMCP_BUILD_ENDPOINT",
+      "DFMCP_BUILD_TOKEN",
+      "DFMCP_BUILD_ALLOW_PLACE",
+      "DFMCP_BUILD_CHECKPOINT_POLICY",
+      "DFMCP_BUILD_PROTECTED",
+      "DFMCP_BUILD_MODE"
+    ],
+    "opt_in_exact_value": "1",
+    "unknown_dfmcp_names_refused": true,
+    "production_marker_presence_refused": true,
+    "modes": [
+      "control",
+      "recover",
+      "offline"
+    ],
+    "default_mode": "control",
+    "checkpoint_policies": [
+      "required",
+      "disposable-fortress-no-checkpoint"
+    ],
+    "default_checkpoint_policy": "required",
+    "maximum_protected_regions": 32,
+    "client_selected_paths_or_credentials": false
+  },
+  "selection": {
+    "shape": [
+      "kind",
+      "item_id",
+      "x",
+      "y",
+      "z"
+    ],
+    "kinds": [
+      "bed",
+      "chair",
+      "table"
+    ],
+    "maximum_json_bytes": 128
+  },
+  "policy": {
+    "actual_core_spatial_lease": true,
+    "lease_ticks": 1200,
+    "target_context_and_item_origin_must_fit": true,
+    "protected_item_and_target_refused": true,
+    "review_binds": [
+      "complete_plan",
+      "journal",
+      "source",
+      "session",
+      "lease",
+      "scope",
+      "protected_regions",
+      "checkpoint_policy"
+    ],
+    "review_required_for_new_commit": true,
+    "runtime_and_policy_rechecked_after_dispatch_sync": true,
+    "query_only_preparation_retirement": true,
+    "verified_game_checkpoint_available": false,
+    "native_global_fence_and_capacity_rechecked_before_intent": true
+  },
+  "query": {
+    "maximum_json_bytes": 2048,
+    "modes": [
+      "records",
+      "get",
+      "selection",
+      "schema"
+    ],
+    "record_page_limit": [
+      1,
+      8
+    ],
+    "pending_first": true,
+    "continuation_binds_journal_head": true,
+    "unknown_duplicate_or_null_fields_allowed": false,
+    "native_calls": 0
+  },
+  "response": {
+    "agent_turn": "dfmcp.agent_turn/1",
+    "canonical_anchor": null,
+    "native_and_journal_evidence_references": true,
+    "complete_pending_inventory_independent_of_pagination": true,
+    "failed_custody_withdraws_inventory_certainty": true,
+    "output_reservation_bytes": 65536,
+    "output_token_proxy_bytes": 4,
+    "output_token_range": [
+      16384,
+      65536
+    ],
+    "maximum_work_bytes": 1073741824,
+    "default_wall_milliseconds": 10000,
+    "maximum_wall_milliseconds": 60000,
+    "placed_proves_completed_building": false,
+    "typed_historical_native_insertion": true,
+    "native_summary_separate_from_local_inventory": true,
+    "cached_evidence_requires_current_query": true
+  },
+  "runtime": {
+    "owner": "inherited Asupersync blocking task with joined result",
+    "current_foreground_context_checked_during_native_io": true,
+    "retained_connection_deadline_renewable": false,
+    "detached_worker_or_fallback_thread": false,
+    "automatic_reconnect_for_commit": false,
+    "effective_io_and_spawn_authority_required": true,
+    "inherited_blocking_pool_required": true
+  },
+  "production_runner_added": false,
+  "registry_admission_added": false,
+  "global_controller_fence": false,
+  "work_items": [
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ]
+}

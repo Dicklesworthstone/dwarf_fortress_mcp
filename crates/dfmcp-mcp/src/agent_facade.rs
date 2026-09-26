@@ -857,7 +857,7 @@ fn project_response(
     profile: ObservationProfile,
     session_hint: Option<&str>,
 ) -> String {
-    let mut payload: Value = match serde_json::from_str(&raw) {
+    let mut payload: Value = match serde_json::from_str::<Value>(&raw) {
         Ok(value) if value.is_object() => value,
         Ok(_) | Err(_) => malformed_payload(operation),
     };

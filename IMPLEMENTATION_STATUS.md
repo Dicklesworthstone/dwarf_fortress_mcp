@@ -22,6 +22,7 @@ The repository contains:
 - a pause-control/1.7 bridge/client/development MCP runtime supporting prepare, durably coordinated commit, receipt-verified reconciliation and bounded foreground recovery for `Pause { paused }` only;
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - offline read-only pause-effect discovery without a bridge connection or mutation authority;
+- an explicitly unadmitted furniture/1.19 native, Rust and eleven-tool MCP development path for exact-item bed/chair/table placement, durable single-attempt coordination and original-key recovery;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
@@ -42,6 +43,58 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
+
+### Executed furniture placement through the eleven-tool MCP surface
+
+`dfmcp-build-placement-dev-server` now connects the native/Rust furniture path to
+the frozen eleven tools. An agent can open operator-selected custody, observe an
+exact item and target, prepare and review its sealed plan, commit once, query a
+lost outcome, retire a preparation with Query authority, or inspect the original
+journal offline. `docs/BUILD_PLACEMENT_MCP.md` contains the configuration and
+complete workflow. Typed native building/job/item insertion details make placed
+receipts useful for subsequent observation selection without decoding binary data.
+
+Current host spatial leases cover both the exact item's ground position and the
+target context; protected regions and checkpoint policy gate preparation and
+commit. Required checkpoint policy refuses by default. Only explicit operator
+disposable-fortress configuration allows this development placement path. Review
+seals bind the full plan, original session/source/journal and host policy. Reopened
+history never restores commit permission. Native-global uncertainty and capacity
+are separate from local inventory and are checked before creating new intent.
+
+The actual executable built on the pinned nightly and **all seven real
+stdio/TCP/private-file process tests passed**. They cover modern discovery and all
+eleven tool names, reviewed one-write placement and local replay, lost-reply
+restart recovery, Query-only retirement after placement revocation, policy
+refusals, offline immutable uncertainty, closed-query errors with visible pending
+work, and a native uncertainty fence appearing before or during preflight without
+stranding new local intent. The native TCP peer is an explicit joined test double
+using the independent native engine corpus.
+
+All **25 focused MCP Rust tests passed**, with zero ignored: eighteen handler and
+policy groups and seven configuration/runtime groups. Two existing runtime-entry
+tests also passed. The tests exercised authority expiry at an advancing native
+tick, cached-evidence redaction, original-connection dispatch, review mismatch,
+protected item/target and expired leases, bounded response refusal, strict query
+parsing, absorbing uncertainty, and refused fallback work without effective I/O,
+spawning authority or an owned blocking pool.
+Exact test cases, compiler settings, binary identity and 37 source hashes are
+recorded in `docs/evidence/build-placement-rust-mcp.json`.
+
+Native I/O uses inherited Asupersync blocking work and joined results. Effective
+I/O and spawning authority plus an owned blocking pool are required; the optional
+asynchronous I/O facade is not mistaken for that authority. Restricted contexts
+cannot create fallback workers. Current Query authorization also gates cached
+failure evidence; revoked or expired reads cannot recover it through an error or
+forced-release response. A native indeterminate outcome stays visibly
+`indeterminate` even when its coordinator record is immutable.
+
+Existing MCP source and fixture compilation blockers were minimally repaired to
+enable executable checks. This is focused Rust/process development evidence, not
+full workspace qualification. Native SDK, live fortress, verified game checkpoint,
+receipt-linked construction-completion obligations and global controller fencing
+remain unestablished. Canonical Agent Turn anchors stay null. The production runner
+map and empty compatibility registry remain unchanged.
 
 ### Executed Rust furniture placement, durable custody and recovery
 
@@ -77,8 +130,8 @@ Those unrelated assertions were preserved. Earlier uncompiled notes below
 describe their original implementation increments; this executed scope does not
 turn the entire repository into a qualified release. This does not establish a
 real DFHack SDK build, live fortress campaign, game checkpoint, global controller
-fence or production admission. The agent-facing MCP integration is a separate
-increment.
+fence or production admission. The agent-facing MCP integration is documented in
+the preceding section.
 
 ### Native exact-item furniture placement through the durable developer client
 

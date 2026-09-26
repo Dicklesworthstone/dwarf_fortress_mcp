@@ -92,7 +92,7 @@ pub(super) fn close(
         let sessions = lock(&SESSIONS)?;
         match sessions.get(&id) {
             Some(handle) => handle.clone(),
-            None => return replay(&lock(&CLOSED)?, id, bytes, tokens),
+            None => return replay(&*lock(&CLOSED)?, id, bytes, tokens),
         }
     };
     // Recover only enough ownership to DROP a poisoned session. No action,
@@ -102,7 +102,7 @@ pub(super) fn close(
         Err(poisoned) => poisoned.into_inner(),
     };
     let Some(session) = owned.as_ref() else {
-        return replay(&lock(&CLOSED)?, id, bytes, tokens);
+        return replay(&*lock(&CLOSED)?, id, bytes, tokens);
     };
     let budget = session.budget;
     let out = response(id);

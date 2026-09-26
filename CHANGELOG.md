@@ -24,6 +24,19 @@ readiness.
 
 ### Added
 
+- Executable furniture placement through the isolated
+  `dfmcp-build-placement-dev-server`: the existing eleven tools now connect exact
+  observation, policy-bound review, one-attempt commit, original-key recovery,
+  Query-only preparation retirement and offline durable evidence. Real host
+  item/target leases, protected regions and explicit checkpoint policy guard
+  effects; cached evidence requires current Query authority. Typed insertion
+  IDs support follow-up observation, and immutable native uncertainty remains
+  visibly unresolved. The binary built on the pinned nightly; all 25 focused MCP
+  Rust tests and seven real stdio/TCP/private-file scenarios pass. Correct effective runtime-capability
+  checks and minimal older compilation repairs make the path executable without
+  changing dependency pins or enabling production admission. See
+  `docs/BUILD_PLACEMENT_MCP.md`.
+
 - Executed Rust furniture/1.19 placement backend: strict canonical capture and
   receipt validation, current-authority bounded TCP, a private append-only
   coordinator, and a session retaining the original preparation connection.

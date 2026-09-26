@@ -182,13 +182,13 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
     let diagnosis = session.query(json!({"kind":"production_diagnosis"}))?;
     assert_eq!(diagnosis["ok"], true);
     assert_eq!(diagnosis["summary"]["jobs_considered"], 0);
-    let digest = lock(&resolve(Some(session.id.to_string()))?)?
+    let digest = lock(&*resolve(Some(session.id.to_string()))?)?
         .state
         .source_digest()?
         .to_string();
     assert_eq!(diagnosis["source_digest"], digest);
     // Discovery is checked with an adequate output budget, not by weakening it.
-    lock(&resolve(Some(session.id.to_string()))?)?
+    lock(&*resolve(Some(session.id.to_string()))?)?
         .budget
         .max_output_tokens = 16384;
     let schema = parse(&super::super::fortress_query(
@@ -219,7 +219,7 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
         )?["ok"],
         true
     );
-    let anchor = lock(&resolve(Some(session.id.to_string()))?)?.anchor()?;
+    let anchor = lock(&*resolve(Some(session.id.to_string()))?)?.anchor()?;
     let failure = parse(&super::super::fortress_observe(Some(
         session.id.to_string(),
     )))?;

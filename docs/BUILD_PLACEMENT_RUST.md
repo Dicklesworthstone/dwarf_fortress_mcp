@@ -134,3 +134,6 @@ evidence, not full warning-denied workspace or production qualification.
 This implementation advances beads `df-dfhack-bridge-plane-c-pic.4` and
 `df-dfhack-bridge-plane-c-pic.5`; their broader mutation and live-campaign scope
 remains open.
+
+The isolated agent-facing workflow is documented in
+[`BUILD_PLACEMENT_MCP.md`](BUILD_PLACEMENT_MCP.md).

@@ -15,8 +15,10 @@
 //! transparent). Recorded as DRAFT-D in `docs/DOGFOODING_FASTMCP.md`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use fastmcp_rust::modern::ResourceTemplate;
+use dfmcp_adapter::GameAdapter;
+use fastmcp_rust::ResourceTemplate;
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
 };

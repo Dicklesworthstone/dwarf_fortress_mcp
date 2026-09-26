@@ -82,7 +82,8 @@ struct PendingPlan {
 /// records. The laboratory fills the bridge and manifest slots with honest
 /// absence markers; the authenticated live plane fills them from the admitted
 /// compatibility tuple instead.
-struct SessionNegotiation {
+#[derive(Clone)]
+pub(crate) struct SessionNegotiation {
     mcp_protocol_version: &'static str,
     dfmcp_protocol_version: &'static str,
     schema_catalog_digest: String,
@@ -105,7 +106,7 @@ impl SessionNegotiation {
         }
     }
 
-    fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         json!({
             "mcp_protocol_version": self.mcp_protocol_version,
             "dfmcp_protocol_version": self.dfmcp_protocol_version,
@@ -311,7 +312,7 @@ pub(crate) fn next_context(session: &mut LabSession) -> Result<(u128, OperationC
 /// prepared. `ctx` carries exactly the session's negotiated grants —
 /// transport identity grants nothing — and the adapter re-authorizes at the
 /// effect boundary.
-fn authorize_entry(
+pub(crate) fn authorize_entry(
     ctx: &OperationContext,
     capability: Capability,
     risk: RiskTier,
@@ -607,6 +608,7 @@ pub fn fortress_open_session(
         fortress_id: _,
         grants: _,
         budget: _,
+        negotiation: _,
         next_request_id: _,
         adapter,
         pending: _,

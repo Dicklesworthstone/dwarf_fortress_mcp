@@ -1471,6 +1471,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             );
         }
     };
+    let budget = guard.budget;
     let response = match guard.adapter.query(
         &QueryRequest {
             anchor,
@@ -1478,10 +1479,10 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 kinds,
                 predicate: None,
                 order: QueryOrder::EntityIdAscending,
-                limit: guard.budget.max_entities,
+                limit: budget.max_entities,
                 continuation: None,
             },
-            max_output_tokens: guard.budget.max_output_tokens,
+            max_output_tokens: budget.max_output_tokens,
             continuation: None,
         },
         &context,

@@ -761,7 +761,7 @@ mod tests {
         executable_file.sync_all()?;
         set_permissions(&executable, std::fs::Permissions::from_mode(0o700))?;
         let metadata = executable.metadata()?;
-        let now = 1_800_000_000;
+        let now: u64 = 1_800_000_000;
         let ticket_path = root.join("ticket.json");
         let mut ticket = AdmissionTicket {
             schema: TICKET_SCHEMA.to_owned(),

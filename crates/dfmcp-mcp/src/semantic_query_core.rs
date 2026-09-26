@@ -599,7 +599,7 @@ pub fn execute(
             let edge_kinds = bounded_names(edge_kinds, 32)?
                 .iter()
                 .map(|kind| edge_kind(kind))
-                .collect::<Result<_>>()?;
+                .collect::<Result<Vec<_>>>()?;
             let result = analyze_dependencies(snapshot, scope, &edge_kinds, graph_budget)?;
             json!({"kind":"dependencies", "truncated":false, "continuation":null,
                 "components":result.components.iter().map(|component| json!({

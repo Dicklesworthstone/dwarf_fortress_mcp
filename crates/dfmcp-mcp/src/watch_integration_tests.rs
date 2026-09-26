@@ -1,4 +1,6 @@
-use super::super::{semantic_query, watch_refresh};
+use super::super::{anchor_json, semantic_query};
+#[path = "watch_refresh.rs"]
+mod watch_refresh;
 use super::*;
 use dfmcp_adapter::{ObservationFrame, ObservationPayload};
 use dfmcp_core::{

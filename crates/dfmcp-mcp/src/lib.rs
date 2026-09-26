@@ -15,6 +15,7 @@
 pub mod admission;
 pub mod agent_facade;
 pub mod agent_turn;
+pub mod build_placement_server;
 pub mod dig_control_server;
 pub mod dig_recovery_server;
 pub mod doctor;
@@ -113,7 +114,8 @@ mod runtime_entry_tests {
     fn runtime_entry_runs_owned_blocking_work() -> Result<(), Box<dyn Error>> {
         assert!(Cx::current().is_none());
         run_with_runtime_cx(|cx| async move {
-            assert!(cx.io().is_some());
+            assert!(cx.capabilities().io);
+            assert!(cx.blocking_pool_handle().is_some());
             assert!(cx.timer_driver().is_some());
             let caller = std::thread::current().id();
             let mut child = cx.spawn_blocking(move |child_cx| {
