@@ -125,6 +125,24 @@ void suite() {
         [](auto &c) { for (auto n : {1, 3, 5, 7}) c.tiles[n].shape = 2; },
     };
     for (const auto &change : blocked) { auto c = initial(); change(c); CHECK(!c.eligible()); }
+    ++groups; // Bookkeeping bits remain exactly witnessed; all other flags refuse.
+    for (const auto flags : {std::uint32_t{0}, std::uint32_t{1} << 28,
+        std::uint32_t{1} << 29, COMPUTED_ITEM_FLAGS}) {
+        Fixture f; f.game.value.item.other_flags = flags;
+        CHECK(f.game.value.eligible()); const auto before = f.prepare();
+        const auto &placed = f.commit(); CHECK(placed.phase == Phase::Placed);
+        CHECK(placed.before.item.other_flags == flags && placed.after->item.other_flags == flags);
+        CHECK(placed.before.encode() == before.before.encode()); CHECK(f.game.writes == 1);
+        for (unsigned bit = 0; bit < 32; ++bit) {
+            auto c = initial(); c.item.other_flags = flags | (std::uint32_t{1} << bit);
+            CHECK(c.eligible() == (bit == 28 || bit == 29));
+        }
+    }
+    for (const auto bit : {28u, 29u}) {
+        Fixture f; f.prepare(); f.game.value.item.other_flags = std::uint32_t{1} << bit;
+        CHECK(f.game.value.eligible()); CHECK(f.commit().phase == Phase::Refused);
+        CHECK(f.game.writes == 0); // Harmless changes still invalidate sealed knowledge.
+    }
     ++groups; // Hidden item data has no accidental attribute backing.
     for (Presence p : {Presence::Missing, Presence::Hidden}) {
         auto c = initial(); c.item = Item{}; c.item.presence = p;

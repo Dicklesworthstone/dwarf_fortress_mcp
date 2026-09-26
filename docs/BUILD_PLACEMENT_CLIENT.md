@@ -53,8 +53,10 @@ Only a fresh preparation returned on that connection permits one commit. Query,
 replay, restart and imported evidence cannot restore permission.
 
 Complete JSON responses are limited to 64 KiB and include an authority-free
-Agent Turn with local pending work, an exact original capture anchor when
-available, and explicit historical/current distinctions. The finite record and
+Agent Turn with local pending work, an exact original native capture reference
+when available, and explicit historical/current distinctions. This standalone
+client has no canonical world adapter; its canonical `anchor` stays null rather
+than relabeling native generation/sequence as a world snapshot. The finite record and
 view shapes are reserved before dispatch. Filesystem operations have cooperative
 budget checks, not hard real-time cancellation guarantees.
 
@@ -65,15 +67,16 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
   test_build_placement_wire test_build_placement_store test_build_placement_client -v
 ```
 
-The first increment passes 51 Python tests: 19 strict codec groups, 15 private
-storage groups and 17 actual loopback/RPC/CLI workflow groups. Native byte parity
+The current source passes 52 Python tests: 19 strict codec groups, 15 private
+storage groups and 18 actual loopback/RPC/CLI workflow groups. Native byte parity
 uses all eight independently constructed engine fixtures. Failure scenarios
 include lost preparation/commit replies, recovery after reopen, permission
 revocation, unknown source records, receipt integrity, immutable uncertainty,
 pre-dispatch publication failure and post-effect receipt publication failure.
-The TCP peers are explicit joined test doubles. The accompanying native plugin
-is a separate increment; these tests do not establish its execution or a real
-DFHack build.
+The TCP peers are explicit joined test doubles. Maximal text receipts and complete
+64-row inventory pages fit the output ceiling. The actual native handler tests
+and producer-to-Python byte checks are described in `BUILD_PLACEMENT_NATIVE.md`;
+neither test scope establishes a real DFHack SDK build or live fortress.
 
 ## Private durable placement directory
 

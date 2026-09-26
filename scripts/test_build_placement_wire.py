@@ -256,6 +256,17 @@ class FurnitureWireTests(unittest.TestCase):
         c = replace(self.before, item=replace(self.before.item, quality=5, subtype=123,
                     ground=replace(self.before.item.ground, dig=1, building=5, occupancy_other=123)))
         self.assertTrue(c.eligible)
+        # DF item cache flags are harmless, but their full bytes remain witnessed.
+        for flags in (1 << 28, 1 << 29, (1 << 28) | (1 << 29)):
+            c = replace(self.before, item=replace(self.before.item, other_flags=flags))
+            self.assertTrue(c.eligible)
+            self.assertNotEqual(c.witness, self.before.witness)
+            self.assertEqual(c.expected_after().item.other_flags, flags)
+            self.assertNotEqual(w.Plan('golden', c).digest, self.plan.digest)
+        for bit in range(32):
+            if bit not in (28, 29):
+                c = replace(self.before, item=replace(self.before.item, other_flags=(1 << bit) | (1 << 28)))
+                self.assertFalse(c.eligible)
         self.assertFalse(c.view()['pathfinding_proved'])
         for index in (1, 3, 5, 7):
             tiles = tuple(t if n in (4, index) else replace(t, shape=2) for n, t in enumerate(self.before.tiles))

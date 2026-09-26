@@ -7,7 +7,6 @@ deconstruction, item substitution, game checkpoint or completed-building claim.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 
 from build_placement_rpc import Authority, Budget, Client, Reply
@@ -24,11 +23,12 @@ def bounded_output(value: dict) -> bytes:
     return out
 
 
-def anchor(plan: Plan) -> dict:
+def capture_reference(plan: Plan) -> dict:
     before = plan.before
-    identity = canonical({'folder': before.folder, 'site': before.site})
-    return {'fortress_id': hashlib.sha256(identity).hexdigest(), 'epoch': before.generation,
-            'sequence': before.sequence, 'game_tick': before.tick, 'state_hash': before.witness.hex()}
+    return {'schema': 'dfmcp.build-capture-reference/1', 'profile': 'furniture/1.19',
+            'folder': before.folder, 'site': before.site, 'native_generation': before.generation,
+            'native_sequence': before.sequence, 'game_tick': before.tick,
+            'capture_sha256': before.witness.hex()}
 
 
 def packet(operation: str, out: dict, plan: Plan | None = None) -> dict:
@@ -47,9 +47,11 @@ def packet(operation: str, out: dict, plan: Plan | None = None) -> dict:
             'agent_turn': {
                 'schema': 'dfmcp.agent_turn/1', 'operation': 'build_placement.' + operation,
                 'phase': 'reconcile' if pending else 'inspect' if historical else 'propose',
-                'session_id': None, 'request_id': None, 'anchor': None if plan is None else anchor(plan),
-                'continuity': {'status': 'stale' if historical and plan else 'bootstrap',
+                'session_id': None, 'turn_id': None, 'request_id': None, 'anchor': None,
+                'continuity': {'status': 'indeterminate' if pending and plan is None
+                               else 'stale' if historical and plan else 'bootstrap',
                                'basis': None, 'gap': None, 'reset_reason': None},
+                'profile': 'forensic' if historical else 'tactical',
                 'briefing': {'runtime_admitted': False, 'mutation_admissible': False,
                              'development_workflow': True, 'construction_completion_proven': False},
                 'changes': [], 'attention': [], 'active_work': work,
@@ -58,7 +60,8 @@ def packet(operation: str, out: dict, plan: Plan | None = None) -> dict:
                                 'Current terrain, finished buildings and game checkpoint are not established.'],
                 'coverage': {'profile': 'furniture/1.19', 'history': 'retained_local_intents_only',
                              'global_controller_fence': False},
-                'budget': {'output_bytes_limit': MAX_OUTPUT}, 'references': []}}
+                'budget': {'output_bytes_limit': MAX_OUTPUT, 'token_count_measured': False},
+                'references': [] if plan is None else [capture_reference(plan)]}}
 
 
 def plan_view(plan: Plan) -> dict:

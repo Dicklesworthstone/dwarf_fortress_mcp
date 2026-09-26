@@ -347,7 +347,25 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(result['result']['effect_status'], 'placed')
             self.assertFalse(result['result']['native_contacted'])
             self.assertFalse(result['result']['construction_completion_proven'])
+            self.assertIsNone(result['agent_turn']['anchor'])
+            self.assertEqual(result['agent_turn']['references'][0]['capture_sha256'], plan().before.witness.hex())
+            self.assertEqual(result['agent_turn']['profile'], 'forensic')
             self.assertEqual(server.effects, 1)
+
+    def test_maximal_text_receipt_and_full_inventory_pages_fit(self):
+        before = replace(plan().before, folder='\U00010000' * 128)
+        value = w.Plan('k' * 128, before)
+        proof = w.Record.decode(native_record(phase='placed')).insertion
+        record = w.Record(value, 'placed', 'none', before.expected_after(), proof)
+        manifest = rpc.Manifest(41, '\U00010000' * 32, '\U00010000' * 32)
+        out = store.State(value, manifest, ('127.0.0.1', 65535), terminal=record,
+                          terminal_manifest=manifest).view()
+        self.assertLess(len(cli.bounded_output(cli.packet('inspect', out, value))), cli.MAX_OUTPUT)
+        rows = [{'key': 'k' * 128, 'plan_digest': 'f' * 64, 'pending': True,
+                 'phase': 'indeterminate', 'dispatch_intent_recorded': True}] * 64
+        inventory = {'rows': rows, 'pending_work': rows, 'pending_count': 256,
+                     'total': 256, 'continuation': 'a' * 2048}
+        self.assertLess(len(cli.bounded_output(cli.packet('inventory', inventory))), cli.MAX_OUTPUT)
 
     def test_lost_reply_reopen_query_and_no_new_dispatch(self):
         with tempfile.TemporaryDirectory() as temp, NativeDouble(connections=2, lose_on='CommitPlacement') as server, server.environment():

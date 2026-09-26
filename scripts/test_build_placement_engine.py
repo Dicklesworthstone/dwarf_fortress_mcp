@@ -99,6 +99,7 @@ def check(compiler: str, mutations: bool, selected: list[str] | None = None) -> 
             raise RuntimeError("actual C++ bytes differ from independently constructed native vectors")
         killed = []
         changes = {
+            "missing_item_flag_filter": ("!(other_flags & ~COMPUTED_ITEM_FLAGS)", "true"),
             "missing_full_revalidation": ("current.encode() != r.before.encode()", "false"),
             "missing_uncertainty_fence": ("require(!unresolved_, 8);", "require(true, 8);"),
             "terminal_replay_not_immutable": ("if (r.phase != Phase::Prepared) return r;",

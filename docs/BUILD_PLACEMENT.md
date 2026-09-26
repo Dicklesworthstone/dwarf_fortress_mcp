@@ -2,8 +2,10 @@
 
 `bridge/common/build_placement.h` implements one-shot placement of one ordinary
 bed, chair or table using one exact existing item. The engine is native-independent
-C++17; callbacks must execute inside one suspended DFHack dispatch. This first
-increment does not supply a native RPC handler or a Rust/MCP control path.
+C++17; callbacks must execute inside one suspended DFHack dispatch. The isolated
+native RPC integration is described in `BUILD_PLACEMENT_NATIVE.md`, and the
+durable Python development client in `BUILD_PLACEMENT_CLIENT.md`. Neither adds
+a Rust/MCP production control path or live admission.
 
 ## Plan and evidence
 
@@ -12,7 +14,10 @@ map dimensions, building/job ID horizons, building count, one selected item and 
 3x3 same-level terrain context. Hidden/missing cells and items have no attribute
 payload. Placement requires a paused, visible, dry, supported, free floor target,
 at least one adjacent free floor, and an unworn unclaimed ground item of the exact
-kind. This narrow filter is not pathfinding, structural safety or a game checkpoint.
+kind. Native `temps_computed` and `weight_computed` flags (bits 28 and 29) are
+permitted bookkeeping; every flag remains witnessed exactly, and a change still
+invalidates preparation. All other residual item flags make the item unavailable.
+This narrow filter is not pathfinding, structural safety or a game checkpoint.
 
 Preparation is effect-free, expires after 60 monotonic seconds, and cannot be
 renewed by replay. Commit rereads the entire capture before any writer invocation.
@@ -51,11 +56,15 @@ python3 scripts/test_build_placement_engine.py --mutations
 python3 scripts/test_build_placement_engine.py --compiler clang++
 ```
 
-GCC 14.2 and Clang 17 each pass 22 groups / 979 actual C++ assertions with warnings
-denied and nonrecovering UBSan. Eight C++ byte outputs match an independently
-constructed Python corpus. Four separately compiled weakened engines fail their
-regressions: missing full revalidation, uncertainty fencing, immutable replay and
-final readback. `--mutation NAME` runs one mutation separately; `--evidence PATH`
-retains source-bound JSON. This is not real DFHack SDK, live-fortress, Rust/MCP,
-power-loss or full repository qualification. Beads df-dfhack-bridge-plane-c-pic.4/.5
-remain open; all existing protocols and production admission are unchanged.
+The current computed-flag increment passes 23 groups / 1,133 actual C++ assertions
+with GCC 13.3, warnings denied and nonrecovering UBSan. Eight C++ byte outputs
+still match the unchanged independently constructed Python corpus. Five separately
+compiled weakened engines fail their regressions: missing item-flag filtering,
+full revalidation, uncertainty fencing, immutable replay and final readback.
+`--mutation NAME` runs one mutation separately; `--evidence PATH` retains
+source-bound JSON. The earlier engine revision had GCC 14.2 and Clang 17 evidence;
+Clang is unavailable in the current environment, so that earlier evidence does not
+qualify the modified source. These checks are not real DFHack SDK, live-fortress,
+Rust/MCP, power-loss or full repository qualification. Beads
+df-dfhack-bridge-plane-c-pic.4/.5 remain open; all other protocols and production
+admission are unchanged.

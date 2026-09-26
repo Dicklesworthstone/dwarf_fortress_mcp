@@ -12,6 +12,9 @@ constexpr std::size_t MAX_RECORDS = 256, MAX_BUILDINGS = 65536;
 constexpr std::size_t MAX_CAPTURE_BYTES = 2048, MAX_RECORD_BYTES = 6144;
 constexpr std::uint64_t PREPARE_MS = 60000;
 constexpr std::uint64_t MAX_TICK = std::uint64_t{UINT32_MAX} * 403200 + 403199;
+// Pinned DF item_flags: these cache bookkeeping bits do not claim, move, hide,
+// forbid or consume an item. Preserve their exact bytes in every witness.
+constexpr std::uint32_t COMPUTED_ITEM_FLAGS = (std::uint32_t{1} << 28) | (std::uint32_t{1} << 29);
 struct Failure : std::exception {
     std::uint32_t code;
     explicit Failure(std::uint32_t c) : code(c) {}
@@ -134,7 +137,7 @@ struct Item {
     }
     bool available(Kind expected) const {
         return presence == Presence::Visible && kind == expected && on_ground && !in_job
-            && !other_flags && !other_refs && jobs.empty() && wear == 0 && material >= 0
+            && !(other_flags & ~COMPUTED_ITEM_FLAGS) && !other_refs && jobs.empty() && wear == 0 && material >= 0
             && ground.dry() && ground.shape == 3 && !ground.occupied;
     }
 };

@@ -8,6 +8,19 @@ readiness.
 
 ### Added
 
+- Native furniture/1.19 DFHack handler with exact-item bed/chair/table observation,
+  fresh preparation, single commit, query and preparation retirement. Full capture
+  revalidation surrounds private allocation; exact construction-job, native
+  building, Hauled item/reverse links and final readback gate Placed evidence.
+  Partial effects remain indeterminate and block new keys. Refuse hidden payload,
+  zone-association writes, secondary item flags and production-profile markers.
+- Native handler: 52 groups / 27,429 executed assertions under GCC/UBSan with
+  explicit SDK/protobuf doubles, four rejected compiled mutants and five
+  actual-handler byte vectors accepted by the strict Python codec. Updated engine: 23 groups / 1,133 assertions,
+  eight unchanged independent vectors and five rejected compiled mutants.
+  Full Python furniture suite: 52 passing tests. Current-source Clang, real SDK,
+  live fortress, Rust/MCP and production qualification remain unestablished.
+
 - Executable furniture/1.19 Python review and one-shot placement client, strict
   native capture/insertion/receipt codec, and private append-only recovery journals.
   Persist intent/preparation/dispatch before effects; preserve immutable uncertainty

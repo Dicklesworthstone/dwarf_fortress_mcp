@@ -43,6 +43,34 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Native exact-item furniture placement through the durable developer client
+
+`docs/BUILD_PLACEMENT_NATIVE.md` documents the new isolated furniture/1.19
+DFHack plugin and six fixed methods. Native reads capture the selected item,
+3x3 terrain, fortress identity, clock and building/job horizons under suspension.
+The writer revalidates after private allocation and invokes
+`Buildings::constructWithItems` at most once. Complete expected-after state,
+exact native building/job/Hauled-item/reverse links and final readback are required
+for a Placed receipt. Partial writes, false returns and lost observations retain
+immutable uncertainty and fence new keys. Hidden payload, zone associations,
+unrepresented secondary item flags and wrong-profile authority are refused.
+
+The native handler passed 52 groups / 27,429 assertions with GCC 13.3,
+warning denial and nonrecovering UBSan against explicit SDK/protobuf doubles.
+Five actual-handler capture/plan/token/prepared/placed outputs pass strict Python
+canonical decoding and commitment checks; four weakened native implementations
+fail their regression assertions. The updated native engine passed
+23 groups / 1,133 assertions, all eight independent existing vectors and five
+compiled mutation regressions. The complete Python codec/journal/RPC/CLI path
+passed 52 tests. Ordinary native temperature/weight-cache flags are now eligible
+while remaining part of full witnessed state. Native fixture bytes are unchanged.
+
+This is executed C++/Python development evidence. Clang, Rust/Cargo, a real
+DFHack SDK and a live game were unavailable. It does not establish actual plugin
+ABI/protobuf-runtime behavior, a live mutation campaign, completed construction,
+physical power-loss safety, global controller fencing, full qualification or
+production admission. The production map still contains only protocol 1.0.
+
 ### Executable furniture placement client and durable recovery
 
 `docs/BUILD_PLACEMENT_CLIENT.md` describes the separate Python furniture/1.19

@@ -318,7 +318,8 @@ class Item:
     def available(self, kind: int) -> bool:
         integer(kind, 1, 3)
         return (self.presence == 2 and self.kind == kind and self.on_ground and not self.in_job
-                and not self.other_flags and not self.other_refs and not self.jobs and self.wear == 0
+                and not (self.other_flags & ~((1 << 28) | (1 << 29)))
+                and not self.other_refs and not self.jobs and self.wear == 0
                 and self.material >= 0 and self.ground.dry and self.ground.shape == 3
                 and not self.ground.occupied)
 
