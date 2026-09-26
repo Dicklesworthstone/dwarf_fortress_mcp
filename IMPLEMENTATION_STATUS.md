@@ -44,7 +44,7 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
-### Whole-plan receipt-linked construction conditions and native acquisition
+### Executable whole-plan receipt-linked construction monitoring
 
 `scripts/construction_plan.py` defines one bounded construction goal for 1..32
 original furniture/1.19 Placed receipts. Canonical ordering and unique native
@@ -66,18 +66,34 @@ One shrinking deadline and budget cover all targets and pages; only the existing
 four query-only method bindings are used. The single-receipt transport retains
 its original profile while sharing the unchanged paged-capture verification.
 
-All **33 core test functions passed**: 17 whole-plan groups and 16 existing
-single-receipt groups. All **27 TCP test functions passed**: 14 whole-plan groups
-and 13 existing transport groups. The real Python transport is exercised against
-explicit joined peers, including a fragmented 32-target multi-page capture, all
-receipt boundaries, source/retention contradictions, lost final replies, release
-failure, authority revocation and nonrenewable budgets.
+`scripts/track_construction_plan.py` now provides the complete bounded
+start/sample/inspect/cancel workflow. It imports one private JSON receipt bundle
+into a separate `DFMPJR01` append-only journal, retaining the canonical receipt
+set, fixed policy/endpoint and every complete shared sample. Read intent
+synchronizes before native contact; complete rendered results, file/parent
+synchronization and old/new-byte verification precede acknowledgment. Restart
+never restores publication permission or renews the goal. Terminal replay is
+offline and immutable, and original placement journals remain untouched.
 
-This is executed Python semantic and TCP development evidence, not durable
-workflow execution, Rust/MCP integration, a real DFHack SDK build, live-fortress
-behavior, full qualification or production admission. Satisfaction remains a
-historical sampled condition and never discharges or retries original placement
-effects. Both owning bridge beads remain open for their broader scope.
+The combined checker passed **108 actual Python test functions**: 59 new
+whole-plan tests (17 core, 14 TCP, 15 private-store and 13 CLI) and all 49 existing
+single-receipt tests. All **five weakened whole-plan implementations were
+rejected** by regression assertions. The suites exercise fragmented 32-target
+multi-page acquisition, every original receipt boundary, source/retention
+contradictions, lost final replies, release failure, authority revocation,
+subprocess restart, shared stability, interruption, locking, corruption,
+publication/output failures, immutable deadlines and unchanged placement custody.
+`docs/evidence/construction-plan-monitor.json` binds the exact result and all
+20 input source hashes, rechecked unchanged after the run.
+
+`docs/RECEIPT_CONSTRUCTION_PLAN.md` documents the workflow;
+`architecture/construction_plan_monitor_v1.json` freezes its bounds and custody.
+This is executed Python/TCP/POSIX development evidence, not Rust/MCP integration,
+a real DFHack SDK build, live-fortress behavior, physical power-loss safety, full
+qualification or production admission. Satisfaction remains a historical sampled
+condition and never discharges or retries original placement effects. Canonical
+Agent Turn anchors remain null. Both owning bridge beads remain open for their
+broader scope.
 
 ### Executed furniture placement through the eleven-tool MCP surface
 

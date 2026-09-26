@@ -1,0 +1,53 @@
+{
+  "actual_python_implementation_executed": true,
+  "actual_tcp_and_subprocesses_executed": true,
+  "full_repository_qualification": false,
+  "live_game": false,
+  "machine_contract_bounds_checked": true,
+  "native_plugin_executed": false,
+  "physical_power_loss": false,
+  "production_admitted": false,
+  "python": "3.12.14",
+  "rejected_mutants": [
+    "trailing_original_receipts_not_verified",
+    "later_targets_not_evaluated",
+    "trailing_native_queries_not_executed",
+    "reopened_read_mints_plan_publication",
+    "plan_publication_before_result_reservation"
+  ],
+  "rust_mcp_executed": false,
+  "schema": "dfmcp.construction-plan-monitor-evidence/1",
+  "source_sha256": {
+    "architecture/construction_monitor_v1.json": "bbd4ad76ed8710fe5185ae211c096b619b182edf5a42d9203682041adc3209e2",
+    "architecture/construction_plan_monitor_v1.json": "862b105ef3a8c5b5e72fc85db36bd588af4be9d91431e42c58b8b9e9d7c47fcd",
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/check_construction_plan.py": "8955245edfe0c15c09f0cc3bb5acc71777fc4dd8e62d12f3ff1833a8b7e9c06d",
+    "scripts/construction_monitor_rpc.py": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809",
+    "scripts/construction_monitor_store.py": "0909c0c7dc34659354cda840d42fce6171c59d46f3cbb76c749380ca5ef37722",
+    "scripts/construction_plan.py": "218f5e00e7f28e6c006a4cbefad87e0da225683f3cbdff91a3fc1dd640c3b72d",
+    "scripts/construction_plan_rpc.py": "41952843cc2a37140c2e02f62cbc76f0272c1bbcba392968813300d8db16c1d6",
+    "scripts/construction_plan_store.py": "672867dec26c33ef30bd079de25889dba54f6536ad30425d70a9da3a510588f6",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/test_construction_monitor_rpc.py": "ab5e69ca86c37c575821eef12ca259bc1b27f339e2a7dbe9c2e02926f2a0ba61",
+    "scripts/test_construction_monitor_store.py": "e6fcb34d6e3f30d2837c424ce564d37a78c252db208550aa3c0242a3cf35bba4",
+    "scripts/test_construction_plan.py": "ac4655c9e1a38dc9ddca989439996663b067dd532760d740e9914e21d1d1def0",
+    "scripts/test_construction_plan_rpc.py": "4fbef755a795030583cda6b96b65960b71cae46629a93ab1faf339fe2a115ed1",
+    "scripts/test_construction_plan_store.py": "58dc923e49826f458d0fb30e1d0df4c171f75b4473a4af333804a3019ebbee22",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a",
+    "scripts/test_track_construction_plan.py": "e81038be22a23363d314655ebed674c7b43f9c4bf790a63e0a79c69699e07533",
+    "scripts/track_construction.py": "3d0d73f40a59dcb20fe07ea62bb0d95276114f3cf15db08b48a5d10625fdbc33",
+    "scripts/track_construction_plan.py": "c44f25e5761beadd7ac432c4a52e40657ca5f8de6f69fb6c46a4e93fa0bdc0c8"
+  },
+  "status": "passed_python_posix_loopback_only",
+  "test_functions": 108,
+  "test_functions_by_module": {
+    "test_construction_monitor_rpc": 13,
+    "test_construction_monitor_store": 20,
+    "test_construction_plan": 17,
+    "test_construction_plan_rpc": 14,
+    "test_construction_plan_store": 15,
+    "test_construction_receipt": 16,
+    "test_track_construction_plan": 13
+  }
+}

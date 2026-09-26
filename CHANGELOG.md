@@ -39,6 +39,17 @@ readiness.
   final receipts, source drift, insufficient retention, lost replies and revoked
   credentials. This is Python/TCP development evidence against explicit peers,
   not a real DFHack SDK/live-game campaign or durable workflow qualification.
+- Executable `track_construction_plan.py` start/sample/inspect/cancel workflow,
+  private complete receipt-set import and a separate append-only plan journal.
+  Full sample/output reservation, synchronized read intent and file/parent
+  publication preserve unknown reads across interruption; restart never renews
+  policy or restores publication permission. Terminal evidence is immutable and
+  offline. The aggregate checker passes all 108 actual Python functions: 59 new
+  whole-plan tests and 49 existing single-receipt tests, and rejects five weakened
+  implementations. The source-bound report records all 20 input hashes in
+  `docs/evidence/construction-plan-monitor.json`. Whole-plan sampled satisfaction
+  does not discharge placement effects or prove present usability, live DFHack
+  operation or production admission. See `docs/RECEIPT_CONSTRUCTION_PLAN.md`.
 
 - Executable furniture placement through the isolated
   `dfmcp-build-placement-dev-server`: the existing eleven tools now connect exact

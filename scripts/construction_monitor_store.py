@@ -175,7 +175,33 @@ def read_private(path: str, maximum: int, budget: Budget) -> bytes:
         os.close(directory)
 
 
-class Journal:
+class _Custody:
+    """Shared filesystem owner for the two source-selected construction codecs.
+
+    Concrete owners bind the private hooks below in source. No path, saved byte,
+    command-line flag, or caller-supplied codec selects a journal generation.
+    """
+
+    @staticmethod
+    def _magic() -> bytes:
+        return MAGIC
+
+    @staticmethod
+    def _limits() -> tuple[int, int, int]:
+        return MAX_FILE, MAX_FRAMES, MAX_BODY
+
+    @staticmethod
+    def _transition(state, kind: str, payload: bytes, budget: Budget):
+        return transition(state, kind, payload, budget)
+
+    @staticmethod
+    def _frame(state, kind: str, payload: bytes) -> bytes:
+        return frame(state, kind, payload)
+
+    @staticmethod
+    def _replay_reader(read: Callable[[int, int], bytes], size: int, budget: Budget):
+        return replay_reader(read, size, budget)
+
     def __init__(self, path: str, budget: Budget, *, writable: bool = False,
                  create: tuple[Goal, tuple[str, int]] | None = None):
         self.path, self.budget, self.writable = path, budget, writable
@@ -196,9 +222,14 @@ class Journal:
                 address_text = f'{address[0]}:{address[1]}'
                 require(endpoint(address_text) == address, 'noncanonical construction endpoint')
                 payload = field(address_text.encode('ascii')) + goal.encode()
-                initial = transition(None, 'goal', payload, budget)
-                first = MAGIC + frame(None, 'goal', payload)
+                initial = self._transition(None, 'goal', payload, budget)
+                first = self._magic() + self._frame(None, 'goal', payload)
                 flags |= os.O_CREAT | os.O_EXCL
+            else:
+                # Refuse invalid custody before an ordinary-user writable open
+                # can fail for permissions (or open a special file). The opened
+                # descriptor and named identity are still verified afterward.
+                private(os.stat(self.name, dir_fd=self.directory, follow_symlinks=False))
             self.fd = os.open(self.name, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
                               0o600, dir_fd=self.directory)
             private(os.fstat(self.fd))
@@ -212,13 +243,13 @@ class Journal:
                 self.check()
             else:
                 before = self._identity()
-                size = integer(before.st_size, len(MAGIC) + HEADER.size + 33, MAX_FILE)
+                size = integer(before.st_size, len(self._magic()) + HEADER.size + 33, self._limits()[0])
                 hasher = hashlib.sha256()
                 def read(offset: int, count: int) -> bytes:
                     raw = read_exact(self.fd, offset, count, budget)
                     hasher.update(raw)
                     return raw
-                state = replay_reader(read, size, budget)
+                state = self._replay_reader(read, size, budget)
                 require(stamp(before) == stamp(self._identity()), 'journal changed during full replay')
                 self.length, self._digest, self.state = size, hasher, state
                 self.check()
@@ -261,8 +292,8 @@ class Journal:
     def _append(self, kind: str, payload: bytes, candidate: State) -> None:
         require(self.writable, 'read-only monitor cannot append')
         self.check()
-        raw = frame(self.state, kind, payload)
-        require(self.length + len(raw) <= MAX_FILE, 'construction journal capacity exhausted')
+        raw = self._frame(self.state, kind, payload)
+        require(self.length + len(raw) <= self._limits()[0], 'construction journal capacity exhausted')
         try:
             self.read_owned = False
             os.lseek(self.fd, 0, os.SEEK_END)
@@ -283,9 +314,10 @@ class Journal:
         self.check()
         # Reserve a complete maximum-sized sample and future cancellation before
         # creating read intent or contacting DFHack. Refusal never truncates history.
-        require(self.length + MAX_BODY + 3 * (HEADER.size + 33) <= MAX_FILE
-                and self.state.frames + 3 <= MAX_FRAMES, 'cannot reserve complete read evidence')
-        candidate = transition(self.state, 'read_started', b'', self.budget)
+        max_file, max_frames, max_body = self._limits()
+        require(self.length + max_body + 3 * (HEADER.size + 33) <= max_file
+                and self.state.frames + 3 <= max_frames, 'cannot reserve complete read evidence')
+        candidate = self._transition(self.state, 'read_started', b'', self.budget)
         self._append('read_started', b'', candidate)
         self.read_owned = True
 
@@ -295,7 +327,7 @@ class Journal:
             self.read_owned = False
             self.check()
             payload = sample.encode()
-            candidate = transition(self.state, 'sample', payload, self.budget)
+            candidate = self._transition(self.state, 'sample', payload, self.budget)
             # Complete result reservation precedes publication; output failure leaves
             # the already durable read-start as unknown, never a successful sample.
             render(candidate)
@@ -309,7 +341,7 @@ class Journal:
         self.check()
         if self.state.progress.terminal:
             return False
-        candidate = transition(self.state, 'cancel', b'', self.budget)
+        candidate = self._transition(self.state, 'cancel', b'', self.budget)
         render(candidate)
         self._append('cancel', b'', candidate)
         return True
@@ -328,8 +360,12 @@ class Journal:
             os.close(self.directory)
             self.directory = None
 
-    def __enter__(self) -> Journal:
+    def __enter__(self):
         return self
 
     def __exit__(self, *_args):
         self.close()
+
+
+class Journal(_Custody):
+    """The fixed DFMCJR01 single-placement construction owner."""

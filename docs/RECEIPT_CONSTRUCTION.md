@@ -6,6 +6,11 @@ operations/1.4 observations. It is separate from the existing generic
 IDs without authenticating a placement receipt. Neither path changes native wire
 formats, the eleven-tool MCP surface, production admission or the placement journal.
 
+For an explicit set of 1..32 original placement receipts, use the
+[whole-plan construction monitor](RECEIPT_CONSTRUCTION_PLAN.md). It evaluates all
+selected targets in one shared capture and requires one global stability streak;
+it does not authenticate the completeness of an earlier blueprint or action DAG.
+
 ## Implemented condition and replay core
 
 `scripts/construction_receipt.py` strictly decodes the unchanged `DFMO1400` native
