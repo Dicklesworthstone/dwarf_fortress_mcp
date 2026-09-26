@@ -6,6 +6,15 @@ readiness.
 
 ## [Unreleased]
 
+### Fixed
+
+- Furniture placement now honors credential removal or rotation at the final
+  native write boundary, after allocation and full state revalidation. A revoked
+  request never enters the writer; its retained uncertainty cannot be retried by
+  restoring credentials or changing keys. Actual-handler GCC/UBSan checks pass
+  53 groups / 27,699 assertions and reject five compiled mutants, including the
+  removed credential recheck. Native wire and golden fixture bytes are unchanged.
+
 ### Added
 
 - Native furniture/1.19 DFHack handler with exact-item bed/chair/table observation,

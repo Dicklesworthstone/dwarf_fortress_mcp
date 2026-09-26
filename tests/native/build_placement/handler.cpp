@@ -466,6 +466,31 @@ void immediate_prewrite_revalidation() {
     indeterminate(q, commit(q)); CHECK(mock::allocator_calls == 1 && mock::writer_calls == 0);
     CHECK(world.buildings.all.empty() && df::live_buildings.empty());
 }
+void immediate_prewrite_credential_revalidation() {
+    for (int fault = 0; fault < 6; ++fault) {
+        reset(); auto q = prepared();
+        mock::after_allocation = [fault] {
+            if (fault == 0) unsetenv("DFMCP_BUILD_TOKEN");
+            else {
+                const std::size_t length = fault == 1 ? 0 : fault == 2 ? 31 : fault == 3 ? 257 : fault == 4 ? 32 : 256;
+                setenv("DFMCP_BUILD_TOKEN", std::string(length, 'r').c_str(), 1);
+            }
+        };
+        const auto result = commit(q); indeterminate(q, result);
+        CHECK(mock::allocator_calls == 1 && mock::writer_calls == 0);
+        CHECK(world.buildings.all.empty() && df::live_buildings.empty());
+        denied(query(q), 1); // The original bearer stays revoked after refusal.
+        const std::string replacement(fault == 5 ? 256 : 32, 'r');
+        setenv("DFMCP_BUILD_TOKEN", replacement.c_str(), 1); q.bearer = replacement;
+        CHECK(query(q).effect == result.effect && commit(q).effect == result.effect);
+        CHECK(mock::writer_calls == 0 && engine.unresolved());
+        wire::Request next_request; next_request.bearer = replacement;
+        auto next = candidate(next_request); next.key = "after-rotation";
+        // Retained uncertainty cannot be escaped by reauthorizing or changing keys.
+        next.mask = PREPARE; denied(call(PreparePlacement, next), 8);
+        CHECK(mock::writer_calls == 0 && engine.size() == 1);
+    }
+}
 void retained_replay_without_game_access() {
     const auto q = prepared(); const auto preparation = retained(q).encode(); const auto created = retained(q).created_ms;
     mock::game_access = 0; const auto replay = call(PreparePlacement, q);
@@ -717,6 +742,7 @@ int main(int argc, char **argv) {
         run("complete_selected_item_revalidation_before_write", stale_item_capture);
         run("complete_terrain_revalidation_before_write", stale_terrain_capture);
         run("revalidation_after_allocation_before_native_writer", immediate_prewrite_revalidation);
+        run("immediate_prewrite_current_credential_revalidation", immediate_prewrite_credential_revalidation);
         run("retained_replay_never_accesses_game", retained_replay_without_game_access);
         run("authenticated_cancellation_never_writes", cancellation_and_token_authentication);
         run("expired_preparation_never_writes", expiration_without_sleep);

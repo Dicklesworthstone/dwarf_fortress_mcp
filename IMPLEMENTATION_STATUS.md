@@ -55,10 +55,10 @@ for a Placed receipt. Partial writes, false returns and lost observations retain
 immutable uncertainty and fence new keys. Hidden payload, zone associations,
 unrepresented secondary item flags and wrong-profile authority are refused.
 
-The native handler passed 52 groups / 27,429 assertions with GCC 13.3,
+The native handler passed 53 groups / 27,699 assertions with GCC 13.3,
 warning denial and nonrecovering UBSan against explicit SDK/protobuf doubles.
 Five actual-handler capture/plan/token/prepared/placed outputs pass strict Python
-canonical decoding and commitment checks; four weakened native implementations
+canonical decoding and commitment checks; five weakened native implementations
 fail their regression assertions. The updated native engine passed
 23 groups / 1,133 assertions, all eight independent existing vectors and five
 compiled mutation regressions. The complete Python codec/journal/RPC/CLI path
@@ -70,6 +70,11 @@ DFHack SDK and a live game were unavailable. It does not establish actual plugin
 ABI/protobuf-runtime behavior, a live mutation campaign, completed construction,
 physical power-loss safety, global controller fencing, full qualification or
 production admission. The production map still contains only protocol 1.0.
+
+The final native write now repeats credential authentication after private
+allocation and complete revalidation. Removal, malformed replacement and valid
+credential rotation all prevent the writer. Retained uncertainty remains immutable
+and fences new keys even after a replacement credential authenticates successfully.
 
 ### Executable furniture placement client and durable recovery
 

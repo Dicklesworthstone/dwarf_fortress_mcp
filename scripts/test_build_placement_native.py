@@ -62,6 +62,9 @@ def check(compiler: str, mutations: bool, selected: list[str] | None) -> dict:
     if compiler_path is None:
         raise RuntimeError(f"requested C++ compiler unavailable: {compiler}")
     source_hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in INPUTS}
+    contract = json.loads((ROOT / "architecture/build_placement_v1_19.json").read_text(encoding="utf-8"))
+    if contract["operator_gates"].get("writer_rechecks_current_credential") is not True:
+        raise RuntimeError("furniture contract must require the current credential at native dispatch")
     changes = {
         "missing_full_revalidation": (ENGINE,
             "current.encode() != r.before.encode()", "false"),
@@ -72,6 +75,8 @@ def check(compiler: str, mutations: bool, selected: list[str] | None) -> dict:
             "if (r.phase == Phase::Cancelled || r.phase == Phase::Refused) return r;"),
         "missing_final_readback": (ENGINE,
             " || inspect(r.before.selection, read).encode() != expected", ""),
+        "missing_writer_credential_recheck": (HANDLER,
+            "authorize_credential(credential);", "(void)credential;"),
     }
     if selected and any(name not in changes for name in selected):
         raise ValueError("unknown mutation; available: " + ", ".join(changes))

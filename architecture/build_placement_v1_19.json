@@ -11,7 +11,8 @@
     "credential": "DFMCP_BUILD_TOKEN",
     "new_placements": "DFMCP_BUILD_ALLOW_PLACE=1",
     "cancellation_and_query_survive_placement_revocation": true,
-    "writer_rechecks_new_placement_gates": true
+    "writer_rechecks_new_placement_gates": true,
+    "writer_rechecks_current_credential": true
   },
   "production_marker_rejected": "DFMCP_ADMITTED_BRIDGE_PROTOCOL (any present value)",
   "computed_item_flag_mask": 805306368,

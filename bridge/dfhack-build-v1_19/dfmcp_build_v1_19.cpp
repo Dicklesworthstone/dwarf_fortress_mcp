@@ -58,17 +58,9 @@ void empty_reply(const wire::Request *in, wire::Reply *out, std::uint32_t code) 
     out->set_protocol_major(1); out->set_protocol_minor(19); out->set_bridge_generation(0);
     out->set_df_version(""); out->set_dfhack_version("");
 }
-void authorize(const wire::Request *in, wire::Reply *out) {
-    empty_reply(in, out, 3);
-    bp::require(in->ByteSizeLong() <= MAX_REQUEST_BYTES && in->IsInitialized()
-        && in->GetReflection()->GetUnknownFields(*in).empty());
-    bp::require(in->client_nonce().size() >= 16 && in->client_nonce().size() <= 64);
-    bp::require(in->protocol_major() == 1 && in->protocol_minor() == 19, 2);
-    bp::require(std::getenv("DFMCP_ADMITTED_BRIDGE_PROTOCOL") == nullptr, 1);
-    bp::require(enabled("DFMCP_ALLOW_UNADMITTED_BUILD_V1_19"), 1);
+void authorize_credential(const std::string &provided) {
     const char *configured = std::getenv("DFMCP_BUILD_TOKEN");
     const std::string_view expected = configured ? configured : "";
-    const auto &provided = in->bearer_token();
     bp::require(expected.size() >= 32 && expected.size() <= 256
         && provided.size() >= 32 && provided.size() <= 256, 1);
     std::size_t difference = expected.size() ^ provided.size();
@@ -78,6 +70,16 @@ void authorize(const wire::Request *in, wire::Reply *out) {
         difference |= a ^ b;
     }
     bp::require(difference == 0, 1);
+}
+void authorize(const wire::Request *in, wire::Reply *out) {
+    empty_reply(in, out, 3);
+    bp::require(in->ByteSizeLong() <= MAX_REQUEST_BYTES && in->IsInitialized()
+        && in->GetReflection()->GetUnknownFields(*in).empty());
+    bp::require(in->client_nonce().size() >= 16 && in->client_nonce().size() <= 64);
+    bp::require(in->protocol_major() == 1 && in->protocol_minor() == 19, 2);
+    bp::require(std::getenv("DFMCP_ADMITTED_BRIDGE_PROTOCOL") == nullptr, 1);
+    bp::require(enabled("DFMCP_ALLOW_UNADMITTED_BUILD_V1_19"), 1);
+    authorize_credential(in->bearer_token());
 }
 void manifest(wire::Reply *out) {
     bp::require(engine.available(), 5);
@@ -255,7 +257,7 @@ bp::Capture capture(const bp::Selection &selected) {
     }
     return out;
 }
-void place(const bp::Capture &before) {
+void place(const bp::Capture &before, const std::string &credential) {
     require_fortress(); bp::require(enabled("DFMCP_BUILD_ALLOW_PLACE"), 1);
     bp::require(df::global::plotinfo != nullptr, 5);
     auto building = std::unique_ptr<df::building>(Buildings::allocInstance(native_pos(before.selection.target),
@@ -272,6 +274,9 @@ void place(const bp::Capture &before) {
         && current.encode() == before.encode() && current.eligible(), 6);
     bp::require(std::getenv("DFMCP_ADMITTED_BRIDGE_PROTOCOL") == nullptr
         && enabled("DFMCP_ALLOW_UNADMITTED_BUILD_V1_19") && enabled("DFMCP_BUILD_ALLOW_PLACE"), 1);
+    // Credential rotation or removal revokes this dispatch even if the request
+    // passed entry authentication. Keep the secret within this suspended call.
+    authorize_credential(credential);
     // constructWithItems may throw after any registry/job/item/occupancy link.
     // Once entered, deleting this pointer could corrupt the game. Retain Unknown
     // even on false return; only independent readback can publish Placed.
@@ -369,7 +374,9 @@ command_result PreparePlacement(color_ostream &, const wire::Request *in, wire::
 command_result CommitPlacement(color_ostream &, const wire::Request *in, wire::Reply *out) {
     return guarded(in, out, 416, true, [&] {
         out->set_effect_record(engine.commit(in->idempotency_key(), in->plan_digest(), in->prepare_token(),
-            monotonic_ms(), capture, place, verify).encode());
+            monotonic_ms(), capture, [&](const bp::Capture &before) {
+                place(before, in->bearer_token());
+            }, verify).encode());
     });
 }
 command_result QueryPlacement(color_ostream &, const wire::Request *in, wire::Reply *out) {

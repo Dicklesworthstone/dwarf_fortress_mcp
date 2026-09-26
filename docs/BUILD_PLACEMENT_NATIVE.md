@@ -92,8 +92,14 @@ The writer allocates an unregistered building with `Buildings::allocInstance`,
 sets its private one-tile dimensions with `Buildings::setSize`, and allocates the
 one-item selection vector. It then repeats full capture equality and eligibility
 checks, validates native incarnation/intervention sequence, and rechecks both
-operator gates and absence of the production marker immediately before
+operator gates, the request bearer against the current configured credential,
+and absence of the production marker immediately before
 `Buildings::constructWithItems`.
+
+Rotating or removing the credential during allocation revokes that pending
+dispatch. The private, unregistered allocation is destroyed and the writer is
+never entered. The engine retains its conservative indeterminate record; restoring
+credentials permits historical query but cannot authorize a second attempt.
 
 The DFHack call can partially link the building, set planned tile occupancy,
 schedule building checks, create a `ConstructBuilding` job and attach the exact
@@ -146,14 +152,15 @@ python3 scripts/test_build_placement_native.py --compiler clang++
 The native test runner compiles the actual handler against explicit SDK and
 protobuf doubles with C++17, warnings denied and nonrecovering UBSan. Its report
 identifies tested source hashes, assertion counts and rejected compiled mutants.
-The current GCC 13.3 run passes 52 scenarios / 27,429 assertions, including
+The current GCC 13.3 run passes 53 scenarios / 27,699 assertions, including
 exhaustive optional-field-shape rejection, production isolation, hidden-field
 redaction, full revalidation, exact native link verification, partial effects,
 uncertainty fences, immutable replay and retention. Five actual RPC-produced
 capture/plan/token/prepared/placed byte values pass independent Python decoding,
-reencoding and commitment verification. Four separately compiled weakened
+reencoding and commitment verification. Five separately compiled weakened
 implementations fail native-handler regressions for missing full revalidation,
-uncertainty fencing, immutable replay and final readback. The separate engine suite passes 23
+uncertainty fencing, immutable replay, final readback and immediate credential
+revalidation. The separate engine suite passes 23
 scenarios / 1,133 assertions and checks its eight unchanged complete byte fixtures.
 These are separate evidence scopes; neither is a real DFHack or live campaign
 qualification. Clang is unavailable in the current environment.

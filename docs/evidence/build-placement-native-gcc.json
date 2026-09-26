@@ -1,7 +1,7 @@
 {
   "actual_cpp_handler_executed": true,
   "actual_handler": {
-    "assertions": 27429,
+    "assertions": 27699,
     "group_names": [
       "rpc_manifest_and_suspended_dispatch",
       "strict_development_environment_gate",
@@ -37,6 +37,7 @@
       "complete_selected_item_revalidation_before_write",
       "complete_terrain_revalidation_before_write",
       "revalidation_after_allocation_before_native_writer",
+      "immediate_prewrite_current_credential_revalidation",
       "retained_replay_never_accesses_game",
       "authenticated_cancellation_never_writes",
       "expired_preparation_never_writes",
@@ -56,7 +57,7 @@
       "allocation_failures_are_retained_without_native_retry",
       "handshake_reports_unresolved_retained_work"
     ],
-    "groups": 52
+    "groups": 53
   },
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
   "flags": [
@@ -78,20 +79,21 @@
     "missing_full_revalidation",
     "missing_uncertainty_fence",
     "terminal_replay_not_immutable",
-    "missing_final_readback"
+    "missing_final_readback",
+    "missing_writer_credential_recheck"
   ],
   "rust_executed": false,
   "schema": "dfmcp.build-native-evidence/1",
   "source_sha256": {
-    "architecture/build_placement_v1_19.json": "2a71d5506cafd7ec56e0473019f34b4fea354cede9684f728b0a44641c3b3ea5",
+    "architecture/build_placement_v1_19.json": "8c461c6e457dbd5a02d6eae5f52bd36c161418a8b8f697263029700c9c96da63",
     "bridge/common/build_placement.h": "bd60b105c7171c81223a3e5379cf26225ee0e621f87c2f957f2b9da02d087d71",
     "bridge/common/retained_snapshot.h": "76b91a4e5e9932a119f1458ee943cd3924148d2f4f6a219a98bed528fc44798a",
     "bridge/dfhack-build-v1_19/CMakeLists.txt": "137e698cbaa28b86d3290a4db4506c9d427ee6a2f3c70fed4f9abcf0348be900",
     "bridge/dfhack-build-v1_19/DfmcpBuildV1_19.proto": "e85d4b7b554edc5612370335a1ef1827418fabb1cfa9f2ba3ea1387be37cec35",
-    "bridge/dfhack-build-v1_19/dfmcp_build_v1_19.cpp": "0f83fbedd1459215fbac2bc3b7a6c49bf25d2151af0fc65c14d5708f35c48ff7",
+    "bridge/dfhack-build-v1_19/dfmcp_build_v1_19.cpp": "d18cf09322072170c670740bb3f39097e092062b6ee72b8ef00c6fb62a8512b9",
     "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
-    "scripts/test_build_placement_native.py": "9517c332eac82eb72c454bdf44e5a44418cece09dbff9c95f11c120d758286b9",
-    "tests/native/build_placement/handler.cpp": "1be39ab378fbb3ff633be932f5046c65192cf4d366cd80ea476d2eee23126b25",
+    "scripts/test_build_placement_native.py": "75ec6fec8da7ce19d7dc623def5a4e9f4bbf8311b02c8304b5091c7f4b6f7566",
+    "tests/native/build_placement/handler.cpp": "a7368c295f10a62dde02a3bd06162282bf0dda8131708968d32028261090db88",
     "tests/native/build_placement/stubs.h": "716715254bcd878c551cfd871434de7a02d28a9c4d5976473c4b80710d57820c"
   },
   "status": "passed_sdk_doubles_only",
