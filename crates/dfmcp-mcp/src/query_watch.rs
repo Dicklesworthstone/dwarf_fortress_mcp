@@ -21,6 +21,8 @@ pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 pub(super) mod batch;
 #[path = "query_watch_count.rs"]
 mod counts;
+#[path = "query_watch_construction.rs"]
+mod construction;
 #[path = "query_condition_evaluation.rs"]
 mod inspection;
 #[path = "query_watch_replay.rs"]
@@ -28,7 +30,7 @@ mod replay;
 pub(super) use replay::Replay as HistoricalWatchReplay;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
-    inspection::extend_schema(counts::extend_schema(schema)?)
+    construction::extend_schema(inspection::extend_schema(counts::extend_schema(schema)?)?)
 }
 pub(super) fn condition_query(
     snapshot: &WorldSnapshot,
@@ -82,6 +84,10 @@ enum Comparison {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Condition {
+    FurnitureSet {
+        targets: Vec<construction::Target>,
+        test: construction::Test,
+    },
     Field {
         entity_id: String,
         generation: u32,
@@ -381,6 +387,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
         pending.push((condition, 1));
     }
     let mut nodes = 0usize;
+    let mut furniture_targets = 0usize;
     while let Some((condition, depth)) = pending.pop() {
         nodes += 1;
         if nodes > MAX_CONDITIONS || depth > MAX_CONDITION_DEPTH {
@@ -389,6 +396,13 @@ fn validate_definition(definition: &Definition) -> Result<()> {
             ));
         }
         match condition {
+            Condition::FurnitureSet { targets, .. } => {
+                construction::validate(targets)?;
+                furniture_targets = furniture_targets.saturating_add(targets.len());
+                if furniture_targets > 2 * construction::MAX_TARGETS {
+                    return Err(bounded("success/failure furniture sets exceed 64 total targets"));
+                }
+            }
             Condition::Field {
                 entity_id,
                 generation,
@@ -498,6 +512,9 @@ impl Probe {
     ) -> Result<Truth> {
         budget.charge()?;
         match condition {
+            Condition::FurnitureSet { targets, test } => {
+                construction::evaluate(self, snapshot, targets, *test, budget)
+            }
             Condition::EntityCount {
                 kind,
                 predicate,
