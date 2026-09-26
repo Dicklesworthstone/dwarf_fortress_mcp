@@ -13,8 +13,8 @@ use dfmcp_core::{
 };
 
 use super::{
-    BuildBinding, BuildCapture, BuildPhase, BuildPlan, BuildPreparation, BuildRecord,
-    BuildSelection,
+    BuildBinding, BuildCapture, BuildNativeSummary, BuildPhase, BuildPlan, BuildPreparation,
+    BuildRecord, BuildSelection,
 };
 use crate::control_effect_journal::EffectJournalStorage;
 
@@ -144,6 +144,9 @@ impl BuildDispatch<'_> {
 /// absolute connection bounds and the shrinking operation timeout at send time.
 pub trait BuildSource {
     fn binding(&self) -> &BuildBinding;
+    /// The latest validated native reply, including obligations under other
+    /// keys. Fresh-key absence does not establish global preparation readiness.
+    fn native_summary(&self) -> BuildNativeSummary;
     fn fence(&mut self);
     fn observe(
         &mut self,
@@ -938,6 +941,19 @@ impl<S: EffectJournalStorage> BuildJournal<S> {
                 ));
             }
             self.after(source, BuildStage::Query, plan, &mut work, guard)?;
+            // Querying this fresh key may discover a global fence that appeared
+            // after observation. Reject it before creating a local obligation
+            // that native preparation is already known to refuse.
+            let summary = source.native_summary();
+            if summary.unresolved() {
+                return Err(error(
+                    ErrorCode::EffectIndeterminate,
+                    "native furniture history is unresolved; no new intent was retained",
+                ));
+            }
+            if !summary.prepare_available() {
+                return Err(exhausted());
+            }
             let entry = self.retain(entry, &mut work)?;
             let current = self.edge(source, BuildStage::Prepare, plan, &mut work, guard)?;
             let prepared = source.prepare(plan, &current, work.remaining()?)?;

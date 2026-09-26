@@ -55,13 +55,20 @@ blocks new keys. Recovery can retire a preparation with Query authority after
 placement grants are revoked; offline replay performs no native I/O or storage
 synchronization.
 
-All **41 new Rust tests passed**, with zero ignored: ten canonical codec groups,
-twelve real TCP/authority/deadline groups and nineteen coordinator/session/Linux
+All **45 new Rust tests passed**, with zero ignored: ten canonical codec groups,
+sixteen real TCP/authority/deadline groups and nineteen coordinator/session/Linux
 storage groups. They use all eight unchanged independent native fixtures and
 exercise real private-file locking, corruption, publication failures, lost
 replies, original-key recovery and non-restored dispatch permission. The adapter
 production check also passed. The compiler is the repository-pinned
 `nightly-2026-08-31`, rustc `1.100.0-nightly (908501772 2026-08-30)`.
+
+The native-global unresolved and retention summary now survives the source/session
+boundary. New-key preparation checks the latest summary after its preflight query
+and before persisting intent. A known native fence or full retention leaves no
+stranded local obligation. Four additional actual TCP tests verify these refusals,
+a fence appearing during preflight, and Query-only retirement of an owned key
+despite an unrelated native uncertainty fence.
 
 Provisioning the compiler exposed and fixed four preexisting test-fixture
 compilation blockers. An earlier baseline adapter run executed 718 tests: 715

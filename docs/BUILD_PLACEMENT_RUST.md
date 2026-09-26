@@ -62,6 +62,14 @@ cancellation. An absent native key after a disconnect or plugin restart remains
 unresolved; absence never proves nonapplication. Every unresolved entry fences
 new keys throughout this journal. Resolved keys remain reserved.
 
+The source also exposes a validated native-global summary separately from local
+history. A preexisting native uncertainty fence or full native retention blocks a
+fresh key after its preflight query and before any local intent is written. This
+prevents stranding a local obligation for a preparation that the client already
+knows cannot be sent. The session retains the last summary for honest historical
+inspection after dropping its connection. Original-key query and preparation
+retirement remain available despite an unrelated native uncertainty fence.
+
 Every append is checked and replayed before writing. File and parent-directory
 synchronization precede acknowledgment. Runtime, source, current capabilities and
 the supplied host policy are checked again after dispatch publication and before
@@ -117,9 +125,9 @@ live fortress campaign remain separate requirements. The existing Python journal
 format is separate and is not silently imported or migrated. Production
 compatibility registry, protocol runner map and admission remain unchanged.
 
-The current focused run passed all 41 tests with zero ignored on pinned
+The current focused run passed all 45 tests with zero ignored on pinned
 `nightly-2026-08-31` / rustc `1.100.0-nightly (908501772 2026-08-30)`: ten codec,
-twelve actual TCP and nineteen coordinator/session/Linux storage groups. The
+sixteen actual TCP and nineteen coordinator/session/Linux storage groups. The
 adapter production check passed as well. This is executed Rust development
 evidence, not full warning-denied workspace or production qualification.
 

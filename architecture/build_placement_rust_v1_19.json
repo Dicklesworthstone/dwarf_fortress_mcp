@@ -11,7 +11,14 @@
   "construction_completion_proven": false,
   "rpc": {
     "endpoint": "numeric IPv4 loopback",
-    "methods": ["Handshake", "ReadPlacement", "PreparePlacement", "CommitPlacement", "QueryPlacement", "CancelPlacement"],
+    "methods": [
+      "Handshake",
+      "ReadPlacement",
+      "PreparePlacement",
+      "CommitPlacement",
+      "QueryPlacement",
+      "CancelPlacement"
+    ],
     "maximum_connection_milliseconds": 60000,
     "maximum_connection_bytes": 524288,
     "maximum_connection_calls": 32,
@@ -26,7 +33,8 @@
     "commit_requires_coordinator_dispatch_value": true,
     "automatic_reconnect_or_retry": false,
     "connection_deadline_or_byte_allowance_renewable": false,
-    "query_restores_dispatch_permission": false
+    "query_restores_dispatch_permission": false,
+    "validated_native_global_summary": true
   },
   "journal": {
     "header_magic": "DFMBJ019",
@@ -35,7 +43,14 @@
     "header_hash_domain": "dfmcp-build-journal/1",
     "frame_hash_domain": "dfmcp-build-journal-frame/1",
     "domain_separator": "NUL",
-    "states": {"intent": 0, "prepared": 1, "dispatch_started": 2, "tracking": 3, "cancel_requested": 4, "terminal": 5},
+    "states": {
+      "intent": 0,
+      "prepared": 1,
+      "dispatch_started": 2,
+      "tracking": 3,
+      "cancel_requested": 4,
+      "terminal": 5
+    },
     "terminal_means": "immutable native outcome retained; indeterminate remains unresolved",
     "maximum_keys": 256,
     "maximum_frames": 1792,
@@ -49,15 +64,33 @@
     "reopen_restores_dispatch_permission": false,
     "missing_native_record_proves_nonapplication": false,
     "tail_repair_or_eviction": false,
-    "python_journal_migration": false
+    "python_journal_migration": false,
+    "native_unresolved_or_full_refused_before_new_intent": true,
+    "owned_key_recovery_preserved_under_native_global_fence": true
   },
   "modes": {
-    "control": ["observe", "prepare", "commit", "query", "cancel_preparation", "inspect"],
-    "recover": ["query", "cancel_preparation", "inspect"],
-    "offline": ["inspect"]
+    "control": [
+      "observe",
+      "prepare",
+      "commit",
+      "query",
+      "cancel_preparation",
+      "inspect"
+    ],
+    "recover": [
+      "query",
+      "cancel_preparation",
+      "inspect"
+    ],
+    "offline": [
+      "inspect"
+    ]
   },
   "private_storage": {
-    "platforms": ["linux-x86_64", "linux-aarch64"],
+    "platforms": [
+      "linux-x86_64",
+      "linux-aarch64"
+    ],
     "file_mode": "0600",
     "parent_mode": "0700",
     "single_link": true,
@@ -71,5 +104,8 @@
   "global_controller_fence": false,
   "verified_game_checkpoint": false,
   "production_admitted": false,
-  "work_items": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"]
+  "work_items": [
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ]
 }

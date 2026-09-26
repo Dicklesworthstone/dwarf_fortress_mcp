@@ -214,6 +214,15 @@ impl BuildSource for Native {
     fn binding(&self) -> &BuildBinding {
         &self.binding
     }
+    fn native_summary(&self) -> BuildNativeSummary {
+        BuildNativeSummary {
+            unresolved: self
+                .retained
+                .as_ref()
+                .is_some_and(|record| record.phase() == BuildPhase::Indeterminate),
+            retained_records: u16::from(self.retained.is_some()),
+        }
+    }
     fn fence(&mut self) {
         self.calls.borrow_mut().fenced += 1;
     }

@@ -727,6 +727,14 @@ impl BuildSource for BuildRpc {
     fn binding(&self) -> &BuildBinding {
         &self.binding
     }
+    fn native_summary(&self) -> BuildNativeSummary {
+        // Wire::call validates the complete reply and the 256-record bound
+        // before publishing either field.
+        BuildNativeSummary {
+            unresolved: self.wire.unresolved,
+            retained_records: self.wire.retained as u16,
+        }
+    }
     fn fence(&mut self) {
         self.fenced = true;
         self.prepared = None;

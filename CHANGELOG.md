@@ -8,6 +8,13 @@ readiness.
 
 ### Fixed
 
+- Furniture preparation now checks native-global uncertainty and retention
+  capacity after its fresh-key query, before writing local intent. A known native
+  refusal cannot strand a local operation that was never prepared. The latest
+  validated native summary remains inspectable after connection abandonment;
+  original-key Query and retirement still work under an unrelated native fence.
+  All 45 adapter tests pass, including four new actual TCP regressions.
+
 - Furniture placement now honors credential removal or rotation at the final
   native write boundary, after allocation and full state revalidation. A revoked
   request never enters the writer; its retained uncertainty cannot be retried by

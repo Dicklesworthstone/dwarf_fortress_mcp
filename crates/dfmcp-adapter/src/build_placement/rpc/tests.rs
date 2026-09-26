@@ -1,6 +1,7 @@
 //! Joined TCP peers exercise the actual fixed transport; these are explicit doubles.
 use super::*;
 use crate::build_placement::journal::{BuildGuard, BuildJournal, BuildMode, BuildStage};
+use crate::build_placement::session::BuildSession;
 use crate::build_placement::tests::fixture;
 use crate::control_effect_journal::EffectJournalStorage;
 use dfmcp_core::{
@@ -351,6 +352,205 @@ fn steps_to_commit(record: &str, lose: bool) -> Result<Vec<Step>> {
         before_commit,
         commit,
     ])
+}
+
+fn refused_native_preflight(
+    initial: BuildNativeSummary,
+    latest: BuildNativeSummary,
+    expected_error: ErrorCode,
+) -> Result<()> {
+    let reads = (0..3)
+        .map(|_| {
+            let mut step = Step::new(1, None)?;
+            step.retained = u64::from(initial.retained_records());
+            step.unresolved = initial.unresolved();
+            Ok(step)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut absent = Step::new(4, None)?;
+    absent.retained = u64::from(latest.retained_records());
+    absent.unresolved = latest.unresolved();
+    let mut dialogue = Dialogue::new(reads);
+    dialogue.retained = u64::from(initial.retained_records());
+    dialogue.unresolved = initial.unresolved();
+    dialogue.steps.push(absent);
+    let peer = peer(vec![dialogue], None)?;
+    let context = context()?;
+    let plan = plan()?;
+    let source = connect(
+        &peer,
+        &context,
+        BuildCancellation::default(),
+        Box::new(|_| Ok(())),
+    )?;
+    let memory = Memory::default();
+    let syncs = memory.syncs.clone();
+    let journal = BuildJournal::open(
+        memory,
+        &context,
+        BuildMode::Control,
+        Some(source.binding().clone()),
+        Some([1; 32]),
+    )?;
+    let mut session = BuildSession::new(journal, &context)?;
+    assert!(session.native_summary().is_none());
+    let capture = session.observe(
+        plan.before().selection(),
+        &context,
+        |_, _, _| Ok(source),
+        &mut Guard,
+    )?;
+    assert!(capture.eligible());
+    assert_eq!(session.native_summary(), Some(initial));
+    let before = session.inventory(&context)?;
+    let sync_count = syncs.load(Ordering::SeqCst);
+    let outcome = session.prepare(plan.key(), capture.witness(), &context, &mut Guard);
+    assert!(matches!(outcome, Err(cause) if cause.code == expected_error));
+    let after = session.inventory(&context)?;
+    assert_eq!(after.total_records(), 0);
+    assert_eq!(after.pending_count(), 0);
+    assert_eq!(after.frames, 0);
+    assert_eq!(after.head, before.head);
+    assert_eq!(after.byte_len, before.byte_len);
+    assert_eq!(syncs.load(Ordering::SeqCst), sync_count);
+    assert_eq!(session.native_summary(), Some(latest));
+    assert!(
+        !session
+            .native_summary()
+            .is_some_and(|summary| summary.prepare_available())
+    );
+    assert!(session.selected().is_none());
+    assert!(!session.has_preparation_connection());
+    drop(session);
+    assert_eq!(join(peer)?, vec![1, 1, 1, 4]);
+    Ok(())
+}
+
+#[test]
+fn global_native_fence_allows_observation_but_never_creates_a_new_intent() -> Result<()> {
+    let fenced = BuildNativeSummary::new(true, 1)?;
+    refused_native_preflight(fenced, fenced, ErrorCode::EffectIndeterminate)
+}
+
+#[test]
+fn native_fence_appearing_during_fresh_key_query_precedes_local_intent() -> Result<()> {
+    refused_native_preflight(
+        BuildNativeSummary::new(false, 0)?,
+        BuildNativeSummary::new(true, 1)?,
+        ErrorCode::EffectIndeterminate,
+    )
+}
+
+#[test]
+fn full_native_retention_precedes_local_intent_even_when_the_fresh_key_is_absent() -> Result<()> {
+    refused_native_preflight(
+        BuildNativeSummary::new(false, 0)?,
+        BuildNativeSummary::new(false, 256)?,
+        ErrorCode::BudgetExceeded,
+    )
+}
+
+#[test]
+fn another_native_indeterminate_does_not_block_owned_key_query_or_cancellation() -> Result<()> {
+    let mut lost = Step::new(2, Some("prepared"))?;
+    lost.drop_reply = true;
+    let first = Dialogue::new(vec![
+        Step::new(1, None)?,
+        Step::new(1, None)?,
+        Step::new(4, None)?,
+        lost,
+    ]);
+    let mut dialogues = vec![first];
+    for mut step in [
+        Step::new(4, Some("prepared"))?,
+        Step::new(5, Some("cancelled"))?,
+    ] {
+        step.unresolved = true;
+        step.retained = 2;
+        let mut dialogue = Dialogue::new(vec![step]);
+        dialogue.unresolved = true;
+        dialogue.retained = 2;
+        dialogues.push(dialogue);
+    }
+    let peer = peer(dialogues, None)?;
+    let mut context = context()?;
+    let plan = plan()?;
+    let mut source = connect(
+        &peer,
+        &context,
+        BuildCancellation::default(),
+        Box::new(|_| Ok(())),
+    )?;
+    let original = source.binding().clone();
+    let mut journal = BuildJournal::open(
+        Memory::default(),
+        &context,
+        BuildMode::Control,
+        Some(original.clone()),
+        Some([1; 32]),
+    )?;
+    assert!(
+        journal
+            .prepare(&mut source, &plan, &context, &mut Guard)
+            .is_err()
+    );
+    assert_eq!(journal.inventory(&context)?.pending_count(), 1);
+    drop(source);
+    context
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    let mut recovery = BuildRpc::connect_trusted_recovery(
+        &original,
+        vec![b't'; 32],
+        [b'r'; 32],
+        plan.before().selection(),
+        &context,
+        BuildCancellation::default(),
+        Box::new(|place| if place { Err(denied()) } else { Ok(()) }),
+    )?;
+    let entry = journal.recover(
+        &mut recovery,
+        plan.key(),
+        plan.digest(),
+        false,
+        &context,
+        &mut Guard,
+    )?;
+    assert_eq!(
+        entry.native().map(BuildRecord::phase),
+        Some(BuildPhase::Prepared)
+    );
+    assert!(!journal.has_permit());
+    assert!(recovery.is_fenced());
+    assert_eq!(recovery.native_summary(), BuildNativeSummary::new(true, 2)?);
+    drop(recovery);
+    let mut recovery = BuildRpc::connect_trusted_recovery(
+        &original,
+        vec![b't'; 32],
+        [b'c'; 32],
+        plan.before().selection(),
+        &context,
+        BuildCancellation::default(),
+        Box::new(|place| if place { Err(denied()) } else { Ok(()) }),
+    )?;
+    let entry = journal.recover(
+        &mut recovery,
+        plan.key(),
+        plan.digest(),
+        true,
+        &context,
+        &mut Guard,
+    )?;
+    assert_eq!(
+        entry.native().map(BuildRecord::phase),
+        Some(BuildPhase::Cancelled)
+    );
+    assert!(!entry.unresolved());
+    assert_eq!(journal.inventory(&context)?.pending_count(), 0);
+    assert_eq!(recovery.native_summary(), BuildNativeSummary::new(true, 2)?);
+    drop(recovery);
+    assert_eq!(join(peer)?, vec![1, 1, 4, 2, 4, 5]);
+    Ok(())
 }
 
 #[test]

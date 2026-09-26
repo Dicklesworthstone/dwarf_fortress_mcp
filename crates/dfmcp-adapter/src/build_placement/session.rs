@@ -11,13 +11,14 @@ use super::journal::{
     BuildState, MAX_BODY_BYTES, MAX_FRAME_BYTES, RPC_RESERVE, SOURCE_RESERVE, Work, authorize,
     error, exhausted, uncertain,
 };
-use super::{BuildBinding, BuildCapture, BuildPlan, BuildSelection};
+use super::{BuildBinding, BuildCapture, BuildNativeSummary, BuildPlan, BuildSelection};
 use crate::control_effect_journal::EffectJournalStorage;
 
 pub struct BuildSession<S, N> {
     journal: BuildJournal<S>,
     source: Option<N>,
     selected: Option<BuildCapture>,
+    last_native_summary: Option<BuildNativeSummary>,
     high_tick: u64,
     high_sequence: u64,
 }
@@ -32,6 +33,7 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
             journal,
             source: None,
             selected: None,
+            last_native_summary: None,
             high_tick,
             high_sequence,
         })
@@ -48,6 +50,12 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
     pub fn selected(&self) -> Option<&BuildCapture> {
         self.selected.as_ref()
     }
+    /// Historical metadata from the latest validated native reply. Retaining it
+    /// after abandonment avoids confusing an empty local journal with native
+    /// readiness; it never substitutes for a new native preflight.
+    pub fn native_summary(&self) -> Option<BuildNativeSummary> {
+        self.last_native_summary
+    }
     pub fn is_fenced(&self) -> bool {
         self.journal.is_fenced()
     }
@@ -56,6 +64,7 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
     }
     pub fn abandon_preparation(&mut self) {
         if let Some(source) = self.source.as_mut() {
+            self.last_native_summary = Some(source.native_summary());
             source.fence();
         }
         self.source = None;
@@ -199,6 +208,7 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
                 self.journal.verify(&mut work)?;
                 Ok(capture)
             })();
+            self.last_native_summary = Some(source.native_summary());
             match observed {
                 Ok(capture) => {
                     self.high_tick = self.high_tick.max(capture.tick());
@@ -241,6 +251,7 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
         let request = work.reserve(self.journal.operation_reserve())?;
         let source = self.source.as_mut().ok_or_else(|| uncertain(key))?;
         let result = self.journal.prepare(source, &plan, &request, guard);
+        self.last_native_summary = Some(source.native_summary());
         self.selected = None;
         if result
             .as_ref()
@@ -340,6 +351,7 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
         let result = self
             .journal
             .recover(&mut source, key, digest, cancel, &request, guard);
+        self.last_native_summary = Some(source.native_summary());
         source.fence();
         self.high_tick = self.high_tick.max(self.journal.high_tick());
         self.high_sequence = self.high_sequence.max(self.journal.high_sequence());

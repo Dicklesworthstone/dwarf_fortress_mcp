@@ -21,6 +21,38 @@ pub const MAX_PLAN_BYTES: usize = 2190;
 pub const MAX_NATIVE_TICK: u64 = crate::bounded_run::MAX_NATIVE_TICK;
 const MAX_ID: u32 = i32::MAX as u32;
 
+/// Global retention status from the source's latest validated native reply.
+/// This is historical source metadata, not a canonical capture, an authority
+/// grant, or proof that a particular placement key is absent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildNativeSummary {
+    unresolved: bool,
+    retained_records: u16,
+}
+impl BuildNativeSummary {
+    pub fn new(unresolved: bool, retained_records: u16) -> Result<Self> {
+        require(
+            retained_records <= 256 && (!unresolved || retained_records > 0),
+            "invalid furniture native retention summary",
+        )?;
+        Ok(Self {
+            unresolved,
+            retained_records,
+        })
+    }
+    pub fn unresolved(self) -> bool {
+        self.unresolved
+    }
+    pub fn retained_records(self) -> u16 {
+        self.retained_records
+    }
+    /// Availability reported by the latest reply. Native authority and state
+    /// still require fresh checks before every preparation and dispatch.
+    pub fn prepare_available(self) -> bool {
+        !self.unresolved && self.retained_records < 256
+    }
+}
+
 fn invalid() -> dfmcp_core::DfmcpError {
     error(ErrorCode::AdapterRejected, "invalid furniture evidence")
 }
