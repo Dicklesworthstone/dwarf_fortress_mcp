@@ -24,6 +24,14 @@ readiness.
 
 ### Added
 
+- Whole-plan receipt-linked construction condition core for 1..32 original
+  furniture/1.19 Placed records. Canonical unique target identities and all
+  original receipt boundaries bind one shared operations capture. Every target
+  must satisfy its condition together throughout one advancing-tick stability
+  streak; independently timed successes cannot complete the plan. This Python
+  semantic increment grants no game effects, placement retry or production
+  admission and does not itself establish native or durable workflow execution.
+
 - Executable furniture placement through the isolated
   `dfmcp-build-placement-dev-server`: the existing eleven tools now connect exact
   observation, policy-bound review, one-attempt commit, original-key recovery,

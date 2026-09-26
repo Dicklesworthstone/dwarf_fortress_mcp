@@ -44,6 +44,27 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-plan receipt-linked construction condition core
+
+`scripts/construction_plan.py` defines one bounded construction goal for 1..32
+original furniture/1.19 Placed receipts. Canonical ordering and unique native
+building/job/item identities, placement keys and target positions bind one
+fortress and furniture-plugin generation. The shared sample codec carries every
+original receipt before and after one complete operations/1.4 capture.
+
+One global stability streak requires every selected building and original item
+to satisfy their receipt-linked condition in the same advancing-tick samples.
+Independently timed successes cannot complete the whole plan. Repeated paused
+captures, interrupted reads, changed captures at one tick, false/unknown targets
+and source/identity regressions preserve conservative sampled evidence.
+
+This Python semantic core does not itself establish native acquisition, durable
+workflow execution, Rust/MCP integration, a real DFHack SDK build, live-fortress
+behavior, full qualification or production admission. Satisfaction remains a
+historical sampled condition and never discharges or retries original placement
+effects. Both owning bridge beads remain open for their broader scope; exact
+executed evidence is recorded separately for the source that ran.
+
 ### Executed furniture placement through the eleven-tool MCP surface
 
 `dfmcp-build-placement-dev-server` now connects the native/Rust furniture path to
