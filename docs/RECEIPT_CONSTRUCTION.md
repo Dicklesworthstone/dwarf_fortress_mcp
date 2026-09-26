@@ -89,12 +89,122 @@ release failures, source/version drift, unknown/duplicate protobuf fields,
 configuration revocation and nonrenewable budgets. Exact input hashes are in
 `docs/evidence/construction-receipt-transport.json`. These are not real DFHack SDK,
 live-game, Rust/MCP or whole-workspace qualification. Durable monitor custody and
-a command-line owner are not established by this transport increment yet.
+the executable foreground workflow are described below.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
   test_construction_receipt test_construction_monitor_rpc -v
 ```
+
+## Executable durable workflow
+
+`track_construction.py` now owns a separate append-only monitor journal. It accepts
+an original canonical furniture/1.19 Placed record as either binary `DFMBR019`
+bytes or a small JSON object with exactly one `canonical_record_hex` field. That
+field is exposed in the Rust furniture MCP effect record. The input receipt file
+must be a regular single-link exact-mode `0600` file under an owned real `0700`
+directory. The monitor never modifies this receipt or the original placement
+journal. A merely prepared or indeterminate placement is not eligible.
+
+For example, with both native plugins already loaded in the same DFHack process,
+configure the isolated client environment with the four variables listed above.
+The operator must select a future absolute deadline using observed game ticks;
+`900000` below is illustrative, not a recommended deadline for every fortress.
+
+```sh
+python3 scripts/track_construction.py start \
+  --journal /private/construction/bed-1.construction \
+  --receipt-file /private/construction/placed.receipt \
+  --deadline-tick 900000 --stable-samples 2 --stable-span-ticks 10 \
+  --interval-ticks 10 --max-gap-ticks 1200
+python3 scripts/track_construction.py sample \
+  --journal /private/construction/bed-1.construction
+python3 scripts/track_construction.py inspect \
+  --journal /private/construction/bed-1.construction
+python3 scripts/track_construction.py cancel \
+  --journal /private/construction/bed-1.construction
+```
+
+Each `start` or nonterminal `sample` performs one bounded foreground acquisition;
+there is no automatic polling or simulation advancement. `start` synchronizes the
+goal and endpoint, then a read-start record, before opening the native connection.
+The original receipt query, complete capture/release and final receipt query must
+all succeed. The complete proposed result is rendered before a sample append;
+file and parent-directory synchronization plus complete readback precede
+acknowledging that sample. A failed read, render or publication preserves the
+unknown read intent. Every response remains within 16 KiB and includes an Agent
+Turn with exact receipt/capture references and visible unresolved monitoring work.
+Its canonical world anchor remains null: native IDs and captures are not relabeled
+as a canonical world generation.
+
+`sample` reopens the original goal; it cannot accept another receipt, endpoint or
+policy, extend the deadline, or recover a prior process's read-publication permit.
+After a process ends with an incomplete read, the next explicitly started read
+resets the stability streak. Prior complete evidence stays in the journal. A
+whole interrupted frame is retained as unknown; a torn frame or corrupt history
+is refused unchanged, with no repair or truncation. A restored original goal
+never renews its observation or game-time allowance.
+
+`inspect` is strictly read-only and needs no credentials or DFHack. `cancel`
+records cancellation of this monitor only; it never removes furniture, cancels
+a native construction job, unpauses the game or changes placement obligations.
+All terminal operations are idempotent: a terminal `sample`, `cancel` or `inspect`
+returns retained history without credentials, network calls or file writes.
+
+### Storage contract and limits
+
+The private POSIX owner rejects symlinks in every path component, noncanonical
+paths, nonregular files, hard links and noncanonical ownership/modes. It holds an
+exclusive nonblocking file lock even during offline inspection. Full file bytes,
+file/path identity and parent-directory identity are checked before publication
+and return; same-size substitution and replaced pathnames are refused. Locking is
+cooperative local custody, not malicious-owner protection or distributed fencing.
+
+The `DFMCJR01` binary journal begins with one goal and numeric endpoint. Every
+frame contains a big-endian bounded body length, sequence number, previous-frame
+checksum, typed body and domain-separated SHA-256 checksum. Full replay validates
+all canonical goal/receipt/capture bytes and rederives every monitor transition;
+a saved phase label is never accepted as evidence. Replay streams bounded frames
+rather than allocating the entire journal. Limits are 128 MiB, 1,030 frames and
+at most 512 accepted observations, with the goal optionally selecting a smaller
+observation allowance. The whole operation shares the transport deadline/work
+allowance and a 1-GiB custody-byte allowance. A full maximum-sized sample and a
+future cancellation frame are reserved before read intent and native access.
+Capacity refusal preserves history; there is no compaction or eviction.
+
+All bytes may be present after a synchronization failure, but the failed call
+never acknowledges durability. A later owner can inspect fully valid historical
+bytes; it does not retroactively claim the failed call acknowledged them.
+Filesystem operations have cooperative deadline checks, not hard real-time
+cancellation guarantees. The tests exercise process/I/O failures, not physical
+power loss. Frame checksums detect corruption; they are not signatures or an
+anti-rollback authority.
+
+### Executed end-to-end validation
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
+  test_construction_receipt test_construction_monitor_rpc \
+  test_construction_monitor_store -v
+```
+
+All **49 actual Python test functions pass**: 16 core, 13 transport and 20 durable
+custody/CLI functions. They include a new-process completion sample, an interrupted
+trailing receipt query followed by fresh stability, file/parent synchronization
+failure before any socket opens, terminal synchronization loss, complete replay,
+every incomplete prefix and single-byte corruption of a representative journal,
+short/partial writes, real subprocess locking, mode/link/FIFO/path replacement
+refusals, input/endpoint/policy substitution and offline terminal behavior. Bed,
+chair and table conditions and bounded whole Agent Turn outputs are exercised.
+Four weakened publication implementations also fail regression assertions: missing
+read-intent synchronization, replayed publication permission, skipped old-byte
+verification, and missing result reservation. The four core weakened implementations
+continue to fail regression assertions.
+Exact evidence scope and source hashes are retained in
+`docs/evidence/construction-monitor-workflow.json`. Run
+`python3 scripts/check_construction_monitor.py --mutations` to repeat the complete
+49-function suite, check the machine-contract bounds and reject the four
+publication mutants.
 
 Even a satisfied goal describes a historical receipt-linked sampled condition. It
 is not continuous monitoring, causal proof, current usability, terrain safety,

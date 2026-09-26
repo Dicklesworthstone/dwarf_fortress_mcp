@@ -1,0 +1,34 @@
+{
+  "actual_python_implementation_executed": true,
+  "actual_tcp_and_subprocesses_executed": true,
+  "full_repository_qualification": false,
+  "live_game": false,
+  "native_plugin_executed": false,
+  "physical_power_loss": false,
+  "production_admitted": false,
+  "python": "3.13.5",
+  "rejected_publication_mutants": [
+    "missing_pre_read_sync",
+    "reopened_read_mints_publication",
+    "old_bytes_not_reverified",
+    "publication_before_output_reservation"
+  ],
+  "rust_mcp_executed": false,
+  "schema": "dfmcp.construction-monitor-evidence/1",
+  "source_sha256": {
+    "architecture/construction_monitor_v1.json": "bbd4ad76ed8710fe5185ae211c096b619b182edf5a42d9203682041adc3209e2",
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/check_construction_monitor.py": "a100704974a753a477336c29f8e973d21a4ddfff4719146daf981321c5f62223",
+    "scripts/check_construction_receipt.py": "1f9c9145ce34e0ccbfcb9c72c9ce53602da07bd8206dce2f79fb1f7a3894138b",
+    "scripts/construction_monitor_rpc.py": "b1e96e7a2377ba3ee11774a4fc9687080c4ab9adaf0a15ef641e0a30081eb46e",
+    "scripts/construction_monitor_store.py": "39b0f917ce937329e8d66ed11d4f09c33ed6c07e3d40d38f8619e72a1962e5e4",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/test_construction_monitor_rpc.py": "899d850dcdc54202312782f841505cb1785ee13506be073070eb0864dad0b673",
+    "scripts/test_construction_monitor_store.py": "e6fcb34d6e3f30d2837c424ce564d37a78c252db208550aa3c0242a3cf35bba4",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a",
+    "scripts/track_construction.py": "3d0d73f40a59dcb20fe07ea62bb0d95276114f3cf15db08b48a5d10625fdbc33"
+  },
+  "status": "passed_python_posix_loopback_only",
+  "test_functions": 49
+}
