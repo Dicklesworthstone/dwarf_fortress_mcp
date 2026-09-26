@@ -1,0 +1,72 @@
+{
+  "command": "PYTHONPATH=scripts python3 -m unittest test_dig_blueprint test_dig_blueprint_client test_track_dig_blueprint -v",
+  "errors": 0,
+  "evidence_scope": "actual Python, private filesystem and joined protocol doubles; not real DFHack",
+  "failures": 0,
+  "full_repository_qualification": false,
+  "live_fortress": false,
+  "mcp_executed": false,
+  "measurements": {
+    "complete_128_step_linked_output_bytes": 8201,
+    "full_volume_linked_output_bytes": 4314,
+    "full_volume_three_sample_journal_bytes": 125072
+  },
+  "physical_power_loss": false,
+  "platform": "Linux",
+  "prior_batch_measurements": {
+    "full_128_step_inventory_bytes": 65504,
+    "maximum_field_review_bytes": 82780
+  },
+  "python": "3.13.5",
+  "real_dfhack_sdk": false,
+  "rust_compiled": false,
+  "schema": "dfmcp.linked-blueprint-evidence/1",
+  "skipped": 0,
+  "source_files": {
+    "scripts/dig_blueprint.py": {
+      "git_blob": "eb16a43e3df6f6453fdadfe5386ec7faf3b80315",
+      "sha256": "59cbbd53b0db9827adbfcc080fded8278cc619101dedbfe6d320e61c605730b3"
+    },
+    "scripts/dig_blueprint_client.py": {
+      "git_blob": "30d4d71759f237a6a1d75f223e56b58fa80a17f1",
+      "sha256": "1c01525b50b055bbe2d7debc51fdfb5b8c85a2a5eb33060c7bb090fc694417a4"
+    },
+    "scripts/dig_designation_client.py": {
+      "git_blob": "0f26e5cd6af55c64537f69a4aee0610bb8dc9edc",
+      "sha256": "c2a09b16d15915079f3eec5bc8dfb60d1babe6950ac219c49bd4c41133f1574d"
+    },
+    "scripts/dig_designation_store.py": {
+      "git_blob": "e82497d39842f294f77e9e576647f19d2a1d594c",
+      "sha256": "a898b5d832bb7553946b6787f5cd7fcd17dacd98a4223af83dd39d2af145c99c"
+    },
+    "scripts/excavation_blueprint.py": {
+      "git_blob": "4623ee4cec90f670c555c37c204ec7904bcec766",
+      "sha256": "e031abbba10fad2122f3c562d7f0954dc4fe165251ed8faafdc3e8065dbddff4"
+    },
+    "scripts/excavation_observer.py": {
+      "git_blob": "95a8f485afa76baced77edac0702ddb891b945cb",
+      "sha256": "2642c09dd5c173c034c5d1e5dd462e843e2dc331645ea4a6215adb27f08181d8"
+    },
+    "scripts/test_dig_blueprint.py": {
+      "git_blob": "b2fa028d927b311c08db8eb93f2482916a4424a8",
+      "sha256": "863c9f3862144ec3146a9d9c8a14372f1b8c715eda1f924c98e84b2e1befcb9b"
+    },
+    "scripts/test_dig_blueprint_client.py": {
+      "git_blob": "c2a6d77edc793e85272a7aa25517e4b4bc4b8e32",
+      "sha256": "13ed2dabb9e8cfc74e3eb121ace30cc6486f2eec5e6d06e1ecad17096b05fc4b"
+    },
+    "scripts/test_track_dig_blueprint.py": {
+      "git_blob": "9ece08c42eb606cdd0d1470965f077f4b211c688",
+      "sha256": "1f2bda6b98583ba1b487d65befecd3e7a4d96af683d9230256af24cec40a27a9"
+    },
+    "scripts/track_dig_blueprint.py": {
+      "git_blob": "b1bf4f7e2ec130d368fffc5a2da3bec8d2a14e77",
+      "sha256": "98b8118df9f5f1b46304f33d62f8f596a9397d711b82b6584a14c0ed8553bb3d"
+    },
+    "scripts/track_excavation.py": {
+      "git_blob": "996811792e2162f754e137433aa112cfcddea419",
+      "sha256": "ed6dadbde3a457037e54cce5750e84170c622a6ce000011a2fa2a165e401946a"
+    }
+  },
+  "tests_executed": 55
+}
