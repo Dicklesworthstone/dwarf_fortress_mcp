@@ -8,6 +8,14 @@ readiness.
 
 ### Added
 
+- Executable furniture/1.19 Python review and one-shot placement client, strict
+  native capture/insertion/receipt codec, and private append-only recovery journals.
+  Persist intent/preparation/dispatch before effects; preserve immutable uncertainty
+  and block new keys until original work resolves. Offline pending-first discovery
+  and inspection never dispatch. All 51 codec/POSIX/loopback/CLI tests pass; this is
+  not native SDK, live-game, Rust/MCP or production qualification. See
+  `docs/BUILD_PLACEMENT_CLIENT.md`.
+
 - Executable read-only excavation floor-goal monitoring over unchanged map/1.5:
   strict capture decoding, distinct advancing-tick sampled stability, fixed
   deadlines, unknown terrain and source/clock invalidation without native mutation.

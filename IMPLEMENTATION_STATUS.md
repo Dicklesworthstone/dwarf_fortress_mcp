@@ -43,6 +43,27 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Executable furniture placement client and durable recovery
+
+`docs/BUILD_PLACEMENT_CLIENT.md` describes the separate Python furniture/1.19
+review/start/inventory/inspect/query/cancel workflow over the existing exact-item
+bed/chair/table engine contract. Strict canonical capture and receipt validation
+checks complete expected-after terrain/item state and the native insertion proof.
+A fresh same-connection preparation can dispatch once only after private intent,
+preparation and dispatch publications have synchronized. Reopened or queried
+preparations cannot recover dispatch permission. Lost outcomes remain pending;
+indeterminate native records are immutable and fence every new key in the same
+private directory. Offline inspection/discovery needs no bridge or credentials.
+
+All 51 codec, POSIX journal, loopback RPC and CLI tests pass. Tests execute actual
+Python with independent native fixtures and explicit TCP peers; they do not
+execute a real DFHack SDK/plugin, Rust/MCP, live game or physical power-loss
+campaign. The native furniture handler is a separate implementation increment.
+Placed means historical construction-job registration, never finished or usable
+furniture. No production admission, checkpoint, global controller lease or other
+mutation family is established. Beads `df-dfhack-bridge-plane-c-pic.4` and `.5`
+remain open for their broader scope.
+
 ### Executable sampled excavation goals and restart-safe monitoring
 
 `docs/EXCAVATION_PROGRESS.md` describes `scripts/track_excavation.py`: a standalone,
