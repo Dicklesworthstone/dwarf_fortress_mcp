@@ -1,0 +1,23 @@
+{
+  "live_game": false,
+  "native_plugin_executed": false,
+  "production_admitted": false,
+  "python_implementation_executed": true,
+  "rejected_mutants": [
+    "job_disappearance_is_completion",
+    "item_substitution_allowed",
+    "paused_replays_count",
+    "interrupted_streak_survives"
+  ],
+  "rust_mcp_executed": false,
+  "schema": "dfmcp.construction-receipt-check/1",
+  "source_sha256": {
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/check_construction_receipt.py": "1f9c9145ce34e0ccbfcb9c72c9ce53602da07bd8206dce2f79fb1f7a3894138b",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a"
+  },
+  "status": "passed_python_only",
+  "test_functions": 16
+}
