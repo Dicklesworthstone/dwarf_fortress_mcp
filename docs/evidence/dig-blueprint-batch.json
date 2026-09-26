@@ -1,0 +1,49 @@
+{
+  "command": "python3 -m unittest discover -s scripts -p 'test_dig_blueprint*.py' -v",
+  "errors": 0,
+  "evidence_scope": "actual Python/compiler/custody/client/TCP-peer/subprocess execution; native peers are doubles",
+  "failures": 0,
+  "full_repository_qualification": false,
+  "large_rectangle_cases": 384,
+  "live_fortress": false,
+  "mcp_executed": false,
+  "output_bytes": {
+    "full_128_step_inventory_bytes": 65504,
+    "maximum_field_review_bytes": 82780
+  },
+  "output_limit": 131072,
+  "physical_power_loss": false,
+  "python_version": "3.13.5",
+  "real_dfhack_sdk": false,
+  "rust_compiled": false,
+  "schema": "dfmcp.dig-blueprint-batch-evidence/1",
+  "source_files": {
+    "scripts/dig_blueprint.py": {
+      "git_blob": "eb16a43e3df6f6453fdadfe5386ec7faf3b80315",
+      "sha256": "59cbbd53b0db9827adbfcc080fded8278cc619101dedbfe6d320e61c605730b3"
+    },
+    "scripts/dig_blueprint_client.py": {
+      "git_blob": "30d4d71759f237a6a1d75f223e56b58fa80a17f1",
+      "sha256": "1c01525b50b055bbe2d7debc51fdfb5b8c85a2a5eb33060c7bb090fc694417a4"
+    },
+    "scripts/dig_designation_client.py": {
+      "git_blob": "0f26e5cd6af55c64537f69a4aee0610bb8dc9edc",
+      "sha256": "c2a09b16d15915079f3eec5bc8dfb60d1babe6950ac219c49bd4c41133f1574d"
+    },
+    "scripts/dig_designation_store.py": {
+      "git_blob": "e82497d39842f294f77e9e576647f19d2a1d594c",
+      "sha256": "a898b5d832bb7553946b6787f5cd7fcd17dacd98a4223af83dd39d2af145c99c"
+    },
+    "scripts/test_dig_blueprint.py": {
+      "git_blob": "b2fa028d927b311c08db8eb93f2482916a4424a8",
+      "sha256": "863c9f3862144ec3146a9d9c8a14372f1b8c715eda1f924c98e84b2e1befcb9b"
+    },
+    "scripts/test_dig_blueprint_client.py": {
+      "git_blob": "c2a6d77edc793e85272a7aa25517e4b4bc4b8e32",
+      "sha256": "13ed2dabb9e8cfc74e3eb121ace30cc6486f2eec5e6d06e1ecad17096b05fc4b"
+    }
+  },
+  "sparse_masks_executed": 4095,
+  "tests_executed": 33,
+  "upstream_base": "ad647773da4dbaf9ec7499a00fc5ee8b474f06a7"
+}

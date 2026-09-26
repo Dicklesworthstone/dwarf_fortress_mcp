@@ -249,25 +249,37 @@ def open_store(api, root: Path, writable=False, budget=lambda: None):
         os.close(parent)
 
 
-def start_designation(api, client, path, key, selected, allow_hidden, expected_witness, confirmed_plan):
+def start_designation(api, client, path, key, selected, allow_hidden, expected_witness, confirmed_plan, *, guard=None):
+    # Optional enclosing-workflow validation runs UNDER the existing store lock.
+    # It can only narrow admission; ordinary capsule callers retain the same path.
     api.key_bytes(key); api.region(selected); api.flag(allow_hidden)
     witness = api.exact_hex(expected_witness, 32); confirmed = api.exact_hex(confirmed_plan, 32)
     api.require(confirmed == api.plan_for(selected, allow_hidden, witness), 'confirmation differs from requested sealed plan')
     with open_store(api, path.parent, True, client.remaining) as store:
         store.ready(path.name, key)
+        if guard is not None:
+            guard(store, None)
         observed = client.observe(selected)
         api.require(hashlib.sha256(observed['raw']).digest() == witness, 'terrain changed since observation; no intent dispatched')
         intent = api.build_intent(client.address, key, selected, allow_hidden, observed['raw'], observed['manifest'])
         with api.capsule(path, intent) as owner:
             store.register(owner)
-            store.dispatch_check(owner); client.remaining()
+            store.dispatch_check(owner)
+            if guard is not None:
+                guard(store, owner)
+            client.remaining()
             prepared = client.prepare(intent)
             if prepared['replayed']:
                 result = api.finish_recovery(owner, prepared, False, True)
             else:
-                store.dispatch_check(owner); client.remaining()
+                store.dispatch_check(owner)
+                if guard is not None:
+                    guard(store, owner)
+                client.remaining()
                 result = api.finish_recovery(owner, client.commit(intent, prepared), True)
             store.verify(); owner.verify()
+            if guard is not None:
+                guard(store, owner)
             return result
 
 
