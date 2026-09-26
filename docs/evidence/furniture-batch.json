@@ -1,0 +1,94 @@
+{
+  "schema": "dfmcp.furniture-batch-evidence/1",
+  "integration_base": "349e5ec709c1c427d52ee4fd00dbe74e8f421e63",
+  "scope": "actual Python, POSIX, subprocess and fixed-protocol TCP test peer; not DFHack",
+  "command": "PYTHONPATH=scripts python3 -m unittest test_furniture_plan test_furniture_batch -v",
+  "python": "3.13.5",
+  "tests_run": 35,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "compiler_tests": 7,
+  "batch_tests": 28,
+  "dependency_graphs_checked": 4096,
+  "native_fixture_values": 8,
+  "actual_maximum_batch_dispatches": 32,
+  "injected_sync_failure_points": 16,
+  "largest_measured_complete_response_bytes": 31548,
+  "maximum_output_bytes": 65536,
+  "mutations": [
+    {
+      "name": "review_not_bound",
+      "test": "test_furniture_batch.BatchTests.test_copied_confirmation_does_not_authorize_another_batch",
+      "rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "final_guard_missing",
+      "test": "test_furniture_batch.BatchTests.test_stop_appearing_after_prepare_prevents_dispatch",
+      "rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "index_not_synced",
+      "test": "test_furniture_batch.BatchTests.test_all_ten_advance_sync_failures_preserve_one_shot_semantics",
+      "rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "missing_intent_forgotten",
+      "test": "test_furniture_batch.BatchTests.test_deleted_registered_child_or_replaced_inode_never_becomes_new_work",
+      "rejected": true,
+      "returncode": 1
+    }
+  ],
+  "source_files": {
+    "scripts/furniture_plan.py": {
+      "sha256": "6ad46a0bfa3641e55c0a92f37d02473c59d679c562a682a62075a3636d616155",
+      "git_blob": "2fc0521378148e16ca3e313c3def00e91db2486e"
+    },
+    "scripts/furniture_batch.py": {
+      "sha256": "9a9f182734b33a46622cda201dad5abcccefaf870943e51dbd357e3fdd79bcd4",
+      "git_blob": "4ea5edb9154e6acc1833c2168375dc074792c04a"
+    },
+    "scripts/test_furniture_plan.py": {
+      "sha256": "7f7ac6ac71f41f16669dfb6c71ce97491e18822d8413669b2ecdfbeb72495ac5",
+      "git_blob": "c3af3714b92e38cb047c9ba4121c78cd5b971329"
+    },
+    "scripts/test_furniture_batch.py": {
+      "sha256": "da2b11763e3b142820ff76516fc295addc3cb3685e4f4851bd9d9e79d8376c7a",
+      "git_blob": "e4396ec7e7c46a7a198f0c481f46a9e0c6ee1fae"
+    },
+    "scripts/check_furniture_batch_mutations.py": {
+      "sha256": "98e66eaa6b7384b56945b2c80dc616a58e2301fd6166c867831a7a8c4f70bffb",
+      "git_blob": "7ac79d837c8bb373ccefb57bc14a20b0b40b8422"
+    },
+    "scripts/build_placement_client.py": {
+      "sha256": "3ee0a1150dec23a20ebf10d5a3a1f551ceebebe6e03fcb97cb2e4f6d0e89c5d8",
+      "git_blob": "a16ee9c1f986ad54501bec237e262c6cf5178940"
+    },
+    "scripts/build_placement_wire.py": {
+      "sha256": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+      "git_blob": "8f906d6d1a919c4bae5f0bdc3bdbacfdd1347d16"
+    },
+    "scripts/build_placement_rpc.py": {
+      "sha256": "d2bef480c0232465764bd7bb37a14946e5d859a02040082df69961238c9f663d",
+      "git_blob": "745cf1c7b5512358cfbcf988a7aa3d3ec7725f3d"
+    },
+    "scripts/build_placement_store.py": {
+      "sha256": "5ccddc7ceb1ef065da0099da27742d56f4d4b7f4695b827e55b8fa89b7ae4897",
+      "git_blob": "98c821dc9a0a80e590997462b2f7d89622e0f2b0"
+    },
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": {
+      "sha256": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+      "git_blob": "5a63fe10e7aa5b09827730e040ad08bc5bfaef96"
+    }
+  },
+  "rust_compiled": false,
+  "mcp_executed": false,
+  "real_dfhack_sdk": false,
+  "live_fortress": false,
+  "physical_power_loss": false,
+  "full_workspace_qualification": false,
+  "production_admitted": false
+}

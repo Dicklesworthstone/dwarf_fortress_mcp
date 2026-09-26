@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from typing import Callable
 
 from build_placement_rpc import Authority, Budget, Client, Reply
 from build_placement_store import PlacementDirectory, Journal, software_equal
@@ -94,7 +95,10 @@ def result(journal: Journal, reply: Reply | None, stored: bool) -> dict:
 
 
 def start(owner: PlacementDirectory, authority: Authority, selection: Selection,
-          key: str, expected_plan: str) -> tuple[dict, Plan]:
+          key: str, expected_plan: str,
+          guard: Callable[[Plan, Reply, str], None] | None = None) -> tuple[dict, Plan]:
+    # An enclosing batch may add custody/confirmation checks, never bypass any
+    # native or journal check. Exceptions fence this call before its next effect.
     expected = exact_hex(expected_plan, 32)
     owner.ready(key)
     authority.guard('CommitPlacement')
@@ -110,8 +114,12 @@ def start(owner: PlacementDirectory, authority: Authority, selection: Selection,
         owner.check()
         known = client.query(plan)
         require(known.record is None and not known.unresolved, 'native key already retained or placement unresolved')
+        if guard is not None:
+            guard(plan, known, 'before_intent')
         journal = owner.create(plan, observed.manifest, authority.address)
         owner.check()
+        if guard is not None:
+            guard(plan, known, 'before_prepare')
         prepared = client.prepare(plan)
         if prepared.record.phase != 'prepared':
             stored = journal.retain(prepared)
@@ -120,6 +128,8 @@ def start(owner: PlacementDirectory, authority: Authority, selection: Selection,
         journal.retain(prepared, prepared=True)
         journal.append('dispatch', {'plan_digest': plan.digest.hex()})
         owner.check()
+        if guard is not None:
+            guard(plan, known, 'before_commit')
         authority.guard('CommitPlacement')
         owner.budget.remaining()
         reply = client.commit(plan)
