@@ -1,0 +1,52 @@
+{
+  "evidence_scope": "executed JSON value-shape and independent predicate-fixture reference only",
+  "fixture_condition_depth": 4,
+  "fixture_condition_nodes": 28,
+  "fixture_predicate_bytes": 2808,
+  "fixture_sha256": "382457a118b8875b3919730ade668a5d5fae6818779a957e3e111bde696a5012",
+  "full_repository_qualification": false,
+  "integration_base_commit": "b86e5f9f3e517af6fb8c35aa06a7d59312cd2260",
+  "live_fortress": false,
+  "mcp_executed": false,
+  "predicate_reference_cases": 4114,
+  "rust_compiled": false,
+  "rust_test_functions_authored": {
+    "adapter": 10,
+    "shared_mcp": 10
+  },
+  "rust_tests_executed": false,
+  "schema": "dfmcp.construction-reference-check/1",
+  "schema_invalid": 50,
+  "schema_sha256": "3d5525bac6c67221c0d0c757f148f43ede9b8382854666d92cff21a06e33f209",
+  "schema_valid": 29,
+  "source_files": {
+    "crates/dfmcp-adapter/src/construction_progress.rs": {
+      "git_blob": "9c0e61ae19850ec35829367c7af1bd257bbee548",
+      "sha256": "c56f1d852ca51ef75aa9ee8b955a364ad7dc44553235a6d8cbb9645b170ce665"
+    },
+    "crates/dfmcp-adapter/src/construction_progress_tests.rs": {
+      "git_blob": "a26c757ce27ae7ccf97b6484d8377af3c33b4e63",
+      "sha256": "bb09452d0a7def2f28abcac988e3f9931123670088f2bc6e5a0b1b97be1ef203"
+    },
+    "crates/dfmcp-adapter/src/lib.rs": {
+      "git_blob": "9e4dbd436ea463afe96dbac74f4c96b7b0d979b0",
+      "sha256": "4e24ddf811c9e72e2019d2f4169f0b574e89f239c6105cc0cb20179205e3a807"
+    },
+    "crates/dfmcp-mcp/src/spatial_construction.rs": {
+      "git_blob": "4e4f3f96a75aca35c7b1ebf702539fa8a32b89a2",
+      "sha256": "c620604a09c69a3bd7e9b05b8e47969f46171ec9012037c6adfde6823df3aa37"
+    },
+    "crates/dfmcp-mcp/src/spatial_construction_tests.rs": {
+      "git_blob": "558514edc6ad812f0eaf5a94162a57e68f4acf7a",
+      "sha256": "cbbb8a6bf32f77e55e5eb969883d4c63c347d957d110834d0de0f91b4785f6a8"
+    },
+    "crates/dfmcp-mcp/src/spatial_queries.rs": {
+      "git_blob": "371687e25d8d6d1a36b7f0f53e9f48e22648461c",
+      "sha256": "8dbf0b16ac9666198d6c5d5753e76aef515cc25cc60b5cf1078c31639da5dd33"
+    },
+    "scripts/check_construction_progress_reference.py": {
+      "git_blob": "ac5df3d9abaf78d34e6706385b03af1be9f94480",
+      "sha256": "1f7dec1797df8e0e9a47fd47d9c926b11f7ac97f2e01d269d8c0caf59e1c7f24"
+    }
+  }
+}

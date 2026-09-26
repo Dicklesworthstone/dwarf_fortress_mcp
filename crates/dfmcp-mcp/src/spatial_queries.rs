@@ -2,7 +2,7 @@
 use super::anchor_json;
 use dfmcp_adapter::live_map::map_error;
 use dfmcp_adapter::live_spatial::SpatialStateView;
-use dfmcp_adapter::operations_analysis::MaterialDemand;
+use dfmcp_adapter::operations_analysis::{MaterialDemand, OperationsStateView};
 use dfmcp_adapter::spatial_inventory::{self as inventory, SPATIAL_SUPPLY_POLICY};
 use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier};
 use dfmcp_world::map_region::ROUTE_POLICY;
@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 mod blueprint;
 #[path = "spatial_connectivity.rs"]
 mod connectivity;
+#[path = "spatial_construction.rs"]
+mod construction;
 
 fn invalid(s: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, s)
@@ -31,6 +33,7 @@ struct Envelope {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Query {
     BlueprintLayout(blueprint::Request),
+    ConstructionProgress(construction::Request),
     MapConnectivity(connectivity::Request),
     MapRoute {
         start: [u32; 3],
@@ -81,7 +84,7 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|v| v.get("kind"))
             .and_then(Value::as_str),
-        Some("map_route" | "spatial_inventory_plan" | "blueprint_layout" | "map_connectivity")
+        Some("map_route" | "spatial_inventory_plan" | "blueprint_layout" | "map_connectivity" | "construction_progress")
     )
 }
 fn validate(input: &Value) -> Result<()> {
@@ -226,7 +229,7 @@ fn base(c: &OperationContext, s: Digest32, kind: &str) -> Value {
         "unit_path_proven":false,"safety_proven":false,"global_unreachability_proven":false,
         "reservation_created":false,"commit_compatible":false,"route_policy":ROUTE_POLICY})
 }
-pub(super) fn execute<T: SpatialStateView>(
+pub(super) fn execute<T: SpatialStateView + OperationsStateView>(
     state: &T,
     c: &OperationContext,
     input: &Value,
@@ -257,6 +260,7 @@ pub(super) fn execute<T: SpatialStateView>(
     let source = state.source_digest()?;
     match envelope.query {
         Query::BlueprintLayout(request) => blueprint::execute(state, c, source, request),
+        Query::ConstructionProgress(request) => construction::execute(state, c, source, request),
         Query::MapConnectivity(request) => connectivity::execute(state, c, source, request),
         Query::MapRoute {
             start,
@@ -378,6 +382,10 @@ pub(super) fn schema() -> Result<Value> {
         "../../../schemas/mcp_map_connectivity_v1.json"
     ))
     .map_err(|_| invalid("connectivity schema invalid"))?;
+    let construction: Value = serde_json::from_str(include_str!(
+        "../../../schemas/mcp_construction_progress_v1.json"
+    ))
+    .map_err(|_| invalid("construction schema invalid"))?;
     let variants = base["$defs"]["query"]["oneOf"]
         .as_array_mut()
         .ok_or_else(|| invalid("base query variants absent"))?;
@@ -385,5 +393,6 @@ pub(super) fn schema() -> Result<Value> {
     variants.push(inventory);
     variants.push(blueprint);
     variants.push(connectivity);
+    variants.push(construction);
     Ok(base)
 }

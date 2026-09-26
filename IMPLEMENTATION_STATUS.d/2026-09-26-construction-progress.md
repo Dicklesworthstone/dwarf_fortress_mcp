@@ -33,3 +33,24 @@ file was verified against its exact Git blob before adding one module line.
 
 Beads: df-dfhack-bridge-plane-c-pic.3, df-action-coordinator-exec-ero.4,
 dfmcp-wp-pln04-long-horizon-bounded-obligations-qr1. Broad acceptance remains open.
+
+## MCP construction query and explicit watch proposals
+
+The shared spatial query router now registers `construction_progress` in both
+spatial/1.6 and citizen/spatial/1.8 handlers and their discovery schema. Responses
+include all-target status summaries, complete bounded job counts, optional item
+links, exact-source pagination and optional per-row explicit watch requests.
+Proposals pin current canonical generations, kind and maximum stage, reuse the
+existing shared watch language and declare removal-job failure. They do not
+register watches or validate external placement receipts. The normal foreground
+watch execution, eight-per-session retention, output reservations and configured
+spatial/1.8 durability remain authoritative; no alternate monitoring state exists.
+
+Ten additional shared MCP Rust test functions cover routing, actual condition
+and watch handlers, lifecycle/cadence, flag/link equivalence, source/reference
+changes, schema/input guards, failed publication and whole-row pagination. These
+are also UNCOMPILED AND UNEXECUTED. The editing environment lacks Rust/Cargo.
+Executed Python reference checks accept 29 JSON shapes, reject 50 malformed
+shapes, and evaluate 4,114 independent cases over the same predicate fixture that
+Rust tests require the generator to emit. Predicate-fixture size is not measured
+Rust output. See docs/CONSTRUCTION_PROGRESS.md and the exact-scope evidence JSON.

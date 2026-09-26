@@ -1,0 +1,232 @@
+{
+  "condition": {
+    "op": "all",
+    "args": [
+      {
+        "op": "field",
+        "entity_id": "1099511627786",
+        "generation": 1,
+        "field": "type_key",
+        "comparison": "eq",
+        "value": {
+          "type": "text",
+          "value": "Bed"
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "1099511627786",
+        "generation": 1,
+        "field": "build_stage",
+        "comparison": "eq",
+        "value": {
+          "type": "i64",
+          "value": 3
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "1099511627786",
+        "generation": 1,
+        "field": "max_build_stage",
+        "comparison": "eq",
+        "value": {
+          "type": "i64",
+          "value": 3
+        }
+      },
+      {
+        "op": "entity_count",
+        "scope": "observed_projection",
+        "kind": "job",
+        "predicate": {
+          "op": "all",
+          "args": [
+            {
+              "op": "related",
+              "entity_id": "1099511627786",
+              "generation": 1,
+              "relation": "contained_in",
+              "direction": "incoming"
+            },
+            {
+              "op": "any",
+              "args": [
+                {
+                  "op": "field",
+                  "field": "type_key",
+                  "comparison": "eq",
+                  "value": {
+                    "type": "text",
+                    "value": "DestroyBuilding"
+                  }
+                },
+                {
+                  "op": "field",
+                  "field": "type_key",
+                  "comparison": "eq",
+                  "value": {
+                    "type": "text",
+                    "value": "ConstructBuilding"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "comparison": "eq",
+        "value": 0
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "type_key",
+        "comparison": "eq",
+        "value": {
+          "type": "text",
+          "value": "BED"
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "in_building",
+        "comparison": "eq",
+        "value": {
+          "type": "bool",
+          "value": true
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "in_job",
+        "comparison": "eq",
+        "value": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "removed",
+        "comparison": "eq",
+        "value": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "on_ground",
+        "comparison": "eq",
+        "value": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      {
+        "op": "field",
+        "entity_id": "2199023255572",
+        "generation": 1,
+        "field": "in_inventory",
+        "comparison": "eq",
+        "value": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      {
+        "op": "entity_count",
+        "scope": "observed_projection",
+        "kind": "item",
+        "predicate": {
+          "op": "all",
+          "args": [
+            {
+              "op": "field",
+              "field": "native_item_id",
+              "comparison": "eq",
+              "value": {
+                "type": "u64",
+                "value": 20
+              }
+            },
+            {
+              "op": "related",
+              "entity_id": "1099511627786",
+              "generation": 1,
+              "relation": "contained_in",
+              "direction": "incoming"
+            }
+          ]
+        },
+        "comparison": "eq",
+        "value": 1
+      },
+      {
+        "op": "entity_count",
+        "scope": "observed_projection",
+        "kind": "item",
+        "predicate": {
+          "op": "related",
+          "entity_id": "2199023255572",
+          "generation": 1,
+          "relation": "contained_in",
+          "direction": "outgoing"
+        },
+        "comparison": "eq",
+        "value": 0
+      },
+      {
+        "op": "entity_count",
+        "scope": "observed_projection",
+        "kind": "job",
+        "predicate": {
+          "op": "related",
+          "entity_id": "2199023255572",
+          "generation": 1,
+          "relation": "uses",
+          "direction": "incoming"
+        },
+        "comparison": "eq",
+        "value": 0
+      }
+    ]
+  },
+  "failure_condition": {
+    "op": "entity_count",
+    "scope": "observed_projection",
+    "kind": "job",
+    "predicate": {
+      "op": "all",
+      "args": [
+        {
+          "op": "related",
+          "entity_id": "1099511627786",
+          "generation": 1,
+          "relation": "contained_in",
+          "direction": "incoming"
+        },
+        {
+          "op": "field",
+          "field": "type_key",
+          "comparison": "eq",
+          "value": {
+            "type": "text",
+            "value": "DestroyBuilding"
+          }
+        }
+      ]
+    },
+    "comparison": "gt",
+    "value": 0
+  }
+}
