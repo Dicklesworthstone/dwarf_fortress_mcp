@@ -17,6 +17,18 @@ readiness.
 
 ### Added
 
+- Executed Rust furniture/1.19 placement backend: strict canonical capture and
+  receipt validation, current-authority bounded TCP, a private append-only
+  coordinator, and a session retaining the original preparation connection.
+  Intent/preparation/dispatch synchronization precedes effects; terminal receipt
+  synchronization precedes acknowledgment. Reopened evidence never restores
+  commit permission, indeterminate history blocks new keys, and Query-only
+  recovery can retire an unattempted preparation after placement revocation.
+  All 41 focused Rust tests pass on the pinned nightly, including real TCP and
+  Linux custody. Four old test-fixture compilation blockers were corrected to
+  enable execution; broader existing assertion failures remain explicit. See
+  `docs/BUILD_PLACEMENT_RUST.md`.
+
 - Native furniture/1.19 DFHack handler with exact-item bed/chair/table observation,
   fresh preparation, single commit, query and preparation retirement. Full capture
   revalidation surrounds private allocation; exact construction-job, native

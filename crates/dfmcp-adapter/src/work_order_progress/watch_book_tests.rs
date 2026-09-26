@@ -25,7 +25,7 @@ impl Store {
             ..Self::default()
         }
     }
-    fn bytes(&self) -> Vec<u8> {
+    fn snapshot_bytes(&self) -> Vec<u8> {
         self.data.borrow().clone()
     }
 }
@@ -123,7 +123,7 @@ fn book(a: &mut ProgressArchive<Store>) -> Result<(WatchBook<Store>, Store)> {
     ))
 }
 fn forged_event(store: &Store, event: Event) -> Result<()> {
-    let bytes = store.bytes();
+    let bytes = store.snapshot_bytes();
     let mut r = Reader {
         bytes: &bytes[48..80],
     };
@@ -164,12 +164,12 @@ fn registration_is_durable_discoverable_and_replay_never_renews() -> Result<()> 
     let (mut b, s) = book(&mut a)?;
     let one = b.register(spec("z")?, WatchRecordRef::of(&origin), &mut a, &ctx()?)?;
     b.register(spec("a")?, WatchRecordRef::of(&origin), &mut a, &ctx()?)?;
-    let bytes = s.bytes();
+    let bytes = s.snapshot_bytes();
     assert_eq!(
         b.register(spec("z")?, WatchRecordRef::of(&origin), &mut a, &ctx()?)?,
         one
     );
-    assert_eq!(bytes, s.bytes());
+    assert_eq!(bytes, s.snapshot_bytes());
     let changed = WatchSpec::new("z", 3, WatchGoal::Validated, 31, 1, 2)?;
     assert!(
         b.register(changed, WatchRecordRef::of(&origin), &mut a, &ctx()?)
@@ -200,7 +200,7 @@ fn appended_samples_survive_crash_before_any_watch_evaluation() -> Result<()> {
     let x = append(&mut a, 2, 11, 1)?;
     let y = append(&mut a, 3, 12, 1)?;
     drop(b);
-    let before = s.bytes();
+    let before = s.snapshot_bytes();
     let mut offline = WatchBook::open(s.clone(), ArchiveMode::Offline, false, &mut a, &ctx()?)?;
     let result = offline.evaluate(&mut a, &ctx()?)?;
     assert_eq!(result.results[0].state(), WatchState::SatisfiedObservation);
@@ -208,7 +208,7 @@ fn appended_samples_survive_crash_before_any_watch_evaluation() -> Result<()> {
         result.results[0].samples(),
         [WatchRecordRef::of(&x), WatchRecordRef::of(&y)]
     );
-    assert_eq!(s.bytes(), before);
+    assert_eq!(s.snapshot_bytes(), before);
     Ok(())
 }
 #[test]
@@ -231,9 +231,9 @@ fn cancellation_replays_in_order_and_cannot_rewrite_satisfaction() -> Result<()>
         .is_err()
     );
     b.cancel("key", d.digest(), x.entry.record_digest, &mut a, &ctx()?)?;
-    let retained = s.bytes();
+    let retained = s.snapshot_bytes();
     b.cancel("key", d.digest(), Digest32::ZERO, &mut a, &ctx()?)?;
-    assert_eq!(s.bytes(), retained);
+    assert_eq!(s.snapshot_bytes(), retained);
     append(&mut a, 3, 12, 1)?;
     let mut offline = WatchBook::open(s, ArchiveMode::Offline, false, &mut a, &ctx()?)?;
     assert_eq!(
@@ -278,7 +278,7 @@ fn rehashed_illegal_cancellations_and_duplicate_registrations_are_rejected() -> 
         Event::Register(spec("key")?, WatchRecordRef::of(&origin), d.digest()),
         Event::Cancel("unknown".into(), d.digest(), WatchRecordRef::of(&end)),
     ] {
-        let s = Store::from_bytes(s.bytes());
+        let s = Store::from_bytes(s.snapshot_bytes());
         forged_event(&s, event)?;
         assert!(WatchBook::open(s, ArchiveMode::Offline, false, &mut a, &ctx()?).is_err());
     }
@@ -290,7 +290,7 @@ fn every_corruption_and_incomplete_prefix_is_refused_without_repair() -> Result<
     let origin = append(&mut a, 1, 10, 0)?;
     let (mut b, s) = book(&mut a)?;
     b.register(spec("key")?, WatchRecordRef::of(&origin), &mut a, &ctx()?)?;
-    let original = s.bytes();
+    let original = s.snapshot_bytes();
     for i in 0..original.len() {
         let mut bytes = original.clone();
         bytes[i] ^= 1;
@@ -299,7 +299,7 @@ fn every_corruption_and_incomplete_prefix_is_refused_without_repair() -> Result<
             WatchBook::open(s.clone(), ArchiveMode::Offline, false, &mut a, &ctx()?).is_err(),
             "byte {i}"
         );
-        assert_eq!(s.bytes(), bytes);
+        assert_eq!(s.snapshot_bytes(), bytes);
     }
     for end in 0..original.len() {
         if end == HEADER_BYTES as usize {
@@ -310,7 +310,7 @@ fn every_corruption_and_incomplete_prefix_is_refused_without_repair() -> Result<
             WatchBook::open(s.clone(), ArchiveMode::Offline, false, &mut a, &ctx()?).is_err(),
             "prefix {end}"
         );
-        assert_eq!(s.bytes(), original[..end]);
+        assert_eq!(s.snapshot_bytes(), original[..end]);
     }
     Ok(())
 }
@@ -342,9 +342,9 @@ fn torn_event_fences_owner_and_blocks_reopen() -> Result<()> {
     );
     assert!(b.records.is_empty());
     assert!(b.evaluate(&mut a, &ctx()?).is_err());
-    let bytes = s.bytes();
+    let bytes = s.snapshot_bytes();
     assert!(WatchBook::open(s.clone(), ArchiveMode::Offline, false, &mut a, &ctx()?).is_err());
-    assert_eq!(s.bytes(), bytes);
+    assert_eq!(s.snapshot_bytes(), bytes);
     Ok(())
 }
 #[test]
@@ -423,11 +423,11 @@ fn budget_refusal_and_custody_loss_never_return_partial_watch_sets() -> Result<(
     let origin = append(&mut a, 1, 10, 0)?;
     let (mut b, s) = book(&mut a)?;
     b.register(spec("key")?, WatchRecordRef::of(&origin), &mut a, &ctx()?)?;
-    let bytes = s.bytes();
+    let bytes = s.snapshot_bytes();
     let mut low = ctx()?;
     low.budget.max_bytes = 1;
     assert!(b.evaluate(&mut a, &low).is_err());
-    assert_eq!(s.bytes(), bytes);
+    assert_eq!(s.snapshot_bytes(), bytes);
     s.faults.borrow_mut().custody_lost = true;
     assert!(b.summary(&mut a, &ctx()?).is_err());
     s.faults.borrow_mut().custody_lost = false;

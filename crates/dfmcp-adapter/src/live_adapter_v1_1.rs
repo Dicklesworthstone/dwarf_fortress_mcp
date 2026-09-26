@@ -1008,7 +1008,7 @@ mod tests {
                 .graph
                 .entities
                 .values()
-                .filter(|entity| entity.kind == EntityKind::Event)
+                .filter(|entity| entity.kind == EntityKind::Announcement)
                 .count(),
             2
         );
@@ -1106,7 +1106,7 @@ mod tests {
                 .graph
                 .entities
                 .values()
-                .filter(|entity| entity.kind == EntityKind::Event)
+                .filter(|entity| entity.kind == EntityKind::Announcement)
                 .count(),
             3
         );

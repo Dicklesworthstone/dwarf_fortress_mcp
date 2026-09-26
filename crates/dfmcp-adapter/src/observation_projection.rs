@@ -166,7 +166,7 @@ impl<S: JournalStorage, P: JournalProfile> ObservationJournal<S, P> {
 mod tests {
     use super::*;
     use crate::live_operations::OperationsProfile;
-    use crate::live_spatial::{LiveSpatialObservation, SpatialStateView};
+    use crate::live_spatial::LiveSpatialObservation;
     use dfmcp_core::{CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget};
     use std::io::Cursor;
 
@@ -259,7 +259,7 @@ mod tests {
                 })
                 .collect(),
         };
-        let mut journal = ObservationJournal::open(
+        let mut journal = ObservationJournal::<Memory, Spatial16>::open(
             Memory::default(),
             &context,
             JournalLimits::default(),

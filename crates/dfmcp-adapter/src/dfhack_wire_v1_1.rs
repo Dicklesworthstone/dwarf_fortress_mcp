@@ -1314,6 +1314,7 @@ mod tests {
     use std::io::{Cursor, Read, Write};
 
     use super::*;
+    use crate::MAX_ANNOUNCEMENT_TEXT_BYTES;
 
     #[derive(Default)]
     struct ScriptedIo {
@@ -1399,7 +1400,7 @@ mod tests {
         writer.sint32(6, 20);
         writer.sint32(7, 30);
         for field in 8..=16 {
-            writer.boolean(field, field != 13)?;
+            writer.boolean(field, field != 13);
         }
         Ok(writer.finish())
     }

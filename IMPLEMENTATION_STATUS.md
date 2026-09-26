@@ -43,6 +43,36 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Executed Rust furniture placement, durable custody and recovery
+
+`docs/BUILD_PLACEMENT_RUST.md` documents the typed furniture/1.19 codec, fixed
+native TCP client, private Rust journal and original-connection session owner.
+The complete native capture, expected-after state and independent insertion proof
+are checked before accepting a placed receipt. Query and replay cannot recreate
+commit permission; every native attempt follows synchronized intent, preparation
+and dispatch records. Immutable indeterminate history remains unresolved and
+blocks new keys. Recovery can retire a preparation with Query authority after
+placement grants are revoked; offline replay performs no native I/O or storage
+synchronization.
+
+All **41 new Rust tests passed**, with zero ignored: ten canonical codec groups,
+twelve real TCP/authority/deadline groups and nineteen coordinator/session/Linux
+storage groups. They use all eight unchanged independent native fixtures and
+exercise real private-file locking, corruption, publication failures, lost
+replies, original-key recovery and non-restored dispatch permission. The adapter
+production check also passed. The compiler is the repository-pinned
+`nightly-2026-08-31`, rustc `1.100.0-nightly (908501772 2026-08-30)`.
+
+Provisioning the compiler exposed and fixed four preexisting test-fixture
+compilation blockers. An earlier baseline adapter run executed 718 tests: 715
+passed and three existing announcement/projection fixture assertions failed.
+Those unrelated assertions were preserved. Earlier uncompiled notes below
+describe their original implementation increments; this executed scope does not
+turn the entire repository into a qualified release. This does not establish a
+real DFHack SDK build, live fortress campaign, game checkpoint, global controller
+fence or production admission. The agent-facing MCP integration is a separate
+increment.
+
 ### Native exact-item furniture placement through the durable developer client
 
 `docs/BUILD_PLACEMENT_NATIVE.md` documents the new isolated furniture/1.19
