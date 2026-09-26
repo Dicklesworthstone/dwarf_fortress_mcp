@@ -179,10 +179,14 @@ pub(super) fn evaluate(
         let evidence = digest(&json!({"domain":POLICY,"anchor":anchor(snapshot.anchor()),
             "target":target,"test":test,"truth":truth.text(),"roots_bound":bound,
             "generation_mismatch":local.invalid_generation,"facts":local.facts}))?;
-        rows.push(json!({"building_native_id":target.building_native_id,
+        let mut row = json!({"building_native_id":target.building_native_id,
             "item_native_id":target.item_native_id,"truth":truth.text(),
             "roots_bound":bound,"generation_mismatch":local.invalid_generation,
-            "evidence_digest":evidence.to_string()}));
+            "evidence_digest":evidence.to_string()});
+        if targets.len() == 1 {
+            row["facts"] = json!(local.facts);
+        }
+        rows.push(row);
         budget.check()?;
     }
     let truth = if decisive {

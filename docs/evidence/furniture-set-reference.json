@@ -1,0 +1,62 @@
+{
+  "schema": "dfmcp.furniture-set-reference/1",
+  "evidence_scope": "independent JSON schema, target and truth-table reference only",
+  "accepted_schema_cases": 20,
+  "rejected_schema_cases": 24,
+  "rejected_semantic_cases": 3,
+  "accepted_query_schema_cases": 9,
+  "rejected_query_schema_cases": 10,
+  "prior_query_schema_preserved_except_additive_mode": true,
+  "rust_test_functions_authored": {
+    "shared_condition": 10,
+    "shared_spatial_query": 5
+  },
+  "ternary_set_cases": 19680,
+  "max_request_nodes": 465,
+  "max_request_accounted_bytes": 20348,
+  "max_request_serialized_bytes": 9976,
+  "rust_compiled": false,
+  "rust_tests_executed": false,
+  "mcp_executed": false,
+  "native_executed": false,
+  "live_fortress": false,
+  "full_repository_qualification": false,
+  "source_files": {
+    "crates/dfmcp-mcp/src/query_watch.rs": {
+      "sha256": "c7ec13c120dd66c298c8b3b67f42f7d442e66f078d6744fcbcb151abccb69229",
+      "git_blob": "0d50b0572e4fe48d96effda91890a213c6d3176c"
+    },
+    "crates/dfmcp-mcp/src/query_watch_construction.rs": {
+      "sha256": "d455c54f4917214502b2164102552feab2ccc8adbc8e8db55e38ebf3e387b9ad",
+      "git_blob": "43540376b584686e0aaa7007aaa86bc70d6a1ce4"
+    },
+    "crates/dfmcp-mcp/src/query_watch_construction_tests.rs": {
+      "sha256": "89e0c6d9435d5b97714b4ffd0854f52a499cc108f727c2e16e6be0c0026c7356",
+      "git_blob": "c328c4e636367904f835f4eb92fbc2401f58ba60"
+    },
+    "schemas/mcp_watch_furniture_set_v1.json": {
+      "sha256": "713f0c13be2d3de9e5a2d23f4d13bdd59b2d69f76158d8db614c9f8691336782",
+      "git_blob": "13a76d1cc117eb8072dff915c81b8937ea8c4a71"
+    },
+    "crates/dfmcp-mcp/src/spatial_construction.rs": {
+      "sha256": "fa192d34baf5efc0c336e66001a8d82946244ed3a0205015b990146ecd4ce159",
+      "git_blob": "567e8764ade922ce795ab15eda6aa0dcdc174aba"
+    },
+    "crates/dfmcp-mcp/src/spatial_construction_set.rs": {
+      "sha256": "ee4fad460834f2ba95c2afae36f5c15313056baba525731ee9d84a15da787fc2",
+      "git_blob": "4c3e5e66eb8f3ccf0814652edcffe503e65d29b1"
+    },
+    "crates/dfmcp-mcp/src/spatial_construction_set_tests.rs": {
+      "sha256": "c84af6c75328b6756676efc4adb6e03033a297cc4470250a715ca04694244ce5",
+      "git_blob": "228245159d8473f1df92427167d953aa14020931"
+    },
+    "schemas/mcp_construction_progress_v1.json": {
+      "sha256": "44d2701bd3928213bd041250053e5a7b570353340ce35ef104733c2b7a826db7",
+      "git_blob": "27b1b338abc332893a2431810975d132d5c5f83e"
+    },
+    "scripts/check_furniture_set_reference.py": {
+      "sha256": "2b41086404efb58a72940f0e20d2ec78eec25e872c499046f6ebf957f5047a48",
+      "git_blob": "e95d9490ccb78dba07cbc8c739d32552b6a5fb04"
+    }
+  }
+}

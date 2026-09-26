@@ -159,6 +159,16 @@
                   "maximum": 64
                 }
               ]
+            },
+            "mode": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "const": "all_targets"
+                }
+              ]
             }
           }
         }

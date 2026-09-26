@@ -1,68 +1,148 @@
 # Whole-plan furniture construction goals
 
-The shared foreground watch engine now accepts the closed `furniture_set`
-condition. One watch can cover 1..32 explicitly selected beds, chairs and tables,
-with optional exact installed items. This removes the need to consume one of the
-eight per-session watch slots per building. Source is present; Rust/MCP compilation
-and execution of this increment are not established in the editing environment.
+The shared foreground watch engine accepts the closed `furniture_set` condition.
+One watch can cover 1..32 explicitly selected beds, chairs and tables, with optional
+exact installed items. All targets share one sample history, fixed deadline and
+stability streak, instead of consuming one of the eight session watch slots per
+building. The existing spatial/1.6 and citizen/spatial/1.8 `construction_progress`
+query can generate the complete request with `monitor.mode = "all_targets"`.
 
-## Semantics
+This increment is source present with executed independent Python reference
+checks. Its Rust tests have **not been compiled or executed here**. It adds no game
+mutation, native protocol, dependency, production admission, receipt import or
+native-effect discharge. Existing implementation evidence does not qualify it.
 
-Use `test: "all_complete"` for success and a second condition with the identical
-targets and `test: "any_removal"` for failure. All selected construction predicates
-must hold in the same observation, for the same watch's stable sample streak.
-Independently successful historical watches are not combined into current success.
-Normal cadence, fixed deadline, epoch/generation invalidation, cancellation,
-terminal immutability and configured spatial/1.8 watch persistence still apply.
+## Request one proposal for the complete selection
+
+In an existing spatial session, submit the following as the `query` argument of
+`fortress.query`. IDs are illustrative; select them from the current observation.
+The deadline must be future, fit the session horizon, and allow the requested
+cadence and sample count. Use the returned proposal's session ID when registering.
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "construction_progress",
+    "targets": [
+      {"building_native_id": 10, "item_native_id": 20},
+      {"building_native_id": 11, "item_native_id": 21}
+    ],
+    "monitor": {
+      "mode": "all_targets",
+      "key_prefix": "bedrooms",
+      "deadline_tick": 100801200,
+      "poll_interval_ticks": 1,
+      "stable_observations": 2
+    },
+    "limit": 1
+  }
+}
+```
+
+The whole-plan proposal is at **`result.monitoring.watch_request`**, not inside a
+row. Submit that complete envelope explicitly through the existing watch query to
+register it. Its key is `<key_prefix>.all`. Preview alone creates no watch, reads
+no new native capture and modifies no game state. The proposal's exact anchor must
+still be current at registration; do not silently remove a stale anchor.
+
+Every page repeats the identical complete-selection proposal, even when only one
+row fits. A missing, unsupported or mismatched building, or an unestablished exact
+item identity, makes `monitoring.available=false` and lists all affected building
+IDs. It returns **no smaller replacement goal**. A complete proposal plus at least
+one row and summary must fit the enclosing output allowance or the query refuses.
+
+Omitting `mode`, or setting it to null, retains the previous per-building proposal
+behavior and normalized query identity. Other mode values are rejected. Switching
+mode, target selection, key, cadence or deadline invalidates a continuation.
+Changing page width or input target order does not change the normalized selection.
+
+## One simultaneous condition, not accumulated individual successes
+
+The generated success predicate uses `test: "all_complete"`; the failure predicate
+uses `test: "any_removal"` over the same complete target set. Every selected
+construction predicate must hold in the same observation for the same watch's
+stable sample streak. A building matching yesterday and another matching today do
+not establish that both match now. A later mismatch resets the common streak;
+repeated polls of one anchor do not add qualifying samples.
+
+Normal watch cadence, fixed deadline, epoch/generation invalidation, cancellation,
+terminal immutability and configured spatial/1.8 persistence still apply. A true
+removal predicate fails the goal. Missing or unestablished roots remain unknown,
+including in removal checks; recycled generations invalidate the whole watch even
+if another target already supplied a decisive boolean result. Cancellation stops
+only monitoring, not construction jobs, miners, or the game clock.
 
 Each target has `building_native_id`, `building_generation`, `kind` (`bed`, `chair`,
 `table`) and `max_stage` (1..32). Optional `item_native_id` and `item_generation`
 must both be supplied or both absent/null. Generations are canonical generations
-from the current observing session, not native plugin incarnation counters.
-Targets must be strictly ordered by native building ID. Duplicate building IDs,
-duplicate selected items, incomplete item identities and invalid bounds are refused.
+from the observing session, not native plugin incarnation counters. Targets in a
+`furniture_set` must be strictly ordered by native building ID. Duplicate building
+IDs, duplicate selected items and incomplete identities are refused.
 
-For each target the implementation expands the same fixed stage/type/job/item
-recipe used by the original per-building construction proposal. It invokes the
-existing field, count and relationship evaluator with the SAME shrinking work
-budget. It does not replace unknown values with success, change the condition
-language's old limits, take another native capture or create a second state machine.
-Explicit building and item roots are checked even in removal-only conditions and
-even after an earlier decisive target. A recycled late identity invalidates the
-watch; missing/unestablished roots cannot yield a successful target.
+For each target the evaluator expands the same fixed stage/type/job/item recipe
+used by the original per-building construction proposal. It invokes the existing
+field, count and relationship evaluator with the **same shrinking work budget**.
+It does not substitute a second truth evaluator or monitoring state machine.
 
-Per-target evidence is condensed to its truth, root-binding and generation status,
-plus a digest covering the full predicate trace and exact anchor. Every selected
-target remains in the result; there is no first-eight-target truncation. Use the
-existing construction_progress diagnosis for the native IDs to inspect detailed
-stages, jobs and item relationships. These observations do not verify an external
-placement receipt, original footprint, native causality, usability or safety.
-Native effect obligations are unchanged.
+Multi-target evidence retains each target's truth, root-binding and generation
+status, plus a digest covering its complete predicate trace and exact anchor. No
+target summary is dropped. A single-target `condition_evaluation` additionally
+returns the full predicate trace for drill-down. The normal `construction_progress`
+rows remain the route to detailed stages, jobs and item relationships.
 
-## Bounds and compatibility
+These are conditions on observed entities. They do not verify an external
+placement receipt, original footprint, common incarnation across plugins,
+causality, current usability, continuous history, safety or game checkpoint.
+Native effect obligations remain unchanged.
 
-A condition accepts at most 32 targets; a success/failure definition may reference
-at most 64 targets across all furniture-set nodes. This admits a 32-target success
-plus 32-target failure predicate but not arbitrary nested multiplication. Existing
-64-node/depth-eight limits still apply to the outer condition tree. Input remains
-bounded to 1,024 nodes and 32 KiB of conservative accounting. Evaluation still has
-one million shared work units and the enclosing cooperative deadline. Large
-rosters can exhaust this bound: the engine refuses instead of skipping targets.
-Complete rendering must succeed before registration or progress is published.
+## Bounds, persistence and compatibility
 
-The new op is added to discovered watch schemas, including condition inspection
-and the existing registration paths. Old condition encodings are unchanged.
-Stored definitions use the existing serde/checkpoint path; an older binary rejects
-the unknown op rather than weakening it. This does not establish a tested migration
-or power-loss campaign, and downgrading a journal with new definitions is unsupported.
+A condition accepts at most 32 targets; one success/failure definition may contain
+at most 64 target occurrences across all furniture-set nodes. This admits a
+32-target success plus a 32-target failure predicate, not arbitrary nested
+multiplication. The existing outer 64-node/depth-eight limits remain unchanged.
+Input stays within 1,024 nodes and 32 KiB conservative accounting; evaluation keeps
+its one million shared work units and cooperative deadline. Because the existing
+population evaluator scans the captured projection, large rosters may exhaust
+this allowance. The operation refuses rather than skipping targets or extending
+the deadline. Complete rendering precedes visible registration or progress.
 
-## Evidence
+Schema discovery includes the new op for condition inspection and existing watch
+registration. Old condition encodings are unchanged. Definitions pass through the
+existing serde/checkpoint/recovery path; no separate store, timer or background
+worker is added. Older binaries reject the unknown op rather than weakening it.
+Downgrading a journal containing new definitions is unsupported. This increment
+does not establish an executed migration, recovery or physical power-loss campaign.
 
-Nine registered Rust test functions cover fixed-recipe equivalence with the
-unchanged construction predicate fixture, full 32-target evaluation, item flags,
-late generation changes, unknown roots/facts, removal, joint stability, one-slot
-registration, denied authority and failed output publication. They have not been
-compiled or executed here. No native code, dependency, production runner,
-compatibility admission or game mutation is changed.
+## Validation scope
+
+Run the retained independent reference checker:
+
+```sh
+python3 scripts/check_furniture_set_reference.py
+```
+
+It executes 20 accepted and 24 rejected furniture-condition schema examples,
+nine accepted and ten rejected query-mode examples, three semantic identity/order
+refusals, and 19,680 three-valued set-reduction cases. It also verifies that removing
+only the additive mode property reconstructs the exact prior query-schema Git
+blob. Its maximum-width paired 32-target request has 465 input nodes, 20,348
+conservatively accounted bytes and 9,976 serialized bytes. This is a modeled watch
+request, **not** an actual MCP/Agent Turn response measurement or Rust execution.
+
+Fifteen new Rust test functions are registered: ten shared condition tests and
+five shared spatial-query tests. They exercise the actual existing evaluator,
+router and watch transitions when run. Coverage includes fixed-recipe equality
+with the unchanged predicate fixture, complete 32-target plans, item flags,
+late generation changes, unknown facts, removal, joint stability, one-slot
+registration, missing off-page identities, complete pagination, old-mode identity,
+no implicit registration, denied authority and rejected publication. The existing
+ten per-building query tests are retained unchanged. **None of these Rust tests
+was compiled or executed in this editing environment.**
+
+Exact checked source hashes and reference counts are in
+`docs/evidence/furniture-set-reference.json`. No real DFHack, live-fortress,
+full-workspace, native ABI or production qualification is claimed.
 
 Beads: `df-action-coordinator-exec-ero.4`, `df-dfhack-bridge-plane-c-pic.3`.

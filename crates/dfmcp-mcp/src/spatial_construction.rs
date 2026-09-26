@@ -10,6 +10,15 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+#[path = "spatial_construction_set.rs"]
+mod set;
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum MonitorMode {
+    AllTargets,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
@@ -40,6 +49,7 @@ impl From<TargetInput> for Target {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Monitor {
+    mode: Option<MonitorMode>,
     key_prefix: String,
     deadline_tick: u64,
     poll_interval_ticks: Option<u64>,
@@ -47,6 +57,8 @@ struct Monitor {
 }
 #[derive(Serialize)]
 struct Monitoring {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mode: Option<MonitorMode>,
     key_prefix: String,
     deadline_tick: u64,
     poll_interval_ticks: u64,
@@ -69,6 +81,7 @@ impl Monitor {
             return Err(invalid("construction monitor cannot fit the future negotiated horizon"));
         }
         Ok(Monitoring {
+            mode: self.mode,
             key_prefix: self.key_prefix, deadline_tick: self.deadline_tick,
             poll_interval_ticks: cadence, stable_observations: stability,
         })
@@ -228,12 +241,16 @@ pub(super) fn execute<S: OperationsStateView>(
     out["mutation_dispatched"] = json!(false);
     out["native_effect_completed_proven"] = json!(false);
     out["interpretation"] = json!("Stage and observed-link conditions on the selected furniture, not a verified placement receipt, original footprint, current usability, delay cause, or permission to act. All jobs are counted; missing jobs alone cannot prove success. Counts describe this captured projection only.");
+    if let Some(options) = monitoring.as_ref().filter(|m| m.mode.is_some()) {
+        out["monitoring"] = set::proposal(&report, c, options)?;
+    }
     let result = paginate(out, report.rows.len(), request.continuation.as_deref(), limit, id, c, |i| {
         if started.elapsed().as_millis() >= u128::from(c.budget.max_wall_millis) {
             return Err(budget("construction rendering deadline exhausted"));
         }
         let row = &report.rows[i];
-        let proposal = monitoring.as_ref().map(|options| proposal(row, c, options)).transpose()?;
+        let proposal = monitoring.as_ref().filter(|m| m.mode.is_none())
+            .map(|options| proposal(row, c, options)).transpose()?;
         Ok(row_json(row, proposal))
     })?;
     if started.elapsed().as_millis() >= u128::from(c.budget.max_wall_millis) {
@@ -244,5 +261,7 @@ pub(super) fn execute<S: OperationsStateView>(
 }
 
 #[cfg(test)]
-#[path = "spatial_construction_tests.rs"]
-mod tests;
+mod tests {
+    include!("spatial_construction_tests.rs");
+    include!("spatial_construction_set_tests.rs");
+}

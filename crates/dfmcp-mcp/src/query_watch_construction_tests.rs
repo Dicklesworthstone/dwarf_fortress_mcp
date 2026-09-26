@@ -114,7 +114,7 @@ fn target_bounds_and_closed_schema_do_not_weaken_the_goal() -> Result<()> {
     assert!(validate_definition(&too_many).is_err());
     validate_input(&request(&targets(32,true)))?;
     let bytes=serde_json::to_vec(&valid).map_err(|_|invalid("test encode"))?;
-    assert_eq!(valid,serde_json::from_slice(&bytes).map_err(|_|invalid("test replay"))?);
+    assert_eq!(valid,serde_json::from_slice::<Definition>(&bytes).map_err(|_|invalid("test replay"))?);
     Ok(())
 }
 
@@ -214,5 +214,16 @@ fn failed_output_publication_and_shared_budget_leave_no_registration() -> Result
         &mut counts::EvaluationBudget::new(0)).is_err());
     c=context(&s);c.grants.clear();
     assert!(execute_in(&store,&s,&c,&request(&t),|v|Ok(v.to_string())).is_err());
+    Ok(())
+}
+
+#[test]
+fn singleton_inspection_retains_full_predicate_trace_without_expanding_set_pages() -> Result<()> {
+    let t=targets(1,true);let s=snapshot(&t,100);
+    let (_,p)=check(&s,&t,Test::AllComplete)?;
+    let row=&p.facts[0]["records"][0];
+    assert!(row["facts"].as_array().is_some_and(|facts|facts.len()>8));
+    let t=targets(2,true);let (_,p)=check(&snapshot(&t,100),&t,Test::AllComplete)?;
+    assert!(p.facts[0]["records"][0].get("facts").is_none());
     Ok(())
 }
