@@ -44,7 +44,7 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
-### Whole-plan receipt-linked construction condition core
+### Whole-plan receipt-linked construction conditions and native acquisition
 
 `scripts/construction_plan.py` defines one bounded construction goal for 1..32
 original furniture/1.19 Placed receipts. Canonical ordering and unique native
@@ -58,12 +58,26 @@ Independently timed successes cannot complete the whole plan. Repeated paused
 captures, interrupted reads, changed captures at one tick, false/unknown targets
 and source/identity regressions preserve conservative sampled evidence.
 
-This Python semantic core does not itself establish native acquisition, durable
+`scripts/construction_plan_rpc.py` acquires these samples through one foreground
+connection: every original receipt is queried before and after one complete
+operations capture, whole-capture digest verification and release acknowledgment.
+Every receipt query must report retention sufficient for the whole selected set.
+One shrinking deadline and budget cover all targets and pages; only the existing
+four query-only method bindings are used. The single-receipt transport retains
+its original profile while sharing the unchanged paged-capture verification.
+
+All **33 core test functions passed**: 17 whole-plan groups and 16 existing
+single-receipt groups. All **27 TCP test functions passed**: 14 whole-plan groups
+and 13 existing transport groups. The real Python transport is exercised against
+explicit joined peers, including a fragmented 32-target multi-page capture, all
+receipt boundaries, source/retention contradictions, lost final replies, release
+failure, authority revocation and nonrenewable budgets.
+
+This is executed Python semantic and TCP development evidence, not durable
 workflow execution, Rust/MCP integration, a real DFHack SDK build, live-fortress
 behavior, full qualification or production admission. Satisfaction remains a
 historical sampled condition and never discharges or retries original placement
-effects. Both owning bridge beads remain open for their broader scope; exact
-executed evidence is recorded separately for the source that ran.
+effects. Both owning bridge beads remain open for their broader scope.
 
 ### Executed furniture placement through the eleven-tool MCP surface
 

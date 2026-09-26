@@ -268,38 +268,47 @@ class Client:
                 'original placed record not retained byte-for-byte')
         return self.manifests['build'], reply[10]
 
+    def _capture_operations(self) -> bytes:
+        """Acquire, verify and release one immutable capture on this connection.
+
+        Both receipt monitors use the exact same paging and release checks. The
+        caller owns the surrounding receipt bracket and one-acquisition permit.
+        """
+        token, offset, identity, pieces = b'', 0, None, []
+        for _ in range(MAX_CAPTURE // PAGE):
+            reply = self._call('operations', 'ReadObservation', {9: token, 10: offset, 12: 0}, set(range(1, 15)))
+            for n in (9, 10, 13):
+                require(type(reply[n]) is bytes, 'wrong native page byte-field type')
+            require(len(reply[10]) == 16 and len(reply[13]) == 32, 'invalid native page identity width')
+            total = integer(reply[12], 1, MAX_CAPTURE)
+            integer(reply[11], 0, total)
+            complete = bool(integer(reply[14], 0, 1))
+            current = reply[10], total, reply[13]
+            require(identity is None or identity == current, 'mixed retained captures')
+            identity = current
+            require(reply[11] == offset and offset < total, 'native page skipped or replayed')
+            width = min(PAGE, total - offset)
+            require(len(reply[9]) == width and complete == (offset + width == total),
+                    'partial or contradictory native page')
+            pieces.append(reply[9])
+            offset += width
+            token = reply[10]
+            if complete:
+                break
+        require(identity is not None and offset == identity[1], 'native capture incomplete')
+        raw = b''.join(pieces)
+        import hashlib
+        require(hashlib.sha256(raw).digest() == identity[2], 'whole native capture digest mismatch')
+        release = self._call('operations', 'ReadObservation', {9: token, 10: 0, 12: 1}, set(range(1, 9)) | {10})
+        require(release[10] == token, 'native release acknowledgment changed token')
+        return raw
+
     def capture_once(self) -> LinkedSample:
         require(not self.used and not self.closed, 'acquisition cannot be retried on this connection')
         self.used = True
         try:
             before, before_record = self._receipt()
-            token, offset, identity, pieces = b'', 0, None, []
-            for _ in range(MAX_CAPTURE // PAGE):
-                reply = self._call('operations', 'ReadObservation', {9: token, 10: offset, 12: 0}, set(range(1, 15)))
-                for n in (9, 10, 13):
-                    require(type(reply[n]) is bytes, 'wrong native page byte-field type')
-                require(len(reply[10]) == 16 and len(reply[13]) == 32, 'invalid native page identity width')
-                total = integer(reply[12], 1, MAX_CAPTURE)
-                integer(reply[11], 0, total)
-                complete = bool(integer(reply[14], 0, 1))
-                current = reply[10], total, reply[13]
-                require(identity is None or identity == current, 'mixed retained captures')
-                identity = current
-                require(reply[11] == offset and offset < total, 'native page skipped or replayed')
-                width = min(PAGE, total - offset)
-                require(len(reply[9]) == width and complete == (offset + width == total),
-                        'partial or contradictory native page')
-                pieces.append(reply[9])
-                offset += width
-                token = reply[10]
-                if complete:
-                    break
-            require(identity is not None and offset == identity[1], 'native capture incomplete')
-            raw = b''.join(pieces)
-            import hashlib
-            require(hashlib.sha256(raw).digest() == identity[2], 'whole native capture digest mismatch')
-            release = self._call('operations', 'ReadObservation', {9: token, 10: 0, 12: 1}, set(range(1, 9)) | {10})
-            require(release[10] == token, 'native release acknowledgment changed token')
+            raw = self._capture_operations()
             after, after_record = self._receipt()
             sample = LinkedSample(before, before_record, self.manifests['operations'], raw, after, after_record)
             sample.validate(self.goal, self.budget.work)

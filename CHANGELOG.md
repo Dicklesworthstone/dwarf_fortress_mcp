@@ -30,7 +30,15 @@ readiness.
   must satisfy its condition together throughout one advancing-tick stability
   streak; independently timed successes cannot complete the plan. This Python
   semantic increment grants no game effects, placement retry or production
-  admission and does not itself establish native or durable workflow execution.
+  admission. All 17 new core and 16 existing single-receipt test functions pass.
+- Same-connection native acquisition for complete construction plans: query every
+  original receipt around one complete operations capture, verify every page,
+  capture digest and release acknowledgment, and preserve one total allowance
+  across all targets. All 14 whole-plan and 13 existing TCP test functions pass,
+  including fragmented 32-target acquisition and refusal of missing/substituted
+  final receipts, source drift, insufficient retention, lost replies and revoked
+  credentials. This is Python/TCP development evidence against explicit peers,
+  not a real DFHack SDK/live-game campaign or durable workflow qualification.
 
 - Executable furniture placement through the isolated
   `dfmcp-build-placement-dev-server`: the existing eleven tools now connect exact

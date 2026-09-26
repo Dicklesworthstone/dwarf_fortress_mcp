@@ -317,8 +317,20 @@ class QueryTransportTests(unittest.TestCase):
             self.assertEqual(peer.reads, 0)
         with NativePeer(notifications=9) as peer, peer.environment(), self.assertRaises(Rejected):
             fetch()
-        with NativePeer(delay=0.05) as peer, peer.environment(), self.assertRaises((Rejected, TimeoutError)):
-            rpc.acquire(rpc.Authority.load(), goal(), rpc.Budget(5))
+        budget = rpc.Budget(5000)
+        def expire_during_receipt(tag, fields, reply, peer):
+            if tag == 'before_receipt':
+                # The connection and handshakes have completed. Inject expiry
+                # at a known response boundary, independent of validation speed
+                # and host scheduling; later I/O must keep this same deadline.
+                budget.deadline = time.monotonic() - 1
+            return reply
+        with NativePeer(hook=expire_during_receipt) as peer, peer.environment():
+            with rpc.Client(rpc.Authority.load(), goal(), budget) as client:
+                with self.assertRaises(Rejected):
+                    client.capture_once()
+                self.assertTrue(client.closed)
+            self.assertEqual((peer.connections, peer.queries, peer.reads), (1, 1, 0))
         with NativePeer() as peer, peer.environment():
             with rpc.Client(rpc.Authority.load(), goal(), rpc.Budget(5000)) as client:
                 client.budget.network_bytes = 1
