@@ -1,0 +1,24 @@
+{
+  "actual_python_and_tcp_executed": true,
+  "live_game": false,
+  "native_plugin_executed": false,
+  "native_profiles": [
+    "furniture/1.19",
+    "operations/1.4"
+  ],
+  "production_admitted": false,
+  "python": "3.13.5",
+  "rust_mcp_executed": false,
+  "schema": "dfmcp.construction-transport-evidence/1",
+  "source_sha256": {
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/construction_monitor_rpc.py": "b1e96e7a2377ba3ee11774a4fc9687080c4ab9adaf0a15ef641e0a30081eb46e",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/test_construction_monitor_rpc.py": "899d850dcdc54202312782f841505cb1785ee13506be073070eb0864dad0b673",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a"
+  },
+  "status": "passed_python_loopback_only",
+  "test_functions": 29,
+  "transport_test_functions": 13
+}

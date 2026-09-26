@@ -57,13 +57,44 @@ are rejected by regression assertions. The unchanged furniture fixture and codec
 were checked against their actual Git blob identities. Source hashes are retained
 in `docs/evidence/construction-receipt-core.json`.
 
-This increment establishes an executed condition/replay library, not a live
-acquisition client or durable monitor owner yet. It does not execute Rust/MCP,
-a native plugin, a real DFHack game, or full-workspace qualification. Subsequent
-network integration must acquire fresh operations bytes and query the original
-receipt before and after capture on the SAME native connection; separate endpoints
-or matching IDs alone are insufficient. Storage must persist read intent before
-acquisition and complete evidence before acknowledging a sample.
+## Same-connection native acquisition
+
+`scripts/construction_monitor_rpc.py` now implements fresh acquisition, binding
+only furniture `Handshake`/`QueryPlacement` and operations
+`Handshake`/`ReadObservation` on one DFHack TCP connection. It queries the exact
+original receipt, reads and validates every immutable operations page, verifies
+whole-capture SHA-256 and release acknowledgment, and queries the original receipt
+again before returning a sample. Missing original records, changed native source,
+mixed pages, malformed replies and lost release/trailing queries cannot publish.
+There is no reconnect, automatic retry, background worker or game-effect method.
+
+The caller supplies `Authority`, `Goal` and one shared `Budget`. The operator uses
+only `DFMCP_ALLOW_UNADMITTED_CONSTRUCTION_MONITOR=1`,
+`DFMCP_CONSTRUCTION_MONITOR_ENDPOINT`, `DFMCP_BUILD_TOKEN` and
+`DFMCP_OPERATIONS_PAGED_TOKEN` in the client process. Numeric loopback is mandatory.
+Every other `DFMCP_*` variable, including placement/admission settings, is rejected.
+The native game process retains its own existing plugin opt-ins and credentials;
+the monitor's isolated environment does not change native configuration.
+
+The wall deadline is 1..60,000 ms for the whole operation, not per page. Caps are
+272 RPC calls, 20 MiB of connection bytes, 2 MiB of text notifications and
+20 million cooperative work steps. Pages are fixed at 64 KiB and a capture uses
+at most 256 pages. Socket ownership always closes in the foreground. Production
+registration and native wire bytes are unchanged.
+
+Thirteen actual TCP test functions pass with explicit joined peers, in addition
+to the sixteen pure-core functions. These exercise the real Python transport,
+fragmented frames, a 2,000-item multi-page capture, both receipt boundaries,
+release failures, source/version drift, unknown/duplicate protobuf fields,
+configuration revocation and nonrenewable budgets. Exact input hashes are in
+`docs/evidence/construction-receipt-transport.json`. These are not real DFHack SDK,
+live-game, Rust/MCP or whole-workspace qualification. Durable monitor custody and
+a command-line owner are not established by this transport increment yet.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
+  test_construction_receipt test_construction_monitor_rpc -v
+```
 
 Even a satisfied goal describes a historical receipt-linked sampled condition. It
 is not continuous monitoring, causal proof, current usability, terrain safety,
