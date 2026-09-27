@@ -24,6 +24,13 @@ readiness.
 
 ### Added
 
+- Complete original furnishing-batch goal identity in `furniture_completion.py`.
+  Retain the full requested DAG and every original indexed placement journal;
+  reject partial selections and source substitutions; bind original custody and
+  placement-time software to shared sampled construction conditions. Fourteen
+  Python/POSIX regressions pass. Durable workflow integration follows separately;
+  this does not grant Rust/MCP, live-game or production admission.
+
 - Whole-plan receipt-linked construction condition core for 1..32 original
   furniture/1.19 Placed records. Canonical unique target identities and all
   original receipt boundaries bind one shared operations capture. Every target

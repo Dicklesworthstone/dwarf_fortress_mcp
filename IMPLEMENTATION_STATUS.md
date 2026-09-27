@@ -44,6 +44,22 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete original furnishing-batch goal identity
+
+`scripts/furniture_completion.py` now imports every registered Placed child from
+one locked original furnishing batch. Its bounded origin retains the complete
+normalized action DAG, exact manifest and ordered index, every child placement
+journal, original source/endpoint, and directory/file identities. The composite
+goal rejects omitted or substituted steps and reuses the existing shared-capture
+condition engine, with placement-time software pinned before the first sample.
+
+Fourteen executed Python/POSIX tests cover complete 32-step retention, canonical
+replay, rehashed substitutions, incomplete/unregistered children, inode changes,
+post-placement batch stop, exact selection, source binding and shared stability.
+This is the typed goal foundation; foreground CLI and durable completion-journal
+integration are the next increment. No Rust/MCP, live-game or admission claim is
+made. Owning beads `df-dfhack-bridge-plane-c-pic.4` and `.5` remain open.
+
 ### Executable whole-plan receipt-linked construction monitoring
 
 `scripts/construction_plan.py` defines one bounded construction goal for 1..32
