@@ -8,12 +8,36 @@ pub(super) const MAX_BYTES: u64 = 512 * 1024;
 const MAX_CALLS: u32 = 32;
 const SLICE: Duration = Duration::from_millis(100);
 
-pub(super) struct Link {
+/// Limits are selected by these two source-defined constructors, never by a
+/// caller's native method or protocol argument. Furniture defaults stay fixed.
+#[derive(Clone, Copy)]
+struct Limits {
+    bytes: u64,
+    calls: u32,
+    reply_bytes: usize,
+    notification_bytes: u64,
+}
+const FURNITURE: Limits = Limits {
+    bytes: MAX_BYTES,
+    calls: MAX_CALLS,
+    reply_bytes: codec::MAX_REPLY,
+    notification_bytes: MAX_BYTES,
+};
+const CONSTRUCTION: Limits = Limits {
+    bytes: 20 * 1024 * 1024,
+    calls: 327,
+    reply_bytes: 65536 + 4096,
+    notification_bytes: 2 * 1024 * 1024,
+};
+
+pub(crate) struct Link {
     socket: TcpStream,
     deadline: Instant,
     remaining_bytes: u64,
     calls: u32,
     cancellation: BuildCancellation,
+    limits: Limits,
+    notifications_left: u64,
 }
 impl Link {
     pub(super) fn connect(
@@ -22,6 +46,27 @@ impl Link {
         bytes: u64,
         cancellation: BuildCancellation,
         check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, FURNITURE)
+    }
+    /// Read-only construction composition uses the same framing, cancellation
+    /// slices and shrinking clock with its separately fixed capture allowance.
+    pub(crate) fn connect_construction(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, CONSTRUCTION)
+    }
+    fn connect_profile(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+        limits: Limits,
     ) -> Result<Self> {
         check()?;
         cancellation.check()?;
@@ -33,9 +78,11 @@ impl Link {
         let out = Self {
             socket,
             deadline,
-            remaining_bytes: bytes.min(MAX_BYTES),
+            remaining_bytes: bytes.min(limits.bytes),
             calls: 0,
             cancellation,
+            limits,
+            notifications_left: limits.notification_bytes,
         };
         out.check(check)?;
         Ok(out)
@@ -116,7 +163,7 @@ impl Link {
         self.check(check)?;
         Ok(())
     }
-    pub(super) fn greeting(&mut self, check: &dyn Fn() -> Result<()>) -> Result<()> {
+    pub(crate) fn greeting(&mut self, check: &dyn Fn() -> Result<()>) -> Result<()> {
         self.send(b"DFHack?\n\x01\0\0\0", check)?;
         let mut reply = [0; 12];
         self.receive(&mut reply, check)?;
@@ -128,11 +175,20 @@ impl Link {
         request: &[u8],
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Vec<u8>> {
+        self.frame_bounded(method, request, self.limits.reply_bytes, check)
+    }
+    pub(crate) fn frame_bounded(
+        &mut self,
+        method: i16,
+        request: &[u8],
+        maximum_reply: usize,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Vec<u8>> {
         require(
-            request.len() <= codec::MAX_REQUEST,
-            "furniture request exceeds 2 KiB",
+            request.len() <= codec::MAX_REQUEST && maximum_reply <= self.limits.reply_bytes,
+            "native request or reply allowance exceeds its fixed profile",
         )?;
-        if self.calls >= MAX_CALLS {
+        if self.calls >= self.limits.calls {
             return Err(budget_error());
         }
         self.calls += 1;
@@ -152,7 +208,7 @@ impl Link {
             )?;
             let n = n as usize;
             require(
-                n <= if id == -1 { codec::MAX_REPLY } else { 65536 },
+                n <= if id == -1 { maximum_reply } else { 65536 },
                 "native furniture frame exceeds bound",
             )?;
             if id == -3 {
@@ -162,6 +218,10 @@ impl Link {
                     notifications <= 8 && notification_bytes <= 262144,
                     "furniture notification allowance exhausted",
                 )?;
+                self.notifications_left = self
+                    .notifications_left
+                    .checked_sub(n as u64)
+                    .ok_or_else(budget_error)?;
             }
             let mut data = vec![0; n];
             self.receive(&mut data, check)?;

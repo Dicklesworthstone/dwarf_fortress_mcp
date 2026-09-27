@@ -44,6 +44,35 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Receipt-linked whole-original-plan construction in Rust
+
+`dfmcp_adapter::construction_plan` now validates later construction conditions
+for every original furniture receipt against one shared operations capture. It
+preserves Python-compatible goal/sample bytes, pins both native receipt brackets
+to the original source, and requires one global stability streak across all
+targets. Identity changes, source regressions, interrupted reads, paused ticks,
+deadlines and observation limits have explicit outcomes.
+
+A separate private monitor retains the full original Rust batch and both
+original file/directory identities. Durable read intent precedes native contact;
+sample publication rechecks complete original custody after synchronization.
+Replay recomputes all transitions under one shared work allowance and restores
+no publication permit. Query-authorized local cancellation remains possible
+without the original placement files, while callers must withhold verified
+construction claims. Existing placement bytes and effect permissions are unchanged.
+
+All **44 new adapter tests passed** on the exact pinned nightly: 14 condition and
+codec groups, 16 origin/store groups and 14 actual TCP acquisition groups. The
+32-target goal/sample fixtures also match the independent Python codecs byte for
+byte. All **79 existing placement, batch and paged-capture regressions also passed**
+against the same compiled test executable, for **123 passing checks**. This is
+focused Rust development execution, not full workspace, native
+DFHack SDK, live-game or production qualification. Sampled satisfaction does not
+prove current usability, continuous stability or discharge of a placement effect.
+The owning bridge beads remain open. See `docs/FURNITURE_COMPLETION_RUST.md` and
+`architecture/furniture_completion_rust_v1.json`; exact execution scope and source
+hashes are in `docs/evidence/furniture-completion-rust.json`.
+
 ### Complete furnishing batches through the existing MCP control loop
 
 The isolated furniture/1.19 server now imports the existing complete exact-item

@@ -22,6 +22,15 @@ pub struct BuildSession<S, N> {
     high_tick: u64,
     high_sequence: u64,
 }
+impl<N: BuildSource> BuildSession<super::journal::private_file::PrivateBuildFile, N> {
+    /// Inspect the existing locked placement owner without opening another file.
+    pub fn private_identity(
+        &self,
+        context: &OperationContext,
+    ) -> Result<super::journal::private_file::PrivateFileIdentity> {
+        self.journal.private_identity(&self.current(context)?)
+    }
+}
 impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
     pub fn new(mut journal: BuildJournal<S>, context: &OperationContext) -> Result<Self> {
         journal.abandon();

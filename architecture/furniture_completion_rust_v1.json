@@ -1,0 +1,51 @@
+{
+  "schema": "dfmcp.furniture-completion-rust-contract/1",
+  "status": "implemented_unadmitted_development",
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "module": "dfmcp_adapter::construction_plan",
+  "condition_policy": "dfmcp.receipt-construction-plan-condition/1",
+  "python_compatible": ["DFMCPG01", "DFMCPS01"],
+  "original_batch": {
+    "requires": "complete_original_rust_batch_all_placed",
+    "retains": ["complete_canonical_plan", "every_original_placed_receipt", "original_placement_journal_root", "parent_and_child_file_and_directory_identities"],
+    "origin_magic": "DFMFRO01",
+    "definition_magic": "DFMFRG01",
+    "journal_magic": "DFMFRJ01",
+    "cancel_requires_original_files": false,
+    "original_placement_format_changed": false
+  },
+  "sampling": {
+    "authority": "query_only",
+    "sequence": ["all_original_receipts", "one_complete_operations_capture_and_release", "all_original_receipts"],
+    "same_connection": true,
+    "shared_capture": true,
+    "shared_stability_streak": true,
+    "durable_read_intent_before_contact": true,
+    "replay_restores_publication_permission": false,
+    "automatic_reconnect_or_polling": false,
+    "publish_rechecks_original_custody_after_sync": true
+  },
+  "bounds": {
+    "targets": [1, 32],
+    "original_bytes": 262144,
+    "capture_bytes": 16777216,
+    "network_bytes": 20971520,
+    "notification_bytes": 2097152,
+    "rpc_calls": 327,
+    "journal_bytes": 134217728,
+    "journal_frames": 1030,
+    "observations": 512,
+    "semantic_work_per_operation": 20000000,
+    "timeout_ms": [1, 60000]
+  },
+  "claims": {
+    "historical_sampled_condition_only": true,
+    "retry_placement_permitted": false,
+    "current_usability_proven": false,
+    "continuous_stability_proven": false,
+    "placement_effect_discharged": false,
+    "canonical_world_anchor": false,
+    "live_game_qualified": false,
+    "production_admitted": false
+  }
+}

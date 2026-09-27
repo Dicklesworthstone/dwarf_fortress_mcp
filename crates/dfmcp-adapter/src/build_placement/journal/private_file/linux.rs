@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::super::{BuildStage, authorize};
-use super::{BuildBinding, BuildJournal, BuildMode, error};
+use super::{BuildBinding, BuildJournal, BuildMode, PrivateFileIdentity, error};
 use crate::control_effect_journal::EffectJournalStorage;
 use dfmcp_core::{Capability, ErrorCode, OperationContext, Result, RiskTier};
 
@@ -79,6 +79,23 @@ pub struct PrivateBuildFile {
     directory_identity: (u64, u64, u32),
 }
 impl PrivateBuildFile {
+    /// Inspect the already locked descriptor; never reopen or create a source.
+    pub fn private_identity(&self, context: &OperationContext) -> Result<PrivateFileIdentity> {
+        super::validate_open(context)?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        self.validate_identity().map_err(failure)?;
+        let identity = PrivateFileIdentity {
+            path: self.path.clone(),
+            file_device: self.file_identity.0,
+            file_inode: self.file_identity.1,
+            file_owner: self.file_identity.2,
+            directory_device: self.directory_identity.0,
+            directory_inode: self.directory_identity.1,
+            directory_owner: self.directory_identity.2,
+        };
+        identity.validate()?;
+        Ok(identity)
+    }
     fn writable(&self) -> io::Result<()> {
         if self.read_only {
             return Err(denied());
@@ -249,7 +266,9 @@ pub(super) fn open_storage(
             )
         })?;
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    if maximum_bytes == 0 || maximum_bytes > super::super::MAX_JOURNAL_BYTES {
+    // Each source-selected caller supplies its own ceiling. Placement remains
+    // 16 MiB, batch parents 64 KiB, and complete-capture monitors 128 MiB.
+    if maximum_bytes == 0 || maximum_bytes > 128 * 1024 * 1024 {
         return Err(error(
             ErrorCode::InvalidRequest,
             "invalid furniture storage byte ceiling",

@@ -24,6 +24,16 @@ readiness.
 
 ### Added
 
+- Receipt-linked whole-plan construction monitoring in safe Rust. Every original
+  Placed target shares one operations capture, one stability streak and a fixed
+  deadline. Same-connection original receipt brackets, strict native identity
+  checks and a private origin-bound journal connect sampled construction evidence
+  to the complete original batch. Durable interrupted reads survive restart;
+  local cancellation works without original placement custody. All 44 new
+  adapter tests pass, including 32-target Python byte parity and real TCP faults.
+  This remains development functionality and grants no placement authority. See
+  `docs/FURNITURE_COMPLETION_RUST.md`.
+
 - Complete exact furnishing batches through the existing furniture MCP server.
   Operator-configured parent custody retains the full plan and original step
   keys; `open_session(furniture_plan=...)`, `query` mode `batch`, `observe`

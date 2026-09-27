@@ -14,8 +14,8 @@ use std::sync::{
 };
 use std::time::Duration;
 
-mod codec;
-mod link;
+pub(crate) mod codec;
+pub(crate) mod link;
 use codec::{Message, bytes, number};
 use link::Link;
 
@@ -86,7 +86,7 @@ impl BuildCancellation {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
-    fn check(&self) -> Result<()> {
+    pub(crate) fn check(&self) -> Result<()> {
         if self.is_cancelled() {
             return Err(cancelled());
         }

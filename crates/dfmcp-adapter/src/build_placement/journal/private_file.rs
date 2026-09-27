@@ -3,11 +3,43 @@
 //! The opened regular file remains exclusively locked through replay and every
 //! operation. A directory descriptor pins opens; publication syncs BOTH file and
 //! parent. Read-only recovery cannot create, write, flush, sync or truncate.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{BuildJournal, BuildMode, error};
 use crate::build_placement::BuildBinding;
 use dfmcp_core::{ErrorCode, OperationContext, Result};
+
+/// Read-only identity of an already held private file and its parent. Persisting
+/// this value lets a later owner reject a copied or substituted original journal.
+/// The value is local custody evidence, not a signature or distributed fence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrivateFileIdentity {
+    pub path: PathBuf,
+    pub file_device: u64,
+    pub file_inode: u64,
+    pub file_owner: u32,
+    pub directory_device: u64,
+    pub directory_inode: u64,
+    pub directory_owner: u32,
+}
+impl PrivateFileIdentity {
+    /// Validate the bounded canonical representation without accessing a path.
+    /// Actual source custody still requires the held file's private_identity.
+    pub fn validate(&self) -> Result<()> {
+        let path = self.path.to_str().ok_or_else(|| error(
+            ErrorCode::InvalidRequest, "private journal identity path must be UTF-8",
+        ))?;
+        if !self.path.is_absolute() || path.len() < 2 || path.len() > 4096
+            || path.as_bytes().contains(&0)
+            || path[1..].split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            || self.file_inode == 0 || self.directory_inode == 0
+            || self.file_owner != self.directory_owner
+        {
+            return Err(error(ErrorCode::InvalidRequest, "invalid private journal identity"));
+        }
+        Ok(())
+    }
+}
 
 #[cfg(all(
     target_os = "linux",
@@ -25,6 +57,14 @@ pub use linux::PrivateBuildFile;
     any(target_arch = "x86_64", target_arch = "aarch64")
 )))]
 pub struct PrivateBuildFile;
+
+#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+impl PrivateBuildFile {
+    pub fn private_identity(&self, context: &OperationContext) -> Result<PrivateFileIdentity> {
+        context.authorize(dfmcp_core::Capability::Query, dfmcp_core::RiskTier::ReadOnly, &[], None)?;
+        Err(error(ErrorCode::CapabilityDenied, "private journal identities require Linux x86_64/aarch64"))
+    }
+}
 
 // A refusing implementation preserves the public return type on unsupported
 // platforms without pretending that their filesystem custody was implemented.

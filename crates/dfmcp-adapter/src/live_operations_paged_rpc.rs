@@ -58,10 +58,10 @@ impl PagedOperationsLimits {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SourceManifest {
-    generation: u64,
-    df: String,
-    dfhack: String,
+pub(crate) struct SourceManifest {
+    pub(crate) generation: u64,
+    pub(crate) df: String,
+    pub(crate) dfhack: String,
 }
 fn envelope<'a>(data: &'a [u8], nonce: &[u8]) -> Result<(Message<'a>, SourceManifest)> {
     let message = Message::parse(data, 14)?;
@@ -175,6 +175,113 @@ fn page(data: &[u8], nonce: &[u8], maximum: usize) -> Result<SnapshotPage> {
     })
 }
 
+/// The source-selected client supplies the already-bound Handshake method.
+/// Both standalone paging and receipt-bracketed paging use these exact bytes.
+pub(crate) fn handshake_bound<F>(
+    token: &[u8],
+    nonce: &[u8],
+    limits: PagedOperationsLimits,
+    mut frame: F,
+) -> Result<SourceManifest>
+where
+    F: FnMut(&[u8], usize) -> Result<Vec<u8>>,
+{
+    let reply = frame(&request(token, nonce, limits, &[], 0, false), 4096)?;
+    let (message, manifest) = envelope(&reply, nonce)?;
+    if (9..=14).any(|field| message.0.contains_key(&field)) {
+        return Err(malformed());
+    }
+    Ok(manifest)
+}
+
+pub(crate) struct AcquiredCapture {
+    pub(crate) manifest: SourceManifest,
+    pub(crate) payload: Vec<u8>,
+    pub(crate) observation: LiveOperationsObservation,
+    pub(crate) pages: u32,
+}
+
+/// One complete capture and release on an already-greeted connection. The
+/// caller owns method selection and the single shrinking I/O allowance. The
+/// monitor pins the handshake generation exactly; the existing standalone
+/// client retains its explicitly supported monotone-generation behavior.
+pub(crate) fn acquire_bound<F, V>(
+    token: &[u8],
+    nonce: &[u8],
+    limits: PagedOperationsLimits,
+    source: &SourceManifest,
+    exact_generation: bool,
+    mut frame: F,
+    mut validate: V,
+) -> Result<AcquiredCapture>
+where
+    F: FnMut(&[u8], usize) -> Result<Vec<u8>>,
+    V: FnMut(&LiveOperationsObservation) -> Result<()>,
+{
+    let mut assembly = SnapshotAssembler::new(limits.payload_bytes, limits.page_bytes)?;
+    let mut pages = 0;
+    while !assembly.complete() {
+        if pages >= 1024 {
+            return Err(failure(
+                ErrorCode::BudgetExceeded,
+                "native snapshot page count exceeded",
+            ));
+        }
+        let snapshot = assembly.manifest().map_or(&[][..], |v| v.token.as_slice());
+        let request = request(token, nonce, limits, snapshot, assembly.offset(), false);
+        let reply = frame(&request, limits.page_bytes + 4096)?;
+        let page = page(&reply, nonce, limits.page_bytes)?;
+        if page.manifest.df_version != source.df
+            || page.manifest.dfhack_version != source.dfhack
+            || page.manifest.generation < source.generation
+            || (exact_generation && page.manifest.generation != source.generation)
+        {
+            return Err(failure(
+                ErrorCode::StaleAnchor,
+                "native paging software or generation differs from its source policy",
+            ));
+        }
+        assembly.push(page)?;
+        pages += 1;
+    }
+    let (manifest, payload) = assembly.finish()?;
+    let observation = LiveOperationsObservation::decode_profile(
+        &payload,
+        manifest.generation,
+        manifest.df_version.clone(),
+        manifest.dfhack_version.clone(),
+        OperationsProfile::PagedV1_4,
+    )?;
+    if observation.jobs.jobs.len() > limits.jobs as usize
+        || observation.buildings.len() > limits.buildings as usize
+        || observation.items.len() > limits.items as usize
+    {
+        return Err(failure(
+            ErrorCode::BudgetExceeded,
+            "native snapshot exceeds requested roster counts",
+        ));
+    }
+    validate(&observation)?;
+    let release = request(token, nonce, limits, &manifest.token, 0, true);
+    let reply = frame(&release, 4096)?;
+    let (ack, released) = envelope(&reply, nonce)?;
+    if ack.bytes(10, 16)? != manifest.token.as_slice()
+        || ack.0.contains_key(&9)
+        || (11..=14).any(|field| ack.0.contains_key(&field))
+        || released.generation != manifest.generation
+        || released.df != manifest.df_version
+        || released.dfhack != manifest.dfhack_version
+    {
+        return Err(malformed());
+    }
+    Ok(AcquiredCapture {
+        manifest: released,
+        payload,
+        observation,
+        pages,
+    })
+}
+
 /// Credentials are owned, never formatted with Debug or reflected in failures.
 pub struct PagedOperationsRpcClient<S> {
     stream: S,
@@ -214,16 +321,9 @@ impl<S: Read + Write> PagedOperationsRpcClient<S> {
         if handshake == read_method {
             return Err(malformed());
         }
-        let reply = call(
-            &mut stream,
-            handshake,
-            &request(&token, &nonce, limits, &[], 0, false),
-            4096,
-        )?;
-        let (message, manifest) = envelope(&reply, &nonce)?;
-        if (9..=14).any(|field| message.0.contains_key(&field)) {
-            return Err(malformed());
-        }
+        let manifest = handshake_bound(&token, &nonce, limits, |request, maximum| {
+            call(&mut stream, handshake, request, maximum)
+        })?;
         Ok(Self {
             stream,
             token,
@@ -259,84 +359,18 @@ impl<S: Read + Write> PagedOperationsRpcClient<S> {
         result
     }
     fn acquire(&mut self) -> Result<LiveOperationsObservation> {
-        let mut assembly =
-            SnapshotAssembler::new(self.limits.payload_bytes, self.limits.page_bytes)?;
-        let mut pages = 0;
-        // All pages, including release, share the transport's single deadline.
-        while !assembly.complete() {
-            if pages >= 1024 {
-                return Err(failure(
-                    ErrorCode::BudgetExceeded,
-                    "native snapshot page count exceeded",
-                ));
-            }
-            let snapshot = assembly.manifest().map_or(&[][..], |v| v.token.as_slice());
-            let request = request(
-                &self.token,
-                &self.nonce,
-                self.limits,
-                snapshot,
-                assembly.offset(),
-                false,
-            );
-            let reply = call(
-                &mut self.stream,
-                self.read_method,
-                &request,
-                self.limits.page_bytes + 4096,
-            )?;
-            let page = page(&reply, &self.nonce, self.limits.page_bytes)?;
-            if page.manifest.df_version != self.manifest.df
-                || page.manifest.dfhack_version != self.manifest.dfhack
-                || page.manifest.generation < self.manifest.generation
-            {
-                return Err(failure(
-                    ErrorCode::StaleAnchor,
-                    "native paging software or generation regressed",
-                ));
-            }
-            assembly.push(page)?;
-            pages += 1;
-        }
-        let (manifest, payload) = assembly.finish()?;
-        let observation = LiveOperationsObservation::decode_profile(
-            &payload,
-            manifest.generation,
-            manifest.df_version.clone(),
-            manifest.dfhack_version.clone(),
-            OperationsProfile::PagedV1_4,
-        )?;
-        if observation.jobs.jobs.len() > self.limits.jobs as usize
-            || observation.buildings.len() > self.limits.buildings as usize
-            || observation.items.len() > self.limits.items as usize
-        {
-            return Err(failure(
-                ErrorCode::BudgetExceeded,
-                "native snapshot exceeds requested roster counts",
-            ));
-        }
-        let release = request(
+        let capture = acquire_bound(
             &self.token,
             &self.nonce,
             self.limits,
-            &manifest.token,
-            0,
-            true,
-        );
-        let reply = call(&mut self.stream, self.read_method, &release, 4096)?;
-        let (ack, source) = envelope(&reply, &self.nonce)?;
-        if ack.bytes(10, 16)? != manifest.token.as_slice()
-            || ack.0.contains_key(&9)
-            || (11..=14).any(|field| ack.0.contains_key(&field))
-            || source.generation != manifest.generation
-            || source.df != manifest.df_version
-            || source.dfhack != manifest.dfhack_version
-        {
-            return Err(malformed());
-        }
-        self.manifest = source;
-        self.last_pages = pages;
-        Ok(observation)
+            &self.manifest,
+            false,
+            |request, maximum| call(&mut self.stream, self.read_method, request, maximum),
+            |_| Ok(()),
+        )?;
+        self.manifest = capture.manifest;
+        self.last_pages = capture.pages;
+        Ok(capture.observation)
     }
 }
 impl PagedOperationsRpcClient<DeadlineStream> {

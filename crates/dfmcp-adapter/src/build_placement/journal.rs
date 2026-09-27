@@ -463,6 +463,16 @@ pub struct BuildJournal<S> {
     fresh_key: Option<String>,
     fenced: bool,
 }
+impl BuildJournal<private_file::PrivateBuildFile> {
+    /// Identity of the currently held original placement file, under Query
+    /// authority. Call inventory as well to verify its complete retained bytes.
+    pub fn private_identity(
+        &self,
+        context: &OperationContext,
+    ) -> Result<private_file::PrivateFileIdentity> {
+        self.storage.private_identity(&self.access(context)?)
+    }
+}
 fn read<S: EffectJournalStorage>(storage: &mut S, work: &mut Work) -> Result<Vec<u8>> {
     work.remaining()?;
     storage.validate_identity().map_err(|_| corrupt())?;

@@ -179,6 +179,17 @@ pub struct BatchStore<S> {
     stopped: bool,
     fenced: bool,
 }
+impl BatchStore<PrivateBuildFile> {
+    /// Identity of the already held original parent. Full byte custody is
+    /// established separately by verify, including any permanent stop marker.
+    pub fn private_identity(
+        &self,
+        context: &OperationContext,
+    ) -> Result<crate::build_placement::journal::private_file::PrivateFileIdentity> {
+        self.access(context)?;
+        self.storage.private_identity(context)
+    }
+}
 impl<S: EffectJournalStorage> BatchStore<S> {
     /// `create` is valid only for an exclusively created empty Control store.
     /// The file shell, rather than retained bytes or client input, supplies it.

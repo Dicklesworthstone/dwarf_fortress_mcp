@@ -12,11 +12,11 @@ fn varint(out: &mut Vec<u8>, mut n: u64) {
     }
     out.push(n as u8);
 }
-pub(super) fn number(out: &mut Vec<u8>, tag: u32, n: u64) {
+pub(crate) fn number(out: &mut Vec<u8>, tag: u32, n: u64) {
     varint(out, u64::from(tag) << 3);
     varint(out, n);
 }
-pub(super) fn bytes(out: &mut Vec<u8>, tag: u32, value: &[u8]) {
+pub(crate) fn bytes(out: &mut Vec<u8>, tag: u32, value: &[u8]) {
     varint(out, (u64::from(tag) << 3) | 2);
     varint(out, value.len() as u64);
     out.extend_from_slice(value);
@@ -39,9 +39,9 @@ enum Field<'a> {
     Number(u64),
     Bytes(&'a [u8]),
 }
-pub(super) struct Message<'a>(BTreeMap<u32, Field<'a>>);
+pub(crate) struct Message<'a>(BTreeMap<u32, Field<'a>>);
 impl<'a> Message<'a> {
-    pub(super) fn parse(data: &'a [u8], maximum: u32) -> Result<Self> {
+    pub(crate) fn parse(data: &'a [u8], maximum: u32) -> Result<Self> {
         require(
             data.len() <= MAX_REPLY && maximum <= 13,
             "oversized furniture envelope",
@@ -68,29 +68,29 @@ impl<'a> Message<'a> {
         }
         Ok(Self(fields))
     }
-    pub(super) fn exact(&self, fields: &[u32]) -> Result<()> {
+    pub(crate) fn exact(&self, fields: &[u32]) -> Result<()> {
         require(
             self.0.len() == fields.len() && fields.iter().all(|n| self.0.contains_key(n)),
             "unexpected furniture reply field set",
         )
     }
-    pub(super) fn has(&self, tag: u32) -> bool {
+    pub(crate) fn has(&self, tag: u32) -> bool {
         self.0.contains_key(&tag)
     }
-    pub(super) fn number(&self, tag: u32) -> Result<u64> {
+    pub(crate) fn number(&self, tag: u32) -> Result<u64> {
         match self.0.get(&tag) {
             Some(Field::Number(n)) => Ok(*n),
             _ => Err(super::malformed()),
         }
     }
-    pub(super) fn boolean(&self, tag: u32) -> Result<bool> {
+    pub(crate) fn boolean(&self, tag: u32) -> Result<bool> {
         match self.number(tag)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => Err(super::malformed()),
         }
     }
-    pub(super) fn bytes(&self, tag: u32) -> Result<&'a [u8]> {
+    pub(crate) fn bytes(&self, tag: u32) -> Result<&'a [u8]> {
         match self.0.get(&tag) {
             Some(Field::Bytes(value)) => Ok(value),
             _ => Err(super::malformed()),
