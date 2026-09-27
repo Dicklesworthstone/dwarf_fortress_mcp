@@ -1,0 +1,234 @@
+{
+  "adapter_validation": {
+    "passed_tests": 123,
+    "report": "docs/evidence/furniture-completion-rust.json",
+    "sha256": "aa356bf11f89bc90d3cd32bfb95e7e69ab64ec256d76832fa78fd2c9db27f74f"
+  },
+  "attempts": [
+    {
+      "command": [
+        "nice",
+        "-n",
+        "19",
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dfmcp-mcp",
+        "--lib",
+        "build_placement_server",
+        "--",
+        "--test-threads=1"
+      ],
+      "compiler_source_diagnostics": [],
+      "current_mcp_files_changed_since_attempt": [
+        "crates/dfmcp-mcp/src/build_placement_server.rs",
+        "crates/dfmcp-mcp/src/build_placement_server/completion.rs"
+      ],
+      "elapsed_seconds": 53.0,
+      "exit_code": 101,
+      "label": "construction-plan-mcp-attempt-1",
+      "log_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-1.log",
+      "log_sha256": "d86606345dac83fc00a151fd6a5e531939fb128e3bffa0dee6ca5de05bec9947",
+      "max_child_rss_kib": 1837992,
+      "phase_timing": [],
+      "resource_report_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-1-resource.json",
+      "resource_report_sha256": "302042a8e458f977b67ec95b996a8b0ac7ae321bb677dd2f4e6320c45b29885b",
+      "rustc_wrapper": "all-rustc.sh",
+      "source_bytes_unchanged_during_attempt": true,
+      "stopped_in": "asupersync 0.5.0 compilation; exact compiler phase was not instrumented in this first attempt",
+      "tests_executed": 0
+    },
+    {
+      "command": [
+        "nice",
+        "-n",
+        "19",
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dfmcp-mcp",
+        "--lib",
+        "build_placement_server",
+        "--",
+        "--test-threads=1"
+      ],
+      "compiler_source_diagnostics": [],
+      "current_mcp_files_changed_since_attempt": [
+        "crates/dfmcp-mcp/src/build_placement_server/completion.rs"
+      ],
+      "elapsed_seconds": 57.687,
+      "exit_code": 101,
+      "label": "construction-plan-mcp-attempt-2",
+      "log_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-2.log",
+      "log_sha256": "eb82828ccbbffef0dd949468f5e8a371eb622d3416ee2750a62f1a8015d657b5",
+      "max_child_rss_kib": 1343372,
+      "phase_timing": [
+        "time:   0.130; rss:   11MB ->   13MB (   +1MB)\tparse_crate",
+        "time:   0.026; rss:   13MB ->   13MB (   +0MB)\tcrate_injection"
+      ],
+      "resource_report_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-2-resource.json",
+      "resource_report_sha256": "1e31e4940d1ceece53b83081943477a963e539ecc2cb59c2406aecec3727e365",
+      "rustc_wrapper": "all-rustc-lowmem.sh",
+      "source_bytes_unchanged_during_attempt": true,
+      "stopped_in": "asupersync 0.5.0 before completion of macro expansion; MCP crate not reached",
+      "tests_executed": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dfmcp-mcp",
+        "--lib",
+        "build_placement_server",
+        "--",
+        "--test-threads=1"
+      ],
+      "compiler_source_diagnostics": [],
+      "current_mcp_files_changed_since_attempt": [
+        "crates/dfmcp-mcp/src/build_placement_server/completion.rs"
+      ],
+      "elapsed_seconds": 40.712,
+      "exit_code": 101,
+      "label": "construction-plan-mcp-attempt-3",
+      "log_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-3.log",
+      "log_sha256": "327e64f2c197dba11aaefc434f7fdee4e97bb72eddd5855639f0b09639b2b180",
+      "max_child_rss_kib": 1415452,
+      "phase_timing": [
+        "time:   0.001; rss:   35MB ->   36MB (   +1MB)\tparse_crate",
+        "time:   0.000; rss:   41MB ->   41MB (   +0MB)\tcrate_injection"
+      ],
+      "resource_report_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-attempt-3-resource.json",
+      "resource_report_sha256": "aded486c8dbccacddbdcedf2505165593593eaa34ffdcb5b167b2755b35c4a4c",
+      "rustc_wrapper": "all-rustc-purge.sh",
+      "source_bytes_unchanged_during_attempt": true,
+      "stopped_in": "asupersync 0.5.0 before completion of macro expansion; MCP crate not reached",
+      "tests_executed": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "check",
+        "--offline",
+        "--locked",
+        "-p",
+        "dfmcp-mcp",
+        "--lib"
+      ],
+      "compiler_source_diagnostics": [],
+      "current_mcp_files_changed_since_attempt": [
+        "crates/dfmcp-mcp/src/build_placement_server/completion.rs"
+      ],
+      "elapsed_seconds": 16.197,
+      "exit_code": 101,
+      "label": "construction-plan-mcp-check-attempt-1",
+      "log_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-check-attempt-1.log",
+      "log_sha256": "2c98a444a74fdee6ed2719a834c0b75ec3a143e220855f47c514c2d8a56391ee",
+      "max_child_rss_kib": 1461056,
+      "phase_timing": [
+        "time:   0.001; rss:   35MB ->   36MB (   +1MB)\tparse_crate",
+        "time:   0.000; rss:   40MB ->   41MB (   +0MB)\tcrate_injection"
+      ],
+      "resource_report_path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/construction-plan-mcp-check-attempt-1-resource.json",
+      "resource_report_sha256": "e5c8e79273746635d53dbb4bf49cf07b421b40ddcd72c8adde72757445305092",
+      "rustc_wrapper": "all-rustc-purge.sh",
+      "source_bytes_unchanged_during_attempt": true,
+      "stopped_in": "asupersync 0.5.0 before completion of macro expansion; MCP crate not reached",
+      "tests_executed": 0
+    }
+  ],
+  "compiler": {
+    "backend_jobs": 1,
+    "build_jobs": 1,
+    "cargo_version": "cargo 1.100.0-nightly (e8cb624d5 2026-08-22)",
+    "channel": "nightly-2026-08-31",
+    "dev_debug": 0,
+    "frontend_jobs": 1,
+    "incremental": false,
+    "rustc_version_verbose": "rustc 1.100.0-nightly (908501772 2026-08-30)\nbinary: rustc\ncommit-hash: 90850177249efe0321573c569aec5d12b257f8d6\ncommit-date: 2026-08-30\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0\n",
+    "test_debug": 0,
+    "workspace_flags": [
+      "-Z",
+      "unstable-options",
+      "-Z",
+      "fewer-names=yes",
+      "--jobs-backend=1",
+      "--jobs-frontend=1"
+    ]
+  },
+  "compiler_wrappers": {
+    "all-rustc-lowmem.sh": {
+      "sha256": "204794de751d171c6bf3984d8010d17e0305ea538649186d0b05905c72945a47",
+      "text": "#!/bin/sh\n# Preserve the workspace wrapper; every dependency uses one frontend/backend job.\ncase \"$1\" in\n  /workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/workspace-rustc.sh)\n    exec \"$@\"\n    ;;\nesac\ndfmcp_rustc=$1\nshift\ndfmcp_prior_arg=\ndfmcp_asupersync=no\nfor dfmcp_arg in \"$@\"; do\n  if [ \"$dfmcp_prior_arg\" = \"--crate-name\" ] && [ \"$dfmcp_arg\" = \"asupersync\" ]; then\n    dfmcp_asupersync=yes\n  fi\n  dfmcp_prior_arg=$dfmcp_arg\ndone\nif [ \"$dfmcp_asupersync\" = yes ]; then\n  # More, smaller codegen units and removal of local MIR debug metadata preserve\n  # source/features, checks, public Debug formatting, and selected tests.\n  exec \"$dfmcp_rustc\" -Z unstable-options -Z fewer-names=yes --jobs-backend=1 --jobs-frontend=1 \"$@\" -C codegen-units=512 -Z mir-strip-debuginfo=all-locals -Z time-passes\nfi\nexec \"$dfmcp_rustc\" -Z unstable-options -Z fewer-names=yes --jobs-backend=1 --jobs-frontend=1 \"$@\"\n"
+    },
+    "all-rustc-purge.sh": {
+      "sha256": "0ec9f81b42954c7ce5041babe830992b5e30b79b4295c22978735777c8f9c3fa",
+      "text": "#!/bin/sh\ndfmcp_prior_arg=\ndfmcp_asupersync=no\nfor dfmcp_arg in \"$@\"; do\n  if [ \"$dfmcp_prior_arg\" = \"--crate-name\" ] && [ \"$dfmcp_arg\" = \"asupersync\" ]; then\n    dfmcp_asupersync=yes\n  fi\n  dfmcp_prior_arg=$dfmcp_arg\ndone\nif [ \"$dfmcp_asupersync\" = yes ]; then\n  export MALLOC_CONF=narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0,tcache:false,retain:false\nfi\nexec /workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/all-rustc-lowmem.sh \"$@\"\n"
+    },
+    "all-rustc.sh": {
+      "sha256": "0f65b591e6b2f44bbcd896e0aa206d1835adacc5aa04356cba6a7c0c8e12614a",
+      "text": "#!/bin/sh\n# Preserve the workspace wrapper; add identical resource controls to dependencies.\ncase \"$1\" in\n  /workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/workspace-rustc.sh)\n    exec \"$@\"\n    ;;\nesac\ndfmcp_rustc=$1\nshift\nexec \"$dfmcp_rustc\" -Z unstable-options -Z fewer-names=yes --jobs-backend=1 --jobs-frontend=1 \"$@\"\n"
+    },
+    "workspace-rustc.sh": {
+      "sha256": "30b4b2f5ad43f27fc61b2dc321c81eac17a136d95e9b4f062bc83c3d9126905e",
+      "text": "#!/bin/sh\ndfmcp_rustc=$1\nshift\nexec \"$dfmcp_rustc\" -Z unstable-options -Z fewer-names=yes --jobs-backend=1 --jobs-frontend=1 \"$@\"\n"
+    }
+  },
+  "completed_mcp_compiles": 0,
+  "feature": "receipt-linked furniture construction completion MCP integration",
+  "full_qualification_or_production_claim": false,
+  "generated_utc": "2026-09-27T22:54:28.173489+00:00",
+  "mcp_process_tests_executed": 0,
+  "mcp_unit_tests_executed": 0,
+  "native_or_live_execution_performed": false,
+  "observed_resource_limit": {
+    "cargo_or_rustc_processes_in_each_idle_sample": 0,
+    "idle_observation_seconds": 30,
+    "idle_samples": 4,
+    "idle_shmem_bytes": 6475874304,
+    "memory_limit_bytes": 8589934592,
+    "note": "This historical idle memory floor left insufficient room for macro expansion. Subsequent shared usage may change; other task files, processes and shared controls were not modified."
+  },
+  "process_scenarios": {
+    "count": 13,
+    "execution_status": "not_run_no_compiled_devserver",
+    "names": [
+      "test_32_original_placements_complete_multi_page_capture_and_bounded_agent_turn",
+      "test_completion_requires_every_original_placed_step_and_rejects_policy_replacement",
+      "test_every_receipt_source_digest_and_release_boundary_is_required",
+      "test_fixed_observation_allowance_expires_and_does_not_renew_on_restart",
+      "test_lost_trailing_receipt_persists_unknown_read_and_restart_requires_fresh_streak",
+      "test_monitor_only_offline_active_history_and_configuration_cannot_be_retargeted",
+      "test_normal_recover_mode_with_query_only_authority_acquires_completion_samples",
+      "test_origin_replaced_during_last_receipt_query_cannot_publish_satisfied_sample",
+      "test_original_three_kind_plan_completes_and_reopens_without_native_credentials",
+      "test_process_killed_before_final_reply_reopens_unknown_and_cannot_reuse_old_streak",
+      "test_restart_without_original_parent_or_child_can_inspect_and_cancel_monitor_only",
+      "test_same_bytes_original_inode_substitution_blocks_completion_but_allows_local_cancel",
+      "test_shared_conditions_never_latch_and_paused_captures_do_not_advance_stability"
+    ]
+  },
+  "resource_report": {
+    "path": "/workspace/scratch/7d48bbce5d85/rust-exact-2026-08-31/logs/mcp-build-resource-report.json",
+    "sha256": "4e0b06c8578e1c901e3b8fa0b7946b6ba766c76d300e28f6f73d9504210c57d2"
+  },
+  "schema_version": 1,
+  "source_capture_note": "Hashes describe the final current files. Later presentation/reservation fixes postdate failed build attempts; per-attempt differences are listed explicitly.",
+  "source_review": "Source owners completed static review and exact-toolchain formatting. The process script parses successfully and contains the 13 listed scenarios. These checks are not compiler or execution results.",
+  "source_sha256_by_repo_path": {
+    "Cargo.lock": "a64a983dc3f26fefc3a99194bc737c4d7d309c1c26e8fa02a4e586ebb5725776",
+    "crates/dfmcp-mcp/src/build_placement_server.rs": "1f55cedc08a5663c218cc83bcfbb10beb18a72947c4125306652ce2a94690655",
+    "crates/dfmcp-mcp/src/build_placement_server/completion.rs": "3a9703bda7ea30e0ff7ab1c410f1a20aea8a5ad4ee4227a16b7e3c40f06ddbd0",
+    "crates/dfmcp-mcp/src/build_placement_server/presentation.rs": "b9d49a548e26a746953307a829d98be2330fae75e5d55d2ea089a6140f012e10",
+    "crates/dfmcp-mcp/src/build_placement_server/runtime.rs": "627aea5fb481d0602157a69c411852258a853abe0a7bb1fe9dac9eb6cd688c5b",
+    "crates/dfmcp-mcp/src/build_placement_server/tests.rs": "0d44fed843238f9ed49a01d7f4aee13ba2301a80bee6645df285ff805a853a4f",
+    "scripts/test_furniture_completion_mcp.py": "ef5661bc02b851c4968f74c4e00957fa9f8894263afee237cc00431ecae8ac27"
+  },
+  "status": "source_present_static_reviewed_build_blocked"
+}

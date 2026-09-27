@@ -16,13 +16,15 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 12] = [
+pub(super) const NAMES: [&str; 14] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
     "DFMCP_BUILD_SCOPE",
     "DFMCP_BUILD_JOURNAL",
     "DFMCP_BUILD_BATCH",
+    "DFMCP_BUILD_COMPLETION",
+    "DFMCP_OPERATIONS_PAGED_TOKEN",
     "DFMCP_BUILD_ENDPOINT",
     "DFMCP_BUILD_TOKEN",
     "DFMCP_BUILD_ALLOW_PLACE",
@@ -63,6 +65,8 @@ impl CheckpointPolicy {
 pub(super) struct Config {
     pub path: PathBuf,
     pub batch_path: Option<PathBuf>,
+    pub completion_path: Option<PathBuf>,
+    pub completion_only: bool,
     pub scope: MapCuboid,
     pub fortress: FortressIdentity,
     pub endpoint: SocketAddr,
@@ -171,15 +175,19 @@ fn configured(
         Some("disposable-fortress-no-checkpoint") => CheckpointPolicy::DisposableFortress,
         _ => return Err(denied()),
     };
-    let mode = match mode {
-        None | Some("control") => BuildMode::Control,
-        Some("recover") => BuildMode::Recover,
-        Some("offline") => BuildMode::Offline,
+    let (mode, completion_only) = match mode {
+        None | Some("control") => (BuildMode::Control, false),
+        Some("recover") => (BuildMode::Recover, false),
+        Some("offline") => (BuildMode::Offline, false),
+        Some("completion-recover") => (BuildMode::Recover, true),
+        Some("completion-offline") => (BuildMode::Offline, true),
         _ => return Err(denied()),
     };
     Ok(Config {
         path: PathBuf::from(path),
         batch_path: None,
+        completion_path: None,
+        completion_only,
         scope,
         fortress,
         endpoint,
@@ -233,6 +241,26 @@ pub(super) fn configuration() -> Result<Config> {
             return Err(denied());
         }
         config.batch_path = Some(PathBuf::from(path));
+    }
+    if let Some(path) = optional("DFMCP_BUILD_COMPLETION")? {
+        if path.len() > 4096
+            || !path.starts_with('/')
+            || path.contains('\0')
+            || path[1..]
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+            || PathBuf::from(&path) == config.path
+            || config
+                .batch_path
+                .as_ref()
+                .is_none_or(|batch| *batch == PathBuf::from(&path))
+        {
+            return Err(denied());
+        }
+        config.completion_path = Some(PathBuf::from(path));
+    }
+    if config.completion_only && config.completion_path.is_none() {
+        return Err(denied());
     }
     Ok(config)
 }
@@ -399,7 +427,7 @@ pub(super) fn connect(
     remaining: Duration,
 ) -> Result<BuildRpc> {
     current_request_check()?;
-    if &configuration()? != config || config.mode == BuildMode::Offline {
+    if &configuration()? != config || config.mode == BuildMode::Offline || config.completion_only {
         return Err(denied());
     }
     let token = required("DFMCP_BUILD_TOKEN", 256)?.into_bytes();
@@ -450,6 +478,50 @@ pub(super) fn connect(
         )
     }
 }
+/// A query-only receipt bracket on the same joined foreground request owner.
+pub(super) fn completion_sample(
+    config: &Config,
+    binding: &BuildBinding,
+    goal: &dfmcp_adapter::construction_plan::Goal,
+    c: &OperationContext,
+) -> Result<dfmcp_adapter::construction_plan::LinkedSample> {
+    current_request_check()?;
+    if &configuration()? != config || config.mode == BuildMode::Offline || config.completion_only {
+        return Err(denied());
+    }
+    config.matches(binding)?;
+    let build_token = required("DFMCP_BUILD_TOKEN", 256)?.into_bytes();
+    let operations_token = required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.into_bytes();
+    if build_token.len() < 32 || operations_token.len() < 32 {
+        return Err(denied());
+    }
+    let pinned_build = build_token.clone();
+    let pinned_operations = operations_token.clone();
+    let pinned_config = config.clone();
+    let permission = Box::new(move || {
+        current_request_check()?;
+        if configuration()? != pinned_config
+            || required("DFMCP_BUILD_TOKEN", 256)?.as_bytes() != pinned_build
+            || required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.as_bytes() != pinned_operations
+        {
+            return Err(denied());
+        }
+        Ok(())
+    });
+    let mut nonce = [0; 32];
+    nonce[..16].copy_from_slice(&c.session_id.get().to_be_bytes());
+    nonce[16..].copy_from_slice(&c.request_id.get().to_be_bytes());
+    dfmcp_adapter::construction_plan::rpc::acquire_trusted(
+        binding,
+        goal,
+        operations_token,
+        build_token,
+        nonce,
+        c,
+        BuildCancellation::with_check(Arc::new(current_request_check)),
+        permission,
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +555,14 @@ mod tests {
             config(None, None, Some("offline"))?.mode,
             BuildMode::Offline
         );
+        for (spelling, mode) in [
+            ("completion-recover", BuildMode::Recover),
+            ("completion-offline", BuildMode::Offline),
+        ] {
+            let config = config(None, None, Some(spelling))?;
+            assert_eq!(config.mode, mode);
+            assert!(config.completion_only);
+        }
         for v in ["true", "1", "none", ""] {
             assert!(config(Some(v), None, None).is_err());
             assert!(config(None, None, Some(v)).is_err());

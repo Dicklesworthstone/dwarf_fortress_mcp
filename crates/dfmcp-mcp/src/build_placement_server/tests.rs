@@ -213,6 +213,8 @@ impl BuildGuard for Guard {
 }
 fn config() -> Result<Config> {
     Ok(Config {
+        completion_path: None,
+        completion_only: false,
         batch_path: None,
         path: "/private/build/journal".into(),
         scope: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(63, 63, 7))?,

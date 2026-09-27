@@ -12,6 +12,10 @@ unadmitted development executable. `all_placed` proves historical registration
 of all requested stage-zero buildings and construction jobs; it does not prove
 construction completion or present usability.
 
+After `all_placed`, the [whole-plan completion monitor](FURNITURE_COMPLETION_MCP.md)
+can check every original building against shared later observations through the
+same tools, with durable progress and restart recovery.
+
 ## Configure the original two files
 
 Use the existing furniture server configuration, including the explicit

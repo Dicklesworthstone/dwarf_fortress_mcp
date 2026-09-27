@@ -44,6 +44,42 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-original-plan completion MCP integration: source present, build blocked
+
+The furniture development server source now connects the tested Rust completion
+adapter to the existing eleven tools: `query` modes `completion_start` and
+`completion`, `observe` selection `completion`, and `cancel` scope `completion`.
+It retains the full original plan and every target assessment in the Agent Turn,
+records read intent before native acquisition, and checks original custody around
+sample publication. No new placement permission or effect method is introduced.
+
+Separate operator modes `completion-recover` and `completion-offline` open only
+the retained monitor after original-file loss. They compare its sealed original
+paths, fortress and endpoint to configuration, permit only local Query work, and
+withhold verified construction claims. Local monitor verification and terminal
+state are separate from original-source verification, so durable cancellation
+removes only the monitor obligation while unknown original custody still cannot
+prove absence of placement work.
+
+The complete **13-scenario process suite is implemented but has not executed**.
+It covers actual placements followed by shared construction observations, normal
+Query-only recovery, abrupt process termination, receipt/paging/source faults,
+original-file loss before and after restart, and a full 32-target capture. Syntax
+and independent fixture checks passed; source reviews found and corrected the
+terminal-obligation projection and a reservation that necessarily refused the
+32-target case. These checks do not establish runtime behavior.
+
+**MCP compilation and process validation remain blocked.** Three test-build
+attempts and one metadata-only check were killed in pinned Asupersync 0.5.0
+before reaching the changed MCP source. A measured idle shared-memory floor of
+6,475,874,304 bytes persisted with zero Cargo/rustc processes under an 8 GiB limit.
+Serial compilation, reduced compiler metadata and allocator tuning did not
+overcome that limit. There are no passing MCP tests or executable results for
+this integration, and the adapter's passing tests must not be treated as those
+results. See `docs/FURNITURE_COMPLETION_MCP.md`,
+`architecture/furniture_completion_mcp_v1.json` and
+`docs/evidence/furniture-completion-mcp-source.json`.
+
 ### Receipt-linked whole-original-plan construction in Rust
 
 `dfmcp_adapter::construction_plan` now validates later construction conditions

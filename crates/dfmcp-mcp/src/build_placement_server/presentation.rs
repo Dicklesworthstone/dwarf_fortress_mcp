@@ -176,8 +176,32 @@ pub(super) fn packet(
             "placed":batch["placed"],"total":batch["total"],"pending_step":batch["pending_step"],
             "next":batch["next"],"construction_completion_proven":false});
     }
+    if let Some(completion) = result.get("completion") {
+        active["scope"] = json!("original_furniture_batch_placement_and_completion");
+        active["inventory_verified"] =
+            json!(active["inventory_verified"] == true && completion["inventory_verified"] == true);
+        if completion["inventory_verified"] != true || completion["terminal"] != true {
+            active["pending_absence_proven"] = json!(false);
+        }
+        active["construction_completion"] = json!({
+            "inventory_path":"result.completion","monitor_id":completion["monitor_id"],
+            "goal_digest":completion["goal_digest"],"origin_digest":completion["origin_digest"],
+            "phase":completion["phase"],"reason":completion["reason"],
+            "origin_verified":completion["origin_verified"],"inventory_verified":completion["inventory_verified"],
+            "monitor_inventory_verified":completion["monitor_inventory_verified"],
+            "monitor_terminal":completion["monitor_terminal"],
+            "read_outcome_unknown":completion["read_outcome_unknown"],
+            "sampled_condition_satisfied":completion["sampled_condition_satisfied"],
+            "observations":completion["observations"],"streak":completion["streak"],
+            "deadline":completion["timing"]["deadline"],"last_tick":completion["last_tick"]
+        });
+        if completion["monitor_terminal"] != true {
+            active["obligations"] = json!([active["construction_completion"].clone()]);
+        }
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
+        "fortress.observe" if result.get("completion").is_some() => AgentPhase::Verify,
         "fortress.observe" => AgentPhase::Orient,
         "fortress.plan" => AgentPhase::Propose,
         "fortress.commit" => AgentPhase::Commit,
@@ -217,6 +241,13 @@ pub(super) fn packet(
             "currently_verified":batch["inventory_verified"],"canonical_world_anchor":false}),
         );
     }
+    if let Some(completion) = result.get("completion") {
+        references.push(json!({"kind":"original_plan_sampled_construction_condition",
+            "monitor_id":completion["monitor_id"],"goal_digest":completion["goal_digest"],
+            "origin_digest":completion["origin_digest"],"capture_sha256":completion["capture_sha256"],
+            "game_tick":completion["last_tick"],"source":completion["source"],
+            "currently_verified":completion["inventory_verified"],"canonical_world_anchor":false}));
+    }
     let mut builder=AgentTurnBuilder::new(op,phase).profile(if matches!(op,"fortress.plan"|"fortress.observe"){ObservationProfile::Tactical}else{ObservationProfile::Forensic})
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished","canonical_world_anchor_available":false})),None)
         .briefing(json!({"runtime":"unadmitted_build_placement_development","bridge_protocol":"1.19","runtime_admitted":false,
@@ -252,6 +283,48 @@ pub(super) fn packet(
             false,
             json!({"session_id":c.map(|c|c.session_id.to_string()),"query":"{\"mode\":\"batch\"}"})
         )]);
+    }
+    if let Some(completion) = result.get("completion") {
+        turn["briefing"]["receipt_linked_sampled_completion"] =
+            completion["sampled_condition_satisfied"].clone();
+        turn["briefing"]["completion_phase"] = completion["phase"].clone();
+        turn["uncertainty"] = json!([uncertainty(
+            "sampled-completion-scope",
+            "unknown",
+            "Completion is a historical condition over the whole original plan at sampled game ticks. Current usability, continuous stability and causal attribution remain unproved.",
+            "Inspect the fixed goal, all target assessments and original custody before relying on retained evidence.",
+            None,
+            Value::Null
+        )]);
+        let live = completion["inventory_verified"] == true && completion["terminal"] != true;
+        turn["recommendations"] = json!([recommendation(
+            "inspect-original-plan-completion",
+            if live {
+                "fortress.observe"
+            } else {
+                "fortress.query"
+            },
+            if live {
+                "Acquire one bounded receipt-linked sample for the fixed original plan."
+            } else {
+                "Inspect retained completion evidence and original custody."
+            },
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            if live {
+                json!({"session_id":c.map(|c|c.session_id.to_string()),"selection":"completion"})
+            } else {
+                json!({"session_id":c.map(|c|c.session_id.to_string()),"query":"{\"mode\":\"completion\"}"})
+            }
+        )]);
+        if completion["inventory_verified"] == true && completion["assessments_complete"] == true {
+            if let Some(domains) = turn["coverage"]["complete_domains"].as_array_mut() {
+                domains.push(json!("original_plan_sampled_construction_condition"));
+            }
+        }
     }
     if let Some(summary) = result.get("source_summary").filter(|v| !v.is_null()) {
         turn["briefing"]["native_source_summary"] = summary.clone();

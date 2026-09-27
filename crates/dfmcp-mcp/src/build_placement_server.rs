@@ -24,6 +24,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 mod batch;
+mod completion;
 mod policy;
 mod presentation;
 mod runtime;
@@ -40,9 +41,23 @@ const EFFECT_BYTES: u64 = 512 * 1024 * 1024;
 const SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<Entry>> = Mutex::new(None);
-struct Entry {
-    state: State<PrivateBuildFile, BuildRpc>,
-    config: Config,
+enum Entry {
+    Placement {
+        state: State<PrivateBuildFile, BuildRpc>,
+        config: Config,
+    },
+    Completion {
+        state: completion::Recovery,
+        config: Config,
+    },
+}
+impl Entry {
+    fn id(&self) -> SessionId {
+        match self {
+            Self::Placement { state, .. } => state.id,
+            Self::Completion { state, .. } => state.id,
+        }
+    }
 }
 fn error(code: ErrorCode, message: &str) -> dfmcp_core::DfmcpError {
     dfmcp_core::DfmcpError::new(code, message)
@@ -119,6 +134,7 @@ struct State<S, N> {
     historical: Option<BuildInventory>,
     pending_hint: Option<Value>,
     batch: Option<batch::Parent>,
+    completion: Option<completion::Monitor>,
 }
 impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     fn new(mut control: BuildSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
@@ -148,9 +164,14 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             historical: Some(view),
             pending_hint: None,
             batch: None,
+            completion: None,
         })
     }
     fn context(&mut self, write: bool, wall: Option<u64>) -> Result<OperationContext> {
+        if let Some(monitor) = &mut self.completion {
+            monitor.verified = false;
+            monitor.store_verified = false;
+        }
         self.request = self.request.checked_add(1).ok_or_else(exhausted)?;
         let mut budget = self.budget;
         if let Some(w) = wall {
@@ -160,7 +181,12 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             self.id,
             RequestId::new(self.request),
             self.binding.fortress().fortress_id(),
-            self.control.high_tick(),
+            self.control.high_tick().max(
+                self.completion
+                    .as_ref()
+                    .and_then(|m| m.store.progress().last_tick)
+                    .unwrap_or(0),
+            ),
             budget,
             self.control.mode(),
             false,
@@ -188,6 +214,9 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         if let Some(parent) = &self.batch {
             result["batch"] = batch::display(parent, view, verified);
         }
+        if let Some(monitor) = &self.completion {
+            result["completion"] = completion::display(monitor, verified && monitor.verified);
+        }
     }
     fn verify_batch(&mut self, c: &OperationContext, view: &BuildInventory) -> Result<()> {
         if let Some(parent) = &mut self.batch {
@@ -197,7 +226,14 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     }
     fn disclosure_context(&self, c: &OperationContext) -> Result<OperationContext> {
         let mut current = c.clone();
-        current.anchor.tick = GameTick(current.anchor.tick.get().max(self.control.high_tick()));
+        current.anchor.tick = GameTick(
+            current.anchor.tick.get().max(self.control.high_tick()).max(
+                self.completion
+                    .as_ref()
+                    .and_then(|m| m.store.progress().last_tick)
+                    .unwrap_or(0),
+            ),
+        );
         if current.session_id != self.id
             || current.anchor.fortress_id != self.binding.fortress().fortress_id()
         {
@@ -399,6 +435,15 @@ enum Query {
     },
     Schema {},
     Batch {},
+    Completion {},
+    CompletionStart {
+        deadline: u64,
+        interval: Option<u32>,
+        stable_samples: Option<u32>,
+        stable_span: Option<u64>,
+        max_gap: Option<u32>,
+        max_observations: Option<u32>,
+    },
 }
 impl Query {
     fn parse(raw: &str) -> Result<Self> {
@@ -451,7 +496,10 @@ impl Query {
             Self::Selection { witness } => {
                 digest(witness)?;
             }
-            Self::Schema {} | Self::Batch {} => {}
+            Self::Schema {}
+            | Self::Batch {}
+            | Self::Completion {}
+            | Self::CompletionStart { .. } => {}
         }
         Ok(value)
     }
@@ -473,12 +521,14 @@ enum Action {
     Query(Query),
     Inventory,
     StopBatch,
+    Completion(completion::Action),
     Denied,
 }
 fn schema() -> Value {
     json!({"schema":"dfmcp.build-placement-mcp-query/1","max_bytes":2048,"closed":true,
     "modes":{"records":{"limit":"optional integer 1..8","offset":"optional integer 0..256; head required when nonzero","head":"optional lowercase SHA-256 exact journal head"},
-        "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"schema":{}},
+        "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"completion":{},
+        "completion_start":{"deadline":"required absolute game tick","interval":"optional 1..403200; default 1","stable_samples":"optional 2..64; default 2","stable_span":"optional 1..4032000; default 1","max_gap":"optional interval..4032000; default 1200","max_observations":"optional stable_samples..512; default 512"},"schema":{}},
     "native_calls":0,"null_fields_allowed":false,"duplicate_fields_allowed":false})
 }
 #[allow(clippy::too_many_arguments)]
@@ -857,6 +907,11 @@ where
         Action::Inventory => Ok(
             json!({"ok":true,"journal":inventory(before),"native_calls":0,"live_game_health_checked":false}),
         ),
+        Action::Completion(_)
+        | Action::Query(Query::Completion {} | Query::CompletionStart { .. }) => Err(error(
+            ErrorCode::InvalidRequest,
+            "completion requires the original private batch session",
+        )),
         Action::Denied => Err(error(
             ErrorCode::CapabilityDenied,
             "furniture journal is not a game checkpoint or restore",
@@ -992,6 +1047,19 @@ where
     } else {
         false
     };
+    if state.completion.is_some() {
+        let checked = verified
+            .as_ref()
+            .ok_or_else(|| error(ErrorCode::CorruptLedger, "original inventory unavailable"))
+            .and_then(|view| completion::verify(state, &display, &mut work, view, batch_verified));
+        if let Err(e) = checked {
+            result["completion_inventory_unverified"] = json!(true);
+            if op == "fortress.doctor" {
+                result["ok"] = json!(false);
+                result["error"] = failure(&e)["error"].clone();
+            }
+        }
+    }
     state.attach_batch(
         &mut result,
         verified.as_ref().or(state.historical.as_ref()),
@@ -1062,32 +1130,47 @@ async fn with_session(
     wall: Option<u64>,
     action: Result<Action>,
 ) -> String {
-    runtime::owned(op, move |control| {
+    let monitor_action = matches!(&action, Ok(Action::Completion(_)));
+    let read_only = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(monitor_action));
+    let worker_read_only = read_only.clone();
+    let output = runtime::owned(op, move |control| {
         let result = (|| {
             let id = session_id(&raw)?;
             let mut locked = lock()?;
             let entry = locked
                 .as_mut()
-                .filter(|e| e.state.id == id)
+                .filter(|e| e.id() == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "furniture session absent"))?;
-            let c = match entry
-                .state
-                .context(runtime::enabled().unwrap_or(false), wall)
-            {
-                Ok(c) => c,
-                Err(e) => return Ok(entry.state.failed(op, None, &e)),
+            let (state, config) = match entry {
+                Entry::Completion { state, config } => {
+                    worker_read_only.store(true, Ordering::Release);
+                    return Ok(completion::run_recovery(
+                        state, config, &control, op, action, wall,
+                    ));
+                }
+                Entry::Placement { state, config } => (state, config),
             };
-            if let Err(e) = runtime::boundary(&control, &entry.config, false) {
-                entry.state.abandon();
-                return Ok(entry.state.failed(op, Some(&c), &e));
+            let c = match state.context(runtime::enabled().unwrap_or(false), wall) {
+                Ok(c) => c,
+                Err(e) => return Ok(state.failed(op, None, &e)),
+            };
+            if let Err(e) = runtime::boundary(&control, config, false) {
+                state.abandon();
+                return Ok(state.failed(op, Some(&c), &e));
             }
-            let config = entry.config.clone();
+            let config = config.clone();
+            let action = match action {
+                Ok(Action::Completion(action)) => {
+                    return Ok(completion::run(state, &config, &control, c, op, action));
+                }
+                other => other,
+            };
             let mut guard = runtime::Guard {
                 control: &control,
                 config: &config,
             };
             let rendered = run_action(
-                &mut entry.state,
+                state,
                 c.clone(),
                 op,
                 action,
@@ -1105,8 +1188,8 @@ async fn with_session(
                 },
             );
             if let Err(e) = runtime::boundary(&control, &config, false) {
-                entry.state.abandon();
-                return Ok(entry.state.failed(op, Some(&c), &e));
+                state.abandon();
+                return Ok(state.failed(op, Some(&c), &e));
             }
             Ok(rendered)
         })();
@@ -1115,7 +1198,12 @@ async fn with_session(
             Err(e) => unbound(op, &e),
         }
     })
-    .await
+    .await;
+    if read_only.load(Ordering::Acquire) {
+        completion::read_only_packet(output)
+    } else {
+        output
+    }
 }
 
 #[tool(
@@ -1161,13 +1249,21 @@ pub async fn fortress_open_session(
             };
             let budget = WorkBudget { max_wall_millis:max_wall_millis.unwrap_or(10000),
                 max_bytes:max_bytes.unwrap_or(MAX_WORK_BYTES),max_output_tokens:max_output_tokens.unwrap_or(16384),
-                max_entities:65536,max_actions:1,max_game_ticks:0 };
+                max_entities:73729,max_actions:1,max_game_ticks:0 };
             let mut locked = lock()?;
             if locked.is_some() { return Err(error(ErrorCode::Conflict, "release the current furniture session first")); }
             let seq = NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
             let id = SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
             let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
             let mut work = Work::new(&c,control.started)?;
+            if config.completion_only {
+                if selection.is_some() || plan.is_some() {
+                    return Err(error(ErrorCode::InvalidRequest, "completion recovery reopens only its retained original monitor"));
+                }
+                let (state, output) = completion::open_recovery(&config, &control, &c, &mut work)?;
+                *locked = Some(Entry::Completion { state, config });
+                return Ok(output);
+            }
             if plan.is_some() {
                 c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
                 c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
@@ -1197,7 +1293,10 @@ pub async fn fortress_open_session(
                 Some(source.binding().clone())
             } else { None };
             runtime::boundary(&control,&config,false)?;
-            let journal = open_private_build(&config.path,&work.take(&c,EFFECT_BYTES)?,config.mode,binding)?;
+            let source_reserve = if config.completion_path.is_some() {
+                completion::open_reserve(&config.path, 16 * 1024 * 1024)?
+            } else { EFFECT_BYTES };
+            let journal = open_private_build(&config.path,&work.take(&c,source_reserve)?,config.mode,binding)?;
             config.matches(journal.binding())?;
             let session = BuildSession::<_,BuildRpc>::new(journal,&work.view(&c)?)?;
             let mut state = State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
@@ -1218,6 +1317,7 @@ pub async fn fortress_open_session(
                 state.batch = Some(parent);
                 state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
             }
+            completion::reopen(&mut state, &config, &c, &mut work, &view)?;
             let mut result = json!({"ok":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),"planning_observation_retained":false,
                 "native_preparation_dispatched":false,"game_mutation_dispatched":false});
@@ -1226,7 +1326,7 @@ pub async fn fortress_open_session(
             if output.len() as u64>OUTPUT_BYTES { return Err(exhausted()); }
             work.current(&c)?;
             runtime::boundary(&control,&config,false)?;
-            *locked = Some(Entry{state,config});
+            *locked = Some(Entry::Placement{state,config});
             Ok(output)
         })();
         match result { Ok(v)=>v,Err(e)=>unbound("fortress.open_session",&e) }
@@ -1241,14 +1341,16 @@ fn mode_name(mode: BuildMode) -> &'static str {
 }
 #[tool(
     name = "fortress.observe",
-    description = "Capture one exact ordinary bed/chair/table item and 3x3 target context. selection is JSON [kind,item_id,x,y,z], or the literal next for a retained complete batch. Batch selection must equal its next unblocked original step. Retain the original connection for fresh review and one commit. Observation abandons prior local permission, never pending work."
+    description = "Capture an exact furniture selection, next for the original batch step, or completion for one query-only whole-plan construction sample. Completion brackets all original receipts around one complete operations capture and durably records progress. Observation abandons local placement permission, never pending work."
 )]
 pub async fn fortress_observe(session_id: String, selection: String) -> String {
     with_session(
         session_id,
         "fortress.observe",
         None,
-        if selection == "next" {
+        if selection == "completion" {
+            Ok(Action::Completion(completion::Action::Sample))
+        } else if selection == "next" {
             Ok(Action::ObserveNext)
         } else {
             parse_selection(&selection).map(Action::Observe)
@@ -1294,7 +1396,7 @@ pub async fn fortress_commit(
 }
 #[tool(
     name = "fortress.query",
-    description = "Inspect local furniture evidence. query is closed JSON with mode batch/records/get/selection/schema. Batch returns the complete original plan, every step, progress and next key/selection after verifying both files. Records page 1..8 with head-bound continuation. No native calls or renewed commit permission."
+    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. Neither makes native calls or renews placement permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1306,6 +1408,24 @@ pub async fn fortress_query(session_id: String, query: String) -> String {
                 idempotency_key,
                 plan_digest,
             } => Ok(Action::Explain(idempotency_key, digest(&plan_digest)?)),
+            Query::Completion {} => Ok(Action::Completion(completion::Action::Inspect)),
+            Query::CompletionStart {
+                deadline,
+                interval,
+                stable_samples,
+                stable_span,
+                max_gap,
+                max_observations,
+            } => Ok(Action::Completion(completion::Action::Start(
+                dfmcp_adapter::construction_plan::Timing {
+                    deadline,
+                    interval: interval.unwrap_or(1),
+                    stable_samples: stable_samples.unwrap_or(2),
+                    stable_span: stable_span.unwrap_or(1),
+                    max_gap: max_gap.unwrap_or(1200),
+                    max_observations: max_observations.unwrap_or(512),
+                },
+            ))),
             q => Ok(Action::Query(q)),
         }),
     )
@@ -1357,27 +1477,35 @@ pub async fn fortress_explain(
     .await
 }
 async fn close(raw: String, release: bool) -> String {
-    runtime::owned("fortress.cancel", move |control| {
+    let output = runtime::owned("fortress.cancel", move |control| {
         let result = (|| {
             control.checkpoint()?;
             let id = session_id(&raw)?;
             let mut locked = lock()?;
             let entry = locked
                 .as_mut()
-                .filter(|e| e.state.id == id)
+                .filter(|e| e.id() == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "furniture session absent"))?;
-            let c = entry.state.context(false, None)?;
+            let (state, config) = match entry {
+                Entry::Completion { state, config } => {
+                    let output = completion::close_recovery(state, config, &control, release)?;
+                    drop(locked.take());
+                    return Ok(output);
+                }
+                Entry::Placement { state, config } => (state, config),
+            };
+            let c = state.context(false, None)?;
             let view = if release {
                 None
             } else {
-                if let Err(e) = runtime::boundary(&control, &entry.config, false) {
-                    return Ok(entry.state.failed("fortress.cancel", Some(&c), &e));
+                if let Err(e) = runtime::boundary(&control, config, false) {
+                    return Ok(state.failed("fortress.cancel", Some(&c), &e));
                 }
                 let work = Work::new(&c, control.started)?;
-                Some(entry.state.control.inventory(&work.view(&c)?)?)
+                Some(state.control.inventory(&work.view(&c)?)?)
             };
             if !release && view.as_ref().is_some_and(|v| v.pending().is_some()) {
-                return Ok(entry.state.failed(
+                return Ok(state.failed(
                     "fortress.cancel",
                     Some(&c),
                     &error(
@@ -1386,7 +1514,7 @@ async fn close(raw: String, release: bool) -> String {
                     ),
                 ));
             }
-            let output = entry.state.close_packet(&c, view.as_ref(), release);
+            let output = state.close_packet(&c, view.as_ref(), release);
             if output.len() as u64 > OUTPUT_BYTES {
                 return Err(exhausted());
             }
@@ -1398,11 +1526,12 @@ async fn close(raw: String, release: bool) -> String {
             Err(e) => unbound("fortress.cancel", &e),
         }
     })
-    .await
+    .await;
+    completion::read_only_packet(output)
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=batch permanently stops new steps under Query authority in control/recover mode, without cancelling native work. scope=effect retires the exact prepared native record; cannot undo construction. scope=session releases settled custody, or release_for_recovery=true preserves unresolved identities while releasing ownership. Reopening never permits blind retry."
+    description = "scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=session releases custody; release_for_recovery preserves unresolved identities."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -1416,6 +1545,15 @@ pub async fn fortress_cancel(
         ("session", None, None) => close(session_id, release).await,
         ("batch", None, None) if !release => {
             with_session(session_id, "fortress.cancel", None, Ok(Action::StopBatch)).await
+        }
+        ("completion", None, None) if !release => {
+            with_session(
+                session_id,
+                "fortress.cancel",
+                None,
+                Ok(Action::Completion(completion::Action::Cancel)),
+            )
+            .await
         }
         ("effect", Some(k), Some(p)) if !release => {
             with_session(

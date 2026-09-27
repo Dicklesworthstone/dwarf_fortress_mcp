@@ -1,0 +1,42 @@
+{
+  "schema": "dfmcp.furniture-completion-mcp-contract/1",
+  "status": "source_present_static_reviewed_rust_build_blocked",
+  "mcp_process_tests_executed": false,
+  "validation_evidence": "../docs/evidence/furniture-completion-mcp-source.json",
+  "result_schema": "dfmcp.furniture-completion-mcp/1",
+  "adapter_contract": "furniture_completion_rust_v1.json",
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "tools": {
+    "fortress.query": ["completion_start", "completion"],
+    "fortress.observe": {"selection": "completion", "acquisitions_per_request": 1},
+    "fortress.cancel": {"scope": "completion", "native_calls": 0}
+  },
+  "frozen_tool_count": 11,
+  "operator_configuration": ["DFMCP_BUILD_JOURNAL", "DFMCP_BUILD_BATCH", "DFMCP_BUILD_COMPLETION", "DFMCP_BUILD_TOKEN", "DFMCP_OPERATIONS_PAGED_TOKEN"],
+  "monitor_only_modes": {
+    "completion-recover": ["inspect", "cancel_monitor", "release_session"],
+    "completion-offline": ["inspect", "release_session"],
+    "opens_original_files": false,
+    "matches_original_configured_paths_fortress_endpoint": true,
+    "native_connections": false,
+    "allows_placement_or_sampling": false,
+    "grants": ["query"],
+    "origin_verified": false,
+    "sampled_condition_satisfied": false,
+    "separate_local_monitor_verification": "monitor_inventory_verified",
+    "separate_local_monitor_terminal_state": "monitor_terminal"
+  },
+  "response": {
+    "original_plan_and_all_steps": "result.batch",
+    "fixed_goal_and_all_assessments": "result.completion",
+    "output_bytes": 65536,
+    "entities_including_world_root": 73729,
+    "work_bytes": 1073741824,
+    "whole_result_admission_before_creation_and_append": true,
+    "partial_target_results": false
+  },
+  "native_placement_formats_changed": false,
+  "canonical_world_anchor": false,
+  "current_usability_proven": false,
+  "production_admitted": false
+}

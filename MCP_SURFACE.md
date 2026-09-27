@@ -145,6 +145,17 @@ it does not claim the full live profile content described by the target contract
 
 ## Tools
 
+The isolated furniture/1.19 development server also uses these same eleven names
+for [complete furnishing batches](docs/FURNITURE_BATCH_MCP.md) and
+[whole-original-plan construction monitoring](docs/FURNITURE_COMPLETION_MCP.md).
+Its closed `query` modes `completion_start`/`completion`, `observe` selection
+`completion`, and `cancel` scope `completion` add receipt-linked, Query-authorized
+monitoring without adding tools. The complete original plan and all assessments
+remain in each handoff. Operator-selected `completion-recover` and
+`completion-offline` modes retain inspect/cancel access to the monitor after
+original-file loss while withholding verified construction claims. These are
+unadmitted development modes, separate from production protocol negotiation.
+
 ### `fortress.open_session`
 
 Negotiates fortress, versions, compatibility, requested capability scopes, observation profile,

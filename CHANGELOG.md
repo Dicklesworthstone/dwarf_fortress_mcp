@@ -24,6 +24,18 @@ readiness.
 
 ### Added
 
+- Source implementation of whole-original-plan construction monitoring through
+  the existing furniture MCP tools, including fixed-goal creation, one explicit
+  shared sample, complete progress and durable local cancellation. Monitor-only
+  recovery preserves inspect/cancel access after original placement files are
+  lost, with historical origin evidence clearly unverified. Local terminal state
+  now removes only the monitor obligation; full 32-target result admission no
+  longer reserves an unrelated optional native-record payload. The 13-scenario
+  process suite is present, but MCP compilation and execution remain blocked by
+  persistent shared memory exhaustion inside the pinned runtime dependency.
+  The adapter below is tested; this MCP integration is not yet runtime-validated.
+  See `docs/FURNITURE_COMPLETION_MCP.md`.
+
 - Receipt-linked whole-plan construction monitoring in safe Rust. Every original
   Placed target shares one operations capture, one stability streak and a fixed
   deadline. Same-connection original receipt brackets, strict native identity
