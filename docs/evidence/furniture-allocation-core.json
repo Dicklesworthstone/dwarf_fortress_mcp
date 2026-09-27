@@ -1,0 +1,30 @@
+{
+  "schema": "dfmcp.furniture-allocation-core-evidence/1",
+  "base_commit": "80d0256e7ddfcfdab885845115dbd3b962067838",
+  "scope": "executed pure Python; actual existing plan compiler; no native read or game effect",
+  "python": "3.13.5",
+  "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest test_furniture_allocation -v",
+  "tests_run": 14,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "exhaustive_graphs": 4096,
+  "random_full_inventory_oracles": 150,
+  "maximum_items_executed": 65536,
+  "maximum_slots_executed": 32,
+  "maximum_reduced_union_executed": 1024,
+  "sources": {
+    "scripts/furniture_allocation.py": {
+      "sha256": "d047583fbac8e1dbd62a8e9fa637b463d4347a9c8668fc6d611742281c877832",
+      "git_blob": "6318e7e3658329eec3b8177dd63c26fbf88d5b30"
+    },
+    "scripts/test_furniture_allocation.py": {
+      "sha256": "e9609444f807ccd1068aab5341fd3f0900124d1b5f052a2e62a87c3bbf8a72ab",
+      "git_blob": "8e71ef651bcd4652644b9125b46b110e1740a0b0"
+    },
+    "scripts/furniture_plan.py": {
+      "sha256": "6ad46a0bfa3641e55c0a92f37d02473c59d679c562a682a62075a3636d616155",
+      "git_blob": "2fc0521378148e16ca3e313c3def00e91db2486e"
+    }
+  }
+}
