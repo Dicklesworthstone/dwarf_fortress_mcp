@@ -114,6 +114,9 @@ fn register() -> Result<Registered> {
         journal: None,
         limits,
         budget: WorkBudget {
+            // This is a large-state semantic/output test, including complete
+            // snapshot validation in debug builds, not a two-second benchmark.
+            max_wall_millis: 60_000,
             max_entities: limits.entity_limit(),
             max_bytes: limits.payload_bytes as u64,
             max_output_tokens: 2048,
@@ -148,7 +151,7 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
     let encoded = super::super::fortress_query(Some(session.id.to_string()), None, Some(request));
     assert!(encoded.len() <= 8192);
     let result = parse(&encoded)?;
-    assert_eq!(result["ok"], true);
+    assert_eq!(result["ok"], true, "{encoded}");
     assert_eq!(result["matched"], 40000);
     assert_eq!(result["agent_turn"]["briefing"]["bridge_protocol"], "1.4");
     assert_eq!(result["agent_turn"]["briefing"]["runtime_admitted"], false);
@@ -157,15 +160,15 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
         "condition":{"op":"field","entity_id":item_entity_id(0).to_string(),"generation":1,"field":"forbidden",
             "comparison":"eq","value":{"type":"bool","value":true}},
         "deadline_tick":105u64*403200+100,"poll_interval_ticks":1,"stable_observations":1}))?;
-    assert_eq!(created["ok"], true);
+    assert_eq!(created["ok"], true, "{created}");
     assert_eq!(created["record"]["terminal"], false);
     let captured = session.query(json!({"kind":"capture","key":"one-item","max_game_ticks":100,
         "select":{"kind":"entities","kinds":["item"],"fields":["forbidden"],
             "where":{"op":"compare","field":"native_item_id","comparison":"eq","value":{"type":"u64","value":0}}}}))?;
-    assert_eq!(captured["ok"], true);
+    assert_eq!(captured["ok"], true, "{captured}");
     let await_input = json!({"kind":"await_watch","watch":created["record"]["watch"]});
     let done = session.query(await_input.clone())?;
-    assert_eq!(done["ok"], true);
+    assert_eq!(done["ok"], true, "{done}");
     assert_eq!(done["record"]["terminal"], true);
     assert_eq!(done["agent_turn"]["briefing"]["bridge_protocol"], "1.4");
     assert_eq!(session.calls.load(Ordering::SeqCst), 1);
@@ -173,7 +176,7 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
     assert_eq!(session.calls.load(Ordering::SeqCst), 1);
     let changed =
         session.query(json!({"kind":"changes","baseline":captured["captured"]["baseline"]}))?;
-    assert_eq!(changed["ok"], true);
+    assert_eq!(changed["ok"], true, "{changed}");
     assert_eq!(changed["change_count"], 1);
     assert_eq!(
         changed["changes"][0]["entity_id"],
@@ -202,7 +205,7 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(18)
+        Some(19)
     );
     assert_eq!(session.query(json!({"kind":"history"}))?["ok"], false);
     assert_eq!(

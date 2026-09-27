@@ -246,6 +246,11 @@ logistics acceptance criteria.
 
 ## Rust allocation from a published inventory
 
+The existing MCP query tool now exposes this Rust allocator in operations/1.3,
+paged operations/1.4 and citizen-inclusive spatial/1.8. See
+[the MCP layout workflow](FURNITURE_ALLOCATION_MCP.md) for complete requests,
+source-bound results and handoff to the exact-item batch workflow.
+
 `dfmcp_adapter::furniture_allocation` implements the same global objective in
 safe Rust with the existing dependencies. Its public `allocate` function takes a
 typed request, candidate slice and cooperative guard. Checked fixed-width

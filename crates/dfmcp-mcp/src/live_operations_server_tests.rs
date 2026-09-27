@@ -173,7 +173,7 @@ fn connected_operations_queries_inspect_real_items_buildings_and_paths() -> Resu
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(20)
+        Some(21)
     );
     Ok(())
 }

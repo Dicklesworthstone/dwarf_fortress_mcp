@@ -115,7 +115,7 @@ not prove the game is still in that state when the agent receives it.
 The new bootstrap registers the existing eleven tool names and reuses the ten
 post-bootstrap operations handlers. Entity inspection/filtering, aggregates,
 search, graph traversal, production diagnosis, declared inventory allocation,
-baselines and foreground condition watches run on the fully published 1.4 graph.
+complete furniture allocation, baselines and foreground condition watches run on the fully published 1.4 graph.
 A logical observe/await call performs one capture, potentially many page RPCs,
 and one release. Terminal watch retries still skip acquisition.
 
@@ -125,8 +125,10 @@ methods remain operations/1.3 with their existing 32,768-item/2-MiB limits and
 provenance even for a small otherwise identical roster. Semantic entity and edge
 keys are shared where their meanings are unchanged; full anchors bind the profile.
 
-Operations schema discovery exposes the eighteen nonhistorical variants for 1.4.
-The existing 1.3 entry continues to expose its twenty variants, including history.
+Operations schema discovery exposes nineteen nonhistorical variants for 1.4.
+The existing 1.3 entry exposes twenty-one variants, including history.
+`furniture_allocation` selects distinct exact items for a complete layout;
+`FURNITURE_ALLOCATION_MCP.md` documents its full-result budget and placement handoff.
 The durable archive currently replays 1.3 records only. The paged entry rejects
 journal configuration and historical queries instead of silently interpreting
 old records as new-profile evidence. Paged observations, watches and baselines
@@ -155,9 +157,14 @@ wire tests, three codec/profile tests, and two MCP integration/isolation tests.
 They include fragmented native I/O, corrupt/mixed pages, lost release, cross-profile
 rejection, 40,000-item queries with an 8,192-byte response budget, baseline/watch
 refresh, source-digest propagation and prior-anchor preservation on failure.
-They have not been compiled or executed: Rust, Cargo and rustfmt were unavailable.
-No Clippy, stdio, real generated DF header build, protobuf linking, plugin loading,
-live-game campaign, full repository qualification or production admission is claimed.
+They were not compiled in the original source-only increment. The subsequent
+furniture-allocation MCP increment compiled the crate and server on the exact
+pinned nightly, ran both existing MCP integration/isolation tests, and passed
+five real modern-stdio/TCP furniture scenarios, including a six-page inventory.
+See `docs/evidence/furniture-allocation-mcp.json` for that focused execution
+scope. It does not establish all fifteen scenarios, warning-denied Clippy, a
+real generated DF header build, protobuf linking, plugin loading, a live-game
+campaign, full repository qualification or production admission.
 
 Still absent: paging beyond these bounded roster/payload ceilings, incremental
 native capture, 1.4 durable archive integration, coherent citizen/announcement or

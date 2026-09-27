@@ -894,6 +894,7 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
             json!({"ok":true,"coherence":"strict citizens, operations and requested terrain are one native capture",
         "situation_policy":situation::policy(),
         "production":"production_diagnosis and inventory_plan use this exact capture and entity generations; flags, attachments and declared supply shortages do not prove causal blockers, native requirements, reachability or job completion",
+        "furniture":"furniture_allocation selects distinct exact items for every declared bed/chair/table target, or explains a complete shortage; the returned furniture-plan requires fresh placement review and reserves no items",
         "worker_join":"observed strict-citizen workers have generation-checked unit entities and performs edges to jobs",
         "workforce":"query workforce_plan maximizes filled declared worker slots with one capacity per citizen; no labor assignment, reservation, native job eligibility or global distance/skill optimum is proved",
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
@@ -958,6 +959,6 @@ pub fn run_stdio() {
     }
     let server=ServerBuilder::new("dfmcp-live-spatial-citizens-dev",env!("CARGO_PKG_VERSION"))
     .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Close or recover from a fenced session using fortress.cancel with scope=session; it releases connections and journal locks without cancelling saved watches. Explicit consent is required to discard volatile watches/baselines. Reopen with a new session and normal authority. Query production_diagnosis or production mode for observed conditions; inventory_plan allocates declared stack units, not reservations. Historical queries remain exact-record reads. Use await_watches for one shared capture and atomic watch progress. Situation mode gives bounded attention. No game effects.").build();
+    .request_timeout(60).instructions("Unadmitted read-only spatial/1.8. Close or recover from a fenced session using fortress.cancel with scope=session; it releases connections and journal locks without cancelling saved watches. Explicit consent is required to discard volatile watches/baselines. Reopen with a new session and normal authority. Query production_diagnosis or production mode for observed conditions; inventory_plan allocates declared stack units, not reservations. furniture_allocation selects distinct items for every bed/chair/table target or reports its shortage; fresh placement review is required. Historical queries remain exact-record reads. Use await_watches for one shared capture and atomic watch progress. Situation mode gives bounded attention. No game effects.").build();
     crate::run_modern_stdio(server);
 }

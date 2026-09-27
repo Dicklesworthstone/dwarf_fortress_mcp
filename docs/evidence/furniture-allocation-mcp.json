@@ -1,0 +1,268 @@
+{
+  "base_revision": "04fc7e472f3fa63f3e5fd40963ae386d4c89d8fd",
+  "boundary_measurement": {
+    "binary_sha256": "3cea658bcd1fa08142c517c051a6f0a5ca8d9855c4c7ae1eddbcbad2e6a7c615",
+    "eligible_candidates": 32,
+    "log_sha256": "9ef4151570df858182ee01823b1d1ee4e302a2a73432d1cd2ac8514b93fb0f19",
+    "observed_items": 2000,
+    "packets": [
+      {
+        "error": null,
+        "max_output_tokens": 16384,
+        "ok": true,
+        "packet_bytes": 18630,
+        "plan_canonical_bytes": 2583,
+        "request_canonical_bytes": 3952,
+        "slots_requested": 32,
+        "status": "allocated",
+        "work_units": 9718
+      },
+      {
+        "error": "budget_exceeded",
+        "max_output_tokens": 2048,
+        "ok": false,
+        "packet_bytes": 2532,
+        "plan_canonical_bytes": null,
+        "request_canonical_bytes": null,
+        "slots_requested": 32,
+        "status": null,
+        "work_units": null
+      },
+      {
+        "error": null,
+        "max_output_tokens": 2048,
+        "ok": true,
+        "packet_bytes": 5606,
+        "plan_canonical_bytes": 123,
+        "request_canonical_bytes": 221,
+        "slots_requested": 1,
+        "status": "allocated",
+        "work_units": 4122
+      }
+    ],
+    "page_bytes": 16384,
+    "passed": true,
+    "sources": [
+      {
+        "captures": 1,
+        "connections": 1,
+        "native_methods": [
+          "Handshake",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation"
+        ],
+        "pages": 6,
+        "releases": 1,
+        "source_bytes": [
+          94112
+        ],
+        "source_sha256": [
+          "fde49e4b2ec5935f354e7cc6483aeff3dd93199bfbbd8deda2e1d04eb4da7666"
+        ]
+      },
+      {
+        "captures": 1,
+        "connections": 1,
+        "native_methods": [
+          "Handshake",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation",
+          "ReadObservation"
+        ],
+        "pages": 6,
+        "releases": 1,
+        "source_bytes": [
+          94112
+        ],
+        "source_sha256": [
+          "fde49e4b2ec5935f354e7cc6483aeff3dd93199bfbbd8deda2e1d04eb4da7666"
+        ]
+      }
+    ],
+    "tests_run": 1
+  },
+  "build": {
+    "binary_command": "cargo build --offline --locked -p dfmcp-mcp --bin dfmcp-live-operations-paged-dev-server",
+    "binary_name": "dfmcp-live-operations-paged-dev-server",
+    "binary_sha256": "3cea658bcd1fa08142c517c051a6f0a5ca8d9855c4c7ae1eddbcbad2e6a7c615",
+    "build_log_sha256": "c6c8a1a2bb9d0d5b5d9c048087023198f4d29efdf969f5cf1fc5061f0e4fb90e",
+    "cargo_jobs": 1,
+    "compiler_wrapper": "#!/bin/sh\nfurniture_rustc=$1\nshift\nexec \"$furniture_rustc\" -Z unstable-options -Z fewer-names=yes --jobs-backend=1 --jobs-frontend=1 \"$@\"\n",
+    "dependency_resolution": "offline_locked_unchanged_Cargo.lock",
+    "full_warning_denied_qualification": false,
+    "profile": "unoptimized_debug_information_disabled",
+    "rustc": "1.100.0-nightly (908501772 2026-08-30)",
+    "toolchain": "nightly-2026-08-31",
+    "workspace_rustc_flags": [
+      "-Z",
+      "unstable-options",
+      "-Z",
+      "fewer-names=yes",
+      "--jobs-backend=1",
+      "--jobs-frontend=1"
+    ]
+  },
+  "focused_rust": {
+    "command": "<compiled-dfmcp-mcp-unit-tests> furniture_ --test-threads=1",
+    "compilation_command": "cargo test --offline --locked -p dfmcp-mcp --lib live_operations_server::paged::tests:: -- --test-threads=1",
+    "failed": 0,
+    "ignored": 0,
+    "log_sha256": "08981eb0e61fd1dc5ba27e08a44f58f3a070b2c8fccb0af4c76dc002eab1a2b3",
+    "passed": 9,
+    "test_names": [
+      "live_operations_server::furniture_tests::furniture_actual_query_route_covers_both_operations_profiles_complete_budget_and_fencing",
+      "live_operations_server::furniture_tests::furniture_ascii_artifact_digests_match_the_independent_python_codec",
+      "live_operations_server::furniture_tests::furniture_authority_cancellation_and_complete_output_budgets_fail_closed",
+      "live_operations_server::furniture_tests::furniture_global_assignment_returns_the_actual_complete_plan_and_source_handles",
+      "live_operations_server::furniture_tests::furniture_joint_shortage_keeps_complete_candidate_evidence_and_emits_no_partial_plan",
+      "live_operations_server::furniture_tests::furniture_normalization_is_stable_and_source_reappearance_changes_the_bound_identity",
+      "live_operations_server::furniture_tests::furniture_schema_discovery_advertises_exact_nonpaginated_request",
+      "live_operations_server::furniture_tests::furniture_strict_requests_reject_wrong_fortress_constraints_and_partial_plan_controls",
+      "live_spatial_citizens_server::production::tests::furniture_allocation_keeps_the_full_citizen_spatial_source_and_reused_item_generation"
+    ]
+  },
+  "limits": [
+    "Explicit joined TCP native peer, not a real DFHack SDK, plugin load or game.",
+    "The 65536-item limit is separately tested in the pure solver and native codec; this MCP process campaign uses 2000 observed items.",
+    "Current published observation and authority only; no archive furniture allocation, extra native capture, item reservation or native placement authority.",
+    "Exported exact-item plans require fresh placement observation/review; material, subtype and distance constraints are not future mutation preconditions in that existing plan format.",
+    "No full workspace, warning-denied Clippy/rustdoc, release, native SDK, live campaign or production admission claim."
+  ],
+  "mcp_process": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 scripts/test_furniture_allocation_mcp.py --binary <built-dfmcp-live-operations-paged-dev-server> -v",
+    "errors": 0,
+    "failed": 0,
+    "log_sha256": "cfa897626f33821cb743814ac7b52557f25472842b33fede32cdd1cd48d122b9",
+    "passed": 5,
+    "skipped": 0,
+    "test_names": [
+      "test_complete_32_slot_result_uses_verified_pages_and_refuses_small_output_budget",
+      "test_failed_release_preserves_prior_anchor_and_fences_further_allocation",
+      "test_joint_shortage_emits_full_witness_without_partial_executable_plan",
+      "test_only_explicit_refresh_changes_supply_and_returned_item_generation",
+      "test_real_modern_stdio_global_assignment_and_complete_inventory_policy"
+    ]
+  },
+  "owning_beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4"
+  ],
+  "profiles": [
+    "operations/1.3",
+    "operations/1.4",
+    "citizen_inclusive_spatial/1.8"
+  ],
+  "regression_fixture_corrections": [
+    "Archive discovery expectations updated to the existing 16 stateless and 21 total variants; explicit assertions keep furniture_allocation excluded from both archive schemas.",
+    "Large 40000-item paging fixture uses the supported 60000 ms allowance for full debug snapshot validation; its inherited 2000 ms allowance demonstrably refused watch creation with budget_exceeded. Its 2048 output-token limit and all semantic assertions remain intact."
+  ],
+  "regression_runs": {
+    "distinct_existing_tests_excluding_new_furniture_test": 30,
+    "operations": {
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "7b3e470fe4fd3f511922e72a4473745d71603c9c54eff326a686d00cf2e5647f",
+      "passed": 17,
+      "test_names": [
+        "live_operations_server::tests::complete_operations_queries_respect_the_minimum_packet_budget",
+        "live_operations_server::tests::connected_operations_queries_inspect_real_items_buildings_and_paths",
+        "live_operations_server::tests::history_cases::archived_inventory_is_queryable_without_changing_live_state_or_reading_bridge",
+        "live_operations_server::tests::history_cases::historical_reads_remain_available_after_native_failure_but_never_create_work",
+        "live_operations_server::tests::history_cases::history_pages_fit_minimum_budget_keep_active_watches_and_bind_the_head",
+        "live_operations_server::tests::history_cases::journal_reopen_restores_the_exact_version_chain_but_not_session_handles",
+        "live_operations_server::tests::history_cases::missing_history_bad_record_and_expired_query_authority_fail_closed",
+        "live_operations_server::tests::missing_authority_and_foreign_handles_never_reach_observation",
+        "live_operations_server::tests::native_inventory_baseline_and_construction_watch_share_one_refresh",
+        "live_operations_server::tests::production_cases::allocation_pages_fit_8192_bytes_and_keep_active_work_without_skipping_stacks",
+        "live_operations_server::tests::production_cases::continuations_bind_session_query_and_snapshot_but_allow_normalized_type_order",
+        "live_operations_server::tests::production_cases::diagnostics_are_available_in_the_actual_tool_without_native_io",
+        "live_operations_server::tests::production_cases::discovered_operations_schema_extends_but_does_not_rewrite_other_profiles",
+        "live_operations_server::tests::production_cases::invalid_focus_envelopes_units_and_budgets_fail_before_any_io",
+        "live_operations_server::tests::production_cases::new_analyses_reject_missing_authority_and_poisoned_sources",
+        "live_operations_server::tests::production_cases::shared_supply_shortage_is_exact_but_never_an_executable_plan",
+        "live_operations_server::tests::source_failure_preserves_anchor_and_permits_local_watch_cleanup"
+      ]
+    },
+    "paged_operations": {
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "f1519e3db0c94fa2b9669ebdbf3fc0f2c6ee98ea982e21ed15714590dc998f8a",
+      "passed": 2,
+      "test_names": [
+        "live_operations_server::paged::tests::large_paged_projection_uses_existing_queries_baselines_and_watches",
+        "live_operations_server::paged::tests::paged_environment_and_handle_family_cannot_admit_old_authority"
+      ]
+    },
+    "spatial_production": {
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "f808724e51a0043b5a5e71eee7b2ac2230529d25260f8839b1f38b9a32b6b7dd",
+      "passed": 12,
+      "test_names": [
+        "live_spatial_citizens_server::production::tests::a_failed_live_source_still_allows_verified_history_and_offline_production_recovery",
+        "live_spatial_citizens_server::production::tests::composed_schema_keeps_existing_features_and_specializes_only_spatial_history",
+        "live_spatial_citizens_server::production::tests::furniture_allocation_keeps_the_full_citizen_spatial_source_and_reused_item_generation",
+        "live_spatial_citizens_server::production::tests::historical_diagnostics_and_inspections_keep_the_original_generation_after_id_reuse",
+        "live_spatial_citizens_server::production::tests::production_mode_and_supply_plans_use_the_coherent_source_without_sampling_watches",
+        "live_spatial_citizens_server::production::tests::production_pages_preserve_complete_counts_and_reject_changed_capture_or_scope",
+        "live_spatial_citizens_server::production::tests::quantities::historical_and_offline_quantity_queries_remain_on_the_exact_record",
+        "live_spatial_citizens_server::production::tests::quantities::quantity_definitions_recover_without_counting_restart_as_a_successful_sample",
+        "live_spatial_citizens_server::production::tests::quantities::quantity_inspection_is_complete_and_does_not_sample_or_persist_watch_progress",
+        "live_spatial_citizens_server::production::tests::quantities::quantity_schema_is_composed_once_and_rejected_results_leave_monitoring_intact",
+        "live_spatial_citizens_server::production::tests::quantities::splitting_and_merging_stacks_preserves_quantity_stability_in_a_shared_capture_batch",
+        "live_spatial_citizens_server::production::tests::rejected_work_focus_authority_and_custody_do_not_acquire_or_publish"
+      ]
+    }
+  },
+  "schema": "dfmcp.furniture-allocation-mcp-evidence/1",
+  "source_sha256": {
+    "Cargo.lock": "a64a983dc3f26fefc3a99194bc737c4d7d309c1c26e8fa02a4e586ebb5725776",
+    "Cargo.toml": "7032b2268d5974fea9292ea336ea31d5e63761b82c6a7ea7e53a6de41a34220f",
+    "crates/dfmcp-adapter/Cargo.toml": "793a82ce3101ab2361a399c67ee64d48140257c4e57bd4117db10ee43457e896",
+    "crates/dfmcp-adapter/src/furniture_allocation.rs": "2063fc832f6a9833a9429de577c2880b513f311240c959627c8c39673426c3d2",
+    "crates/dfmcp-adapter/src/furniture_allocation_tests.rs": "d1ae6216ca28a6a05a389fad3e0b7ab51220de5e2070a5946238836f6a7359e6",
+    "crates/dfmcp-adapter/src/furniture_supply.rs": "d8ca50107fc0e06eb2a148441d37ef4c0ca2a46599fa98e437e696fc8bd674bb",
+    "crates/dfmcp-adapter/src/furniture_supply_tests.rs": "437655759321520b1663a6f47cdcb8d807e88a9f160b2fdedd32d3c0aeedfab5",
+    "crates/dfmcp-adapter/src/lib.rs": "e6822d64b94622c27e0296aba3fd3a52cfc2c5a232af6585e3aa832b26aed057",
+    "crates/dfmcp-mcp/Cargo.toml": "58dfcd0586d3991c025dadc53864d33b4d8b6e4556d8b844d74dd573f3469eaa",
+    "crates/dfmcp-mcp/src/lib.rs": "e5eed1aa58d59f6c9ef2af67e70351eac163fdc15fda7ce99ff3a12aa1d9eed8",
+    "crates/dfmcp-mcp/src/live_operations_paged_server.rs": "1a0f3e5dcf649f49b7f14273bcdd80b0802daf41423d429212ea71f610c84502",
+    "crates/dfmcp-mcp/src/live_operations_paged_server_tests.rs": "8ed28dfa45cbdfe7748c1a1147cd1e0c90f6524bbf216c3e8ae89218348a5837",
+    "crates/dfmcp-mcp/src/live_operations_server.rs": "c48c35f9a157a700e686759ff35dcdf3ff0d05b2cf488d5b9000e6158a72acd2",
+    "crates/dfmcp-mcp/src/live_operations_server_tests.rs": "59cb5719fae853e49e62ab1c9bcd795b45f1969583c94aab1201c2c002c2d3c0",
+    "crates/dfmcp-mcp/src/live_spatial_citizens_server.rs": "6f378a7ed0dcf63f0fe8411bb15aa9da6a50f34400bc606433e983e9c0debf3a",
+    "crates/dfmcp-mcp/src/operations_furniture_tests.rs": "558e6539e02c6aefa4b93603030d95ae22fb4031a12605f0151e26655d7c078a",
+    "crates/dfmcp-mcp/src/operations_production.rs": "1ed936129c7e8c69d48c3cdf2f07a29a0621b9bc9516cf0de7776977d870170b",
+    "crates/dfmcp-mcp/src/operations_production_tests.rs": "f23db162409f2bbf104ffb33c1645a033460aa509c0464c4e6a4fe2acddc8336",
+    "crates/dfmcp-mcp/src/spatial_archive_queries.rs": "dcb862aa383eb49ae3cd6c76fcf8384f30247a029d67583dabdffd91e06f360a",
+    "crates/dfmcp-mcp/src/spatial_production.rs": "099a62e89551f5a837223f3bec6844a2b33f6a7c62d604c30104be44b07a9dce",
+    "crates/dfmcp-mcp/src/spatial_production_tests.rs": "c7bf4e6938149493c9d27353185a62e6de271b576481ea6324105fa0c0db68f1",
+    "rust-toolchain.toml": "5f51b4eb6a3ec3624d6280b7259fe35e325c523b168a9da736e14e5b6e31d742",
+    "schemas/mcp_operations_query_extensions_v1.json": "942a9bc7bbadb8a2c58af8bf051bd5f8a58c9ef62c609a27a18a4e90f491cdf6",
+    "scripts/build_placement_client.py": "3ee0a1150dec23a20ebf10d5a3a1f551ceebebe6e03fcb97cb2e4f6d0e89c5d8",
+    "scripts/build_placement_rpc.py": "d2bef480c0232465764bd7bb37a14946e5d859a02040082df69961238c9f663d",
+    "scripts/build_placement_store.py": "5ccddc7ceb1ef065da0099da27742d56f4d4b7f4695b827e55b8fa89b7ae4897",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/construction_monitor_rpc.py": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/furniture_allocation.py": "d047583fbac8e1dbd62a8e9fa637b463d4347a9c8668fc6d611742281c877832",
+    "scripts/furniture_plan.py": "6ad46a0bfa3641e55c0a92f37d02473c59d679c562a682a62075a3636d616155",
+    "scripts/test_build_placement_client.py": "e0472e66dca2762a4118312b26786e0fc51808459ad379106c393da6c0ba1cf2",
+    "scripts/test_build_placement_engine.py": "e3a7e0b5959d1ab0a7f85c5a041e9355b8ebd0351ea0091affde30bcd4098872",
+    "scripts/test_build_placement_mcp.py": "4907b045468257cbe0f9185b69aeee2a80529c0f0f39ea39b055e5d8c570d26b",
+    "scripts/test_construction_monitor_rpc.py": "ab5e69ca86c37c575821eef12ca259bc1b27f339e2a7dbe9c2e02926f2a0ba61",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a",
+    "scripts/test_furniture_allocation_mcp.py": "1fa654fa3f523c8f43cba7dec8e9e5e47be2a79c82e44498d5d7014e0150e2bf"
+  },
+  "status": "focused_rust_and_mcp_process_development_tests_passed",
+  "stdio_executed_profile": "operations/1.4"
+}

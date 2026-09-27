@@ -242,7 +242,7 @@ pub fn run_stdio() {
         .tool(self::FortressOpenSession).tool(super::FortressObserve).tool(super::FortressQuery).tool(super::FortressPlan)
         .tool(super::FortressCommit).tool(super::FortressWait).tool(super::FortressCancel).tool(super::FortressCheckpoint)
         .tool(super::FortressRestore).tool(super::FortressExplain).tool(super::FortressDoctor).request_timeout(60)
-        .instructions("Explicitly unadmitted operations/1.4. Open a paged session first. Jobs, buildings and inventory share one native capture; all pages are verified before publication. Snapshot game time is the capture time, not the transfer-completion time. Existing queries, production diagnosis, conditional allocation, baselines and foreground watches are available within their own budgets. No live effects, map coverage, citizen data, durable journal or production admission. A failed acquisition preserves the prior snapshot and fences the source.")
+        .instructions("Explicitly unadmitted operations/1.4. Open a paged session first. Jobs, buildings and inventory share one native capture; all pages are verified before publication. Snapshot game time is the capture time, not the transfer-completion time. Existing queries, production diagnosis, conditional allocation, baselines and foreground watches are available within their own budgets. furniture_allocation selects distinct items for every bed/chair/table target or explains a complete shortage; its furniture-plan requires fresh placement review. No live effects, map coverage, citizen data, durable journal or production admission. A failed acquisition preserves the prior snapshot and fences the source.")
         .build();
     crate::run_modern_stdio(server);
 }

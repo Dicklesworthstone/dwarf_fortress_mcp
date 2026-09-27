@@ -6,6 +6,7 @@ use dfmcp_adapter::operations_analysis::{
     self as analysis, ANALYSIS_POLICY, AnalysisHandle, DiagnosisScope, JobDiagnosis,
     MAX_ANALYSIS_WORK, MaterialDemand, OperationsStateView, SUPPLY_POLICY,
 };
+use dfmcp_adapter::{furniture_allocation as furniture, furniture_supply};
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
 };
@@ -15,6 +16,8 @@ use serde_json::{Value, json};
 const MAX_INPUT_BYTES: usize = 65_536;
 const MAX_INPUT_NODES: usize = 4_096;
 const MAX_PAGE: u32 = 128;
+const MAX_FURNITURE_ARTIFACT: usize = 16_384;
+const FURNITURE_OBJECTIVE: &str = "total_same_level_manhattan_then_lexical_slot_item_ids";
 
 fn invalid(text: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, text)
@@ -51,6 +54,54 @@ enum Query {
         continuation: Option<String>,
         max_work: Option<u64>,
     },
+    FurnitureAllocation {
+        world_folder: String,
+        site: u32,
+        slots: Vec<FurnitureSlot>,
+        #[serde(default)]
+        excluded_items: Vec<u32>,
+        maximum_work: Option<u64>,
+    },
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FurnitureKind {
+    Bed,
+    Chair,
+    Table,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FurnitureSlot {
+    name: String,
+    kind: FurnitureKind,
+    target: [u32; 3],
+    #[serde(default)]
+    after: Vec<String>,
+    material: Option<[i32; 2]>,
+    subtype: Option<i32>,
+    #[serde(default = "furniture_max_distance")]
+    max_distance: u32,
+}
+fn furniture_max_distance() -> u32 {
+    furniture::MAX_DISTANCE
+}
+impl From<FurnitureSlot> for furniture::Slot {
+    fn from(slot: FurnitureSlot) -> Self {
+        Self {
+            name: slot.name,
+            kind: match slot.kind {
+                FurnitureKind::Bed => furniture::Kind::Bed,
+                FurnitureKind::Chair => furniture::Kind::Chair,
+                FurnitureKind::Table => furniture::Kind::Table,
+            },
+            target: slot.target,
+            after: slot.after,
+            material: slot.material.map(|[kind, index]| (kind, index)),
+            subtype: slot.subtype,
+            max_distance: slot.max_distance,
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -155,7 +206,7 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|q| q.get("kind"))
             .and_then(Value::as_str),
-        Some("production_diagnosis" | "inventory_plan")
+        Some("production_diagnosis" | "inventory_plan" | "furniture_allocation")
     )
 }
 fn put_text(out: &mut Vec<u8>, value: &str) {
@@ -259,6 +310,233 @@ fn base_payload(context: &OperationContext, source: Digest32, kind: &str) -> Val
         "coverage":{"domain":"coherent_observed_operations","game_feasibility":"unknown",
             "causal_blockers_proven":false,"intermediate_history_proven":false},
         "unknown":["full_native_job_requirements","path_access","labor_eligibility","successful_job_completion"]})
+}
+
+/// The existing furniture artifacts use sorted keys and ASCII JSON, including
+/// lower-case UTF-16 escapes. Do not hash serde's incidental map order or UTF-8
+/// string representation: Unicode fortress folders must match the Python codec.
+fn furniture_canonical(value: &Value, out: &mut Vec<u8>) -> Result<()> {
+    match value {
+        Value::Null => out.extend_from_slice(b"null"),
+        Value::Bool(true) => out.extend_from_slice(b"true"),
+        Value::Bool(false) => out.extend_from_slice(b"false"),
+        Value::Number(number) if number.is_i64() || number.is_u64() => {
+            out.extend_from_slice(number.to_string().as_bytes());
+        }
+        Value::Number(_) => return Err(invariant("furniture artifacts require integer numbers")),
+        Value::String(text) => {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            out.push(b'"');
+            for character in text.chars() {
+                match character {
+                    '"' => out.extend_from_slice(b"\\\""),
+                    '\\' => out.extend_from_slice(b"\\\\"),
+                    '\u{8}' => out.extend_from_slice(b"\\b"),
+                    '\u{c}' => out.extend_from_slice(b"\\f"),
+                    '\n' => out.extend_from_slice(b"\\n"),
+                    '\r' => out.extend_from_slice(b"\\r"),
+                    '\t' => out.extend_from_slice(b"\\t"),
+                    ' '..='~' => out.push(character as u8),
+                    _ => {
+                        let mut units = [0u16; 2];
+                        for unit in character.encode_utf16(&mut units) {
+                            out.extend_from_slice(b"\\u");
+                            for shift in [12, 8, 4, 0] {
+                                out.push(HEX[usize::from((*unit >> shift) & 15)]);
+                            }
+                        }
+                    }
+                }
+            }
+            out.push(b'"');
+        }
+        Value::Array(values) => {
+            out.push(b'[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    out.push(b',');
+                }
+                furniture_canonical(value, out)?;
+            }
+            out.push(b']');
+        }
+        Value::Object(values) => {
+            out.push(b'{');
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index != 0 {
+                    out.push(b',');
+                }
+                furniture_canonical(&Value::String(key.clone()), out)?;
+                out.push(b':');
+                furniture_canonical(value, out)?;
+            }
+            out.push(b'}');
+        }
+    }
+    Ok(())
+}
+
+fn furniture_artifact_digest(value: &Value, domain: &[u8]) -> Result<Digest32> {
+    let mut canonical = Vec::new();
+    furniture_canonical(value, &mut canonical)?;
+    if canonical.len() > MAX_FURNITURE_ARTIFACT {
+        return Err(exhausted(
+            "complete normalized furniture artifact exceeds 16 KiB",
+        ));
+    }
+    let mut bytes = domain.to_vec();
+    bytes.extend_from_slice(&canonical);
+    Ok(Digest32::of_bytes(&bytes))
+}
+
+fn furniture_item(evidence: &furniture_supply::ItemEvidence) -> Value {
+    let item = &evidence.candidate;
+    json!({"item":item.native_id,"kind":item.kind.as_str(),"position":item.position,
+        "material":[item.material_type,item.material_index],"subtype":item.subtype,
+        "item_handle":handle_json(evidence.handle)})
+}
+
+fn furniture_payload<S: OperationsStateView + ?Sized>(
+    state: &S,
+    context: &OperationContext,
+    world_folder: &str,
+    site: u32,
+    requested: &furniture::Request,
+    maximum_work: u64,
+    maximum_bytes: usize,
+) -> Result<Value> {
+    let report =
+        furniture_supply::plan(state, context, world_folder, site, requested, maximum_work)?;
+    let request = json!({"schema":"dfmcp.furniture-request/1","world_folder":world_folder,
+        "site":site,"excluded_items":report.request.excluded_items,
+        "slots":report.request.slots.iter().map(|slot| json!({
+            "name":slot.name,"kind":slot.kind.as_str(),"target":slot.target,"after":slot.after,
+            "material":slot.material.map(|(kind,index)|[kind,index]),"subtype":slot.subtype,
+            "max_distance":slot.max_distance
+        })).collect::<Vec<_>>()});
+    let request_digest = furniture_artifact_digest(&request, b"dfmcp-furniture-request/1\0")?;
+    let observed = state
+        .operations_observation()
+        .ok_or_else(|| invariant("furniture source observation missing"))?;
+    let mut identity = identity_prefix(context, report.source_digest, "furniture_allocation");
+    put_text(&mut identity, furniture_supply::SUPPLY_POLICY);
+    put_text(&mut identity, FURNITURE_OBJECTIVE);
+    identity.extend_from_slice(request_digest.as_bytes());
+    let mut payload = base_payload(context, report.source_digest, "furniture_allocation");
+    payload["allocation_schema"] = json!("dfmcp.furniture-allocation/1");
+    payload["analysis_digest"] = json!(Digest32::of_bytes(&identity).to_string());
+    payload["request"] = request;
+    payload["request_digest"] = json!(request_digest.to_string());
+    payload["source"] = json!({"world_folder":observed.jobs.world_folder,
+        "site":observed.jobs.site_id,"bridge_generation":observed.jobs.bridge_generation,
+        "df_version":observed.jobs.df_version,"dfhack_version":observed.jobs.dfhack_version});
+    payload["supply_policy"] = json!(furniture_supply::SUPPLY_POLICY);
+    payload["objective"] = json!(FURNITURE_OBJECTIVE);
+    payload["same_level_only"] = json!(true);
+    payload["model_feasible"] = json!(report.allocation.shortage.is_none());
+    payload["summary"] = json!({"observed_items":report.observed_items,
+        "candidate_items":report.candidate_count,"maximum_assignable":report.allocation.maximum_assignable,
+        "item_counts_by_primary_policy_reason":report.item_counts});
+    payload["compatible_counts"] = json!(
+        report
+            .allocation
+            .compatible_counts
+            .iter()
+            .map(|(slot, count)| json!({"slot":slot,"count":count}))
+            .collect::<Vec<_>>()
+    );
+    payload["work_units"] = json!(report.work_units);
+    payload["total_distance"] = json!(report.allocation.total_distance);
+    payload["plan"] = Value::Null;
+    payload["plan_digest"] = Value::Null;
+    payload["assignments"] = json!([]);
+    payload["shortage"] = Value::Null;
+    payload["truncated"] = json!(false);
+    payload["continuation"] = Value::Null;
+    payload["placement_eligibility_proven"] = json!(false);
+    payload["pathfinding_proven"] = json!(false);
+    payload["items_reserved"] = json!(false);
+    payload["game_effect_performed"] = json!(false);
+    payload["production_admitted"] = json!(false);
+    payload["coverage"] = json!({"domain":"complete_observed_operations_furniture_candidates",
+        "candidate_graph_complete":true,"game_feasibility":"unknown",
+        "intermediate_history_proven":false,"current_placement_eligibility":"unknown"});
+    payload["unknown"] = json!([
+        "target_terrain_and_map_bounds",
+        "quality_and_wear",
+        "unobserved_native_item_flags",
+        "path_access",
+        "labor_eligibility",
+        "successful_construction"
+    ]);
+    payload["interpretation"] = json!(
+        "The complete assignment is optimal within this capture's conservative furniture model. Native item IDs are bound to the returned source and handles. The furniture-plan artifact requires fresh exact placement review; it is not a prepared MCP plan or mutation authority. A shortage describes this candidate subset only."
+    );
+    if let Some(shortage) = &report.allocation.shortage {
+        payload["status"] = json!("shortage");
+        let candidates = shortage
+            .candidate_items
+            .iter()
+            .map(|id| {
+                report
+                    .items
+                    .get(id)
+                    .map(furniture_item)
+                    .ok_or_else(|| invariant("furniture shortage candidate evidence missing"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        payload["shortage"] = json!({"slots":shortage.slots,"candidate_items":shortage.candidate_items,
+            "candidate_evidence":candidates,"missing":shortage.missing,
+            "scope":"complete_observed_candidate_graph_under_declared_supply_policy"});
+    } else {
+        if report.allocation.assignments.len() != report.request.slots.len() {
+            return Err(invariant(
+                "complete furniture assignment is missing requested slots",
+            ));
+        }
+        payload["status"] = json!("allocated");
+        let mut steps = Vec::new();
+        let mut assignments = Vec::new();
+        for (slot, assignment) in report
+            .request
+            .slots
+            .iter()
+            .zip(&report.allocation.assignments)
+        {
+            if slot.name != assignment.slot {
+                return Err(invariant(
+                    "furniture assignment order differs from normalized slots",
+                ));
+            }
+            let evidence = report
+                .items
+                .get(&assignment.item_id)
+                .ok_or_else(|| invariant("furniture assignment evidence missing"))?;
+            steps.push(json!({"name":slot.name,"kind":slot.kind.as_str(),
+                "item":assignment.item_id,"target":slot.target,"after":slot.after}));
+            let mut row = furniture_item(evidence);
+            row["slot"] = json!(slot.name);
+            row["distance"] = json!(assignment.distance);
+            assignments.push(row);
+        }
+        let plan = json!({"schema":"dfmcp.furniture-plan/1","steps":steps});
+        let digest = furniture_artifact_digest(&plan, b"dfmcp-furniture-plan/1\0")?;
+        payload["plan"] = plan;
+        payload["plan_digest"] = json!(digest.to_string());
+        payload["assignments"] = json!(assignments);
+    }
+    if serde_json::to_vec(&payload)
+        .map_err(|_| invariant("furniture allocation cannot be encoded"))?
+        .len()
+        > maximum_bytes
+    {
+        return Err(exhausted(
+            "complete furniture assignment or shortage cannot fit after required Agent Turn; increase the output budget",
+        ));
+    }
+    Ok(payload)
 }
 
 struct Page<'a> {
@@ -373,6 +651,9 @@ pub(super) fn execute<S: OperationsStateView + ?Sized>(
             continuation.as_deref(),
             max_work.unwrap_or(MAX_ANALYSIS_WORK),
         ),
+        Query::FurnitureAllocation { maximum_work, .. } => {
+            (1, None, maximum_work.unwrap_or(furniture_supply::MAX_WORK))
+        }
     };
     if limit == 0 || limit > MAX_PAGE {
         return Err(exhausted("production page limit must be 1..128"));
@@ -386,6 +667,27 @@ pub(super) fn execute<S: OperationsStateView + ?Sized>(
     )
     .map_err(|_| exhausted("production output budget does not fit this platform"))?;
     let result = match envelope.query {
+        Query::FurnitureAllocation {
+            world_folder,
+            site,
+            slots,
+            excluded_items,
+            ..
+        } => {
+            let request = furniture::Request {
+                slots: slots.into_iter().map(furniture::Slot::from).collect(),
+                excluded_items,
+            };
+            furniture_payload(
+                state,
+                context,
+                &world_folder,
+                site,
+                &request,
+                maximum_work,
+                maximum_bytes,
+            )
+        }
         Query::ProductionDiagnosis {
             job,
             holder,
@@ -543,10 +845,10 @@ pub(super) fn query_schema() -> Result<Value> {
     let mut base = extend_schema(base)?;
     base["$id"] = json!("urn:dfmcp:operations-query:1");
     base["title"] = json!(
-        "Operations query envelope with production diagnostics and conditional inventory planning"
+        "Operations query envelope with production diagnostics, inventory and exact furniture allocation"
     );
     base["description"] = json!(
-        "Value of the operations/1.3 fortress.query query argument. Original structured queries plus observed production diagnostics and declared stack-unit allocation. Runtime enforces authority, canonical identities, UTF-8 bounds, work ceilings and full response budgets."
+        "Value of the operations/1.3 and operations/1.4 fortress.query query argument. Original structured queries plus observed production diagnostics, declared stack-unit allocation, and complete source-bound furniture assignments. Runtime enforces authority, canonical identities, UTF-8 bounds, work ceilings and full response budgets."
     );
     Ok(base)
 }

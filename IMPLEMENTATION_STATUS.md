@@ -44,6 +44,32 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete inventory-driven furnishing plans through MCP
+
+The typed `furniture_allocation` query connects the Rust allocator to the existing
+eleven-tool operations/1.3, paged operations/1.4 and citizen-inclusive spatial/1.8
+development runtimes. Agents can request a full constrained layout and receive
+the existing `dfmcp.furniture-plan/1` artifact with distinct selected items,
+canonical handles, normalized request, Python-compatible digests and the exact
+published source. A shortage includes the complete competing-slot witness and
+no partial plan. Allocation neither rereads the bridge nor reserves or places
+items; the exported plan enters the existing fresh-review furnishing workflow.
+
+Whole-result budgeting reserves the Agent Turn and active work before rendering.
+Historical/archive schemas exclude this current-supply query. All nine new
+MCP Rust tests and five actual modern-stdio/TCP process scenarios pass. The
+32-slot process case uses a 2,000-item capture over six verified native pages;
+its complete Agent Turn is 18,630 bytes. An 8,192-byte output allowance refuses
+the complete layout, then accepts a smaller query from the same capture.
+Existing operations, paging and spatial-production query regressions also pass.
+
+This is executed development Rust and MCP process evidence on the repository's
+exact pinned nightly and dependency lockfile, not full warning-denied workspace,
+real DFHack SDK, live-game or production qualification. The registry and production
+runner map are unchanged. The broader owning bridge beads `.3` and `.4` remain
+open. Usage and exact execution scope are in `docs/FURNITURE_ALLOCATION_MCP.md`
+and `docs/evidence/furniture-allocation-mcp.json`.
+
 ### Global furniture selection from coherent native inventory
 
 `dfmcp_adapter::furniture_allocation` solves a complete 1..32-target furnishing

@@ -652,7 +652,7 @@ fn finish_query(view: &QueryResponseProjection, value: Value) -> Result<String> 
     Ok(encoded)
 }
 #[tool(
-    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production. History requires a compatible durable journal and is unavailable in the paged 1.4 profile. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply."
+    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production. History requires a compatible durable journal and is unavailable in the paged 1.4 profile. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -801,7 +801,8 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
             "item_position":"raw item.pos; use containment edges to inspect holders",
             "inspection":"Use query kind inspect with entity_id, generation and selected fields.",
             "production_analysis":{"diagnose":"production_diagnosis","allocate":"inventory_plan",
-                "scope":"observed conditions and declared stack-unit models only","reservation_created":false}}),
+                "furnish":"furniture_allocation",
+                "scope":"observed conditions, declared stack units and distinct furniture targets; fresh placement review is required","reservation_created":false}}),
                 |value| packet(Some(session), Some(&context), "fortress.explain", value),
             )
         },
@@ -867,7 +868,7 @@ pub fn run_stdio() {
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan)
         .tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint)
         .tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor).request_timeout(60)
-        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. production_diagnosis joins observed job/input conditions; inventory_plan returns a conditional allocation and shortage certificate, not game feasibility or a reservation. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. When an operator configures a durable journal, history lists committed observations and historical_query replays a stateless query at an exact past record. Archived facts do not establish current freshness. Use schema mode for structured requests.")
+        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. production_diagnosis joins observed job/input conditions; inventory_plan returns a conditional allocation and shortage certificate, not game feasibility or a reservation. furniture_allocation selects distinct items for a complete bed/chair/table layout or explains its shortage; fresh placement review is required. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. When an operator configures a durable journal, history lists committed observations and historical_query replays a stateless query at an exact past record. Archived facts do not establish current freshness. Use schema mode for structured requests.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -875,3 +876,7 @@ pub fn run_stdio() {
 #[cfg(test)]
 #[path = "live_operations_server_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "operations_furniture_tests.rs"]
+mod furniture_tests;

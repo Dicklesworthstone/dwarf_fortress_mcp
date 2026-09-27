@@ -171,6 +171,98 @@ fn supply() -> Value {
     json!({"kind":"inventory_plan","quantity_unit":"stack_units","demands":[
     {"key":"a","units":4,"item_types":["item_type_3"]},{"key":"b","units":4,"item_types":["item_type_3"]}]})
 }
+
+#[test]
+fn furniture_allocation_keeps_the_full_citizen_spatial_source_and_reused_item_generation()
+-> Result<()> {
+    use dfmcp_adapter::live_operations::{OperationsProfile, item_entity_id};
+    fn captured(tick: u32, empty: bool) -> Result<LiveSpatialCitizenObservation> {
+        let original = fixture::observation(tick, 0, 1, empty)?;
+        if empty {
+            return Ok(original);
+        }
+        let mut operations = original.spatial().operations().clone();
+        let bed = operations
+            .items
+            .iter_mut()
+            .find(|item| item.native_id == 32)
+            .ok_or_else(|| error(ErrorCode::InvalidRequest, "furniture test item absent"))?;
+        bed.type_key = "BED".to_owned();
+        bed.material_type = 0;
+        bed.material_index = 1;
+        bed.subtype = -1;
+        bed.raw_position = dfmcp_core::MapCoord::new(1, 1, 5);
+        let ops = operations.encode_profile(OperationsProfile::PagedV1_4)?;
+        let terrain = original.spatial().terrain().encode_payload()?;
+        let mut spatial = b"DFMS1600".to_vec();
+        for part in [&ops, &terrain] {
+            spatial.extend_from_slice(&(part.len() as u32).to_be_bytes());
+            spatial.extend_from_slice(part);
+        }
+        // Preserve the original complete citizen component, including its length.
+        let original_bytes = original.encode_payload()?;
+        let citizens_offset = 12 + original.spatial().encode_payload()?.len();
+        let mut complete = b"DFMS1800".to_vec();
+        complete.extend_from_slice(&(spatial.len() as u32).to_be_bytes());
+        complete.extend_from_slice(&spatial);
+        complete.extend_from_slice(&original_bytes[citizens_offset..]);
+        LiveSpatialCitizenObservation::decode_payload(&complete, 7, "df".into(), "dfhack".into())
+    }
+    let _serial = lock(&SERIAL)?;
+    let files = Files::new()?;
+    let s = register(
+        &files,
+        0,
+        vec![captured(4, false)?, captured(5, true)?, captured(6, false)?],
+    )?;
+    ok(decode(&fortress_observe(s.handle()))?)?;
+    retain_watch(&s)?;
+    let before_watch = fs::read(&files.watches).map_err(io_error)?;
+    let query = json!({"kind":"furniture_allocation","world_folder":"region1","site":1,
+        "slots":[{"name":"bed","kind":"bed","target":[2,2,5]}]});
+    let (anchor, source, component_source) = {
+        let handle = resolve(s.handle())?;
+        let session = lock(&handle)?;
+        let observed = session
+            .state
+            .observation_full()
+            .ok_or_else(|| error(ErrorCode::InvalidRequest, "furniture full source absent"))?;
+        assert_eq!(observed.citizens().len(), 1);
+        (
+            session.anchor()?,
+            session.state.source_digest()?,
+            observed
+                .spatial()
+                .operations()
+                .source_digest_profile(OperationsProfile::PagedV1_4)?,
+        )
+    };
+    let first = ok(ask(&s, query.clone())?)?;
+    assert_eq!(first["status"], "allocated");
+    assert_eq!(first["anchor"], anchor_json(anchor));
+    assert_eq!(first["anchor"], first["agent_turn"]["anchor"]);
+    assert_eq!(first["source_digest"], source.to_string());
+    assert_ne!(first["source_digest"], component_source.to_string());
+    assert_eq!(
+        first["assignments"][0]["item_handle"]["entity_id"],
+        item_entity_id(32).to_string()
+    );
+    assert_eq!(first["assignments"][0]["item_handle"]["generation"], 1);
+    assert_eq!(first["native_captures"], 0);
+    assert_eq!(first["agent_turn"]["briefing"]["bridge_protocol"], "1.8");
+    assert_eq!(s.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(fs::read(&files.watches).map_err(io_error)?, before_watch);
+    ok(decode(&fortress_observe(s.handle()))?)?;
+    ok(decode(&fortress_observe(s.handle()))?)?;
+    let second = ok(ask(&s, query)?)?;
+    assert_eq!(second["assignments"][0]["item_handle"]["generation"], 2);
+    assert_eq!(first["plan_digest"], second["plan_digest"]);
+    assert_ne!(first["analysis_digest"], second["analysis_digest"]);
+    assert_ne!(first["source_digest"], second["source_digest"]);
+    assert_eq!(second["native_captures"], 0);
+    assert_eq!(s.calls.load(Ordering::SeqCst), 3);
+    Ok(())
+}
 fn first_record(s: &Registered) -> Result<Value> {
     let value = ok(ask(s, json!({"kind":"history","limit":1}))?)?;
     value["rows"]
@@ -431,14 +523,23 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
         schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(13)
+        Some(16)
     );
     assert_eq!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(16)
+        Some(21)
     );
+    for definition in ["archive_stateless", "query"] {
+        assert!(
+            schema["query_schema"]["$defs"][definition]["oneOf"]
+                .as_array()
+                .ok_or_else(|| error(ErrorCode::InvalidRequest, "missing archive query variants"))?
+                .iter()
+                .all(|variant| variant["properties"]["kind"]["const"] != "furniture_allocation")
+        );
+    }
     drop(s);
     assert_eq!(fs::read(&files.observations).map_err(io_error)?, before);
     assert_eq!(fs::read(&files.watches).map_err(io_error)?, watches);

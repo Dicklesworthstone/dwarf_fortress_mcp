@@ -24,6 +24,18 @@ readiness.
 
 ### Added
 
+- Complete inventory-driven furnishing through the typed MCP
+  `furniture_allocation` query in operations/1.3, paged operations/1.4 and
+  citizen-inclusive spatial/1.8. Full constrained layouts produce the existing
+  exact-item plan artifact with canonical item generations, independent Python
+  digest parity and source evidence; shortages produce no partial plan. The
+  query respects current authority, published anchors and whole-result budgets
+  without another native capture. Nine new Rust tests and five real MCP
+  stdio/TCP scenarios pass, including a complete 32-slot result from six native
+  pages, refused stale/fenced sources and smaller-budget recovery. Development
+  functionality only; placement still uses separate fresh review. See
+  `docs/FURNITURE_ALLOCATION_MCP.md`.
+
 - Global furniture selection in safe Rust over the complete published operations
   inventory. Typed 1..32-target requests preserve exact furniture/material/subtype
   constraints and select distinct items with a global distance optimum and exact

@@ -8,8 +8,11 @@ inventory, create an executable plan, or grant mutation authority.
 Both require whole-projection Query authority, an unfenced source, and the exact
 current context anchor. Entity-focused diagnostics do not widen a narrower grant.
 The original sixteen query variants and eleven tool names remain unchanged.
-Only the operations runtime advertises these two additional variants through
-`mode="schema"`; other runtime schemas are not extended.
+The operations/1.3 and paged operations/1.4 runtimes advertise these analyses
+through `mode="schema"`; citizen-inclusive spatial/1.8 also uses the shared
+analysis handler with its combined source identity. The separate
+`furniture_allocation` query now selects distinct exact furniture items for a
+complete layout; see `FURNITURE_ALLOCATION_MCP.md` for its request and handoff.
 
 ## Joined production inspection
 
@@ -163,9 +166,13 @@ shortage certificates, attachment deduplication, ancestry exclusions, exact raw
 selectors, generation/scope/authority checks, source failure, cursor isolation,
 schema isolation, and an 8,192-byte pagination path retaining an active watch.
 
-These Rust tests have **not been compiled or executed in this editing environment**,
-which has no Rust compiler, Cargo or rustfmt. No Clippy, stdio, native DFHack,
-live-game, full repository qualification, or production admission is claimed.
+These Rust tests were not compiled in the original source-only increment.
+The furniture-allocation MCP increment subsequently compiled the crate on the
+exact pinned nightly and ran all seven production-handler scenarios, together
+with the existing operations and spatial-production query regressions. Its
+focused evidence is in `docs/evidence/furniture-allocation-mcp.json`; it does
+not establish full Clippy, real DFHack, live-game, repository qualification or
+production admission.
 The std-only allocator can separately be tested with:
 
 ```bash
