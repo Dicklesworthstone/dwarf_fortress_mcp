@@ -18,5 +18,7 @@ unlocks the next step, while uncertainty, cancellation or refusal blocks it.
 
 Seven executed Python test functions cover all 4,096 directed four-node graphs
 against a permutation oracle, normalization, exact resources, map bounds,
-closed inputs and all progress-prefix outcomes. This increment is a pure model,
-not native or Rust/MCP execution. Beads: df-dfhack-bridge-plane-c-pic.4/.5.
+closed inputs and all progress-prefix outcomes. The Python compiler is a pure
+model. The compatible [Rust batch core and private parent](FURNITURE_BATCH_RUST.md)
+now have separate executed development tests; neither plan compilation grants
+native effect authority. Beads: df-dfhack-bridge-plane-c-pic.4/.5.

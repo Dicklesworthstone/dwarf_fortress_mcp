@@ -82,19 +82,7 @@ pub fn open_private_build(
     mode: BuildMode,
     expected: Option<BuildBinding>,
 ) -> Result<BuildJournal<PrivateBuildFile>> {
-    if context.cancellation_requested {
-        return Err(error(
-            ErrorCode::CancellationRequested,
-            "furniture storage open cancelled",
-        ));
-    }
-    context.budget.validate()?;
-    if context.budget.max_wall_millis > 60_000 {
-        return Err(error(
-            ErrorCode::BudgetExceeded,
-            "furniture storage deadline exceeds profile bound",
-        ));
-    }
+    validate_open(context)?;
     #[cfg(all(
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")
@@ -108,6 +96,55 @@ pub fn open_private_build(
     )))]
     {
         let _ = (path, mode, expected);
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "furniture private journals require Linux x86_64/aarch64",
+        ))
+    }
+}
+
+fn validate_open(context: &OperationContext) -> Result<()> {
+    if context.cancellation_requested {
+        return Err(error(
+            ErrorCode::CancellationRequested,
+            "furniture storage open cancelled",
+        ));
+    }
+    context.budget.validate()?;
+    if context.budget.max_wall_millis > 60_000 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "furniture storage deadline exceeds profile bound",
+        ));
+    }
+    Ok(())
+}
+
+/// Reuse the same descriptor-pinned custody for another bounded furniture
+/// journal. The caller authenticates its own header and publication; this only
+/// creates an empty file when explicitly allowed in Control mode. The returned
+/// context retains the remaining foreground deadline after opening custody.
+pub(crate) fn open_private_storage(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    allow_create: bool,
+    maximum_bytes: usize,
+) -> Result<(PrivateBuildFile, bool, OperationContext)> {
+    validate_open(context)?;
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        linux::open_storage(path, context, mode, allow_create, maximum_bytes)
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
+    {
+        let _ = (path, mode, allow_create, maximum_bytes);
         Err(error(
             ErrorCode::CapabilityDenied,
             "furniture private journals require Linux x86_64/aarch64",

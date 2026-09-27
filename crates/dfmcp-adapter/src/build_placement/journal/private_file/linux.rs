@@ -74,6 +74,7 @@ pub struct PrivateBuildFile {
     path: PathBuf,
     read_only: bool,
     extent: u64,
+    maximum_bytes: u64,
     file_identity: (u64, u64, u32),
     directory_identity: (u64, u64, u32),
 }
@@ -109,7 +110,7 @@ impl Write for PrivateBuildFile {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.writable()?;
         if self.file.stream_position()? != self.extent
-            || bytes.len() as u64 > super::super::MAX_JOURNAL_BYTES as u64 - self.extent
+            || bytes.len() as u64 > self.maximum_bytes.saturating_sub(self.extent)
         {
             return Err(denied());
         }
@@ -152,7 +153,7 @@ impl EffectJournalStorage for PrivateBuildFile {
             || (named.dev(), named.ino(), named.uid()) != self.file_identity
             || opened.len() != self.extent
             || named.len() != self.extent
-            || self.extent > super::super::MAX_JOURNAL_BYTES as u64
+            || self.extent > self.maximum_bytes
         {
             return Err(denied());
         }
@@ -205,6 +206,55 @@ pub(super) fn open(
             "furniture storage open requires current Query authority",
         ));
     }
+    let (storage, created, _) = open_storage(
+        path,
+        &remaining(context, deadline)?,
+        mode,
+        expected.is_some(),
+        super::super::MAX_JOURNAL_BYTES,
+    )?;
+    let nonce = if created {
+        let mut nonce = [0; 32];
+        File::open("/dev/urandom")
+            .and_then(|mut source| source.read_exact(&mut nonce))
+            .map_err(failure)?;
+        Some(nonce)
+    } else {
+        None
+    };
+    // Header publication (including the directory entry) is synchronized by the
+    // same storage.sync used for every append. Empty existing files are refused.
+    BuildJournal::open(
+        storage,
+        &remaining(context, deadline)?,
+        mode,
+        expected,
+        nonce,
+    )
+}
+
+pub(super) fn open_storage(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    allow_create: bool,
+    maximum_bytes: usize,
+) -> Result<(PrivateBuildFile, bool, OperationContext)> {
+    let deadline = Instant::now()
+        .checked_add(Duration::from_millis(context.budget.max_wall_millis))
+        .ok_or_else(|| {
+            error(
+                ErrorCode::BudgetExceeded,
+                "furniture storage deadline overflow",
+            )
+        })?;
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if maximum_bytes == 0 || maximum_bytes > super::super::MAX_JOURNAL_BYTES {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "invalid furniture storage byte ceiling",
+        ));
+    }
     let raw = path.as_os_str().as_bytes();
     if !path.is_absolute()
         || raw.len() < 2
@@ -253,7 +303,7 @@ pub(super) fn open(
         Err(cause) => return Err(failure(cause)),
     };
     let created = before.is_none();
-    if created && (mode != BuildMode::Control || expected.is_none()) {
+    if created && (mode != BuildMode::Control || !allow_create) {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "furniture recovery cannot create a journal",
@@ -296,26 +346,10 @@ pub(super) fn open(
         path: path.to_owned(),
         read_only: mode == BuildMode::Offline,
         extent: opened.len(),
+        maximum_bytes: maximum_bytes as u64,
         file_identity: (opened.dev(), opened.ino(), opened.uid()),
         directory_identity: (dir.dev(), dir.ino(), dir.uid()),
     };
     storage.validate_identity().map_err(failure)?;
-    let nonce = if created {
-        let mut nonce = [0; 32];
-        File::open("/dev/urandom")
-            .and_then(|mut source| source.read_exact(&mut nonce))
-            .map_err(failure)?;
-        Some(nonce)
-    } else {
-        None
-    };
-    // Header publication (including the directory entry) is synchronized by the
-    // same storage.sync used for every append. Empty existing files are refused.
-    BuildJournal::open(
-        storage,
-        &remaining(context, deadline)?,
-        mode,
-        expected,
-        nonce,
-    )
+    Ok((storage, created, remaining(context, deadline)?))
 }

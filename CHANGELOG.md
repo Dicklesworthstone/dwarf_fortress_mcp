@@ -24,6 +24,16 @@ readiness.
 
 ### Added
 
+- Durable whole-furnishing-plan coordination in safe Rust. The existing exact
+  1..32-step JSON plan now has a Python-compatible parser/digest and a complete
+  original-journal prefix audit. Only synchronized native Placed outcomes unlock
+  the next exact item and target. A separate private parent retains the entire
+  plan, source and journal identity plus permanent stop state without changing
+  the existing single-placement journal. All 24 new adapter tests and 45 existing
+  placement regressions pass, including exhaustive dependency ordering, 32-step
+  recovery, interrupted publication and Linux custody. This model and storage
+  increment grants no native effect authority. See `docs/FURNITURE_BATCH_RUST.md`.
+
 - Complete inventory-driven furnishing through the typed MCP
   `furniture_allocation` query in operations/1.3, paged operations/1.4 and
   citizen-inclusive spatial/1.8. Full constrained layouts produce the existing

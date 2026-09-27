@@ -44,6 +44,33 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable complete furnishing-plan core in Rust
+
+`dfmcp_adapter::furniture_batch` accepts the existing closed
+`dfmcp.furniture-plan/1` artifact, preserving every exact item, target and
+dependency with Python-compatible normalization and digest. A complete immutable
+definition binds the original native source and one original placement journal.
+Deterministic child keys and a full prefix audit prevent skipped, substituted or
+foreign work from advancing a plan. Only a native Placed receipt synchronized in
+the terminal coordinator state unlocks another step; source clocks and native
+building/job ID horizons must remain monotonic across steps.
+
+A separate private parent store synchronizes the complete definition and at most
+one permanent stop. It reuses descriptor-pinned Linux custody while preserving
+the original single-placement format. Control creation needs current Query and
+Plan authority; Query-authorized stop and original evidence inspection do not
+create placement permission. Offline custody never writes, failed publication
+fences advancement, and reopening never restores a dispatch permit.
+
+All **24 new adapter tests and 45 existing placement regressions passed** on the
+exact pinned nightly. Coverage includes all 4,096 four-node dependency graphs,
+every prefix of 32 placements, original native golden bytes, source and selection
+substitution, every truncated parent/stop boundary, interrupted synchronization,
+and real Linux file/parent custody. This is focused Rust development execution,
+not full workspace, real DFHack SDK, live-game or production qualification.
+The broader owning bridge beads `.4` and `.5` remain open. See
+`docs/FURNITURE_BATCH_RUST.md` and `docs/evidence/furniture-batch-rust.json`.
+
 ### Complete inventory-driven furnishing plans through MCP
 
 The typed `furniture_allocation` query connects the Rust allocator to the existing
