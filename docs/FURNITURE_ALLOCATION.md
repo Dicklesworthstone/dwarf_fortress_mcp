@@ -243,3 +243,46 @@ admission is established. Native protocols, dependencies and existing mutation
 paths are unchanged. Broader beads `df-dfhack-bridge-plane-c-pic.4/.5` remain open;
 this workflow implements inventory-driven proposals, not all construction or
 logistics acceptance criteria.
+
+## Rust allocation from a published inventory
+
+`dfmcp_adapter::furniture_allocation` implements the same global objective in
+safe Rust with the existing dependencies. Its public `allocate` function takes a
+typed request, candidate slice and cooperative guard. Checked fixed-width
+lexicographic costs preserve the exact distance/ID objective without floats or
+an added big-integer dependency. A refused guard propagates through scanning,
+maximum matching and optimization without returning a partial assignment.
+
+`dfmcp_adapter::furniture_supply::plan` connects this model to the existing sealed
+`OperationsStateView`. It takes the operation context, expected world folder/site,
+request and total work allowance. The reader requires Query authority, the
+current published anchor, sufficient entity budget and the exact fortress. It
+retains the enclosing source digest and canonical item generation/revision,
+including when operations are embedded in a spatial capture. It does not create
+another projection or perform another native read.
+
+The supply policy is `direct-ground-unattached-singleton-furniture/1`. Candidate
+items must have a supported furniture type, exclusively the observed ground flag,
+no container or building holder, no observed contained items, no actual job
+attachment, a singleton stack,
+known material and bounded ground coordinates. Explicitly excluded IDs are then
+removed. Every observed item receives one primary classification; compatible
+counts refer to the complete resulting candidate graph. Selected item evidence
+and any complete Hall witness retain their original canonical handles.
+
+One work allowance covers normalization, attachment scanning, inventory scanning,
+matching and evidence collection. At most 10,000,000 work units, the caller's
+remaining wall budget, 65,536 items and 65,536 observed attachment rows are allowed.
+The result contains either every assignment or a complete shortage. This supply
+subset establishes neither target terrain nor native placement eligibility,
+quality/wear, route access, reservations or future availability. A later exact
+placement observation and review remain necessary.
+
+All 32 focused adapter Rust tests passed on `nightly-2026-08-31`, with zero
+ignored. The 15 solver tests include all 4,096 small graphs, 200 unpruned random
+inventories, maximum bounds and interruption at every guard boundary. The 17
+projection tests exercise every observed flag word, actual attachments, source
+and item reuse, enclosing spatial generations, current authority and shared
+budgets. This is focused Rust development evidence, not full workspace, real SDK,
+live-game or production qualification. Exact scope and source hashes are in
+`docs/evidence/furniture-allocation-rust.json`.

@@ -44,6 +44,34 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Global furniture selection from coherent native inventory
+
+`dfmcp_adapter::furniture_allocation` solves a complete 1..32-target furnishing
+request against up to 65,536 exact candidate items. It preserves kind, material,
+subtype, same-level distance, explicit exclusions and dependency constraints.
+Global minimum-distance allocation with exact lexical item-ID tie breaking avoids
+greedy material starvation. A complete Hall-deficiency witness explains a
+shortage; no partial executable assignment is emitted.
+
+`dfmcp_adapter::furniture_supply` derives that supply from a sealed published
+operations view under current whole-projection Query authority. It excludes
+non-ground, attached, contained, building-held, nonsingleton and unestablished
+candidate states, checks fortress and anchor identity, and retains the enclosing
+source digest and original canonical entity generations. One work/wall allowance
+covers the full inventory scan and allocation. No extra native read, reservation
+or game effect occurs. See `docs/FURNITURE_ALLOCATION.md`.
+
+All **32 focused adapter Rust tests passed**, with zero ignored, on the exact
+repository-pinned nightly. Fifteen solver tests include all 4,096 small bipartite
+graphs and 200 unpruned inventories against independent exhaustive oracles, the
+65,536-item/32-slot bound and interruption at every guard boundary. Seventeen
+projection tests cover every observed flag word, actual attachments, source and
+entity reuse, enclosing spatial identity, authority and shared budgets. This is
+executed Rust development evidence, not full workspace, real DFHack SDK,
+live-game or production qualification. The broader owning bridge beads `.3` and
+`.4` remain open. Exact inputs and execution scope are recorded in
+`docs/evidence/furniture-allocation-rust.json`.
+
 ### Complete original furnishing plans linked to construction goals
 
 `scripts/track_furniture_batch.py` connects an executed exact furnishing batch

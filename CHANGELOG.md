@@ -24,6 +24,17 @@ readiness.
 
 ### Added
 
+- Global furniture selection in safe Rust over the complete published operations
+  inventory. Typed 1..32-target requests preserve exact furniture/material/subtype
+  constraints and select distinct items with a global distance optimum and exact
+  ID tie breaks. Infeasible layouts return complete shortage witnesses without
+  partial executable assignments. Conservative native supply classification,
+  fortress/anchor validation and original canonical generations bind the result
+  to its source under one Query/work allowance. All 32 focused adapter Rust tests
+  pass, including exhaustive oracles, all observed flag words, source reuse and
+  the 65,536-item boundary. Development functionality only; fresh placement review
+  remains necessary. See `docs/FURNITURE_ALLOCATION.md`.
+
 - Complete original furnishing-batch construction goals through
   `track_furniture_batch.py`. The monitor imports every registered Placed child
   from the locked original action DAG and binds its full plan, source, endpoint
