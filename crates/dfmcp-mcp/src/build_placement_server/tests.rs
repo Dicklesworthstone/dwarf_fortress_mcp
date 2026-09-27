@@ -7,6 +7,8 @@ use dfmcp_core::{MapCoord, MapCuboid};
 use std::cell::RefCell;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::rc::Rc;
+#[path = "batch_tests.rs"]
+mod batch_tests;
 fn fixture(name: &str) -> Result<Vec<u8>> {
     let value: Value = serde_json::from_str(include_str!(
         "../../../../bridge/common/tests/fixtures/build_placement_v1_19.json"
@@ -211,6 +213,7 @@ impl BuildGuard for Guard {
 }
 fn config() -> Result<Config> {
     Ok(Config {
+        batch_path: None,
         path: "/private/build/journal".into(),
         scope: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(63, 63, 7))?,
         fortress: capture()?.fortress().clone(),

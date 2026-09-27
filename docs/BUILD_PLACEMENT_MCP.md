@@ -12,6 +12,10 @@ runner map and compatibility registry do not gain furniture support. A placed
 receipt proves historical stage-zero construction-job registration, not finished
 or usable furniture. The coordination journal is not a game checkpoint.
 
+The same server also supports [complete furnishing plans](FURNITURE_BATCH_MCP.md)
+with a separate durable parent, exact next-step selection, fresh review per
+placement and original-key recovery after restart.
+
 ## Operator configuration
 
 Configuration belongs to the operator process. MCP callers cannot select a path,
@@ -24,6 +28,7 @@ endpoint, credential, protocol, protected region or checkpoint exception.
 | `DFMCP_BUILD_SITE_ID` | Canonical nonnegative decimal native site ID |
 | `DFMCP_BUILD_SCOPE` | Ordered cuboid `[min_x,min_y,min_z,max_x,max_y,max_z]`, coordinates 0..32767 |
 | `DFMCP_BUILD_JOURNAL` | Normalized absolute path in an existing owned `0700` directory |
+| `DFMCP_BUILD_BATCH` | Optional distinct normalized private parent path for one complete furnishing plan |
 | `DFMCP_BUILD_ENDPOINT` | Numeric IPv4 loopback endpoint; default `127.0.0.1:5000` |
 | `DFMCP_BUILD_TOKEN` | Native matching credential, 32..256 bytes; needed only for native calls |
 | `DFMCP_BUILD_ALLOW_PLACE` | Absent disables new placement; exact `1` enables consideration under all other checks |
@@ -132,6 +137,7 @@ before effect work. The server refuses insufficient budgets before dispatch.
 {"mode":"records","limit":8}
 {"mode":"get","idempotency_key":"bed-001","plan_digest":"<lowercase SHA-256>"}
 {"mode":"selection","witness":"<lowercase SHA-256>"}
+{"mode":"batch"}
 {"mode":"schema"}
 ```
 
@@ -141,6 +147,12 @@ pages. Unknown fields, duplicate fields, null optionals, nonintegral numbers and
 invalid digests are refused. Omit absent optional fields. Local queries do not
 open native connections. `fortress.explain` returns complete retained plan and
 receipt evidence; `fortress.doctor` verifies local custody and inventory.
+
+With batch custody configured, `batch` returns the complete original plan and
+all step keys and outcomes. Initial `open_session(furniture_plan=...)` imports
+the full JSON string without `selection`; reopening omits both. `observe` accepts
+the literal `next`, and `cancel(scope="batch")` permanently stops progression
+without native cancellation. See the complete workflow linked above.
 
 For offline inspection, retain the original folder, site, endpoint and journal
 configuration, set `DFMCP_BUILD_MODE=offline`, and remove the credential and

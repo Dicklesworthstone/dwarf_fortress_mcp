@@ -159,6 +159,23 @@ pub(super) fn packet(
             active["pending_absence_proven"] = json!(false);
         }
     }
+    if let Some(batch) = result.get("batch") {
+        active["scope"] = json!("this_furniture_batch_and_original_build_journal");
+        active["original_build_journal_inventory_verified"] = json!(verified.is_some());
+        active["inventory_verified"] =
+            json!(verified.is_some() && batch["inventory_verified"] == true);
+        if batch["inventory_verified"] != true {
+            active["pending_absence_proven"] = json!(false);
+        }
+        // Keep the complete plan and every original step exactly once in the
+        // result. The common handoff spine names their location and identity.
+        active["furniture_batch"] = json!({"inventory_path":"result.batch",
+            "batch_id":batch["batch_id"],"plan_digest":batch["plan_digest"],
+            "inventory_verified":batch["inventory_verified"],"status":batch["status"],
+            "stopped":batch["stopped"],"advancement_fenced":batch["advancement_fenced"],
+            "placed":batch["placed"],"total":batch["total"],"pending_step":batch["pending_step"],
+            "next":batch["next"],"construction_completion_proven":false});
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -193,6 +210,13 @@ pub(super) fn packet(
         references.push(json!({"kind":"build_coordination_root","journal_id":v.journal_id.to_string(),
         "head":v.head.to_string(),"frames":v.frames,"currently_verified":verified.is_some(),"canonical_world_anchor":false}));
     }
+    if let Some(batch) = result.get("batch") {
+        references.push(
+            json!({"kind":"furniture_batch_definition","batch_id":batch["batch_id"],
+            "plan_digest":batch["plan_digest"],"journal_id":batch["journal_id"],
+            "currently_verified":batch["inventory_verified"],"canonical_world_anchor":false}),
+        );
+    }
     let mut builder=AgentTurnBuilder::new(op,phase).profile(if matches!(op,"fortress.plan"|"fortress.observe"){ObservationProfile::Tactical}else{ObservationProfile::Forensic})
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished","canonical_world_anchor_available":false})),None)
         .briefing(json!({"runtime":"unadmitted_build_placement_development","bridge_protocol":"1.19","runtime_admitted":false,
@@ -216,6 +240,19 @@ pub(super) fn packet(
                 "high","high","read_only","not_applicable",false,json!({"session_id":c.session_id.to_string(),"query":"{\"mode\":\"records\",\"limit\":8}"}))]);
     }
     let mut turn = builder.build();
+    if result.get("batch").is_some() {
+        turn["recommendations"] = json!([recommendation(
+            "inspect-original-furniture-batch",
+            "fortress.query",
+            "Inspect the complete original plan and its retained placement prefix before advancing or recovering work.",
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"session_id":c.map(|c|c.session_id.to_string()),"query":"{\"mode\":\"batch\"}"})
+        )]);
+    }
     if let Some(summary) = result.get("source_summary").filter(|v| !v.is_null()) {
         turn["briefing"]["native_source_summary"] = summary.clone();
     }

@@ -24,6 +24,20 @@ readiness.
 
 ### Added
 
+- Complete exact furnishing batches through the existing furniture MCP server.
+  Operator-configured parent custody retains the full plan and original step
+  keys; `open_session(furniture_plan=...)`, `query` mode `batch`, `observe`
+  selection `next`, and `cancel` scope `batch` connect durable planning to fresh
+  review and one native placement per step. Reopening needs no bootstrap call
+  and restores no commit permit. Parent loss blocks advancement while preserving
+  original-key recovery, including after native dispatch. Every response retains
+  the complete plan and progress within an admitted 64 KiB envelope. This is
+  development functionality; all-placed remains distinct from completed
+  construction. All 32 furniture MCP Rust tests, two shared runtime tests,
+  nine new batch process tests and seven existing process regressions pass;
+  the 32-placement response stays complete at 36,407 bytes. See
+  `docs/FURNITURE_BATCH_MCP.md`.
+
 - Durable whole-furnishing-plan coordination in safe Rust. The existing exact
   1..32-step JSON plan now has a Python-compatible parser/digest and a complete
   original-journal prefix audit. Only synchronized native Placed outcomes unlock

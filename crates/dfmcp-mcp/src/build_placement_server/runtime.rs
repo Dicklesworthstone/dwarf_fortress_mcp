@@ -16,12 +16,13 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 11] = [
+pub(super) const NAMES: [&str; 12] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
     "DFMCP_BUILD_SCOPE",
     "DFMCP_BUILD_JOURNAL",
+    "DFMCP_BUILD_BATCH",
     "DFMCP_BUILD_ENDPOINT",
     "DFMCP_BUILD_TOKEN",
     "DFMCP_BUILD_ALLOW_PLACE",
@@ -61,6 +62,7 @@ impl CheckpointPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Config {
     pub path: PathBuf,
+    pub batch_path: Option<PathBuf>,
     pub scope: MapCuboid,
     pub fortress: FortressIdentity,
     pub endpoint: SocketAddr,
@@ -177,6 +179,7 @@ fn configured(
     };
     Ok(Config {
         path: PathBuf::from(path),
+        batch_path: None,
         scope,
         fortress,
         endpoint,
@@ -206,7 +209,7 @@ pub(super) fn configuration() -> Result<Config> {
         crate::admission::current_admission_provenance().is_some(),
     )?;
     enabled()?;
-    configured(
+    let mut config = configured(
         &required("DFMCP_BUILD_WORLD_FOLDER", 512)?,
         &required("DFMCP_BUILD_SITE_ID", 10)?,
         &required("DFMCP_BUILD_SCOPE", 128)?,
@@ -217,7 +220,21 @@ pub(super) fn configuration() -> Result<Config> {
         optional("DFMCP_BUILD_PROTECTED")?.as_deref(),
         optional("DFMCP_BUILD_CHECKPOINT_POLICY")?.as_deref(),
         optional("DFMCP_BUILD_MODE")?.as_deref(),
-    )
+    )?;
+    if let Some(path) = optional("DFMCP_BUILD_BATCH")? {
+        if path.len() > 4096
+            || !path.starts_with('/')
+            || path.contains('\0')
+            || path[1..]
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+            || PathBuf::from(&path) == config.path
+        {
+            return Err(denied());
+        }
+        config.batch_path = Some(PathBuf::from(path));
+    }
+    Ok(config)
 }
 pub(super) struct RequestControl {
     pub started: Instant,

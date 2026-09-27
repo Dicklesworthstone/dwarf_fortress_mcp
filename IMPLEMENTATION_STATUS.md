@@ -44,6 +44,48 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete furnishing batches through the existing MCP control loop
+
+The isolated furniture/1.19 server now imports the existing complete exact-item
+plan under operator-selected private batch custody. The frozen eleven tools
+expose the full original plan, every deterministic child key and outcome, the
+next unblocked selection, and permanent local stopping. Each placement requires
+a fresh native observation, original-key preparation and a review binding the
+full batch, prepared journal head, native plan, session, lease and policy.
+Only a synchronized terminal Placed prefix unlocks the next step.
+
+Reopening the two original files performs no native bootstrap and restores no
+dispatch permission. Original-key Query recovery remains available after a lost
+reply or parent-file substitution. Parent loss at the final post-dispatch-intent
+guard prevents the writer; parent loss after the writer preserves unresolved
+identity until the original outcome is recovered. A lost parent cannot be
+recreated by supplying another plan. Restarted child recovery can explicitly
+omit the unavailable parent under the existing recover/offline configuration.
+
+Complete-plan and future-row output reservation precedes creation/preparation.
+Established batch sessions retain the complete parent inventory under current
+Query disclosure authority, while the Agent Turn names its identity and location
+without duplicating the plan. A permanent stop does not cancel construction or
+erase pending effects. Native wire, child-journal format, dependency pins, empty
+compatibility registry and production runner map remain unchanged.
+
+All **32 furniture MCP Rust tests and two shared runtime-entry tests passed**,
+including seven new batch boundary tests. All **nine new batch process scenarios
+and seven existing single-placement process scenarios passed** against the final
+compiled executable. The 32-step case uses maximum-width names, native source
+strings and near-limit IDs/sequences, compares every capture, key, plan digest
+and receipt against the independent Python codec, and produces a complete
+36,407-byte Agent Turn. Source and binary hashes remained unchanged across the
+final execution. The first process run caught premature native bootstrap on a
+supplied replacement plan; the repaired path now rejects it before native contact.
+
+This is executed development functionality with independent native peers and
+private files, not full workspace, real DFHack SDK, live-game or production
+qualification. `all_placed` establishes historical stage-zero registrations and
+does not prove construction completion or current usability. The broader owning
+bridge beads `.4` and `.5` remain open. See `docs/FURNITURE_BATCH_MCP.md` and
+`docs/evidence/furniture-batch-mcp.json` for exact execution scope.
+
 ### Durable complete furnishing-plan core in Rust
 
 `dfmcp_adapter::furniture_batch` accepts the existing closed

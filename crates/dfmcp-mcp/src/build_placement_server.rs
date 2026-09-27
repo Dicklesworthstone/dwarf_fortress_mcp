@@ -7,6 +7,8 @@ use dfmcp_adapter::build_placement::rpc::BuildRpc;
 use dfmcp_adapter::build_placement::session::BuildSession;
 use dfmcp_adapter::build_placement::{BuildBinding, BuildKind, BuildPlan, BuildSelection};
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
+use dfmcp_adapter::furniture_batch::store::open_private_batch;
+use dfmcp_adapter::furniture_batch::{BatchDefinition, FurniturePlan};
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, ErrorCode, GameTick, LeaseManager,
     ObservationCursor, OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor,
@@ -21,6 +23,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
+mod batch;
 mod policy;
 mod presentation;
 mod runtime;
@@ -101,6 +104,7 @@ struct Review {
     plan: Digest32,
     witness: Digest32,
     seal: Digest32,
+    head: Digest32,
 }
 struct State<S, N> {
     id: SessionId,
@@ -114,6 +118,7 @@ struct State<S, N> {
     review: Option<Review>,
     historical: Option<BuildInventory>,
     pending_hint: Option<Value>,
+    batch: Option<batch::Parent>,
 }
 impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     fn new(mut control: BuildSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
@@ -142,6 +147,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             review: None,
             historical: Some(view),
             pending_hint: None,
+            batch: None,
         })
     }
     fn context(&mut self, write: bool, wall: Option<u64>) -> Result<OperationContext> {
@@ -178,6 +184,17 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             None
         }
     }
+    fn attach_batch(&self, result: &mut Value, view: Option<&BuildInventory>, verified: bool) {
+        if let Some(parent) = &self.batch {
+            result["batch"] = batch::display(parent, view, verified);
+        }
+    }
+    fn verify_batch(&mut self, c: &OperationContext, view: &BuildInventory) -> Result<()> {
+        if let Some(parent) = &mut self.batch {
+            batch::verify(parent, view, c)?;
+        }
+        Ok(())
+    }
     fn disclosure_context(&self, c: &OperationContext) -> Result<OperationContext> {
         let mut current = c.clone();
         current.anchor.tick = GameTick(current.anchor.tick.get().max(self.control.high_tick()));
@@ -209,6 +226,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             .native_summary()
             .map(presentation::source_summary)
             .unwrap_or(Value::Null);
+        self.attach_batch(&mut result, self.historical.as_ref(), false);
         packet(
             op,
             result,
@@ -227,20 +245,23 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         view: Option<&BuildInventory>,
         release: bool,
     ) -> String {
-        let result = json!({"ok":true,"scope":"session","closed":true,"release_for_recovery":release,
+        let mut result = json!({"ok":true,"scope":"session","closed":true,"release_for_recovery":release,
             "effects_cancelled":false,"history_erased":false,"native_quiescence_proven":false});
         match self.disclosure_context(c) {
-            Ok(current) => packet(
-                "fortress.cancel",
-                result,
-                Some(&current),
-                Some(&self.binding),
-                view,
-                self.historical.as_ref(),
-                None,
-                None,
-                None,
-            ),
+            Ok(current) => {
+                self.attach_batch(&mut result, view.or(self.historical.as_ref()), false);
+                packet(
+                    "fortress.cancel",
+                    result,
+                    Some(&current),
+                    Some(&self.binding),
+                    view,
+                    self.historical.as_ref(),
+                    None,
+                    None,
+                    None,
+                )
+            }
             // Explicit recovery release may relinquish owned custody even
             // after Query revocation. It publishes no retained fortress facts.
             Err(_) => packet(
@@ -377,6 +398,7 @@ enum Query {
         witness: String,
     },
     Schema {},
+    Batch {},
 }
 impl Query {
     fn parse(raw: &str) -> Result<Self> {
@@ -429,13 +451,14 @@ impl Query {
             Self::Selection { witness } => {
                 digest(witness)?;
             }
-            Self::Schema {} => {}
+            Self::Schema {} | Self::Batch {} => {}
         }
         Ok(value)
     }
 }
 enum Action {
     Observe(BuildSelection),
+    ObserveNext,
     Plan {
         key: String,
         witness: Digest32,
@@ -449,12 +472,13 @@ enum Action {
     Explain(String, Digest32),
     Query(Query),
     Inventory,
+    StopBatch,
     Denied,
 }
 fn schema() -> Value {
     json!({"schema":"dfmcp.build-placement-mcp-query/1","max_bytes":2048,"closed":true,
     "modes":{"records":{"limit":"optional integer 1..8","offset":"optional integer 0..256; head required when nonzero","head":"optional lowercase SHA-256 exact journal head"},
-        "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"schema":{}},
+        "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"schema":{}},
     "native_calls":0,"null_fields_allowed":false,"duplicate_fields_allowed":false})
 }
 #[allow(clippy::too_many_arguments)]
@@ -474,12 +498,55 @@ where
     F: FnOnce(BuildSelection, bool, &BuildBinding, &OperationContext, Duration) -> Result<N>,
 {
     match action {
-        Action::Observe(selection) => {
+        Action::Observe(_) | Action::ObserveNext => {
             state.abandon();
+            if state.batch.is_some() {
+                state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
+            }
+            let next = state
+                .batch
+                .as_ref()
+                .map(|p| batch::next(p, before))
+                .transpose()?;
+            let selection = match action {
+                Action::Observe(selection) => {
+                    if next
+                        .as_ref()
+                        .is_some_and(|(_, expected)| *expected != selection)
+                    {
+                        return Err(error(
+                            ErrorCode::Conflict,
+                            "selection differs from the original next batch step",
+                        ));
+                    }
+                    selection
+                }
+                _ => next
+                    .as_ref()
+                    .map(|(_, selection)| *selection)
+                    .ok_or_else(|| {
+                        error(
+                            ErrorCode::InvalidRequest,
+                            "next requires an original furniture batch",
+                        )
+                    })?,
+            };
+            let guard_bytes = if state.batch.is_some() {
+                work.take(c, batch::GUARD_BYTES)?.budget.max_bytes
+            } else {
+                0
+            };
+            let mut custody = batch::Guard {
+                parent: &mut state.batch,
+                view: before,
+                key: next.as_ref().map(|(key, _)| key.as_str()),
+                runtime,
+                bytes: guard_bytes,
+            };
             let mut guard = policy::Guard {
                 policy: &state.policy,
                 leases: &state.leases,
-                runtime,
+                runtime: &mut custody,
                 confirmation: None,
             };
             let capture = state.control.observe(
@@ -488,12 +555,24 @@ where
                 |b, c, d| connect(selection, false, b, c, d),
                 &mut guard,
             )?;
+            if let (Some(parent), Some((key, _))) = (&state.batch, next) {
+                parent.definition().validate_next(
+                    before,
+                    parent.stopped(),
+                    &key,
+                    selection,
+                    Some(&capture),
+                )?;
+            }
             Ok(
                 json!({"ok":true,"observation":presentation::observation(&capture),"game_mutation_dispatched":false,
                     "source_summary":state.control.native_summary().map(presentation::source_summary)}),
             )
         }
         Action::Plan { key, witness } => {
+            if state.batch.is_some() {
+                state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
+            }
             if let Some(review) = &state.review {
                 if review.key != key || review.witness != witness {
                     return Err(error(
@@ -505,6 +584,21 @@ where
                     .control
                     .get(&key, review.plan, &work.take(c, LOCAL_BYTES)?)?;
                 state.policy.evaluate(old.plan(), c, &state.leases)?;
+                if let Some(parent) = &state.batch {
+                    parent.definition().validate_next(
+                        before,
+                        parent.stopped(),
+                        &key,
+                        old.plan().before().selection(),
+                        Some(old.plan().before()),
+                    )?;
+                    if review.head != before.head {
+                        return Err(error(
+                            ErrorCode::StaleAnchor,
+                            "reviewed batch journal head changed",
+                        ));
+                    }
+                }
                 return Ok(
                     json!({"ok":true,"plan":presentation::record(&old),"plan_digest":review.plan.to_string(),"review_seal":review.seal.to_string(),"replayed_locally":true}),
                 );
@@ -521,13 +615,34 @@ where
                 })?;
             let plan = BuildPlan::new(&key, capture.clone())?;
             state.policy.evaluate(&plan, c, &state.leases)?;
+            if let Some(parent) = &state.batch {
+                parent.definition().validate_next(
+                    before,
+                    parent.stopped(),
+                    &key,
+                    plan.before().selection(),
+                    Some(plan.before()),
+                )?;
+            }
             state.pending_hint = Some(
                 json!({"idempotency_key":key,"plan_digest":plan.digest().to_string(),"outcome":"unverified","retry_commit_permitted":false}),
             );
+            let guard_bytes = if state.batch.is_some() {
+                work.take(c, batch::GUARD_BYTES)?.budget.max_bytes
+            } else {
+                0
+            };
+            let mut custody = batch::Guard {
+                parent: &mut state.batch,
+                view: before,
+                key: Some(&key),
+                runtime,
+                bytes: guard_bytes,
+            };
             let mut guard = policy::Guard {
                 policy: &state.policy,
                 leases: &state.leases,
-                runtime,
+                runtime: &mut custody,
                 confirmation: None,
             };
             let entry =
@@ -535,11 +650,23 @@ where
                     .control
                     .prepare(&key, witness, &work.take(c, EFFECT_BYTES)?, &mut guard)?;
             if state.control.has_preparation_connection() {
+                let head = if state.batch.is_some() {
+                    let view = state.control.inventory(&work.take(c, LOCAL_BYTES)?)?;
+                    state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, &view)?;
+                    view.head
+                } else {
+                    before.head
+                };
+                let policy_seal = state.policy.seal(entry.plan());
+                let seal = state.batch.as_ref().map_or(policy_seal, |p| {
+                    batch::seal(p, entry.plan(), head, policy_seal)
+                });
                 state.review = Some(Review {
                     key,
                     plan: entry.plan().digest(),
                     witness,
-                    seal: state.policy.seal(entry.plan()),
+                    seal,
+                    head,
                 });
             }
             Ok(
@@ -552,6 +679,9 @@ where
                 return Ok(
                     json!({"ok":true,"effect":presentation::record(&old),"native_calls":0,"historical_replay":true}),
                 );
+            }
+            if state.batch.is_some() {
+                state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
             }
             if !state
                 .review
@@ -569,11 +699,41 @@ where
             let review = state.review.take().ok_or_else(|| {
                 error(ErrorCode::CapabilityDenied, "furniture review unavailable")
             })?;
+            let policy_seal = state.policy.seal(old.plan());
+            if let Some(parent) = &state.batch {
+                if review.head != before.head
+                    || review.seal != batch::seal(parent, old.plan(), before.head, policy_seal)
+                {
+                    return Err(error(
+                        ErrorCode::StaleAnchor,
+                        "complete batch or prepared journal review changed",
+                    ));
+                }
+                parent.definition().validate_next(
+                    before,
+                    parent.stopped(),
+                    &key,
+                    old.plan().before().selection(),
+                    Some(old.plan().before()),
+                )?;
+            }
+            let guard_bytes = if state.batch.is_some() {
+                work.take(c, batch::GUARD_BYTES)?.budget.max_bytes
+            } else {
+                0
+            };
+            let mut custody = batch::Guard {
+                parent: &mut state.batch,
+                view: before,
+                key: Some(&key),
+                runtime,
+                bytes: guard_bytes,
+            };
             let mut guard = policy::Guard {
                 policy: &state.policy,
                 leases: &state.leases,
-                runtime,
-                confirmation: Some(review.seal),
+                runtime: &mut custody,
+                confirmation: Some(policy_seal),
             };
             let result = state
                 .control
@@ -668,6 +828,31 @@ where
         }
         Action::Query(Query::Schema {}) => {
             Ok(json!({"ok":true,"query_schema":schema(),"native_calls":0}))
+        }
+        Action::Query(Query::Batch {}) => {
+            if state.batch.is_none() {
+                return Err(error(
+                    ErrorCode::InvalidRequest,
+                    "no furniture batch is configured",
+                ));
+            }
+            state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
+            Ok(json!({"ok":true,"native_calls":0}))
+        }
+        Action::StopBatch => {
+            state.abandon();
+            let parent = state.batch.as_mut().ok_or_else(|| {
+                error(
+                    ErrorCode::InvalidRequest,
+                    "no furniture batch is configured",
+                )
+            })?;
+            batch::verify(parent, before, &work.take(c, batch::GUARD_BYTES)?)?;
+            parent.stop(&work.take(c, batch::GUARD_BYTES)?)?;
+            Ok(
+                json!({"ok":true,"scope":"batch","stopped":true,"native_calls":0,
+                "effects_cancelled":false,"building_undone":false,"original_key_recovery_preserved":true}),
+            )
         }
         Action::Inventory => Ok(
             json!({"ok":true,"journal":inventory(before),"native_calls":0,"live_game_health_checked":false}),
@@ -781,6 +966,37 @@ where
         result["new_local_obligation_created"] = json!(false);
         result["recovery_target"] = json!("journal_owning_unresolved_native_history");
     }
+    let batch_verified = if state.batch.is_some() {
+        match verified
+            .as_ref()
+            .ok_or_else(|| error(ErrorCode::CorruptLedger, "child inventory unavailable"))
+            .and_then(|v| state.verify_batch(&work.view(&display)?, v))
+        {
+            Ok(()) => true,
+            Err(e) => {
+                state.abandon();
+                result["batch_inventory_unverified"] = json!(true);
+                if matches!(
+                    op,
+                    "fortress.observe" | "fortress.plan" | "fortress.commit" | "fortress.doctor"
+                ) {
+                    result["ok"] = json!(false);
+                    result["error"] = failure(&e)["error"].clone();
+                    result["review_seal"] = Value::Null;
+                    result["retry_commit_permitted"] = json!(false);
+                    result["effect_may_have_occurred"] = json!(op == "fortress.commit");
+                }
+                false
+            }
+        }
+    } else {
+        false
+    };
+    state.attach_batch(
+        &mut result,
+        verified.as_ref().or(state.historical.as_ref()),
+        batch_verified,
+    );
     let rendered = packet(
         op,
         result,
@@ -904,45 +1120,116 @@ async fn with_session(
 
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated furniture/1.19 development custody. Control requires selection as closed JSON [kind,item_id,x,y,z], kind bed/chair/table. Recover and offline open the existing operator-selected private journal without a native connection. No path, endpoint, token, scope or checkpoint policy is client-selectable. Opening dispatches no preparation or game mutation."
+    description = "Open isolated furniture/1.19 custody. Single control uses selection JSON [kind,item_id,x,y,z]. Batch control imports furniture_plan as complete dfmcp.furniture-plan/1 JSON with the operator's batch path configured; omit selection. Reopen a retained batch, recovery or offline journal without selection or plan and without native bootstrap. No client paths or policies. Opening never prepares or places furniture."
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    furniture_plan: Option<String>,
 ) -> String {
-    runtime::owned("fortress.open_session",move|control|{
-        let result=(||{
-            let config=runtime::configuration()?;runtime::boundary(&control,&config,false)?;
-            let selected=selection.as_deref().map(parse_selection).transpose()?;
-            if (config.mode==BuildMode::Control)!=selected.is_some(){return Err(error(ErrorCode::InvalidRequest,"control requires selection; recovery/offline must omit it"));}
-            let budget=WorkBudget{max_wall_millis:max_wall_millis.unwrap_or(10000),max_bytes:max_bytes.unwrap_or(MAX_WORK_BYTES),max_output_tokens:max_output_tokens.unwrap_or(16384),max_entities:65536,max_actions:1,max_game_ticks:0};
-            let mut locked=lock()?;if locked.is_some(){return Err(error(ErrorCode::Conflict,"release the current furniture session first"));}
-            let seq=NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
-            let id=SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
-            let mut c=context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
-            let mut work=Work::new(&c,control.started)?;
-            let binding=if let Some(selection)=selected{
+    runtime::owned("fortress.open_session", move |control| {
+        let result = (|| {
+            let config = runtime::configuration()?;
+            runtime::boundary(&control, &config, false)?;
+            // Parse and bound complete intent before native contact or storage.
+            let plan = furniture_plan.as_deref().map(|s|FurniturePlan::decode(s.as_bytes())).transpose()?;
+            let selected = if let Some(plan) = &plan {
+                if config.batch_path.is_none() || config.mode != BuildMode::Control || selection.is_some() {
+                    return Err(error(ErrorCode::InvalidRequest, "complete plan requires configured Control batch custody and no selection"));
+                }
+                batch::reserve_output(plan)?;
+                for step in plan.steps() {
+                    let halo = config.selection(step.selection)?;
+                    if config.protected.iter().any(|region|dfmcp_core::cuboids_intersect(region,&halo)) {
+                        return Err(error(ErrorCode::CapabilityDenied, "batch target intersects protected region"));
+                    }
+                }
+                plan.ordered_steps().next().map(|step|step.selection)
+            } else if config.batch_path.is_some() {
+                if selection.is_some() {
+                    return Err(error(ErrorCode::InvalidRequest, "reopening a batch derives selections from its retained plan"));
+                }
+                None
+            } else {
+                let selected = selection.as_deref().map(parse_selection).transpose()?;
+                if (config.mode == BuildMode::Control) != selected.is_some() {
+                    return Err(error(ErrorCode::InvalidRequest, "single control requires selection; recovery/offline must omit it"));
+                }
+                selected
+            };
+            let budget = WorkBudget { max_wall_millis:max_wall_millis.unwrap_or(10000),
+                max_bytes:max_bytes.unwrap_or(MAX_WORK_BYTES),max_output_tokens:max_output_tokens.unwrap_or(16384),
+                max_entities:65536,max_actions:1,max_game_ticks:0 };
+            let mut locked = lock()?;
+            if locked.is_some() { return Err(error(ErrorCode::Conflict, "release the current furniture session first")); }
+            let seq = NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
+            let id = SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
+            let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
+            let mut work = Work::new(&c,control.started)?;
+            if plan.is_some() {
+                c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+                c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+                // Import only creates a missing parent. Reopening derives all
+                // intent from retained custody, so a substituted client plan
+                // must never select even a bootstrap native observation.
+                if let Some(path) = &config.batch_path {
+                    match std::fs::symlink_metadata(path) {
+                        Ok(_) => return Err(error(ErrorCode::Conflict,
+                            "existing batch custody must be reopened without a supplied plan")),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                        Err(_) => return Err(error(ErrorCode::CorruptLedger,
+                            "batch parent existence cannot be established")),
+                    }
+                    work.current(&c)?;
+                }
+            }
+            let binding = if let Some(selection) = selected {
                 config.selection(selection)?;
-                let child=work.take(&c,SOURCE_BYTES)?;
-                let source=runtime::connect(&config,selection,None,&child,Duration::from_millis(child.budget.max_wall_millis))?;
-                let capture=source.initial_capture().ok_or_else(||error(ErrorCode::AdapterRejected,"furniture bootstrap capture missing"))?;
-                if capture.fortress()!=&config.fortress||capture.selection()!=selection{return Err(error(ErrorCode::StaleAnchor,"furniture bootstrap source differs from configuration"));}
-                c.anchor.tick=GameTick(capture.tick());let binding=source.binding().clone();drop(source);Some(binding)
-            }else{None};
+                let child = work.take(&c,SOURCE_BYTES)?;
+                let source = runtime::connect(&config,selection,None,&child,Duration::from_millis(child.budget.max_wall_millis))?;
+                let capture = source.initial_capture().ok_or_else(||error(ErrorCode::AdapterRejected,"furniture bootstrap capture missing"))?;
+                if capture.fortress()!=&config.fortress || capture.selection()!=selection {
+                    return Err(error(ErrorCode::StaleAnchor,"furniture bootstrap source differs from configuration"));
+                }
+                c.anchor.tick = GameTick(capture.tick());
+                Some(source.binding().clone())
+            } else { None };
             runtime::boundary(&control,&config,false)?;
-            let journal=open_private_build(&config.path,&work.take(&c,EFFECT_BYTES)?,config.mode,binding)?;
+            let journal = open_private_build(&config.path,&work.take(&c,EFFECT_BYTES)?,config.mode,binding)?;
             config.matches(journal.binding())?;
-            let session=BuildSession::<_,BuildRpc>::new(journal,&work.view(&c)?)?;
-            let mut state=State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;state.budget=budget;state.grants=c.grants.clone();
-            c=state.disclosure_context(&c)?;let view=state.control.inventory(&work.view(&c)?)?;
-            let output=packet("fortress.open_session",json!({"ok":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
+            let session = BuildSession::<_,BuildRpc>::new(journal,&work.view(&c)?)?;
+            let mut state = State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
+            state.budget = budget;
+            state.grants = c.grants.clone();
+            c = state.disclosure_context(&c)?;
+            let view = state.control.inventory(&work.view(&c)?)?;
+            if let Some(path) = &config.batch_path {
+                let expected = if let Some(plan) = plan {
+                    if !view.entries().is_empty() {
+                        return Err(error(ErrorCode::Conflict,"new batch requires an empty original journal; reopen retained work without a plan"));
+                    }
+                    Some(BatchDefinition::new(plan,state.binding.clone(),view.journal_id)?)
+                } else { None };
+                let parent = open_private_batch(path,&work.take(&c,LOCAL_BYTES)?,config.mode,expected)?;
+                batch::matches(parent.definition(),&state.binding)?;
+                batch::reserve_output(parent.definition().plan())?;
+                state.batch = Some(parent);
+                state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
+            }
+            let mut result = json!({"ok":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),"planning_observation_retained":false,
-                "native_preparation_dispatched":false,"game_mutation_dispatched":false}),Some(&c),Some(&state.binding),Some(&view),None,Some(&state.policy),None,None);
-            if output.len() as u64>OUTPUT_BYTES{return Err(exhausted());}work.current(&c)?;runtime::boundary(&control,&config,false)?;
-            *locked=Some(Entry{state,config});Ok(output)
-        })();match result{Ok(v)=>v,Err(e)=>unbound("fortress.open_session",&e)}
+                "native_preparation_dispatched":false,"game_mutation_dispatched":false});
+            state.attach_batch(&mut result,Some(&view),true);
+            let output = packet("fortress.open_session",result,Some(&c),Some(&state.binding),Some(&view),None,Some(&state.policy),None,None);
+            if output.len() as u64>OUTPUT_BYTES { return Err(exhausted()); }
+            work.current(&c)?;
+            runtime::boundary(&control,&config,false)?;
+            *locked = Some(Entry{state,config});
+            Ok(output)
+        })();
+        match result { Ok(v)=>v,Err(e)=>unbound("fortress.open_session",&e) }
     }).await
 }
 fn mode_name(mode: BuildMode) -> &'static str {
@@ -954,20 +1241,24 @@ fn mode_name(mode: BuildMode) -> &'static str {
 }
 #[tool(
     name = "fortress.observe",
-    description = "Capture one exact ordinary bed/chair/table item and 3x3 target context. selection is closed JSON [kind,item_id,x,y,z]. Retain its original connection for reviewed preparation and one commit. A new observation abandons local permission, never durable pending work."
+    description = "Capture one exact ordinary bed/chair/table item and 3x3 target context. selection is JSON [kind,item_id,x,y,z], or the literal next for a retained complete batch. Batch selection must equal its next unblocked original step. Retain the original connection for fresh review and one commit. Observation abandons prior local permission, never pending work."
 )]
 pub async fn fortress_observe(session_id: String, selection: String) -> String {
     with_session(
         session_id,
         "fortress.observe",
         None,
-        parse_selection(&selection).map(Action::Observe),
+        if selection == "next" {
+            Ok(Action::ObserveNext)
+        } else {
+            parse_selection(&selection).map(Action::Observe)
+        },
     )
     .await
 }
 #[tool(
     name = "fortress.plan",
-    description = "Prepare one furniture placement from this session's exact observation witness under current operator scope, item and target lease, protected regions and checkpoint policy. Returns native plan digest and policy-bound review seal. No building insertion occurs at prepare."
+    description = "Prepare one furniture placement from this session's exact observation witness under current scope, lease, protected regions and checkpoint policy. A batch requires its returned original step key; review also binds the complete parent plan and prepared journal head. Returns native plan digest and review seal. Preparation inserts no building."
 )]
 pub async fn fortress_plan(
     session_id: String,
@@ -1003,7 +1294,7 @@ pub async fn fortress_commit(
 }
 #[tool(
     name = "fortress.query",
-    description = "Bounded local furniture journal inventory, exact record, retained selection or query schema. query is closed JSON with mode records/get/selection/schema. Records page 1..8, with head-bound next_query. No native calls and no commitment from recovered records."
+    description = "Inspect local furniture evidence. query is closed JSON with mode batch/records/get/selection/schema. Batch returns the complete original plan, every step, progress and next key/selection after verifying both files. Records page 1..8 with head-bound continuation. No native calls or renewed commit permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1111,7 +1402,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=effect retires only the exact prepared native furniture record under Query recovery authority; cannot undo construction. scope=session releases settled custody, or release_for_recovery=true releases unresolved ownership while preserving all durable evidence. No blind retry after reopening."
+    description = "scope=batch permanently stops new steps under Query authority in control/recover mode, without cancelling native work. scope=effect retires the exact prepared native record; cannot undo construction. scope=session releases settled custody, or release_for_recovery=true preserves unresolved identities while releasing ownership. Reopening never permits blind retry."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -1123,6 +1414,9 @@ pub async fn fortress_cancel(
     let release = release_for_recovery.unwrap_or(false);
     match (scope.as_str(), idempotency_key, plan_digest) {
         ("session", None, None) => close(session_id, release).await,
+        ("batch", None, None) if !release => {
+            with_session(session_id, "fortress.cancel", None, Ok(Action::StopBatch)).await
+        }
         ("effect", Some(k), Some(p)) if !release => {
             with_session(
                 session_id,
@@ -1175,7 +1469,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-build-placement-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted furniture/1.19 development control. Observe one exact ordinary furniture item and target, review the prepared plan and policy seal, then commit once on the original connection. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty. Reopened preparation cannot commit. Placed proves historical stage-zero construction registration, not completed usable furniture. Canonical world anchor is unavailable. Item and target require host scope and avoid protected regions; no global controller fence. No arbitrary command, clock advancement, game checkpoint or restore.").build();
+        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, import a complete dfmcp.furniture-plan/1 JSON string through open_session, then inspect query mode batch and observe selection next. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits plan and selection and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration, not construction completion. No canonical world anchor or global controller fence. No arbitrary command, clock advancement, checkpoint or restore.").build();
     crate::run_modern_stdio(server);
 }
 #[cfg(test)]
