@@ -258,17 +258,21 @@ class FurnitureCompletionTests(unittest.TestCase):
 
     def test_byte_identical_metadata_inode_replacement_is_detected_after_reopen(self):
         for name in ('batch.json', 'steps.jsonl'):
-            path = self.batch_path / name
-            replacement = self.root / ('new-' + name)
-            replacement.write_bytes(path.read_bytes())
-            replacement.chmod(0o600)
-            old = path.stat().st_ino
-            os.replace(replacement, path)
-            self.assertNotEqual(path.stat().st_ino, old)
-            with batch_module.Batch(str(self.batch_path), placement_rpc.Budget(60000)) as batch:
-                self.assertEqual(batch.audit()['status'], 'all_placed')
-                with self.assertRaises(ValueError):
-                    self.origin.verify_batch(batch)
+            with self.subTest(metadata=name):
+                batch_path = self.root / ('metadata-' + name)
+                _, batch_id = create_batch(batch_path)
+                original = origin_from(batch_path, batch_id)
+                path = batch_path / name
+                replacement = self.root / ('new-' + name)
+                replacement.write_bytes(path.read_bytes())
+                replacement.chmod(0o600)
+                old = path.stat().st_ino
+                os.replace(replacement, path)
+                self.assertNotEqual(path.stat().st_ino, old)
+                with batch_module.Batch(str(batch_path), placement_rpc.Budget(60000)) as batch:
+                    self.assertEqual(batch.audit()['status'], 'all_placed')
+                    with self.assertRaises(ValueError):
+                        original.verify_batch(batch)
 
     def test_live_custody_rechecks_detect_child_replacement_and_changed_manifest_bytes(self):
         for name in ('batch.json', 'child'):

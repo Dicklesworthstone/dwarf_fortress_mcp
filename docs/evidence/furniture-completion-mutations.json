@@ -1,0 +1,167 @@
+{
+  "control": {
+    "assertion_failures": 0,
+    "import_or_runtime_errors": 0,
+    "returncode": 0,
+    "test_functions_run": 5,
+    "tests": [
+      "test_furniture_completion.FurnitureCompletionTests.test_goal_requires_the_entire_original_receipt_selection_and_binds_policy",
+      "test_furniture_completion.FurnitureCompletionTests.test_original_software_is_required_on_first_and_every_later_sample",
+      "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_original_child_or_index_substitution_during_render_fences_before_sample_write",
+      "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_original_child_or_index_substitution_after_parent_sync_prevents_acknowledgment",
+      "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_reopened_unknown_read_has_no_permission_and_resets_whole_plan_stability"
+    ],
+    "unittest_summary": "Ran 5 tests in 3.298s\n\nOK"
+  },
+  "evidence_scope": "Executed actual Python core and POSIX custody regressions against four separately weakened temporary source copies.",
+  "method": {
+    "baseline": "Copied repository scripts and unchanged native fixture corpus; ran all five selected test functions before applying mutations.",
+    "environment": {
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": "<temporary-copy>/scripts"
+    },
+    "expected_failure_policy": "Require process exit 1, the exact expected assertion-failure count, and zero unittest ERROR records.",
+    "mutation_isolation": "One separate temporary source copy per mutant; one exact source replacement per copy.",
+    "production_source_modified_for_mutation_run": false,
+    "runner": [
+      "python3",
+      "-m",
+      "unittest",
+      "<tests>",
+      "-v"
+    ],
+    "subprocess_timeout_seconds": 60
+  },
+  "mutants": [
+    {
+      "assertion_failures": 1,
+      "assertion_messages": [
+        "ValueError not raised"
+      ],
+      "file": "scripts/furniture_completion.py",
+      "import_or_runtime_errors": 0,
+      "mutant_file_sha256": "95353dd2deb28bf07b771fd292c8ef306702fde24b87dfb6da2c344914ccd3c1",
+      "name": "omitted_full_receipt_bijection",
+      "replace_exactly_once": {
+        "after": "require(True,",
+        "before": "require(expected.encode() == self.condition.encode(),"
+      },
+      "returncode": 1,
+      "test_functions_run": 1,
+      "tests": [
+        "test_furniture_completion.FurnitureCompletionTests.test_goal_requires_the_entire_original_receipt_selection_and_binds_policy"
+      ],
+      "unittest_summary": "Ran 1 test in 0.091s\n\nFAILED (failures=1)"
+    },
+    {
+      "assertion_failures": 1,
+      "assertion_messages": [
+        "ValueError not raised"
+      ],
+      "file": "scripts/furniture_completion.py",
+      "import_or_runtime_errors": 0,
+      "mutant_file_sha256": "439cb648641ff15d68da72816b1858df07ab69ea9746ed5ddd859ee6e6f9dff0",
+      "name": "omitted_original_native_source",
+      "replace_exactly_once": {
+        "after": "require(True, 'sample differs from the original furnishing native source')",
+        "before": "require(all((manifest.generation, manifest.df_version, manifest.dfhack_version)\n                == (expected.generation, expected.df_version, expected.dfhack_version)\n                for manifest in (sample.before, sample.after)),\n            'sample differs from the original furnishing native source')"
+      },
+      "returncode": 1,
+      "test_functions_run": 1,
+      "tests": [
+        "test_furniture_completion.FurnitureCompletionTests.test_original_software_is_required_on_first_and_every_later_sample"
+      ],
+      "unittest_summary": "Ran 1 test in 0.175s\n\nFAILED (failures=1)"
+    },
+    {
+      "assertion_failures": 4,
+      "assertion_messages": [
+        "Rejected not raised",
+        "Rejected not raised",
+        "Rejected not raised",
+        "Rejected not raised"
+      ],
+      "file": "scripts/furniture_completion_store.py",
+      "import_or_runtime_errors": 0,
+      "mutant_file_sha256": "a14ea2b3d42320de18471c264490ba37a73464a7bd67347861362b7d4be5a7ea",
+      "name": "omitted_publication_source_custody",
+      "replace_exactly_once": {
+        "after": "pass  # Mutant: no original-source custody validation.",
+        "before": "self.state.goal.origin.verify_batch(self._batch)"
+      },
+      "returncode": 1,
+      "subtest_scope": [
+        "child substitution during render",
+        "index substitution during render",
+        "child substitution after parent sync",
+        "index substitution after parent sync"
+      ],
+      "test_functions_run": 2,
+      "tests": [
+        "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_original_child_or_index_substitution_during_render_fences_before_sample_write",
+        "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_original_child_or_index_substitution_after_parent_sync_prevents_acknowledgment"
+      ],
+      "unittest_summary": "Ran 2 tests in 1.284s\n\nFAILED (failures=4)"
+    },
+    {
+      "assertion_failures": 1,
+      "assertion_messages": [
+        "True is not false"
+      ],
+      "file": "scripts/construction_monitor_store.py",
+      "import_or_runtime_errors": 0,
+      "mutant_file_sha256": "45c1b0d98727f303e6d5217487ae93b4b92a2a1dd97bf583b5ee98444900954c",
+      "name": "restored_reopened_read_permission",
+      "replace_exactly_once": {
+        "after": "self.length, self._digest, self.state = size, hasher, state\n                self.read_owned = state.progress.reading\n                self.check()",
+        "before": "self.length, self._digest, self.state = size, hasher, state\n                self.check()"
+      },
+      "returncode": 1,
+      "test_functions_run": 1,
+      "tests": [
+        "test_furniture_completion_store.FurnitureCompletionCustodyTests.test_reopened_unknown_read_has_no_permission_and_resets_whole_plan_stability"
+      ],
+      "unittest_summary": "Ran 1 test in 0.432s\n\nFAILED (failures=1)"
+    }
+  ],
+  "schema": "dfmcp.furniture-completion-mutation-evidence/1",
+  "scope_limits": {
+    "full_dependency_inventory": false,
+    "full_workspace_qualified": false,
+    "live_fortress_qualified": false,
+    "mutation_authority_granted": false,
+    "native_dfhack_sdk_qualified": false,
+    "physical_power_loss_qualified": false,
+    "production_admitted": false,
+    "rust_qualified": false
+  },
+  "source_hash_count": 17,
+  "source_hashes_match_at_report_creation": true,
+  "source_hashes_unchanged_after_execution": true,
+  "source_sha256": {
+    "bridge/common/tests/fixtures/build_placement_v1_19.json": "7761f99477bb52be29331beeb28be50358c206c9763b50e95d72a395c5cc93ae",
+    "scripts/build_placement_rpc.py": "d2bef480c0232465764bd7bb37a14946e5d859a02040082df69961238c9f663d",
+    "scripts/build_placement_store.py": "5ccddc7ceb1ef065da0099da27742d56f4d4b7f4695b827e55b8fa89b7ae4897",
+    "scripts/build_placement_wire.py": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+    "scripts/construction_monitor_rpc.py": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809",
+    "scripts/construction_monitor_store.py": "0909c0c7dc34659354cda840d42fce6171c59d46f3cbb76c749380ca5ef37722",
+    "scripts/construction_plan.py": "218f5e00e7f28e6c006a4cbefad87e0da225683f3cbdff91a3fc1dd640c3b72d",
+    "scripts/construction_plan_store.py": "672867dec26c33ef30bd079de25889dba54f6536ad30425d70a9da3a510588f6",
+    "scripts/construction_receipt.py": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+    "scripts/furniture_batch.py": "9a9f182734b33a46622cda201dad5abcccefaf870943e51dbd357e3fdd79bcd4",
+    "scripts/furniture_completion.py": "d4f1e788ae54ae13c8e2463e1b5fd52b70b4cd2d9c50a08fb17f3bdcb755caa9",
+    "scripts/furniture_completion_store.py": "d323c86320ae19898b70cfa8fccd4dfaabefd45cd4d90b1b9e4a4e49e736a4b3",
+    "scripts/furniture_plan.py": "6ad46a0bfa3641e55c0a92f37d02473c59d679c562a682a62075a3636d616155",
+    "scripts/test_construction_plan_store.py": "58dc923e49826f458d0fb30e1d0df4c171f75b4473a4af333804a3019ebbee22",
+    "scripts/test_construction_receipt.py": "e0e3c35c60af950fb280a9d1ec22723b5dea6ccc7d24f37c900c31ad6ef5c56a",
+    "scripts/test_furniture_completion.py": "48a684c93a6e2d5a3784c8a3d494486dfd2d0be9ef1343e47a2aa4cfa10d55df",
+    "scripts/test_furniture_completion_store.py": "58af45290f323b9efa1de986c674e886cff144ec9a936a605c36d61f97a393f6"
+  },
+  "status": "passed_python_mutation_regressions",
+  "summary": {
+    "mutant_assertion_failures": 7,
+    "mutant_import_or_runtime_errors": 0,
+    "selected_test_functions": 5,
+    "weakened_implementations_rejected_by_assertions": 4
+  }
+}

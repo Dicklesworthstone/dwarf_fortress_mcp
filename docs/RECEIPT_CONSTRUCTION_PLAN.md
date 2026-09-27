@@ -29,6 +29,13 @@ requested placement is represented, or import a high-level furniture plan
 automatically. A caller must choose the complete intended receipt set before
 starting; the monitor proves its condition only for that selected set.
 
+For a batch executed by `furniture_batch.py`,
+[`track_furniture_batch.py`](FURNITURE_COMPLETION.md) supplies the complete
+original-plan workflow. It imports the locked original batch, requires a
+registered Placed receipt for every exact DAG step, and retains that binding
+through monitoring and restart. The independently selected receipt-set format
+and workflow documented here remain unchanged.
+
 Each member retains the exact original placement bytes and inherits policy
 `dfmcp.receipt-construction-condition/1`. It requires the original building type,
 one-tile footprint and maximum build stage, the original singleton item with its

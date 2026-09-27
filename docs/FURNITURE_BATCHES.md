@@ -123,6 +123,14 @@ change the game or clear uncertain work. There is no resume/unstopping command.
 monitor's private input format and use its independently authorized setup; receipt
 export does not start monitoring, grant new authority or prove construction.
 
+To monitor the **complete original furnishing plan**, use
+[`track_furniture_batch.py`](FURNITURE_COMPLETION.md) after `all_placed`. It opens
+this batch directly, requires every planned step's registered Placed receipt,
+and retains the full plan-to-receipt binding in a separate durable monitor.
+All original targets must satisfy their construction conditions together in
+the same sampled captures. Keep this original batch and its child journals in
+place: completion inspection rechecks their custody even after a terminal result.
+
 ## Durable inventory, limits and failure behavior
 
 The batch owns exactly `batch.json`, append-only `steps.jsonl`, `effects/`, and an

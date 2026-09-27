@@ -24,12 +24,20 @@ readiness.
 
 ### Added
 
-- Complete original furnishing-batch goal identity in `furniture_completion.py`.
-  Retain the full requested DAG and every original indexed placement journal;
-  reject partial selections and source substitutions; bind original custody and
-  placement-time software to shared sampled construction conditions. Fourteen
-  Python/POSIX regressions pass. Durable workflow integration follows separately;
-  this does not grant Rust/MCP, live-game or production admission.
+- Complete original furnishing-batch construction goals through
+  `track_furniture_batch.py`. The monitor imports every registered Placed child
+  from the locked original action DAG and binds its full plan, source, endpoint
+  and exact step-to-receipt mapping into durable monitoring. Every original
+  target must satisfy its condition in the same sampled captures; omitted
+  furnishings cannot be hidden by a smaller receipt selection. Restart retains
+  the fixed goal, and successful inspection or sampling rechecks original batch
+  custody even after terminal completion. Cancellation can stop monitoring when
+  the source is unavailable while explicitly withholding source verification.
+  Existing placement and selected-receipt formats are unchanged. Python
+  development functionality only: 183 tests pass, including 40 new tests, and
+  four weakened implementations are rejected by assertions. The 32-placement
+  boundary workflow returns a complete 53,320-byte result. See
+  `docs/FURNITURE_COMPLETION.md`.
 
 - Whole-plan receipt-linked construction condition core for 1..32 original
   furniture/1.19 Placed records. Canonical unique target identities and all

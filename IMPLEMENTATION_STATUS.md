@@ -44,21 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
-### Complete original furnishing-batch goal identity
+### Complete original furnishing plans linked to construction goals
 
-`scripts/furniture_completion.py` now imports every registered Placed child from
-one locked original furnishing batch. Its bounded origin retains the complete
-normalized action DAG, exact manifest and ordered index, every child placement
-journal, original source/endpoint, and directory/file identities. The composite
-goal rejects omitted or substituted steps and reuses the existing shared-capture
-condition engine, with placement-time software pinned before the first sample.
+`scripts/track_furniture_batch.py` connects an executed exact furnishing batch
+to the existing shared-capture construction monitor. It imports the locked
+original batch only when every retained DAG step has its registered canonical
+Placed receipt. The full normalized plan, batch/source identity, endpoint,
+ordered step mapping and original child evidence become part of a new immutable
+goal and separate journal. Selecting only the successful furnishings cannot
+satisfy the complete original request.
 
-Fourteen executed Python/POSIX tests cover complete 32-step retention, canonical
-replay, rehashed substitutions, incomplete/unregistered children, inode changes,
-post-placement batch stop, exact selection, source binding and shared stability.
-This is the typed goal foundation; foreground CLI and durable completion-journal
-integration are the next increment. No Rust/MCP, live-game or admission claim is
-made. Owning beads `df-dfhack-bridge-plane-c-pic.4` and `.5` remain open.
+The start/sample/inspect/cancel workflow retains one fixed deadline and global
+stability streak over every original target. Original batch custody is rechecked
+for successful sampling and inspection, including terminal inspection. Missing
+or changed original evidence cannot produce a successful completion report;
+an active monitor can still be cancelled with its source explicitly unverified.
+The original placement journals and selected-receipt monitor formats remain
+unchanged. See `docs/FURNITURE_COMPLETION.md` for the operator workflow.
+
+The combined checker passed 183 Python tests, including 40 new core, custody and
+complete batch-to-monitor tests. The boundary workflow executed 32 reviewed
+placements and monitored all original steps from a 16,345-byte dependency plan;
+its complete response measured 53,320 of 65,536 bytes. Four independently weakened
+implementations were rejected by assertions, including original-source loss
+during rendering and after synchronization. Exact input hashes and scope are in
+`docs/evidence/furniture-completion.json` and
+`docs/evidence/furniture-completion-mutations.json`.
+
+This executed increment provides Python development functionality, not Rust/MCP
+integration, real DFHack/live-game qualification or production admission.
+Satisfaction remains a historical sampled condition; it grants no game effect,
+retry permission, effect discharge, current-usability or continuous-stability
+claim. Both owning bridge beads remain open for their broader scope.
 
 ### Executable whole-plan receipt-linked construction monitoring
 
