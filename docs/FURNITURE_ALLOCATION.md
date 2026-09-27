@@ -3,9 +3,115 @@
 `scripts/furniture_allocation.py` chooses distinct exact items for 1..32 requested
 bed/chair/table targets. It emits the existing `dfmcp.furniture-plan/1` format used
 by `furniture_batch.py`, or a shortage with **no partial executable plan**.
-This increment is an executed pure allocator; native acquisition is not provided
-by the allocator itself. It does not reserve items, prepare/commit a placement,
-unpause the game, or qualify a production profile.
+`scripts/allocate_furniture.py` now connects that allocator to one complete,
+authenticated operations/1.4 inventory capture. It returns a source-bound proposal
+with exact item selections, or an explicit shortage, through a bounded JSON/Agent
+Turn response. It does not reserve items, prepare/commit a placement, unpause the
+game, or qualify a production profile.
+
+## Executable native inventory workflow
+
+The operator must already have the unchanged `dfmcp_operations_v1_4` plugin
+loaded and configured in the target DFHack process. This client does not load a
+plugin or change native configuration. Use an isolated client environment with
+only these DFMCP variables:
+
+- `DFMCP_ALLOW_UNADMITTED_FURNITURE_ALLOCATION=1` (exact development opt-in).
+- `DFMCP_FURNITURE_ALLOCATION_ENDPOINT` (optional canonical numeric IPv4 loopback
+  address and port; default `127.0.0.1:5000`).
+- `DFMCP_OPERATIONS_PAGED_TOKEN` (the operator-configured 32..256-byte read token).
+
+Other DFMCP variables, including furniture credentials, placement permission and
+production-admission configuration, are refused. No mutation authority is needed
+or accepted. Credentials are never copied into a proposal, log or error response.
+
+```sh
+# In that isolated client environment, using a request in the format below:
+python3 scripts/allocate_furniture.py \
+  --request-file furnishings-request.json --timeout-ms 10000
+```
+
+The command opens one native TCP connection and binds exactly the operations
+`Handshake` and `ReadObservation` methods. It reuses the existing transport's
+retained-page, nonce, manifest, size, whole-capture SHA-256 and release checks;
+there is no duplicate page protocol. The complete immutable capture must be
+received and its release acknowledged with the original token before allocation.
+Generation or software drift, skipped/replayed pages, wrong digests, lost replies
+and release failures return no proposal. There is no reconnect or automatic retry.
+
+The existing full-roster decoder validates **all** jobs, buildings, items,
+containment and job-item attachments before projection. Folder and site must match
+the operator's request exactly. Items with contradictory or invalid relationships
+anywhere in the capture cannot be hidden by selecting only convenient rows.
+
+Candidate projection recognizes only exact `BED`, `CHAIR` and `TABLE` enum keys.
+The native nine-bit item projection must contain only `on_ground` (word 64):
+forbidden, in-job, dump, removed, rotten, trader, inventory and building flags
+exclude the item. Container/holder relationships, being a container for another
+item, or any observed job attachment also exclude it even when flags look free.
+Candidates must be singleton stacks with known material, valid coordinates and no
+explicit operator exclusion. Disjoint rejection counts cover the full item roster.
+The full allocator then applies each slot's material, subtype, z-level and distance
+constraints and the whole-plan distinct-item requirement.
+
+### Results and handoff to placement
+
+An `ok: true` response is an established report, not necessarily a feasible plan:
+`result.status` is `allocated` or `shortage`. Only `allocated` has a non-null
+`result.plan`. A valid shortage exits 0 and describes the competing slots and
+missing items; a refused read/request exits 2 with `ok: false`, `result: null` and
+no partial allocation, native text, credential or path. Consumers must check both
+`ok` and `result.status`, not just the process exit code.
+
+For an allocated report, `result.plan` is the complete existing
+`dfmcp.furniture-plan/1` object accepted by `furniture_batch.py init --plan`.
+Retain the source report and extract that object into the batch's normal plan
+input. Use the **separate** furniture-batch environment and its existing
+initialization, review and confirmation workflow from `FURNITURE_BATCHES.md`.
+The allocator never initiates a batch or copies read credentials into a writer.
+Each later placement still requires a fresh native capture, exact confirmation,
+original-key custody and all existing uncertainty and policy gates.
+
+The report retains the normalized request, exact capture SHA-256, capture tick,
+folder/site, native horizons, generation and software identities, complete
+projection counts, chosen source item facts and distances. These identify
+historical evidence, not a canonical world generation: the Agent Turn anchor
+remains null. Its coverage explicitly says existing placement receipts and active
+placement work were not queried. Allocation cannot clear those obligations or
+establish that a different controller has no unresolved effect.
+
+The operations projection does not expose wear, all native item flags, terrain,
+map dimensions or worker paths. Allocation therefore does **not** establish that
+any placement is eligible, accessible or safe. Material and subtype constraints
+are assessed at this inventory capture only; the existing exact-item plan format
+does not turn those facts into durable future constraints. Inspect each later
+native plan, and discard/reallocate rather than silently substitute another item.
+Items are not reserved between proposal and execution.
+
+### Input, resource limits and publication
+
+The command reads a bounded regular request file with a no-follow open for the
+final path component, and checks descriptor size and identity/time metadata across
+the read. It refuses final symlinks, FIFOs, directories, oversized files and
+changed bytes; this is not the placement journal's private directory custody or
+an all-parent no-follow policy. JSON duplicate fields, excessive nesting and
+invalid requests are refused before any native socket opens. The request file
+is not modified. The command creates no plan file or journal; its result is stdout.
+
+All steps share one shrinking 1..60,000 ms wall allowance (default 10,000), 272 RPC
+calls including bindings, 20 MiB network allowance and 20,000,000 guarded work
+steps. Captures are at most 16 MiB, pages at most 65,536 bytes, and native rosters
+are bounded at 4,096 jobs, 4,096 buildings, 65,536 items and 65,536 attachments.
+Notifications are bounded per reply and across the connection. These limits are
+not renewed for each page, decoding pass or assignment. Filesystem and CPU checks
+are cooperative, not hard real-time cancellation guarantees.
+
+Complete JSON/Agent Turn output must fit 65,536 bytes. Allocation facts are fully
+serialized before a final authority and deadline recheck, so revocation during
+projection or optimization cannot publish cached read evidence. Oversize or
+budget failures refuse the complete result rather than truncating it into a
+misleading executable plan. A caller may perform another explicit read later,
+but this operation never reconnects or grants placement permission.
 
 ## Request and pure API
 
@@ -50,8 +156,8 @@ result = allocate(request, candidates)
 
 The pure API checks all supplied candidate identities and values, including
 excluded/irrelevant candidates. It does not authenticate the caller's facts or
-verify that those facts came from the requested fortress. The native read adapter
-must establish those associations before calling it. Every result makes its
+verify that those facts came from the requested fortress. The executable native
+read adapter establishes those associations before calling it. Every result makes its
 non-authority and non-reservation scope explicit.
 
 ## Global allocation, objective and shortages
@@ -82,7 +188,7 @@ several individually satisfiable slots can still compete for too few items.
 The result includes the maximum assignable count, but never an executable subset
 that silently drops the other targets or weakens constraints.
 
-## Bounds and validation
+## Solver bounds and executed validation
 
 At most 65,536 supplied candidate items, 32 slots, 4,096 explicitly excluded IDs,
 1,024 reduced item identities, and 49,152 serialized allocation-result bytes are
@@ -92,13 +198,48 @@ optimization; budget refusal returns no partial result. The pure API has finite
 structural bounds even when no external deadline guard is supplied.
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest test_furniture_allocation -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
+  test_furniture_allocation test_furniture_inventory -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts \
+  python3 scripts/check_furniture_allocation.py
 ```
 
-All 14 test functions pass. Tests exhaust all 4,096 three-slot/four-item bipartite
-graphs against an independent cardinality/cost/permutation oracle; compare 150
-random full inventories against an unpruned oracle; execute the 65,536-item,
-32-slot bound and the 1,024-item reduced union; and check deterministic tie breaks,
-material starvation, Hall witnesses, strict parsing, interrupted budgets and
-actual existing-plan compiler compatibility. This is pure Python evidence, not
-DFHack, TCP, live-game, Rust/MCP or production qualification.
+All **40 actual test functions pass**, with no skips: 14 pure allocator functions
+and 26 projection, real TCP and CLI/process functions. The first increment's
+14-function evidence remains in `docs/evidence/furniture-allocation-core.json`;
+current exact source hashes, counts and mutations are in
+`docs/evidence/furniture-allocation-integration.json`.
+
+Tests exhaust all 4,096 three-slot/four-item bipartite graphs against an independent
+cardinality/cost/permutation oracle and compare 150 random inventories against an
+unpruned oracle. They execute the 65,536-item/32-slot and 1,024-item reduced-union
+bounds, all 512 native projected flag words, strict complete-roster parsing,
+material starvation, deterministic tie breaks, exact Hall shortage witnesses,
+foreign-fortress refusal and compatibility with the actual existing plan compiler.
+
+The joined TCP peer uses an independent wire encoder and asserts both read-only
+bindings and every native request field. Its 65,536-item test transmits a
+**3,080,323-byte capture across 48 pages**, with a job-item attachment in the final
+page that must exclude an otherwise attractive item before solving all 32 slots.
+Fault tests exercise binding, framing, source/software/token/digest drift, lost
+pages, release acknowledgments, notification limits, shrinking budgets, real wall
+timeout and post-read revocation. Real CLI subprocess tests establish the native
+read-to-plan handoff, valid shortages and sanitized failures without altering the
+request or creating placement files.
+
+Ten deliberately weakened implementations fail **regression assertions**, not
+syntax/import errors: ignored distance, greedy candidate trimming, cross-level
+candidates, partial shortage plans, ignored flags/job attachments, foreign-world
+adoption, missing release verification, missing capture digest verification, and
+missing final authority recheck. The checker repeats these executions from copied
+source and emits exact source identities. The largest measured complete response
+in this campaign, including maximum-width source fields and 32 slots, is
+**31,572 bytes** of the 65,536-byte limit; larger outputs are refused, not presumed
+safe from that measurement.
+
+The native TCP peer is a test double, not DFHack. No real native SDK/plugin build,
+live fortress, Rust/MCP integration, whole-workspace qualification or production
+admission is established. Native protocols, dependencies and existing mutation
+paths are unchanged. Broader beads `df-dfhack-bridge-plane-c-pic.4/.5` remain open;
+this workflow implements inventory-driven proposals, not all construction or
+logistics acceptance criteria.

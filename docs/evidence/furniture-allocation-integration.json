@@ -1,0 +1,139 @@
+{
+  "schema": "dfmcp.furniture-allocation-integration-evidence/1",
+  "scope": "executed Python, exact existing dependencies, independent wire encoder, joined TCP test peer and real CLI subprocess; not DFHack",
+  "python": "3.13.5",
+  "tests_run": 40,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "exhaustive_graphs": 4096,
+  "random_unpruned_oracles": 150,
+  "native_flag_words_checked": 512,
+  "maximum_inventory_items_executed": 65536,
+  "maximum_slots_executed": 32,
+  "mutations": [
+    {
+      "name": "distance_ignored",
+      "source": "scripts/furniture_allocation.py",
+      "test": "test_furniture_allocation.AllocationTests.test_sum_distance_precedes_id_vector_and_lexical_slots_break_ties",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "greedy_candidate_reduction",
+      "source": "scripts/furniture_allocation.py",
+      "test": "test_furniture_allocation.AllocationTests.test_global_assignment_avoids_greedy_material_starvation",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "cross_level_candidates",
+      "source": "scripts/furniture_allocation.py",
+      "test": "test_furniture_allocation.AllocationTests.test_same_level_distance_subtype_material_kind_and_exclusions",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "partial_plan_on_shortage",
+      "source": "scripts/furniture_allocation.py",
+      "test": "test_furniture_allocation.AllocationTests.test_hall_shortage_not_individual_counts_and_no_partial_plan",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "projected_flags_ignored",
+      "source": "scripts/furniture_inventory.py",
+      "test": "test_furniture_inventory.ProjectionTests.test_all_512_native_flag_words_and_candidate_policy",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "job_attachment_ignored",
+      "source": "scripts/furniture_inventory.py",
+      "test": "test_furniture_inventory.ProjectionTests.test_job_attachment_beats_apparently_free_flags",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "foreign_world_adopted",
+      "source": "scripts/furniture_inventory.py",
+      "test": "test_furniture_inventory.ProjectionTests.test_foreign_fortress_refuses_instead_of_relabeling_inventory",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "release_token_not_verified",
+      "source": "scripts/construction_monitor_rpc.py",
+      "test": "test_furniture_inventory.TransportTests.test_complete_bytes_without_verified_release_never_publish",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "capture_digest_not_verified",
+      "source": "scripts/construction_monitor_rpc.py",
+      "test": "test_furniture_inventory.TransportTests.test_bad_binding_handshake_and_page_shapes_never_return_plan",
+      "assertion_rejected": true,
+      "returncode": 1
+    },
+    {
+      "name": "post_read_revocation_ignored",
+      "source": "scripts/furniture_inventory.py",
+      "test": "test_furniture_inventory.TransportTests.test_revocation_after_native_read_cannot_publish_cached_allocation",
+      "assertion_rejected": true,
+      "returncode": 1
+    }
+  ],
+  "sources": {
+    "scripts/furniture_plan.py": {
+      "sha256": "6ad46a0bfa3641e55c0a92f37d02473c59d679c562a682a62075a3636d616155",
+      "git_blob": "2fc0521378148e16ca3e313c3def00e91db2486e"
+    },
+    "scripts/build_placement_wire.py": {
+      "sha256": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+      "git_blob": "8f906d6d1a919c4bae5f0bdc3bdbacfdd1347d16"
+    },
+    "scripts/construction_receipt.py": {
+      "sha256": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+      "git_blob": "5ec00e974680217f56da408f347d70775182c16c"
+    },
+    "scripts/construction_monitor_rpc.py": {
+      "sha256": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809",
+      "git_blob": "7e714feeecade89531e69e3848986bf8634b79a7"
+    },
+    "scripts/furniture_allocation.py": {
+      "sha256": "d047583fbac8e1dbd62a8e9fa637b463d4347a9c8668fc6d611742281c877832",
+      "git_blob": "6318e7e3658329eec3b8177dd63c26fbf88d5b30"
+    },
+    "scripts/furniture_inventory.py": {
+      "sha256": "afc0d03d048b6c147ddb7d840de85df77465423af85b966238b8020c516a6f6f",
+      "git_blob": "e2338f54eb62c12cda4c952dd108804a143e6dd1"
+    },
+    "scripts/allocate_furniture.py": {
+      "sha256": "edd97ff42b06b3cadf18cbf71d9cd6ad7df686397f6d21497e56cf94ee19b935",
+      "git_blob": "8088a0e13c692d000aefbb6181f7f42c4bfb20b2"
+    },
+    "scripts/test_furniture_allocation.py": {
+      "sha256": "e9609444f807ccd1068aab5341fd3f0900124d1b5f052a2e62a87c3bbf8a72ab",
+      "git_blob": "8e71ef651bcd4652644b9125b46b110e1740a0b0"
+    },
+    "scripts/test_furniture_inventory.py": {
+      "sha256": "78a4ed3f01c3c4d906b8cbef25005ade1ebdbfcafcae122804d802090cfe2e16",
+      "git_blob": "aac193df48f523a52ba048ebe7f50a290a4823bc"
+    },
+    "scripts/check_furniture_allocation.py": {
+      "sha256": "a7c7a510f4e5eb3cad20f5f6baaf9b5cb26b2e1d4f6e59cb79036acf71fc0a74",
+      "git_blob": "96b20c11fa80a148e79315104b33088e5c7bfd38"
+    }
+  },
+  "rust_mcp_executed": false,
+  "real_dfhack_sdk": false,
+  "live_fortress": false,
+  "whole_workspace_qualified": false,
+  "production_admitted": false,
+  "measured": {
+    "largest_complete_response_bytes": 31572,
+    "largest_capture_bytes": 3080323,
+    "maximum_pages": 48
+  },
+  "passed": true
+}
