@@ -8,7 +8,7 @@ pub(super) const MAX_BYTES: u64 = 512 * 1024;
 const MAX_CALLS: u32 = 32;
 const SLICE: Duration = Duration::from_millis(100);
 
-/// Limits are selected by these two source-defined constructors, never by a
+/// Limits are selected by source-defined constructors, never by a
 /// caller's native method or protocol argument. Furniture defaults stay fixed.
 #[derive(Clone, Copy)]
 struct Limits {
@@ -26,6 +26,13 @@ const FURNITURE: Limits = Limits {
 const CONSTRUCTION: Limits = Limits {
     bytes: 20 * 1024 * 1024,
     calls: 327,
+    reply_bytes: 65536 + 4096,
+    notification_bytes: 2 * 1024 * 1024,
+};
+
+const ALLOCATION: Limits = Limits {
+    bytes: 20 * 1024 * 1024,
+    calls: 272,
     reply_bytes: 65536 + 4096,
     notification_bytes: 2 * 1024 * 1024,
 };
@@ -59,6 +66,17 @@ impl Link {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         Self::connect_profile(address, timeout, bytes, cancellation, check, CONSTRUCTION)
+    }
+    /// One complete operations/1.4 read for a furniture allocation. No caller
+    /// can select a wider profile or renew its connection allowance per page.
+    pub(crate) fn connect_furniture_allocation(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, ALLOCATION)
     }
     fn connect_profile(
         address: SocketAddr,

@@ -24,7 +24,10 @@ construction completion or control the game's job scheduler.
 
 `BatchDefinition` binds the full plan, exact `BuildBinding` (endpoint, fortress,
 generation, dimensions and software identities) and original child-journal ID.
-Its canonical representation is at most 17,456 bytes. A child key is
+The legacy `DFMFBD01` representation is at most 17,456 bytes. Allocation-driven
+batches use `DFMFBD02` to retain the request and original selected-item evidence,
+bounded at 42,036 bytes; see [the allocation handoff](FURNITURE_HANDOFF_RUST.md).
+A child key is
 `fb-<64-character batch ID>-<step name>`, at most 116 ASCII characters. Callers
 must compare the definition's complete binding with the actual opened journal;
 the inventory alone does not expose endpoint or software fields.

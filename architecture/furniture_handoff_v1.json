@@ -1,0 +1,53 @@
+{
+  "schema": "dfmcp.furniture-handoff-contract/1",
+  "beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
+  "request_schema": "dfmcp.furniture-request/1",
+  "request_max_bytes": 16384,
+  "max_slots": 32,
+  "handoff_max_bytes": 24576,
+  "batch_definition_max_bytes": 42036,
+  "original_definition_magic": "DFMFBD01",
+  "allocation_definition_magic": "DFMFBD02",
+  "parent_store_max_bytes": 65536,
+  "source": {
+    "profile": "operations/1.4",
+    "methods": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "network_max_bytes": 20971520,
+    "max_entities_including_root": 73729,
+    "max_wall_millis": 60000,
+    "max_calls": 272,
+    "publication": "complete_capture_digest_strict_decode_verified_release"
+  },
+  "allocation": {
+    "policy": "direct-ground-unattached-singleton-furniture/1",
+    "objective": "total_same_level_manhattan_then_lexical_slot_item_ids",
+    "partial_executable_assignment": false,
+    "automatic_reallocation": false,
+    "client_reports_are_observations": false,
+    "items_reserved": false
+  },
+  "placement": {
+    "profile": "furniture/1.19",
+    "cross_profile_generations_equal": false,
+    "same_endpoint_fortress_software": true,
+    "original_item_attributes_required": true,
+    "current_request_distance_required": true,
+    "source_clock_and_building_job_id_horizons_cannot_regress": true,
+    "fresh_native_review_required": true,
+    "handoff_grants_effect_authority": false
+  },
+  "existing_placement_journal_changed": false,
+  "native_wire_changed": false,
+  "live_registry_admitted": false,
+  "production_runner_protocols": [
+    "1.0"
+  ],
+  "evidence_status": "source_present_reconstructed_after_executor_outage_uncompiled"
+}

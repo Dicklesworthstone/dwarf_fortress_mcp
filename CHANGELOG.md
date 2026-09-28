@@ -24,6 +24,14 @@ readiness.
 
 ### Added
 
+- Source-bound furniture allocation handoffs in Rust. Complete operations/1.4
+  inventory now feeds an immutable exact batch retaining request constraints,
+  selected-item evidence and the original source. Fresh placement captures and
+  retained child audits enforce those constraints; shortages expose no partial
+  plan. The new batch representation preserves all legacy placement bytes.
+  Source and 33 new test groups are present, but executor disconnection blocked
+  compilation and execution. See `docs/FURNITURE_HANDOFF_RUST.md`.
+
 - Source implementation of whole-original-plan construction monitoring through
   the existing furniture MCP tools, including fixed-goal creation, one explicit
   shared sample, complete progress and durable local cancellation. Monitor-only

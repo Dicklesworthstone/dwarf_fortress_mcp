@@ -8,14 +8,17 @@ use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use crate::build_placement::journal::{BuildInventory, BuildState};
 use crate::build_placement::{BuildBinding, BuildCapture, BuildKind, BuildPhase, BuildSelection};
+use crate::furniture_handoff::{Handoff, MAX_HANDOFF_BYTES};
 
 pub mod store;
 
 pub const SCHEMA: &str = "dfmcp.furniture-plan/1";
 pub const MAX_STEPS: usize = 32;
 pub const MAX_PLAN_BYTES: usize = 16_384;
-pub const MAX_DEFINITION_BYTES: usize = MAX_PLAN_BYTES + 1024 + 48;
+pub const MAX_LEGACY_DEFINITION_BYTES: usize = MAX_PLAN_BYTES + 1024 + 48;
+pub const MAX_DEFINITION_BYTES: usize = MAX_LEGACY_DEFINITION_BYTES + 4 + MAX_HANDOFF_BYTES;
 const DEFINITION_MAGIC: &[u8; 8] = b"DFMFBD01";
+const HANDOFF_DEFINITION_MAGIC: &[u8; 8] = b"DFMFBD02";
 
 fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -93,7 +96,7 @@ impl FurniturePlan {
         Self::normalize(steps.ok_or_else(|| invalid("furniture plan lacks steps"))?)
     }
 
-    fn normalize(mut steps: Vec<FurnitureStep>) -> Result<Self> {
+    pub(crate) fn normalize(mut steps: Vec<FurnitureStep>) -> Result<Self> {
         require(
             (1..=MAX_STEPS).contains(&steps.len()),
             "furniture plan requires 1..32 steps",
@@ -220,6 +223,7 @@ impl FurniturePlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BatchDefinition {
     plan: FurniturePlan,
+    handoff: Option<Handoff>,
     binding: BuildBinding,
     journal_id: Digest32,
     id: Digest32,
@@ -233,6 +237,7 @@ impl BatchDefinition {
         )?;
         let mut out = Self {
             plan,
+            handoff: None,
             binding,
             journal_id,
             id: Digest32::from_bytes([0; 32]),
@@ -240,11 +245,23 @@ impl BatchDefinition {
         out.id = hash(b"dfmcp-furniture-batch-rust/1", &out.canonical_bytes());
         Ok(out)
     }
+    /// A source-bound allocation retains its original constraints and selected
+    /// evidence. The legacy constructor remains byte-for-byte DFMFBD01.
+    pub fn from_handoff(handoff: Handoff, binding: BuildBinding, journal_id: Digest32) -> Result<Self> {
+        handoff.validate_binding(&binding)?;
+        let mut out = Self::new(handoff.plan().clone(), binding, journal_id)?;
+        out.handoff = Some(handoff);
+        out.id = hash(b"dfmcp-furniture-batch-rust/2", &out.canonical_bytes());
+        Ok(out)
+    }
     pub fn plan(&self) -> &FurniturePlan {
         &self.plan
     }
     pub fn binding(&self) -> &BuildBinding {
         &self.binding
+    }
+    pub fn handoff(&self) -> Option<&Handoff> {
+        self.handoff.as_ref()
     }
     pub fn journal_id(&self) -> Digest32 {
         self.journal_id
@@ -257,12 +274,16 @@ impl BatchDefinition {
     }
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let binding = self.binding.encode();
-        let mut out = DEFINITION_MAGIC.to_vec();
+        let mut out = if self.handoff.is_some() { HANDOFF_DEFINITION_MAGIC } else { DEFINITION_MAGIC }.to_vec();
         for field in [self.plan.canonical_bytes(), binding.as_slice()] {
             out.extend_from_slice(&(field.len() as u32).to_be_bytes());
             out.extend_from_slice(field);
         }
         out.extend_from_slice(self.journal_id.as_bytes());
+        if let Some(handoff) = &self.handoff {
+            out.extend_from_slice(&(handoff.canonical_bytes().len() as u32).to_be_bytes());
+            out.extend_from_slice(handoff.canonical_bytes());
+        }
         out
     }
     pub fn decode(raw: &[u8]) -> Result<Self> {
@@ -271,8 +292,9 @@ impl BatchDefinition {
             "furniture batch definition exceeds bound",
         )?;
         let mut reader = Bytes(raw);
+        let magic = reader.take(8)?;
         require(
-            reader.take(8)? == DEFINITION_MAGIC,
+            magic == DEFINITION_MAGIC || magic == HANDOFF_DEFINITION_MAGIC,
             "invalid furniture batch definition",
         )?;
         let plan = FurniturePlan::decode(reader.field(MAX_PLAN_BYTES)?)?;
@@ -283,11 +305,17 @@ impl BatchDefinition {
                 .try_into()
                 .map_err(|_| invalid("invalid batch journal identity"))?,
         );
+        let handoff = if magic == HANDOFF_DEFINITION_MAGIC {
+            Some(Handoff::decode(reader.field(MAX_HANDOFF_BYTES)?)?)
+        } else { None };
         require(
             reader.0.is_empty(),
             "trailing furniture batch definition bytes",
         )?;
-        let out = Self::new(plan, binding, journal_id)?;
+        let out = if let Some(handoff) = handoff {
+            require(handoff.plan() == &plan, "batch plan differs from original allocation")?;
+            Self::from_handoff(handoff, binding, journal_id)?
+        } else { Self::new(plan, binding, journal_id)? };
         require(
             out.canonical_bytes() == raw,
             "noncanonical furniture batch definition",
@@ -405,6 +433,11 @@ impl BatchDefinition {
             return Err(corrupt(
                 "furniture child source or exact selection differs from original batch",
             ));
+        }
+        if let Some(handoff) = &self.handoff {
+            handoff.validate_capture(&self.binding, capture).map_err(|_| corrupt(
+                "furniture child violates original allocation source or constraints",
+            ))?;
         }
         if let Some(prior) = last_after {
             if capture.tick() < prior.tick()

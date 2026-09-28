@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Source-bound inventory allocation through placement: Rust source present
+
+The new `furniture_handoff` adapter derives an exact 1..32-item furniture plan
+from one complete operations/1.4 capture and the existing global allocator.
+A closed Python-compatible request retains material, subtype, same-level
+distance, excluded items and dependency constraints. Shortages produce no
+partial executable assignment.
+
+An immutable handoff seals the normalized request, original source/capture
+digests, endpoint, software, ID horizons and selected-item evidence. New
+`DFMFBD02` batch definitions retain it; legacy `DFMFBD01` bytes and native
+placement journals are unchanged. Every fresh selection and retained child
+audit checks the original item attributes and request constraints. Independent
+operations and furniture generations remain separate.
+
+The trusted read path binds only operations/1.4 Handshake/ReadObservation,
+requires complete paging, strict decoding and verified release, and preserves
+the original source clock under one foreground authority and budget.
+
+**33 new Rust test groups are implemented but uncompiled and unexecuted.**
+Independent Python request and fixture checks ran before the execution outage;
+they do not establish the Rust feature's behavior. Four further MCP build
+attempts on 2026-09-28 were killed in the pinned Asupersync dependency. The
+executor then became disconnected (409 environment_offline), preventing the
+planned adapter-only build and required final verification commands.
+
+The reviewed source was reconstructed from successful patch context and
+preserved directly through GitHub after the outage. Final formatting and
+byte-for-byte comparison with the inaccessible local files remain pending.
+The earlier 123 completion adapter passes are historical evidence and do not
+qualify these changed adapter files. See `docs/FURNITURE_HANDOFF_RUST.md`
+and `architecture/furniture_handoff_v1.json`.
+
 ### Whole-original-plan completion MCP integration: source present, build blocked
 
 The furniture development server source now connects the tested Rust completion

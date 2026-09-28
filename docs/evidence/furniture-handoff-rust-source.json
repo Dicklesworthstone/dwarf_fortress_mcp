@@ -1,0 +1,87 @@
+{
+  "schema": "dfmcp.furniture-handoff-source-evidence/1",
+  "status": "source_present_reconstructed_after_executor_outage_uncompiled",
+  "source_parent": "72d058dbb42e2795353e697ead90452e4d41d00f",
+  "source_objects": [
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_batch.rs",
+      "git_blob_sha1": "9bbae3d78b5e66397f2e8a63d58a14156a0d2e68"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff.rs",
+      "git_blob_sha1": "3a484a331dbb1727a4248c302b7d0af21fb05150"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/wire.rs",
+      "git_blob_sha1": "864f4915e53ab216d3b0b29d2c5df0b808dca93a"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/tests.rs",
+      "git_blob_sha1": "b4379b86f92e621fc903e9f77ccd015a5c3ba87f"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/request.rs",
+      "git_blob_sha1": "0437bacdc67842c8aa04d19deabd00dbf4788975"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/request_tests.rs",
+      "git_blob_sha1": "e4821a77f140db27c5960807420d6e7d00ac1a04"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/rpc.rs",
+      "git_blob_sha1": "901aad68986ccd9622a67525e3a6b2c2143fe37c"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/furniture_handoff/rpc_tests.rs",
+      "git_blob_sha1": "39f5a49768993e7a1e7a9943442d49052b022924"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
+      "git_blob_sha1": "9c5660387f545aa378b3367a616ca3450a19ae9a"
+    },
+    {
+      "path": "crates/dfmcp-adapter/src/lib.rs",
+      "git_blob_sha1": "231695a95cf68afb27d39626a44da8cfe63ce865"
+    }
+  ],
+  "tests": {
+    "request_codec_groups": 13,
+    "handoff_model_groups": 11,
+    "joined_tcp_groups": 9,
+    "total_new_rust_groups": 33,
+    "compiled": false,
+    "executed": false
+  },
+  "validation_limits": [
+    "Original pre-outage files were statically reviewed; original Rust formatting checks ran before later final fixes.",
+    "Recovered GitHub blobs reconstruct successful patch semantics and final reviewed revision/budget fixes. They are not asserted byte-identical to inaccessible formatted local files.",
+    "No adapter-only Cargo build started before the executor disconnected.",
+    "Historical 123 completion adapter passes do not validate these changed adapter files.",
+    "No native, live-game, production, or full-workspace qualification is established."
+  ],
+  "environment": {
+    "compiler": "rustc 1.100.0-nightly (908501772 2026-08-30)",
+    "runtime_dependency": "asupersync 0.5.0",
+    "mcp_build_attempts": 4,
+    "mcp_command": "cargo test --offline --locked -p dfmcp-mcp --lib build_placement_server -- --test-threads=1",
+    "latest_attempt": {
+      "exit_code": 101,
+      "termination": "SIGKILL in dependency compiler before workspace compilation",
+      "elapsed_seconds": 156.552,
+      "maximum_child_rss_kib": 4354208,
+      "asupersync_only_additional_flags": [
+        "-Znext-solver=coherence",
+        "-Zpolonius=off"
+      ]
+    },
+    "subsequent_failure": "409 Conflict, environment_offline: Environment is not connected"
+  },
+  "next_required": [
+    "Reconcile reconstructed bytes with any recovered local checkout.",
+    "Format and compile with the pinned toolchain.",
+    "Execute furniture_handoff then furniture_batch, build_placement, construction_plan and paged-RPC regressions.",
+    "Run mandatory repository verification and local qualification."
+  ],
+  "native_wire_changed": false,
+  "registry_admitted": false
+}
