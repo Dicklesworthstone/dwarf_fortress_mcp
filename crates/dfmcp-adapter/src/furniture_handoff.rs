@@ -97,14 +97,29 @@ struct Work<'a> {
     started: Instant,
     maximum: u64,
     used: u64,
+    checked_at: u64,
+    check: &'a mut dyn FnMut() -> Result<()>,
 }
 impl Work<'_> {
+    fn checkpoint(&mut self) -> Result<()> {
+        self.context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        (self.check)()?;
+        if self.started.elapsed().as_millis() >= u128::from(self.context.budget.max_wall_millis) {
+            return Err(exhausted());
+        }
+        self.checked_at = self.used;
+        Ok(())
+    }
     fn charge(&mut self, count: u64) -> Result<()> {
         self.used = self.used.checked_add(count).ok_or_else(exhausted)?;
         if self.used > self.maximum || self.started.elapsed().as_millis() >= u128::from(self.context.budget.max_wall_millis) {
             return Err(exhausted());
         }
-        self.context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
+        self.context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        if self.used.saturating_sub(self.checked_at) >= 256 {
+            self.checkpoint()?;
+        }
+        Ok(())
     }
     fn remaining(&self) -> Result<OperationContext> {
         let elapsed = u64::try_from(self.started.elapsed().as_millis()).map_err(|_| exhausted())?;
@@ -124,9 +139,28 @@ impl Handoff {
         request: &FurnitureRequest,
         maximum_work: u64,
     ) -> Result<AllocationOutcome> {
+        Self::allocate_with_check(state, context, endpoint, request, maximum_work, &mut || Ok(()))
+    }
+
+    /// The effect-owning host supplies its live foreground cancellation check.
+    /// It remains active through source validation, inventory scanning, global
+    /// matching, shortage construction and immutable handoff assembly. It can
+    /// only narrow Query authority, never authorize placement or renew budgets.
+    /// Checks run at phase boundaries and at most every 256 charged work units;
+    /// bounded synchronous hashing/sorting is not a hard-preemption guarantee.
+    /// Any check failure discards the whole outcome without a partial handoff.
+    pub fn allocate_with_check(
+        state: &LiveOperationsState,
+        context: &OperationContext,
+        endpoint: SocketAddr,
+        request: &FurnitureRequest,
+        maximum_work: u64,
+        check: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<AllocationOutcome> {
         context.budget.validate()?;
         require(maximum_work > 0 && maximum_work <= furniture_supply::MAX_WORK, "invalid furniture handoff work ceiling")?;
-        let mut work = Work { context, started: Instant::now(), maximum: maximum_work, used: 0 };
+        let mut work = Work { context, started: Instant::now(), maximum: maximum_work, used: 0, checked_at: 0, check };
+        work.checkpoint()?;
         work.charge(1)?;
         if context.budget.max_bytes < ALLOCATION_BYTE_RESERVE {
             return Err(exhausted());
@@ -135,11 +169,13 @@ impl Handoff {
         require(endpoint.is_ipv4() && endpoint.ip().is_loopback() && endpoint.port() != 0, "furniture handoff requires IPv4 loopback")?;
         let observed = state.observation().ok_or_else(|| invalid("no published furniture inventory"))?;
         let snapshot = state.snapshot().ok_or_else(|| invalid("no published furniture source anchor"))?;
-        require(snapshot.anchor() == context.anchor && snapshot.hash_is_valid(), "furniture handoff names another published anchor")?;
-        require(observed.jobs.world_folder == request.folder() && i64::from(observed.jobs.site_id) == i64::from(request.site()), "furniture request source differs")?;
+        // Reject an insufficient entity allowance before hashing the full graph.
         if snapshot.graph.entities.len() > context.budget.max_entities as usize {
             return Err(exhausted());
         }
+        require(snapshot.anchor() == context.anchor && snapshot.hash_is_valid(), "furniture handoff names another published anchor")?;
+        require(observed.jobs.world_folder == request.folder() && i64::from(observed.jobs.site_id) == i64::from(request.site()), "furniture request source differs")?;
+        work.checkpoint()?;
         // Reject enum aliasing anywhere in the full roster, including irrelevant
         // items. A selected semantic key must have one observed native type.
         let mut types = BTreeMap::new();
@@ -154,11 +190,18 @@ impl Handoff {
         }
         // The profile's complete byte ceiling was reserved before encoding.
         // Existing strict codec bounds this temporary payload at 16 MiB.
+        work.checkpoint()?;
         let capture = observed.encode_profile(OperationsProfile::PagedV1_4)?;
         work.charge(capture.len().div_ceil(64 * 1024) as u64)?;
+        work.checkpoint()?;
         let remaining = work.maximum.checked_sub(work.used).filter(|n| *n > 0).ok_or_else(exhausted)?;
-        let mut report = furniture_supply::plan(state, &work.remaining()?, request.folder(), request.site(), request.request(), remaining)?;
+        let analysis_context = work.remaining()?;
+        let mut report = furniture_supply::plan_with_check(
+            state, &analysis_context, request.folder(), request.site(), request.request(), remaining,
+            &mut || work.checkpoint(),
+        )?;
         work.charge(report.work_units)?;
+        work.checkpoint()?;
         let handoff = if report.allocation.shortage.is_some() {
             require(report.allocation.assignments.is_empty(), "shortage exposed a partial furniture assignment")?;
             None
@@ -184,9 +227,11 @@ impl Handoff {
                 let native_type = u32::try_from(observed.items[index].item_type).map_err(|_| invalid("invalid selected native furniture type"))?;
                 items.push(SelectedItem { slot: assignment.slot.clone(), candidate: selected.candidate, native_type, handle: selected.handle, distance: assignment.distance });
             }
+            work.checkpoint()?;
             Some(Self::assemble(request.clone(), source, items)?)
         };
         work.charge(1)?;
+        work.checkpoint()?;
         report.work_units = work.used;
         Ok(AllocationOutcome { report, handoff })
     }
@@ -273,3 +318,6 @@ impl Handoff {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod check_tests;
