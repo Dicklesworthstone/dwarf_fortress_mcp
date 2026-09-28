@@ -49,5 +49,29 @@
   "production_runner_protocols": [
     "1.0"
   ],
-  "evidence_status": "source_present_reconstructed_after_executor_outage_uncompiled"
+  "evidence_status": "source_present_reconstructed_after_executor_outage_uncompiled",
+  "mcp": {
+    "tool_count": 11,
+    "open_session_input": "furniture_request",
+    "mutually_exclusive_inputs": [
+      "furniture_request",
+      "furniture_plan",
+      "selection"
+    ],
+    "query_mode": "allocation",
+    "query_views": [
+      "request",
+      "items"
+    ],
+    "query_default_view": "request",
+    "shortage": {
+      "session_opened": false,
+      "partial_batch_created": false,
+      "native_placement_dispatched": false
+    },
+    "reopen_requires_intent_inputs_omitted": true,
+    "retained_allocation_clock_initializes_lease": true,
+    "monitor_only_recovery_original_custody_verified": false,
+    "rust_execution_status": "not_executed"
+  }
 }

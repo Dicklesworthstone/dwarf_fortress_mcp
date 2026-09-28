@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Requested furniture slots through MCP: source present, execution blocked
+
+The furniture server now accepts `open_session(furniture_request=...)` as an
+alternative to manually chosen item IDs. It validates the entire request and
+operator target scope before native contact, acquires one paged operations/1.4
+inventory, and creates an exact allocation-backed batch only when all slots can
+be assigned. A complete shortage returns without opening a session or creating
+placement custody. Explicit plan and single-selection paths remain available.
+
+The closed `allocation` query exposes original request or item evidence, and
+every normal batch handoff retains a compact allocation identity. Fresh
+observe/prepare/commit checks enforce the original constraints. Reopening never
+reallocates; the retained source tick initializes the new lease before the
+first child exists, fixing late-game empty-batch restart. Operator Plan
+revocation is rechecked before new custody and final publication. Shortage and
+monitor recovery disclosures also recheck authority after serialization.
+
+**Nine new MCP process methods are present but have not executed.** Independent
+Python syntax/import and native-peer fixture checks ran, including the global
+scarcity assignment, distinct protocol generations, and a 95,618-byte,
+2,032-candidate capture producing 32 exact items. These are fixture checks,
+not Rust behavior evidence. New code was reconstructed from reviewed successful
+patch context after the executor disconnected; final formatting, byte
+comparison, compilation and process tests remain outstanding.
+
+The prior completion MCP integration's 13 process methods also remain
+unexecuted. Four further attempts on 2026-09-28 died inside Asupersync before
+workspace compilation; the final attempt still failed after compiler-only
+trait-solver and borrow-checker memory reductions. The subsequent backend error
+was `409 environment_offline`. There is no new devserver executable or full
+qualification claim. See `docs/FURNITURE_HANDOFF_MCP.md` and
+`docs/evidence/furniture-handoff-mcp-source.json`.
+
 ### Source-bound inventory allocation through placement: Rust source present
 
 The new `furniture_handoff` adapter derives an exact 1..32-item furniture plan

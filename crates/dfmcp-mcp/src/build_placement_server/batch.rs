@@ -99,7 +99,7 @@ pub(super) fn display(parent: &Parent, view: Option<&BuildInventory>, verified: 
     // bytes, never the parser that accepts a client's complete-plan intent.
     let plan: Value =
         serde_json::from_slice(definition.plan().canonical_bytes()).unwrap_or(Value::Null);
-    json!({"schema":"dfmcp.furniture-batch-mcp/1","batch_id":definition.id().to_string(),
+    let mut result = json!({"schema":"dfmcp.furniture-batch-mcp/1","batch_id":definition.id().to_string(),
         "plan_digest":definition.plan().digest().to_string(),"plan":plan,
         "journal_id":definition.journal_id().to_string(),"head":view.map(|v|v.head.to_string()),
         "inventory_verified":verified,"historical_evidence_only":true,
@@ -109,7 +109,11 @@ pub(super) fn display(parent: &Parent, view: Option<&BuildInventory>, verified: 
         "pending_step":progress.as_ref().and_then(|p|p.pending_step.as_deref()),
         "steps":rows,"next":next,"atomic":false,"construction_completion_proven":false,
         "retry_permitted":false,"max_native_commit_calls_per_request":1,
-        "fresh_observation_and_review_per_step":true,"reopening_restores_dispatch_permission":false})
+        "fresh_observation_and_review_per_step":true,"reopening_restores_dispatch_permission":false});
+    if let Some(handoff) = definition.handoff() {
+        result["allocation"] = super::allocation::summary(handoff);
+    }
+    result
 }
 
 pub(super) fn matches(definition: &BatchDefinition, binding: &BuildBinding) -> Result<()> {

@@ -1,0 +1,53 @@
+{
+  "schema": "dfmcp.unexecuted-process-suite-fixture-checkpoint/1",
+  "date": "2026-09-28",
+  "repository": "Dicklesworthstone/dwarf_fortress_mcp",
+  "source_path": "scripts/test_furniture_handoff_mcp.py",
+  "source_blob": "e4d654a087cc5eba367a5e09dd37331a6a8b8419",
+  "source_bytes": 28015,
+  "test_methods": 9,
+  "reconstruction": "Successful full Add File patch plus the two successful subsequent patches; no executor byte comparison after the backend outage. The later strengthening patch failed before reading and is excluded.",
+  "rust_executable_received": false,
+  "rust_process_tests_executed": 0,
+  "rust_feature_pass_claim": false,
+  "dfhack_sdk_or_live_game_execution": false,
+  "production_admission": false,
+  "executed_checks": [
+    {
+      "kind": "python_ast",
+      "result": "passed",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nimport ast\nfrom pathlib import Path\np=Path('scripts/test_furniture_handoff_mcp.py')\na=ast.parse(p.read_text())\nprint('test_methods',sum(isinstance(n,ast.FunctionDef) and n.name.startswith('test_') for n in ast.walk(a)))\nPY",
+      "stdout": "test_methods 9\n"
+    },
+    {
+      "kind": "python_import_and_small_fixture",
+      "result": "passed",
+      "scope": "Independent fixture only; not the Rust executable",
+      "stdout": "test_methods 8\nassignment [{'slot': 'a', 'item': 43, 'kind': 'bed', 'position': [20, 10, 2], 'material': [3, -1], 'subtype': -1, 'distance': 10}, {'slot': 'b', 'item': 42, 'kind': 'bed', 'position': [10, 10, 2], 'material': [7, 8], 'subtype': -1, 'distance': 1}]\npayload_length 166\ncapture 43 (20, 10, 2) 3 -1 101\ncapture 42 (10, 10, 2) 7 8 101\n"
+    },
+    {
+      "kind": "joined_tcp_fixture",
+      "result": "passed",
+      "scope": "Manual native framing to the Python peer only; not the Rust executable",
+      "checks": [
+        "Same listener served operations Handshake/ReadObservation/full capture digest/release and a separate build Handshake",
+        "Operations generation 987; furniture generation 7",
+        "Independent Python projection matched both expected exact chosen items"
+      ],
+      "stdout": "joined_profile_fixture_passed 2 1 1\n"
+    },
+    {
+      "kind": "wide_independent_projection",
+      "result": "passed",
+      "scope": "Independent fixture only; not the Rust executable",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'\nimport sys\nsys.path.insert(0,'scripts')\nimport test_furniture_handoff_mcp as t\nfrom furniture_inventory import project\nplan=t.batch_mcp.exact_plan(32,wide=True)\nrequest=t.request(tuple(t.model.Slot(s.name,s.kind,s.target,s.after,max_distance=0) for s in plan.steps))\nitems=tuple(t.model.Candidate(s.item,s.kind,s.target,(3,-1),-1) for s in plan.steps)\nitems+=tuple(t.model.Candidate(n,'bed',(200,200,0),(3,-1),-1) for n in range(1,2001))\nwith t.NativePeer(request,items) as peer:\n assert peer.plan==plan\n raw=peer.allocation_payload(); out=project(request,raw,lambda:None)\n assert out['plan']==plan.json()\n assert len(out['assignments'])==32 and out['candidate_count']==2032\n print('wide_handoff_fixture',len(raw),'bytes',len(out['assignments']),'assignments',out['candidate_count'],'candidates')\nPY",
+      "stdout": "wide_handoff_fixture 95618 bytes 32 assignments 2032 candidates\n"
+    }
+  ],
+  "outstanding": [
+    "Run all 13 existing completion process methods against the exact compiled development server",
+    "Run all 9 new handoff process methods against the same feature-capable executable",
+    "Run existing batch and single-placement process regressions",
+    "Compare reconstructed source blob byte-for-byte with saved local file when executor returns"
+  ]
+}

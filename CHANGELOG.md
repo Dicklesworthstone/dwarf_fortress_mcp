@@ -24,6 +24,15 @@ readiness.
 
 ### Added
 
+- Inventory-driven furnishing through the existing MCP open/query/observe/plan/
+  commit workflow. Requested slots allocate from one complete operations/1.4
+  capture and retain the original constraints and chosen items through restart
+  and completion monitoring. Shortage creates no partial batch. Empty-child
+  restart now initializes its lease from the retained allocation clock, and
+  new custody rechecks current Plan opt-in. Nine process test methods are
+  implemented; execution remains blocked by dependency memory failures and
+  an offline executor. See `docs/FURNITURE_HANDOFF_MCP.md`.
+
 - Source-bound furniture allocation handoffs in Rust. Complete operations/1.4
   inventory now feeds an immutable exact batch retaining request constraints,
   selected-item evidence and the original source. Fresh placement captures and

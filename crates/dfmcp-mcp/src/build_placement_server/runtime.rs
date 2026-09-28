@@ -522,6 +522,45 @@ pub(super) fn completion_sample(
         permission,
     )
 }
+/// Acquire supply evidence on the same joined foreground request owner. This
+/// connection binds operations/1.4 only; build/1.19 is checked independently
+/// after the allocator has selected a complete immutable set of items.
+pub(super) fn furniture_supply(
+    config: &Config,
+    c: &OperationContext,
+) -> Result<dfmcp_adapter::live_operations::LiveOperationsState> {
+    current_request_check()?;
+    if &configuration()? != config || config.mode != BuildMode::Control || config.completion_only {
+        return Err(denied());
+    }
+    let token = required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.into_bytes();
+    if token.len() < 32 {
+        return Err(denied());
+    }
+    let pinned_token = token.clone();
+    let pinned_config = config.clone();
+    let permission = Box::new(move || {
+        current_request_check()?;
+        if configuration()? != pinned_config
+            || required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.as_bytes() != pinned_token
+        {
+            return Err(denied());
+        }
+        Ok(())
+    });
+    let mut nonce = [0; 32];
+    nonce[..16].copy_from_slice(&c.session_id.get().to_be_bytes());
+    nonce[16..].copy_from_slice(&c.request_id.get().to_be_bytes());
+    dfmcp_adapter::furniture_handoff::rpc::acquire_trusted(
+        config.endpoint,
+        &config.fortress,
+        token,
+        nonce,
+        c,
+        BuildCancellation::with_check(Arc::new(current_request_check)),
+        permission,
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;

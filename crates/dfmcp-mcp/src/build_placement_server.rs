@@ -9,6 +9,7 @@ use dfmcp_adapter::build_placement::{BuildBinding, BuildKind, BuildPlan, BuildSe
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
 use dfmcp_adapter::furniture_batch::store::open_private_batch;
 use dfmcp_adapter::furniture_batch::{BatchDefinition, FurniturePlan};
+use dfmcp_adapter::furniture_handoff::{FurnitureRequest, Handoff};
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, ErrorCode, GameTick, LeaseManager,
     ObservationCursor, OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor,
@@ -23,6 +24,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
+mod allocation;
 mod batch;
 mod completion;
 mod policy;
@@ -435,6 +437,10 @@ enum Query {
     },
     Schema {},
     Batch {},
+    Allocation {
+        #[serde(default)]
+        view: allocation::View,
+    },
     Completion {},
     CompletionStart {
         deadline: u64,
@@ -498,6 +504,7 @@ impl Query {
             }
             Self::Schema {}
             | Self::Batch {}
+            | Self::Allocation { .. }
             | Self::Completion {}
             | Self::CompletionStart { .. } => {}
         }
@@ -528,6 +535,7 @@ fn schema() -> Value {
     json!({"schema":"dfmcp.build-placement-mcp-query/1","max_bytes":2048,"closed":true,
     "modes":{"records":{"limit":"optional integer 1..8","offset":"optional integer 0..256; head required when nonzero","head":"optional lowercase SHA-256 exact journal head"},
         "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"completion":{},
+        "allocation":{"view":"optional request (default) or items; retained original evidence only"},
         "completion_start":{"deadline":"required absolute game tick","interval":"optional 1..403200; default 1","stable_samples":"optional 2..64; default 2","stable_span":"optional 1..4032000; default 1","max_gap":"optional interval..4032000; default 1200","max_observations":"optional stable_samples..512; default 512"},"schema":{}},
     "native_calls":0,"null_fields_allowed":false,"duplicate_fields_allowed":false})
 }
@@ -889,6 +897,21 @@ where
             state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
             Ok(json!({"ok":true,"native_calls":0}))
         }
+        Action::Query(Query::Allocation { view }) => {
+            state.verify_batch(&work.take(c, batch::GUARD_BYTES)?, before)?;
+            let handoff = state
+                .batch
+                .as_ref()
+                .and_then(|p| p.definition().handoff())
+                .ok_or_else(|| {
+                    error(ErrorCode::InvalidRequest, "this batch has no allocation origin")
+                })?;
+            Ok(json!({
+                "ok":true,
+                "allocation":allocation::display(handoff, view)?,
+                "native_calls":0
+            }))
+        }
         Action::StopBatch => {
             state.abandon();
             let parent = state.batch.as_mut().ok_or_else(|| {
@@ -1047,6 +1070,9 @@ where
     } else {
         false
     };
+    if let Some(allocation) = result.get_mut("allocation") {
+        allocation["inventory_verified"] = json!(batch_verified);
+    }
     if state.completion.is_some() {
         let checked = verified
             .as_ref()
@@ -1208,7 +1234,7 @@ async fn with_session(
 
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated furniture/1.19 custody. Single control uses selection JSON [kind,item_id,x,y,z]. Batch control imports furniture_plan as complete dfmcp.furniture-plan/1 JSON with the operator's batch path configured; omit selection. Reopen a retained batch, recovery or offline journal without selection or plan and without native bootstrap. No client paths or policies. Opening never prepares or places furniture."
+    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without any intent input or native bootstrap. No client paths or policies. Opening never prepares or places furniture."
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,
@@ -1216,14 +1242,26 @@ pub async fn fortress_open_session(
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
     furniture_plan: Option<String>,
+    furniture_request: Option<String>,
 ) -> String {
     runtime::owned("fortress.open_session", move |control| {
         let result = (|| {
             let config = runtime::configuration()?;
             runtime::boundary(&control, &config, false)?;
             // Parse and bound complete intent before native contact or storage.
-            let plan = furniture_plan.as_deref().map(|s|FurniturePlan::decode(s.as_bytes())).transpose()?;
-            let selected = if let Some(plan) = &plan {
+            if usize::from(selection.is_some()) + usize::from(furniture_plan.is_some()) + usize::from(furniture_request.is_some()) > 1 {
+                return Err(error(ErrorCode::InvalidRequest, "furniture intent inputs are mutually exclusive"));
+            }
+            let mut plan = furniture_plan.as_deref().map(|s|FurniturePlan::decode(s.as_bytes())).transpose()?;
+            let requested = furniture_request.as_deref().map(|s|FurnitureRequest::decode(s.as_bytes())).transpose()?;
+            let importing = plan.is_some() || requested.is_some();
+            if let Some(requested) = &requested {
+                if config.batch_path.is_none() || config.mode != BuildMode::Control || config.completion_only {
+                    return Err(error(ErrorCode::InvalidRequest, "furniture request requires new Control batch custody"));
+                }
+                allocation::validate_request(requested, &config)?;
+            }
+            let mut selected = if let Some(plan) = &plan {
                 if config.batch_path.is_none() || config.mode != BuildMode::Control || selection.is_some() {
                     return Err(error(ErrorCode::InvalidRequest, "complete plan requires configured Control batch custody and no selection"));
                 }
@@ -1257,14 +1295,14 @@ pub async fn fortress_open_session(
             let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
             let mut work = Work::new(&c,control.started)?;
             if config.completion_only {
-                if selection.is_some() || plan.is_some() {
+                if selection.is_some() || plan.is_some() || requested.is_some() {
                     return Err(error(ErrorCode::InvalidRequest, "completion recovery reopens only its retained original monitor"));
                 }
                 let (state, output) = completion::open_recovery(&config, &control, &c, &mut work)?;
                 *locked = Some(Entry::Completion { state, config });
                 return Ok(output);
             }
-            if plan.is_some() {
+            if importing {
                 c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
                 c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
                 // Import only creates a missing parent. Reopening derives all
@@ -1281,6 +1319,39 @@ pub async fn fortress_open_session(
                     work.current(&c)?;
                 }
             }
+            let mut handoff = None;
+            if let Some(requested) = &requested {
+                let observed = runtime::furniture_supply(&config, &work.take(&c, 20 * 1024 * 1024)?)?;
+                runtime::boundary(&control, &config, false)?;
+                let anchor = observed.snapshot().ok_or_else(|| error(ErrorCode::AdapterRejected,
+                    "furniture supply lacks a complete operations snapshot"))?.anchor();
+                c.anchor.tick = GameTick(c.anchor.tick.get().max(anchor.tick.get()));
+                c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+                c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+                let mut analysis_context = work.take(&c, 256 * 1024 * 1024)?;
+                analysis_context.anchor = anchor;
+                let outcome = Handoff::allocate(&observed, &analysis_context, config.endpoint,
+                    requested, dfmcp_adapter::furniture_supply::MAX_WORK)?;
+                work.current(&c)?;
+                runtime::boundary(&control, &config, false)?;
+                if outcome.handoff.is_none() {
+                    let result = json!({"ok":true,"status":"furniture_shortage","session_opened":false,
+                        "session_id":null,"allocation":allocation::shortage(&outcome, requested)?,
+                        "native_preparation_dispatched":false,"game_mutation_dispatched":false,
+                        "batch_created":false,"retry_commit_permitted":false});
+                    let output = packet("fortress.open_session",result,Some(&c),None,None,None,None,None,None);
+                    if output.len() as u64 > OUTPUT_BYTES { return Err(exhausted()); }
+                    work.current(&c)?.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+                    runtime::boundary(&control, &config, false)?;
+                    return Ok(output);
+                }
+                let allocated = outcome.handoff.ok_or_else(|| error(ErrorCode::InternalInvariantViolation,
+                    "complete furniture allocation lost its handoff"))?;
+                batch::reserve_output(allocated.plan())?;
+                selected = allocated.plan().ordered_steps().next().map(|step|step.selection);
+                plan = Some(allocated.plan().clone());
+                handoff = Some(allocated);
+            }
             let binding = if let Some(selection) = selected {
                 config.selection(selection)?;
                 let child = work.take(&c,SOURCE_BYTES)?;
@@ -1289,43 +1360,64 @@ pub async fn fortress_open_session(
                 if capture.fortress()!=&config.fortress || capture.selection()!=selection {
                     return Err(error(ErrorCode::StaleAnchor,"furniture bootstrap source differs from configuration"));
                 }
+                if let Some(handoff) = &handoff {
+                    handoff.validate_capture(source.binding(), capture)?;
+                }
                 c.anchor.tick = GameTick(capture.tick());
                 Some(source.binding().clone())
             } else { None };
-            runtime::boundary(&control,&config,false)?;
-            let source_reserve = if config.completion_path.is_some() {
+            runtime::boundary(&control,&config,importing)?;
+            let source_reserve = if config.completion_path.is_some() || handoff.is_some() {
                 completion::open_reserve(&config.path, 16 * 1024 * 1024)?
             } else { EFFECT_BYTES };
-            let journal = open_private_build(&config.path,&work.take(&c,source_reserve)?,config.mode,binding)?;
+            let mut journal = open_private_build(&config.path,&work.take(&c,source_reserve)?,config.mode,binding)?;
             config.matches(journal.binding())?;
-            let session = BuildSession::<_,BuildRpc>::new(journal,&work.view(&c)?)?;
-            let mut state = State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
-            state.budget = budget;
-            state.grants = c.grants.clone();
-            c = state.disclosure_context(&c)?;
-            let view = state.control.inventory(&work.view(&c)?)?;
+            c.anchor.tick = GameTick(c.anchor.tick.get().max(journal.high_tick()));
+            let mut retained_parent = None;
             if let Some(path) = &config.batch_path {
+                let view = journal.inventory(&work.take(&c,LOCAL_BYTES)?)?;
                 let expected = if let Some(plan) = plan {
                     if !view.entries().is_empty() {
                         return Err(error(ErrorCode::Conflict,"new batch requires an empty original journal; reopen retained work without a plan"));
                     }
-                    Some(BatchDefinition::new(plan,state.binding.clone(),view.journal_id)?)
+                    Some(if let Some(handoff) = handoff {
+                        BatchDefinition::from_handoff(handoff,journal.binding().clone(),view.journal_id)?
+                    } else {
+                        BatchDefinition::new(plan,journal.binding().clone(),view.journal_id)?
+                    })
                 } else { None };
-                let parent = open_private_batch(path,&work.take(&c,LOCAL_BYTES)?,config.mode,expected)?;
-                batch::matches(parent.definition(),&state.binding)?;
+                runtime::boundary(&control,&config,importing)?;
+                let mut parent = open_private_batch(path,&work.take(&c,LOCAL_BYTES)?,config.mode,expected)?;
+                batch::matches(parent.definition(),journal.binding())?;
                 batch::reserve_output(parent.definition().plan())?;
-                state.batch = Some(parent);
-                state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
+                batch::verify(&mut parent,&view,&work.take(&c,batch::GUARD_BYTES)?)?;
+                // An allocated batch may restart before its first child exists.
+                // Its retained source tick must initialize the new session and
+                // host lease, rather than creating an already-expired tick-zero
+                // lease or requiring another inventory capture/reallocation.
+                if let Some(handoff) = parent.definition().handoff() {
+                    c.anchor.tick = GameTick(c.anchor.tick.get().max(handoff.source().anchor.tick.get()));
+                    c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+                }
+                retained_parent = Some(parent);
             }
+            let session = BuildSession::<_,BuildRpc>::new(journal,&work.view(&c)?)?;
+            let mut state = State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
+            state.budget = budget;
+            state.grants = c.grants.clone();
+            state.batch = retained_parent;
+            c = state.disclosure_context(&c)?;
+            let view = state.control.inventory(&work.view(&c)?)?;
+            state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
             completion::reopen(&mut state, &config, &c, &mut work, &view)?;
-            let mut result = json!({"ok":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
+            let mut result = json!({"ok":true,"session_opened":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),"planning_observation_retained":false,
                 "native_preparation_dispatched":false,"game_mutation_dispatched":false});
             state.attach_batch(&mut result,Some(&view),true);
             let output = packet("fortress.open_session",result,Some(&c),Some(&state.binding),Some(&view),None,Some(&state.policy),None,None);
             if output.len() as u64>OUTPUT_BYTES { return Err(exhausted()); }
             work.current(&c)?;
-            runtime::boundary(&control,&config,false)?;
+            runtime::boundary(&control,&config,importing)?;
             *locked = Some(Entry::Placement{state,config});
             Ok(output)
         })();
@@ -1396,7 +1488,7 @@ pub async fn fortress_commit(
 }
 #[tool(
     name = "fortress.query",
-    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. Neither makes native calls or renews placement permission."
+    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. No native calls or renewed placement permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1607,7 +1699,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-build-placement-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, import a complete dfmcp.furniture-plan/1 JSON string through open_session, then inspect query mode batch and observe selection next. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits plan and selection and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration, not construction completion. No canonical world anchor or global controller fence. No arbitrary command, clock advancement, checkpoint or restore.").build();
+        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, use open_session furniture_request (dfmcp.furniture-request/1 JSON) to allocate all requested slots from one fresh operations/1.4 capture, or import an exact furniture_plan (dfmcp.furniture-plan/1 JSON). A shortage creates no session or partial batch. Inspect query mode batch and observe selection next. Query mode allocation with view request or items inspects the immutable original constraints and selection. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits all intent inputs, performs no reallocation, and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration. Once every original step is Placed, completion_start fixes a whole-plan goal, observe selection completion acquires one sample, and query completion or local cancel inspects or stops the monitor. No canonical world anchor or global controller fence. No arbitrary command, clock advancement, checkpoint or restore.").build();
     crate::run_modern_stdio(server);
 }
 #[cfg(test)]

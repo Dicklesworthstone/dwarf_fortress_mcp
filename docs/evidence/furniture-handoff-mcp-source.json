@@ -1,0 +1,83 @@
+{
+  "schema": "dfmcp.furniture-handoff-mcp-source-evidence/1",
+  "status": "source_present_reconstructed_after_executor_outage_uncompiled",
+  "adapter_commit": "57f14f8b109da60953f4c460a928f3eab9651bcc",
+  "source_objects": [
+    {
+      "path": "crates/dfmcp-mcp/src/build_placement_server.rs",
+      "git_blob_sha1": "628282da05c568e559425edcc15139e5f121e7e3"
+    },
+    {
+      "path": "crates/dfmcp-mcp/src/build_placement_server/allocation.rs",
+      "git_blob_sha1": "4fbe70bb9820deafdb7491a79d6ea4fa32081d06"
+    },
+    {
+      "path": "crates/dfmcp-mcp/src/build_placement_server/runtime.rs",
+      "git_blob_sha1": "be3238c44863dab76e776f0ed5cce6db84017610"
+    },
+    {
+      "path": "crates/dfmcp-mcp/src/build_placement_server/batch.rs",
+      "git_blob_sha1": "dec06ae8a2399f30eb185d5297c6260fd553286a"
+    },
+    {
+      "path": "crates/dfmcp-mcp/src/build_placement_server/completion.rs",
+      "git_blob_sha1": "45b06931d67b07c3c88ec2ae5531f5307752999a"
+    },
+    {
+      "path": "scripts/test_furniture_handoff_mcp.py",
+      "git_blob_sha1": "e4d654a087cc5eba367a5e09dd37331a6a8b8419"
+    }
+  ],
+  "reconstructed_mcp_blobs_fetch_back_equal": true,
+  "reconstruction_limits": "Sources were reconstructed from successful reviewed patches after the executor disconnected. They were fetched back from GitHub and compared to upload strings; they have not been compared to the inaccessible formatted local files or compiled.",
+  "functional_scope": [
+    "Mutually exclusive furniture_request startup with strict closed bounded request parsing.",
+    "Fresh complete authenticated operations capture and all-or-nothing global furniture allocation.",
+    "Original request/source/item constraints retained through exact batch execution.",
+    "Fresh capture checks before native preparation and original immutable batch identity in reviews.",
+    "Full shortage response without a session, partial batch, build bootstrap, preparation or placement.",
+    "Original request/items inspection through the existing query tool, including monitor-only historical recovery.",
+    "Empty child restart uses retained allocation tick before session/lease construction.",
+    "Current Plan opt-in required before new child/parent custody and final publication.",
+    "Shortage and monitor-recovery disclosure rechecks after serialization."
+  ],
+  "process_suite": {
+    "new_methods": 9,
+    "rust_process_methods_executed": 0,
+    "existing_completion_methods": 13,
+    "existing_completion_methods_executed_for_this_source": 0,
+    "existing_batch_and_single_placement_regressions_for_this_source": "not_executed"
+  },
+  "fixture_evidence": "docs/evidence/furniture-handoff-mcp-fixtures.json",
+  "build": {
+    "command": "cargo test --offline --locked -p dfmcp-mcp --lib build_placement_server -- --test-threads=1",
+    "compiler": "rustc 1.100.0-nightly (908501772 2026-08-30)",
+    "attempts_on_2026_09_28": 4,
+    "result": "All stopped by SIGKILL inside asupersync before workspace compilation",
+    "last_attempt": {
+      "elapsed_seconds": 156.552,
+      "maximum_child_rss_kib": 4354208,
+      "exit_code": 101,
+      "additional_dependency_only_flags": [
+        "-Znext-solver=coherence",
+        "-Zpolonius=off"
+      ]
+    },
+    "devserver_produced": false
+  },
+  "executor_failure": "409 Conflict, environment_offline: Environment is not connected",
+  "required_final_gates": {
+    "verify": "could_not_execute_after_executor_disconnected",
+    "qualify_local": "could_not_execute_after_executor_disconnected"
+  },
+  "pending": [
+    "Restore execution; reconcile and format published source.",
+    "Compile adapter and run all 33 new groups plus relevant regressions.",
+    "Compile MCP and run all 13 completion +9 handoff +9 batch +7 single-placement process methods.",
+    "Run required repository verification and local qualification."
+  ],
+  "native_wire_changed": false,
+  "dependencies_changed": false,
+  "live_game_tested": false,
+  "production_admitted": false
+}

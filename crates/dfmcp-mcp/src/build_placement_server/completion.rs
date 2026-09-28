@@ -92,14 +92,18 @@ fn recovery_batch(origin: &Origin) -> Value {
     }).collect::<Vec<_>>();
     let plan: Value =
         serde_json::from_slice(definition.plan().canonical_bytes()).unwrap_or(Value::Null);
-    json!({"schema":"dfmcp.furniture-batch-mcp/1","batch_id":definition.id().to_string(),
+    let mut result = json!({"schema":"dfmcp.furniture-batch-mcp/1","batch_id":definition.id().to_string(),
         "plan_digest":definition.plan().digest().to_string(),"plan":plan,
         "journal_id":definition.journal_id().to_string(),"head":origin.journal_head().to_string(),
         "inventory_verified":false,"historical_evidence_only":true,"status":"unverified",
         "historical_placed":rows.len(),"placed":null,"total":rows.len(),"steps":rows,
         "stopped":null,"advancement_fenced":true,"pending_step":null,"next":null,
         "atomic":false,"construction_completion_proven":false,"retry_permitted":false,
-        "reopening_restores_dispatch_permission":false})
+        "reopening_restores_dispatch_permission":false});
+    if let Some(handoff) = definition.handoff() {
+        result["allocation"] = allocation::summary(handoff);
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -217,12 +221,13 @@ pub(super) fn run_recovery(
     let result = (|| -> Result<String> {
         runtime::boundary(request, config, false)?;
         let mut work = Work::new(&c, request.started)?;
-        let cancel = match action? {
-            super::Action::Completion(Action::Cancel) => true,
+        let (cancel, allocation_view) = match action? {
+            super::Action::Completion(Action::Cancel) => (true, None),
+            super::Action::Query(Query::Allocation { view }) => (false, Some(view)),
             super::Action::Completion(Action::Inspect)
             | super::Action::Query(Query::Batch {})
             | super::Action::Query(Query::Schema {})
-            | super::Action::Inventory => false,
+            | super::Action::Inventory => (false, None),
             _ => {
                 return Err(error(
                     ErrorCode::CapabilityDenied,
@@ -261,7 +266,15 @@ pub(super) fn run_recovery(
             state
                 .store
                 .verify(&work.take(&c, state.store.byte_len() as u64 + 8192)?)?;
-            result["query_schema"] = schema();
+            if let Some(view) = allocation_view {
+                let handoff = state.store.definition().origin().definition().handoff()
+                    .ok_or_else(|| error(ErrorCode::InvalidRequest, "original batch has no allocation origin"))?;
+                result["allocation"] = allocation::display(handoff, view)?;
+                result["allocation"]["inventory_verified"] = json!(false);
+                result["allocation"]["monitor_copy_verified"] = json!(true);
+            } else {
+                result["query_schema"] = schema();
+            }
         }
         authorize(&work.current(&c)?, Some(state.store.progress()))?;
         runtime::boundary(request, config, false)?;
@@ -269,6 +282,8 @@ pub(super) fn run_recovery(
         if output.len() as u64 > OUTPUT_BYTES {
             return Err(exhausted());
         }
+        authorize(&work.current(&c)?, Some(state.store.progress()))?;
+        runtime::boundary(request, config, false)?;
         Ok(output)
     })();
     match result {

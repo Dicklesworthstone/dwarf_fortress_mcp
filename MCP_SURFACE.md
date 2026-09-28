@@ -145,6 +145,15 @@ it does not claim the full live profile content described by the target contract
 
 ## Tools
 
+The furniture development server also accepts a `furniture_request` JSON string
+as an alternative `open_session` input. One complete operations/1.4 inventory
+feeds an immutable exact batch preserving its original selection constraints
+and item evidence. Shortage creates no partial batch; reopening does not
+reallocate. Closed `query` mode `allocation` provides original `request` and
+`items` views. The existing per-step review and commit boundary remains
+required. This new source and its process tests await Rust execution after an
+executor outage; see `docs/FURNITURE_HANDOFF_MCP.md`.
+
 The isolated furniture/1.19 development server also uses these same eleven names
 for [complete furnishing batches](docs/FURNITURE_BATCH_MCP.md) and
 [whole-original-plan construction monitoring](docs/FURNITURE_COMPLETION_MCP.md).
