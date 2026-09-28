@@ -1,0 +1,49 @@
+{
+  "schema": "dfmcp.furniture-allocation-cancellation/1",
+  "beads": [
+    "df-cx-authority-budget-threading-lmu",
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
+  "additional_owner_check": {
+    "supply_api": "furniture_supply::plan_with_check",
+    "handoff_api": "furniture_handoff::Handoff::allocate_with_check",
+    "callback": "FnMut() -> Result<()>",
+    "scan_matching_work_quantum": 256,
+    "phase_boundary_checks": true,
+    "final_outcome_check": true,
+    "callback_time_in_shared_deadline": true,
+    "callback_errors_propagated": true,
+    "callback_grants_authority": false,
+    "partial_outcome_after_refusal": false,
+    "hard_preemption_guarantee": false
+  },
+  "mcp": {
+    "entry": "fortress.open_session(furniture_request)",
+    "owner": "runtime::RequestControl",
+    "callback": "runtime::boundary(control, config, true)",
+    "before_furniture_bootstrap": true,
+    "before_placement_custody_creation": true,
+    "existing_publication_checks_retained": true
+  },
+  "compatibility": {
+    "legacy_apis_preserved": true,
+    "canonical_bytes_changed": false,
+    "work_unit_accounting_changed": false,
+    "selection_objective_changed": false,
+    "native_wire_changed": false,
+    "journal_format_changed": false,
+    "dependencies_changed": false,
+    "mcp_tool_count": 11
+  },
+  "new_test_methods": {
+    "adapter_work_quantum": 3,
+    "adapter_pipeline": 6,
+    "mcp_runtime_owner": 2,
+    "compiled": false,
+    "executed": false
+  },
+  "evidence_status": "source_present_uncompiled_unexecuted",
+  "production_admitted": false
+}

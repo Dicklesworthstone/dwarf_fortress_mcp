@@ -36,7 +36,23 @@ This is cooperative interruption, not a real-time guarantee: bounded synchronous
 hashing, encoding and sorting cannot be preempted inside an individual primitive.
 No threads, tasks, timer, dependency, native RPC method or journal format is added.
 
-## Regression scope
+## MCP integration
+
+The actual `fortress.open_session(furniture_request=...)` path calls
+`Handoff::allocate_with_check` after verified inventory acquisition and before
+furniture bootstrap or creation of the placement journal/batch parent. Its
+callback invokes `runtime::boundary` with the original joined `RequestControl`,
+exact operator configuration and the existing write/Plan opt-in requirement.
+
+This preserves live checks for request abandonment, parent/worker cancellation,
+effective inherited I/O and spawn restrictions, ownership of the blocking pool,
+configuration identity and current operator opt-in throughout CPU-bound planning.
+The callback grants no placement authority. The existing checks before native
+bootstrap, durable custody, disclosure and final session publication remain.
+The eleven tool names, argument schemas, original recovery identities and
+one-attempt placement rule do not change.
+
+## Regression scope and evidence status
 
 Three work-allowance methods cover initial checks, the exact 256-unit boundary,
 revocation, exhausted ceilings, expired wall time and callback execution time.
@@ -46,9 +62,22 @@ complete global assignment and a material-starved request. They also check
 missing/expired Query authority, exact shared work ceilings and owner refusal
 before unpublished-source access.
 
-These nine Rust methods have not compiled or executed here. No Rust, MCP,
-native DFHack, live-game or full-repository qualification follows from this
-source increment. The earlier handoff and completion integration execution gaps
-remain open. Run the `furniture_handoff` and `furniture_supply` adapter filters,
-then existing placement/batch/construction regressions and the MCP process
-suites on the exact pinned toolchain before asserting runtime behavior.
+Two additional MCP Rust methods exercise the actual `runtime::owned` joined
+worker and `RequestControl::check` with complete and infeasible 512-item captures.
+They apply inherited capability restrictions at source entry, interior work and
+final publication checkpoints and require complete outcome refusal. These are
+runtime-owner unit tests, not native TCP, operator-environment or stdio process
+tests.
+
+**All eleven new Rust methods remain uncompiled and unexecuted here.** The
+editing container has no Rust toolchain, and local GitHub checkout failed because
+DNS resolution was unavailable. GitHub API source reads, object writes and ref
+updates succeeded. No new Rust, MCP process, native DFHack, live-game or
+full-repository qualification follows from this source increment. The earlier
+handoff and completion integration execution gaps remain open.
+
+Run the `furniture_handoff` and `furniture_supply` adapter filters, then existing
+placement/batch/construction regressions, `build_placement_server` MCP Rust tests,
+and the handoff/completion/batch/single-placement process suites on the exact
+pinned toolchain before asserting runtime behavior. The machine-readable scope
+is `architecture/furniture_allocation_cancellation_v1.json`.

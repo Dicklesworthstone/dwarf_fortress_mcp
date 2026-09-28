@@ -1330,8 +1330,12 @@ pub async fn fortress_open_session(
                 c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
                 let mut analysis_context = work.take(&c, 256 * 1024 * 1024)?;
                 analysis_context.anchor = anchor;
-                let outcome = Handoff::allocate(&observed, &analysis_context, config.endpoint,
-                    requested, dfmcp_adapter::furniture_supply::MAX_WORK)?;
+                // Native I/O has finished, but CPU-bound allocation still belongs
+                // to this joined request. Keep cancellation, inherited runtime
+                // restrictions and the operator's Plan opt-in live throughout it.
+                let outcome = Handoff::allocate_with_check(&observed, &analysis_context, config.endpoint,
+                    requested, dfmcp_adapter::furniture_supply::MAX_WORK,
+                    &mut || runtime::boundary(&control, &config, true))?;
                 work.current(&c)?;
                 runtime::boundary(&control, &config, false)?;
                 if outcome.handoff.is_none() {
@@ -1704,3 +1708,6 @@ pub fn run_stdio() {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod allocation_owner_tests;
