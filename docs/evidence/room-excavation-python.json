@@ -1,0 +1,113 @@
+{
+  "schema": "dfmcp.room-excavation-python-evidence/1",
+  "executed_on": "2026-10-05",
+  "base_commit": "1d6eee258feb8f8acd4c02c8b8b7b0a8c1a326db",
+  "session_start_commit": "42c49bdd9319753d37dd75030892c657a6249fdc",
+  "python_version": "3.13.5",
+  "methods_passed": 35,
+  "skipped": 0,
+  "final_runs": [
+    {
+      "selection": "test_room_excavation_handoff",
+      "methods": 17,
+      "elapsed_seconds": 5.383,
+      "exit_code": 0
+    },
+    {
+      "selection": "RoomDigTests except test_32_slot_plan_and_all_native_steps_preserve_every_exclusion",
+      "methods": 17,
+      "elapsed_seconds": 18.874,
+      "exit_code": 0
+    },
+    {
+      "selection": "test_room_dig_batch.RoomDigTests.test_32_slot_plan_and_all_native_steps_preserve_every_exclusion",
+      "methods": 1,
+      "elapsed_seconds": 22.694,
+      "exit_code": 0
+    }
+  ],
+  "reproduction": "PYTHONPATH=scripts:tests python3 -m unittest test_room_excavation_handoff test_room_dig_batch -v",
+  "invocation_limit_note": "Combined invocation exceeded executor time limit; final groups completed separately after restoring original sources.",
+  "source_sha256": {
+    "scripts/dig_blueprint_client.py": "cf1557d542d8226a0e341dd9acdb054508a97a8c97f5edd5d3ee543668025a9b",
+    "scripts/room_excavation_handoff.py": "4d369bd7b2d9bdc3b6f556e5f80476e8e3a3c266ab6cd09419cf87fc5acf1961",
+    "tests/room_dig_peer.py": "ee0b66239b7e5adce3a3605d59f70eafb83403230750588c086ac624b920aad4",
+    "tests/test_room_dig_batch.py": "3c8109c60e5c88961910731c04f83816a3174272d4d4c4689e66cf9449d2874a",
+    "tests/check_room_dig_legacy.py": "b58247f7110878e80574278aef8fe4472e26b77f0f0a7f929f32f81f0f6a69d7",
+    "scripts/survey_rooms.py": "0d9a6bd9aa3a166edfc5394a9836fd6ac97e40e83edf5d38295700e157bdcf75",
+    "tests/test_room_excavation_handoff.py": "f973b325e024dd9a7e7727b1df07aee18b20cc0fe291f4c372d8f4a1f83d7e1a"
+  },
+  "source_git_blobs": {
+    "scripts/dig_blueprint_client.py": "d9e49c0c740fd055493e1a4941b637787851efa5",
+    "scripts/room_excavation_handoff.py": "debe8025f437de595bfff5c3f78ca97709069023",
+    "tests/room_dig_peer.py": "ebbc0d942cf35e3395d0c1fa993ae3d4941ec611",
+    "tests/test_room_dig_batch.py": "40e4ed02d1272959e6ce03bc506495a9316aeeb0",
+    "tests/check_room_dig_legacy.py": "0ed73066f2bf24a7a622df696104f7a0eb2c0cbd",
+    "scripts/survey_rooms.py": "24e65b3f0405f7870eec8823e62d92f9a75a981c",
+    "tests/test_room_excavation_handoff.py": "294d91f70f4bbce92d2d8765d1afe8c2e131c85a"
+  },
+  "unchanged_dependency_git_blobs": {
+    "scripts/furniture_plan.py": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+    "scripts/furniture_allocation.py": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+    "scripts/room_provisioning.py": "1a486bd993bc19c6d6f19d9999eac5d1682ac1b9",
+    "scripts/excavation_observer.py": "95a8f485afa76baced77edac0702ddb891b945cb",
+    "scripts/room_terrain.py": "d6f0222f71a6c9b6be1e2c0714ec499f0b9c0286",
+    "scripts/dig_designation_client.py": "0f26e5cd6af55c64537f69a4aee0610bb8dc9edc",
+    "scripts/dig_designation_store.py": "e82497d39842f294f77e9e576647f19d2a1d594c",
+    "scripts/dig_blueprint.py": "eb16a43e3df6f6453fdadfe5386ec7faf3b80315",
+    "tests/room_terrain_fixtures.py": "abb825694c4b5b417765f2f488dc743f3f3c68c6",
+    "tests/room_terrain_peer.py": "884c559a4dafe68bb9b0f9fd88d4c9c4b44c559d"
+  },
+  "legacy_compatibility": {
+    "command": "PYTHONPATH=scripts:tests python3 tests/check_room_dig_legacy.py reference.py",
+    "reference_blob": "30d4d71759f237a6a1d75f223e56b58fa80a17f1",
+    "byte_identical_results": 22,
+    "native_fixture_steps": 7,
+    "passed": true
+  },
+  "mutation_checks": [
+    {
+      "mutation": "survey_source_binding_removed",
+      "exit_code": 1,
+      "assertion_rejected": true
+    },
+    {
+      "mutation": "room_intent_removed_from_batch_identity",
+      "exit_code": 1,
+      "assertion_rejected": true
+    },
+    {
+      "mutation": "final_authority_checks_removed",
+      "exit_code": 1,
+      "assertion_rejected": true
+    }
+  ],
+  "large_fixture": {
+    "furniture_slots": 32,
+    "excluded_items": 646,
+    "original_floor_tiles": 158,
+    "already_dug_tiles": 1,
+    "remaining_tiles": 157,
+    "native_designation_steps_executed": 30,
+    "all_targets_exact": true,
+    "capture_bytes": 25810,
+    "room_plan_bytes": 24800,
+    "handoff_bytes_at_fixed_measurement_endpoint_127_0_0_1_5000": 78327
+  },
+  "log": {
+    "path": "docs/evidence/room-excavation-tests.txt",
+    "sha256": "955f109cc97036c9c43642b5e294848850ee2d04c1f7437dc3d29f8771d28283"
+  },
+  "execution_scope": "Actual Python map/dig clients, strict codecs, private journals and CLI subprocesses against a joined independently encoded synthetic TCP peer; selected exact sources, not a full checkout.",
+  "not_executed": [
+    "real DFHack plugin SDK/ABI",
+    "live fortress",
+    "Rust/MCP",
+    "actual mining completion",
+    "furniture effects/construction",
+    "native room assignments",
+    "downstream room-monitor process",
+    "full repository qualification"
+  ],
+  "production_admitted": false
+}

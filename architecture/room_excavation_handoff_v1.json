@@ -1,0 +1,64 @@
+{
+  "schema": "dfmcp.room-excavation-execution-contract/1",
+  "handoff_schema": "dfmcp.room-excavation-handoff/1",
+  "batch_schema": "dfmcp.dig-blueprint-batch/2",
+  "owning_beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
+  "work_packages": [
+    "WP-05",
+    "WP-10"
+  ],
+  "native_profiles": [
+    "map/1.5",
+    "dig/1.16"
+  ],
+  "native_protocol_changes": false,
+  "original_intent": "complete canonical RoomPlan plus raw map survey retained in private batch manifest",
+  "reopen": "rebuild original intent and survey; require exact retained residual; no new survey or retry keys",
+  "cross_profile_checks": [
+    "endpoint",
+    "world_folder",
+    "site",
+    "dimensions",
+    "df_version",
+    "dfhack_version",
+    "minimum_game_tick"
+  ],
+  "map_and_dig_generations_independent": true,
+  "batch_identity_domain": "dfmcp-dig-blueprint-batch/2",
+  "batch_identity_covers_complete_handoff": true,
+  "hidden_neighbor_override_permitted": false,
+  "commands": {
+    "init": "--room-handoff; no explicit source overrides",
+    "inspect": "inventory or exact original room-plan",
+    "observe": "one fresh native review",
+    "advance": "one confirmed native commit maximum",
+    "query": "original key only",
+    "cancel": "original preparation only",
+    "stop": "future local steps only"
+  },
+  "bounds": {
+    "handoff_bytes": 262144,
+    "manifest_bytes": 327680,
+    "manifest_nesting": 14,
+    "response_bytes": 262144,
+    "native_steps": 128,
+    "target_tiles": 512,
+    "work_checks_per_command": 8000000,
+    "native_frames_per_command": 10,
+    "native_bytes_per_command": 4194304,
+    "maximum_timeout_ms": 60000
+  },
+  "legacy_batch_policy": "unchanged batch/1 canonical identity/manifest/response bytes and profile bounds",
+  "effect_journal_changes": false,
+  "automatic_retry": false,
+  "global_controller_fence": false,
+  "checkpoint_verified": false,
+  "excavation_completion_proven": false,
+  "room_completion_proven": false,
+  "production_admitted": false,
+  "evidence": "docs/evidence/room-excavation-python.json"
+}

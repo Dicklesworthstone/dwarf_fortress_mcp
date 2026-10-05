@@ -1,0 +1,185 @@
+=== Handoff core and map CLI export: 17 tests ===
+test_actual_cli_export_uses_one_original_map_capture (test_room_excavation_handoff.ExportTests.test_actual_cli_export_uses_one_original_map_capture) ... ok
+test_empty_blocked_and_lost_reads_never_export_partial_handoff (test_room_excavation_handoff.ExportTests.test_empty_blocked_and_lost_reads_never_export_partial_handoff) ... ok
+test_existing_default_and_residual_exports_are_byte_unchanged (test_room_excavation_handoff.ExportTests.test_existing_default_and_residual_exports_are_byte_unchanged) ... ok
+test_final_handoff_serialization_revocation_withholds_result (test_room_excavation_handoff.ExportTests.test_final_handoff_serialization_revocation_withholds_result) ... ok
+test_shared_budget_does_not_renew_for_handoff_derivation (test_room_excavation_handoff.ExportTests.test_shared_budget_does_not_renew_for_handoff_derivation) ... ok
+test_blocked_or_empty_work_never_produces_executable_handoff (test_room_excavation_handoff.HandoffTests.test_blocked_or_empty_work_never_produces_executable_handoff) ... ok
+test_capture_substitution_and_wrong_fortress_rejected (test_room_excavation_handoff.HandoffTests.test_capture_substitution_and_wrong_fortress_rejected) ... ok
+test_changed_raw_evidence_must_regenerate_residual (test_room_excavation_handoff.HandoffTests.test_changed_raw_evidence_must_regenerate_residual) ... ok
+test_closed_canonical_codec_and_bounds (test_room_excavation_handoff.HandoffTests.test_closed_canonical_codec_and_bounds) ... ok
+test_every_bound_source_component_changes_handoff_identity (test_room_excavation_handoff.HandoffTests.test_every_bound_source_component_changes_handoff_identity) ... ok
+test_interruption_does_not_return_an_artifact (test_room_excavation_handoff.HandoffTests.test_interruption_does_not_return_an_artifact) ... ok
+test_large_sparse_multilevel_and_32_slot_artifacts_are_complete (test_room_excavation_handoff.HandoffTests.test_large_sparse_multilevel_and_32_slot_artifacts_are_complete) ... ok
+test_native_source_checks_software_fortress_endpoint_dimensions_clock_and_pause (test_room_excavation_handoff.HandoffTests.test_native_source_checks_software_fortress_endpoint_dimensions_clock_and_pause) ... ok
+test_original_constraints_exclusions_and_all_rooms_survive (test_room_excavation_handoff.HandoffTests.test_original_constraints_exclusions_and_all_rooms_survive) ... ok
+test_partial_excavation_retains_whole_plan_but_only_remaining_walls (test_room_excavation_handoff.HandoffTests.test_partial_excavation_retains_whole_plan_but_only_remaining_walls) ... ok
+test_recomputed_checksum_cannot_change_derived_residual_or_survey (test_room_excavation_handoff.HandoffTests.test_recomputed_checksum_cannot_change_derived_residual_or_survey) ... ok
+test_summary_is_owned_and_keeps_evidence_without_disclosing_raw (test_room_excavation_handoff.HandoffTests.test_summary_is_owned_and_keeps_evidence_without_disclosing_raw) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 5.383s
+
+OK
+
+=== Native batch integration except large case: 17 tests ===
+test_actual_cli_map_export_to_all_native_designations_and_offline_original_plan (test_room_dig_batch.RoomDigTests.test_actual_cli_map_export_to_all_native_designations_and_offline_original_plan) ... ok
+test_authority_revoked_after_prepare_leaves_original_uncertain_work (test_room_dig_batch.RoomDigTests.test_authority_revoked_after_prepare_leaves_original_uncertain_work) ... ok
+test_bad_but_rehashed_native_readback_is_not_terminal_proof (test_room_dig_batch.RoomDigTests.test_bad_but_rehashed_native_readback_is_not_terminal_proof) ... ok
+test_endpoint_and_explicit_overrides_refused_before_native_contact (test_room_dig_batch.RoomDigTests.test_endpoint_and_explicit_overrides_refused_before_native_contact) ... ok
+test_final_serialization_revocation_after_durable_effect_withholds_success (test_room_dig_batch.RoomDigTests.test_final_serialization_revocation_after_durable_effect_withholds_success) ... ok
+test_legacy_batch_still_executes_and_has_identical_contract (test_room_dig_batch.RoomDigTests.test_legacy_batch_still_executes_and_has_identical_contract) ... ok
+test_live_manifest_loss_fences_commit_and_missing_original_blocks_disclosure (test_room_dig_batch.RoomDigTests.test_live_manifest_loss_fences_commit_and_missing_original_blocks_disclosure) ... ok
+test_local_stop_retains_plan_does_not_cancel_unknown_native_effect (test_room_dig_batch.RoomDigTests.test_local_stop_retains_plan_does_not_cancel_unknown_native_effect) ... ok
+test_lost_commit_reply_reconciles_original_key_without_second_dispatch (test_room_dig_batch.RoomDigTests.test_lost_commit_reply_reconciles_original_key_without_second_dispatch) ... ok
+test_lost_prepare_unknown_query_then_explicit_cancel_never_dispatches (test_room_dig_batch.RoomDigTests.test_lost_prepare_unknown_query_then_explicit_cancel_never_dispatches) ... ok
+test_native_call_and_work_budgets_are_shared_and_never_renewed (test_room_dig_batch.RoomDigTests.test_native_call_and_work_budgets_are_shared_and_never_renewed) ... ok
+test_native_generation_clock_dimensions_and_unpaused_review_cannot_rebind (test_room_dig_batch.RoomDigTests.test_native_generation_clock_dimensions_and_unpaused_review_cannot_rebind) ... ok
+test_original_room_constraints_bind_batch_identity_and_every_recovery_key (test_room_dig_batch.RoomDigTests.test_original_room_constraints_bind_batch_identity_and_every_recovery_key) ... ok
+test_private_input_and_manifest_bounds_preserve_legacy_rules (test_room_dig_batch.RoomDigTests.test_private_input_and_manifest_bounds_preserve_legacy_rules) ... ok
+test_rehashed_retained_handoff_or_residual_substitution_blocks_reopening (test_room_dig_batch.RoomDigTests.test_rehashed_retained_handoff_or_residual_substitution_blocks_reopening) ... ok
+test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) ... ok
+test_stale_confirmation_does_not_mint_intent_or_replan (test_room_dig_batch.RoomDigTests.test_stale_confirmation_does_not_mint_intent_or_replan) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 18.874s
+
+OK
+
+=== Complete 32-slot native batch: 1 test ===
+test_32_slot_plan_and_all_native_steps_preserve_every_exclusion (test_room_dig_batch.RoomDigTests.test_32_slot_plan_and_all_native_steps_preserve_every_exclusion) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 22.694s
+
+OK
+
+=== Legacy byte compatibility ===
+PASS: 22 byte-identical legacy/current results across 7 native fixture steps; reference 30d4d71759f237a6a1d75f223e56b58fa80a17f1
+
+=== Expected mutation failures; original sources restored before final runs ===
+=== survey_source_binding_removed ===
+test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) ... 
+  test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='dimensions') ... FAIL
+  test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='tick') ... FAIL
+  test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='paused') ... FAIL
+  test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='df_version') ... FAIL
+  test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='dfhack_version') ... FAIL
+
+======================================================================
+FAIL: test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='dimensions')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 130, in test_source_mismatch_refuses_before_creating_any_batch_files
+    self.assertRaises(ValueError, self.initialize, peer)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised by initialize
+
+======================================================================
+FAIL: test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='tick')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 131, in test_source_mismatch_refuses_before_creating_any_batch_files
+    self.assertEqual(list(self.directory.iterdir()), [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [PosixPath('/tmp/room-dig-_187n6ip/batch/e[62 chars]on')] != []
+
+First list contains 2 additional elements.
+First extra element 0:
+PosixPath('/tmp/room-dig-_187n6ip/batch/effects')
+
++ []
+- [PosixPath('/tmp/room-dig-_187n6ip/batch/effects'),
+-  PosixPath('/tmp/room-dig-_187n6ip/batch/blueprint.json')]
+
+======================================================================
+FAIL: test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='paused')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 131, in test_source_mismatch_refuses_before_creating_any_batch_files
+    self.assertEqual(list(self.directory.iterdir()), [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [PosixPath('/tmp/room-dig-_187n6ip/batch/e[62 chars]on')] != []
+
+First list contains 2 additional elements.
+First extra element 0:
+PosixPath('/tmp/room-dig-_187n6ip/batch/effects')
+
++ []
+- [PosixPath('/tmp/room-dig-_187n6ip/batch/effects'),
+-  PosixPath('/tmp/room-dig-_187n6ip/batch/blueprint.json')]
+
+======================================================================
+FAIL: test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='df_version')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 131, in test_source_mismatch_refuses_before_creating_any_batch_files
+    self.assertEqual(list(self.directory.iterdir()), [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [PosixPath('/tmp/room-dig-_187n6ip/batch/e[62 chars]on')] != []
+
+First list contains 2 additional elements.
+First extra element 0:
+PosixPath('/tmp/room-dig-_187n6ip/batch/effects')
+
++ []
+- [PosixPath('/tmp/room-dig-_187n6ip/batch/effects'),
+-  PosixPath('/tmp/room-dig-_187n6ip/batch/blueprint.json')]
+
+======================================================================
+FAIL: test_source_mismatch_refuses_before_creating_any_batch_files (test_room_dig_batch.RoomDigTests.test_source_mismatch_refuses_before_creating_any_batch_files) (field='dfhack_version')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 131, in test_source_mismatch_refuses_before_creating_any_batch_files
+    self.assertEqual(list(self.directory.iterdir()), [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [PosixPath('/tmp/room-dig-_187n6ip/batch/e[62 chars]on')] != []
+
+First list contains 2 additional elements.
+First extra element 0:
+PosixPath('/tmp/room-dig-_187n6ip/batch/effects')
+
++ []
+- [PosixPath('/tmp/room-dig-_187n6ip/batch/effects'),
+-  PosixPath('/tmp/room-dig-_187n6ip/batch/blueprint.json')]
+
+----------------------------------------------------------------------
+Ran 1 test in 0.330s
+
+FAILED (failures=5)
+=== room_intent_removed_from_batch_identity ===
+test_original_room_constraints_bind_batch_identity_and_every_recovery_key (test_room_dig_batch.RoomDigTests.test_original_room_constraints_bind_batch_identity_and_every_recovery_key) ... FAIL
+
+======================================================================
+FAIL: test_original_room_constraints_bind_batch_identity_and_every_recovery_key (test_room_dig_batch.RoomDigTests.test_original_room_constraints_bind_batch_identity_and_every_recovery_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 379, in test_original_room_constraints_bind_batch_identity_and_every_recovery_key
+    self.assertEqual(first['batch_id'], d.digest(b'dfmcp-dig-blueprint-batch/2', d.canonical(value)).hex())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'f1db1e7f0c192c0bca308a9a340dd36b34a0265016606cf6e18c2084c225d1e5' != '0ab95395340d7ba50ccc6c9ca6ec6c720affe54ec8adc140c81145d006ae57a8'
+- f1db1e7f0c192c0bca308a9a340dd36b34a0265016606cf6e18c2084c225d1e5
++ 0ab95395340d7ba50ccc6c9ca6ec6c720affe54ec8adc140c81145d006ae57a8
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.086s
+
+FAILED (failures=1)
+=== final_authority_checks_removed ===
+test_final_serialization_revocation_after_durable_effect_withholds_success (test_room_dig_batch.RoomDigTests.test_final_serialization_revocation_after_durable_effect_withholds_success) ... FAIL
+
+======================================================================
+FAIL: test_final_serialization_revocation_after_durable_effect_withholds_success (test_room_dig_batch.RoomDigTests.test_final_serialization_revocation_after_durable_effect_withholds_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_dig_batch.py", line 305, in test_final_serialization_revocation_after_durable_effect_withholds_success
+    self.assertEqual(code, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^
+AssertionError: 0 != 2
+
+----------------------------------------------------------------------
+Ran 1 test in 0.223s
+
+FAILED (failures=1)
+

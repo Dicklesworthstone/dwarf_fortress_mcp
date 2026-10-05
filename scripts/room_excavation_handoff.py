@@ -128,24 +128,7 @@ class RoomExcavationHandoff:
         sequence, witnesses, confirmation and original-key receipts independently.
         Matching selectors cannot detect an unobserved same-tick save restore.
         """
-        source = self.source(guard)
-        e.endpoint(address)
-        native_manifest = e.Manifest.from_json(manifest)
-        require(address == source['endpoint'], 'dig endpoint differs from retained room survey')
-        require(type(observed) is dict and {'folder', 'site', 'dimensions', 'tick', 'paused'} <= set(observed),
-                'decoded native source required')
-        for name in ('df_version', 'dfhack_version'):
-            require(getattr(native_manifest, name) == source['manifest'][name], 'dig software differs from room survey')
-        require(type(observed['folder']) is str and type(observed['site']) is int
-                and type(observed['dimensions']) is list and len(observed['dimensions']) == 3,
-                'invalid decoded native source identity')
-        for size in observed['dimensions']:
-            e.integer(size, 1, 32768)
-        require(all(observed[key] == source[key] for key in ('folder', 'site', 'dimensions')),
-                'dig fortress or dimensions differ from original room source')
-        require(e.integer(observed['tick'], 0, e.MAX_TICK) >= source['game_tick']
-                and observed['paused'] is True, 'dig source precedes room survey or is unpaused')
-        guard()
+        check_native_binding(self.source(guard), address, manifest, observed, guard)
 
     def summary(self, guard: Guard = idle) -> dict:
         value = self.json()
@@ -159,3 +142,31 @@ class RoomExcavationHandoff:
                   'mutation_authority_granted': False, 'production_admitted': False}
         guard()
         return result
+
+
+def check_native_binding(source: dict, address: str, manifest: dict, observed: dict,
+                         guard: Guard = idle) -> None:
+    """Compare against an internal verified handoff binding, never imported claims.
+
+    Batch owners retain canonical binding bytes after complete handoff decoding,
+    and verify the original custody before reusing them within one operation.
+    External callers must decode the full handoff, not pass an arbitrary binding.
+    """
+    e.endpoint(address)
+    native_manifest = e.Manifest.from_json(manifest)
+    require(address == source['endpoint'], 'dig endpoint differs from retained room survey')
+    require(type(observed) is dict and {'folder', 'site', 'dimensions', 'tick', 'paused'} <= set(observed),
+            'decoded native source required')
+    for name in ('df_version', 'dfhack_version'):
+        require(getattr(native_manifest, name) == source['manifest'][name], 'dig software differs from room survey')
+    require(type(observed['folder']) is str and type(observed['site']) is int
+            and type(observed['dimensions']) is list and len(observed['dimensions']) == 3,
+            'invalid decoded native source identity')
+    for size in observed['dimensions']:
+        e.integer(size, 1, 32768)
+    require(all(observed[key] == source[key] for key in ('folder', 'site', 'dimensions')),
+            'dig fortress or dimensions differ from original room source')
+    require(e.integer(observed['tick'], 0, e.MAX_TICK) >= source['game_tick']
+            and observed['paused'] is True, 'dig source precedes room survey or is unpaused')
+    guard()
+
