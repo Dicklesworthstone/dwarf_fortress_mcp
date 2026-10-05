@@ -1,0 +1,32 @@
+{
+  "schema": "dfmcp.room-terrain-python-evidence/1",
+  "base_commit": "37298b8312056e538a422b92048f7ca015b103fd",
+  "executed_on": "2026-10-05",
+  "command": "python3 -m unittest discover -s tests -p test_room_terrain.py -v",
+  "methods_passed": 16,
+  "source_sha256": {
+    "scripts/room_terrain.py": "b1d6b5bfcc00bc465b84b4924d9f6ad99a2f9c0512b2eff35e73ebdf5596eaf4",
+    "tests/room_terrain_fixtures.py": "96e8002708a1cdb8db291dd2a8aea1e3b989d6fff65c0e8ac9dd5f19666c49fe",
+    "tests/test_room_terrain.py": "8299159670539cd9f68227f26623fff415f7ec859babd2f11e81c78c88d6cf3b"
+  },
+  "unchanged_dependency_git_blobs": {
+    "scripts/furniture_plan.py": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+    "scripts/furniture_allocation.py": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+    "scripts/room_provisioning.py": "1a486bd993bc19c6d6f19d9999eac5d1682ac1b9",
+    "scripts/excavation_observer.py": "95a8f485afa76baced77edac0702ddb891b945cb"
+  },
+  "log": {
+    "path": "docs/evidence/room-terrain-core.txt",
+    "sha256": "708afb511aef19826f9bf716c67bc74c17a3bd92f159328449d30a1b40f92ff7"
+  },
+  "execution": "actual Python compiler/request contracts/map decoder with supplied native-format fixture bytes",
+  "not_executed": [
+    "socket transport",
+    "native dig client",
+    "Rust/MCP",
+    "DFHack SDK",
+    "live fortress",
+    "full repository suite"
+  ],
+  "production_admitted": false
+}

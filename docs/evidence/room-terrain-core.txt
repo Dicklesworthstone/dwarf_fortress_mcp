@@ -1,0 +1,21 @@
+test_all_4096_small_masks_have_an_exact_disjoint_cover (test_room_terrain.RoomTerrainTests.test_all_4096_small_masks_have_an_exact_disjoint_cover) ... ok
+test_all_room_template_counts_and_dimensions (test_room_terrain.RoomTerrainTests.test_all_room_template_counts_and_dimensions) ... ok
+test_capture_holes_are_not_targets_or_required_halo (test_room_terrain.RoomTerrainTests.test_capture_holes_are_not_targets_or_required_halo) ... ok
+test_capture_selection_source_extent_and_manifest_are_validated (test_room_terrain.RoomTerrainTests.test_capture_selection_source_extent_and_manifest_are_validated) ... ok
+test_complete_blocker_accounting_and_bounded_diagnostics (test_room_terrain.RoomTerrainTests.test_complete_blocker_accounting_and_bounded_diagnostics) ... ok
+test_complete_partial_and_already_dug_rooms (test_room_terrain.RoomTerrainTests.test_complete_partial_and_already_dug_rooms) ... ok
+test_determinism_full_intent_binding_and_nonaliasing (test_room_terrain.RoomTerrainTests.test_determinism_full_intent_binding_and_nonaliasing) ... ok
+test_fragmented_residual_exhaustion_returns_no_partial_artifact (test_room_terrain.RoomTerrainTests.test_fragmented_residual_exhaustion_returns_no_partial_artifact) ... ok
+test_guard_interruptions_cannot_publish_a_partial_proposal (test_room_terrain.RoomTerrainTests.test_guard_interruptions_cannot_publish_a_partial_proposal) ... ok
+test_map_edges_and_padded_axis_overflow_are_not_clamped (test_room_terrain.RoomTerrainTests.test_map_edges_and_padded_axis_overflow_are_not_clamped) ... ok
+test_multilevel_exact_mask_and_original_constraints_survive (test_room_terrain.RoomTerrainTests.test_multilevel_exact_mask_and_original_constraints_survive) ... ok
+test_occupied_floors_are_geometry_not_furnishing_permission (test_room_terrain.RoomTerrainTests.test_occupied_floors_are_geometry_not_furnishing_permission) ... ok
+test_required_walls_cannot_be_ignored_filled_or_excavated (test_room_terrain.RoomTerrainTests.test_required_walls_cannot_be_ignored_filled_or_excavated) ... ok
+test_room_artifact_is_rebuilt_before_using_geometry_or_claims (test_room_terrain.RoomTerrainTests.test_room_artifact_is_rebuilt_before_using_geometry_or_claims) ... ok
+test_target_failures_never_emit_a_successful_subset (test_room_terrain.RoomTerrainTests.test_target_failures_never_emit_a_successful_subset) ... ok
+test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear (test_room_terrain.RoomTerrainTests.test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 4.768s
+
+OK
