@@ -18,6 +18,7 @@ from furniture_batch import Batch
 from furniture_completion import Goal, Origin
 from furniture_completion_store import Journal, State, MAX_FILE, MAX_FRAMES
 import track_construction_plan as selected
+import construction_wait as foreground
 
 MAX_OUTPUT = selected.MAX_OUTPUT
 
@@ -90,10 +91,13 @@ def output(value: dict) -> bytes:
 
 
 def reserve(operation: str, state: State, *, source_verified: bool = False,
-            native_contacted: bool = False, storage_acknowledged: bool = False) -> bytes:
+            native_contacted: bool = False, storage_acknowledged: bool = False,
+            wait_limits: foreground.Limits | None = None) -> bytes:
     value = packet(operation, state, source_verified=source_verified, native_contacted=native_contacted,
                    storage_acknowledged=storage_acknowledged)
     value['result']['journal'] = {'frames': MAX_FRAMES, 'bytes': MAX_FILE, 'head': 'f' * 64}
+    if wait_limits is not None:
+        value['result']['wait'] = foreground.reserve_view(wait_limits)
     return output(value)
 
 
@@ -105,9 +109,10 @@ class Parser(argparse.ArgumentParser):
 def main(argv: list[str] | None = None) -> int:
     operation, owner, batch, last_state = 'unknown', None, None, None
     native_contacted = False
+    wait_result, authority = None, None
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('start', 'sample', 'inspect', 'cancel'))
+        parser.add_argument('operation', choices=('start', 'sample', 'wait', 'inspect', 'cancel'))
         parser.add_argument('--journal', required=True)
         parser.add_argument('--batch')
         parser.add_argument('--batch-id')
@@ -118,8 +123,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--max-gap-ticks', type=int)
         parser.add_argument('--max-observations', type=int)
         parser.add_argument('--timeout-ms', type=int, default=10000)
+        foreground.add_arguments(parser)
         args = parser.parse_args(argv)
         operation = args.operation
+        wait_limits = foreground.parse_limits(args)
         budget = Budget(args.timeout_ms)
         initial = (args.batch, args.batch_id, args.deadline_tick)
         choices = (args.interval_ticks, args.stable_samples, args.stable_span_ticks,
@@ -142,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             origin.verify_batch(batch)
             owner = Journal(args.journal, budget, writable=True, create=(goal, origin.address))
         else:
-            owner = Journal(args.journal, budget, writable=operation in ('sample', 'cancel'))
+            owner = Journal(args.journal, budget, writable=operation in ('sample', 'wait', 'cancel'))
             last_state = owner.state
             if operation != 'cancel':
                 separate_journal(args.journal, owner.state.goal.origin.batch_path)
@@ -180,6 +187,21 @@ def main(argv: list[str] | None = None) -> int:
 
             owner.accept(sample, render)
             stored = True
+        elif operation == 'wait':
+            authority = None if owner.state.progress.terminal else Authority.load()
+
+            def acquire_wait(current_authority, original_goal, current_budget):
+                nonlocal native_contacted
+                native_contacted = True
+                # The journal retains the full original batch goal. Only its
+                # exact immutable receipt condition enters the shared transport.
+                return acquire(current_authority, original_goal.condition, current_budget)
+
+            wait_result = foreground.run(owner, authority, acquire_wait,
+                lambda candidate: reserve(operation, candidate, source_verified=True,
+                    native_contacted=False, storage_acknowledged=False, wait_limits=wait_limits),
+                wait_limits, source_guard=source_guard)
+            stored = wait_result.samples > 0
         elif operation == 'cancel':
             stored = owner.cancel(lambda candidate: reserve(operation, candidate, storage_acknowledged=True))
         owner.check()
@@ -189,7 +211,11 @@ def main(argv: list[str] | None = None) -> int:
         value = packet(operation, last_state, source_verified=operation != 'cancel',
                        native_contacted=native_contacted, storage_acknowledged=stored)
         value['result']['journal'] = {'frames': last_state.frames, 'bytes': owner.length, 'head': last_state.tail.hex()}
+        if wait_result is not None:
+            value['result']['wait'] = wait_result.view()
         raw = output(value)
+        if operation == 'wait' and authority is not None:
+            authority.guard()
         if operation != 'cancel':
             source_guard()
         owner.check()

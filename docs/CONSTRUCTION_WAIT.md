@@ -69,3 +69,47 @@ records are explicit fixtures, not a real DFHack plugin or executed game effects
 This is focused Python development execution only: no Rust/MCP build, native SDK,
 live game, physical power-loss, full-workspace qualification or production admission.
 Owning beads `df-dfhack-bridge-plane-c-pic.4` and `.5` remain open.
+
+## Complete original furnishing batches
+
+The same waiter now drives `track_furniture_batch.py wait` for existing full-plan
+completion journals, including allocation-backed batch/2 and legacy batch/1:
+
+```sh
+python3 scripts/track_furniture_batch.py wait \
+  --journal /private/construction/bedroom.completion \
+  --wait-samples 8 --poll-ms 100 --timeout-ms 10000
+```
+
+Start the monitor through the unchanged workflow in `FURNITURE_COMPLETION.md`.
+Wait never imports a replacement batch or receipt subset. The complete original
+plan, retained request constraints, native source namespaces, endpoint and fixed
+goal remain sealed in the existing origin/goal. The journal and original batch
+owners stay open together; original custody is rechecked during delays, before
+native work, around sample publication and after rendering. Each acquisition
+passes only the original goal's receipt condition to the existing shared transport.
+The full batch goal remains the journal's identity.
+
+A successful result retains every original target and requested dependency, plus
+`result.wait`. Even an already satisfied goal requires currently verified original
+batch custody for `complete_original_plan_sampled_condition`. Missing original
+files cannot be replaced by the monitor's retained success label. Failed reads or
+process termination preserve unknown read intent. A later explicit wait resets
+stability through existing replay; it never repeats placement or renews policy.
+Local `cancel` remains available without original batch files and establishes only
+monitor cancellation, not construction success or discharge of placement effects.
+
+Ten additional tests passed against actual batch/origin/monitor stores and the
+real CLI. Nine recovery/authority cases and the full 32-target case completed in
+two separate final invocations; an earlier combined run exceeded the executor's
+45-second limit. The 32-target case imports allocation-backed fixture history via
+`start`, receives paged native-protocol observations, waits to joint satisfaction,
+and reopens offline without changing any original placement file. A forced process
+kill after the second synchronized read intent proves explicit restart resets the
+stability streak. Loss during delay, after intent and final rendering; revoked
+final disclosure; legacy formats; and original source/selection fencing are covered.
+
+Placement histories and the TCP server in these tests are explicit fixtures. The
+new tests execute monitoring, not real game placements. Exact source and execution
+scope are recorded in `evidence/construction-wait-python.json`. They do not replace
+full repository, Rust/MCP, DFHack SDK, live-fortress or production qualification.

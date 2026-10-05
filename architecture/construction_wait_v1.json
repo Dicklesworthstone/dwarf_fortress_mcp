@@ -1,20 +1,43 @@
 {
   "schema": "dfmcp.construction-wait-contract/1",
   "result_schema": "dfmcp.construction-wait/1",
-  "entrypoint": "scripts/track_construction_plan.py wait",
   "original_goal": "required_immutable_existing_journal",
-  "max_samples": {"minimum": 1, "default": 8, "maximum": 32},
-  "poll_ms": {"minimum": 10, "default": 100, "maximum": 5000},
+  "max_samples": {
+    "minimum": 1,
+    "default": 8,
+    "maximum": 32
+  },
+  "poll_ms": {
+    "minimum": 10,
+    "default": 100,
+    "maximum": 5000
+  },
   "delay_guard_quantum_ms": 50,
   "cooperative_final_margin_ms": 250,
   "consecutive_nonadvancing_samples": 2,
   "whole_response_bytes": 65536,
-  "stop_reasons": ["terminal", "sample_limit", "game_tick_not_advanced", "rpc_allowance", "wall_allowance"],
+  "stop_reasons": [
+    "terminal",
+    "sample_limit",
+    "game_tick_not_advanced",
+    "rpc_allowance",
+    "wall_allowance"
+  ],
   "budgets": "one_existing_shrinking_allowance_across_replay_delays_reads_publications",
-  "native_methods": ["build.Handshake", "build.QueryPlacement", "operations.Handshake", "operations.ReadObservation"],
+  "native_methods": [
+    "build.Handshake",
+    "build.QueryPlacement",
+    "operations.Handshake",
+    "operations.ReadObservation"
+  ],
   "failed_acquisition_retry": false,
   "background_work": false,
   "game_time_control": false,
   "placement_effect_discharge": false,
-  "production_admission": false
+  "production_admission": false,
+  "entrypoints": [
+    "scripts/track_construction_plan.py wait",
+    "scripts/track_furniture_batch.py wait"
+  ],
+  "original_batch_custody": "required_throughout_full_batch_wait_including_terminal_disclosure"
 }
