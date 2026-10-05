@@ -1,20 +1,33 @@
 {
   "schema": "dfmcp.room-provisioning-contract/1",
-  "status": "unadmitted_python_geometry_and_recipe_source",
-  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "status": "focused_python_geometry_and_inventory_execution_only",
+  "owning_beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
   "input_schema": "dfmcp.room-provisioning-request/1",
   "plan_schema": "dfmcp.room-provisioning-plan/1",
   "policy": "dfmcp.connected-room-furnishings/1",
-  "outputs": ["dfmcp.excavation-blueprint/1", "dfmcp.furniture-request/1"],
+  "outputs": [
+    "dfmcp.excavation-blueprint/1",
+    "dfmcp.furniture-request/1"
+  ],
   "limits": {
     "input_bytes": 16384,
     "plan_bytes": 49152,
     "areas": 8,
     "area_name_ascii_bytes": 24,
     "bedrooms_per_area": 10,
-    "bedroom_width_and_height": [3, 7],
+    "bedroom_width_and_height": [
+      3,
+      7
+    ],
     "dining_pairs_per_area": 16,
-    "dining_columns": [1, 4],
+    "dining_columns": [
+      1,
+      4
+    ],
     "furniture_slots_total": 32,
     "excavation_parts_total": 32,
     "excavation_tiles_total": 512,
@@ -46,5 +59,30 @@
   "game_effects": [],
   "room_or_zone_assignment": false,
   "canonical_world_anchor": null,
-  "production_admission_changed": false
+  "production_admission_changed": false,
+  "cli": {
+    "entrypoint": "scripts/plan_rooms.py",
+    "compile_exports": [
+      "plan",
+      "excavation",
+      "furniture-request"
+    ],
+    "allocate_inputs": [
+      "original_room_request",
+      "revalidated_complete_room_plan"
+    ],
+    "allocation_profile": "room-provisioning/1",
+    "output_bytes": 65536,
+    "native_profile": "operations/1.4",
+    "methods": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "acquisitions": 1,
+    "automatic_retry": false,
+    "budget": "one existing inventory allowance shared through input, compilation, native acquisition and final output",
+    "authority": "existing isolated inventory environment only; checked through projection and after serialization",
+    "room_manifest_custody": "separate operator artifact; not a new cross-stage journal",
+    "shortage": "all room intent retained, no executable furniture subset"
+  }
 }

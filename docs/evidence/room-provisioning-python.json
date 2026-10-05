@@ -1,0 +1,122 @@
+{
+  "schema": "dfmcp.room-provisioning-python-evidence/1",
+  "base_revision": "e392b30283ae640b7ee0c131d1761d87813d838b",
+  "scope": "focused_python_geometry_and_inventory_handoff_only",
+  "python_version": "3.13.5",
+  "tests_passed": 32,
+  "tests_skipped": 0,
+  "source_files": {
+    "scripts/build_placement_wire.py": {
+      "git_blob_sha": "8f906d6d1a919c4bae5f0bdc3bdbacfdd1347d16",
+      "sha256": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117",
+      "bytes": 26919
+    },
+    "scripts/construction_monitor_rpc.py": {
+      "git_blob_sha": "7e714feeecade89531e69e3848986bf8634b79a7",
+      "sha256": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809",
+      "bytes": 15036
+    },
+    "scripts/construction_receipt.py": {
+      "git_blob_sha": "5ec00e974680217f56da408f347d70775182c16c",
+      "sha256": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38",
+      "bytes": 20896
+    },
+    "scripts/furniture_allocation.py": {
+      "git_blob_sha": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+      "sha256": "d047583fbac8e1dbd62a8e9fa637b463d4347a9c8668fc6d611742281c877832",
+      "bytes": 14005
+    },
+    "scripts/furniture_handoff.py": {
+      "git_blob_sha": "8a1b7b6439a5be90c6ede924aaf3dfecb3eab806",
+      "sha256": "eed129abf541c81e843807d52236a919b9d3d63ee489bcdb49aa0f828a13a0b1",
+      "bytes": 11322
+    },
+    "scripts/furniture_inventory.py": {
+      "git_blob_sha": "42bfbdb12c483d1e03e5d9a02213326fc9a1fa44",
+      "sha256": "dec6578cc7fb8d7a61ab79889d09672fc4d1e1b3abb8e436621e5f390851cc6f",
+      "bytes": 13244
+    },
+    "scripts/furniture_plan.py": {
+      "git_blob_sha": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+      "sha256": "dc2ddcaecb6e6a8f3f97e59c62d6716610170ea38dc844fec9c78d68eea151d7",
+      "bytes": 8704
+    },
+    "scripts/plan_rooms.py": {
+      "git_blob_sha": "d14f134698bacd32ebd394e6f823ec5eccc2666b",
+      "sha256": "c8450625d1a4fae4a09bcba0d7d2aac12071dc33ffadbcfbbf2afa02ae2e3c41",
+      "bytes": 7821
+    },
+    "scripts/room_provisioning.py": {
+      "git_blob_sha": "1a486bd993bc19c6d6f19d9999eac5d1682ac1b9",
+      "sha256": "e4ba6be335e770c07d489bb8257415388876098dda3a7a61edd9f6c6659efe54",
+      "bytes": 16591
+    },
+    "tests/room_inventory_peer.py": {
+      "git_blob_sha": "d8a5fb7cd8c514fee5bf9597d073e6252cc34786",
+      "sha256": "0f88559c2081a72c4239b2ff8690d9824deb67cb79c79adb4252ca403009c7c0",
+      "bytes": 8208
+    },
+    "tests/test_plan_rooms.py": {
+      "git_blob_sha": "d628b225b304237484fd17252a6af1a22096c3e7",
+      "sha256": "5a3871a5e8bbb8007a4e68e9be508d2a87a4421e8c8f3854e4269ce8a72624e7",
+      "bytes": 15232
+    },
+    "tests/test_room_provisioning.py": {
+      "git_blob_sha": "f6dec14f436a2e8587a1dcbe42e1a00a788de9f5",
+      "sha256": "f3b6eec90caee5fa2145f3b81c279eecdade48b479354069413a2f997eb8173c",
+      "bytes": 15308
+    }
+  },
+  "runs": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_room_provisioning.py -v",
+      "methods_passed": 16,
+      "log_file": "room-provisioning-core.log",
+      "log_sha256": "5a0e21f98b16ee4878dd6d59e90ab79d6cda5694c89bb6124078a692692c6242"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_plan_rooms.py -v",
+      "methods_passed": 16,
+      "log_file": "room-provisioning-integration.log",
+      "log_sha256": "fc3b109ba8b55c20f42c712b31fd9a9113a64066fab718a39637793e69c67eaa"
+    }
+  ],
+  "mutations": [
+    {
+      "mutation": "omit_final_authority",
+      "source": "scripts/plan_rooms.py",
+      "test": "test_plan_rooms.PlanRoomsTests.test_final_serialization_revocation_withholds_cached_inventory",
+      "result": "rejected_by_regression_assertion"
+    },
+    {
+      "mutation": "omit_recipe_revalidation",
+      "source": "scripts/plan_rooms.py",
+      "test": "test_plan_rooms.PlanRoomsTests.test_changed_imported_plan_cannot_open_socket",
+      "result": "rejected_by_regression_assertion"
+    },
+    {
+      "mutation": "omit_request_digest_binding",
+      "source": "scripts/plan_rooms.py",
+      "test": "test_plan_rooms.PlanRoomsTests.test_swapped_handoff_or_request_identity_is_refused_after_read",
+      "result": "rejected_by_regression_assertion"
+    },
+    {
+      "mutation": "omit_bedroom_wall_constraint",
+      "source": "scripts/room_provisioning.py",
+      "test": "test_room_provisioning.RoomProvisioningTests.test_other_area_cannot_excavate_bedroom_wall",
+      "result": "rejected_by_regression_assertion"
+    }
+  ],
+  "not_executed": [
+    "dig_compiler_or_designation_client",
+    "furniture_batch_placement_process",
+    "completion_monitor_process",
+    "Rust_MCP",
+    "native_DFHack_SDK",
+    "live_fortress",
+    "full_workspace_qualification"
+  ],
+  "native_protocols_modified": false,
+  "production_admission_changed": false,
+  "mutation_log_sha256": "cd01756bceda005f93c189a87afa79e511515306b680c6bea21b84ec25e57d7c"
+}

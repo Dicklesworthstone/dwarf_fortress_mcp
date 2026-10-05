@@ -110,3 +110,99 @@ The native dig compiler and live inventory CLI are separate integration checks.
 The owning bridge beads `.3`, `.4` and `.5` remain open. The machine contract is
 `architecture/room_provisioning_v1.json`. No production runner, protocol, journal
 format, dependency pin or compatibility registry is changed.
+
+## Executable compiler and inventory handoff
+
+The new `scripts/plan_rooms.py` command exports canonical artifacts without
+creating any journal or contacting a bridge in `compile` mode:
+
+```sh
+python3 scripts/plan_rooms.py compile --request-file rooms.json > room-plan.json
+python3 scripts/plan_rooms.py compile --request-file rooms.json --emit excavation > excavation.json
+python3 scripts/plan_rooms.py compile --request-file rooms.json --emit furniture-request > furniture-request.json
+```
+
+Compile succeeds with exit 0 and writes one exact standalone artifact, without
+a trailing newline, so `room-plan.json` can be imported byte-for-byte. Other
+commands do not accept compile-only export flags. Each input is a bounded regular
+file opened without following the final symlink; descriptor and path metadata
+must stay stable throughout the read. This is operator input, not private journal
+custody or all-parent no-follow traversal. Oversize, special, replaced, duplicate
+JSON, malformed or conflicting requests fail before native contact.
+
+To select the actual complete item set, use the existing isolated inventory
+configuration from `FURNITURE_ALLOCATION.md`: exact
+`DFMCP_ALLOW_UNADMITTED_FURNITURE_ALLOCATION=1`,
+`DFMCP_OPERATIONS_PAGED_TOKEN`, and optional numeric-loopback
+`DFMCP_FURNITURE_ALLOCATION_ENDPOINT`. No other DFMCP variables are accepted,
+including furniture placement credentials and production admission settings.
+
+```sh
+python3 scripts/plan_rooms.py allocate --plan-file room-plan.json > room-allocation.json
+# Alternatively, compile and allocate the original request in this same call:
+python3 scripts/plan_rooms.py allocate --request-file rooms.json > room-allocation.json
+```
+
+An imported plan is regenerated from its complete original intent before any
+socket is opened. The existing inventory client binds only operations/1.4
+Handshake and ReadObservation. It acquires and verifies all pages of one capture,
+including its digest and release acknowledgement. The existing projection decodes
+that complete inventory once for global allocation and handoff derivation. It
+does not call a placement profile, reread the game or reserve items.
+
+The response uses profile `room-provisioning/1` and the existing bounded allocation
+Agent Turn. An allocated result retains its exact `plan` and `handoff`, plus
+`room_provisioning`, a reproducible recipe summary with original intent and plan
+identity. That summary omits the duplicate furniture request: it is not the full
+standalone `--plan-file` artifact. Retain the original `room-plan.json` for later
+recipe import. The full derived request remains inside the handoff.
+
+Both `ok` and `result.status` matter. A valid shortage returns exit 0, status
+`shortage`, no handoff, no executable furniture plan and no partial assignment;
+all room intent remains visible. A refused input/read/source/authority/budget
+returns exit 2 with result null, no cached inventory or partial plan, and no
+credential, native text or caller path. The unallocated excavation proposal in
+a recipe is never permission to mine, including when furnishings are short.
+
+The complete result must fit 65,536 bytes. Compilation, input reads, native calls,
+projection, optimization and serialization share one shrinking 1..60,000 ms wall
+allowance (default 10,000), 272 calls, 20 MiB native bytes, 1 GiB input bytes and
+20 million work checks. Native pages and room areas cannot renew that allowance.
+Current operator authority is checked throughout room revalidation and CPU
+projection, and again after the entire final result is serialized. Failures never
+trigger an automatic reconnect. These are cooperative checks, not hard realtime.
+
+Export only an allocated result's `handoff` with the existing canonical codec,
+then use the separate furniture batch environment and its normal fresh
+review/prepare/one-shot-commit workflow. The handoff retains every derived item
+slot and material/subtype/distance constraint; it does not carry native room
+zoning or grant a terrain effect. Native placement, journal, completion and Rust
+interfaces are unchanged. The room manifest is separate operator data, not a
+new cross-stage project journal or combined room-completion certificate.
+
+### Executed integration scope
+
+The actual compiler and allocator subprocesses passed 16 additional tests against
+the unchanged existing inventory TCP client, strict roster codec, global
+allocator and handoff codec. All 16 core tests were rerun too. A 32-slot recipe
+(eight bedrooms and four dining pairs) used one 2,032-item, two-page, 95,622-byte
+capture and returned a complete 23,028-byte response. The maximum-width 32-slot
+source/name/material fixture returned 34,109 bytes. These are fixture sizes, not
+universal performance claims.
+
+The tests cover full shortages, recipe/handoff substitution, missing/corrupt
+release, wrong page offsets/digests/profiles, lost reads, foreign fortresses,
+malformed full rosters, bounded files and caller configuration, shared budget
+exhaustion, final serialization revocation, future selected-item constraint
+checks, and the unchanged default inventory command. Four independently weakened
+implementations were rejected by regression assertions: final authority omitted,
+recipe revalidation omitted, request-digest binding omitted, and required bedroom
+wall checks omitted. Exact source/log hashes are recorded in
+`docs/evidence/room-provisioning-python.json`.
+
+The TCP peer and captured inventory are explicit fixtures, not native DFHack.
+This session did not execute the existing dig compiler/designation client, batch
+placement process, completion monitor, Rust/MCP, real SDK or live-game campaigns.
+It verifies the room-to-inventory-handoff boundary, not those downstream stages
+or production qualification. All existing source dependencies used in these
+Python tests were verified against their Git blob hashes.
