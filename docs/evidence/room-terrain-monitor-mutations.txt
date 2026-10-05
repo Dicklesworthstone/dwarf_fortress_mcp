@@ -1,0 +1,57 @@
+=== required_walls_omitted ===
+test_original_wall_loss_blocks_even_when_every_floor_is_done (test_room_terrain_goal.RoomTerrainGoalTests.test_original_wall_loss_blocks_even_when_every_floor_is_done) ... FAIL
+
+======================================================================
+FAIL: test_original_wall_loss_blocks_even_when_every_floor_is_done (test_room_terrain_goal.RoomTerrainGoalTests.test_original_wall_loss_blocks_even_when_every_floor_is_done)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_room_terrain_goal.py", line 43, in test_original_wall_loss_blocks_even_when_every_floor_is_done
+    self.assertEqual(d['counts']['required_walls']['wrong_shape'], 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+FAILED (failures=1)
+
+=== unfinished_read_reset_omitted ===
+test_durable_unfinished_read_resets_recovered_streak (test_track_room_terrain.TrackRoomTerrainTests.test_durable_unfinished_read_resets_recovered_streak) ... FAIL
+
+======================================================================
+FAIL: test_durable_unfinished_read_resets_recovered_streak (test_track_room_terrain.TrackRoomTerrainTests.test_durable_unfinished_read_resets_recovered_streak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_track_room_terrain.py", line 172, in test_durable_unfinished_read_resets_recovered_streak
+    self.assertEqual((first['goal_status'], first['matching_samples']), ('stabilizing', 1))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: ('satisfied', 2) != ('stabilizing', 1)
+
+First differing element 0:
+'satisfied'
+'stabilizing'
+
+- ('satisfied', 2)
++ ('stabilizing', 1)
+
+----------------------------------------------------------------------
+Ran 1 test in 0.112s
+
+FAILED (failures=1)
+
+=== final_output_guard_omitted ===
+test_final_serialization_rechecks_authority_after_durable_success (test_track_room_terrain.TrackRoomTerrainTests.test_final_serialization_rechecks_authority_after_durable_success) ... FAIL
+
+======================================================================
+FAIL: test_final_serialization_rechecks_authority_after_durable_success (test_track_room_terrain.TrackRoomTerrainTests.test_final_serialization_rechecks_authority_after_durable_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/dwarf_fortress_mcp/tests/test_track_room_terrain.py", line 271, in test_final_serialization_rechecks_authority_after_durable_success
+    self.assertEqual(code, 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^
+AssertionError: 0 != 2
+
+----------------------------------------------------------------------
+Ran 1 test in 0.073s
+
+FAILED (failures=1)

@@ -1,0 +1,118 @@
+{
+  "schema": "dfmcp.room-terrain-monitor-python-evidence/1",
+  "base_commit": "e569fa7f4ca23253903ce012eae30440d804e077",
+  "executed_on": "2026-10-05",
+  "python_version": "3.13.5",
+  "command": "PYTHONPATH=scripts:tests python3 -m unittest test_room_terrain_goal test_track_room_terrain -v",
+  "methods_passed": 32,
+  "core_methods": 14,
+  "journal_cli_compatibility_methods": 18,
+  "legacy_trace_goldens": 20,
+  "legacy_serialized_response_goldens": 20,
+  "legacy_control_git_blob": "996811792e2162f754e137433aa112cfcddea419",
+  "source_sha256": {
+    "scripts/room_terrain_goal.py": "da4f3cacd241af0924335d45b9c5a9b20fef102768ab9a1e787a00afbff12ab4",
+    "scripts/track_excavation.py": "87309148f92f6980fb3085e6098c97506a93f968a0c6c131fc6737c0c4394cf9",
+    "tests/test_room_terrain_goal.py": "c4372473e5fb26333ac876a87233bd5c7fa6a8abaf4af416cdbfc9d3aa051595",
+    "tests/test_track_room_terrain.py": "61a6569d2fc34c1af6347927d8aa0763e90401bb6eeb521d810de235c003d8e4",
+    "tests/room_goal_legacy_golden.json": "a4378df3a883b844600d8f14a966dfbd356ea68aeecbdd1de67e5807271b0ca4"
+  },
+  "unchanged_dependency_git_blobs": {
+    "scripts/furniture_plan.py": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+    "scripts/furniture_allocation.py": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+    "scripts/room_provisioning.py": "1a486bd993bc19c6d6f19d9999eac5d1682ac1b9",
+    "scripts/room_terrain.py": "d6f0222f71a6c9b6be1e2c0714ec499f0b9c0286",
+    "scripts/excavation_observer.py": "95a8f485afa76baced77edac0702ddb891b945cb",
+    "scripts/excavation_blueprint.py": "4623ee4cec90f670c555c37c204ec7904bcec766",
+    "tests/room_terrain_fixtures.py": "abb825694c4b5b417765f2f488dc743f3f3c68c6",
+    "tests/room_terrain_peer.py": "884c559a4dafe68bb9b0f9fd88d4c9c4b44c559d"
+  },
+  "logs": [
+    {
+      "path": "docs/evidence/room-terrain-monitor-python.txt",
+      "sha256": "2b3ebf186f0181e6b29881985b7823ec55480262f5220edae91fd1a740415323"
+    },
+    {
+      "path": "docs/evidence/room-terrain-monitor-mutations.txt",
+      "sha256": "877ab6eab8c369a67d01352f4f1eefe674849a8a4b61bd7c846ee7e26848465c"
+    }
+  ],
+  "mutation_checks": [
+    {
+      "mutation": "required_walls_omitted",
+      "file": "scripts/room_terrain_goal.py",
+      "test": "test_room_terrain_goal.RoomTerrainGoalTests.test_original_wall_loss_blocks_even_when_every_floor_is_done",
+      "exit_code": 1,
+      "assertion_rejected": true
+    },
+    {
+      "mutation": "unfinished_read_reset_omitted",
+      "file": "scripts/track_excavation.py",
+      "test": "test_track_room_terrain.TrackRoomTerrainTests.test_durable_unfinished_read_resets_recovered_streak",
+      "exit_code": 1,
+      "assertion_rejected": true
+    },
+    {
+      "mutation": "final_output_guard_omitted",
+      "file": "scripts/track_excavation.py",
+      "test": "test_track_room_terrain.TrackRoomTerrainTests.test_final_serialization_rechecks_authority_after_durable_success",
+      "exit_code": 1,
+      "assertion_rejected": true
+    }
+  ],
+  "measured_fixtures": [
+    {
+      "fixture": "32_slots_646_exclusions_pending",
+      "capture_tiles": 1368,
+      "capture_bytes": 27430,
+      "plan_bytes": 25091,
+      "journal_bytes": 80591,
+      "response_bytes": 36000,
+      "native_connections": 1,
+      "native_observations": 1,
+      "native_frames": 4,
+      "work_checks": 16310,
+      "furniture_slots": 32,
+      "excluded_items": 646,
+      "deficit_rows": 64
+    },
+    {
+      "fixture": "3072_cell_capture",
+      "capture_tiles": 3072,
+      "capture_bytes": 61510,
+      "plan_bytes": 3035,
+      "journal_bytes": 126695,
+      "response_bytes": 10305,
+      "native_connections": 1,
+      "native_observations": 1,
+      "native_frames": 4,
+      "work_checks": 2100,
+      "furniture_slots": 4,
+      "excluded_items": 0,
+      "deficit_rows": 24
+    },
+    {
+      "fixture": "128_read_retention_replay",
+      "journal_bytes": 15938426,
+      "events": 257,
+      "read_attempts": 128,
+      "observations_retained": 129,
+      "status": "pending",
+      "work_checks": 89091,
+      "elapsed_seconds": 3.47
+    }
+  ],
+  "execution": "Actual Python room compiler, decoder/client, journal filesystem/custody, CLI subprocesses and joined fragmented TCP fixture peer; original sources rerun after mutations.",
+  "source_scope": "Selected files fetched at immutable revisions and verified by Git blob SHA; not a full repository checkout.",
+  "not_executed": [
+    "native digging",
+    "furniture placement/construction",
+    "native room assignment",
+    "Rust/MCP",
+    "real DFHack SDK/ABI",
+    "live fortress",
+    "full repository suite",
+    "release/publication qualification"
+  ],
+  "production_admitted": false
+}

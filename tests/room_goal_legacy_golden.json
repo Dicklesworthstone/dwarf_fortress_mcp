@@ -1,0 +1,82 @@
+{
+  "blueprint.cancelled": [
+    "42650e0ee2b95d4c1152c3e41456c7b0f6150b7a9d1c2a81a4ea531d7cb8a54b",
+    "6445839d2a44864e6fb8431f901cc2893202abb469c554c85d5f6a08e3ad65c2"
+  ],
+  "blueprint.expired": [
+    "cbc057fcc0b07a9df4fda167d99a6212d3ff4a567b3cf73e340872c8749d9f30",
+    "16d46069457ef0ffd3f55ed45fca57038810f8e02385e6e69c0a189d31ccee7b"
+  ],
+  "blueprint.failed": [
+    "95df3b8c327a23e7f7d0294eccafd9fc8a7bbc964255c6738ac23da924d4dbb2",
+    "4b5613bb43bbc27e57c7e72c2a179d3779381ac79aa7bf01136e69c2fe9ced36"
+  ],
+  "blueprint.invalidated": [
+    "fe49e46ff3d029bd285446793e9dc4772b10ba47c2d79ba6791313aa2cbe9836",
+    "e69034ce86faa88377e7185d3faabf001d0d41b6aa04b45cbeb3be41de0975b5"
+  ],
+  "blueprint.pending": [
+    "d3c3409cc2f71d86e8a68120314cffc1ef37d322137ff9e9923fc81b57288a6a",
+    "ae9e6f3c7c7c6aa1c6d97c6f9a34c8273b41b803af812a0c9ea9604f10d7c505"
+  ],
+  "blueprint.recovered": [
+    "348fc5a3ca8297ca4a4ae965c4639b214c57ab34ab885f0f0656ddde299a0fd6",
+    "3858a5f165eb0cf33cebe3d927de28d28d290d3b385b455f71603c3d599e1333"
+  ],
+  "blueprint.satisfied": [
+    "21bbbd5cca2b7749ecf88c63d05b90c65ee303615a1e4cb68802291631b3cc34",
+    "0ae017ab5c3a29541b86b8d252ce2373d97d3e8c51590fae32540dbef6b9ccf9"
+  ],
+  "blueprint.stabilizing": [
+    "3f6fa4cbd57ed740fd0081a4b973549cda2adf0e79ffa28e606f90118f510aba",
+    "78db689cbbf74f6b0c9375e7a75eb2fc3881baa6d41a1149d257e3f8ccc23174"
+  ],
+  "blueprint.unfinished": [
+    "6295a9ec78c28b47295894cc9b1397c6add48cff999d7126e5f3f34d8370bfbf",
+    "d411593b8e195ae88fe16d5d3adf41d1d3e86c2d871a87002910c73122f89589"
+  ],
+  "blueprint.unknown": [
+    "1578916be8d9849f7714dea370c9002f09af02e6d34a34185febe342732bb5ea",
+    "b5d3cba7522c5297c3c7e445a9ce35fcbe21b3269e4e705b05ffe5c8189c4d52"
+  ],
+  "floor.cancelled": [
+    "0703aa6710a07fce28fca338d9372531b01b5bd52f858de8b5672bd3ba799349",
+    "4bed3bf97a6636916b33db4134fdf40f0e6c256dc61dcbe395f3a29f64890f2e"
+  ],
+  "floor.expired": [
+    "ecbee3f448c25207a042ac8ef4eaad69113125988de48a8e8a2c74852e679afe",
+    "900e9fc5f52a0fca486e071ec1f1f0fc9abe65399009c1312a7703869c8d4f5f"
+  ],
+  "floor.failed": [
+    "03333951d3de0446f730a31ee96dc40d8e3ccd27595aad9d656f27ccc166de29",
+    "89246d4920ba303bfce99f32f4e856f4a236bf13dd79358fcfef9a91101c3d48"
+  ],
+  "floor.invalidated": [
+    "f75de94263c4ff63de628fc0adf65f830a9efd394a09384601ef7d4f87fe5e0f",
+    "384b0f65c048fa85bbdc345d6b5b02d1fbcd844dee468e70e44b3ba8ea8ca3d5"
+  ],
+  "floor.pending": [
+    "a713b3821794bdde3321e3955aae58bb4706e20deb10eef91521a40daeb158da",
+    "cc2d6e8dd3196505f23163e23eea7ab5ae406a8f7da86eeb5f553b6aece11d5f"
+  ],
+  "floor.recovered": [
+    "066df1e5934006da40b315b17cbbf4e42786eba31459eacd41d0ec9714e78712",
+    "7719cffa8618dba65aa1a828fae945a2c351633e03f6e346e036a8d4e9925654"
+  ],
+  "floor.satisfied": [
+    "534c66abd742e62da86b87ac00b3dd716c7548a81d8aa6f4b0b057c9ed3b3a63",
+    "040fbe9b90f402a4d48261683575aee213d65991faf48d9ca70260d54e278f37"
+  ],
+  "floor.stabilizing": [
+    "8d6bdaafa0bdfe880d1add11fcf97789cb2e0adb1571ef5c3df49fd4f7149e0e",
+    "cb401bc5d2efd840cebe5bcd64ea776ffb33f7d66f1ef915bf55133fa508c62e"
+  ],
+  "floor.unfinished": [
+    "35641434336e8e0114a960fad75661bc49fd481454bde49a1c08197904cf0964",
+    "fb6ba9d497431440413d4f6196747aeb1832ed8b1183aed646d099cca74fce48"
+  ],
+  "floor.unknown": [
+    "82c01c6b397f8963bef2c125e8c7479563ceb20ee074db7534cc0fd925c180cd",
+    "2262b96d6a6c93262bd237b942d9114c7030776b42fcf1f3f25ad535d44de202"
+  ]
+}
