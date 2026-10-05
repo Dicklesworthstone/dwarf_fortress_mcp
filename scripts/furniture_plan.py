@@ -164,9 +164,13 @@ def progress(plan: FurniturePlan, recorded: dict[str, str]) -> dict:
 
     Only historical Placed receipts unlock the next step. A terminal refusal or
     cancellation stops the batch too: it is not an excuse to weaken its intent.
+    Retain the complete original plan in every handoff, including unstarted
+    selections. Historical progress never authorizes a retry or proves completion.
     """
-    require(type(recorded) is dict and set(recorded) <= {s.name for s in plan.steps},
-            'unexpected furniture batch record')
+    require(type(recorded) is dict and set(recorded) <= {s.name for s in plan.steps}
+            and all(type(phase) is str and phase in (
+                'placed', 'refused', 'cancelled', 'unknown', 'indeterminate'
+            ) for phase in recorded.values()), 'unexpected furniture batch record')
     rows, status, next_step, pending = [], 'ready', None, None
     prefix_open = True
     for step in plan.ordered:
@@ -188,6 +192,7 @@ def progress(plan: FurniturePlan, recorded: dict[str, str]) -> dict:
     if prefix_open:
         status = 'all_placed'
     return {'status': status, 'next_step': next_step, 'pending_step': pending,
+            'plan': plan.json(), 'plan_digest': plan.digest,
             'placed': sum(value == 'placed' for value in recorded.values()),
             'total': len(plan.steps), 'steps': rows, 'atomic': False,
             'construction_completion_proven': False, 'retry_permitted': False}
