@@ -1,12 +1,14 @@
-## Retain complete inventory intent for Python furnishing batches
+## Retain inventory intent through durable Python furnishing execution
 
-Add the bounded immutable Python handoff core linking a complete constrained
-request, exact item selections, native type identities and inventory source to
-an existing executable furniture plan. Later selection validation preserves
-material/subtype/distance/level, software/fortress/endpoint and source-clock/ID
-horizons. Operations and furniture generation namespaces remain separate.
+Add the bounded immutable handoff and allocation-backed batch/2 initialization.
+Preserve the complete request, exact selected items, native types, inventory
+source, material/subtype/distance/level constraints and source clock/ID horizons.
+Enforce them in review, all three mutation guards and independent child replay.
+Expose original allocation through bounded offline inspection; restart never
+reallocates or restores a dispatch permit. Keep legacy batch/1 and child formats.
 
-All 18 focused semantic tests pass. Native initialization and batch integration
-are not delivered by this first core increment; no new native effect, reservation,
-Rust/MCP qualification or production admission is claimed. Owning beads:
-`df-dfhack-bridge-plane-c-pic.4` and `df-dfhack-bridge-plane-c-pic.5`.
+All 38 focused Python methods pass, including real TCP clients, private journals,
+32 placements, lost replies, revocation, custody loss and pending-effect recovery.
+Inventory export and allocation-backed completion remain separate increments.
+No new native methods, credentials, Rust/MCP qualification or production admission.
+Owning beads: `df-dfhack-bridge-plane-c-pic.4` and `.5`.

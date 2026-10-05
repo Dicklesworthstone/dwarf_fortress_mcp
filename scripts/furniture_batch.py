@@ -15,12 +15,16 @@ from pathlib import Path
 import secrets
 
 import furniture_plan as model
+from furniture_handoff import Handoff, MAX_BYTES as MAX_HANDOFF_BYTES
+from furniture_allocation import Candidate
 import build_placement_client as placement
 import build_placement_store as storage
 from build_placement_rpc import Authority, Budget, Client, Reply, endpoint
 from build_placement_wire import Plan, Selection, canonical, exact_hex, integer, require, text_bytes, MAX_TICK
 
 SCHEMA = 'dfmcp.furniture-batch/1'
+HANDOFF_SCHEMA = 'dfmcp.furniture-batch/2'
+MAX_DEFINITION = 65536
 HEADER = b'{"schema":"dfmcp.furniture-batch-index/1"}\n'
 MAX_FILE = 32768
 MAX_OUTPUT = 65536
@@ -49,15 +53,35 @@ def selection(step: model.Step) -> Selection:
     return Selection(placement.KINDS[step.kind], step.item, *step.target)
 
 
+def validate_handoff_capture(handoff: Handoff, capture, manifest, address: str) -> None:
+    """Retained inventory only narrows an independently decoded native observation."""
+    from build_placement_wire import Capture
+    require(type(handoff) is Handoff and type(capture) is Capture, 'invalid handoff capture')
+    capture.encode()
+    require(capture.generation == manifest.generation, 'placement capture generation differs')
+    handoff.validate_binding(address, capture.folder, capture.site,
+                             manifest.df_version, manifest.dfhack_version)
+    step = next((s for s in handoff.plan().steps if selection(s) == capture.selection), None)
+    require(step is not None and capture.item.presence == 2, 'original selected item is not observed')
+    item = capture.item
+    candidate = Candidate(step.item, step.kind, item.pos,
+                          (item.material, item.material_index), item.subtype)
+    require(item.kind == capture.selection.kind, 'native selected furniture kind changed')
+    handoff.validate_item(step, candidate, item.native_type, capture.tick,
+                          capture.next_job, capture.next_building)
+
+
 class File:
     """One bounded descriptor-pinned batch metadata file, never a native journal."""
-    def __init__(self, root: int, name: str, budget: Budget, writable: bool, initial: bytes | None = None):
+    def __init__(self, root: int, name: str, budget: Budget, writable: bool, initial: bytes | None = None,
+                 *, maximum: int = MAX_FILE):
         self.root, self.name, self.budget = root, name, budget
+        self.maximum = integer(maximum, 1, MAX_DEFINITION)
         self.fd = None
         try:
             flags = os.O_RDWR | os.O_APPEND if writable else os.O_RDONLY
             if initial is not None:
-                require(writable and 0 < len(initial) <= MAX_FILE, 'invalid batch publication')
+                require(writable and 0 < len(initial) <= self.maximum, 'invalid batch publication')
                 flags |= os.O_CREAT | os.O_EXCL
             self.fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=root)
             self.identity = identity(self.fd)
@@ -77,7 +101,7 @@ class File:
         self.budget.remaining()
         before = os.fstat(self.fd)
         storage.private(before, 0o600)
-        require(identity(self.fd) == self.identity and 0 < before.st_size <= MAX_FILE, 'invalid batch file identity or extent')
+        require(identity(self.fd) == self.identity and 0 < before.st_size <= self.maximum, 'invalid batch file identity or extent')
         raw = bytearray()
         while len(raw) <= before.st_size:
             self.budget.remaining()
@@ -134,11 +158,17 @@ class Batch:
             require({'batch.json', 'steps.jsonl', 'effects'} <= found
                     and found <= {'batch.json', 'steps.jsonl', 'effects', 'stop.json'}, 'incomplete or foreign batch inventory')
             for name in sorted(found - {'effects'}):
-                self.files[name] = File(self.fd, name, budget, writable and name == 'steps.jsonl')
+                self.files[name] = File(self.fd, name, budget, writable and name == 'steps.jsonl',
+                                        maximum=MAX_DEFINITION if name == 'batch.json' else MAX_FILE)
             value = unseal(self.files['batch.json'].raw)
+            require(value.get('schema') in (SCHEMA, HANDOFF_SCHEMA), 'unsupported batch format')
+            with_handoff = value['schema'] == HANDOFF_SCHEMA
             storage.exact_object(value, {'schema', 'nonce', 'plan', 'source', 'endpoint', 'folder', 'site',
-                                        'dimensions', 'first_tick', 'root_identity', 'effects_identity'})
-            require(value['schema'] == SCHEMA, 'unsupported batch format')
+                                        'dimensions', 'first_tick', 'root_identity', 'effects_identity'}
+                                 | ({'handoff'} if with_handoff else set()))
+            require(with_handoff or len(self.files['batch.json'].raw) <= MAX_FILE,
+                    'legacy batch definition exceeds original bound')
+            self.handoff = Handoff.from_json(value['handoff']) if with_handoff else None
             exact_hex(value['nonce'], 24)
             self.plan = model.FurniturePlan.from_json(value['plan'])
             self.source = storage.manifest_from(value['source'])
@@ -147,6 +177,12 @@ class Batch:
             integer(value['site'], 0, 2147483647)
             integer(value['first_tick'], 0, MAX_TICK)
             self.plan.check_dimensions(value['dimensions'])
+            if self.handoff is not None:
+                self.handoff.validate_binding(value['endpoint'], value['folder'], value['site'],
+                                              self.source.df_version, self.source.dfhack_version)
+                require(self.plan == self.handoff.plan()
+                        and value['first_tick'] >= self.handoff.source.tick,
+                        'batch differs from retained allocation or predates its inventory')
             for field in ('root_identity', 'effects_identity'):
                 require(type(value[field]) is list and len(value[field]) == 2, 'invalid persisted directory identity')
                 for number in value[field]:
@@ -202,7 +238,13 @@ class Batch:
         require(list(self.effects.identity) == self.value['effects_identity'], 'effects directory changed')
 
     def bind(self, plan: Plan, manifest) -> None:
-        self.bind_capture(plan.before, manifest)
+        self.bind_before(plan.before, manifest)
+
+    def bind_before(self, capture, manifest) -> None:
+        """Fresh review and retained child plans share the same original constraints."""
+        self.bind_capture(capture, manifest)
+        if self.handoff is not None:
+            validate_handoff_capture(self.handoff, capture, manifest, self.value['endpoint'])
 
     def bind_capture(self, capture, manifest) -> None:
         require(manifest == self.source and capture.generation == self.source.generation
@@ -250,6 +292,8 @@ class Batch:
                    inventory_verified=True, advance_allowed=out['status'] == 'ready' and not self.stopped
                    and all(row.get('registered', True) for row in out['steps']),
                    source=self.source.view(), endpoint=self.value['endpoint'], native_contacted=False)
+        if self.handoff is not None:
+            out['allocation'] = self.handoff.compact()
         out['inventory_digest'] = sha(canonical({'batch': self.id, 'index': sha(self.files['steps.jsonl'].raw),
             'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}))
         self.check()
@@ -340,33 +384,64 @@ def encoded(operation: str, out: dict, ok: bool = True) -> bytes:
     return raw
 
 
-def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, timeout_ms: int = 10000) -> dict:
+def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, timeout_ms: int = 10000,
+               *, handoff: Handoff | None = None) -> dict:
     text_bytes(folder, 512)
     integer(site, 0, 2147483647)
+    require(type(plan) is model.FurniturePlan, 'invalid complete furniture plan')
+    if handoff is not None:
+        require(type(handoff) is Handoff, 'invalid furniture handoff')
+        handoff = Handoff.decode(canonical(handoff.json()))
+        require(plan == handoff.plan() and (folder, site) == (handoff.request.folder, handoff.request.site),
+                'explicit initialization differs from original request')
     budget = Budget(timeout_ms)
     with root_lock(path, budget) as root:
         require(not names(root), 'initialization requires an existing empty private directory')
         authority = Authority.load()
+        address = f'{authority.address[0]}:{authority.address[1]}'
+        if handoff is not None:
+            require(address == handoff.source.address, 'operator endpoint differs from allocation')
         with Client(authority, budget, selection(plan.ordered[0])) as client:
             reply = client.observe()
         capture = reply.capture
         require(capture.folder == folder and capture.site == site, 'initial observation is another fortress')
         plan.check_dimensions(capture.dimensions)
+        if handoff is not None:
+            validate_handoff_capture(handoff, capture, reply.manifest, address)
+        value = {'schema': SCHEMA if handoff is None else HANDOFF_SCHEMA,
+            'nonce': secrets.token_hex(24), 'plan': plan.json(),
+            'source': reply.manifest.view(), 'endpoint': address,
+            'folder': folder, 'site': site, 'dimensions': list(capture.dimensions), 'first_tick': capture.tick,
+            'root_identity': identity(root), 'effects_identity': [2**64 - 1, 2**64 - 1]}
+        maximum = MAX_FILE if handoff is None else MAX_DEFINITION
+        if handoff is not None:
+            value['handoff'] = handoff.json()
+        # Reserve complete definition and visible original intent BEFORE creating custody.
+        require(len(seal(value)) <= maximum, 'batch manifest too large')
+        preview = model.progress(plan, {})
+        if handoff is not None:
+            preview['allocation'] = handoff.compact()
+        require(len(encoded('init', preview)) + 8192 <= MAX_OUTPUT, 'batch output reservation exceeds bound')
+        authority.guard('QueryPlacement')
+        budget.remaining()
+        pinned = storage.open_directory(path)
+        try:
+            require(identity(pinned) == identity(root) and not names(root), 'initial batch directory changed')
+        finally:
+            os.close(pinned)
         os.mkdir('effects', 0o700, dir_fd=root)
         effects = storage.open_directory(str(Path(path) / 'effects'))
         try:
-            value = {'schema': SCHEMA, 'nonce': secrets.token_hex(24), 'plan': plan.json(),
-                'source': reply.manifest.view(), 'endpoint': f'{authority.address[0]}:{authority.address[1]}',
-                'folder': folder, 'site': site, 'dimensions': list(capture.dimensions), 'first_tick': capture.tick,
-                'root_identity': identity(root), 'effects_identity': identity(effects)}
+            value['effects_identity'] = identity(effects)
         finally:
             os.close(effects)
         raw = seal(value)
-        require(len(raw) <= MAX_FILE, 'batch manifest too large')
         published = []
         try:
             for name, data in [('batch.json', raw), ('steps.jsonl', HEADER)]:
-                published.append(File(root, name, budget, True, data))
+                authority.guard('QueryPlacement')
+                published.append(File(root, name, budget, True, data,
+                                      maximum=maximum if name == 'batch.json' else MAX_FILE))
             for file in published:
                 file.check()
         finally:
@@ -376,6 +451,9 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         out = batch.audit()
         out['native_contacted'] = True
         encoded('init', out)
+        authority.guard('QueryPlacement')
+        budget.remaining()
+        batch.check()
         return out
 
 
@@ -403,6 +481,7 @@ def review(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
         require(reply.manifest == batch.source and reply.capture.identity == (
             batch.source.generation, batch.value['site'], tuple(batch.value['dimensions']), batch.value['folder'])
             and reply.capture.tick >= batch.value['first_tick'], 'review source differs from batch')
+        batch.bind_before(reply.capture, reply.manifest)
         out.update(native_contacted=True, before=reply.capture.view(),
                    blockers=list(reply.capture.blockers) + (['native_unresolved'] if reply.unresolved else [])
                    + (['native_retention_full'] if reply.retained_records == 256 else []),
@@ -413,6 +492,9 @@ def review(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
             out['confirm_review'] = review_seal(batch, step, native_plan, out['inventory_digest'])
         batch.audit()
         encoded('review', out)
+        authority.guard('QueryPlacement')
+        batch.budget.remaining()
+        batch.check()
         return out
 
 
@@ -455,10 +537,17 @@ def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, 
         return out
 
 
-def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_ms: int = 10000) -> dict:
+def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_ms: int = 10000,
+            *, allocation: bool = False) -> dict:
     with Batch(path, Budget(timeout_ms)) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         out = batch.audit()
+        require(type(allocation) is bool and not (allocation and step_name is not None),
+                'allocation inspection and child receipt selection are separate bounded views')
+        if allocation:
+            require(batch.handoff is not None, 'legacy exact-item batch has no retained allocation')
+            out['allocation'] = batch.handoff.json()
+            out['handoff_digest'] = batch.handoff.digest
         if step_name is not None:
             model.label(step_name)
             step = next((s for s in batch.plan.steps if s.name == step_name), None)
@@ -498,19 +587,27 @@ def stop(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
         return out
 
 
-def read_plan(path: str) -> model.FurniturePlan:
+def read_input(path: str, maximum: int) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         before = os.fstat(fd)
         # Input is operator data, not persistent custody. Refuse special files.
         import stat
-        require(stat.S_ISREG(before.st_mode) and 1 <= before.st_size <= model.MAX_BYTES, 'invalid plan input')
+        require(stat.S_ISREG(before.st_mode) and 1 <= before.st_size <= maximum, 'invalid plan input')
         raw = os.read(fd, before.st_size + 1)
         require(len(raw) == before.st_size and storage.stamp(before) == storage.stamp(os.fstat(fd))
                 == storage.stamp(os.stat(path, follow_symlinks=False)), 'plan input changed')
-        return model.FurniturePlan.decode(raw)
+        return raw
     finally:
         os.close(fd)
+
+
+def read_plan(path: str) -> model.FurniturePlan:
+    return model.FurniturePlan.decode(read_input(path, model.MAX_BYTES))
+
+
+def read_handoff(path: str) -> Handoff:
+    return Handoff.decode(read_input(path, MAX_HANDOFF_BYTES))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -521,24 +618,30 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument('--directory', required=True)
         command.add_argument('--timeout-ms', type=int, default=10000)
         if operation == 'init':
-            command.add_argument('--plan', required=True)
+            choice = command.add_mutually_exclusive_group(required=True)
+            choice.add_argument('--plan')
+            choice.add_argument('--handoff')
             command.add_argument('--world-folder', required=True)
             command.add_argument('--site', required=True, type=int)
         else:
             command.add_argument('--batch-id', required=True)
         if operation in ('inspect', 'query', 'cancel'):
             command.add_argument('--step', required=operation != 'inspect')
+        if operation == 'inspect':
+            command.add_argument('--allocation', action='store_true')
         if operation == 'advance':
             command.add_argument('--expected-plan', required=True)
             command.add_argument('--confirm-review', required=True)
     args = parser.parse_args(argv)
     try:
         if args.operation == 'init':
-            out = initialize(args.directory, read_plan(args.plan), args.world_folder, args.site, args.timeout_ms)
+            handoff = read_handoff(args.handoff) if args.handoff is not None else None
+            plan = handoff.plan() if handoff is not None else read_plan(args.plan)
+            out = initialize(args.directory, plan, args.world_folder, args.site, args.timeout_ms, handoff=handoff)
         elif args.operation == 'advance':
             out = advance(args.directory, args.batch_id, args.expected_plan, args.confirm_review, args.timeout_ms)
         elif args.operation == 'inspect':
-            out = inspect(args.directory, args.batch_id, args.step, args.timeout_ms)
+            out = inspect(args.directory, args.batch_id, args.step, args.timeout_ms, allocation=args.allocation)
         elif args.operation in ('query', 'cancel'):
             out = recover(args.directory, args.batch_id, args.step, args.operation == 'cancel', args.timeout_ms)
         else:
