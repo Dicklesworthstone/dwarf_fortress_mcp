@@ -176,7 +176,7 @@ def serialize(value: dict) -> bytes:
 
 
 def run(plan: RoomPlan, authority: Authority, budget: Budget, *, emit: str = 'survey') -> bytes:
-    require(emit in ('survey', 'remaining-blueprint'), 'unsupported room survey export')
+    require(emit in ('survey', 'remaining-blueprint', 'excavation-handoff'), 'unsupported room survey export')
     def guard():
         authority.guard()
         budget.work()
@@ -193,6 +193,10 @@ def run(plan: RoomPlan, authority: Authority, budget: Budget, *, emit: str = 'su
             require(result['remaining_blueprint'] is not None,
                     'no complete nonempty excavation proposal to export')
             output = canonical(result['remaining_blueprint'])
+        if emit == 'excavation-handoff':
+            from room_excavation_handoff import RoomExcavationHandoff
+            output = RoomExcavationHandoff.create(selected.plan, observed.raw, observed.manifest,
+                                                  authority.address, guard).encode()
         guard()  # Cached results and final serialization cannot bypass revocation.
         return output
 
@@ -202,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--request-file', type=Path)
     source.add_argument('--plan-file', type=Path)
-    parser.add_argument('--emit', choices=('survey', 'remaining-blueprint'), default='survey')
+    parser.add_argument('--emit', choices=('survey', 'remaining-blueprint', 'excavation-handoff'), default='survey')
     parser.add_argument('--timeout-ms', type=int, default=10000)
     args = parser.parse_args(argv)
     try:
