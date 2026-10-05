@@ -1,0 +1,22 @@
+{
+  "schema": "dfmcp.furniture-handoff-python/1",
+  "status": "implemented_unadmitted_python_semantic_core",
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "implementation": "scripts/furniture_handoff.py",
+  "tests": "tests/test_furniture_handoff.py",
+  "max_bytes": 32768,
+  "max_slots": 32,
+  "inventory_profile": "operations/1.4",
+  "plan_schema": "dfmcp.furniture-plan/1",
+  "digest_domain": "dfmcp-furniture-handoff-python/1",
+  "canonical_encoding": "ASCII JSON, sorted keys, compact separators, no duplicate fields",
+  "native_horizon_order": ["next_job", "next_building", "next_item"],
+  "future_selection": "same original item/type/material/subtype; movement inside original level/distance only",
+  "generation_namespaces": "operations and furniture generations are independently bound",
+  "native_methods_added": [],
+  "game_mutation_authority": false,
+  "items_reserved": false,
+  "reallocation_permitted": false,
+  "native_acquisition_independently_attested": false,
+  "production_admitted": false
+}
