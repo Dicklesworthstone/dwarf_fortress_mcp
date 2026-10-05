@@ -18,6 +18,7 @@ from construction_monitor_rpc import (
 from construction_receipt import Manifest, decode_operations
 from furniture_allocation import Candidate, Guard, Request, allocate
 from furniture_plan import canonical, integer, require
+from furniture_handoff import Handoff, InventorySource, Selected
 
 OPT_IN = 'DFMCP_ALLOW_UNADMITTED_FURNITURE_ALLOCATION'
 ENDPOINT = 'DFMCP_FURNITURE_ALLOCATION_ENDPOINT'
@@ -100,10 +101,17 @@ class InventoryClient(ReceiptClient):
             raise
 
 
-def project(request: Request, raw: bytes, guard: Guard) -> dict:
+def project(request: Request, raw: bytes, guard: Guard,
+            *, handoff_binding: tuple[str, Manifest] | None = None) -> dict:
     """Decode all bytes before projection. Supplied bytes alone do not prove I/O."""
     require(type(request) is Request, 'invalid inventory request')
     request.__post_init__()
+    if handoff_binding is not None:
+        require(type(handoff_binding) is tuple and len(handoff_binding) == 2
+                and type(handoff_binding[0]) is str and type(handoff_binding[1]) is Manifest,
+                'invalid handoff source binding')
+        endpoint(handoff_binding[0])
+        handoff_binding[1].encode()
     observed = decode_operations(raw, guard)
     require((observed.folder, observed.site) == (request.folder, request.site),
             'inventory is not from the requested fortress')
@@ -155,6 +163,28 @@ def project(request: Request, raw: bytes, guard: Guard) -> dict:
                             'items': len(observed.items), 'attachments': len(observed.attachments),
                             'counts': counts, 'unprojected_item_state': 'unknown',
                             'terrain_and_map_dimensions': 'not_observed', 'placement_state': 'not_queried'}
+    if handoff_binding is not None:
+        address, manifest = handoff_binding
+        result['schema'] = 'dfmcp.furniture-allocation-handoff-result/1'
+        result['handoff'] = None
+        if result['status'] == 'allocated':
+            source = InventorySource(address, manifest.generation, manifest.df_version,
+                manifest.dfhack_version, observed.digest, len(raw), observed.tick, observed.horizons)
+            selected = []
+            for assignment in result['assignments']:
+                guard()
+                item = observed.items[assignment['item']]
+                selected.append(Selected(assignment['slot'],
+                    Candidate(item.id, kinds[item.kind], item.position,
+                              (item.material, item.material_index), item.subtype), item.native_type))
+            handoff = Handoff(request, source, tuple(selected))
+            require(handoff.plan().json() == result['plan'], 'handoff differs from complete allocation')
+            result['handoff'], result['handoff_digest'] = handoff.json(), handoff.digest
+            # Full request and original selections live in the handoff; do not duplicate
+            # them and consume the output budget needed for the executable plan.
+            del result['request']
+            del result['assignments']
+            result['allocation_details_location'] = 'handoff'
     guard()
     return result
 
@@ -162,7 +192,9 @@ def project(request: Request, raw: bytes, guard: Guard) -> dict:
 def packet(result: dict | None, error_class: str | None = None) -> dict:
     success = result is not None
     status = result['status'] if success else 'unestablished'
-    return {'ok': success, 'profile': 'furniture-allocation/1', 'runtime_admitted': False,
+    retained = success and 'handoff' in result
+    return {'ok': success, 'profile': 'furniture-allocation-handoff/1' if retained else 'furniture-allocation/1',
+            'runtime_admitted': False,
             'result': result, **({} if success else {'error_class': error_class,
                 'detail': 'Inventory, request, authority, budget or evidence refused; no allocation established.'}),
             'agent_turn': {
@@ -176,7 +208,8 @@ def packet(result: dict | None, error_class: str | None = None) -> dict:
                 'changes': [], 'attention': [], 'active_work': [], 'affordances': [], 'recommendations': [],
                 'uncertainty': ['Allocation is a historical proposal, not a reservation or placement permission.',
                                 'Wear, unprojected flags, terrain, dimensions and worker paths are not established.',
-                                'Material and subtype constraints are assessed at this capture only; review each later native plan.',
+                                ('Retained constraints narrow future review; the exported artifact does not independently attest acquisition.'
+                                 if retained else 'Material and subtype constraints are assessed at this capture only; review each later native plan.'),
                                 'Existing placement uncertainty is not queried or cleared.'],
                 'coverage': {'operations_capture': 'complete' if success else 'unestablished',
                              'active_work': 'not_queried', 'placement_receipts': 'not_queried',
@@ -191,13 +224,18 @@ def bounded_output(value: dict) -> bytes:
     return raw
 
 
-def run(request: Request, authority: Authority, budget: Budget) -> bytes:
+def run(request: Request, authority: Authority, budget: Budget, *, retain_constraints: bool = False) -> bytes:
     """One live foreground read and complete serialization before publication."""
     require(type(request) is Request, 'invalid inventory request')
     request.__post_init__()
+    require(type(retain_constraints) is bool, 'invalid handoff export option')
     with InventoryClient(authority, budget) as client:
         manifest, raw = client.capture_once()
-        result = project(request, raw, budget.work)
+        if retain_constraints:
+            address = f'{authority.address[0]}:{authority.address[1]}'
+            result = project(request, raw, budget.work, handoff_binding=(address, manifest))
+        else:
+            result = project(request, raw, budget.work)
         result['source'].update(native_generation=manifest.generation,
                                 df_version=manifest.df_version, dfhack_version=manifest.dfhack_version)
         result['native_capture_established'] = True

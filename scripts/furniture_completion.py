@@ -18,12 +18,15 @@ import construction_plan as condition
 from construction_receipt import Cursor, Guard
 import furniture_batch as furnishing
 from furniture_plan import FurniturePlan
+from furniture_handoff import Handoff
 
 MAX_ORIGIN = 2 * 1024 * 1024
 MAX_GOAL = MAX_ORIGIN + condition.MAX_GOAL + 16
 MAX_SAMPLE = condition.MAX_SAMPLE
 ORIGIN_MAGIC = b'DFMFCO01'
 GOAL_MAGIC = b'DFMFCG01'
+HANDOFF_ORIGIN_MAGIC = b'DFMFCO02'
+HANDOFF_GOAL_MAGIC = b'DFMFCG02'
 POLICY = 'dfmcp.original-furnishing-completion/1'
 LinkedSample = condition.LinkedSample
 Progress = condition.Progress
@@ -85,6 +88,7 @@ class Origin:
     root_identity: tuple[int, int] = derived(init=False)
     effects_identity: tuple[int, int] = derived(init=False)
     receipts: tuple[bytes, ...] = derived(init=False, repr=False)
+    handoff: Handoff | None = derived(init=False, repr=False)
 
     def __post_init__(self, guard: Guard | None) -> None:
         work = _pure_guard if guard is None else guard
@@ -92,12 +96,18 @@ class Origin:
         _path(self.batch_path)
         _identity(self.manifest_identity)
         _identity(self.index_identity)
-        _blob(self.manifest_raw, furnishing.MAX_FILE)
+        _blob(self.manifest_raw, furnishing.MAX_DEFINITION)
         _blob(self.index_raw, furnishing.MAX_FILE)
         value = furnishing.unseal(self.manifest_raw)
+        require(value.get('schema') in (furnishing.SCHEMA, furnishing.HANDOFF_SCHEMA),
+                'wrong original batch generation')
+        with_handoff = value['schema'] == furnishing.HANDOFF_SCHEMA
         placements.exact_object(value, {'schema', 'nonce', 'plan', 'source', 'endpoint', 'folder', 'site',
-                                       'dimensions', 'first_tick', 'root_identity', 'effects_identity'})
-        require(value['schema'] == furnishing.SCHEMA, 'wrong original batch generation')
+                                       'dimensions', 'first_tick', 'root_identity', 'effects_identity'}
+                                | ({'handoff'} if with_handoff else set()))
+        require(with_handoff or len(self.manifest_raw) <= furnishing.MAX_FILE,
+                'legacy original definition exceeds its fixed bound')
+        handoff = Handoff.from_json(value['handoff']) if with_handoff else None
         exact_hex(value['nonce'], 24)
         plan = FurniturePlan.from_json(value['plan'])
         require(plan.json() == value['plan'], 'original furniture plan is not normalized')
@@ -108,6 +118,11 @@ class Origin:
         integer(value['first_tick'], 0, MAX_TICK)
         require(type(value['dimensions']) is list, 'invalid original map dimensions')
         plan.check_dimensions(value['dimensions'])
+        if handoff is not None:
+            handoff.validate_binding(value['endpoint'], value['folder'], value['site'],
+                                     source.df_version, source.dfhack_version)
+            require(handoff.plan() == plan and value['first_tick'] >= handoff.source.tick,
+                    'original batch differs from retained request or inventory time')
         for name in ('root_identity', 'effects_identity'):
             require(type(value[name]) is list, 'invalid persisted original directory identity')
             _identity(tuple(value[name]))
@@ -145,6 +160,8 @@ class Origin:
                     and before.folder == value['folder'] and before.site == value['site']
                     and list(before.dimensions) == value['dimensions']
                     and before.tick >= value['first_tick'], 'original child source or fortress differs')
+            if handoff is not None:
+                furnishing.validate_handoff_capture(handoff, before, source, value['endpoint'])
             if last_after is not None:
                 require(before.tick >= last_after.tick and before.sequence >= last_after.sequence
                         and before.next_building >= last_after.next_building
@@ -154,7 +171,8 @@ class Origin:
             previous = furnishing.sha(line)
         for name, item in (('batch_id', batch_id), ('plan', plan), ('source', source), ('address', address),
                            ('root_identity', tuple(value['root_identity'])),
-                           ('effects_identity', tuple(value['effects_identity'])), ('receipts', tuple(receipts))):
+                           ('effects_identity', tuple(value['effects_identity'])), ('receipts', tuple(receipts)),
+                           ('handoff', handoff)):
             object.__setattr__(self, name, item)
         require(len(self.encode()) <= MAX_ORIGIN, 'oversized original furnishing evidence')
         work()
@@ -189,8 +207,10 @@ class Origin:
         require(observed.encode() == self.encode(), 'original furnishing custody changed')
 
     def encode(self) -> bytes:
-        raw = (ORIGIN_MAGIC + field(_path(self.batch_path)) + _identity(self.manifest_identity)
-               + _blob(self.manifest_raw, furnishing.MAX_FILE) + _identity(self.index_identity)
+        magic = ORIGIN_MAGIC if self.handoff is None else HANDOFF_ORIGIN_MAGIC
+        maximum = furnishing.MAX_FILE if self.handoff is None else furnishing.MAX_DEFINITION
+        raw = (magic + field(_path(self.batch_path)) + _identity(self.manifest_identity)
+               + _blob(self.manifest_raw, maximum) + _identity(self.index_identity)
                + _blob(self.index_raw, furnishing.MAX_FILE) + bytes([len(self.children)]))
         for child in self.children:
             raw += field(text_bytes(child.name, 256)) + _identity(child.file_identity) + _blob(child.raw, placements.MAX_FILE)
@@ -200,10 +220,11 @@ class Origin:
     @classmethod
     def decode(cls, raw: bytes, guard: Guard | None = None) -> Origin:
         r = Cursor(raw, MAX_ORIGIN)
-        require(r.take(8) == ORIGIN_MAGIC, 'wrong original furnishing evidence generation')
+        magic = r.take(8)
+        require(magic in (ORIGIN_MAGIC, HANDOFF_ORIGIN_MAGIC), 'wrong original furnishing evidence generation')
         path = r.string(4096)
         manifest_identity = (r.number(8), r.number(8))
-        manifest = _read_blob(r, furnishing.MAX_FILE)
+        manifest = _read_blob(r, furnishing.MAX_FILE if magic == ORIGIN_MAGIC else furnishing.MAX_DEFINITION)
         index_identity = (r.number(8), r.number(8))
         index = _read_blob(r, furnishing.MAX_FILE)
         children = []
@@ -218,7 +239,8 @@ class Origin:
 
     @property
     def digest(self) -> str:
-        return hashlib.sha256(b'dfmcp.furniture-completion-origin/1\0' + self.encode()).hexdigest()
+        domain = b'dfmcp.furniture-completion-origin/1\0' if self.handoff is None else b'dfmcp.furniture-completion-origin/2\0'
+        return hashlib.sha256(domain + self.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -267,12 +289,13 @@ class Goal:
         return self.condition.max_observations
 
     def encode(self) -> bytes:
-        return GOAL_MAGIC + _blob(self.origin.encode(), MAX_ORIGIN) + _blob(self.condition.encode(), condition.MAX_GOAL)
+        magic = GOAL_MAGIC if self.origin.handoff is None else HANDOFF_GOAL_MAGIC
+        return magic + _blob(self.origin.encode(), MAX_ORIGIN) + _blob(self.condition.encode(), condition.MAX_GOAL)
 
     @classmethod
     def decode(cls, raw: bytes, guard: Guard | None = None) -> Goal:
         r = Cursor(raw, MAX_GOAL)
-        require(r.take(8) == GOAL_MAGIC, 'wrong furnishing completion goal generation')
+        require(r.take(8) in (GOAL_MAGIC, HANDOFF_GOAL_MAGIC), 'wrong furnishing completion goal generation')
         origin = Origin.decode(_read_blob(r, MAX_ORIGIN), guard)
         goal = condition.Goal.decode(_read_blob(r, condition.MAX_GOAL))
         r.finish()
@@ -282,7 +305,8 @@ class Goal:
 
     @property
     def digest(self) -> str:
-        return hashlib.sha256(b'dfmcp.furniture-completion-goal/1\0' + self.encode()).hexdigest()
+        domain = b'dfmcp.furniture-completion-goal/1\0' if self.origin.handoff is None else b'dfmcp.furniture-completion-goal/2\0'
+        return hashlib.sha256(domain + self.encode()).hexdigest()
 
 
 def advance(state: Progress, goal: Goal, sample: LinkedSample, guard: Guard) -> Progress:
@@ -293,5 +317,15 @@ def advance(state: Progress, goal: Goal, sample: LinkedSample, guard: Guard) -> 
                 == (expected.generation, expected.df_version, expected.dfhack_version)
                 for manifest in (sample.before, sample.after)),
             'sample differs from the original furnishing native source')
+    handoff = goal.origin.handoff
+    if handoff is not None:
+        original = handoff.source
+        require((sample.operations.generation, *sample.operations.software)
+                == (original.generation, original.df_version, original.dfhack_version),
+                'completion operations source differs from original allocation')
     reduced = condition.advance(replace(state, goal_digest=goal.condition.digest), goal.condition, sample, guard)
+    if handoff is not None and (reduced.last_tick < handoff.source.tick
+            or any(a < b for a, b in zip(reduced.horizons, handoff.source.horizons))):
+        reduced = replace(reduced, phase='invalidated', reason='allocation_source_regressed',
+                          reason_building=None, streak=0, first_tick=None, counted_tick=None)
     return replace(reduced, goal_digest=goal.digest)

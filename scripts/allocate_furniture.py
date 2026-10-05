@@ -46,12 +46,17 @@ def read_request(path: str, budget: Budget) -> Request:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--request-file', required=True)
+    parser.add_argument('--with-handoff', action='store_true',
+                        help='retain the complete original request and selected-item evidence for batch initialization')
     parser.add_argument('--timeout-ms', type=int, default=10000)
     args = parser.parse_args(argv)
     try:
         budget = Budget(args.timeout_ms)
         request = read_request(args.request_file, budget)
-        output = run(request, Authority.load(), budget)
+        if args.with_handoff:
+            output = run(request, Authority.load(), budget, retain_constraints=True)
+        else:
+            output = run(request, Authority.load(), budget)
         status = 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt) as error:
         # No native strings, paths, credentials or partial assignments in errors.

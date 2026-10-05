@@ -1,14 +1,17 @@
 {
   "schema": "dfmcp.furniture-handoff-python/1",
-  "status": "implemented_unadmitted_python_batch_execution",
+  "status": "implemented_unadmitted_python_execution_and_completion",
   "beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
     "df-dfhack-bridge-plane-c-pic.4",
     "df-dfhack-bridge-plane-c-pic.5"
   ],
   "implementation": "scripts/furniture_handoff.py",
   "tests": [
     "tests/test_furniture_handoff.py",
-    "tests/test_furniture_handoff_batch.py"
+    "tests/test_furniture_handoff_batch.py",
+    "tests/test_furniture_handoff_inventory.py",
+    "tests/test_furniture_handoff_completion.py"
   ],
   "max_bytes": 32768,
   "max_slots": 32,
@@ -31,11 +34,34 @@
   "production_admitted": false,
   "implementations": [
     "scripts/furniture_handoff.py",
-    "scripts/furniture_batch.py"
+    "scripts/furniture_inventory.py",
+    "scripts/allocate_furniture.py",
+    "scripts/furniture_batch.py",
+    "scripts/furniture_completion.py"
   ],
   "batch_schema": "dfmcp.furniture-batch/2",
   "batch_definition_max_bytes": 65536,
   "legacy_batch_definition_max_bytes": 32768,
   "output_max_bytes": 65536,
-  "native_acquisition_from_import": "not_independently_attested; fresh placement observations required"
+  "native_acquisition_from_import": "not_independently_attested; fresh placement observations required",
+  "export": {
+    "option": "--with-handoff",
+    "profile": "furniture-allocation-handoff/1",
+    "result_schema": "dfmcp.furniture-allocation-handoff-result/1",
+    "whole_capture_reads": 1,
+    "shortage_handoff": null,
+    "default_report_unchanged": true
+  },
+  "completion": {
+    "origin_magic": "DFMFCO02",
+    "goal_magic": "DFMFCG02",
+    "origin_digest_domain": "dfmcp.furniture-completion-origin/2",
+    "goal_digest_domain": "dfmcp.furniture-completion-goal/2",
+    "legacy_bytes_unchanged": true,
+    "original_operations_generation_required": true,
+    "original_inventory_horizons_are_lower_bounds": true,
+    "all_original_targets_required": true,
+    "max_origin_bytes": 2097152,
+    "journal_frame_format_unchanged": true
+  }
 }

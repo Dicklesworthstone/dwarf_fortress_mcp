@@ -1,0 +1,136 @@
+{
+  "schema": "dfmcp.furniture-handoff-python-development-evidence/1",
+  "base_revision": "5907c94af060db6807acb5dc845fa0df2aa5e822",
+  "scope": "focused_python_development_execution_only",
+  "python_version": "3.13.5",
+  "methods_passed": 59,
+  "runs": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_furniture_handoff.py -v",
+      "methods": 18,
+      "result": "passed_focused_development_only",
+      "log_file": "furniture-handoff-core-final.log",
+      "log_sha256": "12b600334cffeb9d528b77b7b6aec5e50562cc8c321e44d774b415f902766f76"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_furniture_handoff_batch.py -v",
+      "methods": 20,
+      "result": "passed_focused_development_only",
+      "log_file": "furniture-handoff-batch-final.log",
+      "log_sha256": "6029f3762eff38b858d102b20690ded34b58a7819e555899e828566843f197c9"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_furniture_handoff_inventory.py -v",
+      "methods": 10,
+      "result": "passed_focused_development_only",
+      "log_file": "furniture-handoff-inventory-final.log",
+      "log_sha256": "115e0f3023babda1b1328fab7968475f781525eebf900387492c19d09a136adb"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -p test_furniture_handoff_completion.py -v",
+      "methods": 11,
+      "result": "passed_focused_development_only",
+      "log_file": "furniture-handoff-completion-final.log",
+      "log_sha256": "be89b05fc8d3f24beff074907ef5644bf304ab99e501133a6da18ea3b361c147"
+    }
+  ],
+  "source_files": {
+    "scripts/allocate_furniture.py": {
+      "git_blob_sha": "3d8e3e80a2ff8e77f19829a623bf70ecfb84da6e",
+      "sha256": "481ddfb7a81bc5615bbb1bbf7f847ff33f0e5ccf0c856c546b6d8b3d3045f1a1"
+    },
+    "scripts/build_placement_client.py": {
+      "git_blob_sha": "a16ee9c1f986ad54501bec237e262c6cf5178940",
+      "sha256": "3ee0a1150dec23a20ebf10d5a3a1f551ceebebe6e03fcb97cb2e4f6d0e89c5d8"
+    },
+    "scripts/build_placement_rpc.py": {
+      "git_blob_sha": "745cf1c7b5512358cfbcf988a7aa3d3ec7725f3d",
+      "sha256": "d2bef480c0232465764bd7bb37a14946e5d859a02040082df69961238c9f663d"
+    },
+    "scripts/build_placement_store.py": {
+      "git_blob_sha": "98c821dc9a0a80e590997462b2f7d89622e0f2b0",
+      "sha256": "5ccddc7ceb1ef065da0099da27742d56f4d4b7f4695b827e55b8fa89b7ae4897"
+    },
+    "scripts/build_placement_wire.py": {
+      "git_blob_sha": "8f906d6d1a919c4bae5f0bdc3bdbacfdd1347d16",
+      "sha256": "0918996637142edbbcffeac52e4f3e647ba867e79fc26f9cccfba584256dd117"
+    },
+    "scripts/construction_monitor_rpc.py": {
+      "git_blob_sha": "7e714feeecade89531e69e3848986bf8634b79a7",
+      "sha256": "e89294a98cc6174d477bfbb74262b8a1d8ccfc4971489d91d9134f1a702dd809"
+    },
+    "scripts/construction_plan.py": {
+      "git_blob_sha": "ee921d44a5b2f9e9dbe2f672774928874fd3652a",
+      "sha256": "218f5e00e7f28e6c006a4cbefad87e0da225683f3cbdff91a3fc1dd640c3b72d"
+    },
+    "scripts/construction_receipt.py": {
+      "git_blob_sha": "5ec00e974680217f56da408f347d70775182c16c",
+      "sha256": "537e65dfd40337718b47dcb2095337347d5143ed97412253697c8005cfa64d38"
+    },
+    "scripts/furniture_allocation.py": {
+      "git_blob_sha": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+      "sha256": "d047583fbac8e1dbd62a8e9fa637b463d4347a9c8668fc6d611742281c877832"
+    },
+    "scripts/furniture_batch.py": {
+      "git_blob_sha": "25056a97dc60f33d9c21062918a754a7452d2066",
+      "sha256": "940756bc3cf6d2544b831359e9fc5f0895ae30b8c6e75edfda9f965619d9ce86"
+    },
+    "scripts/furniture_completion.py": {
+      "git_blob_sha": "817328765758f97f09cb37e95a7a159cdc88d304",
+      "sha256": "6301aa272c7b02d9d433961a34abe50a1a209d5b8b3605d419f072b73f34d8da"
+    },
+    "scripts/furniture_handoff.py": {
+      "git_blob_sha": "8a1b7b6439a5be90c6ede924aaf3dfecb3eab806",
+      "sha256": "eed129abf541c81e843807d52236a919b9d3d63ee489bcdb49aa0f828a13a0b1"
+    },
+    "scripts/furniture_inventory.py": {
+      "git_blob_sha": "42bfbdb12c483d1e03e5d9a02213326fc9a1fa44",
+      "sha256": "dec6578cc7fb8d7a61ab79889d09672fc4d1e1b3abb8e436621e5f390851cc6f"
+    },
+    "scripts/furniture_plan.py": {
+      "git_blob_sha": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+      "sha256": "dc2ddcaecb6e6a8f3f97e59c62d6716610170ea38dc844fec9c78d68eea151d7"
+    },
+    "tests/test_furniture_handoff.py": {
+      "git_blob_sha": "ecca25383421fc7c2e1200b92f77b4577551d483",
+      "sha256": "57457e4ac2dba08a3b7a88bfad89b02f103431473496e40d74c7cf2c139aff8e"
+    },
+    "tests/test_furniture_handoff_batch.py": {
+      "git_blob_sha": "c22ce8deff08697ea9eb57576881c455bfc1c673",
+      "sha256": "615b3c1a98f3466e816bd247e2ea1e24acb5d95e807cb211eec51f532e8afa6c"
+    },
+    "tests/test_furniture_handoff_completion.py": {
+      "git_blob_sha": "cb93cfb573a8e5a865b4f27906f25974c3f1b10f",
+      "sha256": "4cfdf3ca1bd3024c3fc8d9d5307aeb08a4669b08f2dffdaf41844b27c8d4b4dd"
+    },
+    "tests/test_furniture_handoff_inventory.py": {
+      "git_blob_sha": "0ca76eec63221e61a832ea141cbfa61592bf73ce",
+      "sha256": "5c428735203ef0f9e6cc9275af72ffd9e9fda3ed8d8f9617bc894be17f125ecf"
+    }
+  },
+  "unchanged_dependency_blobs_verified": {
+    "scripts/furniture_plan.py": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+    "scripts/furniture_allocation.py": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+    "scripts/build_placement_wire.py": "8f906d6d1a919c4bae5f0bdc3bdbacfdd1347d16",
+    "scripts/build_placement_rpc.py": "745cf1c7b5512358cfbcf988a7aa3d3ec7725f3d",
+    "scripts/build_placement_store.py": "98c821dc9a0a80e590997462b2f7d89622e0f2b0",
+    "scripts/build_placement_client.py": "a16ee9c1f986ad54501bec237e262c6cf5178940",
+    "scripts/construction_receipt.py": "5ec00e974680217f56da408f347d70775182c16c",
+    "scripts/construction_monitor_rpc.py": "7e714feeecade89531e69e3848986bf8634b79a7",
+    "scripts/construction_plan.py": "ee921d44a5b2f9e9dbe2f672774928874fd3652a"
+  },
+  "observed_fixture_sizes_bytes": {
+    "allocation_export": 34099,
+    "full_batch_inspection": 48371,
+    "completion_origin": 347309
+  },
+  "limitations": [
+    "Aggregate invocation exceeded execution time limit; final per-module invocations passed.",
+    "Partial source reconstruction, not full clean checkout.",
+    "TCP peer is a test double, not a DFHack plugin.",
+    "Later construction samples are explicit wire fixtures.",
+    "Full completion-monitor CLI/journal process suite not executed.",
+    "No Rust/MCP, native SDK, live-game, full-workspace or production qualification."
+  ],
+  "production_admitted": false
+}
