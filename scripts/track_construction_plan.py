@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start, sample, inspect or cancel a receipt-linked furnishing-plan monitor.
+"""Start, sample, wait, inspect or cancel a receipt-linked furnishing-plan monitor.
 
 Each foreground sample verifies every original receipt around one complete
 operations capture. A separate private journal retains the entire selection,
@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+
+import construction_wait as foreground
 
 from build_placement_wire import Rejected, Record, canonical, exact_hex, require
 from construction_plan import Goal, Progress, MAX_TARGETS
@@ -142,7 +144,8 @@ def output(value: dict) -> bytes:
 
 
 def reserve(operation: str, state: State, *, native_contacted: bool = False,
-            storage_acknowledged: bool = False) -> bytes:
+            storage_acknowledged: bool = False,
+            wait_limits: foreground.Limits | None = None) -> bytes:
     """Reserve the final journal envelope as well as every target's result.
 
     Decimal bounds are at least as wide as any admitted journal's actual values;
@@ -152,6 +155,8 @@ def reserve(operation: str, state: State, *, native_contacted: bool = False,
     value = packet(operation, state, native_contacted=native_contacted,
                    storage_acknowledged=storage_acknowledged)
     value['result']['journal'] = {'frames': MAX_FRAMES, 'bytes': MAX_FILE, 'head': 'f' * 64}
+    if wait_limits is not None:
+        value['result']['wait'] = foreground.reserve_view(wait_limits)
     return output(value)
 
 
@@ -164,9 +169,10 @@ class Parser(argparse.ArgumentParser):
 def main(argv: list[str] | None = None) -> int:
     operation, owner, last_state = 'unknown', None, None
     native_contacted = False
+    wait_result, authority = None, None
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('start', 'sample', 'inspect', 'cancel'))
+        parser.add_argument('operation', choices=('start', 'sample', 'wait', 'inspect', 'cancel'))
         parser.add_argument('--journal', required=True)
         parser.add_argument('--receipts-file')
         parser.add_argument('--deadline-tick', type=int)
@@ -176,8 +182,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--max-gap-ticks', type=int)
         parser.add_argument('--max-observations', type=int)
         parser.add_argument('--timeout-ms', type=int, default=10000)
+        foreground.add_arguments(parser)
         args = parser.parse_args(argv)
         operation = args.operation
+        wait_limits = foreground.parse_limits(args)
         budget = Budget(args.timeout_ms)
         choices = (args.interval_ticks, args.stable_samples, args.stable_span_ticks,
                    args.max_gap_ticks, args.max_observations)
@@ -196,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             reserve(operation, State(goal, authority.address, Progress(goal.digest)))
             owner = Journal(args.journal, budget, writable=True, create=(goal, authority.address))
         else:
-            owner = Journal(args.journal, budget, writable=operation in ('sample', 'cancel'))
+            owner = Journal(args.journal, budget, writable=operation in ('sample', 'wait', 'cancel'))
         last_state = owner.state
         stored = operation == 'start'
         if operation in ('start', 'sample') and not owner.state.progress.terminal:
@@ -213,13 +221,33 @@ def main(argv: list[str] | None = None) -> int:
             owner.accept(sample, lambda candidate: reserve(operation, candidate,
                          native_contacted=True, storage_acknowledged=True))
             stored = True
+        elif operation == 'wait':
+            authority = None if owner.state.progress.terminal else Authority.load()
+
+            def acquire_wait(current_authority, goal, current_budget):
+                nonlocal native_contacted
+                native_contacted = True
+                return acquire(current_authority, goal, current_budget)
+
+            wait_result = foreground.run(owner, authority, acquire_wait,
+                lambda candidate: reserve(operation, candidate, native_contacted=False,
+                    storage_acknowledged=False, wait_limits=wait_limits), wait_limits)
+            stored = wait_result.samples > 0
         elif operation == 'cancel':
             stored = owner.cancel(lambda candidate: reserve(operation, candidate, storage_acknowledged=True))
         owner.check()
         last_state = owner.state
         value = packet(operation, last_state, native_contacted=native_contacted, storage_acknowledged=stored)
         value['result']['journal'] = {'frames': last_state.frames, 'bytes': owner.length, 'head': last_state.tail.hex()}
+        if wait_result is not None:
+            value['result']['wait'] = wait_result.view()
         raw = output(value)
+        if operation == 'wait':
+            # Do not disclose cached acquisition evidence after revocation during
+            # final rendering, even when the last sample made the goal terminal.
+            if authority is not None:
+                authority.guard()
+            owner.check()
         budget.remaining()
         owner.close()
         owner = None
