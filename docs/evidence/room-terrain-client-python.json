@@ -1,0 +1,107 @@
+{
+  "schema": "dfmcp.room-terrain-client-python-evidence/1",
+  "base_commit": "2db1c2aaef24f2f42a5057cdce3ba844eaed8521",
+  "executed_on": "2026-10-05",
+  "command": "PYTHONPATH=scripts:tests python3 -m unittest test_room_terrain test_survey_rooms -v",
+  "methods_passed": 31,
+  "core_methods": 16,
+  "integration_methods": 15,
+  "source_sha256": {
+    "scripts/survey_rooms.py": "154162097f5811e0abc41db4ac3f85d25e7b48347b81c56b789698a843d045d4",
+    "scripts/room_terrain.py": "b1d6b5bfcc00bc465b84b4924d9f6ad99a2f9c0512b2eff35e73ebdf5596eaf4",
+    "tests/room_terrain_peer.py": "1b7c1521d3bc47b639a6e6d133a98831b0031590e5eddcf12cfa6a7db9fd03dd",
+    "tests/room_terrain_fixtures.py": "96e8002708a1cdb8db291dd2a8aea1e3b989d6fff65c0e8ac9dd5f19666c49fe",
+    "tests/test_survey_rooms.py": "0c07f3b61d73ff58aa30e853a7119415a75e250f1eccc415ef3edf69ad38767a",
+    "tests/test_room_terrain.py": "8299159670539cd9f68227f26623fff415f7ec859babd2f11e81c78c88d6cf3b"
+  },
+  "unchanged_dependency_git_blobs": {
+    "scripts/furniture_plan.py": "52fe43ce2d6514f3f0d1a3d983cc53c31fb39143",
+    "scripts/furniture_allocation.py": "6318e7e3658329eec3b8177dd63c26fbf88d5b30",
+    "scripts/room_provisioning.py": "1a486bd993bc19c6d6f19d9999eac5d1682ac1b9",
+    "scripts/excavation_observer.py": "95a8f485afa76baced77edac0702ddb891b945cb"
+  },
+  "logs": [
+    {
+      "path": "docs/evidence/room-terrain-client.txt",
+      "sha256": "e8175fe1a1a5c549c927fce6ac084b00471fcabeb652478892a1a377491eec96"
+    },
+    {
+      "path": "docs/evidence/room-terrain-mutations.txt",
+      "sha256": "e27b1f9495d0d44a44f62cf0f87ef46200e21a41d2c75644d08faa0207bc7346"
+    }
+  ],
+  "mutation_checks": [
+    {
+      "mutation": "final_authority_check_removed",
+      "file": "scripts/survey_rooms.py",
+      "test": "test_survey_rooms.SurveyRoomsTests.test_final_serialization_revocation_applies_to_full_and_narrow_exports",
+      "exit_code": 1,
+      "regression_assertion_rejected": true
+    },
+    {
+      "mutation": "original_room_revalidation_removed",
+      "file": "scripts/room_terrain.py",
+      "test": "test_room_terrain.RoomTerrainTests.test_room_artifact_is_rebuilt_before_using_geometry_or_claims",
+      "exit_code": 1,
+      "regression_assertion_rejected": true
+    },
+    {
+      "mutation": "fortress_selector_check_removed",
+      "file": "scripts/room_terrain.py",
+      "test": "test_room_terrain.RoomTerrainTests.test_capture_selection_source_extent_and_manifest_are_validated",
+      "exit_code": 1,
+      "regression_assertion_rejected": true
+    },
+    {
+      "mutation": "vertical_halo_omitted",
+      "file": "scripts/room_terrain.py",
+      "test": "test_room_terrain.RoomTerrainTests.test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear",
+      "exit_code": 1,
+      "regression_assertion_rejected": true
+    },
+    {
+      "mutation": "required_walls_not_observed",
+      "file": "scripts/room_terrain.py",
+      "test": "test_room_terrain.RoomTerrainTests.test_required_walls_cannot_be_ignored_filled_or_excavated",
+      "exit_code": 1,
+      "regression_assertion_rejected": true
+    }
+  ],
+  "measured_fixtures": [
+    {
+      "fixture": "3072_cell_max_source",
+      "capture_tiles": 3072,
+      "capture_bytes": 62015,
+      "response_bytes": 9430,
+      "floor_targets": 24,
+      "furniture_slots": 4,
+      "remaining_blueprint_parts": 2,
+      "native_calls": 4,
+      "observations": 1,
+      "work_checks": 4473
+    },
+    {
+      "fixture": "32_slot_room_plan",
+      "capture_tiles": 1140,
+      "capture_bytes": 22870,
+      "response_bytes": 31875,
+      "floor_targets": 158,
+      "furniture_slots": 32,
+      "remaining_blueprint_parts": 20,
+      "native_calls": 4,
+      "observations": 1,
+      "work_checks": 11376
+    }
+  ],
+  "execution": "actual Python compiler, map decoder/client, CLI subprocesses, files and joined fragmented TCP fixture peer; final original sources rerun after mutation checks",
+  "not_executed": [
+    "native dig compiler/client",
+    "digging effects",
+    "furniture placement/completion",
+    "Rust/MCP",
+    "real DFHack SDK/ABI",
+    "live fortress",
+    "full repository suite"
+  ],
+  "production_admitted": false
+}

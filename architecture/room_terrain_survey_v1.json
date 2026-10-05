@@ -2,7 +2,11 @@
   "schema": "dfmcp.room-terrain-survey-contract/1",
   "result_schema": "dfmcp.room-terrain-survey/1",
   "policy": "dfmcp.room-remaining-walls/1",
-  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "owning_beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
   "bead_acceptance_closed": false,
   "input": "regenerated complete dfmcp.room-provisioning-plan/1 and one exact raw map/1.5 capture",
   "capture": "one complete three-dimensional one-tile-padded bounding region; no split or clamp",
@@ -21,14 +25,77 @@
   "required_wall": "same sampled wall predicate, excluding intended bedroom doorways",
   "remaining_halo": "unique 3D Chebyshev-distance-one neighbors minus remaining targets; visible, dry, undesignated",
   "residual_cover": "smaller of global and original-part-local width-first covers, canonical-byte tie break; not minimum proof",
-  "statuses": ["blocked", "excavation_proposed", "terrain_shapes_satisfied_at_sample"],
+  "statuses": [
+    "blocked",
+    "excavation_proposed",
+    "terrain_shapes_satisfied_at_sample"
+  ],
   "residual_schema": "dfmcp.excavation-blueprint/1",
   "residual_null_unless": "nonempty complete remaining mask with zero failed domain or capacity checks",
   "completion_goal": "room_plan.excavation_blueprint, never merely the residual",
-  "unknowns": ["native excavation eligibility", "aquifers", "water pressure", "wall material", "structural support", "native protected areas", "unit paths", "native effect inventory", "current terrain", "continuous preservation"],
-  "never_proves": ["mutation authority", "replacement effect key authorization", "uncertain effect reconciliation", "room completion", "construction completion", "production admission"],
-  "tests": ["tests/test_room_terrain.py"],
+  "unknowns": [
+    "native excavation eligibility",
+    "aquifers",
+    "water pressure",
+    "wall material",
+    "structural support",
+    "native protected areas",
+    "unit paths",
+    "native effect inventory",
+    "current terrain",
+    "continuous preservation"
+  ],
+  "never_proves": [
+    "mutation authority",
+    "replacement effect key authorization",
+    "uncertain effect reconciliation",
+    "room completion",
+    "construction completion",
+    "production admission"
+  ],
+  "tests": [
+    "tests/test_room_terrain.py",
+    "tests/test_survey_rooms.py"
+  ],
   "native_protocol_changed": false,
   "journal_format_changed": false,
-  "production_runner_changed": false
+  "production_runner_changed": false,
+  "command": {
+    "path": "scripts/survey_rooms.py",
+    "inputs": [
+      "--plan-file",
+      "--request-file"
+    ],
+    "exports": [
+      "survey",
+      "remaining-blueprint"
+    ],
+    "environment": [
+      "DFMCP_ALLOW_UNADMITTED_EXCAVATION_V1_5",
+      "DFMCP_MAP_TOKEN",
+      "DFMCP_MAP_ENDPOINT"
+    ],
+    "native_methods": [
+      "Handshake",
+      "ReadObservation"
+    ],
+    "native_observations_per_invocation": 1,
+    "automatic_reconnect": false,
+    "budget": {
+      "timeout_ms": [
+        1,
+        60000
+      ],
+      "default_timeout_ms": 10000,
+      "work_checks": 250000,
+      "native_frames": 4,
+      "native_bytes": 4194304,
+      "file_reservation_bytes": 49153
+    },
+    "read_input": "bounded stable regular operator file; final-component no-follow; not all-parent journal custody",
+    "report_digest_domain": "dfmcp-room-terrain-report/1",
+    "report_binding": "entire Agent Turn envelope and acquisition endpoint; not a signature or cross-plugin incarnation",
+    "exit_zero": "complete survey including coherent blocked or satisfied status; narrow export additionally requires complete nonempty proposal",
+    "output_failure": "no reconnect, observation retry or second packet"
+  }
 }

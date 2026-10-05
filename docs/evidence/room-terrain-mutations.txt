@@ -1,0 +1,90 @@
+=== final_authority_check_removed ===
+test_final_serialization_revocation_applies_to_full_and_narrow_exports (test_survey_rooms.SurveyRoomsTests.test_final_serialization_revocation_applies_to_full_and_narrow_exports) ... FAIL
+
+======================================================================
+FAIL: test_final_serialization_revocation_applies_to_full_and_narrow_exports (test_survey_rooms.SurveyRoomsTests.test_final_serialization_revocation_applies_to_full_and_narrow_exports)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dfmcp-room-mutant-x8k76us3/tests/test_survey_rooms.py", line 185, in test_final_serialization_revocation_applies_to_full_and_narrow_exports
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.059s
+
+FAILED (failures=1)
+
+=== original_room_revalidation_removed ===
+test_room_artifact_is_rebuilt_before_using_geometry_or_claims (test_room_terrain.RoomTerrainTests.test_room_artifact_is_rebuilt_before_using_geometry_or_claims) ... FAIL
+
+======================================================================
+FAIL: test_room_artifact_is_rebuilt_before_using_geometry_or_claims (test_room_terrain.RoomTerrainTests.test_room_artifact_is_rebuilt_before_using_geometry_or_claims)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dfmcp-room-mutant-71h6glj0/tests/test_room_terrain.py", line 195, in test_room_artifact_is_rebuilt_before_using_geometry_or_claims
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)
+
+=== fortress_selector_check_removed ===
+test_capture_selection_source_extent_and_manifest_are_validated (test_room_terrain.RoomTerrainTests.test_capture_selection_source_extent_and_manifest_are_validated) ... FAIL
+
+======================================================================
+FAIL: test_capture_selection_source_extent_and_manifest_are_validated (test_room_terrain.RoomTerrainTests.test_capture_selection_source_extent_and_manifest_are_validated)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dfmcp-room-mutant-r2hnbcwf/tests/test_room_terrain.py", line 206, in test_capture_selection_source_extent_and_manifest_are_validated
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+
+=== vertical_halo_omitted ===
+test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear (test_room_terrain.RoomTerrainTests.test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear) ... FAIL
+
+======================================================================
+FAIL: test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear (test_room_terrain.RoomTerrainTests.test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dfmcp-room-mutant-yedwpw5h/tests/test_room_terrain.py", line 130, in test_vertical_and_diagonal_remaining_halo_is_not_assumed_clear
+    self.assertEqual(result['status'], 'blocked')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'excavation_proposed' != 'blocked'
+- excavation_proposed
++ blocked
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
+
+=== required_walls_not_observed ===
+test_required_walls_cannot_be_ignored_filled_or_excavated (test_room_terrain.RoomTerrainTests.test_required_walls_cannot_be_ignored_filled_or_excavated) ... FAIL
+
+======================================================================
+FAIL: test_required_walls_cannot_be_ignored_filled_or_excavated (test_room_terrain.RoomTerrainTests.test_required_walls_cannot_be_ignored_filled_or_excavated)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dfmcp-room-mutant-jcl251of/tests/test_room_terrain.py", line 117, in test_required_walls_cannot_be_ignored_filled_or_excavated
+    self.assertEqual(result['status'], 'blocked')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'terrain_shapes_satisfied_at_sample' != 'blocked'
+- terrain_shapes_satisfied_at_sample
++ blocked
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)

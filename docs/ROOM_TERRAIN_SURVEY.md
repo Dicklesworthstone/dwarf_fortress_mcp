@@ -111,3 +111,112 @@ survey. Source and log hashes are recorded in `docs/evidence/room-terrain-python
 These are supplied native-format byte fixtures, not real DFHack or live gameplay.
 This first reducer qualification does not execute sockets, the native dig client,
 Rust/MCP, the DFHack SDK, a game save, or the full repository suite.
+
+## Executable one-shot map survey
+
+`scripts/survey_rooms.py` connects the reducer to the unchanged map/1.5 reader.
+Use a clean map-profile environment, removing unrelated `DFMCP_*` names before
+running it. This command accepts neither inventory nor digging/placement tokens:
+
+```sh
+export DFMCP_ALLOW_UNADMITTED_EXCAVATION_V1_5=1
+export DFMCP_MAP_TOKEN='<matching map plugin token, 32..256 bytes>'
+export DFMCP_MAP_ENDPOINT=127.0.0.1:5000
+
+python3 scripts/survey_rooms.py --plan-file room-plan.json > room-survey.json
+# Or compile the complete original request within the same guarded command:
+python3 scripts/survey_rooms.py --request-file rooms.json > room-survey.json
+```
+
+The input must be a bounded, nonempty regular file. The final path component is
+opened without following symlinks, and descriptor/path identity, size and timestamps
+must remain stable throughout reading. This is operator input, not all-parent
+no-follow custody, a new journal, or a portable proof of native acquisition.
+Imported plans are regenerated before opening any socket. The complete request,
+map selection and raw response are validated again before any successful output.
+
+Each invocation opens one numeric IPv4 loopback connection, binds only the existing
+`Handshake` and `ReadObservation`, and obtains at most one coherent capture. The
+native profile, codec, nonce checks, manifest consistency and byte format are not
+reimplemented or changed. A revoked environment or exhausted outer allowance can
+stop the connection before a bind, handshake, send, receive or final disclosure.
+Malformed, refused or lost replies never cause a reconnect or second observation.
+
+The default command writes one canonical JSON envelope without a trailing newline.
+Exit 0 means a complete survey result was obtained, **not that excavation is ready**:
+check `result.status`. A coherent `blocked` survey still retains the whole original
+room plan and complete deficit counts, with `remaining_blueprint=null`. A fully
+satisfied sampled shape predicate also has no residual. Input/read/source/authority/
+budget failures return exit 2 and a sanitized error envelope with no partial result,
+credential, caller path or native text.
+
+The common Agent Turn carries explicit unknowns instead of a fabricated canonical
+world anchor or effect inventory. `acquisition` identifies the actual endpoint,
+map profile, one-read count and survey digest. A separate `report_digest` binds the
+entire envelope, including endpoint, to the underlying result. These digests detect
+content substitution; they are not signatures, an external trust root, or a shared
+incarnation identity with dig/1.16.
+
+### Exact standalone residual export
+
+```sh
+python3 scripts/survey_rooms.py --plan-file room-plan.json \
+  --emit remaining-blueprint > remaining.json
+```
+
+This is a **new** one-shot survey, not an export from a previous response. Export
+succeeds only for an unblocked, nonempty complete residual, and writes the exact
+existing excavation-blueprint schema without a wrapper or trailing newline. The
+full report must still fit its byte allowance before the narrower artifact is
+returned. A blocked or already-satisfied result returns exit 2, not an empty or
+partial executable blueprint. Use the default survey form to inspect its deficits.
+
+Retain the original room plan and check the command's exit code before consuming
+redirected output. The residual can be supplied to the existing separate
+`dig_blueprint_client.py` workflow; its fresh paused terrain review, eligibility,
+confirmation, original-key custody and one-attempt commit rules are unchanged.
+This command does not initialize a batch, inspect old receipts, start excavation,
+create a checkpoint or unpause the fortress. Earlier uncertain effects must still
+be reconciled through their original workflow, never replaced by a new residual.
+All later whole-project checks must keep the original complete goal rather than
+silently treating the smaller residual as the requested room project.
+
+### Shared bounds and executed integration
+
+The command has one 1..60,000 ms wall allowance (default 10,000), 250,000 work
+checks, four native RPC frames, 4 MiB native bytes and a 49,153-byte file-read
+reservation including a growth/EOF probe. Individual parts, pages or the native
+client constructor cannot renew this allowance. Authority is checked throughout
+compilation, selection, native I/O, reduction and after complete serialization;
+narrow exports do not bypass the final check. Filesystem calls and stdout writes
+are not forcibly interruptible. A short write, broken pipe or flush failure returns
+failure without reconnecting or attempting to emit a second JSON object.
+
+Run the complete focused suite:
+
+```sh
+PYTHONPATH=scripts:tests python3 -m unittest test_room_terrain test_survey_rooms -v
+```
+
+All 31 tests passed together: the 16 pure tests above and 15 additional integration
+tests. The integration suite executes actual CLI subprocesses, stable-file reads,
+the unchanged native map client and fragmented TCP replies from an explicit joined
+test peer. Cases cover partial/already-dug/blocked rooms, complete standalone exports,
+source or selection substitution, malformed profiles/frames, lost replies, operator
+revocation during I/O and CPU work, shared budget exhaustion, final serialization,
+output failure, and the unchanged default map-client path.
+
+A 3,072-cell, maximum-width source fixture acquired 62,015 bytes and returned a
+9,430-byte complete envelope. A separate 32-slot room recipe retained 646 excluded
+item IDs and returned 31,875 bytes after a 22,870-byte capture. Both used exactly
+one observation. These are measured fixture sizes, not universal runtime promises.
+Five independent mutation checks rejected implementations missing original-intent
+revalidation, fortress selection, required-wall checks, vertical halo checks, or
+final authority checks. Final unmodified sources then passed all 31 tests again.
+
+Exact source, dependency and log hashes are recorded in
+`docs/evidence/room-terrain-client-python.json`. The peer and terrain are synthetic
+native-format fixtures, not a real DFHack plugin or game. The native dig compiler/
+client, digging effects, furniture placement/completion, Rust/MCP, SDK/ABI, live-game
+and full-repository suites were not executed here. No native method, dependency pin,
+journal format, mutation gate or production admission was changed.
