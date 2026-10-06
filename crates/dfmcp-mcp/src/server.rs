@@ -2495,6 +2495,14 @@ fn live_routing_json(plan: &PreparedPlan) -> serde_json::Value {
                     "step": step.step.get(),
                     "routable": true,
                     "protocol": routed.family.protocol(),
+                    "dev_server": routed.family.dev_server(),
+                    "dev_server_observations": match &routed.request {
+                        LiveRequest::Dig { regions } => json!(regions
+                            .iter()
+                            .map(|r| json!({"tool": "fortress.observe", "arguments": {"region": r.coordinates()}}))
+                            .collect::<Vec<_>>()),
+                        _ => json!([]),
+                    },
                     "request": request,
                     "requires_live_resolution": requires,
                     "live_preconditions": routed.live_preconditions,

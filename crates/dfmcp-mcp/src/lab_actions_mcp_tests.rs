@@ -115,6 +115,10 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
     assert_eq!(routing["steps"][1]["routable"], false);
     assert_eq!(routing["steps"][2]["routable"], false);
     assert_eq!(routing["steps"][3]["protocol"], "workforce/1.17");
+    assert_eq!(
+        routing["steps"][3]["dev_server"],
+        "dfmcp-live-workforce-dev-server"
+    );
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
 
     let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;

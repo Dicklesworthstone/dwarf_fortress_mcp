@@ -210,8 +210,10 @@ why it cannot.
 | stockpile, squad, burrow, standing order, extension | none | refused with a reason |
 
 Each routable step lists the typed request (for example the exact dig
-rectangles), the live values still to resolve, and the family's own live
-preconditions. Routing is deterministic and pure: it grants no capability,
+rectangles), the live values still to resolve, the family's own live
+preconditions, the unadmitted development server that executes the family
+(`dev_server`) and, for excavation, the exact `fortress.observe` region call per
+rectangle for that server (`dev_server_observations`). Routing is deterministic and pure: it grants no capability,
 performs no I/O, and every family remains unadmitted development execution.
 
 ## Deterministic replay bundles

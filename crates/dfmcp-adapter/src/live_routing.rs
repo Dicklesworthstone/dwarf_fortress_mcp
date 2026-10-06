@@ -52,6 +52,18 @@ impl LiveFamily {
             Self::WorkforceV1_17 => "workforce/1.17",
         }
     }
+
+    /// The unadmitted development MCP server that executes this family.
+    #[must_use]
+    pub const fn dev_server(self) -> &'static str {
+        match self {
+            Self::ControlV1_7 => "dfmcp-live-control-dev-server",
+            Self::DigV1_16 => "dfmcp-dig-control-dev-server",
+            Self::BuildV1_19 => "dfmcp-build-placement-dev-server",
+            Self::WorkOrdersV1_10 => "dfmcp-live-work-orders-dev-server",
+            Self::WorkforceV1_17 => "dfmcp-live-workforce-dev-server",
+        }
+    }
 }
 
 /// A value the live family needs that only a fresh live read can supply.
