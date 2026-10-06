@@ -347,6 +347,8 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
         let mut value = value.clone();
         if let Some(object) = value.as_object_mut() {
             object.remove("agent_turn");
+            // Output-budget accounting describes this presentation, like the turn.
+            object.remove("output_budget");
         }
         value
     };

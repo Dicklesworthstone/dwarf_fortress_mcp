@@ -1432,7 +1432,12 @@ fn project_response(
     if let Some(anchor) = current_anchor {
         builder = builder.anchor(anchor);
     }
-    builder.attach(payload)
+    let max_output_tokens = state
+        .budget
+        .get("max_output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
+    crate::output_budget::fit(&builder.attach(payload), max_output_tokens)
 }
 
 #[tool(

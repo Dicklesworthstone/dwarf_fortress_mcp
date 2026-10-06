@@ -1453,3 +1453,71 @@ fn unrelated_concurrent_work_commits_by_unchanged_read_witness() -> TestResult {
     assert_eq!(retry["actions"], committed["actions"]);
     Ok(())
 }
+
+#[test]
+fn every_response_fits_the_negotiated_output_budget() -> TestResult {
+    // A tight negotiated budget: 1,500 tokens (conservatively 6,000 bytes).
+    let opened = parsed(&fortress_open_session(
+        Some(false),
+        Some("72130".to_owned()),
+        Some(caps(&ALL_EFFECTS)),
+        None,
+        Some(5_000),
+        None,
+        None,
+        Some(1_500),
+        None,
+        Some("starter_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    let budget = 1_500usize * crate::output_budget::BYTES_PER_TOKEN;
+    let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+    let mut responses = vec![opened.to_string()];
+    let planned = fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        None,
+        Some(
+            r#"{"template":"bedroom_cluster","origin":[3,5,10],"rooms":4,"room_size":[3,3]}"#
+                .to_owned(),
+        ),
+    );
+    let digest = parsed(&planned)?["plan_digest"]
+        .as_str()
+        .ok_or("plan digest survives every tier")?
+        .to_owned();
+    responses.push(planned);
+    responses.push(fortress_commit(Some(session.clone()), digest));
+    responses.push(fortress_wait(Some(session.clone()), Some(100)));
+    responses.push(fortress_observe(Some(session.clone())));
+    responses.push(fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"terrain","min":[0,0,10],"max":[47,47,10]}"#.to_owned()),
+    ));
+    responses.push(fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","limit":100}"#.to_owned()),
+    ));
+    responses.push(fortress_doctor(Some(session.clone())));
+    responses.push(fortress_explain(Some(session), None));
+    for response in &responses {
+        assert!(
+            response.len() <= budget,
+            "{} bytes > {budget}",
+            response.len()
+        );
+        let value = parsed(response)?;
+        assert!(value["output_budget"]["tier"].is_string(), "{value}");
+        assert!(
+            value["agent_turn"].is_object(),
+            "{}",
+            &response[..response.len().min(600)]
+        );
+    }
+    // The large terrain read was degraded explicitly, never silently.
+    let terrain = parsed(&responses[5])?;
+    assert_ne!(terrain["output_budget"]["tier"], "full", "{terrain}");
+    Ok(())
+}

@@ -1026,6 +1026,8 @@ static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LabSession>>>>> =
 static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1));
 
 const MAX_LAB_SESSIONS: usize = 1_024;
+/// Output-token budget of a laboratory session that requests none.
+const LAB_DEFAULT_OUTPUT_TOKENS: u32 = 4_096;
 const MAX_LAB_COMMIT_RECEIPTS: usize = 4_096;
 /// Committed actions a session may have open (not yet terminal) at once.
 const MAX_OPEN_ACTIONS: usize = 1_024;
@@ -1513,10 +1515,10 @@ pub(crate) fn open_session_in_scenario(
         max_entities: max_entities
             .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_entities, |value| value),
         max_bytes: max_bytes.map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_bytes, |value| value),
-        max_output_tokens: max_output_tokens.map_or(
-            WorkBudget::CONSERVATIVE_DEFAULT.max_output_tokens,
-            |value| value,
-        ),
+        // The laboratory's Agent Turn is rich; 1,500 tokens (the conservative
+        // live default) cannot carry it with plan detail, so lab sessions
+        // default to 4,096 unless the caller negotiates otherwise.
+        max_output_tokens: max_output_tokens.map_or(LAB_DEFAULT_OUTPUT_TOKENS, |value| value),
         max_actions: max_actions
             .map_or(WorkBudget::CONSERVATIVE_DEFAULT.max_actions, |value| value),
     };

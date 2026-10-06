@@ -80,6 +80,10 @@ readiness.
   commits directly via identical-action intent replay with a deterministic
   `witness_rebase` certificate; otherwise the explicit replay names the first
   changed read.
+- Output budgets are enforced: every laboratory response is fitted to the session's negotiated
+  `max_output_tokens` (estimator ceil(bytes/4)) through deterministic tiers — compact Agent Turn,
+  truncated arrays with recorded paths and totals, omitted optional sections, minimal envelope —
+  and reports `output_budget`. Lab sessions default to 4,096 output tokens.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
