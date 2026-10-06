@@ -228,3 +228,16 @@ fortress depend on state outside their own log and are exported with
 `replayable: false`. `scripts/lab_replay_roundtrip.py` demonstrates recording,
 exact replay and localizing a tampered call over real stdio.
 
+## What changed, every turn
+
+Each session retains a bounded history (32 versions) of the exact canonical
+world versions it has seen. Every Agent Turn's `changes` now lists, besides
+protocol events, the **observed world changes** between the anchor the agent
+saw last and the current one: `game_time_passed`, `fortress_paused` /
+`fortress_unpaused`, `entity_created` / `entity_removed`, `entity_changed`
+(each changed field with its value before and after; at most 8 fields and 24
+entities per turn, with `entity_changes_omitted` beyond that) and
+`terrain_changed` per level (tiles changed, bounding box, tile transitions such
+as `wall->floor`). If the previous anchor aged out of the history the turn says
+`history_not_retained` (epistemic state `unknown`) instead of guessing.
+

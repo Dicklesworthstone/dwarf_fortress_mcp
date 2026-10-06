@@ -616,7 +616,7 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
     }
 }
 
-const fn tile_name(code: u32) -> &'static str {
+pub(crate) const fn tile_name(code: u32) -> &'static str {
     match code {
         tile_codes::OPEN_SPACE => "open_space",
         tile_codes::FLOOR => "floor",

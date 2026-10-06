@@ -42,6 +42,7 @@ pub mod replay;
 pub mod resources;
 pub mod server;
 pub mod tasks;
+mod world_changes;
 
 pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};
 pub use agent_facade::run_stdio;

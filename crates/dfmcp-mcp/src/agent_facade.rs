@@ -876,6 +876,25 @@ fn recommendations(
     Vec::new()
 }
 
+/// Observed world changes between the anchor this agent saw last and the
+/// current one, from the session's retained canonical versions.
+fn world_changes(
+    session_id: Option<&String>,
+    previous: Option<&Value>,
+    current: Option<&Value>,
+) -> Vec<Value> {
+    let (Some(session_id), Some(previous), Some(current)) = (session_id, previous, current) else {
+        return Vec::new();
+    };
+    let Some(from) = previous.get("state_hash").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    if current.get("state_hash").and_then(Value::as_str) == Some(from) {
+        return Vec::new();
+    }
+    crate::server::world_changes_since(session_id, from).unwrap_or_default()
+}
+
 fn changes(operation: &str, ok: bool, payload: &Value) -> Vec<Value> {
     if !ok {
         return Vec::new();
@@ -1316,12 +1335,21 @@ fn project_response(
         None => Vec::new(),
     };
 
+    let world_delta = world_changes(
+        session_id.as_ref(),
+        previous_anchor.as_ref(),
+        current_anchor.as_ref(),
+    );
     let mut builder = AgentTurnBuilder::new(operation, phase)
         .turn_id(format!("presentation-turn-{turn_sequence}"))
         .continuity(status, previous_anchor, None, reset_reason)
         .profile(profile)
         .briefing(briefing(&state))
-        .changes(changes(operation, is_ok(&payload), &payload))
+        .changes({
+            let mut listed = changes(operation, is_ok(&payload), &payload);
+            listed.extend(world_delta);
+            listed
+        })
         .attention(attention(operation, is_ok(&payload), &payload, &state))
         .active_work(active_work(&state))
         .affordances(affordances(&state))

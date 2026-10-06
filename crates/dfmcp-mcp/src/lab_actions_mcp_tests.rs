@@ -1026,3 +1026,78 @@ fn a_blueprint_objective_is_decomposed_dug_and_furnished() -> TestResult {
     assert_eq!(room["levels"][0]["rows"], json!(["...", "...", "..."]));
     Ok(())
 }
+
+#[test]
+fn every_turn_reports_what_changed_in_the_world() -> TestResult {
+    let session = open("72077", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[4,4,10],"mode":"mine"}},
+                {"action":{"kind":"set_labor","units":["1002"],"labor":"MINE","enabled":true}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // Planning changes nothing in the world.
+    let kinds = |turn: &Value| -> Vec<String> {
+        turn["agent_turn"]["changes"]
+            .as_array()
+            .map(|changes| {
+                changes
+                    .iter()
+                    .filter_map(|c| c["kind"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(kinds(&planned), ["plan_prepared"]);
+
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
+    let changes = committed["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("changes")?
+        .clone();
+    let created = changes
+        .iter()
+        .find(|c| c["kind"] == "entity_created")
+        .ok_or("no entity_created")?;
+    assert_eq!(created["epistemic_state"], "observed");
+    let dwarf = changes
+        .iter()
+        .find(|c| c["kind"] == "entity_changed" && c["subject"]["entity_id"] == "1002")
+        .ok_or("labor change not reported")?;
+    assert_eq!(dwarf["fields"][0]["field"], "labor.MINE");
+    assert_eq!(dwarf["fields"][0]["after"], true);
+
+    let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+    let changes = waited["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("changes")?
+        .clone();
+    let time = changes
+        .iter()
+        .find(|c| c["kind"] == "game_time_passed")
+        .ok_or("no clock change")?;
+    assert_eq!(
+        time["subject"]["to_tick"].as_u64(),
+        time["subject"]["from_tick"].as_u64().map(|t| t + 100)
+    );
+    let terrain = changes
+        .iter()
+        .find(|c| c["kind"] == "terrain_changed")
+        .ok_or("no terrain change")?;
+    assert_eq!(terrain["subject"]["z"], 10);
+    assert_eq!(terrain["tiles_changed"], 6);
+    assert_eq!(terrain["transitions"]["wall->floor"], 6);
+    assert_eq!(terrain["bounding_box"]["min"], json!([2, 3, 10]));
+    assert_eq!(terrain["bounding_box"]["max"], json!([4, 4, 10]));
+
+    // Nothing changed since: an observe reports no world changes.
+    let observed = parsed(&fortress_observe(Some(session)))?;
+    assert!(kinds(&observed).is_empty(), "{observed}");
+    Ok(())
+}

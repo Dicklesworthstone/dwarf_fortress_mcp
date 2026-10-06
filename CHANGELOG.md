@@ -54,6 +54,10 @@ readiness.
   at `df://session/{id}/replay` (`dfmcp.replay.bundle/1`); `dwarf-fortress-mcp
   replay <bundle>` re-executes it and reports the earliest divergence by call,
   tool and field (outcome, error code or resulting canonical anchor).
+- The Agent Turn's `changes` now reports observed world changes since the
+  agent's previous anchor (entities created/removed/changed with field
+  before/after, terrain per level with bounding box and transitions, clock and
+  pause), from a bounded per-session history of canonical world versions.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

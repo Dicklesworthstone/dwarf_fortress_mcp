@@ -98,6 +98,57 @@ pub(crate) struct LabSession {
     carried: Vec<CarriedStep>,
     /// Every tool call of this session, for deterministic replay bundles.
     pub(crate) replay: crate::replay::ReplayLog,
+    /// Bounded, immutable history of the world versions this session saw,
+    /// newest last, so every turn can say exactly what changed.
+    history: std::collections::VecDeque<WorldSnapshot>,
+}
+
+/// World versions each session retains for change reporting.
+const MAX_SESSION_HISTORY: usize = 32;
+
+fn remember_version(session: &mut LabSession) {
+    let current = session.adapter.snapshot();
+    if session
+        .history
+        .back()
+        .is_some_and(|last| last.state_hash == current.state_hash)
+    {
+        return;
+    }
+    if session.history.len() == MAX_SESSION_HISTORY {
+        session.history.pop_front();
+    }
+    session.history.push_back(current.clone());
+}
+
+/// Observed world changes from the version with `from_state_hash` to the
+/// newest version this session saw. `None` when the session is unknown;
+/// a single `history_not_retained` item when the base aged out.
+pub(crate) fn world_changes_since(
+    session_id: &str,
+    from_state_hash: &str,
+) -> Option<Vec<serde_json::Value>> {
+    let session = lookup_session_str(session_id).ok()?;
+    let guard = session.lock().ok()?;
+    let target = guard.history.back()?;
+    if target.state_hash.to_hex() == from_state_hash {
+        return Some(Vec::new());
+    }
+    match guard
+        .history
+        .iter()
+        .find(|version| version.state_hash.to_hex() == from_state_hash)
+    {
+        Some(base) => Some(crate::world_changes::describe(base, target)),
+        None => Some(vec![json!({
+            "kind": "history_not_retained",
+            "subject": {"from_state_hash": from_state_hash},
+            "epistemic_state": "unknown",
+            "invalidates": [],
+            "evidence": [],
+            "note": "the previous anchor is older than this session's retained history; observe or query to re-establish the picture",
+        })]),
+    }
 }
 
 /// A step committed before a durable restart. No action handle survives the
@@ -290,6 +341,7 @@ pub(crate) fn with_session<T>(
     }
     let output = body(&mut guard);
     persist_durable_head(&mut guard);
+    remember_version(&mut guard);
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
@@ -1457,6 +1509,7 @@ pub(crate) fn open_session_in_scenario(
         durable_plans: BTreeMap::new(),
         carried: Vec::new(),
         replay: crate::replay::ReplayLog::default(),
+        history: std::collections::VecDeque::new(),
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -1510,6 +1563,7 @@ pub(crate) fn open_session_in_scenario(
         durable_plans: _,
         carried: _,
         replay: _,
+        history: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -1546,6 +1600,7 @@ pub(crate) fn open_session_in_scenario(
             }
             log
         },
+        history: std::collections::VecDeque::new(),
     }));
     {
         let mut registry = sessions();
@@ -1565,6 +1620,9 @@ pub(crate) fn open_session_in_scenario(
         }
         registry.insert(session_id, session.clone());
     }
+    // Retain the opening world version so the first turn that changes it can
+    // say exactly what changed.
+    with_session(&session, || (), |_| ());
     if durable {
         if !shared {
             durable_lab().owners.insert(fortress_id, session_id);
