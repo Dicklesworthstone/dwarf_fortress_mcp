@@ -1412,11 +1412,22 @@ pub(crate) fn filter_predicate(raw: &Json, depth: usize) -> Result<Predicate> {
 const PATH_MARGIN: i32 = 8;
 /// Most path points returned.
 const MAX_PATH_POINTS: usize = 64;
+/// Largest coordinate magnitude a path endpoint may name.
+const MAX_PATH_COORDINATE: u32 = 1 << 20;
 
 fn path(snapshot: &WorldSnapshot, from: [i32; 3], to: [i32; 3]) -> Result<Json> {
     use dfmcp_world::map_region::{Cell, MapRegion, Region, Shape, Tile};
     // The bounded route region is the endpoints' bounding box plus a margin; z gets
     // a one-level margin so a single-level route does not sit on the region boundary.
+    if from
+        .iter()
+        .chain(&to)
+        .any(|c| c.unsigned_abs() > MAX_PATH_COORDINATE)
+    {
+        return Err(invalid(format!(
+            "path coordinates are bounded by +/-{MAX_PATH_COORDINATE}"
+        )));
+    }
     let margin = [PATH_MARGIN, PATH_MARGIN, 1];
     let origin: [i32; 3] = std::array::from_fn(|axis| from[axis].min(to[axis]) - margin[axis]);
     let mut size = [0_u32; 3];

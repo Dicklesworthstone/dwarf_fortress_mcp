@@ -466,7 +466,10 @@ mod tests {
                 None,
                 None,
             ))?;
-            let session = opened["session_id"].as_str().ok_or_else(|| opened.to_string())?.to_owned();
+            let session = opened["session_id"]
+                .as_str()
+                .ok_or_else(|| opened.to_string())?
+                .to_owned();
             let s = || Some(session.clone());
             for mode in [
                 None,
