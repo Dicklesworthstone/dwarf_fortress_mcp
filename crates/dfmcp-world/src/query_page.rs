@@ -188,6 +188,15 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             bytes.push(9);
             encode_predicate(bytes, child)?;
         }
+        Predicate::RegionTerrain { area, tile_code } => {
+            bytes.push(10);
+            for value in [
+                area.min.x, area.min.y, area.min.z, area.max.x, area.max.y, area.max.z,
+            ] {
+                bytes.extend_from_slice(&value.to_be_bytes());
+            }
+            bytes.extend_from_slice(&tile_code.to_be_bytes());
+        }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {
         return Err(DfmcpError::new(

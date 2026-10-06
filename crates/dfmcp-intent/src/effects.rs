@@ -1,0 +1,849 @@
+//! Reference semantics of every semantic action on the canonical world model.
+//!
+//! This module is the single definition of what an action *means* in canonical
+//! state: which entities and fields it changes, which entity it creates (with
+//! an identity derived only from the step's idempotency key, so a planner can
+//! name it before dispatch), which postconditions prove it, and how temporal
+//! work progresses with game time.
+//!
+//! The deterministic laboratory and the in-process mutation dispatcher both
+//! execute these semantics. A live adapter must instead *observe* the native
+//! effects; it uses the same field vocabulary and created-entity identities so
+//! the same sealed postconditions and obligations remain checkable.
+//!
+//! Progress rates are a laboratory calibration, not a claim about Dwarf
+//! Fortress throughput.
+
+use std::collections::BTreeMap;
+
+use dfmcp_core::{
+    DfmcpError, Digest32, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid, Result,
+};
+use dfmcp_world::terrain::{region_tiles, tile_codes, validate_region};
+use dfmcp_world::{
+    CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value, WorldSnapshot,
+};
+
+use crate::action::{Action, BuildingKind, DigMode};
+use crate::plan::ObligationSpec;
+
+/// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
+pub const LABOR_FIELD_PREFIX: &str = "labor.";
+/// Field holding burrow membership on a unit: `burrow.<burrow entity id>`.
+pub const BURROW_FIELD_PREFIX: &str = "burrow.";
+/// Field holding a unit's squad entity.
+pub const SQUAD_FIELD: &str = "squad";
+/// Field holding a standing order on the fortress settings entity.
+pub const STANDING_ORDER_FIELD_PREFIX: &str = "standing_order.";
+/// Stockpile fields.
+pub const STOCKPILE_ACCEPTS_FIELD: &str = "accepts";
+pub const STOCKPILE_MAX_BINS_FIELD: &str = "max_bins";
+pub const STOCKPILE_MAX_BARRELS_FIELD: &str = "max_barrels";
+pub const STOCKPILE_MAX_WHEELBARROWS_FIELD: &str = "max_wheelbarrows";
+/// Lifecycle field on created designation, building and work-order entities.
+pub const STATUS_FIELD: &str = "status";
+pub const STATUS_ACTIVE: &str = "active";
+pub const STATUS_COMPLETE: &str = "complete";
+/// Building fields.
+pub const CONSTRUCTION_STAGE_FIELD: &str = "construction_stage";
+pub const STAGE_PLANNED: &str = "planned";
+pub const STAGE_UNDER_CONSTRUCTION: &str = "under_construction";
+pub const STAGE_COMPLETE: &str = "complete";
+/// Work-order and designation progress fields.
+pub const AMOUNT_REMAINING_FIELD: &str = "amount_remaining";
+pub const TILES_REMAINING_FIELD: &str = "tiles_remaining";
+
+/// Entity kind of a created dig designation.
+pub const DIG_DESIGNATION_KIND: &str = "dig_designation";
+/// Entity kind of the per-fortress settings record holding standing orders.
+pub const FORTRESS_SETTINGS_KIND: &str = "fortress_settings";
+
+/// Laboratory calibration: game ticks of labor to excavate one tile.
+pub const DIG_TICKS_PER_TILE: u64 = 10;
+/// Laboratory calibration: game ticks to construct one building.
+pub const BUILD_TICKS: u64 = 500;
+/// Laboratory calibration: game ticks to produce one work-order unit.
+pub const WORK_ORDER_TICKS_PER_UNIT: u64 = 50;
+/// Largest default obligation horizon: one Dwarf Fortress year.
+pub const MAX_DEFAULT_OBLIGATION_TICKS: u64 = 403_200;
+/// Default obligation polling cadence.
+pub const DEFAULT_POLL_INTERVAL_TICKS: u64 = 10;
+
+const CREATED_ENTITY_NAMESPACE: u64 = 0x7E00_0000_0000_0000;
+const CREATED_ENTITY_MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
+const SOURCE: &str = "dfmcp.reference-effects/1";
+
+fn namespaced(domain: &[u8], payload: &[u8]) -> EntityId {
+    let mut bytes = Vec::with_capacity(domain.len() + payload.len() + 1);
+    bytes.extend_from_slice(domain);
+    bytes.push(0);
+    bytes.extend_from_slice(payload);
+    let digest = Digest32::of_bytes(&bytes);
+    let mut low = [0u8; 8];
+    low.copy_from_slice(&digest.as_bytes()[..8]);
+    EntityId::new(CREATED_ENTITY_NAMESPACE | (u64::from_be_bytes(low) & CREATED_ENTITY_MASK))
+}
+
+/// Identity of the `ordinal`-th entity created by the step whose idempotency
+/// key is `idempotency_key`. It is known before dispatch and stable across
+/// retries, so sealed postconditions can refer to it.
+#[must_use]
+pub fn created_entity_id(idempotency_key: &str, ordinal: u32) -> EntityId {
+    let mut payload = idempotency_key.as_bytes().to_vec();
+    payload.extend_from_slice(&ordinal.to_be_bytes());
+    namespaced(b"dfmcp-created-entity-v1", &payload)
+}
+
+/// Identity of the fortress-wide settings entity that holds standing orders.
+#[must_use]
+pub fn fortress_settings_entity_id(fortress: FortressId) -> EntityId {
+    namespaced(b"dfmcp-fortress-settings-v1", &fortress.get().to_be_bytes())
+}
+
+/// Canonical tile code an excavation mode leaves behind.
+#[must_use]
+pub const fn dig_target_tile_code(mode: DigMode) -> u32 {
+    match mode {
+        DigMode::Mine | DigMode::RemoveConstruction => tile_codes::FLOOR,
+        DigMode::Channel => tile_codes::OPEN_SPACE,
+        DigMode::UpStair | DigMode::DownStair | DigMode::UpDownStair => tile_codes::STAIR,
+        DigMode::Ramp => tile_codes::RAMP,
+    }
+}
+
+const fn dig_mode_name(mode: DigMode) -> &'static str {
+    match mode {
+        DigMode::Mine => "mine",
+        DigMode::Channel => "channel",
+        DigMode::UpStair => "up_stair",
+        DigMode::DownStair => "down_stair",
+        DigMode::UpDownStair => "up_down_stair",
+        DigMode::Ramp => "ramp",
+        DigMode::RemoveConstruction => "remove_construction",
+    }
+}
+
+/// Stable label for a building kind, e.g. `workshop:Carpenters`.
+#[must_use]
+pub fn building_kind_label(kind: &BuildingKind) -> String {
+    match kind {
+        BuildingKind::Workshop(name) => format!("workshop:{name}"),
+        BuildingKind::Furnace(name) => format!("furnace:{name}"),
+        BuildingKind::Furniture(name) => format!("furniture:{name}"),
+        BuildingKind::Construction(name) => format!("construction:{name}"),
+        BuildingKind::Trap(name) => format!("trap:{name}"),
+        BuildingKind::FarmPlot => "farm_plot".to_owned(),
+        BuildingKind::Bridge => "bridge".to_owned(),
+        BuildingKind::Well => "well".to_owned(),
+        BuildingKind::Custom(name) => format!("custom:{name}"),
+    }
+}
+
+fn field_eq(entity_id: EntityId, field: impl Into<String>, value: Value) -> Predicate {
+    Predicate::FieldCompare {
+        entity_id,
+        field: field.into(),
+        op: CompareOp::Eq,
+        value,
+    }
+}
+
+fn accepts_value(accepts: &std::collections::BTreeSet<String>) -> Value {
+    Value::List(accepts.iter().cloned().map(Value::Text).collect())
+}
+
+/// Postconditions that prove `action` took effect, or empty when the action
+/// family has no reference semantics (extensions must state their own).
+#[must_use]
+pub fn default_postconditions(
+    action: &Action,
+    idempotency_key: &str,
+    fortress: FortressId,
+) -> Vec<Predicate> {
+    match action {
+        Action::Pause { paused } => vec![Predicate::Paused(*paused)],
+        Action::DesignateDig { area, mode } => vec![Predicate::RegionTerrain {
+            area: *area,
+            tile_code: dig_target_tile_code(*mode),
+        }],
+        Action::Build { .. } => vec![field_eq(
+            created_entity_id(idempotency_key, 0),
+            CONSTRUCTION_STAGE_FIELD,
+            Value::Text(STAGE_COMPLETE.to_owned()),
+        )],
+        Action::CreateWorkOrder { .. } => vec![field_eq(
+            created_entity_id(idempotency_key, 0),
+            AMOUNT_REMAINING_FIELD,
+            Value::U64(0),
+        )],
+        Action::SetLabor {
+            units,
+            labor,
+            enabled,
+        } => units
+            .iter()
+            .map(|unit| {
+                field_eq(
+                    *unit,
+                    format!("{LABOR_FIELD_PREFIX}{labor}"),
+                    Value::Bool(*enabled),
+                )
+            })
+            .collect(),
+        Action::SetBurrowMembership {
+            units,
+            burrow,
+            assigned,
+        } => units
+            .iter()
+            .map(|unit| {
+                field_eq(
+                    *unit,
+                    format!("{BURROW_FIELD_PREFIX}{}", burrow.get()),
+                    Value::Bool(*assigned),
+                )
+            })
+            .collect(),
+        Action::AssignSquad { units, squad } => units
+            .iter()
+            .map(|unit| field_eq(*unit, SQUAD_FIELD, Value::Entity(*squad)))
+            .collect(),
+        Action::ConfigureStockpile {
+            stockpile, accepts, ..
+        } => vec![field_eq(
+            *stockpile,
+            STOCKPILE_ACCEPTS_FIELD,
+            accepts_value(accepts),
+        )],
+        Action::SetStandingOrder { key, value } => vec![field_eq(
+            fortress_settings_entity_id(fortress),
+            format!("{STANDING_ORDER_FIELD_PREFIX}{key}"),
+            Value::Text(value.clone()),
+        )],
+        Action::Extension { .. } => Vec::new(),
+    }
+}
+
+/// Default bounded obligation for naturally temporal actions. The terminal is
+/// the action's reference postcondition; the deadline is an explicit, sealed
+/// game-tick horizon scaled to the requested work and capped at one year.
+pub fn default_obligation(
+    action: &Action,
+    idempotency_key: &str,
+    fortress: FortressId,
+    now: GameTick,
+) -> Result<Option<ObligationSpec>> {
+    let horizon = match action {
+        Action::DesignateDig { area, .. } => {
+            let tiles = validate_region(*area)?;
+            DIG_TICKS_PER_TILE
+                .saturating_mul(tiles)
+                .saturating_mul(2)
+                .saturating_add(100)
+        }
+        Action::Build { .. } => BUILD_TICKS.saturating_mul(4),
+        Action::CreateWorkOrder { amount, .. } => WORK_ORDER_TICKS_PER_UNIT
+            .saturating_mul(u64::from(*amount))
+            .saturating_mul(2)
+            .saturating_add(100),
+        _ => return Ok(None),
+    }
+    .min(MAX_DEFAULT_OBLIGATION_TICKS);
+    let postconditions = default_postconditions(action, idempotency_key, fortress);
+    let terminal = match postconditions.len() {
+        1 => postconditions
+            .into_iter()
+            .next()
+            .unwrap_or(Predicate::False),
+        _ => Predicate::All(postconditions),
+    };
+    let deadline_tick = now.checked_add(horizon).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "default obligation deadline exceeds the game-tick horizon",
+        )
+    })?;
+    Ok(Some(ObligationSpec {
+        terminal,
+        failure: None,
+        deadline_tick,
+        poll_interval_ticks: DEFAULT_POLL_INTERVAL_TICKS,
+        stable_for_observations: 1,
+    }))
+}
+
+/// Exact inverse of an action whose prior state is fully determined by the
+/// action itself. Actions that overwrite unobserved prior configuration
+/// (stockpiles, squads, standing orders) have no default compensation.
+#[must_use]
+pub fn default_compensation(action: &Action) -> Option<Action> {
+    match action {
+        Action::Pause { paused } => Some(Action::Pause { paused: !*paused }),
+        Action::SetLabor {
+            units,
+            labor,
+            enabled,
+        } => Some(Action::SetLabor {
+            units: units.clone(),
+            labor: labor.clone(),
+            enabled: !*enabled,
+        }),
+        Action::SetBurrowMembership {
+            units,
+            burrow,
+            assigned,
+        } => Some(Action::SetBurrowMembership {
+            units: units.clone(),
+            burrow: *burrow,
+            assigned: !*assigned,
+        }),
+        _ => None,
+    }
+}
+
+fn precondition(message: impl Into<String>) -> DfmcpError {
+    DfmcpError::new(ErrorCode::PreconditionsFailed, message)
+}
+
+fn known(value: Value, tick: GameTick) -> Fact {
+    Fact::known(
+        value,
+        tick,
+        FactSource::Derived(SOURCE.to_owned()),
+        Digest32::ZERO,
+    )
+}
+
+fn field_value<'a>(entity: &'a EntityRecord, field: &str) -> Option<&'a Value> {
+    entity.fields.get(field).map(|fact| &fact.value)
+}
+
+fn field_u64(entity: &EntityRecord, field: &str) -> u64 {
+    match field_value(entity, field) {
+        Some(Value::U64(value)) => *value,
+        _ => 0,
+    }
+}
+
+fn field_text<'a>(entity: &'a EntityRecord, field: &str) -> Option<&'a str> {
+    match field_value(entity, field) {
+        Some(Value::Text(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// Write fields onto one entity, advancing its revision once if anything
+/// changed. Returns whether the entity changed.
+fn write_fields(
+    snapshot: &mut WorldSnapshot,
+    entity_id: EntityId,
+    fields: Vec<(String, Value)>,
+) -> Result<bool> {
+    let tick = snapshot.tick;
+    let entity = snapshot
+        .graph
+        .entities
+        .get_mut(&entity_id)
+        .ok_or_else(|| precondition(format!("entity {} is not observed", entity_id.get())))?;
+    let mut changed = false;
+    for (name, value) in fields {
+        if entity.fields.get(&name).map(|fact| &fact.value) != Some(&value)
+            || entity
+                .fields
+                .get(&name)
+                .is_some_and(|fact| fact.presence.is_some())
+        {
+            entity.fields.insert(name, known(value, tick));
+            changed = true;
+        }
+    }
+    if changed {
+        entity.revision = entity.revision.checked_add(1).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "entity revision is exhausted")
+        })?;
+    }
+    Ok(changed)
+}
+
+fn require_kind(snapshot: &WorldSnapshot, entity_id: EntityId, kind: &EntityKind) -> Result<()> {
+    match snapshot.graph.entities.get(&entity_id) {
+        Some(entity) if &entity.kind == kind => Ok(()),
+        Some(entity) => Err(precondition(format!(
+            "entity {} is a {}, not a {}",
+            entity_id.get(),
+            entity.kind.as_str(),
+            kind.as_str()
+        ))),
+        None => Err(precondition(format!(
+            "entity {} is not observed",
+            entity_id.get()
+        ))),
+    }
+}
+
+fn require_units(snapshot: &WorldSnapshot, units: &[EntityId]) -> Result<()> {
+    if units.is_empty() {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "action names no units",
+        ));
+    }
+    for unit in units {
+        require_kind(snapshot, *unit, &EntityKind::Unit)?;
+    }
+    Ok(())
+}
+
+fn create_entity(
+    snapshot: &mut WorldSnapshot,
+    id: EntityId,
+    kind: EntityKind,
+    label: String,
+    fields: Vec<(String, Value)>,
+) -> Result<()> {
+    if snapshot.graph.entities.contains_key(&id) {
+        return Err(DfmcpError::new(
+            ErrorCode::Conflict,
+            "the step's created entity already exists; an effect is dispatched once",
+        ));
+    }
+    let tick = snapshot.tick;
+    let fields: BTreeMap<String, Fact> = fields
+        .into_iter()
+        .map(|(name, value)| (name, known(value, tick)))
+        .collect();
+    snapshot.graph.entities.insert(
+        id,
+        EntityRecord {
+            id,
+            generation: 1,
+            revision: 1,
+            kind,
+            label,
+            fields,
+        },
+    );
+    Ok(())
+}
+
+fn count_remaining(snapshot: &WorldSnapshot, area: MapCuboid, target: u32) -> u64 {
+    region_tiles(area)
+        .filter(|coord| snapshot.tile_code_at(*coord) != Some(target))
+        .count() as u64
+}
+
+/// Apply the immediate part of `action` to canonical state. Temporal actions
+/// create their tracking entity here and progress in [`advance_effects`].
+/// Returns whether canonical state changed; the caller owns the cursor and
+/// state hash. On error the snapshot may be partially modified, so callers
+/// must apply effects to a transaction shadow.
+pub fn apply_effect(
+    snapshot: &mut WorldSnapshot,
+    action: &Action,
+    idempotency_key: &str,
+) -> Result<bool> {
+    match action {
+        Action::Pause { paused } => {
+            let changed = snapshot.paused != *paused;
+            snapshot.paused = *paused;
+            Ok(changed)
+        }
+        Action::SetLabor {
+            units,
+            labor,
+            enabled,
+        } => {
+            require_units(snapshot, units)?;
+            let mut changed = false;
+            for unit in units {
+                changed |= write_fields(
+                    snapshot,
+                    *unit,
+                    vec![(
+                        format!("{LABOR_FIELD_PREFIX}{labor}"),
+                        Value::Bool(*enabled),
+                    )],
+                )?;
+            }
+            Ok(changed)
+        }
+        Action::SetBurrowMembership {
+            units,
+            burrow,
+            assigned,
+        } => {
+            require_units(snapshot, units)?;
+            require_kind(snapshot, *burrow, &EntityKind::Burrow)?;
+            let mut changed = false;
+            for unit in units {
+                changed |= write_fields(
+                    snapshot,
+                    *unit,
+                    vec![(
+                        format!("{BURROW_FIELD_PREFIX}{}", burrow.get()),
+                        Value::Bool(*assigned),
+                    )],
+                )?;
+            }
+            Ok(changed)
+        }
+        Action::AssignSquad { units, squad } => {
+            require_units(snapshot, units)?;
+            require_kind(snapshot, *squad, &EntityKind::Squad)?;
+            let mut changed = false;
+            for unit in units {
+                changed |= write_fields(
+                    snapshot,
+                    *unit,
+                    vec![(SQUAD_FIELD.to_owned(), Value::Entity(*squad))],
+                )?;
+            }
+            Ok(changed)
+        }
+        Action::ConfigureStockpile {
+            stockpile,
+            accepts,
+            max_bins,
+            max_barrels,
+            max_wheelbarrows,
+        } => {
+            require_kind(snapshot, *stockpile, &EntityKind::Stockpile)?;
+            let mut fields = vec![(STOCKPILE_ACCEPTS_FIELD.to_owned(), accepts_value(accepts))];
+            for (name, value) in [
+                (STOCKPILE_MAX_BINS_FIELD, max_bins),
+                (STOCKPILE_MAX_BARRELS_FIELD, max_barrels),
+                (STOCKPILE_MAX_WHEELBARROWS_FIELD, max_wheelbarrows),
+            ] {
+                if let Some(value) = value {
+                    fields.push((name.to_owned(), Value::U64(u64::from(*value))));
+                }
+            }
+            write_fields(snapshot, *stockpile, fields)
+        }
+        Action::SetStandingOrder { key, value } => {
+            let settings = fortress_settings_entity_id(snapshot.fortress_id);
+            let field = (
+                format!("{STANDING_ORDER_FIELD_PREFIX}{key}"),
+                Value::Text(value.clone()),
+            );
+            if snapshot.graph.entities.contains_key(&settings) {
+                require_kind(
+                    snapshot,
+                    settings,
+                    &EntityKind::Other(FORTRESS_SETTINGS_KIND.to_owned()),
+                )?;
+                write_fields(snapshot, settings, vec![field])
+            } else {
+                create_entity(
+                    snapshot,
+                    settings,
+                    EntityKind::Other(FORTRESS_SETTINGS_KIND.to_owned()),
+                    "fortress settings".to_owned(),
+                    vec![field],
+                )?;
+                Ok(true)
+            }
+        }
+        Action::DesignateDig { area, mode } => {
+            let tiles = validate_region(*area)?;
+            if let Some(unknown) = region_tiles(*area).find(|c| snapshot.tile_code_at(*c).is_none())
+            {
+                return Err(precondition(format!(
+                    "excavation region includes unobserved terrain at {unknown:?}"
+                )));
+            }
+            let target = dig_target_tile_code(*mode);
+            let remaining = count_remaining(snapshot, *area, target);
+            create_entity(
+                snapshot,
+                created_entity_id(idempotency_key, 0),
+                EntityKind::Other(DIG_DESIGNATION_KIND.to_owned()),
+                format!("{} designation", dig_mode_name(*mode)),
+                vec![
+                    (
+                        "mode".to_owned(),
+                        Value::Text(dig_mode_name(*mode).to_owned()),
+                    ),
+                    ("area_min".to_owned(), Value::Coord(area.min)),
+                    ("area_max".to_owned(), Value::Coord(area.max)),
+                    ("target_tile_code".to_owned(), Value::U64(u64::from(target))),
+                    ("tiles_total".to_owned(), Value::U64(tiles)),
+                    (TILES_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
+                    ("work_ticks".to_owned(), Value::U64(0)),
+                    (
+                        STATUS_FIELD.to_owned(),
+                        Value::Text(
+                            if remaining == 0 {
+                                STATUS_COMPLETE
+                            } else {
+                                STATUS_ACTIVE
+                            }
+                            .to_owned(),
+                        ),
+                    ),
+                ],
+            )?;
+            Ok(true)
+        }
+        Action::Build {
+            kind,
+            location,
+            footprint,
+            material,
+        } => {
+            if !footprint.contains(*location) {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "building location lies outside its footprint",
+                ));
+            }
+            validate_region(*footprint)?;
+            for coord in region_tiles(*footprint) {
+                match snapshot.tile_code_at(coord) {
+                    Some(tile_codes::FLOOR) => {}
+                    Some(_) => {
+                        return Err(precondition(format!(
+                            "building footprint tile {coord:?} is not open floor"
+                        )));
+                    }
+                    None => {
+                        return Err(precondition(format!(
+                            "building footprint tile {coord:?} is not observed"
+                        )));
+                    }
+                }
+            }
+            let label = building_kind_label(kind);
+            create_entity(
+                snapshot,
+                created_entity_id(idempotency_key, 0),
+                EntityKind::Building,
+                label.clone(),
+                vec![
+                    ("building_kind".to_owned(), Value::Text(label)),
+                    ("position".to_owned(), Value::Coord(*location)),
+                    ("footprint_min".to_owned(), Value::Coord(footprint.min)),
+                    ("footprint_max".to_owned(), Value::Coord(footprint.max)),
+                    (
+                        "material_tokens".to_owned(),
+                        Value::List(
+                            material
+                                .required_tokens
+                                .iter()
+                                .cloned()
+                                .map(Value::Text)
+                                .collect(),
+                        ),
+                    ),
+                    (
+                        CONSTRUCTION_STAGE_FIELD.to_owned(),
+                        Value::Text(STAGE_PLANNED.to_owned()),
+                    ),
+                    ("progress_ticks".to_owned(), Value::U64(0)),
+                    ("required_ticks".to_owned(), Value::U64(BUILD_TICKS)),
+                ],
+            )?;
+            Ok(true)
+        }
+        Action::CreateWorkOrder {
+            name,
+            job_token,
+            amount,
+            ..
+        } => {
+            if *amount == 0 {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "work order amount must be positive",
+                ));
+            }
+            create_entity(
+                snapshot,
+                created_entity_id(idempotency_key, 0),
+                EntityKind::WorkOrder,
+                name.clone(),
+                vec![
+                    ("job_token".to_owned(), Value::Text(job_token.clone())),
+                    ("amount_total".to_owned(), Value::U64(u64::from(*amount))),
+                    (
+                        AMOUNT_REMAINING_FIELD.to_owned(),
+                        Value::U64(u64::from(*amount)),
+                    ),
+                    ("work_ticks".to_owned(), Value::U64(0)),
+                    (
+                        STATUS_FIELD.to_owned(),
+                        Value::Text(STATUS_ACTIVE.to_owned()),
+                    ),
+                ],
+            )?;
+            Ok(true)
+        }
+        Action::Extension {
+            namespace, name, ..
+        } => Err(DfmcpError::new(
+            ErrorCode::AdapterRejected,
+            format!("extension action {namespace}.{name} has no reference semantics"),
+        )),
+    }
+}
+
+fn coord_field(entity: &EntityRecord, field: &str) -> Option<MapCoord> {
+    match field_value(entity, field) {
+        Some(Value::Coord(coord)) => Some(*coord),
+        _ => None,
+    }
+}
+
+/// Progress all active temporal work by `elapsed` game ticks, deterministically
+/// in ascending entity order. Call after advancing `snapshot.tick`. Returns
+/// whether canonical state changed; the caller owns the cursor and hash.
+pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
+    if elapsed == 0 {
+        return Ok(false);
+    }
+    let designation_kind = EntityKind::Other(DIG_DESIGNATION_KIND.to_owned());
+    let active: Vec<(EntityId, EntityKind)> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| match &entity.kind {
+            EntityKind::WorkOrder => field_text(entity, STATUS_FIELD) == Some(STATUS_ACTIVE),
+            EntityKind::Building => {
+                field_text(entity, CONSTRUCTION_STAGE_FIELD).is_some_and(|s| s != STAGE_COMPLETE)
+            }
+            kind if kind == &designation_kind => {
+                field_text(entity, STATUS_FIELD) == Some(STATUS_ACTIVE)
+            }
+            _ => false,
+        })
+        .map(|entity| (entity.id, entity.kind.clone()))
+        .collect();
+    let mut changed = false;
+    for (id, kind) in active {
+        changed |= match kind {
+            EntityKind::WorkOrder => advance_work_order(snapshot, id, elapsed)?,
+            EntityKind::Building => advance_building(snapshot, id, elapsed)?,
+            _ => advance_designation(snapshot, id, elapsed)?,
+        };
+    }
+    Ok(changed)
+}
+
+fn entity(snapshot: &WorldSnapshot, id: EntityId) -> Result<&EntityRecord> {
+    snapshot.graph.entities.get(&id).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "active effect entity disappeared during progress",
+        )
+    })
+}
+
+fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
+    let order = entity(snapshot, id)?;
+    let work = field_u64(order, "work_ticks").saturating_add(elapsed);
+    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD);
+    let produced = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
+    let remaining = remaining - produced;
+    let mut fields = vec![
+        (AMOUNT_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
+        (
+            "work_ticks".to_owned(),
+            Value::U64(if remaining == 0 {
+                0
+            } else {
+                work % WORK_ORDER_TICKS_PER_UNIT
+            }),
+        ),
+    ];
+    if remaining == 0 {
+        fields.push((
+            STATUS_FIELD.to_owned(),
+            Value::Text(STATUS_COMPLETE.to_owned()),
+        ));
+    }
+    write_fields(snapshot, id, fields)
+}
+
+fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
+    let building = entity(snapshot, id)?;
+    let required = field_u64(building, "required_ticks").max(1);
+    let progress = field_u64(building, "progress_ticks")
+        .saturating_add(elapsed)
+        .min(required);
+    let stage = if progress >= required {
+        STAGE_COMPLETE
+    } else {
+        STAGE_UNDER_CONSTRUCTION
+    };
+    write_fields(
+        snapshot,
+        id,
+        vec![
+            ("progress_ticks".to_owned(), Value::U64(progress)),
+            (
+                CONSTRUCTION_STAGE_FIELD.to_owned(),
+                Value::Text(stage.to_owned()),
+            ),
+        ],
+    )
+}
+
+fn advance_designation(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
+    let designation = entity(snapshot, id)?;
+    let (Some(min), Some(max)) = (
+        coord_field(designation, "area_min"),
+        coord_field(designation, "area_max"),
+    ) else {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "dig designation lost its area",
+        ));
+    };
+    let area = MapCuboid::new(min, max)?;
+    let target = u32::try_from(field_u64(designation, "target_tile_code")).map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "dig designation target tile code is invalid",
+        )
+    })?;
+    let work = field_u64(designation, "work_ticks").saturating_add(elapsed);
+    let budget = work / DIG_TICKS_PER_TILE;
+    let mut changed = false;
+    if budget > 0 {
+        let pending: Vec<MapCoord> = region_tiles(area)
+            .filter(|coord| {
+                snapshot
+                    .tile_code_at(*coord)
+                    .is_some_and(|code| code != target)
+            })
+            .take(usize::try_from(budget).unwrap_or(usize::MAX))
+            .collect();
+        for coord in pending {
+            changed |= snapshot.set_tile_code(coord, target)?;
+        }
+    }
+    let remaining = count_remaining(snapshot, area, target);
+    let mut fields = vec![
+        (TILES_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
+        (
+            "work_ticks".to_owned(),
+            Value::U64(if remaining == 0 {
+                0
+            } else {
+                work % DIG_TICKS_PER_TILE
+            }),
+        ),
+    ];
+    if remaining == 0 {
+        fields.push((
+            STATUS_FIELD.to_owned(),
+            Value::Text(STATUS_COMPLETE.to_owned()),
+        ));
+    }
+    changed |= write_fields(snapshot, id, fields)?;
+    Ok(changed)
+}
+
+#[cfg(test)]
+#[path = "effects_tests.rs"]
+mod tests;

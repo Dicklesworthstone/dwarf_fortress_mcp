@@ -118,7 +118,22 @@ impl StaticPlanner {
         let mut steps = Vec::with_capacity(intent.requested_actions.len());
         let mut required_capabilities = BTreeSet::new();
         for (index, requested) in intent.requested_actions.iter().enumerate() {
-            let normalized = normalize_requested(requested);
+            let step_number = u32::try_from(index).map_err(|_| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "plan step index exceeds its wire representation",
+                )
+            })?;
+            let step_id = StepId::new(step_number);
+            let mut normalized = normalize_requested(requested);
+            let idempotency_key =
+                derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
+            complete_reference_semantics(
+                &mut normalized,
+                &idempotency_key,
+                intent.anchor.fortress_id,
+                snapshot.tick,
+            )?;
             validate_action(&normalized.action, &self.policy, context)?;
             validate_constraints(intent, &normalized.action)?;
             if normalized.action.risk() > max_allowed_risk {
@@ -158,18 +173,9 @@ impl StaticPlanner {
                 }
             }
             validate_requested(index, &normalized, snapshot.tick)?;
-            let step_number = u32::try_from(index).map_err(|_| {
-                DfmcpError::new(
-                    ErrorCode::BudgetExceeded,
-                    "plan step index exceeds its wire representation",
-                )
-            })?;
-            let step_id = StepId::new(step_number);
             let dependencies = validate_dependencies(index, &normalized.depends_on)?;
             let capability = normalized.action.capability();
             required_capabilities.insert(capability);
-            let idempotency_key =
-                derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
             steps.push(PlanStep {
                 id: step_id,
                 action: normalized.action.clone(),
@@ -329,6 +335,35 @@ fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
         obligation: requested.obligation.as_ref().map(normalize_obligation),
         depends_on: requested.depends_on.clone(),
     }
+}
+
+/// Fill omitted semantics from the reference action model: postconditions
+/// that prove the effect, a bounded obligation for temporal work, and an exact
+/// inverse compensation where the action fully determines it. Explicit caller
+/// choices always win; everything synthesized is sealed into the plan digest.
+fn complete_reference_semantics(
+    requested: &mut RequestedAction,
+    idempotency_key: &str,
+    fortress: dfmcp_core::FortressId,
+    now: GameTick,
+) -> Result<()> {
+    if requested.postconditions.is_empty() {
+        requested.postconditions = normalize_predicates(&crate::effects::default_postconditions(
+            &requested.action,
+            idempotency_key,
+            fortress,
+        ));
+    }
+    if requested.obligation.is_none() {
+        requested.obligation =
+            crate::effects::default_obligation(&requested.action, idempotency_key, fortress, now)?
+                .as_ref()
+                .map(normalize_obligation);
+    }
+    if requested.compensation.is_none() {
+        requested.compensation = crate::effects::default_compensation(&requested.action);
+    }
+    Ok(())
 }
 
 fn normalize_predicates(predicates: &[Predicate]) -> Vec<Predicate> {
@@ -802,7 +837,8 @@ mod tests {
     }
 
     #[test]
-    fn non_pause_action_without_postcondition_is_rejected() {
+    fn non_pause_action_without_postcondition_gets_reference_postconditions()
+    -> dfmcp_core::Result<()> {
         let snapshot = snapshot();
         let intent = Intent {
             id: IntentId::new(2),
@@ -822,8 +858,45 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
+        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot))?;
+        let step = &plan.steps[0];
+        assert_eq!(
+            step.postconditions,
+            crate::effects::default_postconditions(
+                &step.action,
+                &step.idempotency_key,
+                snapshot.fortress_id
+            )
+        );
+        assert!(step.obligation.is_none());
+        assert!(step.compensation.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn extension_without_postcondition_is_rejected() {
+        let snapshot = snapshot();
+        let intent = Intent {
+            id: IntentId::new(2),
+            anchor: snapshot.anchor(),
+            summary: "run an extension".to_owned(),
+            terminal_condition: Predicate::Paused(false),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+            requested_actions: vec![RequestedAction {
+                action: Action::Extension {
+                    namespace: "lab".to_owned(),
+                    name: "noop".to_owned(),
+                    parameters: std::collections::BTreeMap::new(),
+                },
+                preconditions: vec![Predicate::Paused(true)],
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        };
         let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
-        assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
+        assert!(result.is_err());
     }
 
     #[test]

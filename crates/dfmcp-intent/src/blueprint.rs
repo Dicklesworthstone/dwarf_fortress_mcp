@@ -170,7 +170,17 @@ impl BlueprintPlanner {
             id: intent_id,
             anchor,
             summary: layout.summary().to_owned(),
-            terminal_condition: Predicate::False,
+            terminal_condition: Predicate::All(
+                layout
+                    .excavations()
+                    .iter()
+                    .map(|part| Predicate::RegionTerrain {
+                        area: part.area,
+                        tile_code: crate::effects::dig_target_tile_code(part.mode),
+                    })
+                    .collect(),
+            )
+            .normalized(),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: layout
                 .excavations()
@@ -249,10 +259,16 @@ fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: GameTick) -> Reque
     RequestedAction {
         action: Action::DesignateDig { area, mode },
         preconditions: Vec::new(),
-        postconditions: vec![Predicate::True],
+        postconditions: vec![Predicate::RegionTerrain {
+            area,
+            tile_code: crate::effects::dig_target_tile_code(mode),
+        }],
         compensation: None,
         obligation: Some(ObligationSpec {
-            terminal: Predicate::False,
+            terminal: Predicate::RegionTerrain {
+                area,
+                tile_code: crate::effects::dig_target_tile_code(mode),
+            },
             failure: None,
             deadline_tick,
             poll_interval_ticks: 10,
@@ -314,7 +330,22 @@ mod tests {
         )?;
         assert_eq!(intent.requested_actions.len(), 10);
         assert_eq!(intent.summary, "excavate 4 bedroom units");
-        assert_eq!(intent.terminal_condition, Predicate::False);
+        // The intent is complete only when every excavated region shows its
+        // target terrain; each action seals the same region predicate.
+        let Predicate::All(regions) = &intent.terminal_condition else {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "blueprint terminal is not a region conjunction",
+            ));
+        };
+        assert_eq!(regions.len(), 10);
+        for requested in &intent.requested_actions {
+            assert!(regions.contains(&requested.postconditions[0]));
+            assert_eq!(
+                requested.obligation.as_ref().map(|o| &o.terminal),
+                Some(&requested.postconditions[0])
+            );
+        }
         Ok(())
     }
 

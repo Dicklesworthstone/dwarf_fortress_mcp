@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
+use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCuboid, Result};
 
 use crate::{EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, Value, WorldSnapshot};
 
@@ -13,6 +13,8 @@ const MAX_QUERY_VALUE_DEPTH: usize = 64;
 const MAX_QUERY_VALUE_NODES: usize = 4_096;
 const MAX_QUERY_VALUE_BYTES: usize = 64 * 1_024;
 const MAX_QUERY_SCAN_ENTITIES: usize = 1_000_000;
+/// Total terrain tiles all region predicates in one predicate tree may visit.
+pub const MAX_PREDICATE_REGION_TILES: u64 = 262_144;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CompareOp {
@@ -44,6 +46,12 @@ pub enum Predicate {
         kind: Option<EdgeKind>,
     },
     Paused(bool),
+    /// Every tile of a bounded region has this canonical tile code. Unobserved
+    /// terrain is unknown, never a match.
+    RegionTerrain {
+        area: MapCuboid,
+        tile_code: u32,
+    },
     All(Vec<Predicate>),
     Any(Vec<Predicate>),
     Not(Box<Predicate>),
@@ -167,6 +175,16 @@ impl Predicate {
             Self::Not(predicate) => {
                 output.push(9);
                 predicate.encode(output);
+            }
+            Self::RegionTerrain { area, tile_code } => {
+                use crate::canonical::{put_i32, put_u32};
+                output.push(10);
+                for value in [
+                    area.min.x, area.min.y, area.min.z, area.max.x, area.max.y, area.max.z,
+                ] {
+                    put_i32(output, value);
+                }
+                put_u32(output, *tile_code);
             }
         }
     }
@@ -305,6 +323,13 @@ fn evaluate_truth(
             }))
         }
         Predicate::Paused(expected) => PredicateTruth::from_bool(snapshot.paused == *expected),
+        Predicate::RegionTerrain { area, tile_code } => {
+            match snapshot.region_terrain_truth(*area, *tile_code) {
+                crate::terrain::RegionTruth::Matches => PredicateTruth::True,
+                crate::terrain::RegionTruth::Differs => PredicateTruth::False,
+                crate::terrain::RegionTruth::Unknown => PredicateTruth::Unknown,
+            }
+        }
         Predicate::All(predicates) => {
             let mut result = PredicateTruth::True;
             for predicate in predicates {
@@ -466,6 +491,7 @@ impl WorldQuery {
 fn validate_predicate_shape(root: &Predicate) -> Result<()> {
     let mut pending = vec![(root, 1usize)];
     let mut nodes = 0usize;
+    let mut region_tiles = 0u64;
     while let Some((predicate, depth)) = pending.pop() {
         nodes = nodes.checked_add(1).ok_or_else(|| {
             DfmcpError::new(
@@ -511,6 +537,16 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 ));
             }
             Predicate::FieldCompare { value, .. } => validate_query_value(value)?,
+            Predicate::RegionTerrain { area, .. } => {
+                let tiles = crate::terrain::validate_region(*area)?;
+                region_tiles = region_tiles.saturating_add(tiles);
+                if region_tiles > MAX_PREDICATE_REGION_TILES {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "predicate terrain regions exceed their combined tile bound",
+                    ));
+                }
+            }
             _ => {}
         }
     }
