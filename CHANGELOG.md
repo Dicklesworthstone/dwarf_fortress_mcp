@@ -84,12 +84,34 @@ readiness.
   `max_output_tokens` (estimator ceil(bytes/4)) through deterministic tiers — compact Agent Turn,
   truncated arrays with recorded paths and totals, omitted optional sections, minimal envelope —
   and reports `output_budget`. Lab sessions default to 4,096 output tokens.
+- Lab queries: `where` filters, lexical `search`, and `path` walkability routes over observed
+  terrain with honest certified/unknown absence; `fortress.explain` returns a verified Merkle
+  inclusion proof; doctor reports real lease and obligation counts.
+- Certified top-k attention: every Agent Turn ranks attention (severity, urgency, category, id),
+  keeps six items, and records the selection certificate under `coverage.attention_selection`.
+- Production objectives (`{"template":"production","quotas":[...]}`) compile against observed
+  stock; work orders need a completed Still/Kitchen and a worker with BREW/COOK, stall with
+  `blocked_by`, and fail their obligation at the deadline; supply alerts remedy the actual
+  blocker. The starter fortress opens with a still, a kitchen, a brewer and a cook.
+- Reachability-based retention of world versions (`dfmcp_world::retention`): live plans and
+  checkpoints keep their versions readable past the 32-version window.
+- PUB-OBS root-last `CapsulePublisher`, seed-pinned `FaultSchedule` campaigns (replacing
+  `chaos.rs`), the `dfmcp.replay.bundle/1` JSON schema with a golden replay regression, an
+  adversarial threat corpus, and a capability noninterference test.
+- Renamed capability-implying names: `table_ledger` (was `sqlite_ledger`),
+  `http_resumption_lab` (was `http_transport`), `e2e_lab_fortress_tests`, and
+  `DelegationToken.delegation_digest`.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
   complete. Laboratory only.
 
 ### Fixed
+
+- Plan-scope `compensate_reversible` no longer applies the inverse of deferred steps that never
+  dispatched (it could flip a dwarf's labor nobody asked to change).
+- Lab `path` queries bound their coordinates instead of overflowing `i32` arithmetic.
+- Warning-denied Clippy is clean across the workspace (`--all-targets --all-features`).
 
 - The whole Rust workspace test graph compiles and passes again on the pinned
   nightly: 3,054 tests, 0 failed (debug, `CARGO_PROFILE_DEV_DEBUG=0` to keep the

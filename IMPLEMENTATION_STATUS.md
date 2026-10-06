@@ -78,7 +78,9 @@ reference progress rates are calibration, not Dwarf Fortress claims.
 ### Laboratory agent loop: changes, history, replay, economy, objectives (2026-10-06)
 
 - **What changed, every turn.** Each lab session retains its last 32 exact
-  canonical world versions; every Agent Turn's `changes` reports observed world
+  canonical world versions plus every older version a live root still names
+  (pending plan anchor, durable in-flight plans, checkpoints), collecting the
+  rest with tombstones so a refusal says "collected" or "never observed"; every Agent Turn's `changes` reports observed world
   changes since the agent's previous anchor (entities created/removed/changed
   with field before/after, terrain per level with bounding box and transitions,
   clock and pause). `fortress.query` reads any retained version exactly
@@ -112,6 +114,45 @@ reference progress rates are calibration, not Dwarf Fortress claims.
 
 All of this is laboratory semantics and development execution; none of it is
 native, live-game, registry or production evidence.
+
+### Laboratory control-plane depth: queries, attention, publication, faults (2026-10-06)
+
+- **Queries.** `fortress.query` adds closed `where` filters (field/op/value,
+  all/any/not; unknown facts never match), lexical `search`, and `path`
+  walkability routes over observed terrain via `MapRegion` (an unreachable
+  answer is certified only when the bounded search touched neither the region
+  edge nor an unobserved tile). `fortress.explain` returns a Merkle inclusion
+  proof verified against the world root.
+- **Attention.** Every Agent Turn ranks attention under a lexicographic total
+  order (severity, urgency, category, id), keeps at most six items, collects
+  every applicable control condition, and certifies the selection
+  (`coverage.attention_selection`, `dfmcp_world::select_top_k`).
+- **Production realism.** Brewing/cooking orders progress only with a completed
+  Still/Kitchen and a living worker with the BREW/COOK labor; stalled orders say
+  why (`blocked_by`) and fail their obligation at the deadline. Production
+  objectives compile against observed stock and refuse with every blocker named;
+  supply alerts remedy the actual blocker (assign the labor) before production.
+  The civilian alert FSM locks civilians down during a raid.
+- **Publication and faults.** `dfmcp_world::CapsulePublisher` implements PUB-OBS
+  root-last publication over the in-memory ledger (readers see only complete
+  roots; recovery re-derives the root by replay). `dfmcp_lab::faults` replaces
+  the chaos RNG loop with seed-pinned canonical `FaultSchedule`s driving crash/
+  drop/reorder at publication boundaries and crash/torn-write at journal appends,
+  with hash-chained injection transcripts.
+- **Replay.** `schemas/replay.bundle.schema.json` pins `dfmcp.replay.bundle/1`;
+  a checked-in golden bundle must replay with zero divergence, replayed sessions
+  re-export byte-identical bundles, and every lab scenario replays a broad tool
+  mix with zero divergence.
+- **Adversarial and noninterference tests.** A threat corpus maps every plan
+  §14.2 adversary class to a test (tainted text, closed vocabularies, forged or
+  replayed digests, forged sessions, hostile sizes, checkpoint-id traversal); a
+  session without observe/query learns no world fact through any channel.
+- **Fixes found by these tests.** Path endpoints overflowed `i32` arithmetic;
+  plan-scope `compensate_reversible` applied the inverse of deferred steps that
+  never dispatched.
+
+Laboratory semantics and development execution only; none of it is native,
+live-game, registry or production evidence.
 
 ### Crash-durable laboratory fortresses (2026-10-06)
 
