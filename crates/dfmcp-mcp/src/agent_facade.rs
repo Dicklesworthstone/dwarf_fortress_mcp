@@ -1096,7 +1096,7 @@ fn base_attention(
     Vec::new()
 }
 
-fn briefing(state: &SessionOrientation) -> Value {
+fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
     json!({
         "implementation_phase": LAB_IMPLEMENTATION_PHASE,
         "adapter": state.adapter,
@@ -1104,7 +1104,7 @@ fn briefing(state: &SessionOrientation) -> Value {
         "fortress_loaded": true,
         "paused": state.paused,
         "mission": null,
-        "objective_status": [],
+        "objective_status": payload.get("objectives").cloned().unwrap_or_else(|| json!([])),
         "mutation_admissible": has_grant(state, "plan") && has_grant(state, "control_clock"),
         "last_checkpoint_id": state.last_checkpoint_id,
         "highest_unresolved_uncertainty": "no live DFHack observation or mutation path is implemented",
@@ -1398,7 +1398,7 @@ fn project_response(
         .turn_id(format!("presentation-turn-{turn_sequence}"))
         .continuity(status, previous_anchor, None, reset_reason)
         .profile(profile)
-        .briefing(briefing(&state))
+        .briefing(briefing(&state, &payload))
         .changes({
             let mut listed = changes(operation, is_ok(&payload), &payload);
             listed.extend(world_delta);

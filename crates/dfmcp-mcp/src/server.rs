@@ -101,6 +101,42 @@ pub(crate) struct LabSession {
     /// Bounded, immutable history of the world versions this session saw,
     /// newest last, so every turn can say exactly what changed.
     history: std::collections::VecDeque<WorldSnapshot>,
+    /// The intent behind every committed plan, re-evaluated against each
+    /// observation: dispatch success is not goal success.
+    objectives: Vec<Objective>,
+}
+
+/// A committed intent whose terminal condition is the goal.
+#[derive(Clone, Debug)]
+struct Objective {
+    plan_digest: String,
+    summary: String,
+    terminal: Predicate,
+    committed_tick: u64,
+}
+
+const MAX_OBJECTIVES: usize = 64;
+
+/// Every tracked objective with whether the current world satisfies it.
+pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
+    let snapshot = session.adapter.snapshot();
+    json!(
+        session
+            .objectives
+            .iter()
+            .map(|objective| {
+                let satisfied = dfmcp_world::evaluate(snapshot, &objective.terminal);
+                json!({
+                    "plan_digest": objective.plan_digest,
+                    "summary": objective.summary,
+                    "status": if satisfied { "achieved" } else { "not_yet_observed" },
+                    "epistemic_state": "observed",
+                    "terminal_condition": crate::lab_world::predicate_json(&objective.terminal),
+                    "committed_tick": objective.committed_tick,
+                })
+            })
+            .collect::<Vec<_>>()
+    )
 }
 
 /// World versions each session retains for change reporting.
@@ -1510,6 +1546,7 @@ pub(crate) fn open_session_in_scenario(
         carried: Vec::new(),
         replay: crate::replay::ReplayLog::default(),
         history: std::collections::VecDeque::new(),
+        objectives: Vec::new(),
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -1564,6 +1601,7 @@ pub(crate) fn open_session_in_scenario(
         carried: _,
         replay: _,
         history: _,
+        objectives: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -1601,6 +1639,7 @@ pub(crate) fn open_session_in_scenario(
             log
         },
         history: std::collections::VecDeque::new(),
+        objectives: Vec::new(),
     }));
     {
         let mut registry = sessions();
@@ -1735,6 +1774,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["evidence_count"] = json!(frame.evidence.len());
                         payload["world"] = crate::lab_world::briefing(&snapshot);
                         payload["world_alerts"] = json!(crate::lab_world::world_alerts(&snapshot));
+                        payload["objectives"] = objectives_json(guard);
                         payload.to_string()
                     }
                     ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => {
@@ -2157,6 +2197,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         "schema": "dfmcp.lab-handoff/1",
         "durability": durability_json(session),
         "world_alerts": alerts,
+        "objectives": objectives_json(session),
         "orientation": {
             "replay_bundle": format!("df://session/{}/replay", session.session_id),
             "changes_since_oldest_retained": oldest_retained.map(|hash| json!({
@@ -2682,6 +2723,16 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                     .durable_plans
                                     .insert(pending.plan.digest, pending.plan.clone());
                             }
+                            if guard.objectives.len() == MAX_OBJECTIVES {
+                                guard.objectives.remove(0);
+                            }
+                            let committed_tick = guard.adapter.snapshot().tick.0;
+                            guard.objectives.push(Objective {
+                                plan_digest: plan_digest.clone(),
+                                summary: pending.plan.summary.clone(),
+                                terminal: pending.plan.terminal_condition.clone(),
+                                committed_tick,
+                            });
                             guard.last_action =
                                 receipt.actions.first().map(|action| action.action_id);
                             guard.last_plan_actions = receipt
@@ -2891,6 +2942,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 payload["open_actions_remaining"] = json!(guard.open_actions.len());
                 payload["world_alerts"] =
                     json!(crate::lab_world::world_alerts(guard.adapter.snapshot()));
+                payload["objectives"] = objectives_json(guard);
                 if !guard.carried.is_empty() {
                     // Proven against this observation by the durable hook that
                     // runs after this call; report the prior evaluation plus
@@ -3303,6 +3355,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     guard.last_plan_actions.clear();
                     guard.open_actions.clear();
                     guard.commit_receipts.clear();
+                    guard.objectives.clear();
                     if guard.durable_scenario.is_some() {
                         let fortress = guard.fortress_id;
                         let digests: BTreeSet<Digest32> = guard

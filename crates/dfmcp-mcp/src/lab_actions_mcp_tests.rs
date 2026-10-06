@@ -152,6 +152,11 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         100
     );
 
+    let first = parsed(&fortress_wait(Some(session.clone()), Some(1)))?;
+    assert_eq!(
+        first["agent_turn"]["briefing"]["objective_status"][0]["status"],
+        "not_yet_observed"
+    );
     let mut finished = false;
     for _ in 0..40 {
         let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
@@ -175,6 +180,10 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         settled["agent_turn"]["active_work"]["obligations"],
         json!([])
     );
+    // The goal itself, not just the dispatch, is observed achieved.
+    let objectives = &settled["agent_turn"]["briefing"]["objective_status"];
+    assert_eq!(objectives[0]["summary"], "brewery", "{objectives}");
+    assert_eq!(objectives[0]["status"], "achieved");
 
     let after = parsed(&fortress_query(
         Some(session.clone()),

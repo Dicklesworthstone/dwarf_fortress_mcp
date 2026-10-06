@@ -65,6 +65,10 @@ readiness.
   game time, explicit `thirsty`/`hungry` needs on shortage, work orders that
   produce stock, and `world_alerts` raised as `fortress_needs` attention with
   an exact remedy plan.
+- Objectives: every committed intent is tracked and its terminal condition
+  re-evaluated against each observation; the Agent Turn briefing's
+  `objective_status` (and observe, wait and handoff) report `achieved` or
+  `not_yet_observed` separately from action dispatch state.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
