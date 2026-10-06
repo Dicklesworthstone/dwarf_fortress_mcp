@@ -165,7 +165,7 @@ fn checks_all_512_observed_flag_words_against_independent_bit_reference() {
                 let expected = flags / 256 % 2 == 1
                     && [1, 3, 6, 7]
                         .iter()
-                        .all(|bit| flags / (1u32 << *bit) % 2 == 0)
+                        .all(|bit| (flags / (1u32 << *bit)).is_multiple_of(2))
                     && attached == 0;
                 assert_eq!(installed_item(&item, 10, building_kind, attached), expected);
                 assert!(!installed_item(&item, 11, building_kind, attached));

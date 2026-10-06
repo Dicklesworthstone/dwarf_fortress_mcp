@@ -242,12 +242,12 @@ pub fn analyze<S: OperationsStateView + ?Sized>(
                 "duplicate or invalid construction target or expectation",
             ));
         }
-        if let Some(id) = target.item_native_id {
-            if item_ids.insert(id, target.building_native_id).is_some() {
-                return Err(invalid(
-                    "one exact item cannot be requested for multiple furniture targets",
-                ));
-            }
+        if let Some(id) = target.item_native_id
+            && item_ids.insert(id, target.building_native_id).is_some()
+        {
+            return Err(invalid(
+                "one exact item cannot be requested for multiple furniture targets",
+            ));
         }
     }
     let observation = state

@@ -8,10 +8,12 @@ const UNKNOWN: &str = include_str!("../../tests/fixtures/work_order_unknown_v1_1
 
 fn hex(value: &str) -> Result<Vec<u8>> {
     let value = value.trim();
-    require(value.len() % 2 == 0, "odd fixture hex")?;
+    require(value.len().is_multiple_of(2), "odd fixture hex")?;
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = char::from(pair[0])
                 .to_digit(16)

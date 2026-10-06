@@ -1,0 +1,5 @@
+# AGENTS.md forbids unwrap/expect/panic in production code. Tests assert by
+# panicking, so these lints apply to production code only.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

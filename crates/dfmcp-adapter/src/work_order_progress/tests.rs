@@ -10,7 +10,9 @@ const VECTOR: &str = include_str!("../../tests/fixtures/work_order_progress_v1_1
 fn hex(s: &str) -> Result<Vec<u8>> {
     s.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let s = std::str::from_utf8(pair)
                 .map_err(|_| error(ErrorCode::InvalidRequest, "test hex"))?;

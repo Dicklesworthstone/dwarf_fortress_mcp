@@ -155,7 +155,7 @@ mod tests {
     fn config() -> LiveConnectionConfig {
         LiveConnectionConfig {
             endpoint: parse_loopback_endpoint("127.0.0.1:5000")
-                .map_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 5000)), |value| value),
+                .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 5000))),
             connect_timeout: Duration::from_secs(2),
             read_timeout: Duration::from_secs(5),
             write_timeout: Duration::from_secs(5),

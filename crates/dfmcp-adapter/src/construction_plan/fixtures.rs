@@ -12,7 +12,9 @@ pub(crate) fn hex(raw: &str) -> Vec<u8> {
     let raw = raw.trim();
     assert_eq!(raw.len() % 2, 0);
     raw.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let value = std::str::from_utf8(pair).unwrap();
             u8::from_str_radix(value, 16).unwrap()

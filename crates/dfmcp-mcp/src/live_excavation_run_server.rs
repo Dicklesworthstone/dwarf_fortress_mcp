@@ -212,10 +212,10 @@ fn dispatch<B: ExcavationSessionBackend>(
         ),
     };
     let mut turn = state.session.execute(command, &c, started, guard);
-    if turn.outcome.is_ok() {
-        if let Some(cause) = request_error {
-            turn.outcome = Err(cause);
-        }
+    if turn.outcome.is_ok()
+        && let Some(cause) = request_error
+    {
+        turn.outcome = Err(cause);
     }
     let mut candidate = state.cursors.clone();
     let rendered =
@@ -330,7 +330,7 @@ pub async fn fortress_open_session(
                 return Err(exhausted());
             }
             let serial = NEXT
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                     (n < (1u64 << 57)).then_some(n + 1)
                 })
                 .map_err(|_| exhausted())?;

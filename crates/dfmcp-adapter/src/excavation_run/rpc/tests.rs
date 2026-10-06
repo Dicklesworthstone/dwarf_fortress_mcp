@@ -287,10 +287,11 @@ impl Server {
                     }
                     _ => unreachable!(),
                 }
-                if index >= 2 && !(index == 4 && behavior.absent) {
-                    if let Some(record) = &behavior.record {
-                        bytes(&mut out, 10, record);
-                    }
+                if index >= 2
+                    && !(index == 4 && behavior.absent)
+                    && let Some(record) = &behavior.record
+                {
+                    bytes(&mut out, 10, record);
                 }
                 number(&mut out, 11, 0);
                 number(&mut out, 12, u64::from(behavior.record.is_some()));

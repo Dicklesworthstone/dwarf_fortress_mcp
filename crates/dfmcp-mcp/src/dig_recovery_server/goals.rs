@@ -163,13 +163,12 @@ impl Inventory {
             check()?;
             let candidate = (|| -> Result<(Snapshot, Pin, u64)> {
                 let snapshot = Snapshot::open(&spec.journal, &mut check)?;
-                if let Some(old) = &self.pins[index] {
-                    if snapshot.identity() != old.identity
+                if let Some(old) = &self.pins[index]
+                    && (snapshot.identity() != old.identity
                         || snapshot.bytes().len() < old.length
-                        || Digest32::of_bytes(&snapshot.bytes()[..old.length]) != old.digest
-                    {
-                        return Err(denied());
-                    }
+                        || Digest32::of_bytes(&snapshot.bytes()[..old.length]) != old.digest)
+                {
+                    return Err(denied());
                 }
                 let archive = Archive::decode(snapshot.bytes(), &mut check)?;
                 if archive.id != archive::digest(&spec.goal_id)? {

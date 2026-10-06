@@ -150,16 +150,15 @@ pub(super) fn execute<S: OperationsStateView + ?Sized>(
             available,
         )?;
         charge(&mut used, report.work_units, maximum)?;
-        if let Some(first) = evaluated.first() {
-            if report.anchor != first.report.anchor
+        if let Some(first) = evaluated.first()
+            && (report.anchor != first.report.anchor
                 || report.source_digest != first.report.source_digest
                 || report.resources != first.report.resources
-                || report.quotas != first.report.quotas
-            {
-                return Err(invariant(
-                    "production alternatives do not share one observed stock and quota universe",
-                ));
-            }
+                || report.quotas != first.report.quotas)
+        {
+            return Err(invariant(
+                "production alternatives do not share one observed stock and quota universe",
+            ));
         }
         let mut deficits = Vec::with_capacity(report.resources.len());
         for resource in &report.resources {

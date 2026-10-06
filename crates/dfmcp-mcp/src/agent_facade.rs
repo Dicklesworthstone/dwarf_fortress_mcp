@@ -174,10 +174,10 @@ fn extract_anchor(payload: &Value, prior: Option<&Value>) -> Option<Value> {
         "current_anchor",
         "anchor",
     ] {
-        if let Some(value) = payload.get(field) {
-            if !value.is_null() {
-                return Some(normalize_anchor(value.clone(), payload, prior));
-            }
+        if let Some(value) = payload.get(field)
+            && !value.is_null()
+        {
+            return Some(normalize_anchor(value.clone(), payload, prior));
         }
     }
 

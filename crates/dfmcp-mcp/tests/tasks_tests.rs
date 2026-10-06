@@ -5,9 +5,9 @@ use std::error::Error;
 
 use dfmcp_adapter::{CancelMode, GameAdapter};
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, CommitState, Digest32, ErrorCode, FortressId,
-    GameTick, IntentId, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId,
-    StateAnchor, StepId, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, CommitState, ErrorCode, FortressId, GameTick,
+    IntentId, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, StateAnchor,
+    StepId, WorkBudget,
 };
 use dfmcp_intent::{Action, PlanStep, PreparedPlan, derive_step_idempotency_key};
 use dfmcp_lab::MemoryAdapter;

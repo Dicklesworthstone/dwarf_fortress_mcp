@@ -457,16 +457,15 @@ impl BatchDefinition {
                     corrupt("furniture child violates original allocation source or constraints")
                 })?;
         }
-        if let Some(prior) = last_after {
-            if capture.tick() < prior.tick()
+        if let Some(prior) = last_after
+            && (capture.tick() < prior.tick()
                 || capture.sequence() < prior.sequence()
                 || capture.next_building_id() < prior.next_building_id()
-                || capture.next_job_id() < prior.next_job_id()
-            {
-                return Err(corrupt(
-                    "furniture child clock, sequence or native ID horizon regressed",
-                ));
-            }
+                || capture.next_job_id() < prior.next_job_id())
+        {
+            return Err(corrupt(
+                "furniture child clock, sequence or native ID horizon regressed",
+            ));
         }
         Ok(())
     }
@@ -642,7 +641,7 @@ impl Json<'_> {
                 return Ok(out);
             }
             require(
-                byte >= 0x20 && byte < 0x80,
+                (0x20..0x80).contains(&byte),
                 "furniture JSON strings must decode to their ASCII catalog",
             )?;
             if byte == b'\\' {

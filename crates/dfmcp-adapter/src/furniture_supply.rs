@@ -89,7 +89,7 @@ impl<'a> Work<'a> {
             .checked_add(1)
             .ok_or_else(|| exhausted("furniture allocation work overflow"))?;
         self.within_allowance()?;
-        if self.used % CHECK_INTERVAL == 0 {
+        if self.used.is_multiple_of(CHECK_INTERVAL) {
             self.checkpoint()?;
         }
         Ok(())

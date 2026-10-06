@@ -7,7 +7,9 @@ fn hex(text: &str) -> Result<Vec<u8>> {
     let text = text.trim();
     require(text.len().is_multiple_of(2), "odd fixture hex")?;
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = char::from(pair[0])
                 .to_digit(16)

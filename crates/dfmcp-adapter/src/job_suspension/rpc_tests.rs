@@ -7,7 +7,9 @@ const EFFECT: &str = include_str!("../../tests/fixtures/job_suspension_effect_v1
 fn hex(text: &str) -> Result<Vec<u8>> {
     text.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = char::from(pair[0]).to_digit(16).ok_or_else(malformed)?;
             let b = char::from(pair[1]).to_digit(16).ok_or_else(malformed)?;
@@ -287,7 +289,7 @@ fn malformed_method_shapes_nonce_and_generation_fence_even_after_complete_frames
     let mut wrong_nonce = observation_reply()?;
     let index = wrong_nonce
         .windows(16)
-        .position(|b| b == &[b'n'; 16])
+        .position(|b| b == [b'n'; 16])
         .ok_or_else(malformed)?;
     wrong_nonce[index] = b'x';
     for reply in [

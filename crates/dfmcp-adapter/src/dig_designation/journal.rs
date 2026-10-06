@@ -207,7 +207,7 @@ impl<S: EffectJournalStorage> DigJournal<S> {
             let n = usize::from(u16::from_be_bytes(r.array()?));
             check(n <= MAX_BINDING_BYTES)?;
             let binding = DigBinding::decode(r.take(n)?)?;
-            check(r.take(32)? != &[0; 32])?;
+            check(r.take(32)? != [0; 32])?;
             let prefix_end = raw.len() - r.0.len();
             let id = Digest32::from_bytes(r.array()?);
             check(id == hash(b"dfmcp-dig-journal/1", &raw[..prefix_end]))?;

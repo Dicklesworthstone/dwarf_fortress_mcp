@@ -58,7 +58,7 @@ struct SessionSlot;
 impl SessionSlot {
     fn reserve() -> Result<Self> {
         SLOTS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 (value < MAX_SESSIONS).then_some(value + 1)
             })
             .map_err(|_| {

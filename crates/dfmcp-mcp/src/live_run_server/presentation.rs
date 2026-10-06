@@ -143,10 +143,10 @@ impl Cursors {
         bytes.extend_from_slice(key.head.as_bytes());
         bytes.extend_from_slice(&self.serial.to_be_bytes());
         let token = Digest32::of_bytes(&bytes).to_string();
-        if self.entries.len() >= 64 {
-            if let Some(old) = self.entries.keys().next().cloned() {
-                self.entries.remove(&old);
-            }
+        if self.entries.len() >= 64
+            && let Some(old) = self.entries.keys().next().cloned()
+        {
+            self.entries.remove(&old);
         }
         self.entries.insert(token.clone(), (key, offset));
         Ok(token)

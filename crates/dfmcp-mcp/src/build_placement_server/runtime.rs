@@ -236,7 +236,7 @@ pub(super) fn configuration() -> Result<Config> {
             || path[1..]
                 .split('/')
                 .any(|p| p.is_empty() || p == "." || p == "..")
-            || PathBuf::from(&path) == config.path
+            || *&path == config.path
         {
             return Err(denied());
         }
@@ -249,7 +249,7 @@ pub(super) fn configuration() -> Result<Config> {
             || path[1..]
                 .split('/')
                 .any(|p| p.is_empty() || p == "." || p == "..")
-            || PathBuf::from(&path) == config.path
+            || *&path == config.path
             || config
                 .batch_path
                 .as_ref()

@@ -11,11 +11,13 @@ const UNKNOWN: &str = include_str!("../../tests/fixtures/work_order_unknown_v1_1
 const WAIT: Duration = Duration::from_secs(2);
 fn hex(s: &str) -> Result<Vec<u8>> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(malformed());
     }
     s.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let a = char::from(p[0]).to_digit(16).ok_or_else(malformed)?;
             let b = char::from(p[1]).to_digit(16).ok_or_else(malformed)?;

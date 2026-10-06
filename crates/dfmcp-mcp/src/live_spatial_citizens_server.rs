@@ -298,10 +298,10 @@ fn packet_with_basis(
     {
         work["obligations"] = w;
     }
-    if let (Some(s), Some(c)) = (s, c) {
-        if s.source.archive_only() {
-            return archive::packet(s, c, operation, None, v);
-        }
+    if let (Some(s), Some(c)) = (s, c)
+        && s.source.archive_only()
+    {
+        return archive::packet(s, c, operation, None, v);
     }
     let mut builder = AgentTurnBuilder::new(operation, AgentPhase::Inspect).active_work(work);
     let mut maximum = 8192;

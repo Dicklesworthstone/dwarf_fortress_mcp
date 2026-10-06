@@ -79,7 +79,7 @@ fn source(tick: u32) -> LiveOperationsObservation {
                 job_type: 5,
                 type_key: "Dig".to_owned(),
                 reaction: String::new(),
-                suspended: tick % 2 == 0,
+                suspended: tick.is_multiple_of(2),
                 repeating: false,
                 position: MapCoord::new(1, 2, 3),
                 worker_native_id: None,

@@ -394,11 +394,11 @@ impl Report {
             }
         }
         for (name, next) in &self.counts {
-            if let Some(prior) = before.counts.get(name) {
-                if prior != next {
-                    changes.push(json!({
+            if let Some(prior) = before.counts.get(name)
+                && prior != next
+            {
+                changes.push(json!({
                 "kind":"situation_roster_count_change","domain":name,"before":prior,"after":next}));
-                }
             }
         }
         let total = changes.len();

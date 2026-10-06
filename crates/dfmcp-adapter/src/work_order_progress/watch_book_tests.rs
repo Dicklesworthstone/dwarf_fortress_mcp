@@ -475,7 +475,9 @@ fn all_watches_share_one_complete_archive_walk_and_retention_is_finite() -> Resu
 fn hex(raw: &str) -> Result<Vec<u8>> {
     raw.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let t = std::str::from_utf8(p).map_err(|_| corrupt("test hex"))?;
             u8::from_str_radix(t, 16).map_err(|_| corrupt("test hex"))

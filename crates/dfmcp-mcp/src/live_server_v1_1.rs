@@ -1740,41 +1740,41 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
             );
         }
     };
-    if !reset {
-        if let (Some(basis), Some(target)) = (
+    if !reset
+        && let (Some(basis), Some(target)) = (
             prior_batch.as_ref(),
             guard
                 .adapter
                 .last_capsule()
                 .map(|capsule| &capsule.announcement_batch),
-        ) {
-            match summarize_live_announcement_change(basis, target) {
-                Ok(summary) if !summary.heartbeat => changes.push(json!({
-                    "kind": "retained_announcements_advanced",
-                    "epistemic_state": "certified_derived",
-                    "basis_digest": summary.basis_digest.to_string(),
-                    "target_digest": summary.target_digest.to_string(),
-                    "added_report_ids": summary.added_report_ids,
-                    "ids_truncated": summary.ids_truncated,
-                    "cursor_advanced": summary.cursor_advanced,
-                    "retained_window_gap_introduced": summary.retained_window_gap_introduced,
-                    "continuation_required": summary.continuation_required,
-                    "invalidates": ["prior_announcement_attention"],
-                    "evidence": [summary.target_digest.to_string()],
-                })),
-                Ok(_) => {}
-                Err(failure) => {
-                    return session_error(
-                        &guard,
-                        operation,
-                        AgentPhase::Orient,
-                        ObservationProfile::Pulse,
-                        request_id,
-                        prior,
-                        ContinuityStatus::Indeterminate,
-                        &failure,
-                    );
-                }
+        )
+    {
+        match summarize_live_announcement_change(basis, target) {
+            Ok(summary) if !summary.heartbeat => changes.push(json!({
+                "kind": "retained_announcements_advanced",
+                "epistemic_state": "certified_derived",
+                "basis_digest": summary.basis_digest.to_string(),
+                "target_digest": summary.target_digest.to_string(),
+                "added_report_ids": summary.added_report_ids,
+                "ids_truncated": summary.ids_truncated,
+                "cursor_advanced": summary.cursor_advanced,
+                "retained_window_gap_introduced": summary.retained_window_gap_introduced,
+                "continuation_required": summary.continuation_required,
+                "invalidates": ["prior_announcement_attention"],
+                "evidence": [summary.target_digest.to_string()],
+            })),
+            Ok(_) => {}
+            Err(failure) => {
+                return session_error(
+                    &guard,
+                    operation,
+                    AgentPhase::Orient,
+                    ObservationProfile::Pulse,
+                    request_id,
+                    prior,
+                    ContinuityStatus::Indeterminate,
+                    &failure,
+                );
             }
         }
     }

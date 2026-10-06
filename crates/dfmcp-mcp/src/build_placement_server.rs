@@ -843,13 +843,13 @@ where
             offset,
             head,
         }) => {
-            if let Some(head) = head {
-                if digest(&head)? != before.head {
-                    return Err(error(
-                        ErrorCode::StaleAnchor,
-                        "furniture journal continuation head changed",
-                    ));
-                }
+            if let Some(head) = head
+                && digest(&head)? != before.head
+            {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "furniture journal continuation head changed",
+                ));
             }
             let limit = limit.unwrap_or(8);
             let offset = offset.unwrap_or(0);

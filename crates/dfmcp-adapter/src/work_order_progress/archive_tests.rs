@@ -11,7 +11,9 @@ fn capture(sequence: u64, tick: u64, remaining: i32) -> Result<ProgressObservati
     let text = include_str!("../../tests/fixtures/work_order_progress_v1_12.hex").trim();
     let mut bytes: Vec<u8> = text
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let s = std::str::from_utf8(pair).map_err(|_| corrupt("fixture UTF-8"))?;
             u8::from_str_radix(s, 16).map_err(|_| corrupt("fixture hex"))

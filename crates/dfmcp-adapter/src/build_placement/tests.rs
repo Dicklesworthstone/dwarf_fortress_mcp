@@ -12,7 +12,9 @@ pub(super) fn fixture(name: &str) -> Result<Vec<u8>> {
         .ok_or_else(invalid)?;
     require(text.len().is_multiple_of(2), "fixture hex width")?;
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let raw = std::str::from_utf8(pair).map_err(|_| invalid())?;
             u8::from_str_radix(raw, 16).map_err(|_| invalid())

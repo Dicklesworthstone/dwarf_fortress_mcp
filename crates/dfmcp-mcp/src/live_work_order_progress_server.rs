@@ -814,7 +814,7 @@ pub fn fortress_open_session(
             ));
         }
         let seq = NEXT
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < (1u64 << 57)).then_some(n + 1)
             })
             .map_err(|_| {

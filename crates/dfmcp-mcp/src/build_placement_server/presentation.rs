@@ -24,7 +24,7 @@ pub(super) fn digest(raw: &str) -> Result<Digest32> {
         ));
     }
     let mut out = [0; 32];
-    for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in raw.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let s = std::str::from_utf8(pair)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
         out[i] = u8::from_str_radix(s, 16)
@@ -153,11 +153,11 @@ pub(super) fn packet(
                 "idempotency_key":p.plan().key(),"plan_digest":p.plan().digest().to_string()}});
         }
     }
-    if verified.is_none() {
-        if let Some(hint) = result.get("pending_identity_hint").filter(|v| !v.is_null()) {
-            active["unverified_operation_identity"] = hint.clone();
-            active["pending_absence_proven"] = json!(false);
-        }
+    if verified.is_none()
+        && let Some(hint) = result.get("pending_identity_hint").filter(|v| !v.is_null())
+    {
+        active["unverified_operation_identity"] = hint.clone();
+        active["pending_absence_proven"] = json!(false);
     }
     if let Some(batch) = result.get("batch") {
         active["scope"] = json!("this_furniture_batch_and_original_build_journal");
@@ -223,10 +223,10 @@ pub(super) fn packet(
                 .and_then(|v| v.get("after_reference"))
                 .filter(|v| !v.is_null())
                 .or_else(|| value.get("review").and_then(|v| v.get("native_reference")));
-            if let Some(reference) = reference {
-                if !references.contains(reference) {
-                    references.push(reference.clone());
-                }
+            if let Some(reference) = reference
+                && !references.contains(reference)
+            {
+                references.push(reference.clone());
             }
         }
     }
@@ -320,10 +320,11 @@ pub(super) fn packet(
                 json!({"session_id":c.map(|c|c.session_id.to_string()),"query":"{\"mode\":\"completion\"}"})
             }
         )]);
-        if completion["inventory_verified"] == true && completion["assessments_complete"] == true {
-            if let Some(domains) = turn["coverage"]["complete_domains"].as_array_mut() {
-                domains.push(json!("original_plan_sampled_construction_condition"));
-            }
+        if completion["inventory_verified"] == true
+            && completion["assessments_complete"] == true
+            && let Some(domains) = turn["coverage"]["complete_domains"].as_array_mut()
+        {
+            domains.push(json!("original_plan_sampled_construction_condition"));
         }
     }
     if let Some(summary) = result.get("source_summary").filter(|v| !v.is_null()) {

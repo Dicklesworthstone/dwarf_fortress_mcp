@@ -8,14 +8,16 @@ use dfmcp_world::{
 
 fn native_payload() -> Result<Vec<u8>> {
     let hex = include_str!("fixtures/jobs_v1_2.hex").trim();
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(DfmcpError::new(
             ErrorCode::InvalidRequest,
             "invalid golden hex",
         ));
     }
     hex.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| {
             let text = std::str::from_utf8(chunk)
                 .map_err(|_| DfmcpError::new(ErrorCode::InvalidRequest, "invalid golden UTF-8"))?;

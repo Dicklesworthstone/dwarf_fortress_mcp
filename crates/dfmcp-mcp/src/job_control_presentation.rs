@@ -31,7 +31,7 @@ pub(super) fn digest(text: &str) -> Result<Digest32> {
         ));
     }
     let mut bytes = [0; 32];
-    for (index, pair) in text.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in text.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let pair = std::str::from_utf8(pair)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
         bytes[index] = u8::from_str_radix(pair, 16)
@@ -175,10 +175,10 @@ impl Continuations {
         bytes.extend_from_slice(after.as_bytes());
         let token = Digest32::of_bytes(&bytes).to_string();
         if !self.issued.contains_key(&token) {
-            if self.order.len() == 64 {
-                if let Some(old) = self.order.pop_front() {
-                    self.issued.remove(&old);
-                }
+            if self.order.len() == 64
+                && let Some(old) = self.order.pop_front()
+            {
+                self.issued.remove(&old);
             }
             self.order.push_back(token.clone());
             self.issued.insert(

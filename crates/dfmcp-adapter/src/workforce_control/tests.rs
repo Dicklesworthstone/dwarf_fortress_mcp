@@ -8,7 +8,9 @@ pub(super) fn unhex(text: &str) -> Result<Vec<u8>> {
     let text = text.trim();
     require(text.len().is_multiple_of(2), "odd fixture")?;
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|b| {
             let s = std::str::from_utf8(b)
                 .map_err(|_| error(ErrorCode::InvalidRequest, "fixture UTF-8"))?;

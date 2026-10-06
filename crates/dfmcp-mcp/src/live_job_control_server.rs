@@ -138,7 +138,7 @@ fn session_lock() -> Result<MutexGuard<'static, Option<RuntimeSession>>> {
 }
 fn next_id() -> Result<SessionId> {
     let number = NEXT
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
             (n < SEQUENCE_LIMIT).then_some(n + 1)
         })
         .map_err(|_| {

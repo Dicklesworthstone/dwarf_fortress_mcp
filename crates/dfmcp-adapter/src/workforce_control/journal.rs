@@ -423,7 +423,7 @@ impl<S: EffectJournalStorage> WorkforceJournal<S> {
         let n = u16(&mut r)?;
         check(n <= 916)?;
         let binding = WorkforceBinding::decode(r.take(n)?)?;
-        check(r.take(32)? != &[0u8; 32])?;
+        check(r.take(32)? != [0u8; 32])?;
         let header_len = raw.len() - r.0.len();
         let id = Digest32::from_bytes(r.array()?);
         check(id == hash(b"dfmcp-workforce-journal/1", &raw[..header_len]))?;

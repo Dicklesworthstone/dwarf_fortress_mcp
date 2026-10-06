@@ -146,7 +146,7 @@ impl ExcavationRunSource for Native {
             fs::set_permissions(path.join(JOURNAL_NAME), fs::Permissions::from_mode(0o400))
                 .unwrap();
         }
-        Ok(prepared()?)
+        prepared()
     }
     fn commit(
         &mut self,
@@ -159,7 +159,7 @@ impl ExcavationRunSource for Native {
         if self.lose_commit {
             return Err(error(ErrorCode::AdapterUnavailable, "lost reply"));
         }
-        Ok(stopped()?)
+        stopped()
     }
     fn query(
         &mut self,
@@ -177,7 +177,7 @@ impl ExcavationRunSource for Native {
         _: Duration,
     ) -> Result<ExcavationRunRecord> {
         self.calls.push("cancel");
-        Ok(stopped()?)
+        stopped()
     }
 }
 

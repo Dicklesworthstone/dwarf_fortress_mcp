@@ -12,7 +12,9 @@ const EFFECT: &str = include_str!("../../tests/fixtures/job_suspension_effect_v1
 fn hex(text: &str) -> Result<Vec<u8>> {
     text.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let a = char::from(p[0]).to_digit(16).ok_or_else(exhausted)?;
             let b = char::from(p[1]).to_digit(16).ok_or_else(exhausted)?;
@@ -522,8 +524,8 @@ fn complete_history_is_credential_free_and_read_only_recovery_cannot_dispatch() 
     let c = context()?;
     j.prepare(&mut source, &p, &c)?;
     let bytes = j.storage.bytes.into_inner();
-    assert!(!bytes.windows(32).any(|v| v == &[b't'; 32]));
-    assert!(!bytes.windows(16).any(|v| v == &[b'n'; 16]));
+    assert!(!bytes.windows(32).any(|v| v == [b't'; 32]));
+    assert!(!bytes.windows(16).any(|v| v == [b'n'; 16]));
     let mut read_context = c.clone();
     read_context
         .grants

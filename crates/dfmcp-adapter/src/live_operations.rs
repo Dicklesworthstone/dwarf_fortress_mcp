@@ -853,10 +853,10 @@ impl LiveOperationsState {
             entity.revision = revision;
             for value in entity.fields.values_mut() {
                 value.source_digest = source;
-                if let FactSource::DfhackField(name) = &mut value.source {
-                    if name.starts_with("jobs/1.2.") {
-                        *name = name.replacen("jobs/1.2.", prefix, 1);
-                    }
+                if let FactSource::DfhackField(name) = &mut value.source
+                    && name.starts_with("jobs/1.2.")
+                {
+                    *name = name.replacen("jobs/1.2.", prefix, 1);
                 }
             }
         }

@@ -164,7 +164,7 @@ fn stopped_is_historical_and_overshoot_is_not_hidden() -> Result<()> {
 fn canonical_reference_fixture_matches_exact_rust_encoding() -> Result<()> {
     let text = include_str!("../../tests/fixtures/bounded_run_stopped_v1_13.hex").trim();
     let mut bytes = Vec::new();
-    for pair in text.as_bytes().chunks_exact(2) {
+    for pair in text.as_bytes().as_chunks::<2>().0 {
         let pair = std::str::from_utf8(pair)
             .map_err(|_| error(ErrorCode::InvalidRequest, "fixture UTF-8"))?;
         bytes.push(

@@ -272,12 +272,12 @@ fn analyze_inner(
         work_units: 0,
     };
     for demand in &result.demands {
-        if !fields.contains_key(&demand.target) {
+        if let std::collections::btree_map::Entry::Vacant(e) = fields.entry(demand.target) {
             let field =
                 Reachability::compute(map, &[demand.target], work.remaining().min(MAX_ROUTE_WORK))
                     .map_err(map_error)?;
             work.charge(field.work_units)?;
-            fields.insert(demand.target, field);
+            e.insert(field);
         }
         let field = fields
             .get(&demand.target)

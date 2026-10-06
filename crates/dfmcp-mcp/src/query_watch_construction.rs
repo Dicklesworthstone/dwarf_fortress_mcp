@@ -61,10 +61,10 @@ pub(super) fn validate(targets: &[Target]) -> Result<()> {
         {
             return Err(invalid("invalid, unordered or duplicate furniture target"));
         }
-        if let Some(item) = target.item_native_id {
-            if item >= i32::MAX as u32 || !items.insert(item) {
-                return Err(invalid("invalid or multiply assigned furniture item"));
-            }
+        if let Some(item) = target.item_native_id
+            && (item >= i32::MAX as u32 || !items.insert(item))
+        {
+            return Err(invalid("invalid or multiply assigned furniture item"));
         }
         prior = Some(target.building_native_id);
     }

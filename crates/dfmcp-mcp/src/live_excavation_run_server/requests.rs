@@ -32,7 +32,7 @@ pub(super) fn digest(raw: &str) -> Result<Digest32> {
         return Err(invalid());
     }
     let mut bytes = [0; 32];
-    for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in raw.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let text = std::str::from_utf8(pair).map_err(|_| invalid())?;
         bytes[i] = u8::from_str_radix(text, 16).map_err(|_| invalid())?;
     }

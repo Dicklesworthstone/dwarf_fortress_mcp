@@ -18,7 +18,9 @@ fn capture() -> Result<BuildCapture> {
     let encoded = text[start..].split('"').next().ok_or_else(corrupt)?;
     let bytes = encoded
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let digits = std::str::from_utf8(pair).map_err(|_| corrupt())?;
             u8::from_str_radix(digits, 16).map_err(|_| corrupt())

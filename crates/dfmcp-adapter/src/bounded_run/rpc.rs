@@ -417,10 +417,10 @@ impl<S: Read + Write> RunRpcClient<S> {
         context: &OperationContext,
     ) -> Result<Reply> {
         authorize(context, matches!(operation, 2 | 3 | 5))?;
-        if let Some(plan) = plan {
-            if matches!(operation, 2 | 3) {
-                authorize_plan(context, plan)?;
-            }
+        if let Some(plan) = plan
+            && matches!(operation, 2 | 3)
+        {
+            authorize_plan(context, plan)?;
         }
         if self.fenced {
             return Err(error(

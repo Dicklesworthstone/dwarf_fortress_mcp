@@ -77,11 +77,13 @@ impl EffectJournalStorage for Memory {
 }
 pub(super) fn unhex(text: &str) -> Result<Vec<u8>> {
     let text = text.trim();
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return Err(exhausted());
     }
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let a = char::from(p[0]).to_digit(16).ok_or_else(exhausted)?;
             let b = char::from(p[1]).to_digit(16).ok_or_else(exhausted)?;

@@ -363,7 +363,7 @@ fn furniture_canonical(value: &Value, out: &mut Vec<u8>) -> Result<()> {
         Value::Object(values) => {
             out.push(b'{');
             let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            entries.sort_by_key(|(left, _)| *left);
             for (index, (key, value)) in entries.into_iter().enumerate() {
                 if index != 0 {
                     out.push(b',');

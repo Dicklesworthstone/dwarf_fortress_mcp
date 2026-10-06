@@ -15,7 +15,7 @@ struct PagedSlot;
 impl PagedSlot {
     fn reserve() -> Result<Self> {
         PAGED_SLOTS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < 2).then_some(count + 1)
             })
             .map_err(|_| {

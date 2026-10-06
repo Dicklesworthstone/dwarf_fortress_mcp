@@ -28,7 +28,7 @@ fn string(value: &Value) -> Result<&str> {
 }
 pub(super) fn hex(raw: &str, maximum: usize) -> Result<Vec<u8>> {
     if raw.is_empty()
-        || raw.len() % 2 != 0
+        || !raw.len().is_multiple_of(2)
         || raw.len() > maximum * 2
         || !raw
             .bytes()
@@ -37,7 +37,9 @@ pub(super) fn hex(raw: &str, maximum: usize) -> Result<Vec<u8>> {
         return Err(denied());
     }
     raw.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let s = std::str::from_utf8(pair).map_err(|_| denied())?;
             u8::from_str_radix(s, 16).map_err(|_| denied())

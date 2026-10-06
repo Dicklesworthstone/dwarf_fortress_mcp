@@ -771,10 +771,10 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
                 self.review = None;
                 return Err(stale());
             }
-            if let Ok(ExcavationOutcome::Effect { key, .. }) = &result {
-                if self.inventory.entry(key).is_none() {
-                    return Err(corrupt());
-                }
+            if let Ok(ExcavationOutcome::Effect { key, .. }) = &result
+                && self.inventory.entry(key).is_none()
+            {
+                return Err(corrupt());
             }
             result
         })();

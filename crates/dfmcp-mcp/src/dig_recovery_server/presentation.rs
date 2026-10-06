@@ -25,7 +25,7 @@ pub fn digest(raw: &str) -> Result<Digest32> {
         ));
     }
     let mut value = [0; 32];
-    for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in raw.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let text = std::str::from_utf8(pair)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid digest"))?;
         value[i] = u8::from_str_radix(text, 16)

@@ -7,7 +7,9 @@ fn fixture() -> Result<Vec<u8>> {
     let text = include_str!("../../tests/fixtures/work_order_progress_v1_12.hex");
     text.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let text = std::str::from_utf8(p).map_err(|_| bad())?;
             u8::from_str_radix(text, 16).map_err(|_| bad())

@@ -882,7 +882,7 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
             if health == 0 {
                 break;
             }
-            if soldiers == 0 && fought % ROUNDS_PER_KILL == 0 {
+            if soldiers == 0 && fought.is_multiple_of(ROUNDS_PER_KILL) {
                 let victim = snapshot
                     .graph
                     .entities

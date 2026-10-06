@@ -417,33 +417,33 @@ fn serve(
             }
             Event::Handshake => {}
         }
-        if let Some((at, fault)) = &options.fault {
-            if *at == event {
-                match fault {
-                    Fault::Field(tag, value) => {
-                        reply.insert(*tag, value.clone());
-                    }
-                    Fault::Drop => return Ok(()),
-                    Fault::Frame(id, n) => {
-                        let _ = stream.write_all(&header(*id, *n));
-                        return Ok(());
-                    }
+        if let Some((at, fault)) = &options.fault
+            && *at == event
+        {
+            match fault {
+                Fault::Field(tag, value) => {
+                    reply.insert(*tag, value.clone());
+                }
+                Fault::Drop => return Ok(()),
+                Fault::Frame(id, n) => {
+                    let _ = stream.write_all(&header(*id, *n));
+                    return Ok(());
                 }
             }
         }
-        if let Some((at, signal)) = &options.revoke {
-            if *at == event {
-                signal.store(true, Ordering::Release);
-            }
+        if let Some((at, signal)) = &options.revoke
+            && *at == event
+        {
+            signal.store(true, Ordering::Release);
         }
-        if let Some((at, cancel)) = &options.cancel {
-            if *at == event {
-                // No reply arrives: the client's 100ms slices must discover
-                // cancellation while blocked and close this connection.
-                cancel.cancel();
-                require(read_request(stream)?.is_none())?;
-                return Ok(());
-            }
+        if let Some((at, cancel)) = &options.cancel
+            && *at == event
+        {
+            // No reply arrives: the client's 100ms slices must discover
+            // cancellation while blocked and close this connection.
+            cancel.cancel();
+            require(read_request(stream)?.is_none())?;
+            return Ok(());
         }
         for _ in 0..options.notifications {
             if stream.write_all(&header(-3, 0)).is_err() {

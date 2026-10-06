@@ -472,26 +472,24 @@ fn verify_inner(
         if witness.source_side[from] && !witness.source_side[to] {
             cut = cut.checked_add(capacity).ok_or(Error::ArithmeticOverflow)?;
         }
-        if flow < capacity {
-            if value
+        if flow < capacity
+            && (value
                 .add(witness.potentials[from])?
                 .sub(witness.potentials[to])?
                 < Cost::default()
-                || (witness.source_side[from] && !witness.source_side[to])
-            {
-                return Err(Error::InvalidCertificate);
-            }
+                || (witness.source_side[from] && !witness.source_side[to]))
+        {
+            return Err(Error::InvalidCertificate);
         }
-        if flow > 0 {
-            if Cost::default()
+        if flow > 0
+            && (Cost::default()
                 .sub(value)?
                 .add(witness.potentials[to])?
                 .sub(witness.potentials[from])?
                 < Cost::default()
-                || (witness.source_side[to] && !witness.source_side[from])
-            {
-                return Err(Error::InvalidCertificate);
-            }
+                || (witness.source_side[to] && !witness.source_side[from]))
+        {
+            return Err(Error::InvalidCertificate);
         }
         Ok(())
     };

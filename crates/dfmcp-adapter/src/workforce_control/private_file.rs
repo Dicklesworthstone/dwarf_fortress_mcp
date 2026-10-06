@@ -247,13 +247,13 @@ pub fn open_private_workforce(
             None
         };
         let mut journal = WorkforceJournal::open(storage, context, mode, initialize)?;
-        if let Some(expected) = expected {
-            if journal.view(context)?.binding != expected {
-                return Err(error(
-                    ErrorCode::Conflict,
-                    "workforce journal binds another exact source",
-                ));
-            }
+        if let Some(expected) = expected
+            && journal.view(context)?.binding != expected
+        {
+            return Err(error(
+                ErrorCode::Conflict,
+                "workforce journal binds another exact source",
+            ));
         }
         Ok(journal)
     }

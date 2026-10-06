@@ -849,7 +849,7 @@ pub async fn fortress_open_session(
             let budget=WorkBudget{max_wall_millis:max_wall_millis.map_or(10_000,|n|n),max_bytes:max_bytes.map_or(MAX_WORK_BYTES,|n|n),
                 max_output_tokens:max_output_tokens.map_or(8192,|n|n),max_entities:300,max_actions:1,max_game_ticks:0};
             let mut locked=lock()?;if locked.is_some(){return Err(error(ErrorCode::Conflict,"release the current mining session first"));}
-            let seq=NEXT.fetch_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1)).map_err(|_|exhausted())?;
+            let seq=NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1)).map_err(|_|exhausted())?;
             let id=SessionId::new((1u128<<127)|FAMILY|u128::from(seq));let write=runtime::enabled()?;
             let mut c=OperationContext{session_id:id,request_id:RequestId::new(1),budget,cancellation_requested:false,
                 anchor:StateAnchor{fortress_id:config.fortress(),cursor:ObservationCursor::ORIGIN,tick:GameTick(0),state_hash:Digest32::ZERO},
@@ -1056,7 +1056,7 @@ pub async fn fortress_cancel(
     plan_digest: Option<String>,
     release_for_recovery: Option<bool>,
 ) -> String {
-    let release = release_for_recovery.map_or(false, |v| v);
+    let release = release_for_recovery.is_some_and(|v| v);
     match (scope.as_str(), idempotency_key, plan_digest) {
         ("session", None, None) => close(session_id, release).await,
         ("effect", Some(key), Some(plan)) if !release => {

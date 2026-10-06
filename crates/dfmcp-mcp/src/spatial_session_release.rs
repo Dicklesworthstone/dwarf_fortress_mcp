@@ -15,7 +15,7 @@ pub(super) struct Slot {
 impl Slot {
     pub(super) fn reserve() -> Result<Self> {
         SLOTS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < 2).then_some(n + 1)
             })
             .map_err(|_| {

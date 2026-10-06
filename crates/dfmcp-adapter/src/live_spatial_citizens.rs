@@ -766,10 +766,10 @@ impl LiveSpatialCitizenState {
 }
 fn rebind(fact: &mut Fact, source: Digest32) {
     fact.source_digest = source;
-    if let FactSource::DfhackField(name) = &mut fact.source {
-        if let Some(suffix) = name.strip_prefix("spatial/1.6.") {
-            *name = format!("spatial/1.8.{suffix}");
-        }
+    if let FactSource::DfhackField(name) = &mut fact.source
+        && let Some(suffix) = name.strip_prefix("spatial/1.6.")
+    {
+        *name = format!("spatial/1.8.{suffix}");
     }
 }
 impl SpatialStateView for LiveSpatialCitizenState {

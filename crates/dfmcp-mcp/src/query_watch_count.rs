@@ -41,7 +41,7 @@ impl EvaluationBudget {
             ));
         }
         self.used += 1;
-        if self.used == 1 || self.used % 128 == 0 {
+        if self.used == 1 || self.used.is_multiple_of(128) {
             self.check()?;
         }
         Ok(())

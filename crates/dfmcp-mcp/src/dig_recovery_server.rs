@@ -601,7 +601,7 @@ fn open(
             ));
         }
         let next = NEXT
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |v| {
                 (v < (1u64 << 57)).then_some(v + 1)
             })
             .map_err(|_| exhausted())?;

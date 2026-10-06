@@ -284,13 +284,13 @@ fn peer(dialogues: Vec<Dialogue>, syncs: Option<Arc<AtomicUsize>>) -> Result<Pee
                 )?;
                 let nonce = validate_request(&raw, step.op)?;
                 calls.push(step.op);
-                if step.op == 3 {
-                    if let Some(syncs) = &syncs {
-                        require(
-                            syncs.load(Ordering::SeqCst) >= 4,
-                            "commit preceded dispatch sync",
-                        )?;
-                    }
+                if step.op == 3
+                    && let Some(syncs) = &syncs
+                {
+                    require(
+                        syncs.load(Ordering::SeqCst) >= 4,
+                        "commit preceded dispatch sync",
+                    )?;
                 }
                 if step.drop_reply {
                     break;

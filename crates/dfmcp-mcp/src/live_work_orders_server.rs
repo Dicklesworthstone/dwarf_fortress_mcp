@@ -619,7 +619,7 @@ pub fn fortress_open_session(
             ));
         }
         let sequence = NEXT
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < SEQUENCE_LIMIT).then_some(n + 1)
             })
             .map_err(|_| error(ErrorCode::BudgetExceeded, "creation session IDs exhausted"))?;

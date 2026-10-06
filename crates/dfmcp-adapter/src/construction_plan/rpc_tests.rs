@@ -74,7 +74,9 @@ fn fixture(name: &str) -> Result<Vec<u8>> {
     require(value.len().is_multiple_of(2))?;
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| invalid())?, 16)
                 .map_err(|_| invalid())
@@ -651,38 +653,38 @@ fn serve(
         }
         let mut suffix = Vec::new();
         let mut raw_override = None;
-        if let Some((at, change)) = &options.change {
-            if *at == event {
-                match change {
-                    Change::Field(tag, value) => {
-                        response.insert(*tag, value.clone());
-                    }
-                    Change::Remove(tag) => {
-                        response.remove(tag);
-                    }
-                    Change::Duplicate(tag, value) => wire_field(&mut suffix, *tag, value),
-                    Change::Raw(raw) => raw_override = Some(raw.clone()),
-                    Change::Drop => {
-                        let _ = stream.write_all(&header(-1, 1000));
-                        let _ = stream.write_all(&[8]);
-                        return Ok(());
-                    }
-                    Change::Frame(method, count) => {
-                        let _ = stream.write_all(&header(*method, *count));
-                        return Ok(());
-                    }
+        if let Some((at, change)) = &options.change
+            && *at == event
+        {
+            match change {
+                Change::Field(tag, value) => {
+                    response.insert(*tag, value.clone());
+                }
+                Change::Remove(tag) => {
+                    response.remove(tag);
+                }
+                Change::Duplicate(tag, value) => wire_field(&mut suffix, *tag, value),
+                Change::Raw(raw) => raw_override = Some(raw.clone()),
+                Change::Drop => {
+                    let _ = stream.write_all(&header(-1, 1000));
+                    let _ = stream.write_all(&[8]);
+                    return Ok(());
+                }
+                Change::Frame(method, count) => {
+                    let _ = stream.write_all(&header(*method, *count));
+                    return Ok(());
                 }
             }
         }
-        if let Some((at, signal)) = &options.signal {
-            if *at == event {
-                signal.store(true, Ordering::Release);
-            }
+        if let Some((at, signal)) = &options.signal
+            && *at == event
+        {
+            signal.store(true, Ordering::Release);
         }
-        if let Some((at, cancellation)) = &options.cancellation {
-            if *at == event {
-                cancellation.cancel();
-            }
+        if let Some((at, cancellation)) = &options.cancellation
+            && *at == event
+        {
+            cancellation.cancel();
         }
         for _ in 0..options.notifications {
             let mut notification = header(-3, options.notification_bytes as i32).to_vec();

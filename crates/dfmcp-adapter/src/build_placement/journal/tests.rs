@@ -16,7 +16,9 @@ fn fixture(name: &str) -> Result<Vec<u8>> {
     let encoded = text[start..].split('"').next().ok_or_else(corrupt)?;
     encoded
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let hex = std::str::from_utf8(pair).map_err(|_| corrupt())?;
             u8::from_str_radix(hex, 16).map_err(|_| corrupt())

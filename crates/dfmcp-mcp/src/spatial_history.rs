@@ -297,15 +297,14 @@ pub(super) fn execute(
     c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let request = parse(input, c)?;
     // Reject write-like nested requests before reading any journal data.
-    if let Request::HistoricalQuery { query, record, .. } = &request {
-        if !stateless(query.get("kind").and_then(Value::as_str).unwrap_or(""))
-            || !(1..=4096).contains(record)
-        {
-            return Err(error(
-                ErrorCode::InvalidRequest,
-                "historical_query permits retained records and stateless reads only; no watches, baselines, refreshes or nested history",
-            ));
-        }
+    if let Request::HistoricalQuery { query, record, .. } = &request
+        && (!stateless(query.get("kind").and_then(Value::as_str).unwrap_or(""))
+            || !(1..=4096).contains(record))
+    {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "historical_query permits retained records and stateless reads only; no watches, baselines, refreshes or nested history",
+        ));
     }
     let mut projection = view(session, c)?;
     let replay = replay_context(session, c);
