@@ -1422,11 +1422,11 @@ mod tests {
     use dfmcp_adapter::{GameAdapter, ObservationRequest, Projection};
     use dfmcp_core::{
         Capability, CapabilityGrant, CapabilityScope, CommitState, DfmcpError, ErrorCode,
-        FortressId, GameTick, IntentId, MapCoord, MapCuboid, ObservationCursor, OperationContext,
-        RequestId, RiskTier, SessionId, WorkBudget,
+        FortressId, GameTick, IntentId, ObservationCursor, OperationContext, RequestId, RiskTier,
+        SessionId, WorkBudget,
     };
     use dfmcp_intent::{
-        Action, Constraint, DigMode, Intent, ObligationSpec, RequestedAction, StaticPlanner,
+        Action, Constraint, Intent, ObligationSpec, RequestedAction, StaticPlanner,
     };
     use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
 

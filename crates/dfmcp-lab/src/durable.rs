@@ -192,7 +192,7 @@ fn unhex_payload(raw: &str, bound: usize) -> Result<String> {
     if raw == "-" {
         return Ok(String::new());
     }
-    if raw.len() % 2 != 0 || raw.len() / 2 > bound {
+    if !raw.len().is_multiple_of(2) || raw.len() / 2 > bound {
         return Err(corrupt("journal text field has an invalid length"));
     }
     let mut bytes = Vec::with_capacity(raw.len() / 2);
@@ -545,7 +545,25 @@ impl DurableLabStore {
         for hash in store.referenced_objects() {
             store.load_snapshot(hash)?;
         }
+        store.remove_crash_leftovers();
         Ok(store)
+    }
+
+    /// Temporary objects and an unpublished compaction are never named by
+    /// the journal; a crash can leave them behind, so drop them on open.
+    fn remove_crash_leftovers(&self) {
+        let _ = fs::remove_file(self.root.join("journal.compact"));
+        if let Ok(entries) = fs::read_dir(self.root.join("objects")) {
+            for entry in entries.flatten() {
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(".tmp-"))
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 
     fn replay_line(&mut self, line: &[u8]) -> Result<()> {
@@ -1097,6 +1115,88 @@ mod tests {
         drop(store);
         let store = DurableLabStore::open(&dir.0)?;
         assert_eq!(store.commits(FortressId::new(5)).count(), 0);
+        Ok(())
+    }
+
+    /// Every crash state of an append-only journal is a byte prefix of it
+    /// (objects are always synced before the record naming them). Reopening
+    /// any prefix must yield exactly the state after its last complete record.
+    #[test]
+    fn every_crash_point_recovers_the_last_complete_record() -> Result<()> {
+        let dir = TempDir::new("campaign");
+        let digest = Digest32::of_bytes(b"campaign-plan");
+        let mut states: Vec<(usize, Option<StateAnchor>, usize, Option<String>)> = Vec::new();
+        let journal = dir.0.join("journal");
+        let record_state = |store: &DurableLabStore| {
+            (
+                store.head(FortressId::new(4)).map(|h| h.anchor),
+                store.checkpoints(FortressId::new(4)).count(),
+                store
+                    .commit(FortressId::new(4), digest)
+                    .and_then(|c| c.steps.get(&1).cloned()),
+            )
+        };
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            let snap = |len: &mut Vec<_>, store: &DurableLabStore| -> Result<()> {
+                let bytes = fs::metadata(&journal).map_err(|e| io("meta", &e))?.len();
+                let (head, checkpoints, step) = record_state(store);
+                len.push((bytes as usize, head, checkpoints, step));
+                Ok(())
+            };
+            snap(&mut states, &store)?;
+            store.persist_head("starter_fortress", &snapshot(4, 1))?;
+            snap(&mut states, &store)?;
+            store.persist_commit(
+                &snapshot(4, 1),
+                digest,
+                9,
+                DurablePlanSource::Pause {
+                    summary: "pause".to_owned(),
+                    paused: true,
+                },
+            )?;
+            snap(&mut states, &store)?;
+            store.persist_step(FortressId::new(4), digest, 1, "dispatched")?;
+            snap(&mut states, &store)?;
+            store.persist_head("starter_fortress", &snapshot(4, 2))?;
+            snap(&mut states, &store)?;
+            store.persist_checkpoint(CheckpointId::new(5), "cp", &snapshot(4, 2))?;
+            snap(&mut states, &store)?;
+            store.persist_step(FortressId::new(4), digest, 1, "verified")?;
+            snap(&mut states, &store)?;
+            store.retire_commit(FortressId::new(4), digest)?;
+            snap(&mut states, &store)?;
+            store.persist_head("starter_fortress", &snapshot(4, 3))?;
+            snap(&mut states, &store)?;
+        }
+        let full = fs::read(&journal).map_err(|e| io("read", &e))?;
+        let mut checked = 0usize;
+        for len in 0..=full.len() {
+            fs::write(&journal, &full[..len]).map_err(|e| io("write", &e))?;
+            // A crash mid-write can also leave temporary files behind.
+            fs::write(dir.0.join("objects").join(".tmp-stale"), b"partial")
+                .map_err(|e| io("tmp", &e))?;
+            let store = DurableLabStore::open(&dir.0)?;
+            let expected = states
+                .iter()
+                .rev()
+                .find(|(bytes, ..)| *bytes <= len)
+                .ok_or_else(|| corrupt("no expected state"))?;
+            let (head, checkpoints, step) = record_state(&store);
+            assert_eq!(
+                (head, checkpoints, step),
+                (expected.1, expected.2, expected.3.clone()),
+                "crash after {len} journal bytes"
+            );
+            if let Some(head) = head {
+                assert_eq!(store.load_snapshot(head.state_hash)?.anchor(), head);
+            }
+            assert_eq!(store.report().torn_tail_bytes as usize, len - expected.0);
+            assert!(!dir.0.join("objects").join(".tmp-stale").exists());
+            checked += 1;
+        }
+        assert_eq!(checked, full.len() + 1);
         Ok(())
     }
 
