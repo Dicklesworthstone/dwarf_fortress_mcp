@@ -1025,6 +1025,66 @@ fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientat
     items
 }
 
+/// Most attention items one turn carries; the rest are named in the
+/// selection certificate under `coverage.attention_selection`.
+const MAX_ATTENTION_ITEMS: usize = 6;
+
+fn attention_key(item: &Value) -> dfmcp_world::AttentionKey {
+    let rank = |value: &Value, scale: &[&str]| {
+        value
+            .as_str()
+            .and_then(|text| scale.iter().position(|level| *level == text))
+            .map_or(0, |position| (scale.len() - position) as u64)
+    };
+    dfmcp_world::AttentionKey {
+        class: rank(&item["severity"], &["critical", "high", "medium", "low"]) as u8,
+        magnitude: rank(
+            &item["urgency"],
+            &[
+                "now",
+                "before_the_next_plan",
+                "before_formulating_an_unrelated_plan",
+            ],
+        ),
+        freshness: rank(
+            &item["category"],
+            &[
+                "control_plane",
+                "continuity",
+                "surprise",
+                "active_work",
+                "fortress_needs",
+            ],
+        ),
+        identity: item["attention_id"].as_str().unwrap_or_default().to_owned(),
+    }
+}
+
+/// Exact, certified top-k ranking: severity, then urgency, then category,
+/// ties by attention id. Attention is advisory and never authorizes.
+fn ranked_attention(items: Vec<Value>) -> (Vec<Value>, Value) {
+    let keys: Vec<_> = items.iter().map(attention_key).collect();
+    match dfmcp_world::select_top_k(&keys, MAX_ATTENTION_ITEMS) {
+        Ok((picked, certificate)) => {
+            let selection = json!({
+                "policy": "severity > urgency > category, ties by attention_id ascending",
+                "k": certificate.k,
+                "considered": certificate.considered,
+                "selected": certificate.selected,
+                "excluded": certificate.excluded,
+                "certificate_digest": certificate.digest.to_hex(),
+                "certified": certificate.verify(&keys),
+            });
+            let ranked = picked
+                .into_iter()
+                .filter_map(|i| items.get(i).cloned())
+                .collect();
+            (ranked, selection)
+        }
+        Err(error) => (items, json!({"certified": false, "error": error.message})),
+    }
+}
+
 fn base_attention(
     operation: &str,
     ok: bool,
@@ -1043,9 +1103,10 @@ fn base_attention(
             "evidence": [],
         })];
     }
+    let mut items = Vec::new();
     let failed = failed_plan_actions(state);
     if !failed.is_empty() {
-        return vec![json!({
+        items.push(json!({
             "attention_id": "obligation-failed",
             "category": "active_work",
             "severity": "high",
@@ -1058,10 +1119,10 @@ fn base_attention(
             "subjects": failed.iter().map(|view| json!({"action_id": view.action_id, "step": view.step})).collect::<Vec<_>>(),
             "likely_consequence_if_ignored": "dependent work will never dispatch and the goal will not be reached",
             "evidence": [],
-        })];
+        }));
     }
     if state.pending_plan_digest.is_some() {
-        return vec![json!({
+        items.push(json!({
             "attention_id": "prepared-plan-awaiting-decision",
             "category": "active_work",
             "severity": "medium",
@@ -1070,10 +1131,10 @@ fn base_attention(
             "finding": "a sealed plan is awaiting commit, replacement, or explicit abandonment",
             "likely_consequence_if_ignored": "the agent may lose track of unfinished protocol state",
             "evidence": [],
-        })];
+        }));
     }
     if action_is_nonterminal(state.last_action_state.as_deref()) {
-        return vec![json!({
+        items.push(json!({
             "attention_id": "action-awaiting-verification",
             "category": "active_work",
             "severity": "high",
@@ -1082,10 +1143,10 @@ fn base_attention(
             "finding": "an action is not yet in an ordinary terminal state",
             "likely_consequence_if_ignored": "goal completion or failure may be misclassified",
             "evidence": [],
-        })];
+        }));
     }
     if operation == "fortress.restore" {
-        return vec![json!({
+        items.push(json!({
             "attention_id": "restore-invalidated-prior-context",
             "category": "continuity",
             "severity": "critical",
@@ -1094,9 +1155,9 @@ fn base_attention(
             "finding": "the observation epoch changed and all pre-restore handles are stale",
             "likely_consequence_if_ignored": "the agent may act on invalid plans or continuations",
             "evidence": [],
-        })];
+        }));
     }
-    Vec::new()
+    items
 }
 
 fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
@@ -1403,6 +1464,8 @@ fn project_response(
     } else {
         Vec::new()
     };
+    let (ranked, selection) =
+        ranked_attention(attention(operation, is_ok(&payload), &payload, &state));
     let mut builder = AgentTurnBuilder::new(operation, phase)
         .turn_id(format!("presentation-turn-{turn_sequence}"))
         .continuity(status, previous_anchor, None, reset_reason)
@@ -1413,7 +1476,7 @@ fn project_response(
             listed.extend(world_delta);
             listed
         })
-        .attention(attention(operation, is_ok(&payload), &payload, &state))
+        .attention(ranked)
         .active_work(active_work(&state))
         .affordances(affordances(&state))
         .recommendations(recommendations(
@@ -1423,7 +1486,11 @@ fn project_response(
             &state,
         ))
         .uncertainty(uncertainties(&state))
-        .coverage(coverage(&payload))
+        .coverage({
+            let mut covered = coverage(&payload);
+            covered["attention_selection"] = selection;
+            covered
+        })
         .budget(budget(&state))
         .references(references);
     if let Some(id) = session_id {

@@ -46,7 +46,8 @@ pub use topology::{
 };
 
 pub use attention::{
-    AttentionEngine, AttentionLedger, AttentionSignal, AttentionSignalKind, CompletenessStatus,
+    AttentionEngine, AttentionKey, AttentionLedger, AttentionSignal, AttentionSignalKind,
+    CompletenessStatus, SelectionCertificate, select_top_k,
 };
 pub use checkpoint::{CheckpointManifest, CheckpointStore, RestoreCertificate};
 pub use delta::{

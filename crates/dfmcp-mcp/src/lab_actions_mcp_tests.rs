@@ -1763,7 +1763,10 @@ fn live_plans_keep_their_world_version_readable_past_the_recent_window() -> Test
         Some(session.clone()),
         None,
         None,
-        Some(r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[2,3,10],"mode":"mine"}}]"#.to_owned()),
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[2,3,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
         None,
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
@@ -1814,6 +1817,66 @@ fn live_plans_keep_their_world_version_readable_past_the_recent_window() -> Test
             .as_str()
             .is_some_and(|m| m.contains("never observed")),
         "{never}"
+    );
+    Ok(())
+}
+
+#[test]
+fn attention_is_ranked_bounded_and_certified_every_turn() -> TestResult {
+    let session = open_besieged("72170")?;
+    let rank = |value: &Value, scale: &[&str]| {
+        value
+            .as_str()
+            .and_then(|t| scale.iter().position(|s| *s == t))
+            .map_or(0, |p| scale.len() - p)
+    };
+    let mut saw_many = false;
+    // Plan (pending) while the raid builds, so several conditions coexist.
+    parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[2,3,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    for _ in 0..25 {
+        let turn = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        let items = turn["agent_turn"]["attention"]
+            .as_array()
+            .ok_or("attention")?;
+        let selection = &turn["agent_turn"]["coverage"]["attention_selection"];
+        assert_eq!(selection["certified"], true, "{selection}");
+        assert!(items.len() <= 6);
+        let ids: Vec<_> = items.iter().map(|i| i["attention_id"].clone()).collect();
+        assert_eq!(json!(ids), selection["selected"], "{selection}");
+        saw_many |= items.len() >= 2;
+        let keys: Vec<_> = items
+            .iter()
+            .map(|i| {
+                (
+                    rank(&i["severity"], &["critical", "high", "medium", "low"]),
+                    rank(
+                        &i["urgency"],
+                        &[
+                            "now",
+                            "before_the_next_plan",
+                            "before_formulating_an_unrelated_plan",
+                        ],
+                    ),
+                )
+            })
+            .collect();
+        assert!(
+            keys.windows(2).all(|w| w[0] >= w[1]),
+            "attention not ranked: {items:?}"
+        );
+    }
+    assert!(
+        saw_many,
+        "the scenario should raise concurrent attention items"
     );
     Ok(())
 }
