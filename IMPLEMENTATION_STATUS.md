@@ -44,6 +44,27 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Every semantic action family in the deterministic laboratory (2026-10-06)
+
+`dfmcp_intent::effects` now defines the reference meaning of every non-extension
+action (dig, build, labor, work orders, stockpiles, squads, burrows, standing
+orders, pause): created-entity identities derived from step idempotency keys,
+default postconditions (including the new `Predicate::RegionTerrain` map
+predicate), bounded default obligations along the dependency critical path,
+exact inverse compensations, and deterministic game-time progress. The planner
+seals these defaults. The lab `MemoryAdapter` and the in-process
+`MutationDispatcher` (new `reconcile` against later observations) execute them,
+and the process-local MCP laboratory exposes them through the existing eleven
+tools: `scenario="starter_fortress"`, structured `entities`/`terrain` queries,
+`fortress.plan(actions=...)` and `fortress.wait(max_game_ticks=...)`. See
+`docs/LAB_SEMANTIC_ACTIONS.md`.
+
+The workspace runs **3,085 tests, 0 failed, 0 ignored**; the previously ignored
+end-to-end pipeline test now dispatches a real excavation and proves it by
+reconciliation. This is laboratory semantics and development execution only:
+no DFHack mutation, native, live-game, registry or production evidence. The
+reference progress rates are calibration, not Dwarf Fortress claims.
+
 ### Whole-workspace Rust test execution (2026-10-06)
 
 For the first time in recent history the complete workspace test graph built

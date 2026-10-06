@@ -27,13 +27,13 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, Digest32,
-    EntityId, ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext,
-    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
+    EntityId, ErrorCode, FortressId, IntentId, OperationContext, RequestId, Result, RiskTier,
+    SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{EdgeKind, Predicate, QueryOrder, WorldGraph, WorldQuery, WorldSnapshot};
+use dfmcp_world::{EdgeKind, Predicate, QueryOrder, WorldQuery, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -67,8 +67,12 @@ pub(crate) struct LabSession {
     pending: Option<PendingPlan>,
     /// Most recent committed action id (for wait/cancel).
     last_action: Option<ActionId>,
+    /// Every action of the most recent committed plan, in step order.
+    last_plan_actions: Vec<ActionId>,
     /// Bounded plan-digest to payload map for idempotent re-commit (ADR-006).
     commit_receipts: BTreeMap<String, String>,
+    /// Authority each committed plan required; a replay must still hold it.
+    commit_authority: BTreeMap<String, Vec<(Capability, RiskTier)>>,
 }
 
 /// A plan sealed by `fortress_plan` and awaiting `fortress_commit`.
@@ -277,13 +281,14 @@ fn validate_lab_budget(budget: WorkBudget) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn seed_snapshot(fortress_id: FortressId, paused: bool) -> WorldSnapshot {
     WorldSnapshot::new(
         fortress_id,
-        GameTick(1),
-        ObservationCursor::ORIGIN,
+        dfmcp_core::GameTick(1),
+        dfmcp_core::ObservationCursor::ORIGIN,
         paused,
-        WorldGraph::default(),
+        dfmcp_world::WorldGraph::default(),
     )
 }
 
@@ -453,6 +458,12 @@ fn parse_capability_request(requested: &[(String, String)]) -> Result<Vec<Negoti
             Capability::Observe
                 | Capability::Query
                 | Capability::Plan
+                | Capability::Designate
+                | Capability::Construct
+                | Capability::ConfigureLabor
+                | Capability::ConfigureProduction
+                | Capability::ConfigureLogistics
+                | Capability::ConfigureMilitary
                 | Capability::ControlClock
                 | Capability::Checkpoint
                 | Capability::Restore
@@ -514,6 +525,44 @@ pub fn fortress_open_session(
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
 ) -> String {
+    open_session_in_scenario(
+        paused,
+        fortress_selector,
+        requested_capabilities,
+        max_wall_millis,
+        max_game_ticks,
+        max_entities,
+        max_bytes,
+        max_output_tokens,
+        max_actions,
+        None,
+    )
+}
+
+/// Open a laboratory session seeded from a named scenario (`empty` by default;
+/// `starter_fortress` provides rock, a hall, dwarves, a stockpile, a burrow
+/// and a squad for exercising every action family).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open_session_in_scenario(
+    paused: Option<bool>,
+    fortress_selector: Option<String>,
+    requested_capabilities: Option<Vec<(String, String)>>,
+    max_wall_millis: Option<u64>,
+    max_game_ticks: Option<u64>,
+    max_entities: Option<u32>,
+    max_bytes: Option<u64>,
+    max_output_tokens: Option<u32>,
+    max_actions: Option<u32>,
+    scenario: Option<String>,
+) -> String {
+    let scenario = scenario.unwrap_or_else(|| "empty".to_owned());
+    if scenario.len() > 64 {
+        return coded_error_payload(
+            "fortress.open_session",
+            ErrorCode::BudgetExceeded,
+            "scenario name exceeds its explicit byte bound",
+        );
+    }
     let paused = paused.is_none_or(|value| value);
     let selector_str = fortress_selector.map_or_else(|| "1".to_owned(), |value| value);
     if selector_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
@@ -581,6 +630,10 @@ pub fn fortress_open_session(
     }
 
     let grants = negotiate_grants(fortress_id, &requested_caps);
+    let seed = match crate::lab_world::scenario_snapshot(&scenario, fortress_id, paused) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
+    };
     let probe_session = LabSession {
         session_id: SessionId::new(0), // placeholder; replaced below
         fortress_id,
@@ -588,10 +641,12 @@ pub fn fortress_open_session(
         budget,
         negotiation: SessionNegotiation::laboratory(String::from("pending")),
         next_request_id: 0,
-        adapter: MemoryAdapter::new(seed_snapshot(fortress_id, paused)),
+        adapter: MemoryAdapter::new(seed),
         pending: None,
         last_action: None,
+        last_plan_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
+        commit_authority: BTreeMap::new(),
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -613,7 +668,9 @@ pub fn fortress_open_session(
         adapter,
         pending: _,
         last_action: _,
+        last_plan_actions: _,
         commit_receipts: _,
+        commit_authority: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -625,7 +682,9 @@ pub fn fortress_open_session(
         adapter,
         pending: None,
         last_action: None,
+        last_plan_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
+        commit_authority: BTreeMap::new(),
     }));
     {
         let mut registry = sessions();
@@ -647,16 +706,7 @@ pub fn fortress_open_session(
     }
     let granted_strings: Vec<&str> = requested_caps
         .iter()
-        .map(|c| match c.capability {
-            Capability::Observe => "observe",
-            Capability::Query => "query",
-            Capability::Plan => "plan",
-            Capability::ControlClock => "control_clock",
-            Capability::Checkpoint => "checkpoint",
-            Capability::Restore => "restore",
-            Capability::Doctor => "doctor",
-            _ => "unreachable-after-capability-validation",
-        })
+        .map(|c| c.capability.as_str())
         .collect();
     json!({
         "ok": true,
@@ -677,6 +727,7 @@ pub fn fortress_open_session(
         },
         "anchor": anchor_json(&snapshot_anchor),
         "paused": paused_after,
+        "scenario": scenario,
         "note": "session_id is required for all subsequent tool calls; transport identity grants nothing",
     })
     .to_string()
@@ -738,9 +789,11 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 // fortress.query
 // ============================================================================
 
-/// Return the bounded summary query supported by the laboratory slice.
+/// Run a bounded laboratory query: `summary`, `entities`, or a JSON object
+/// `{"mode":"entities","kind":"unit","limit":25,"offset":0}` /
+/// `{"mode":"terrain","min":[x,y,z],"max":[x,y,z]}`.
 #[tool(
-    description = "Run the bounded summary query supported by the laboratory adapter. Full DfQL is not implemented."
+    description = "Run a bounded laboratory query. mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
@@ -749,12 +802,6 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             "fortress.query",
             ErrorCode::BudgetExceeded,
             "query mode exceeds its explicit byte bound",
-        );
-    }
-    if mode != "summary" {
-        return error_payload(
-            "fortress.query",
-            "only mode=\"summary\" is supported by the laboratory slice; full DfQL is not implemented",
         );
     }
     let session = match resolve_session(session_id) {
@@ -771,6 +818,19 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
     };
     if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
         return dfmcp_error_payload("fortress.query", &error);
+    }
+    if mode != "summary" {
+        let snapshot = guard.adapter.snapshot();
+        return match crate::lab_world::query(snapshot, &mode) {
+            Ok(mut payload) => {
+                payload["ok"] = json!(true);
+                payload["session_id"] = json!(format!("{}", guard.session_id));
+                payload["anchor"] = anchor_json(&snapshot.anchor());
+                payload["game_tick"] = json!(snapshot.tick.0);
+                payload.to_string()
+            }
+            Err(error) => dfmcp_error_payload("fortress.query", &error),
+        };
     }
     let request = QueryRequest {
         anchor: ctx.anchor,
@@ -812,7 +872,24 @@ pub fn fortress_plan(
     summary: Option<String>,
     paused_target: Option<bool>,
 ) -> String {
-    let summary = summary.map_or_else(|| "unpause the simulation".to_owned(), |value| value);
+    plan_with_actions(session_id, summary, paused_target, None)
+}
+
+/// Compile either the legacy pause intent or a JSON array of semantic action
+/// steps (see `lab_world::parse_steps`). Missing postconditions, obligations
+/// and compensations are sealed from the reference action model.
+pub(crate) fn plan_with_actions(
+    session_id: Option<String>,
+    summary: Option<String>,
+    paused_target: Option<bool>,
+    actions: Option<String>,
+) -> String {
+    let default_summary = if actions.is_some() {
+        "execute semantic actions"
+    } else {
+        "unpause the simulation"
+    };
+    let summary = summary.map_or_else(|| default_summary.to_owned(), |value| value);
     if summary.len() > MAX_SUMMARY_BYTES {
         return coded_error_payload(
             "fortress.plan",
@@ -837,23 +914,31 @@ pub fn fortress_plan(
     }
     let snapshot = guard.adapter.snapshot();
 
-    let paused_target = paused_target.is_some_and(|value| value);
-    let intent = Intent {
-        id: IntentId::new(rid),
-        anchor: snapshot.anchor(),
-        summary,
-        terminal_condition: Predicate::Paused(paused_target),
-        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-        requested_actions: vec![RequestedAction {
-            action: Action::Pause {
-                paused: paused_target,
-            },
-            preconditions: vec![Predicate::Paused(!paused_target)],
-            postconditions: vec![Predicate::Paused(paused_target)],
-            compensation: None,
-            obligation: None,
-            depends_on: Vec::new(),
-        }],
+    let intent = match actions {
+        Some(raw) => match semantic_intent(IntentId::new(rid), snapshot, summary, &raw) {
+            Ok(intent) => intent,
+            Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+        },
+        None => {
+            let paused_target = paused_target.is_some_and(|value| value);
+            Intent {
+                id: IntentId::new(rid),
+                anchor: snapshot.anchor(),
+                summary,
+                terminal_condition: Predicate::Paused(paused_target),
+                constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+                requested_actions: vec![RequestedAction {
+                    action: Action::Pause {
+                        paused: paused_target,
+                    },
+                    preconditions: vec![Predicate::Paused(!paused_target)],
+                    postconditions: vec![Predicate::Paused(paused_target)],
+                    compensation: None,
+                    obligation: None,
+                    depends_on: Vec::new(),
+                }],
+            }
+        }
     };
 
     match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
@@ -866,7 +951,11 @@ pub fn fortress_plan(
                 "plan_id": format!("{}", plan.id),
                 "plan_digest": digest,
                 "terminal_condition": format!("{:?}", intent.terminal_condition),
-                "max_risk": "reversible",
+                "max_risk": plan.max_risk.as_str(),
+                "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+                "requires_checkpoint": plan.requires_checkpoint,
+                "expires_at_tick": plan.expires_at_tick.0,
+                "steps": crate::lab_world::plan_steps_json(&plan),
                 "note": "sealed plan; commit it with fortress_commit before expiry",
             });
             guard.pending = Some(PendingPlan {
@@ -877,6 +966,59 @@ pub fn fortress_plan(
         }
         Err(error) => dfmcp_error_payload("fortress.plan", &error),
     }
+}
+
+/// Build an intent from semantic action steps. Its terminal condition is the
+/// conjunction of every step's reference postcondition, so an intent whose
+/// effects already hold is refused instead of being re-executed.
+fn semantic_intent(
+    id: IntentId,
+    snapshot: &WorldSnapshot,
+    summary: String,
+    raw: &str,
+) -> Result<Intent> {
+    let requested_actions = crate::lab_world::parse_steps(raw)?;
+    let mut terminal = Vec::new();
+    let mut max_risk = RiskTier::ReadOnly;
+    for (index, requested) in requested_actions.iter().enumerate() {
+        let step =
+            dfmcp_core::StepId::new(u32::try_from(index).map_err(|_| {
+                DfmcpError::new(ErrorCode::BudgetExceeded, "too many semantic steps")
+            })?);
+        let action = requested.action.normalized();
+        let key = dfmcp_intent::derive_step_idempotency_key(id, snapshot.anchor(), step, &action);
+        terminal.extend(dfmcp_intent::effects::default_postconditions(
+            &action,
+            &key,
+            snapshot.fortress_id,
+        ));
+        max_risk = max_risk.max(action.risk());
+    }
+    Ok(Intent {
+        id,
+        anchor: snapshot.anchor(),
+        summary,
+        terminal_condition: Predicate::All(terminal).normalized(),
+        constraints: vec![Constraint::MaxRisk(max_risk)],
+        requested_actions,
+    })
+}
+
+/// The (capability, risk ceiling) pairs a sealed plan needs to be committed.
+fn plan_authority(plan: &PreparedPlan) -> Vec<(Capability, RiskTier)> {
+    let mut authority: BTreeMap<Capability, RiskTier> = BTreeMap::new();
+    for step in &plan.steps {
+        let entry = authority
+            .entry(step.required_capability)
+            .or_insert(step.risk);
+        *entry = (*entry).max(step.risk);
+    }
+    if plan.requires_checkpoint {
+        authority
+            .entry(Capability::Checkpoint)
+            .or_insert(RiskTier::Guarded);
+    }
+    authority.into_iter().collect()
 }
 
 // ============================================================================
@@ -911,10 +1053,24 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             Ok(value) => value,
             Err(error) => return dfmcp_error_payload("fortress.commit", &error),
         };
-        if let Err(error) =
-            authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
-        {
-            return dfmcp_error_payload("fortress.commit", &error);
+        // Commit authority is the sealed plan's own capability set (checked
+        // here and again per step by the adapter), not a fixed clock grant.
+        let required = guard
+            .commit_authority
+            .get(&plan_digest)
+            .cloned()
+            .or_else(|| {
+                guard
+                    .pending
+                    .as_ref()
+                    .filter(|pending| pending.digest == plan_digest)
+                    .map(|pending| plan_authority(&pending.plan))
+            })
+            .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
+        for (capability, risk) in required {
+            if let Err(error) = authorize_entry(&entry_ctx, capability, risk) {
+                return dfmcp_error_payload("fortress.commit", &error);
+            }
         }
     }
 
@@ -926,10 +1082,15 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             Ok(value) => value,
             Err(error) => return dfmcp_error_payload("fortress.commit", &error),
         };
-        if let Err(error) =
-            replay_context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)
-        {
-            return dfmcp_error_payload("fortress.commit", &error);
+        let required = guard
+            .commit_authority
+            .get(&plan_digest)
+            .cloned()
+            .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
+        for (capability, risk) in required {
+            if let Err(error) = replay_context.authorize(capability, risk, &[], None) {
+                return dfmcp_error_payload("fortress.commit", &error);
+            }
         }
         return payload;
     }
@@ -981,6 +1142,15 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
                 Ok(receipt) => {
                     guard.last_action = receipt.actions.first().map(|action| action.action_id);
+                    guard.last_plan_actions = receipt
+                        .actions
+                        .iter()
+                        .map(|action| action.action_id)
+                        .collect();
+                    let authority = plan_authority(&pending.plan);
+                    guard
+                        .commit_authority
+                        .insert(plan_digest.clone(), authority);
                     let snapshot = guard.adapter.snapshot();
                     let paused = snapshot.paused;
                     let payload = json!({
@@ -990,6 +1160,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         "plan_digest": receipt.plan_digest.to_string(),
                         "actions": receipt.actions.iter().map(|action| json!({
                             "action_id": format!("{}", action.action_id),
+                            "step": action.step_id.get(),
                             "state": format!("{:?}", action.state),
                             "message": action.message,
                         })).collect::<Vec<_>>(),
@@ -1024,6 +1195,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
     description = "Poll the most recent committed action in this session. Returns the action receipt state from the laboratory adapter's bounded obligation machinery."
 )]
 pub fn fortress_wait(session_id: Option<String>) -> String {
+    wait_with_ticks(session_id, None)
+}
+
+/// Optionally let laboratory game time pass (only while the fortress is
+/// unpaused, bounded by the session's game-tick budget), then poll every
+/// action of the most recent committed plan against the new observation.
+pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
@@ -1048,24 +1226,69 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
             "no committed action yet; call fortress_commit first",
         );
     };
+    let requested_ticks = max_game_ticks.unwrap_or(0);
+    if requested_ticks > guard.budget.max_game_ticks {
+        return coded_error_payload(
+            "fortress.wait",
+            ErrorCode::BudgetExceeded,
+            "max_game_ticks exceeds the session's negotiated game-tick budget",
+        );
+    }
+    let paused = guard.adapter.snapshot().paused;
+    let advanced = if requested_ticks > 0 && !paused {
+        if let Err(error) = guard.adapter.advance_ticks(requested_ticks) {
+            return dfmcp_error_payload("fortress.wait", &error);
+        }
+        requested_ticks
+    } else {
+        0
+    };
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
-        Ok(task) => json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "action_id": format!("{}", action_id),
-            "task_id": task.task_id,
-            "status": task.status.as_str(),
-            "commit_state": format!("{:?}", task.commit_state),
-            "summary": task.summary,
-            "observed_anchor": anchor_json(&ctx.anchor),
-        })
-        .to_string(),
-        Err(error) => dfmcp_error_payload("fortress.wait", &error),
+    let task = match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
+        Ok(task) => task,
+        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+    };
+    let mut plan_actions = Vec::new();
+    for planned in guard.last_plan_actions.clone() {
+        let (_, poll_ctx) = match next_context(&mut guard) {
+            Ok(value) => value,
+            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+        };
+        match guard.adapter.poll_action(planned, &poll_ctx) {
+            Ok(receipt) => plan_actions.push(json!({
+                "action_id": format!("{planned}"),
+                "step": receipt.step_id.get(),
+                "state": format!("{:?}", receipt.state),
+                "message": receipt.message,
+            })),
+            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+        }
     }
+    let snapshot = guard.adapter.snapshot();
+    let mut payload = json!({
+        "ok": true,
+        "session_id": format!("{}", guard.session_id),
+        "action_id": format!("{}", action_id),
+        "task_id": task.task_id,
+        "status": task.status.as_str(),
+        "commit_state": format!("{:?}", task.commit_state),
+        "summary": task.summary,
+        "observed_anchor": anchor_json(&snapshot.anchor()),
+    });
+    if max_game_ticks.is_some() {
+        payload["advanced_game_ticks"] = json!(advanced);
+        payload["game_tick"] = json!(snapshot.tick.0);
+        payload["plan_actions"] = json!(plan_actions);
+        if requested_ticks > 0 && paused {
+            payload["blocked"] = json!(
+                "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
+            );
+        }
+    }
+    payload.to_string()
 }
 
 // ============================================================================

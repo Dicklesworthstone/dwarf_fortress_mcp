@@ -6,6 +6,16 @@ readiness.
 
 ## [Unreleased]
 
+### Added
+
+- Reference semantics for every non-extension action (`dfmcp_intent::effects`)
+  and a `RegionTerrain` map predicate. The laboratory adapter, the in-process
+  dispatcher (with observation-driven `reconcile`) and the MCP laboratory now
+  execute excavation, construction, labor, work orders, stockpiles, squads,
+  burrows and standing orders with sealed postconditions and game-time
+  obligations; `starter_fortress` scenario, `entities`/`terrain` queries,
+  `fortress.plan(actions)` and `fortress.wait(max_game_ticks)`. Laboratory only.
+
 ### Fixed
 
 - The whole Rust workspace test graph compiles and passes again on the pinned

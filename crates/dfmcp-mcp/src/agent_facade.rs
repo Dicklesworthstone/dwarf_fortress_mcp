@@ -913,7 +913,7 @@ fn project_response(
 }
 
 #[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet."
+    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -926,9 +926,10 @@ pub fn fortress_open_session(
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
+    scenario: Option<String>,
 ) -> String {
     project_response(
-        crate::server::fortress_open_session(
+        crate::server::open_session_in_scenario(
             paused,
             fortress_selector,
             requested_capabilities,
@@ -938,6 +939,7 @@ pub fn fortress_open_session(
             max_bytes,
             max_output_tokens,
             max_actions,
+            scenario,
         ),
         "fortress.open_session",
         AgentPhase::Bootstrap,
@@ -973,15 +975,16 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 }
 
 #[tool(
-    description = "Compile a pause/resume intent without effects and keep the sealed plan visible as active work."
+    description = "Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step."
 )]
 pub fn fortress_plan(
     session_id: Option<String>,
     summary: Option<String>,
     paused_target: Option<bool>,
+    actions: Option<String>,
 ) -> String {
     project_response(
-        crate::server::fortress_plan(session_id.clone(), summary, paused_target),
+        crate::server::plan_with_actions(session_id.clone(), summary, paused_target, actions),
         "fortress.plan",
         AgentPhase::Propose,
         ObservationProfile::Tactical,
@@ -1002,10 +1005,12 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
     )
 }
 
-#[tool(description = "Poll active work and return bounded verification state.")]
-pub fn fortress_wait(session_id: Option<String>) -> String {
+#[tool(
+    description = "Poll active work and return bounded verification state. max_game_ticks lets laboratory game time pass first (only while unpaused, within the session game-tick budget) and then reports every action of the last committed plan."
+)]
+pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
     project_response(
-        crate::server::fortress_wait(session_id.clone()),
+        crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
         "fortress.wait",
         AgentPhase::Verify,
         ObservationProfile::Pulse,
@@ -1127,6 +1132,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
     }
 
@@ -1161,6 +1167,7 @@ mod tests {
             Some(session_id),
             Some("resume the lab".to_owned()),
             Some(false),
+            None,
         ))?;
         assert_eq!(planned["ok"], true);
         assert_eq!(
@@ -1224,3 +1231,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "lab_actions_mcp_tests.rs"]
+mod lab_actions_tests;

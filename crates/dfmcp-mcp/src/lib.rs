@@ -22,6 +22,7 @@ pub mod doctor;
 pub mod ee_memory;
 pub mod http_transport;
 pub mod job_control_session;
+mod lab_world;
 pub mod live_control_server;
 pub mod live_excavation_run_server;
 pub mod live_job_control_server;
