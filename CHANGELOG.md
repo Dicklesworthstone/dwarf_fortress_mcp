@@ -15,6 +15,16 @@ readiness.
   burrows and standing orders with sealed postconditions and game-time
   obligations; `starter_fortress` scenario, `entities`/`terrain` queries,
   `fortress.plan(actions)` and `fortress.wait(max_game_ticks)`. Laboratory only.
+- Laboratory agent loop: Agent Turn tracking of every committed action and open
+  obligation, plan-scoped cancellation with drain progress and a finalize
+  certificate, a `df://session/{id}/handoff` resume packet (all session views now
+  resolve on the real `serve` binary), a bounded world briefing from
+  `fortress.observe`, deterministic plan forecasts on a discarded fork, and
+  surprise records when observations contradict forecasts.
+- Shared laboratory fortresses (`shared=true`): several agent sessions on one
+  world and clock, exclusive spatial leases at commit, intent replay of plans
+  made stale by another member, unanimous unpause with an any-member emergency
+  pause, and no unilateral restore.
 
 ### Fixed
 
