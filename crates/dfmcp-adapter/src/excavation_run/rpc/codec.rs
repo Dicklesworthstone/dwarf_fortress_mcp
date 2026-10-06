@@ -35,22 +35,31 @@ fn read_varint(r: &mut Reader<'_>) -> Result<u64> {
     Err(super::malformed())
 }
 #[derive(Clone, Copy)]
-enum Field<'a> { Number(u64), Bytes(&'a [u8]) }
+enum Field<'a> {
+    Number(u64),
+    Bytes(&'a [u8]),
+}
 pub(super) struct Message<'a>(BTreeMap<u32, Field<'a>>);
 impl<'a> Message<'a> {
     pub(super) fn parse(data: &'a [u8], maximum: u32) -> Result<Self> {
-        require(data.len() <= MAX_REPLY && maximum <= 19, "oversized excavation envelope")?;
+        require(
+            data.len() <= MAX_REPLY && maximum <= 19,
+            "oversized excavation envelope",
+        )?;
         let mut r = Reader(data);
         let mut fields = BTreeMap::new();
         while !r.0.is_empty() {
             let key = read_varint(&mut r)?;
             let tag = u32::try_from(key >> 3).map_err(|_| super::malformed())?;
-            require(tag > 0 && tag <= maximum && !fields.contains_key(&tag),
-                "duplicate or unknown excavation field")?;
+            require(
+                tag > 0 && tag <= maximum && !fields.contains_key(&tag),
+                "duplicate or unknown excavation field",
+            )?;
             let value = match key & 7 {
                 0 => Field::Number(read_varint(&mut r)?),
                 2 => {
-                    let n = usize::try_from(read_varint(&mut r)?).map_err(|_| super::malformed())?;
+                    let n =
+                        usize::try_from(read_varint(&mut r)?).map_err(|_| super::malformed())?;
                     Field::Bytes(r.take(n)?)
                 }
                 _ => return Err(super::malformed()),
@@ -60,10 +69,14 @@ impl<'a> Message<'a> {
         Ok(Self(fields))
     }
     pub(super) fn exact(&self, fields: &[u32]) -> Result<()> {
-        require(self.0.len() == fields.len() && fields.iter().all(|n| self.0.contains_key(n)),
-            "unexpected excavation reply field set")
+        require(
+            self.0.len() == fields.len() && fields.iter().all(|n| self.0.contains_key(n)),
+            "unexpected excavation reply field set",
+        )
     }
-    pub(super) fn has(&self, tag: u32) -> bool { self.0.contains_key(&tag) }
+    pub(super) fn has(&self, tag: u32) -> bool {
+        self.0.contains_key(&tag)
+    }
     pub(super) fn number(&self, tag: u32) -> Result<u64> {
         match self.0.get(&tag) {
             Some(Field::Number(n)) => Ok(*n),
@@ -72,7 +85,9 @@ impl<'a> Message<'a> {
     }
     pub(super) fn boolean(&self, tag: u32) -> Result<bool> {
         match self.number(tag)? {
-            0 => Ok(false), 1 => Ok(true), _ => Err(super::malformed()),
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(super::malformed()),
         }
     }
     pub(super) fn bytes(&self, tag: u32) -> Result<&'a [u8]> {

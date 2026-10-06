@@ -550,8 +550,7 @@ fn with_session<F: FnOnce() -> Result<Action>>(
                 "creation session absent or closed",
             )
         })?;
-        let cancelled =
-            asupersync::Cx::current().is_some_and(|cx| cx.checkpoint().is_err());
+        let cancelled = asupersync::Cx::current().is_some_and(|cx| cx.checkpoint().is_err());
         let context = state.context(production_enabled(), cancelled)?;
         Ok(run_action(
             state,

@@ -26,16 +26,27 @@ impl PrivateFileIdentity {
     /// Validate the bounded canonical representation without accessing a path.
     /// Actual source custody still requires the held file's private_identity.
     pub fn validate(&self) -> Result<()> {
-        let path = self.path.to_str().ok_or_else(|| error(
-            ErrorCode::InvalidRequest, "private journal identity path must be UTF-8",
-        ))?;
-        if !self.path.is_absolute() || path.len() < 2 || path.len() > 4096
+        let path = self.path.to_str().ok_or_else(|| {
+            error(
+                ErrorCode::InvalidRequest,
+                "private journal identity path must be UTF-8",
+            )
+        })?;
+        if !self.path.is_absolute()
+            || path.len() < 2
+            || path.len() > 4096
             || path.as_bytes().contains(&0)
-            || path[1..].split('/').any(|part| part.is_empty() || part == "." || part == "..")
-            || self.file_inode == 0 || self.directory_inode == 0
+            || path[1..]
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+            || self.file_inode == 0
+            || self.directory_inode == 0
             || self.file_owner != self.directory_owner
         {
-            return Err(error(ErrorCode::InvalidRequest, "invalid private journal identity"));
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "invalid private journal identity",
+            ));
         }
         Ok(())
     }
@@ -58,11 +69,22 @@ pub use linux::PrivateBuildFile;
 )))]
 pub struct PrivateBuildFile;
 
-#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(not(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+)))]
 impl PrivateBuildFile {
     pub fn private_identity(&self, context: &OperationContext) -> Result<PrivateFileIdentity> {
-        context.authorize(dfmcp_core::Capability::Query, dfmcp_core::RiskTier::ReadOnly, &[], None)?;
-        Err(error(ErrorCode::CapabilityDenied, "private journal identities require Linux x86_64/aarch64"))
+        context.authorize(
+            dfmcp_core::Capability::Query,
+            dfmcp_core::RiskTier::ReadOnly,
+            &[],
+            None,
+        )?;
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "private journal identities require Linux x86_64/aarch64",
+        ))
     }
 }
 

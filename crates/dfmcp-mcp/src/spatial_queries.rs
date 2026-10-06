@@ -84,7 +84,13 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|v| v.get("kind"))
             .and_then(Value::as_str),
-        Some("map_route" | "spatial_inventory_plan" | "blueprint_layout" | "map_connectivity" | "construction_progress")
+        Some(
+            "map_route"
+                | "spatial_inventory_plan"
+                | "blueprint_layout"
+                | "map_connectivity"
+                | "construction_progress"
+        )
     )
 }
 fn validate(input: &Value) -> Result<()> {

@@ -115,7 +115,8 @@ pub(super) fn shortage(outcome: &AllocationOutcome, requested: &FurnitureRequest
             "shortage unexpectedly contains an executable assignment",
         ));
     }
-    Ok(json!({"request":request(requested)?,"request_digest":requested.digest().to_string(),
+    Ok(
+        json!({"request":request(requested)?,"request_digest":requested.digest().to_string(),
         "source_digest":report.source_digest.to_string(),"captured_tick":report.anchor.tick.get(),
         "observed_items":report.observed_items,"candidate_items":report.candidate_count,
         "maximum_assignable":report.allocation.maximum_assignable,
@@ -127,5 +128,6 @@ pub(super) fn shortage(outcome: &AllocationOutcome, requested: &FurnitureRequest
             "entity_id":item.handle.entity_id.to_string(),"generation":item.handle.generation,"revision":item.handle.revision})).collect::<Vec<_>>(),
         "supply_policy":dfmcp_adapter::furniture_supply::SUPPLY_POLICY,"complete_shortage_witness":true,
         "plan":null,"items_reserved":false,"game_mutation_dispatched":false,
-        "interpretation":"The requested slots cannot all be assigned within this observation's conservative furniture model. No partial batch was created."}))
+        "interpretation":"The requested slots cannot all be assigned within this observation's conservative furniture model. No partial batch was created."}),
+    )
 }

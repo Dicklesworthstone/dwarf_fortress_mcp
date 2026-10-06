@@ -247,7 +247,11 @@ impl BatchDefinition {
     }
     /// A source-bound allocation retains its original constraints and selected
     /// evidence. The legacy constructor remains byte-for-byte DFMFBD01.
-    pub fn from_handoff(handoff: Handoff, binding: BuildBinding, journal_id: Digest32) -> Result<Self> {
+    pub fn from_handoff(
+        handoff: Handoff,
+        binding: BuildBinding,
+        journal_id: Digest32,
+    ) -> Result<Self> {
         handoff.validate_binding(&binding)?;
         let mut out = Self::new(handoff.plan().clone(), binding, journal_id)?;
         out.handoff = Some(handoff);
@@ -274,7 +278,12 @@ impl BatchDefinition {
     }
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let binding = self.binding.encode();
-        let mut out = if self.handoff.is_some() { HANDOFF_DEFINITION_MAGIC } else { DEFINITION_MAGIC }.to_vec();
+        let mut out = if self.handoff.is_some() {
+            HANDOFF_DEFINITION_MAGIC
+        } else {
+            DEFINITION_MAGIC
+        }
+        .to_vec();
         for field in [self.plan.canonical_bytes(), binding.as_slice()] {
             out.extend_from_slice(&(field.len() as u32).to_be_bytes());
             out.extend_from_slice(field);
@@ -307,15 +316,22 @@ impl BatchDefinition {
         );
         let handoff = if magic == HANDOFF_DEFINITION_MAGIC {
             Some(Handoff::decode(reader.field(MAX_HANDOFF_BYTES)?)?)
-        } else { None };
+        } else {
+            None
+        };
         require(
             reader.0.is_empty(),
             "trailing furniture batch definition bytes",
         )?;
         let out = if let Some(handoff) = handoff {
-            require(handoff.plan() == &plan, "batch plan differs from original allocation")?;
+            require(
+                handoff.plan() == &plan,
+                "batch plan differs from original allocation",
+            )?;
             Self::from_handoff(handoff, binding, journal_id)?
-        } else { Self::new(plan, binding, journal_id)? };
+        } else {
+            Self::new(plan, binding, journal_id)?
+        };
         require(
             out.canonical_bytes() == raw,
             "noncanonical furniture batch definition",
@@ -435,9 +451,11 @@ impl BatchDefinition {
             ));
         }
         if let Some(handoff) = &self.handoff {
-            handoff.validate_capture(&self.binding, capture).map_err(|_| corrupt(
-                "furniture child violates original allocation source or constraints",
-            ))?;
+            handoff
+                .validate_capture(&self.binding, capture)
+                .map_err(|_| {
+                    corrupt("furniture child violates original allocation source or constraints")
+                })?;
         }
         if let Some(prior) = last_after {
             if capture.tick() < prior.tick()

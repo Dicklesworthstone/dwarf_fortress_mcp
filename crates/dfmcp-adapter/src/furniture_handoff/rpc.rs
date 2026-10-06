@@ -28,7 +28,11 @@ fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::AdapterRejected, message).retryable(false)
 }
 fn require(condition: bool, message: &str) -> Result<()> {
-    if condition { Ok(()) } else { Err(invalid(message)) }
+    if condition {
+        Ok(())
+    } else {
+        Err(invalid(message))
+    }
 }
 fn exhausted() -> DfmcpError {
     DfmcpError::new(

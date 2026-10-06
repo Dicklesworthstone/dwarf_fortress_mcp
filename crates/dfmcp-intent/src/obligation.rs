@@ -174,7 +174,8 @@ impl ObligationRuntime {
             ));
         }
         self.register_obligation(action_id, spec, snapshot.tick)?;
-        self.observation_anchors.insert(action_id, snapshot.anchor());
+        self.observation_anchors
+            .insert(action_id, snapshot.anchor());
         Ok(())
     }
 
@@ -182,9 +183,10 @@ impl ObligationRuntime {
     /// read. Identity, poll cadence, elapsed time and the fixed deadline survive.
     /// Historical terminal outcomes and cancellation drains are not rewritten.
     pub fn observation_interrupted(&mut self, action_id: ActionId) -> Result<()> {
-        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation")
-        })?;
+        let obligation = self
+            .obligations
+            .get_mut(&action_id)
+            .ok_or_else(|| DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation"))?;
         if let ObligationStatus::Active {
             consecutive_stable_observations,
             ..

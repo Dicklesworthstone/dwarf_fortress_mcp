@@ -103,7 +103,9 @@ fn recipe(target: &Target, test: Test) -> Value {
     let removal = row_field("type_key", literal("text", json!("DestroyBuilding")));
     let selected_jobs = all(vec![
         related(building, generation, "contained_in", "incoming"),
-        if test == Test::AnyRemoval { removal } else {
+        if test == Test::AnyRemoval {
+            removal
+        } else {
             json!({"op":"any","args":[removal,
                 row_field("type_key",literal("text",json!("ConstructBuilding")))]})
         },
@@ -114,38 +116,89 @@ fn recipe(target: &Target, test: Test) -> Value {
         return condition;
     }
     let mut conditions = vec![
-        field(building, generation, "type_key", literal("text", json!(building_kind))),
-        field(building, generation, "build_stage", literal("i64", json!(target.max_stage))),
-        field(building, generation, "max_build_stage", literal("i64", json!(target.max_stage))),
+        field(
+            building,
+            generation,
+            "type_key",
+            literal("text", json!(building_kind)),
+        ),
+        field(
+            building,
+            generation,
+            "build_stage",
+            literal("i64", json!(target.max_stage)),
+        ),
+        field(
+            building,
+            generation,
+            "max_build_stage",
+            literal("i64", json!(target.max_stage)),
+        ),
         count("job", selected_jobs, 0),
     ];
     if let (Some(native), Some(generation)) = (target.item_native_id, target.item_generation) {
         let item = item_entity_id(native);
-        conditions.push(field(item, generation, "type_key", literal("text", json!(item_kind))));
-        for (name, value) in [("in_building", true), ("in_job", false), ("removed", false),
-            ("on_ground", false), ("in_inventory", false)] {
+        conditions.push(field(
+            item,
+            generation,
+            "type_key",
+            literal("text", json!(item_kind)),
+        ));
+        for (name, value) in [
+            ("in_building", true),
+            ("in_job", false),
+            ("removed", false),
+            ("on_ground", false),
+            ("in_inventory", false),
+        ] {
             conditions.push(field(item, generation, name, literal("bool", json!(value))));
         }
-        conditions.push(count("item", all(vec![
-            row_field("native_item_id", literal("u64", json!(native))),
-            related(building, target.building_generation, "contained_in", "incoming"),
-        ]), 1));
-        conditions.push(count("item", related(item, generation, "contained_in", "outgoing"), 0));
-        conditions.push(count("job", related(item, generation, "uses", "incoming"), 0));
+        conditions.push(count(
+            "item",
+            all(vec![
+                row_field("native_item_id", literal("u64", json!(native))),
+                related(
+                    building,
+                    target.building_generation,
+                    "contained_in",
+                    "incoming",
+                ),
+            ]),
+            1,
+        ));
+        conditions.push(count(
+            "item",
+            related(item, generation, "contained_in", "outgoing"),
+            0,
+        ));
+        conditions.push(count(
+            "job",
+            related(item, generation, "uses", "incoming"),
+            0,
+        ));
     }
     all(conditions)
 }
 
 fn bind_root(
-    snapshot: &WorldSnapshot, id: EntityId, generation: u32, kind: EntityKind, probe: &mut Probe,
+    snapshot: &WorldSnapshot,
+    id: EntityId,
+    generation: u32,
+    kind: EntityKind,
+    probe: &mut Probe,
 ) -> bool {
-    let Some(entity) = snapshot.graph.entities.get(&id) else { return false; };
+    let Some(entity) = snapshot.graph.entities.get(&id) else {
+        return false;
+    };
     probe.invalid_generation |= entity.generation != generation;
     entity.generation == generation && entity.revision != 0 && entity.kind == kind
 }
 
 pub(super) fn evaluate(
-    probe: &mut Probe, snapshot: &WorldSnapshot, targets: &[Target], test: Test,
+    probe: &mut Probe,
+    snapshot: &WorldSnapshot,
+    targets: &[Target],
+    test: Test,
     budget: &mut counts::EvaluationBudget,
 ) -> Result<Truth> {
     validate(targets)?;
@@ -158,10 +211,21 @@ pub(super) fn evaluate(
         let mut local = Probe::default();
         // Bind EVERY explicit reference, even for removal-only tests and after
         // an earlier decisive target. Recycled IDs must not hide in a group.
-        let mut bound = bind_root(snapshot, building_entity_id(target.building_native_id),
-            target.building_generation, EntityKind::Building, &mut local);
+        let mut bound = bind_root(
+            snapshot,
+            building_entity_id(target.building_native_id),
+            target.building_generation,
+            EntityKind::Building,
+            &mut local,
+        );
         if let (Some(id), Some(generation)) = (target.item_native_id, target.item_generation) {
-            bound &= bind_root(snapshot, item_entity_id(id), generation, EntityKind::Item, &mut local);
+            bound &= bind_root(
+                snapshot,
+                item_entity_id(id),
+                generation,
+                EntityKind::Item,
+                &mut local,
+            );
         }
         let condition: Condition = serde_json::from_value(recipe(target, test))
             .map_err(|_| invalid("internal furniture recipe is invalid"))?;
@@ -191,8 +255,14 @@ pub(super) fn evaluate(
     }
     let truth = if decisive {
         Truth::from_bool(test == Test::AnyRemoval)
-    } else if unknown { Truth::Unknown } else { Truth::from_bool(test == Test::AllComplete) };
-    probe.facts.push(json!({"op":"furniture_set","policy":POLICY,"test":test,
+    } else if unknown {
+        Truth::Unknown
+    } else {
+        Truth::from_bool(test == Test::AllComplete)
+    };
+    probe
+        .facts
+        .push(json!({"op":"furniture_set","policy":POLICY,"test":test,
         "truth":truth.text(),"selected":targets.len(),"records":rows,
         "records_complete":true,"scope":"observed_projection",
         "native_effect_completion_proven":false}));
@@ -202,10 +272,13 @@ pub(super) fn evaluate(
 
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
     let extension: Value = serde_json::from_str(include_str!(
-        "../../../schemas/mcp_watch_furniture_set_v1.json"))
-        .map_err(|_| invalid("embedded furniture-set schema is invalid"))?;
-    schema["$defs"]["watch_condition"]["oneOf"].as_array_mut()
-        .ok_or_else(|| invalid("watch condition variants absent"))?.push(extension);
+        "../../../schemas/mcp_watch_furniture_set_v1.json"
+    ))
+    .map_err(|_| invalid("embedded furniture-set schema is invalid"))?;
+    schema["$defs"]["watch_condition"]["oneOf"]
+        .as_array_mut()
+        .ok_or_else(|| invalid("watch condition variants absent"))?
+        .push(extension);
     Ok(schema)
 }
 

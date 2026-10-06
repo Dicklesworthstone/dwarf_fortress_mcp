@@ -267,8 +267,18 @@ pub(super) fn run_recovery(
                 .store
                 .verify(&work.take(&c, state.store.byte_len() as u64 + 8192)?)?;
             if let Some(view) = allocation_view {
-                let handoff = state.store.definition().origin().definition().handoff()
-                    .ok_or_else(|| error(ErrorCode::InvalidRequest, "original batch has no allocation origin"))?;
+                let handoff = state
+                    .store
+                    .definition()
+                    .origin()
+                    .definition()
+                    .handoff()
+                    .ok_or_else(|| {
+                        error(
+                            ErrorCode::InvalidRequest,
+                            "original batch has no allocation origin",
+                        )
+                    })?;
                 result["allocation"] = allocation::display(handoff, view)?;
                 result["allocation"]["inventory_verified"] = json!(false);
                 result["allocation"]["monitor_copy_verified"] = json!(true);

@@ -128,24 +128,42 @@ struct Work<'a> {
 }
 impl Work<'_> {
     fn charge(&mut self, count: u64) -> Result<()> {
-        self.used = self.used.checked_add(count).ok_or_else(|| bounded("construction work overflow"))?;
+        self.used = self
+            .used
+            .checked_add(count)
+            .ok_or_else(|| bounded("construction work overflow"))?;
         if self.used > self.limit {
-            return Err(bounded("construction analysis exhausted its work allowance"));
+            return Err(bounded(
+                "construction analysis exhausted its work allowance",
+            ));
         }
         if self.start.elapsed().as_millis() >= u128::from(self.context.budget.max_wall_millis) {
-            return Err(bounded("construction analysis exhausted its foreground deadline"));
+            return Err(bounded(
+                "construction analysis exhausted its foreground deadline",
+            ));
         }
-        self.context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
+        self.context
+            .authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
     }
 }
 fn handle(snapshot: &WorldSnapshot, id: EntityId, kind: EntityKind) -> Result<AnalysisHandle> {
     let value = snapshot.graph.entities.get(&id).ok_or_else(|| {
-        error(ErrorCode::InternalInvariantViolation, "construction endpoint has no canonical identity")
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "construction endpoint has no canonical identity",
+        )
     })?;
     if value.kind != kind || value.generation == 0 {
-        return Err(error(ErrorCode::InternalInvariantViolation, "invalid construction endpoint identity"));
+        return Err(error(
+            ErrorCode::InternalInvariantViolation,
+            "invalid construction endpoint identity",
+        ));
     }
-    Ok(AnalysisHandle { entity_id: id, generation: value.generation, revision: value.revision })
+    Ok(AnalysisHandle {
+        entity_id: id,
+        generation: value.generation,
+        revision: value.revision,
+    })
 }
 fn item_kind(building: &str) -> Option<&'static str> {
     match building {
@@ -170,7 +188,11 @@ pub fn installed_item(item: &LiveItem, building: u32, kind: &str, attached_jobs:
 fn job_evidence(job: &LiveJob, snapshot: &WorldSnapshot) -> Result<JobEvidence> {
     Ok(JobEvidence {
         native_id: job.native_id,
-        handle: handle(snapshot, EntityId::new(u64::from(job.native_id) + 2), EntityKind::Job)?,
+        handle: handle(
+            snapshot,
+            EntityId::new(u64::from(job.native_id) + 2),
+            EntityKind::Job,
+        )?,
         type_key: job.type_key.clone(),
         suspended: job.suspended,
         worker_native_id: job.worker_native_id,
@@ -195,38 +217,64 @@ pub fn analyze<S: OperationsStateView + ?Sized>(
     if max_work == 0 || max_work > MAX_WORK {
         return Err(bounded("construction work allowance must be 1..1000000"));
     }
-    let mut work = Work { context, start: Instant::now(), used: 0, limit: max_work };
+    let mut work = Work {
+        context,
+        start: Instant::now(),
+        used: 0,
+        limit: max_work,
+    };
     let mut selected = BTreeMap::new();
     let mut item_ids = BTreeMap::new();
     for target in targets {
         work.charge(1)?;
         if target.building_native_id >= i32::MAX as u32
-            || target.item_native_id.is_some_and(|id| id >= i32::MAX as u32)
+            || target
+                .item_native_id
+                .is_some_and(|id| id >= i32::MAX as u32)
             || target.expected_generation == Some(0)
-            || target.expected_type.as_ref().is_some_and(|kind| item_kind(kind).is_none())
+            || target
+                .expected_type
+                .as_ref()
+                .is_some_and(|kind| item_kind(kind).is_none())
             || selected.insert(target.building_native_id, target).is_some()
         {
-            return Err(invalid("duplicate or invalid construction target or expectation"));
+            return Err(invalid(
+                "duplicate or invalid construction target or expectation",
+            ));
         }
         if let Some(id) = target.item_native_id {
             if item_ids.insert(id, target.building_native_id).is_some() {
-                return Err(invalid("one exact item cannot be requested for multiple furniture targets"));
+                return Err(invalid(
+                    "one exact item cannot be requested for multiple furniture targets",
+                ));
             }
         }
     }
-    let observation = state.operations_observation().ok_or_else(|| invalid("no coherent operations capture"))?;
-    let snapshot = state.operations_snapshot().ok_or_else(|| invalid("no canonical operations projection"))?;
+    let observation = state
+        .operations_observation()
+        .ok_or_else(|| invalid("no coherent operations capture"))?;
+    let snapshot = state
+        .operations_snapshot()
+        .ok_or_else(|| invalid("no canonical operations projection"))?;
     if snapshot.anchor() != context.anchor {
-        return Err(error(ErrorCode::StaleAnchor, "construction context names another capture"));
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "construction context names another capture",
+        ));
     }
     if snapshot.graph.entities.len() > context.budget.max_entities as usize {
-        return Err(bounded("construction analysis exceeds session entity scan allowance"));
+        return Err(bounded(
+            "construction analysis exceeds session entity scan allowance",
+        ));
     }
     // Account for both complete validation/hash traversals, then each join visit.
     // The sealed view excludes client-built or partially published observations.
     work.charge(2 * (snapshot.graph.entities.len() + snapshot.graph.edges.len()) as u64)?;
     if !snapshot.hash_is_valid() {
-        return Err(error(ErrorCode::InternalInvariantViolation, "invalid construction source hash"));
+        return Err(error(
+            ErrorCode::InternalInvariantViolation,
+            "invalid construction source hash",
+        ));
     }
     let source_digest = state.operations_source_digest()?;
     work.charge(1)?;
@@ -264,11 +312,14 @@ pub fn analyze<S: OperationsStateView + ?Sized>(
     for attachment in &observation.attachments {
         work.charge(1)?;
         if let Some(building) = item_ids.get(&attachment.item_native_id) {
-            let entry = attachments.entry(attachment.item_native_id).or_insert((u32::MAX, 0, 0));
+            let entry = attachments
+                .entry(attachment.item_native_id)
+                .or_insert((u32::MAX, 0, 0));
             if entry.0 != attachment.job_native_id {
                 entry.0 = attachment.job_native_id;
                 entry.1 += 1;
-                entry.2 += u32::from(construction_ids.get(&attachment.job_native_id) == Some(building));
+                entry.2 +=
+                    u32::from(construction_ids.get(&attachment.job_native_id) == Some(building));
             }
         }
     }
@@ -283,52 +334,95 @@ pub fn analyze<S: OperationsStateView + ?Sized>(
     for (id, target) in selected {
         work.charge(1)?;
         let building = buildings.get(&id).copied();
-        let identity = building.map(|_| handle(snapshot, building_entity_id(id), EntityKind::Building)).transpose()?;
+        let identity = building
+            .map(|_| handle(snapshot, building_entity_id(id), EntityKind::Building))
+            .transpose()?;
         let group = jobs.remove(&id).unwrap_or_default();
-        let item = target.item_native_id.map(|item_id| -> Result<ItemEvidence> {
-            let observed = items.get(&item_id).copied();
-            let (_, attached_jobs, attached_construction_jobs) =
-                attachments.get(&item_id).copied().unwrap_or_default();
-            Ok(ItemEvidence {
-                native_id: item_id,
-                handle: observed.map(|_| handle(snapshot, item_entity_id(item_id), EntityKind::Item)).transpose()?,
-                type_key: observed.map(|v| v.type_key.clone()),
-                flags: observed.map(|v| v.flags),
-                container_native_id: observed.and_then(|v| v.container_native_id),
-                holder_building_native_id: observed.and_then(|v| v.holder_building_native_id),
-                attached_jobs,
-                attached_construction_jobs,
-                installed_condition: observed.map(|v| building.is_some_and(|b| installed_item(v, id, &b.type_key, attached_jobs))),
+        let item = target
+            .item_native_id
+            .map(|item_id| -> Result<ItemEvidence> {
+                let observed = items.get(&item_id).copied();
+                let (_, attached_jobs, attached_construction_jobs) =
+                    attachments.get(&item_id).copied().unwrap_or_default();
+                Ok(ItemEvidence {
+                    native_id: item_id,
+                    handle: observed
+                        .map(|_| handle(snapshot, item_entity_id(item_id), EntityKind::Item))
+                        .transpose()?,
+                    type_key: observed.map(|v| v.type_key.clone()),
+                    flags: observed.map(|v| v.flags),
+                    container_native_id: observed.and_then(|v| v.container_native_id),
+                    holder_building_native_id: observed.and_then(|v| v.holder_building_native_id),
+                    attached_jobs,
+                    attached_construction_jobs,
+                    installed_condition: observed.map(|v| {
+                        building.is_some_and(|b| installed_item(v, id, &b.type_key, attached_jobs))
+                    }),
+                })
             })
-        }).transpose()?;
-        let stage_complete = building.map(|b| b.max_build_stage > 0 && b.build_stage == b.max_build_stage);
+            .transpose()?;
+        let stage_complete =
+            building.map(|b| b.max_build_stage > 0 && b.build_stage == b.max_build_stage);
         let status = match building {
             None => Status::Missing,
-            Some(b) if target.expected_generation.is_some_and(|g| identity.as_ref().is_none_or(|h| h.generation != g))
-                || target.expected_type.as_ref().is_some_and(|kind| kind != &b.type_key) => Status::IdentityMismatch,
-            Some(b) if item_kind(&b.type_key).is_none() || b.max_build_stage <= 0
-                || b.max_build_stage > 32 => Status::Unsupported,
+            Some(b)
+                if target
+                    .expected_generation
+                    .is_some_and(|g| identity.as_ref().is_none_or(|h| h.generation != g))
+                    || target
+                        .expected_type
+                        .as_ref()
+                        .is_some_and(|kind| kind != &b.type_key) =>
+            {
+                Status::IdentityMismatch
+            }
+            Some(b)
+                if item_kind(&b.type_key).is_none()
+                    || b.max_build_stage <= 0
+                    || b.max_build_stage > 32 =>
+            {
+                Status::Unsupported
+            }
             Some(_) if group.removal != 0 => Status::RemovalPending,
             Some(_) if stage_complete != Some(true) || group.construction != 0 => {
-                if group.construction == 0 { Status::NoConstructionJob }
-                else if group.suspended_construction == group.construction { Status::Suspended }
-                else { Status::Pending }
+                if group.construction == 0 {
+                    Status::NoConstructionJob
+                } else if group.suspended_construction == group.construction {
+                    Status::Suspended
+                } else {
+                    Status::Pending
+                }
             }
-            Some(_) if item.as_ref().is_some_and(|v| v.installed_condition != Some(true)) => Status::ItemUnverified,
+            Some(_)
+                if item
+                    .as_ref()
+                    .is_some_and(|v| v.installed_condition != Some(true)) =>
+            {
+                Status::ItemUnverified
+            }
             Some(_) => Status::SatisfiedAtObservation,
         };
         rows.push(Row {
-            target: target.clone(), handle: identity,
+            target: target.clone(),
+            handle: identity,
             type_key: building.map(|b| b.type_key.clone()),
             min: building.map(|b| MapCoord::new(b.x1, b.y1, b.z)),
             max: building.map(|b| MapCoord::new(b.x2, b.y2, b.z)),
             stage: building.map(|b| b.build_stage),
             maximum_stage: building.map(|b| b.max_build_stage),
-            stage_complete, jobs: group, item, status,
+            stage_complete,
+            jobs: group,
+            item,
+            status,
         });
     }
     work.charge(1)?;
-    Ok(Report { anchor: context.anchor, source_digest, rows, work_used: work.used })
+    Ok(Report {
+        anchor: context.anchor,
+        source_digest,
+        rows,
+        work_used: work.used,
+    })
 }
 
 #[cfg(test)]

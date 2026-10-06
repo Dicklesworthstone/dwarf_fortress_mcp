@@ -19,10 +19,10 @@ mod durability;
 pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 #[path = "query_watch_batch.rs"]
 pub(super) mod batch;
-#[path = "query_watch_count.rs"]
-mod counts;
 #[path = "query_watch_construction.rs"]
 mod construction;
+#[path = "query_watch_count.rs"]
+mod counts;
 #[path = "query_condition_evaluation.rs"]
 mod inspection;
 #[path = "query_watch_replay.rs"]
@@ -400,7 +400,9 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                 construction::validate(targets)?;
                 furniture_targets = furniture_targets.saturating_add(targets.len());
                 if furniture_targets > 2 * construction::MAX_TARGETS {
-                    return Err(bounded("success/failure furniture sets exceed 64 total targets"));
+                    return Err(bounded(
+                        "success/failure furniture sets exceed 64 total targets",
+                    ));
                 }
             }
             Condition::Field {

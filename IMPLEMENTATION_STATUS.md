@@ -44,6 +44,19 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-workspace Rust test execution (2026-10-06)
+
+For the first time in recent history the complete workspace test graph built
+and ran: **3,054 tests passed, 0 failed, 2 ignored** (`cargo test --workspace`,
+debug profile with `CARGO_PROFILE_DEV_DEBUG=0`; full debuginfo is what drove the
+earlier asupersync compiler OOMs). This executes the previously uncompiled
+furniture-request, allocation-owner and completion MCP source paths' unit tests,
+but not their process-level scenarios, warning-denied Clippy, rustdoc, native
+DFHack, live-game or production qualification. Repairs made to get there:
+stale integration tests, nine MCP servers whose `cx.io()` gate refused all work
+under the native runtime, closed-query field leaks, a cross-module test session
+race, and three-way merge branch validation.
+
 ### Requested furniture slots through MCP: source present, execution blocked
 
 The furniture server now accepts `open_session(furniture_request=...)` as an

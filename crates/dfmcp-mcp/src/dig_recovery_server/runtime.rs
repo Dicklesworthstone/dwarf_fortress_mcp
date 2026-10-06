@@ -1,5 +1,6 @@
 //! Owned blocking execution and a second, query-only native boundary.
 use super::{error, unbound};
+use asupersync::Cx;
 use dfmcp_adapter::dig_designation::journal::session::DigSessionGuard;
 use dfmcp_adapter::dig_designation::journal::{DigBinding, DigGuard, DigMode, DigStage};
 use dfmcp_adapter::dig_designation::rpc::{
@@ -7,7 +8,6 @@ use dfmcp_adapter::dig_designation::rpc::{
 };
 use dfmcp_adapter::dig_designation::{DigEffect, DigObservation, DigPlan, DigRegion};
 use dfmcp_core::{ErrorCode, MapCoord, MapCuboid, OperationContext, Result};
-use asupersync::Cx;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{

@@ -44,9 +44,10 @@ impl ObligationRuntime {
                 "cancellation exceeds the bounded compensation-step inventory",
             ));
         }
-        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation")
-        })?;
+        let obligation = self
+            .obligations
+            .get_mut(&action_id)
+            .ok_or_else(|| DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation"))?;
         if current_tick < obligation.registered_tick
             || obligation
                 .last_evaluated_tick
@@ -113,19 +114,28 @@ impl ObligationRuntime {
     /// The owner must verify compensation postconditions and drain in-flight work
     /// before asserting quiescence. This method performs no game or storage I/O.
     pub fn record_drain_progress(&mut self, certificate: &DrainProgressCertificate) -> Result<()> {
-        let obligation = self.obligations.get(&certificate.action_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation")
-        })?;
-        let previous = self.drain_progress.get(&certificate.action_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::Conflict, "obligation has no registered cancellation drain")
-        })?;
+        let obligation = self
+            .obligations
+            .get(&certificate.action_id)
+            .ok_or_else(|| DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation"))?;
+        let previous = self
+            .drain_progress
+            .get(&certificate.action_id)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "obligation has no registered cancellation drain",
+                )
+            })?;
         let drain_started_tick = match obligation.status {
             ObligationStatus::Draining { drain_started_tick } => drain_started_tick,
             ObligationStatus::Cancelled { .. } if previous == certificate => return Ok(()),
-            _ => return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "progress can only advance an active cancellation drain",
-            )),
+            _ => {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "progress can only advance an active cancellation drain",
+                ));
+            }
         };
         if certificate.drain_started_tick != drain_started_tick
             || certificate.current_tick < drain_started_tick
@@ -136,9 +146,12 @@ impl ObligationRuntime {
             || (certificate.is_quiescent && certificate.steps_remaining != 0)
             || (previous.is_quiescent && !certificate.is_quiescent)
         {
-            return Err(incomplete("drain progress changed its identity, inventory or monotone bounds"));
+            return Err(incomplete(
+                "drain progress changed its identity, inventory or monotone bounds",
+            ));
         }
-        self.drain_progress.insert(certificate.action_id, certificate.clone());
+        self.drain_progress
+            .insert(certificate.action_id, certificate.clone());
         Ok(())
     }
 
@@ -156,9 +169,10 @@ impl ObligationRuntime {
         current_tick: GameTick,
         certificate: &DrainProgressCertificate,
     ) -> Result<()> {
-        let obligation = self.obligations.get_mut(&action_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation")
-        })?;
+        let obligation = self
+            .obligations
+            .get_mut(&action_id)
+            .ok_or_else(|| DfmcpError::new(ErrorCode::InvalidRequest, "unknown obligation"))?;
         let identity_matches = certificate.action_id == action_id
             && certificate.current_tick == current_tick
             && self.drain_progress.get(&action_id) == Some(certificate);
@@ -176,10 +190,13 @@ impl ObligationRuntime {
                 Ok(())
             }
             ObligationStatus::Cancelled { cancelled_at_tick }
-                if identity_matches && current_tick == cancelled_at_tick => Ok(()),
-            ObligationStatus::Draining { .. } | ObligationStatus::Cancelled { .. } => {
-                Err(incomplete("cancellation requires its exact recorded quiescent certificate"))
+                if identity_matches && current_tick == cancelled_at_tick =>
+            {
+                Ok(())
             }
+            ObligationStatus::Draining { .. } | ObligationStatus::Cancelled { .. } => Err(
+                incomplete("cancellation requires its exact recorded quiescent certificate"),
+            ),
             _ => Err(DfmcpError::new(
                 ErrorCode::Conflict,
                 "cancellation can be finalized only from the draining state",

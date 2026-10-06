@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn echoed_announcement_cursor_must_match_the_request() -> Result<()> {
-        let batch = announcement_batch(8, vec![announcement(10, "wrong cursor")], true)?;
+        let batch = announcement_batch(8, vec![announcement(9, "wrong cursor")], true)?;
         let mut source = source(vec![page(0, 1, &[1], true, batch)]);
         let failure = read_complete_observation_v1_1_bounded(&mut source, 1, true, 1, 9, 128)
             .expect_err("the source echoed a different announcement cursor");

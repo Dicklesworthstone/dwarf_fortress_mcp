@@ -1,12 +1,12 @@
 //! Explicit operator selection and inherited, supervised blocking ownership.
 use super::{error, unbound};
+use asupersync::Cx;
 use dfmcp_adapter::dig_control_policy::DigCheckpointPolicy;
 use dfmcp_adapter::dig_designation::journal::session::DigSessionGuard;
 use dfmcp_adapter::dig_designation::journal::{DigBinding, DigGuard, DigStage};
 use dfmcp_adapter::dig_designation::rpc::{DigRpcClient, DigTcpStream};
 use dfmcp_adapter::dig_designation::{DigPlan, DigRegion};
 use dfmcp_core::{ErrorCode, MapCoord, MapCuboid, OperationContext, Result};
-use asupersync::Cx;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{

@@ -141,12 +141,9 @@ mod runtime_entry_tests {
                 assert!(child_cx.checkpoint().is_ok());
                 (42, std::thread::current().id())
             })?;
-            let (answer, worker) = asupersync::time::timeout(
-                cx.now(),
-                Duration::from_secs(5),
-                child.join(&cx),
-            )
-            .await??;
+            let (answer, worker) =
+                asupersync::time::timeout(cx.now(), Duration::from_secs(5), child.join(&cx))
+                    .await??;
             assert_eq!(answer, 42);
             assert_ne!(worker, caller);
             Ok::<_, Box<dyn Error>>(())

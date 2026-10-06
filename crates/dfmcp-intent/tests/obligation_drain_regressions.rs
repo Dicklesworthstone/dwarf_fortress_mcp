@@ -24,9 +24,13 @@ fn draining(steps: usize) -> Result<(ObligationRuntime, ActionId)> {
     Ok((runtime, action))
 }
 
-fn progress(action: ActionId, tick: u64, done: usize, remaining: usize, quiet: bool)
-    -> DrainProgressCertificate
-{
+fn progress(
+    action: ActionId,
+    tick: u64,
+    done: usize,
+    remaining: usize,
+    quiet: bool,
+) -> DrainProgressCertificate {
     DrainProgressCertificate {
         action_id: action,
         drain_started_tick: GameTick(10),
@@ -43,16 +47,26 @@ fn multi_step_compensation_waits_for_both_all_work_and_quiescence() -> Result<()
     let first = progress(action, 11, 1, 2, false);
     runtime.record_drain_progress(&first)?;
     assert_eq!(runtime.get_drain_progress(action), Some(&first));
-    assert!(runtime.finalize_cancel(action, GameTick(11), &first).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(11), &first)
+            .is_err()
+    );
     let all_done = progress(action, 12, 3, 0, false);
     runtime.record_drain_progress(&all_done)?;
-    assert!(runtime.finalize_cancel(action, GameTick(12), &all_done).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(12), &all_done)
+            .is_err()
+    );
     let quiet = progress(action, 13, 3, 0, true);
     runtime.record_drain_progress(&quiet)?;
     runtime.finalize_cancel(action, GameTick(13), &quiet)?;
     assert!(matches!(
         runtime.get_status(action),
-        Some(ObligationStatus::Cancelled { cancelled_at_tick: GameTick(13) })
+        Some(ObligationStatus::Cancelled {
+            cancelled_at_tick: GameTick(13)
+        })
     ));
     assert_eq!(runtime.get_drain_progress(action), Some(&quiet));
     Ok(())
@@ -66,7 +80,10 @@ fn finalization_cannot_skip_progress_registration() -> Result<()> {
     let result = runtime.finalize_cancel(action, GameTick(20), &claimed);
     assert!(matches!(result, Err(error) if error.code == ErrorCode::CancellationIncomplete));
     assert_eq!(runtime.get_drain_progress(action).cloned(), before);
-    assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Draining { .. })));
+    assert!(matches!(
+        runtime.get_status(action),
+        Some(ObligationStatus::Draining { .. })
+    ));
     Ok(())
 }
 
@@ -93,13 +110,20 @@ fn progress_counts_ticks_and_quiescence_cannot_regress() -> Result<()> {
     let (mut runtime, action) = draining(3)?;
     let first = progress(action, 20, 2, 1, false);
     runtime.record_drain_progress(&first)?;
-    for bad in [progress(action, 21, 1, 2, false), progress(action, 19, 3, 0, true)] {
+    for bad in [
+        progress(action, 21, 1, 2, false),
+        progress(action, 19, 3, 0, true),
+    ] {
         assert!(runtime.record_drain_progress(&bad).is_err());
         assert_eq!(runtime.get_drain_progress(action), Some(&first));
     }
     let quiet = progress(action, 21, 3, 0, true);
     runtime.record_drain_progress(&quiet)?;
-    assert!(runtime.record_drain_progress(&progress(action, 22, 3, 0, false)).is_err());
+    assert!(
+        runtime
+            .record_drain_progress(&progress(action, 22, 3, 0, false))
+            .is_err()
+    );
     assert_eq!(runtime.get_drain_progress(action), Some(&quiet));
     Ok(())
 }
@@ -114,9 +138,17 @@ fn certificate_identity_and_finalization_tick_must_match() -> Result<()> {
     assert!(matches!(unknown, Err(error) if error.code == ErrorCode::InvalidRequest));
     let quiet = progress(action, 11, 1, 0, true);
     runtime.record_drain_progress(&quiet)?;
-    assert!(runtime.finalize_cancel(action, GameTick(12), &quiet).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(12), &quiet)
+            .is_err()
+    );
     let wrong_action = progress(ActionId::new(2), 11, 1, 0, true);
-    assert!(runtime.finalize_cancel(action, GameTick(11), &wrong_action).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(11), &wrong_action)
+            .is_err()
+    );
     runtime.finalize_cancel(action, GameTick(11), &quiet)?;
     Ok(())
 }
@@ -133,7 +165,11 @@ fn exact_progress_and_terminal_replay_are_idempotent_not_replaceable() -> Result
     runtime.finalize_cancel(action, GameTick(11), &quiet)?;
     let later = progress(action, 12, 1, 0, true);
     assert!(runtime.record_drain_progress(&later).is_err());
-    assert!(runtime.finalize_cancel(action, GameTick(12), &later).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(12), &later)
+            .is_err()
+    );
     assert_eq!(runtime.get_status(action).cloned(), terminal);
     assert_eq!(runtime.get_drain_progress(action), Some(&quiet));
     Ok(())
@@ -158,7 +194,11 @@ fn repeated_requests_preserve_inventory_and_latest_progress() -> Result<()> {
 fn zero_work_still_requires_a_report_of_quiescence() -> Result<()> {
     let (mut runtime, action) = draining(0)?;
     let quiet = progress(action, 11, 0, 0, true);
-    assert!(runtime.finalize_cancel(action, GameTick(11), &quiet).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(action, GameTick(11), &quiet)
+            .is_err()
+    );
     runtime.record_drain_progress(&quiet)?;
     runtime.finalize_cancel(action, GameTick(11), &quiet)?;
     Ok(())
@@ -171,7 +211,10 @@ fn excessive_inventory_is_refused_without_starting_cancellation() -> Result<()> 
     runtime.register_obligation(action, goal(), GameTick(0))?;
     let result = runtime.request_cancel_with_steps(action, GameTick(10), 65_537);
     assert!(matches!(result, Err(error) if error.code == ErrorCode::BudgetExceeded));
-    assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Active { .. })));
+    assert!(matches!(
+        runtime.get_status(action),
+        Some(ObligationStatus::Active { .. })
+    ));
     assert_eq!(runtime.get_drain_progress(action), None);
     runtime.request_cancel_with_steps(action, GameTick(10), 65_536)?;
     Ok(())
@@ -184,7 +227,10 @@ fn progress_cannot_create_a_cancellation_for_an_active_obligation() -> Result<()
     runtime.register_obligation(action, goal(), GameTick(0))?;
     let result = runtime.record_drain_progress(&progress(action, 10, 0, 0, true));
     assert!(matches!(result, Err(error) if error.code == ErrorCode::Conflict));
-    assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Active { .. })));
+    assert!(matches!(
+        runtime.get_status(action),
+        Some(ObligationStatus::Active { .. })
+    ));
     assert_eq!(runtime.get_drain_progress(action), None);
     Ok(())
 }
@@ -209,9 +255,16 @@ fn independent_drains_cannot_finalize_each_other() -> Result<()> {
     runtime.record_drain_progress(&first_progress)?;
     let second_done = progress(second, 12, 1, 0, true);
     runtime.record_drain_progress(&second_done)?;
-    assert!(runtime.finalize_cancel(first, GameTick(12), &second_done).is_err());
+    assert!(
+        runtime
+            .finalize_cancel(first, GameTick(12), &second_done)
+            .is_err()
+    );
     runtime.finalize_cancel(second, GameTick(12), &second_done)?;
     assert_eq!(runtime.get_drain_progress(first), Some(&first_progress));
-    assert!(matches!(runtime.get_status(first), Some(ObligationStatus::Draining { .. })));
+    assert!(matches!(
+        runtime.get_status(first),
+        Some(ObligationStatus::Draining { .. })
+    ));
     Ok(())
 }

@@ -904,7 +904,10 @@ where
                 .as_ref()
                 .and_then(|p| p.definition().handoff())
                 .ok_or_else(|| {
-                    error(ErrorCode::InvalidRequest, "this batch has no allocation origin")
+                    error(
+                        ErrorCode::InvalidRequest,
+                        "this batch has no allocation origin",
+                    )
                 })?;
             Ok(json!({
                 "ok":true,

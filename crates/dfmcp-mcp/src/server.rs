@@ -26,7 +26,7 @@ use dfmcp_adapter::{
     QueryRequest,
 };
 use dfmcp_core::{
-    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, Digest32, DfmcpError,
+    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, Digest32,
     EntityId, ErrorCode, FortressId, GameTick, IntentId, ObservationCursor, OperationContext,
     RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };

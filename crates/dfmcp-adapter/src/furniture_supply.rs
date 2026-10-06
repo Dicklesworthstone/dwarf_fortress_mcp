@@ -125,7 +125,15 @@ pub fn plan<S: OperationsStateView + ?Sized>(
     requested: &Request,
     maximum_work: u64,
 ) -> Result<Report> {
-    plan_with_check(state, context, folder, site, requested, maximum_work, &mut || Ok(()))
+    plan_with_check(
+        state,
+        context,
+        folder,
+        site,
+        requested,
+        maximum_work,
+        &mut || Ok(()),
+    )
 }
 
 /// Plan under the live foreground owner's cancellation and authority checks.

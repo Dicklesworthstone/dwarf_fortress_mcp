@@ -62,7 +62,10 @@ fn failure_evidence_is_not_hidden_by_poll_cadence() -> Result<()> {
     runtime.step_tick(&snapshot(1, 1, true))?;
     assert!(matches!(
         runtime.get_status(action),
-        Some(ObligationStatus::Failed { failed_at_tick: GameTick(1), .. })
+        Some(ObligationStatus::Failed {
+            failed_at_tick: GameTick(1),
+            ..
+        })
     ));
     Ok(())
 }
@@ -79,7 +82,10 @@ fn off_cadence_contradiction_resets_without_postponing_the_next_sample() -> Resu
     runtime.step_tick(&snapshot(20, 20, false))?;
     assert_streak(&runtime, action, 1);
     runtime.step_tick(&snapshot(30, 30, false))?;
-    assert!(matches!(runtime.get_status(action), Some(ObligationStatus::Fulfilled { .. })));
+    assert!(matches!(
+        runtime.get_status(action),
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
     Ok(())
 }
 
@@ -122,7 +128,10 @@ fn matching_deadline_with_insufficient_samples_is_immediately_terminal() -> Resu
     runtime.step_tick(&snapshot(15, 15, false))?;
     assert!(matches!(
         runtime.get_status(action),
-        Some(ObligationStatus::Failed { failed_at_tick: GameTick(15), .. })
+        Some(ObligationStatus::Failed {
+            failed_at_tick: GameTick(15),
+            ..
+        })
     ));
     Ok(())
 }
@@ -136,7 +145,10 @@ fn final_eligible_sample_at_deadline_can_complete_outside_poll_cadence() -> Resu
     let final_sample = snapshot(15, 15, false);
     runtime.step_tick(&final_sample)?;
     match runtime.get_status(action) {
-        Some(ObligationStatus::Fulfilled { fulfilled_at_tick, evidence }) => {
+        Some(ObligationStatus::Fulfilled {
+            fulfilled_at_tick,
+            evidence,
+        }) => {
             assert_eq!(*fulfilled_at_tick, GameTick(15));
             assert_eq!(evidence.len(), 1);
             assert_eq!(evidence[0].anchor, final_sample.anchor());

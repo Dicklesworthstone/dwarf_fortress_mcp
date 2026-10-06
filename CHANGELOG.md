@@ -8,6 +8,17 @@ readiness.
 
 ### Fixed
 
+- The whole Rust workspace test graph compiles and passes again on the pinned
+  nightly: 3,054 tests, 0 failed (debug, `CARGO_PROFILE_DEV_DEBUG=0` to keep the
+  asupersync build under ~8 GB). Nine development MCP servers refused every
+  request because they required `cx.io()`, which asupersync 0.5's native runtime
+  never installs; they now check effective `capabilities().io`. Closed
+  `schema`/`baselines` queries now reject unknown fields. Three-way world merges
+  accept branches several observations ahead of their base while still rejecting
+  dangling edges, and epoch-crossing deltas name the epoch change. This is
+  development execution, not warning-denied Clippy, native, live or production
+  qualification.
+
 - Furniture preparation now checks native-global uncertainty and retention
   capacity after its fresh-key query, before writing local intent. A known native
   refusal cannot strand a local operation that was never prepared. The latest

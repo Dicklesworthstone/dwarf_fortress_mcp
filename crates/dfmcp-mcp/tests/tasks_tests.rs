@@ -9,7 +9,7 @@ use dfmcp_core::{
     GameTick, IntentId, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId,
     StateAnchor, StepId, WorkBudget,
 };
-use dfmcp_intent::{Action, PlanStep, PreparedPlan};
+use dfmcp_intent::{Action, PlanStep, PreparedPlan, derive_step_idempotency_key};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_mcp::tasks::{McpTaskStatus, cancel_action_task, project_action_task};
 use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
@@ -66,7 +66,14 @@ fn sample_plan(anchor: StateAnchor, paused_target: bool) -> PreparedPlan {
         depends_on: Vec::new(),
         risk: RiskTier::Reversible,
         required_capability: Capability::ControlClock,
-        idempotency_key: Digest32::of_bytes(b"step_pause_task").to_hex(),
+        idempotency_key: derive_step_idempotency_key(
+            IntentId::new(1),
+            anchor,
+            StepId::new(0),
+            &Action::Pause {
+                paused: paused_target,
+            },
+        ),
     };
 
     let mut caps = BTreeSet::new();

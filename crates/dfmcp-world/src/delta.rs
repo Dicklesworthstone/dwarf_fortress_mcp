@@ -425,6 +425,16 @@ fn validate_cursor_transition(base: ObservationCursor, target: ObservationCursor
         )
         .retryable(true)
     })?;
+    if target.epoch != base.epoch {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            format!(
+                "a delta cannot span observation epoch changes ({} -> {}); bootstrap a new epoch snapshot",
+                base.epoch, target.epoch
+            ),
+        )
+        .retryable(true));
+    }
     if target != expected {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,

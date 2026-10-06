@@ -9,8 +9,8 @@ use dfmcp_adapter::live_operations::{
     LiveItem, LiveOperationsObservation, LiveOperationsState, OperationsProfile,
 };
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, ErrorCode, MapCoord, OperationContext,
-    RequestId, Result, RiskTier, SessionId, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, ErrorCode, MapCoord, OperationContext, RequestId,
+    Result, RiskTier, SessionId, WorkBudget,
 };
 use std::net::SocketAddr;
 
@@ -32,19 +32,21 @@ fn fixture(shortage: bool) -> Result<(LiveOperationsState, OperationContext, Fur
         next_item_id: 554,
         buildings: Vec::new(),
         attachments: Vec::new(),
-        items: (42..554).map(|id| LiveItem {
-            native_id: id,
-            item_type: 101,
-            type_key: "BED".into(),
-            subtype: -1,
-            material_type: 419,
-            material_index: -1,
-            stack_size: 1,
-            raw_position: MapCoord::new(10, 10, 2),
-            flags: 64,
-            container_native_id: None,
-            holder_building_native_id: None,
-        }).collect(),
+        items: (42..554)
+            .map(|id| LiveItem {
+                native_id: id,
+                item_type: 101,
+                type_key: "BED".into(),
+                subtype: -1,
+                material_type: 419,
+                material_index: -1,
+                stack_size: 1,
+                raw_position: MapCoord::new(10, 10, 2),
+                flags: 64,
+                container_native_id: None,
+                holder_building_native_id: None,
+            })
+            .collect(),
     };
     let mut state = LiveOperationsState::with_profile(OperationsProfile::PagedV1_4);
     state.publish(observed)?;
@@ -88,23 +90,34 @@ fn joined_runtime_owner_survives_complete_allocation_and_shortage()
                 let (state, context, request) = fixture(shortage).unwrap();
                 control.check().unwrap();
                 let expected = Handoff::allocate(
-                    &state, &context, endpoint(), &request, furniture_supply::MAX_WORK,
-                ).unwrap();
+                    &state,
+                    &context,
+                    endpoint(),
+                    &request,
+                    furniture_supply::MAX_WORK,
+                )
+                .unwrap();
                 let mut checks = 0;
                 let actual = Handoff::allocate_with_check(
-                    &state, &context, endpoint(), &request, furniture_supply::MAX_WORK,
+                    &state,
+                    &context,
+                    endpoint(),
+                    &request,
+                    furniture_supply::MAX_WORK,
                     &mut || {
                         checks += 1;
                         control.check()
                     },
-                ).unwrap();
+                )
+                .unwrap();
                 assert!(checks > 6, "owner was checked only outside the solver");
                 assert_eq!(actual, expected);
                 assert_eq!(actual.handoff.is_none(), shortage);
                 control.check().unwrap();
             }
             "owned-allocation".into()
-        }).await
+        })
+        .await
     })?;
     assert_eq!(output, "owned-allocation");
     Ok(())
@@ -120,12 +133,17 @@ fn inherited_runtime_restriction_interrupts_allocation_before_result_publication
                 let before = state.snapshot().cloned();
                 let mut total = 0;
                 let expected = Handoff::allocate_with_check(
-                    &state, &context, endpoint(), &request, furniture_supply::MAX_WORK,
+                    &state,
+                    &context,
+                    endpoint(),
+                    &request,
+                    furniture_supply::MAX_WORK,
                     &mut || {
                         total += 1;
                         control.check()
                     },
-                ).unwrap();
+                )
+                .unwrap();
                 assert!(total > 6);
                 // Include source entry, interior scan/matching, and the final
                 // handoff/shortage check. No environment mutation or test-only
@@ -134,7 +152,11 @@ fn inherited_runtime_restriction_interrupts_allocation_before_result_publication
                     let mut restriction = None;
                     let mut visited = 0;
                     let outcome = Handoff::allocate_with_check(
-                        &state, &context, endpoint(), &request, furniture_supply::MAX_WORK,
+                        &state,
+                        &context,
+                        endpoint(),
+                        &request,
+                        furniture_supply::MAX_WORK,
                         &mut || {
                             visited += 1;
                             if visited == stop {
@@ -145,17 +167,29 @@ fn inherited_runtime_restriction_interrupts_allocation_before_result_publication
                     );
                     drop(restriction);
                     assert_eq!(outcome.unwrap_err().code, ErrorCode::CapabilityDenied);
-                    assert_eq!(visited, stop, "solver continued after losing its owner authority");
+                    assert_eq!(
+                        visited, stop,
+                        "solver continued after losing its owner authority"
+                    );
                     assert_eq!(state.snapshot(), before.as_ref());
                     control.check().unwrap();
                 }
-                assert_eq!(Handoff::allocate_with_check(
-                    &state, &context, endpoint(), &request, furniture_supply::MAX_WORK,
-                    &mut || control.check(),
-                ).unwrap(), expected);
+                assert_eq!(
+                    Handoff::allocate_with_check(
+                        &state,
+                        &context,
+                        endpoint(),
+                        &request,
+                        furniture_supply::MAX_WORK,
+                        &mut || control.check(),
+                    )
+                    .unwrap(),
+                    expected
+                );
             }
             "owner-restriction-observed".into()
-        }).await
+        })
+        .await
     })?;
     assert_eq!(output, "owner-restriction-observed");
     Ok(())

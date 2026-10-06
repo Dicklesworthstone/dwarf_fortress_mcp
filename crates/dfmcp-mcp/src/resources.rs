@@ -68,10 +68,10 @@ fn session_id_param(raw: &str) -> std::result::Result<dfmcp_core::SessionId, Mcp
         .map_err(|error| McpError::invalid_params(format!("invalid_params: {}", error.message)))
 }
 
-fn lookup(raw: &str, operation: &str) -> std::result::Result<
-    Arc<std::sync::Mutex<crate::server::LabSession>>,
-    McpError,
-> {
+fn lookup(
+    raw: &str,
+    operation: &str,
+) -> std::result::Result<Arc<std::sync::Mutex<crate::server::LabSession>>, McpError> {
     let session_id = session_id_param(raw)?;
     lookup_session(session_id).map_err(|error| denial(operation, error))
 }
@@ -113,10 +113,7 @@ fn template_read_refusal() -> McpError {
 
 /// `df://session/{session_id}/summary` — bounded snapshot projection.
 /// Requires the session's negotiated `observe` capability.
-pub(crate) fn session_summary(
-    session_id_hex: &str,
-    uri: &str,
-) -> McpResult<Vec<ResourceContent>> {
+pub(crate) fn session_summary(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/summary";
     let session = lookup(session_id_hex, operation)?;
     let mut guard = session.lock().map_err(|_| poisoned(operation))?;
@@ -368,14 +365,22 @@ mod tests {
     use super::*;
     use crate::server::{
         fortress_cancel, fortress_checkpoint, fortress_commit, fortress_doctor, fortress_explain,
-        fortress_open_session, fortress_observe, fortress_plan, fortress_query, fortress_restore,
+        fortress_observe, fortress_open_session, fortress_plan, fortress_query, fortress_restore,
         fortress_wait,
     };
     use serde_json::Value;
 
     fn open_default() -> Value {
         serde_json::from_str(&fortress_open_session(
-            Some(true), None, None, None, None, None, None, None, None,
+            Some(true),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ))
         .expect("open_session returns JSON")
     }
@@ -400,7 +405,10 @@ mod tests {
     }
 
     fn session_id_of(payload: &Value) -> String {
-        payload["session_id"].as_str().expect("session_id").to_owned()
+        payload["session_id"]
+            .as_str()
+            .expect("session_id")
+            .to_owned()
     }
 
     fn error_code(response: &Value) -> &str {
@@ -532,8 +540,7 @@ mod tests {
         assert_eq!(negotiation["mcp_protocol_version"], "2026-07-28");
         assert_eq!(negotiation["dfmcp_protocol_version"], "dfmcp/0");
         assert_eq!(
-            negotiation["schema_catalog_digest"],
-            second["negotiation"]["schema_catalog_digest"],
+            negotiation["schema_catalog_digest"], second["negotiation"]["schema_catalog_digest"],
             "schema catalog digest must be deterministic across sessions"
         );
         assert_eq!(negotiation["canonical_schema_version"], "0.1.0");

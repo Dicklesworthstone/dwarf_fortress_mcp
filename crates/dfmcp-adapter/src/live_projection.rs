@@ -1015,19 +1015,22 @@ mod tests {
             .is_err()
         );
 
+        // Invalid pages may be refused while assembling the capsule or while
+        // projecting it; either way no projection may be produced.
+        let rejected = |invalid| -> bool {
+            let mut assembler = ObservationAssembler::new(manifest());
+            if assembler.push_page(invalid).is_err() {
+                return true;
+            }
+            assembler.finalize().map_or(true, |capsule| {
+                project_live_capsule(&capsule, FortressId::new(9), ObservationCursor::ORIGIN)
+                    .is_err()
+            })
+        };
+
         let mut invalid_site = page(0, 1, &[1], true);
         invalid_site.site_id = -1;
-        let mut assembler = ObservationAssembler::new(manifest());
-        assembler.push_page(invalid_site)?;
-        let invalid_site_capsule = assembler.finalize()?;
-        assert!(
-            project_live_capsule(
-                &invalid_site_capsule,
-                FortressId::new(9),
-                ObservationCursor::ORIGIN,
-            )
-            .is_err()
-        );
+        assert!(rejected(invalid_site));
 
         let mut invalid_clock = page(0, 1, &[1], true);
         invalid_clock.current_year_tick = u32::try_from(TICKS_PER_YEAR).map_err(|_| {
@@ -1036,31 +1039,11 @@ mod tests {
                 "tick bound does not fit u32",
             )
         })?;
-        let mut assembler = ObservationAssembler::new(manifest());
-        assembler.push_page(invalid_clock)?;
-        let invalid_clock_capsule = assembler.finalize()?;
-        assert!(
-            project_live_capsule(
-                &invalid_clock_capsule,
-                FortressId::new(9),
-                ObservationCursor::ORIGIN,
-            )
-            .is_err()
-        );
+        assert!(rejected(invalid_clock));
 
         let mut invalid_roster = page(0, 1, &[1], true);
         invalid_roster.citizens[0].resident = true;
-        let mut assembler = ObservationAssembler::new(manifest());
-        assembler.push_page(invalid_roster)?;
-        let invalid_roster_capsule = assembler.finalize()?;
-        assert!(
-            project_live_capsule(
-                &invalid_roster_capsule,
-                FortressId::new(9),
-                ObservationCursor::ORIGIN,
-            )
-            .is_err()
-        );
+        assert!(rejected(invalid_roster));
         Ok(())
     }
 }

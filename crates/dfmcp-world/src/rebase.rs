@@ -390,7 +390,7 @@ impl SemanticRebaseEngine {
                 events,
             },
         );
-        if diff_snapshots(base, &merged).is_err() {
+        if !transition_is_valid(base, &merged) {
             return Err(ConflictCertificate::new(
                 plan_id,
                 base_anchor,
@@ -485,12 +485,26 @@ fn merge_scalar<T: Copy + PartialEq>(base: T, ours: T, theirs: T) -> Option<T> {
     }
 }
 
+/// A merge branch may be several observations ahead of its base, so it is not
+/// required to be the exact cursor successor (that is a single-delta rule).
+/// Its record changes must still form a structurally valid transition, which
+/// is checked by replaying them as if they were the base's next observation.
 fn branch_is_valid(base: &WorldSnapshot, branch: &WorldSnapshot) -> bool {
     if base.anchor() == branch.anchor() {
         base == branch
     } else {
-        diff_snapshots(base, branch).is_ok()
+        transition_is_valid(base, branch)
     }
+}
+
+fn transition_is_valid(base: &WorldSnapshot, target: &WorldSnapshot) -> bool {
+    let Some(successor) = base.cursor.checked_next() else {
+        return false;
+    };
+    let mut probe = target.clone();
+    probe.cursor = successor;
+    probe.refresh_hash();
+    diff_snapshots(base, &probe).is_ok()
 }
 
 fn merge_conflict(

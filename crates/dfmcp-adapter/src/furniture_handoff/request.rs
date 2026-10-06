@@ -81,7 +81,10 @@ impl FurnitureRequest {
         }
         parser.whitespace();
         require(parser.0.is_empty(), "trailing furniture request data")?;
-        require(schema.as_deref() == Some(SCHEMA), "unsupported furniture request schema")?;
+        require(
+            schema.as_deref() == Some(SCHEMA),
+            "unsupported furniture request schema",
+        )?;
         let missing = || invalid("furniture request lacks required fields");
         Self::new(
             folder.ok_or_else(missing)?,
@@ -119,7 +122,9 @@ fn canonical(folder: &str, site: u32, request: &Request) -> Result<Vec<u8>> {
         out.push_str(&identity.to_string());
         canonical_bound(&out)?;
     }
-    out.push_str(&format!("],\"schema\":\"{SCHEMA}\",\"site\":{site},\"slots\":["));
+    out.push_str(&format!(
+        "],\"schema\":\"{SCHEMA}\",\"site\":{site},\"slots\":["
+    ));
     for (index, slot) in request.slots.iter().enumerate() {
         if index != 0 {
             out.push(',');
@@ -139,7 +144,9 @@ fn canonical(folder: &str, site: u32, request: &Request) -> Result<Vec<u8>> {
             Some((kind, index)) => format!("[{kind},{index}]"),
             None => "null".to_owned(),
         };
-        let subtype = slot.subtype.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let subtype = slot
+            .subtype
+            .map_or_else(|| "null".to_owned(), |value| value.to_string());
         let [x, y, z] = slot.target;
         out.push_str(&format!(
             "],\"kind\":\"{}\",\"material\":{material},\"max_distance\":{},\"name\":\"{}\",\"subtype\":{subtype},\"target\":[{x},{y},{z}]}}",
@@ -155,7 +162,10 @@ fn canonical(folder: &str, site: u32, request: &Request) -> Result<Vec<u8>> {
 }
 
 fn canonical_bound(value: &str) -> Result<()> {
-    require(value.len() <= MAX_REQUEST_BYTES, "normalized furniture request exceeds 16 KiB")
+    require(
+        value.len() <= MAX_REQUEST_BYTES,
+        "normalized furniture request exceeds 16 KiB",
+    )
 }
 
 /// Match json.dumps(..., ensure_ascii=True), including UTF-16 surrogate pairs.
@@ -200,7 +210,8 @@ fn check_depth(raw: &[u8]) -> Result<()> {
                     require(depth <= 8, "furniture request nesting exceeds eight levels")?;
                 }
                 b']' | b'}' => {
-                    depth = depth.checked_sub(1)
+                    depth = depth
+                        .checked_sub(1)
                         .ok_or_else(|| invalid("invalid furniture request nesting"))?;
                 }
                 _ => {}
@@ -214,7 +225,11 @@ fn check_depth(raw: &[u8]) -> Result<()> {
 struct Json<'a>(&'a [u8]);
 impl Json<'_> {
     fn whitespace(&mut self) {
-        while self.0.first().is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n')) {
+        while self
+            .0
+            .first()
+            .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        {
             self.0 = &self.0[1..];
         }
     }
@@ -231,7 +246,9 @@ impl Json<'_> {
         require(self.consume(byte), "invalid closed furniture request JSON")
     }
     fn next_byte(&mut self) -> Result<u8> {
-        let (&byte, remaining) = self.0.split_first()
+        let (&byte, remaining) = self
+            .0
+            .split_first()
             .ok_or_else(|| invalid("incomplete furniture request JSON"))?;
         self.0 = remaining;
         Ok(byte)
@@ -239,7 +256,8 @@ impl Json<'_> {
     fn hex_unit(&mut self) -> Result<u16> {
         let mut code = 0u16;
         for _ in 0..4 {
-            let digit = char::from(self.next_byte()?).to_digit(16)
+            let digit = char::from(self.next_byte()?)
+                .to_digit(16)
                 .ok_or_else(|| invalid("invalid furniture request Unicode escape"))?;
             code = code * 16 + digit as u16;
         }
@@ -248,11 +266,15 @@ impl Json<'_> {
     fn escaped_unicode(&mut self) -> Result<char> {
         let first = self.hex_unit()?;
         let code = if (0xd800..=0xdbff).contains(&first) {
-            require(self.next_byte()? == b'\\' && self.next_byte()? == b'u',
-                "unpaired furniture request Unicode surrogate")?;
+            require(
+                self.next_byte()? == b'\\' && self.next_byte()? == b'u',
+                "unpaired furniture request Unicode surrogate",
+            )?;
             let second = self.hex_unit()?;
-            require((0xdc00..=0xdfff).contains(&second),
-                "invalid furniture request Unicode surrogate pair")?;
+            require(
+                (0xdc00..=0xdfff).contains(&second),
+                "invalid furniture request Unicode surrogate pair",
+            )?;
             0x1_0000 + ((u32::from(first) - 0xd800) << 10) + u32::from(second) - 0xdc00
         } else {
             u32::from(first)
@@ -265,7 +287,8 @@ impl Json<'_> {
         loop {
             let byte = self.next_byte()?;
             if byte == b'"' {
-                return String::from_utf8(out).map_err(|_| invalid("invalid furniture request string UTF-8"));
+                return String::from_utf8(out)
+                    .map_err(|_| invalid("invalid furniture request string UTF-8"));
             }
             require(byte >= 0x20, "unescaped furniture request string control")?;
             if byte == b'\\' {
@@ -285,7 +308,10 @@ impl Json<'_> {
             } else {
                 out.push(byte);
             }
-            require(out.len() <= maximum, "furniture request string exceeds bound")?;
+            require(
+                out.len() <= maximum,
+                "furniture request string exceeds bound",
+            )?;
         }
     }
     fn number(&mut self) -> Result<i32> {
@@ -297,17 +323,31 @@ impl Json<'_> {
             false
         };
         let first = self.next_byte()?;
-        require(first.is_ascii_digit(), "furniture request values require integers")?;
+        require(
+            first.is_ascii_digit(),
+            "furniture request values require integers",
+        )?;
         let mut value = u32::from(first - b'0');
         while self.0.first().is_some_and(u8::is_ascii_digit) {
             require(first != b'0', "leading zero in furniture request integer")?;
             let digit = u32::from(self.next_byte()? - b'0');
-            value = value.checked_mul(10).and_then(|value| value.checked_add(digit))
+            value = value
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(digit))
                 .ok_or_else(|| invalid("furniture request integer exceeds bound"))?;
         }
-        require(!self.0.first().is_some_and(|byte| matches!(byte, b'.' | b'e' | b'E')),
-            "floating-point furniture request values are forbidden")?;
-        let signed = if negative { -i64::from(value) } else { i64::from(value) };
+        require(
+            !self
+                .0
+                .first()
+                .is_some_and(|byte| matches!(byte, b'.' | b'e' | b'E')),
+            "floating-point furniture request values are forbidden",
+        )?;
+        let signed = if negative {
+            -i64::from(value)
+        } else {
+            i64::from(value)
+        };
         i32::try_from(signed).map_err(|_| invalid("furniture request integer exceeds bound"))
     }
     fn unsigned(&mut self) -> Result<u32> {
@@ -348,8 +388,10 @@ impl Json<'_> {
         let mut out = Vec::new();
         if !self.consume(b']') {
             loop {
-                require(out.len() < furniture_allocation::MAX_SLOTS - 1,
-                    "furniture dependency bound exceeded")?;
+                require(
+                    out.len() < furniture_allocation::MAX_SLOTS - 1,
+                    "furniture dependency bound exceeded",
+                )?;
                 out.push(self.string(48)?);
                 if self.consume(b']') {
                     break;
@@ -364,8 +406,10 @@ impl Json<'_> {
         let mut out = Vec::new();
         if !self.consume(b']') {
             loop {
-                require(out.len() < furniture_allocation::MAX_EXCLUDED,
-                    "furniture exclusion bound exceeded")?;
+                require(
+                    out.len() < furniture_allocation::MAX_EXCLUDED,
+                    "furniture exclusion bound exceeded",
+                )?;
                 out.push(self.unsigned()?);
                 if self.consume(b']') {
                     break;
@@ -380,8 +424,10 @@ impl Json<'_> {
         let mut out = Vec::new();
         if !self.consume(b']') {
             loop {
-                require(out.len() < furniture_allocation::MAX_SLOTS,
-                    "furniture request exceeds 32 slots")?;
+                require(
+                    out.len() < furniture_allocation::MAX_SLOTS,
+                    "furniture request exceeds 32 slots",
+                )?;
                 out.push(self.slot()?);
                 if self.consume(b']') {
                     break;
@@ -401,16 +447,24 @@ impl Json<'_> {
                 self.symbol(b':')?;
                 match field.as_str() {
                     "name" if name.is_none() => name = Some(self.string(48)?),
-                    "kind" if kind.is_none() => kind = Some(match self.string(8)?.as_str() {
-                        "bed" => Kind::Bed,
-                        "chair" => Kind::Chair,
-                        "table" => Kind::Table,
-                        _ => return Err(invalid("unsupported furniture request kind")),
-                    }),
+                    "kind" if kind.is_none() => {
+                        kind = Some(match self.string(8)?.as_str() {
+                            "bed" => Kind::Bed,
+                            "chair" => Kind::Chair,
+                            "table" => Kind::Table,
+                            _ => return Err(invalid("unsupported furniture request kind")),
+                        })
+                    }
                     "target" if target.is_none() => target = Some(self.target()?),
                     "after" if after.is_none() => after = Some(self.dependencies()?),
                     "material" if material.is_none() => material = Some(self.material()?),
-                    "subtype" if subtype.is_none() => subtype = Some(if self.null() { None } else { Some(self.number()?) }),
+                    "subtype" if subtype.is_none() => {
+                        subtype = Some(if self.null() {
+                            None
+                        } else {
+                            Some(self.number()?)
+                        })
+                    }
                     "max_distance" if distance.is_none() => distance = Some(self.unsigned()?),
                     _ => return Err(invalid("unknown or duplicate furniture request slot field")),
                 }

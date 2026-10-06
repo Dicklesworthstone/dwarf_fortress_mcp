@@ -7,7 +7,10 @@ use dfmcp_core::{
 };
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 
 const TICK: u64 = 806_500;
@@ -64,27 +67,39 @@ fn manifest() -> Vec<u8> {
     out
 }
 fn serve(mut stream: TcpStream) -> Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(io_error)?;
-    stream.set_write_timeout(Some(Duration::from_secs(2))).map_err(io_error)?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(io_error)?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(io_error)?;
     let mut greeting = [0; 12];
     stream.read_exact(&mut greeting).map_err(io_error)?;
-    require(greeting == *b"DFHack?\n\x01\0\0\0", "unexpected lifecycle greeting")?;
+    require(
+        greeting == *b"DFHack?\n\x01\0\0\0",
+        "unexpected lifecycle greeting",
+    )?;
     stream.write_all(b"DFHack!\n\x01\0\0\0").map_err(io_error)?;
     let raw = capture();
     for (index, expected) in [0i16, 0, 2, 3, 3].into_iter().enumerate() {
         let mut header = [0; 8];
         stream.read_exact(&mut header).map_err(io_error)?;
         let count = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-        require(i16::from_le_bytes([header[0], header[1]]) == expected
-            && header[2..4] == [0; 2] && (0..=2048).contains(&count),
-            "unexpected lifecycle request")?;
+        require(
+            i16::from_le_bytes([header[0], header[1]]) == expected
+                && header[2..4] == [0; 2]
+                && (0..=2048).contains(&count),
+            "unexpected lifecycle request",
+        )?;
         let mut request = vec![0; count as usize];
         stream.read_exact(&mut request).map_err(io_error)?;
         let mut reply = if index < 2 {
             let mut reply = Vec::new();
             field(&mut reply, 1, index as u64 + 2);
             reply
-        } else { manifest() };
+        } else {
+            manifest()
+        };
         if index == 3 {
             blob(&mut reply, 9, &raw);
             blob(&mut reply, 10, &SNAPSHOT);
@@ -102,8 +117,10 @@ fn serve(mut stream: TcpStream) -> Result<()> {
         stream.write_all(&frame).map_err(io_error)?;
     }
     let mut extra = [0];
-    require(stream.read(&mut extra).map_err(io_error)? == 0,
-        "native connection was retained or reused after verified release")
+    require(
+        stream.read(&mut extra).map_err(io_error)? == 0,
+        "native connection was retained or reused after verified release",
+    )
 }
 
 #[test]
@@ -117,7 +134,10 @@ fn verified_release_ends_native_ownership_but_not_request_checks() -> Result<()>
             loop {
                 match listener.accept() {
                     Ok((stream, _)) => return serve(stream),
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
                         thread::yield_now();
                     }
                     Err(e) => return Err(io_error(e)),
@@ -126,16 +146,30 @@ fn verified_release_ends_native_ownership_but_not_request_checks() -> Result<()>
         });
         let fortress = FortressIdentity::new("region1", 2)?;
         let context = OperationContext {
-            session_id: SessionId::new(1), request_id: RequestId::new(2),
-            anchor: StateAnchor { fortress_id: fortress.fortress_id(),
-                cursor: ObservationCursor::ORIGIN, tick: GameTick(TICK - 1),
-                state_hash: Digest32::of_bytes(b"previous") },
-            budget: WorkBudget { max_wall_millis: 60_000, max_bytes: MAX_NETWORK_BYTES,
-                max_entities: MAX_ENTITIES, ..WorkBudget::CONSERVATIVE_DEFAULT },
-            grants: vec![CapabilityGrant { capability: Capability::Query,
-                scope: CapabilityScope { fortress_id: Some(fortress.fortress_id()),
-                    ..CapabilityScope::default() }, max_risk: RiskTier::ReadOnly,
-                expires_at_tick: None, remaining_uses: None }],
+            session_id: SessionId::new(1),
+            request_id: RequestId::new(2),
+            anchor: StateAnchor {
+                fortress_id: fortress.fortress_id(),
+                cursor: ObservationCursor::ORIGIN,
+                tick: GameTick(TICK - 1),
+                state_hash: Digest32::of_bytes(b"previous"),
+            },
+            budget: WorkBudget {
+                max_wall_millis: 60_000,
+                max_bytes: MAX_NETWORK_BYTES,
+                max_entities: MAX_ENTITIES,
+                ..WorkBudget::CONSERVATIVE_DEFAULT
+            },
+            grants: vec![CapabilityGrant {
+                capability: Capability::Query,
+                scope: CapabilityScope {
+                    fortress_id: Some(fortress.fortress_id()),
+                    ..CapabilityScope::default()
+                },
+                max_risk: RiskTier::ReadOnly,
+                expires_at_tick: None,
+                remaining_uses: None,
+            }],
             cancellation_requested: false,
         };
         let cancellation = BuildCancellation::default();
@@ -143,17 +177,29 @@ fn verified_release_ends_native_ownership_but_not_request_checks() -> Result<()>
         let signal = revoked.clone();
         let permission: ReadPermission = Box::new(move || {
             if signal.load(Ordering::Acquire) {
-                Err(DfmcpError::new(ErrorCode::CapabilityDenied, "revoked after release"))
-            } else { Ok(()) }
+                Err(DfmcpError::new(
+                    ErrorCode::CapabilityDenied,
+                    "revoked after release",
+                ))
+            } else {
+                Ok(())
+            }
         });
         let deadline = Instant::now() + Duration::from_secs(60);
-        let mut work = Work { context: &context, fortress: &fortress,
-            cancellation: &cancellation, permission: &permission, deadline,
-            high_tick: Cell::new(context.anchor.tick.get()) };
+        let mut work = Work {
+            context: &context,
+            fortress: &fortress,
+            cancellation: &cancellation,
+            permission: &permission,
+            deadline,
+            high_tick: Cell::new(context.anchor.tick.get()),
+        };
         let observed = read_observation(endpoint, &[b'o'; 32], &NONCE, &work);
         // Join BEFORE projection. This is an ownership assertion, not a race
         // between large-graph CPU time and a peer's idle socket timeout.
-        let closed = peer.join().map_err(|_| invalid("lifecycle peer panicked"))?;
+        let closed = peer
+            .join()
+            .map_err(|_| invalid("lifecycle peer panicked"))?;
         let observed = observed?;
         closed?;
         assert_eq!(work.deadline, deadline);
@@ -166,9 +212,18 @@ fn verified_release_ends_native_ownership_but_not_request_checks() -> Result<()>
                 work.check()?;
                 assert!(state.snapshot().is_some());
             }
-            1 => { cancellation.cancel(); assert!(work.check().is_err()); }
-            2 => { revoked.store(true, Ordering::Release); assert!(work.check().is_err()); }
-            _ => { work.deadline = Instant::now(); assert!(work.check().is_err()); }
+            1 => {
+                cancellation.cancel();
+                assert!(work.check().is_err());
+            }
+            2 => {
+                revoked.store(true, Ordering::Release);
+                assert!(work.check().is_err());
+            }
+            _ => {
+                work.deadline = Instant::now();
+                assert!(work.check().is_err());
+            }
         }
     }
     Ok(())

@@ -1266,7 +1266,7 @@ mod tests {
         assert!(response.rows.iter().any(|row| {
             row.fields
                 .iter()
-                .any(|(key, value)| key == "kind" && value == "event")
+                .any(|(key, value)| key == "kind" && value == "announcement")
         }));
         Ok(())
     }

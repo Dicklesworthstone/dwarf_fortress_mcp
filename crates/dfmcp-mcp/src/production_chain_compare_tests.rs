@@ -1,8 +1,8 @@
 use super::*;
 #[path = "../../dfmcp-adapter/tests/support/production_spatial.rs"]
 mod fixture;
-use dfmcp_adapter::live_spatial::citizens::LiveSpatialCitizenState;
 use dfmcp_adapter::live_spatial::SpatialStateView;
+use dfmcp_adapter::live_spatial::citizens::LiveSpatialCitizenState;
 use dfmcp_core::{CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget};
 
 fn state() -> Result<LiveSpatialCitizenState> {

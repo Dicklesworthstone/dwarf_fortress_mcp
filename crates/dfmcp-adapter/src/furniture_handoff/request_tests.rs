@@ -17,8 +17,10 @@ fn minimal_canonical_bytes_and_domain_digest_match_independent_python() -> Resul
     // scripts/furniture_allocation.py Request.decode + furniture_plan.canonical
     // and Python hashlib generated these fixed expected bytes and digests.
     assert_eq!(value.canonical_bytes(), MINIMAL_CANONICAL);
-    assert_eq!(value.digest().to_string(),
-        "4c528a3b7faf5eaf30ab583e2f5136d5f3b38e0a6f800d25283276af838ddead");
+    assert_eq!(
+        value.digest().to_string(),
+        "4c528a3b7faf5eaf30ab583e2f5136d5f3b38e0a6f800d25283276af838ddead"
+    );
     assert_eq!(value.folder(), "region1");
     assert_eq!(value.site(), 2);
     assert_eq!(value.request().slots[0].max_distance, 65_532);
@@ -26,7 +28,14 @@ fn minimal_canonical_bytes_and_domain_digest_match_independent_python() -> Resul
     assert_eq!(value.request().slots[0].subtype, None);
     assert!(value.request().excluded_items.is_empty());
     assert_eq!(FurnitureRequest::decode(value.canonical_bytes())?, value);
-    assert_eq!(FurnitureRequest::new(value.folder().to_owned(), value.site(), value.request().clone())?, value);
+    assert_eq!(
+        FurnitureRequest::new(
+            value.folder().to_owned(),
+            value.site(),
+            value.request().clone()
+        )?,
+        value
+    );
     assert_ne!(value.digest(), Digest32::of_bytes(value.canonical_bytes()));
     Ok(())
 }
@@ -37,9 +46,19 @@ fn constrained_unicode_request_matches_independent_python_canonical_and_digest()
     let expected = br#"{"excluded_items":[0,12,2147483646],"schema":"dfmcp.furniture-request/1","site":2147483647,"slots":[{"after":[],"kind":"bed","material":null,"max_distance":65532,"name":"a","subtype":null,"target":[15,15,2]},{"after":["a"],"kind":"chair","material":[419,-1],"max_distance":100,"name":"b","subtype":-1,"target":[18,15,2]},{"after":["a","b"],"kind":"table","material":[2147483647,2147483647],"max_distance":0,"name":"z","subtype":2147483647,"target":[20,15,2]}],"world_folder":"r\u00e9gion\ud83c\udff0/\b\f\n\r\t\u0001\u007f\"\\"}"#;
     let value = FurnitureRequest::decode(raw)?;
     assert_eq!(value.canonical_bytes(), expected);
-    assert_eq!(value.digest().to_string(),
-        "4c757ebbfa3828a0efd3fb09aa40b981ae47ce39edc4b45fd30bccbdd4dd0d09");
-    assert_eq!(value.request().slots.iter().map(|slot| slot.name.as_str()).collect::<Vec<_>>(), ["a", "b", "z"]);
+    assert_eq!(
+        value.digest().to_string(),
+        "4c757ebbfa3828a0efd3fb09aa40b981ae47ce39edc4b45fd30bccbdd4dd0d09"
+    );
+    assert_eq!(
+        value
+            .request()
+            .slots
+            .iter()
+            .map(|slot| slot.name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "z"]
+    );
     assert_eq!(value.request().slots[2].after, ["a", "b"]);
     assert_eq!(FurnitureRequest::decode(expected)?, value);
     Ok(())
@@ -48,7 +67,8 @@ fn constrained_unicode_request_matches_independent_python_canonical_and_digest()
 #[test]
 fn raw_utf8_and_escaped_unicode_keys_have_identical_normal_form() -> Result<()> {
     let raw = MINIMAL.replace("region1", "régi城🏰");
-    let escaped = MINIMAL.replace("region1", r"r\u00e9gi\u57ce\ud83c\udff0")
+    let escaped = MINIMAL
+        .replace("region1", r"r\u00e9gi\u57ce\ud83c\udff0")
         .replace("world_folder", r"world_\u0066older")
         .replace("schema", r"sch\u0065ma")
         .replace("furniture-request/1", r"furniture-request\/1")
@@ -58,11 +78,15 @@ fn raw_utf8_and_escaped_unicode_keys_have_identical_normal_form() -> Result<()> 
     assert_eq!(value.folder(), "régi城🏰");
     assert!(value.canonical_bytes().is_ascii());
     for (raw_folder, escaped_folder) in [
-        ("\u{80}", r"\u0080"), ("\u{ffff}", r"\uffff"),
-        ("\u{10000}", r"\ud800\udc00"), ("\u{10ffff}", r"\udbff\udfff"),
+        ("\u{80}", r"\u0080"),
+        ("\u{ffff}", r"\uffff"),
+        ("\u{10000}", r"\ud800\udc00"),
+        ("\u{10ffff}", r"\udbff\udfff"),
     ] {
-        assert_eq!(FurnitureRequest::decode(MINIMAL.replace("region1", raw_folder).as_bytes())?,
-            FurnitureRequest::decode(MINIMAL.replace("region1", escaped_folder).as_bytes())?);
+        assert_eq!(
+            FurnitureRequest::decode(MINIMAL.replace("region1", raw_folder).as_bytes())?,
+            FurnitureRequest::decode(MINIMAL.replace("region1", escaped_folder).as_bytes())?
+        );
     }
     Ok(())
 }
@@ -70,8 +94,10 @@ fn raw_utf8_and_escaped_unicode_keys_have_identical_normal_form() -> Result<()> 
 #[test]
 fn duplicate_escaped_keys_and_unknown_fields_are_rejected_at_both_levels() {
     for replacement in [
-        r#""site":2,"site":2"#, r#""site":2,"si\u0074e":2"#,
-        r#""site":2,"extra":0"#, r#""site":2,"excluded_items":[],"excluded_items":[]"#,
+        r#""site":2,"site":2"#,
+        r#""site":2,"si\u0074e":2"#,
+        r#""site":2,"extra":0"#,
+        r#""site":2,"excluded_items":[],"excluded_items":[]"#,
     ] {
         rejected(&MINIMAL.replace("\"site\":2", replacement));
     }
@@ -91,7 +117,22 @@ fn duplicate_escaped_keys_and_unknown_fields_are_rejected_at_both_levels() {
 
 #[test]
 fn integers_reject_type_syntax_and_range_substitution() -> Result<()> {
-    for number in ["null", "true", "false", "\"2\"", "2.0", "2e0", "2E+0", "02", "+2", "- 0", "-1", "2147483648", "4294967296", "999999999999999999999999"] {
+    for number in [
+        "null",
+        "true",
+        "false",
+        "\"2\"",
+        "2.0",
+        "2e0",
+        "2E+0",
+        "02",
+        "+2",
+        "- 0",
+        "-1",
+        "2147483648",
+        "4294967296",
+        "999999999999999999999999",
+    ] {
         rejected(&MINIMAL.replace("\"site\":2", &format!("\"site\":{number}")));
     }
     let zero = FurnitureRequest::decode(MINIMAL.replace("\"site\":2", "\"site\":-0").as_bytes())?;
@@ -125,23 +166,36 @@ fn only_material_and_subtype_allow_explicit_null() -> Result<()> {
     let canonical = std::str::from_utf8(MINIMAL_CANONICAL).map_err(|_| invalid("fixture UTF-8"))?;
     assert_eq!(FurnitureRequest::decode(MINIMAL_CANONICAL)?, minimal()?);
     for field in [
-        "\"excluded_items\":[]", "\"schema\":\"dfmcp.furniture-request/1\"",
-        "\"site\":2", "\"world_folder\":\"region1\"", "\"after\":[]",
-        "\"kind\":\"bed\"", "\"name\":\"bed\"", "\"max_distance\":65532",
+        "\"excluded_items\":[]",
+        "\"schema\":\"dfmcp.furniture-request/1\"",
+        "\"site\":2",
+        "\"world_folder\":\"region1\"",
+        "\"after\":[]",
+        "\"kind\":\"bed\"",
+        "\"name\":\"bed\"",
+        "\"max_distance\":65532",
         "\"target\":[15,15,2]",
     ] {
-        let (key, _) = field.split_once(':').ok_or_else(|| invalid("fixture field"))?;
+        let (key, _) = field
+            .split_once(':')
+            .ok_or_else(|| invalid("fixture field"))?;
         rejected(&canonical.replace(field, &format!("{key}:null")));
     }
-    rejected(&MINIMAL.replace(r#"[{"name":"bed","kind":"bed","target":[15,15,2]}]"#, "null"));
+    rejected(&MINIMAL.replace(
+        r#"[{"name":"bed","kind":"bed","target":[15,15,2]}]"#,
+        "null",
+    ));
     Ok(())
 }
 
 #[test]
 fn missing_fields_wrong_containers_and_trailing_data_are_rejected() {
     for field in [
-        "\"schema\":\"dfmcp.furniture-request/1\",", "\"world_folder\":\"region1\",",
-        "\"site\":2,", "\"name\":\"bed\",", "\"kind\":\"bed\",",
+        "\"schema\":\"dfmcp.furniture-request/1\",",
+        "\"world_folder\":\"region1\",",
+        "\"site\":2,",
+        "\"name\":\"bed\",",
+        "\"kind\":\"bed\",",
         ",\"target\":[15,15,2]",
     ] {
         rejected(&MINIMAL.replace(field, ""));
@@ -149,7 +203,14 @@ fn missing_fields_wrong_containers_and_trailing_data_are_rejected() {
     for raw in ["{}", "[]", "null", "true", "0", "", " ", "\"text\""] {
         rejected(raw);
     }
-    for replacement in ["{}", "[]", "[15,15]", "[15,15,2,0]", "[15,15,2,]", "\"15,15,2\""] {
+    for replacement in [
+        "{}",
+        "[]",
+        "[15,15]",
+        "[15,15,2,0]",
+        "[15,15,2,]",
+        "\"15,15,2\"",
+    ] {
         rejected(&MINIMAL.replace("[15,15,2]", replacement));
     }
     for extra in [",", " null", "{}", "\0"] {
@@ -169,7 +230,13 @@ fn normalization_rejects_duplicate_geometry_names_exclusions_and_invalid_dags() 
         value.slots[0].name = name.to_owned();
         cases.push(value);
     }
-    for target in [[0,15,2], [15,0,2], [32767,15,2], [15,32767,2], [15,15,32768]] {
+    for target in [
+        [0, 15, 2],
+        [15, 0, 2],
+        [32767, 15, 2],
+        [15, 32767, 2],
+        [15, 15, 32768],
+    ] {
         let mut value = initial.clone();
         value.slots[0].target = target;
         cases.push(value);
@@ -204,7 +271,7 @@ fn normalization_rejects_duplicate_geometry_names_exclusions_and_invalid_dags() 
     cycle.slots[1].after = vec!["bed".to_owned()];
     cases.push(cycle);
     let mut duplicate_exclusion = initial;
-    duplicate_exclusion.excluded_items = vec![1,1];
+    duplicate_exclusion.excluded_items = vec![1, 1];
     cases.push(duplicate_exclusion);
     for request in cases {
         assert!(FurnitureRequest::new("region1".to_owned(), 2, request).is_err());
@@ -231,33 +298,73 @@ fn exact_integer_name_and_dependency_boundaries_are_preserved() -> Result<()> {
     let high = FurnitureRequest::new("region1".to_owned(), i32::MAX as u32, request)?;
     assert_eq!(FurnitureRequest::decode(high.canonical_bytes())?, high);
     let prototype = minimal()?.request().slots[0].clone();
-    let mut slots: Vec<_> = (0..32).map(|index| {
-        let mut slot = prototype.clone();
-        slot.name = format!("s{index:02}");
-        slot.target[0] += index;
-        slot
-    }).collect();
-    slots[31].after = slots[..31].iter().map(|slot| slot.name.clone()).rev().collect();
-    let maximum = FurnitureRequest::new("region1".to_owned(), 2,
-        Request { slots: slots.clone(), excluded_items: vec![] })?;
+    let mut slots: Vec<_> = (0..32)
+        .map(|index| {
+            let mut slot = prototype.clone();
+            slot.name = format!("s{index:02}");
+            slot.target[0] += index;
+            slot
+        })
+        .collect();
+    slots[31].after = slots[..31]
+        .iter()
+        .map(|slot| slot.name.clone())
+        .rev()
+        .collect();
+    let maximum = FurnitureRequest::new(
+        "region1".to_owned(),
+        2,
+        Request {
+            slots: slots.clone(),
+            excluded_items: vec![],
+        },
+    )?;
     assert_eq!(maximum.request().slots[31].after.len(), 31);
-    assert_eq!(FurnitureRequest::decode(maximum.canonical_bytes())?, maximum);
+    assert_eq!(
+        FurnitureRequest::decode(maximum.canonical_bytes())?,
+        maximum
+    );
     slots[31].after.push("extra".to_owned());
-    assert!(FurnitureRequest::new("region1".to_owned(), 2,
-        Request { slots, excluded_items: vec![] }).is_err());
+    assert!(
+        FurnitureRequest::new(
+            "region1".to_owned(),
+            2,
+            Request {
+                slots,
+                excluded_items: vec![]
+            }
+        )
+        .is_err()
+    );
     Ok(())
 }
 
 #[test]
 fn unicode_controls_surrogates_and_utf8_are_validated_before_publication() {
-    for folder in [r"\u0000", r"\ud800", r"\udc00", r"\ud800x", r"\ud800\u0000",
-        r"\udc00\ud800", r"\ud800\ud800", r"\uGGGG", r"\u123", r"\q", "bad\nfolder", ""] {
+    for folder in [
+        r"\u0000",
+        r"\ud800",
+        r"\udc00",
+        r"\ud800x",
+        r"\ud800\u0000",
+        r"\udc00\ud800",
+        r"\ud800\ud800",
+        r"\uGGGG",
+        r"\u123",
+        r"\q",
+        "bad\nfolder",
+        "",
+    ] {
         rejected(&MINIMAL.replace("region1", folder));
     }
     let mut raw = MINIMAL.as_bytes().to_vec();
     raw[60] = 0xff;
     assert!(FurnitureRequest::decode(&raw).is_err());
-    for prefix in [&[0xef,0xbb,0xbf][..], &[0xc0,0x80][..], &[0xed,0xa0,0x80][..]] {
+    for prefix in [
+        &[0xef, 0xbb, 0xbf][..],
+        &[0xc0, 0x80][..],
+        &[0xed, 0xa0, 0x80][..],
+    ] {
         let mut bytes = prefix.to_vec();
         bytes.extend_from_slice(MINIMAL.as_bytes());
         assert!(FurnitureRequest::decode(&bytes).is_err());
@@ -272,7 +379,13 @@ fn folder_bound_counts_utf8_bytes_and_site_bound_applies_to_typed_constructor() 
         assert_eq!(value.folder().len(), 512);
         assert_eq!(FurnitureRequest::decode(value.canonical_bytes())?, value);
     }
-    for folder in ["x".repeat(513), "é".repeat(257), "🏰".repeat(129), "".to_owned(), "x\0".to_owned()] {
+    for folder in [
+        "x".repeat(513),
+        "é".repeat(257),
+        "🏰".repeat(129),
+        "".to_owned(),
+        "x\0".to_owned(),
+    ] {
         assert!(FurnitureRequest::new(folder, 2, request.clone()).is_err());
     }
     assert!(FurnitureRequest::new("region1".to_owned(), i32::MAX as u32 + 1, request).is_err());
@@ -297,15 +410,21 @@ fn input_depth_and_byte_bounds_are_checked_independently_of_normalized_size() ->
 fn slot_collection_and_normalized_output_bounds_prevent_partial_requests() -> Result<()> {
     let initial = minimal()?;
     let mut request = initial.request().clone();
-    request.slots = (0..32).rev().map(|index| {
-        let mut slot = request.slots[0].clone();
-        slot.name = format!("slot-{index:02}");
-        slot.target[0] += index;
-        slot
-    }).collect();
+    request.slots = (0..32)
+        .rev()
+        .map(|index| {
+            let mut slot = request.slots[0].clone();
+            slot.name = format!("slot-{index:02}");
+            slot.target[0] += index;
+            slot
+        })
+        .collect();
     let maximum = FurnitureRequest::new("region1".to_owned(), 2, request.clone())?;
     assert_eq!(maximum.request().slots.len(), 32);
-    assert_eq!(FurnitureRequest::decode(maximum.canonical_bytes())?, maximum);
+    assert_eq!(
+        FurnitureRequest::decode(maximum.canonical_bytes())?,
+        maximum
+    );
     let mut extra = request.slots[0].clone();
     extra.name = "extra".to_owned();
     extra.target[0] = 100;
@@ -321,8 +440,15 @@ fn slot_collection_and_normalized_output_bounds_prevent_partial_requests() -> Re
     exclusions.excluded_items.push(4096);
     assert!(FurnitureRequest::new("region1".to_owned(), 2, exclusions).is_err());
     // Compact input omits defaults; expanded normalized output must still fit.
-    let excluded = (0..3250).map(|id| id.to_string()).collect::<Vec<_>>().join(",");
-    let source = MINIMAL.replace("\"site\":2", &format!("\"site\":2,\"excluded_items\":[{excluded}]"))
+    let excluded = (0..3250)
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let source = MINIMAL
+        .replace(
+            "\"site\":2",
+            &format!("\"site\":2,\"excluded_items\":[{excluded}]"),
+        )
         .replace("region1", &"é".repeat(256));
     assert!(source.len() <= MAX_REQUEST_BYTES);
     assert!(FurnitureRequest::decode(source.as_bytes()).is_err());

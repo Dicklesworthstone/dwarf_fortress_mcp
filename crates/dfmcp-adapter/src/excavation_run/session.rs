@@ -35,7 +35,10 @@ pub struct ExcavationInventory {
 }
 impl ExcavationInventory {
     pub fn new(binding: ExcavationBinding, entries: Vec<ExcavationEntry>) -> Result<Self> {
-        require(entries.len() <= MAX_ENTRIES, "excavation inventory exceeds 256 entries")?;
+        require(
+            entries.len() <= MAX_ENTRIES,
+            "excavation inventory exceeds 256 entries",
+        )?;
         let mut bytes = b"dfmcp-excavation-inventory/1\0".to_vec();
         fn field(out: &mut Vec<u8>, value: &[u8]) -> Result<()> {
             let length = u32::try_from(value.len()).map_err(|_| exhausted())?;
@@ -81,15 +84,34 @@ impl ExcavationInventory {
                 bytes.push(0);
             }
         }
-        require(bytes.len() <= 2 * 1024 * 1024, "inventory projection exceeds bound")?;
-        Ok(Self { binding, entries, digest: Digest32::of_bytes(&bytes), high_tick })
+        require(
+            bytes.len() <= 2 * 1024 * 1024,
+            "inventory projection exceeds bound",
+        )?;
+        Ok(Self {
+            binding,
+            entries,
+            digest: Digest32::of_bytes(&bytes),
+            high_tick,
+        })
     }
-    pub fn binding(&self) -> &ExcavationBinding { &self.binding }
-    pub fn entries(&self) -> &[ExcavationEntry] { &self.entries }
-    pub fn digest(&self) -> Digest32 { self.digest }
-    pub fn high_tick(&self) -> u64 { self.high_tick }
+    pub fn binding(&self) -> &ExcavationBinding {
+        &self.binding
+    }
+    pub fn entries(&self) -> &[ExcavationEntry] {
+        &self.entries
+    }
+    pub fn digest(&self) -> Digest32 {
+        self.digest
+    }
+    pub fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
     pub fn pending_count(&self) -> usize {
-        self.entries.iter().filter(|entry| entry.unresolved()).count()
+        self.entries
+            .iter()
+            .filter(|entry| entry.unresolved())
+            .count()
     }
     pub fn entry(&self, key: &str) -> Option<&ExcavationEntry> {
         self.entries.iter().find(|entry| entry.plan().key() == key)
@@ -122,16 +144,22 @@ pub struct ExcavationObservation {
     pub capture: ExcavationCapture,
 }
 
-fn validate_observation(observed: &ExcavationObservation, inventory: &ExcavationInventory,
-    region: ExcavationRegion, high_tick: u64) -> Result<()>
-{
+fn validate_observation(
+    observed: &ExcavationObservation,
+    inventory: &ExcavationInventory,
+    region: ExcavationRegion,
+    high_tick: u64,
+) -> Result<()> {
     let binding = inventory.binding();
-    if &observed.binding != binding || observed.capture.region() != region
+    if &observed.binding != binding
+        || observed.capture.region() != region
         || observed.capture.tick() < high_tick
         || observed.capture.fortress() != binding.fortress()
         || observed.capture.generation() != binding.generation()
         || observed.capture.dimensions() != binding.dimensions()
-    { return Err(stale()); }
+    {
+        return Err(stale());
+    }
     Ok(())
 }
 
@@ -149,35 +177,81 @@ pub trait ExcavationSessionGuard {
 pub trait ExcavationSessionBackend {
     fn fortress(&self) -> &FortressIdentity;
     fn region(&self) -> ExcavationRegion;
-    fn inspect(&mut self, context: &OperationContext,
-        guard: &dyn ExcavationSessionGuard) -> Result<ExcavationInventory>;
-    fn initialize(&mut self, context: &OperationContext,
-        guard: &dyn ExcavationSessionGuard) -> Result<ExcavationObservation>;
-    fn observe(&mut self, expected: &ExcavationInventory, context: &OperationContext,
-        guard: &dyn ExcavationSessionGuard) -> Result<ExcavationObservation>;
-    fn start(&mut self, expected: &ExcavationInventory, plan: ExcavationRunPlan,
-        context: &OperationContext, guard: &dyn ExcavationSessionGuard) -> Result<ExcavationRunRecord>;
-    fn recover(&mut self, expected: &ExcavationInventory, key: &str, cancel: bool,
-        context: &OperationContext, guard: &dyn ExcavationSessionGuard) -> Result<Option<ExcavationRunRecord>>;
+    fn inspect(
+        &mut self,
+        context: &OperationContext,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<ExcavationInventory>;
+    fn initialize(
+        &mut self,
+        context: &OperationContext,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<ExcavationObservation>;
+    fn observe(
+        &mut self,
+        expected: &ExcavationInventory,
+        context: &OperationContext,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<ExcavationObservation>;
+    fn start(
+        &mut self,
+        expected: &ExcavationInventory,
+        plan: ExcavationRunPlan,
+        context: &OperationContext,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<ExcavationRunRecord>;
+    fn recover(
+        &mut self,
+        expected: &ExcavationInventory,
+        key: &str,
+        cancel: bool,
+        context: &OperationContext,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<Option<ExcavationRunRecord>>;
 }
 
 #[derive(Clone, Debug)]
 pub enum ExcavationCommand {
     Observe,
-    Plan { key: String, witness: Digest32, spec: ExcavationRunSpec },
-    Commit { key: String, digest: Digest32, confirmed: bool },
-    Wait { key: String, digest: Digest32 },
-    CancelEffect { key: String, digest: Digest32 },
-    CancelPlan { key: String, digest: Digest32 },
+    Plan {
+        key: String,
+        witness: Digest32,
+        spec: ExcavationRunSpec,
+    },
+    Commit {
+        key: String,
+        digest: Digest32,
+        confirmed: bool,
+    },
+    Wait {
+        key: String,
+        digest: Digest32,
+    },
+    CancelEffect {
+        key: String,
+        digest: Digest32,
+    },
+    CancelPlan {
+        key: String,
+        digest: Digest32,
+    },
     Inventory,
-    Explain { key: String, digest: Digest32 },
-    Release { for_recovery: bool },
+    Explain {
+        key: String,
+        digest: Digest32,
+    },
+    Release {
+        for_recovery: bool,
+    },
 }
 #[derive(Debug)]
 pub enum ExcavationOutcome {
     Observation(ExcavationCapture),
     Plan(ExcavationRunPlan),
-    Effect { key: String, native_record_found: Option<bool> },
+    Effect {
+        key: String,
+        native_record_found: Option<bool>,
+    },
     PlanCancelled,
     Inventory,
     Released,
@@ -200,19 +274,37 @@ pub struct ExcavationTurn {
 }
 
 fn exhausted() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::BudgetExceeded, "complete excavation request and response exceed their allowance")
+    error(
+        ErrorCode::BudgetExceeded,
+        "complete excavation request and response exceed their allowance",
+    )
 }
 fn corrupt() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::CorruptLedger, "retained excavation inventory changed or regressed; preserve journal")
+    error(
+        ErrorCode::CorruptLedger,
+        "retained excavation inventory changed or regressed; preserve journal",
+    )
 }
 fn denied() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::CapabilityDenied, "excavation session mode, owner or authority refused")
+    error(
+        ErrorCode::CapabilityDenied,
+        "excavation session mode, owner or authority refused",
+    )
 }
 fn stale() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::StaleAnchor, "excavation observation or review changed; observe and review again")
+    error(
+        ErrorCode::StaleAnchor,
+        "excavation observation or review changed; observe and review again",
+    )
 }
-fn query(context: &OperationContext, fortress: &FortressIdentity, tick: u64) -> Result<OperationContext> {
-    if context.anchor.fortress_id != fortress.fortress_id() { return Err(denied()); }
+fn query(
+    context: &OperationContext,
+    fortress: &FortressIdentity,
+    tick: u64,
+) -> Result<OperationContext> {
+    if context.anchor.fortress_id != fortress.fortress_id() {
+        return Err(denied());
+    }
     let mut current = context.clone();
     current.anchor.tick = dfmcp_core::GameTick(current.anchor.tick.get().max(tick));
     current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
@@ -231,29 +323,51 @@ impl Call {
             || context.budget.max_bytes > MAX_SESSION_BYTES
             || context.budget.max_game_ticks > 1200
             || u64::from(context.budget.max_output_tokens) * 4 < RESPONSE_BYTES
-        { return Err(exhausted()); }
-        let child_bytes = context.budget.max_bytes.checked_sub(2 * VIEW_BYTES + RESPONSE_BYTES)
-            .filter(|n| *n > 0).ok_or_else(exhausted)?;
-        let deadline = started.checked_add(Duration::from_millis(context.budget.max_wall_millis))
+        {
+            return Err(exhausted());
+        }
+        let child_bytes = context
+            .budget
+            .max_bytes
+            .checked_sub(2 * VIEW_BYTES + RESPONSE_BYTES)
+            .filter(|n| *n > 0)
             .ok_or_else(exhausted)?;
-        let call = Self { context, deadline, child_bytes };
+        let deadline = started
+            .checked_add(Duration::from_millis(context.budget.max_wall_millis))
+            .ok_or_else(exhausted)?;
+        let call = Self {
+            context,
+            deadline,
+            child_bytes,
+        };
         call.context(child_bytes, 0)?;
         Ok(call)
     }
     fn context(&self, bytes: u64, tick: u64) -> Result<OperationContext> {
-        let remaining = self.deadline.checked_duration_since(Instant::now())
-            .filter(|time| *time >= Duration::from_millis(1)).ok_or_else(exhausted)?;
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|time| *time >= Duration::from_millis(1))
+            .ok_or_else(exhausted)?;
         if self.context.cancellation_requested {
-            return Err(error(ErrorCode::CancellationRequested, "excavation request cancelled"));
+            return Err(error(
+                ErrorCode::CancellationRequested,
+                "excavation request cancelled",
+            ));
         }
         let mut current = self.context.clone();
-        current.budget.max_wall_millis = u64::try_from(remaining.as_millis()).map_err(|_| exhausted())?;
+        current.budget.max_wall_millis =
+            u64::try_from(remaining.as_millis()).map_err(|_| exhausted())?;
         current.budget.max_bytes = bytes;
         current.anchor.tick = dfmcp_core::GameTick(current.anchor.tick.get().max(tick));
         Ok(current)
     }
-    fn view(&self, tick: u64) -> Result<OperationContext> { self.context(VIEW_BYTES, tick) }
-    fn work(&self, tick: u64) -> Result<OperationContext> { self.context(self.child_bytes, tick) }
+    fn view(&self, tick: u64) -> Result<OperationContext> {
+        self.context(VIEW_BYTES, tick)
+    }
+    fn work(&self, tick: u64) -> Result<OperationContext> {
+        self.context(self.child_bytes, tick)
+    }
 }
 
 /// One caller-owned session. Dropping it drops only local review/cache state;
@@ -272,9 +386,14 @@ pub struct ExcavationSession<B> {
     released: bool,
 }
 impl<B: ExcavationSessionBackend> ExcavationSession<B> {
-    pub fn open(mut backend: B, mode: ExcavationMode, initialize: bool,
-        context: &OperationContext, started: Instant, guard: &dyn ExcavationSessionGuard) -> Result<Self>
-    {
+    pub fn open(
+        mut backend: B,
+        mode: ExcavationMode,
+        initialize: bool,
+        context: &OperationContext,
+        started: Instant,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> Result<Self> {
         guard.checkpoint()?;
         let context = query(context, backend.fortress(), 0)?;
         let call = Call::new(context.clone(), started)?;
@@ -284,31 +403,63 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
             guard.allow_start()?;
         }
         let observed = if initialize {
-            if mode != ExcavationMode::Control { return Err(denied()); }
+            if mode != ExcavationMode::Control {
+                return Err(denied());
+            }
             context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
             Some(backend.initialize(&call.work(0)?, guard)?)
-        } else { None };
+        } else {
+            None
+        };
         let inventory = backend.inspect(&call.view(0)?, guard)?;
         let mut high_tick = inventory.high_tick();
-        if inventory.binding().fortress() != backend.fortress() { return Err(denied()); }
+        if inventory.binding().fortress() != backend.fortress() {
+            return Err(denied());
+        }
         let selected = if let Some(observed) = observed {
             validate_observation(&observed, &inventory, backend.region(), high_tick)?;
             high_tick = high_tick.max(observed.capture.tick());
             Some(observed.capture)
-        } else { None };
+        } else {
+            None
+        };
         query(&call.view(high_tick)?, backend.fortress(), high_tick)?;
         guard.checkpoint()?;
-        Ok(Self { backend, mode, owner: context.session_id, last_request: context.request_id.get(),
-            inventory, selected, review: None, uncertain_attempt: None, high_tick,
-            fenced: false, released: false })
+        Ok(Self {
+            backend,
+            mode,
+            owner: context.session_id,
+            last_request: context.request_id.get(),
+            inventory,
+            selected,
+            review: None,
+            uncertain_attempt: None,
+            high_tick,
+            fenced: false,
+            released: false,
+        })
     }
-    pub fn mode(&self) -> ExcavationMode { self.mode }
-    pub fn inventory(&self) -> &ExcavationInventory { &self.inventory }
-    pub fn selected(&self) -> Option<&ExcavationCapture> { self.selected.as_ref() }
-    pub fn plan(&self) -> Option<&ExcavationRunPlan> { self.review.as_ref().map(|(_, plan)| plan) }
-    pub fn high_tick(&self) -> u64 { self.high_tick }
-    pub fn is_released(&self) -> bool { self.released }
-    pub fn is_fenced(&self) -> bool { self.fenced }
+    pub fn mode(&self) -> ExcavationMode {
+        self.mode
+    }
+    pub fn inventory(&self) -> &ExcavationInventory {
+        &self.inventory
+    }
+    pub fn selected(&self) -> Option<&ExcavationCapture> {
+        self.selected.as_ref()
+    }
+    pub fn plan(&self) -> Option<&ExcavationRunPlan> {
+        self.review.as_ref().map(|(_, plan)| plan)
+    }
+    pub fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
+    pub fn is_released(&self) -> bool {
+        self.released
+    }
+    pub fn is_fenced(&self) -> bool {
+        self.fenced
+    }
 
     fn accept(&mut self, next: ExcavationInventory) -> Result<()> {
         if let Err(cause) = self.inventory.validate_successor(&next) {
@@ -323,33 +474,55 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
     }
     fn exact(&self, key: &str, digest: Digest32) -> Result<&ExcavationEntry> {
         let entry = self.inventory.entry(key).ok_or_else(|| {
-            error(ErrorCode::InvalidRequest, "excavation key is not in this journal")
+            error(
+                ErrorCode::InvalidRequest,
+                "excavation key is not in this journal",
+            )
         })?;
-        if entry.plan().digest() != digest { return Err(stale()); }
+        if entry.plan().digest() != digest {
+            return Err(stale());
+        }
         Ok(entry)
     }
     fn control(&self, context: &OperationContext) -> Result<()> {
-        if self.mode != ExcavationMode::Control || self.fenced { return Err(denied()); }
+        if self.mode != ExcavationMode::Control || self.fenced {
+            return Err(denied());
+        }
         context.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)
     }
     fn authorize_plan(&self, plan: &ExcavationRunPlan, context: &OperationContext) -> Result<()> {
         self.control(context)?;
         super::coordinator::authorize_start(context, self.inventory.binding(), plan)
     }
-    fn perform(&mut self, command: ExcavationCommand, call: &Call,
-        guard: &dyn ExcavationSessionGuard, native_attempted: &mut bool) -> Result<ExcavationOutcome>
-    {
-        let context = query(&call.work(self.high_tick)?, self.backend.fortress(), self.high_tick)?;
+    fn perform(
+        &mut self,
+        command: ExcavationCommand,
+        call: &Call,
+        guard: &dyn ExcavationSessionGuard,
+        native_attempted: &mut bool,
+    ) -> Result<ExcavationOutcome> {
+        let context = query(
+            &call.work(self.high_tick)?,
+            self.backend.fortress(),
+            self.high_tick,
+        )?;
         guard.checkpoint()?;
         match command {
             ExcavationCommand::Observe => {
-                if self.mode != ExcavationMode::Control { return Err(denied()); }
+                if self.mode != ExcavationMode::Control {
+                    return Err(denied());
+                }
                 context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
                 self.selected = None;
                 self.review = None;
                 *native_attempted = true;
                 let observed = self.backend.observe(&self.inventory, &context, guard)?;
-                validate_observation(&observed, &self.inventory, self.backend.region(), self.high_tick)?;
+                validate_observation(
+                    &observed,
+                    &self.inventory,
+                    self.backend.region(),
+                    self.high_tick,
+                )?;
                 self.high_tick = self.high_tick.max(observed.capture.tick());
                 query(&context, self.backend.fortress(), self.high_tick)?;
                 self.selected = Some(observed.capture.clone());
@@ -358,33 +531,58 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
             ExcavationCommand::Plan { key, witness, spec } => {
                 self.control(&context)?;
                 guard.allow_start()?;
-                if self.inventory.pending_count() != 0 || self.uncertain_attempt.is_some()
-                    || self.inventory.entry(&key).is_some() {
-                    return Err(error(ErrorCode::Conflict, "retained or unresolved excavation work blocks a fresh plan"));
+                if self.inventory.pending_count() != 0
+                    || self.uncertain_attempt.is_some()
+                    || self.inventory.entry(&key).is_some()
+                {
+                    return Err(error(
+                        ErrorCode::Conflict,
+                        "retained or unresolved excavation work blocks a fresh plan",
+                    ));
                 }
-                let before = self.selected.as_ref().filter(|capture| capture.witness() == witness)
-                    .ok_or_else(stale)?.clone();
+                let before = self
+                    .selected
+                    .as_ref()
+                    .filter(|capture| capture.witness() == witness)
+                    .ok_or_else(stale)?
+                    .clone();
                 let plan = ExcavationRunPlan::new(&key, spec, before)?;
                 self.authorize_plan(&plan, &context)?;
                 if self.review.as_ref().is_some_and(|(_, old)| old != &plan) {
-                    return Err(error(ErrorCode::Conflict, "cancel the outstanding local review before replacing it"));
+                    return Err(error(
+                        ErrorCode::Conflict,
+                        "cancel the outstanding local review before replacing it",
+                    ));
                 }
                 self.review = Some((self.inventory.digest(), plan.clone()));
                 Ok(ExcavationOutcome::Plan(plan))
             }
-            ExcavationCommand::Commit { key, digest, confirmed } => {
+            ExcavationCommand::Commit {
+                key,
+                digest,
+                confirmed,
+            } => {
                 self.control(&context)?;
-                if !confirmed { return Err(denied()); }
+                if !confirmed {
+                    return Err(denied());
+                }
                 // A duplicate is a historical lookup, never a reconstructed permit.
                 if self.inventory.entry(&key).is_some() {
                     self.exact(&key, digest)?;
-                    return Ok(ExcavationOutcome::Effect { key, native_record_found: None });
+                    return Ok(ExcavationOutcome::Effect {
+                        key,
+                        native_record_found: None,
+                    });
                 }
                 if self.uncertain_attempt.is_some() || self.inventory.pending_count() != 0 {
-                    return Err(error(ErrorCode::EffectIndeterminate, "recover unresolved work instead of committing"));
+                    return Err(error(
+                        ErrorCode::EffectIndeterminate,
+                        "recover unresolved work instead of committing",
+                    ));
                 }
                 let (root, plan) = self.review.as_ref().ok_or_else(stale)?;
-                if *root != self.inventory.digest() || plan.key() != key || plan.digest() != digest {
+                if *root != self.inventory.digest() || plan.key() != key || plan.digest() != digest
+                {
                     return Err(stale());
                 }
                 self.authorize_plan(plan, &context)?;
@@ -393,22 +591,39 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
                 // Consume BEFORE the effect shell. An error cannot restore this review.
                 self.review = None;
                 self.selected = None;
-                self.uncertain_attempt = Some(ExcavationAttempt { key: key.clone(), digest });
+                self.uncertain_attempt = Some(ExcavationAttempt {
+                    key: key.clone(),
+                    digest,
+                });
                 *native_attempted = true;
-                let record = self.backend.start(&self.inventory, plan.clone(), &context, guard)?;
-                if record.plan() != &plan { return Err(corrupt()); }
-                Ok(ExcavationOutcome::Effect { key, native_record_found: Some(true) })
+                let record = self
+                    .backend
+                    .start(&self.inventory, plan.clone(), &context, guard)?;
+                if record.plan() != &plan {
+                    return Err(corrupt());
+                }
+                Ok(ExcavationOutcome::Effect {
+                    key,
+                    native_record_found: Some(true),
+                })
             }
             ExcavationCommand::Wait { key, digest }
             | ExcavationCommand::CancelEffect { key, digest } => {
                 // The variant is split by execute; see recover_effect below.
                 self.exact(&key, digest)?;
-                Err(error(ErrorCode::InternalInvariantViolation, "unrouted excavation recovery request"))
+                Err(error(
+                    ErrorCode::InternalInvariantViolation,
+                    "unrouted excavation recovery request",
+                ))
             }
             ExcavationCommand::CancelPlan { key, digest } => {
-                if self.mode != ExcavationMode::Control { return Err(denied()); }
+                if self.mode != ExcavationMode::Control {
+                    return Err(denied());
+                }
                 let (_, plan) = self.review.as_ref().ok_or_else(stale)?;
-                if plan.key() != key || plan.digest() != digest { return Err(stale()); }
+                if plan.key() != key || plan.digest() != digest {
+                    return Err(stale());
+                }
                 self.review = None;
                 self.selected = None;
                 Ok(ExcavationOutcome::PlanCancelled)
@@ -416,12 +631,17 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
             ExcavationCommand::Inventory => Ok(ExcavationOutcome::Inventory),
             ExcavationCommand::Explain { key, digest } => {
                 self.exact(&key, digest)?;
-                Ok(ExcavationOutcome::Effect { key, native_record_found: None })
+                Ok(ExcavationOutcome::Effect {
+                    key,
+                    native_record_found: None,
+                })
             }
             ExcavationCommand::Release { .. } => {
                 if self.inventory.pending_count() != 0 || self.uncertain_attempt.is_some() {
-                    return Err(error(ErrorCode::CancellationIncomplete,
-                        "unresolved excavation work requires explicit release for recovery"));
+                    return Err(error(
+                        ErrorCode::CancellationIncomplete,
+                        "unresolved excavation work requires explicit release for recovery",
+                    ));
                 }
                 self.review = None;
                 self.selected = None;
@@ -430,41 +650,74 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
             }
         }
     }
-    fn recover_effect(&mut self, key: String, digest: Digest32, cancel: bool,
-        call: &Call, guard: &dyn ExcavationSessionGuard, attempted: &mut bool) -> Result<ExcavationOutcome>
-    {
-        let context = query(&call.work(self.high_tick)?, self.backend.fortress(), self.high_tick)?;
-        if cancel { self.control(&context)?; }
+    fn recover_effect(
+        &mut self,
+        key: String,
+        digest: Digest32,
+        cancel: bool,
+        call: &Call,
+        guard: &dyn ExcavationSessionGuard,
+        attempted: &mut bool,
+    ) -> Result<ExcavationOutcome> {
+        let context = query(
+            &call.work(self.high_tick)?,
+            self.backend.fortress(),
+            self.high_tick,
+        )?;
+        if cancel {
+            self.control(&context)?;
+        }
         let entry = self.exact(&key, digest)?;
         // SourceLost is terminal historical evidence but remains unresolved.
         if entry.native().is_some_and(ExcavationRunRecord::terminal) {
-            return Ok(ExcavationOutcome::Effect { key, native_record_found: None });
+            return Ok(ExcavationOutcome::Effect {
+                key,
+                native_record_found: None,
+            });
         }
-        if self.mode == ExcavationMode::Offline { return Err(denied()); }
+        if self.mode == ExcavationMode::Offline {
+            return Err(denied());
+        }
         guard.checkpoint()?;
         self.review = None;
         self.selected = None;
         *attempted = true;
-        let result = self.backend.recover(&self.inventory, &key, cancel, &context, guard)?;
-        Ok(ExcavationOutcome::Effect { key, native_record_found: Some(result.is_some()) })
+        let result = self
+            .backend
+            .recover(&self.inventory, &key, cancel, &context, guard)?;
+        Ok(ExcavationOutcome::Effect {
+            key,
+            native_record_found: Some(result.is_some()),
+        })
     }
     /// One foreground turn. Both inventory reads and the single child operation
     /// share the request's original wall deadline and disjoint byte reservations.
     /// Forced release deliberately bypasses broken storage; it never cancels a run.
-    pub fn execute(&mut self, command: ExcavationCommand, context: &OperationContext,
-        started: Instant, guard: &dyn ExcavationSessionGuard) -> ExcavationTurn
-    {
+    pub fn execute(
+        &mut self,
+        command: ExcavationCommand,
+        context: &OperationContext,
+        started: Instant,
+        guard: &dyn ExcavationSessionGuard,
+    ) -> ExcavationTurn {
         let mut verified = false;
         let mut authorized = false;
         let mut native_attempted = false;
         let outcome = (|| {
-            if self.released || context.session_id != self.owner
-                || context.request_id.get() <= self.last_request { return Err(denied()); }
+            if self.released
+                || context.session_id != self.owner
+                || context.request_id.get() <= self.last_request
+            {
+                return Err(denied());
+            }
             self.last_request = context.request_id.get();
             match &command {
-                ExcavationCommand::Plan { key, .. } | ExcavationCommand::Commit { key, .. }
-                | ExcavationCommand::Wait { key, .. } | ExcavationCommand::CancelEffect { key, .. }
-                | ExcavationCommand::CancelPlan { key, .. } | ExcavationCommand::Explain { key, .. } => validate_key(key)?,
+                ExcavationCommand::Plan { key, .. }
+                | ExcavationCommand::Commit { key, .. }
+                | ExcavationCommand::Wait { key, .. }
+                | ExcavationCommand::CancelEffect { key, .. }
+                | ExcavationCommand::CancelPlan { key, .. }
+                | ExcavationCommand::Explain { key, .. } => validate_key(key)?,
                 _ => {}
             }
             guard.checkpoint()?;
@@ -477,33 +730,51 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
                 self.released = true;
                 return Ok(ExcavationOutcome::Released);
             }
-            if self.fenced { return Err(corrupt()); }
+            if self.fenced {
+                return Err(corrupt());
+            }
             let before = self.backend.inspect(&call.view(self.high_tick)?, guard)?;
             self.accept(before)?;
-            query(&call.view(self.high_tick)?, self.backend.fortress(), self.high_tick)?;
+            query(
+                &call.view(self.high_tick)?,
+                self.backend.fortress(),
+                self.high_tick,
+            )?;
             let result = match command {
-                ExcavationCommand::Wait { key, digest } =>
-                    self.recover_effect(key, digest, false, &call, guard, &mut native_attempted),
-                ExcavationCommand::CancelEffect { key, digest } =>
-                    self.recover_effect(key, digest, true, &call, guard, &mut native_attempted),
+                ExcavationCommand::Wait { key, digest } => {
+                    self.recover_effect(key, digest, false, &call, guard, &mut native_attempted)
+                }
+                ExcavationCommand::CancelEffect { key, digest } => {
+                    self.recover_effect(key, digest, true, &call, guard, &mut native_attempted)
+                }
                 other => self.perform(other, &call, guard, &mut native_attempted),
             };
             let after = self.backend.inspect(&call.view(self.high_tick)?, guard)?;
             self.accept(after)?;
-            query(&call.view(self.high_tick)?, self.backend.fortress(), self.high_tick)?;
+            query(
+                &call.view(self.high_tick)?,
+                self.backend.fortress(),
+                self.high_tick,
+            )?;
             guard.checkpoint()?;
             verified = true;
-            if self.uncertain_attempt.as_ref().is_some_and(|attempt|
-                self.inventory.entry(&attempt.key).is_some_and(|entry| entry.plan().digest() == attempt.digest)) {
+            if self.uncertain_attempt.as_ref().is_some_and(|attempt| {
+                self.inventory
+                    .entry(&attempt.key)
+                    .is_some_and(|entry| entry.plan().digest() == attempt.digest)
+            }) {
                 self.uncertain_attempt = None;
             }
-            if self.review.as_ref().is_some_and(|(root, plan)|
-                *root != self.inventory.digest() || plan.before().tick() != self.high_tick) {
+            if self.review.as_ref().is_some_and(|(root, plan)| {
+                *root != self.inventory.digest() || plan.before().tick() != self.high_tick
+            }) {
                 self.review = None;
                 return Err(stale());
             }
             if let Ok(ExcavationOutcome::Effect { key, .. }) = &result {
-                if self.inventory.entry(key).is_none() { return Err(corrupt()); }
+                if self.inventory.entry(key).is_none() {
+                    return Err(corrupt());
+                }
             }
             result
         })();
@@ -518,8 +789,16 @@ impl<B: ExcavationSessionBackend> ExcavationSession<B> {
             outcome,
             inventory: (verified && authorized).then(|| self.inventory.clone()),
             historical_prior: (!verified && authorized).then(|| self.inventory.clone()),
-            plan: if authorized { self.plan().cloned() } else { None },
-            uncertain_attempt: if authorized { self.uncertain_attempt.clone() } else { None },
+            plan: if authorized {
+                self.plan().cloned()
+            } else {
+                None
+            },
+            uncertain_attempt: if authorized {
+                self.uncertain_attempt.clone()
+            } else {
+                None
+            },
             native_operation_attempted: native_attempted,
             released: self.released,
         }

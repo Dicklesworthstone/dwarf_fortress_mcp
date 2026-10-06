@@ -4,7 +4,7 @@ use dfmcp_core::{
     Capability, Digest32, FortressId, GameTick, IntentId, ObservationCursor, RiskTier, StateAnchor,
     StepId,
 };
-use dfmcp_intent::{Action, PlanStep, PreparedPlan};
+use dfmcp_intent::{Action, PlanStep, PreparedPlan, derive_step_idempotency_key};
 use dfmcp_world::Predicate;
 use std::collections::BTreeSet;
 
@@ -32,7 +32,12 @@ fn sample_plan() -> Result<PreparedPlan, Box<dyn std::error::Error>> {
         depends_on: Vec::new(),
         risk: RiskTier::Reversible,
         required_capability: Capability::ControlClock,
-        idempotency_key: Digest32::of_bytes(b"step_0").to_hex(),
+        idempotency_key: derive_step_idempotency_key(
+            IntentId::new(100),
+            anchor,
+            StepId::new(0),
+            &Action::Pause { paused: true },
+        ),
     };
 
     Ok(PreparedPlan::builder(

@@ -212,7 +212,9 @@ impl PreparedPlanBuilder {
 }
 
 #[must_use]
-pub(crate) fn derive_step_idempotency_key(
+/// Deterministic idempotency key binding a step to its intent, anchor, step
+/// ID and action. Plan validation rejects any other key.
+pub fn derive_step_idempotency_key(
     intent_id: IntentId,
     anchor: StateAnchor,
     step_id: StepId,
