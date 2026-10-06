@@ -9,9 +9,10 @@ Beads: df-dfhack-bridge-plane-c-pic.4 / df-dfhack-bridge-plane-c-pic.5.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from build_placement_wire import Rejected, Record, require
+from build_placement_wire import Rejected, Record, canonical, require
 from construction_plan import Goal as Condition, Progress
 from construction_plan_rpc import Authority, Budget, acquire
 from furniture_batch import Batch
@@ -21,6 +22,7 @@ import track_construction_plan as selected
 import construction_wait as foreground
 
 MAX_OUTPUT = selected.MAX_OUTPUT
+MAX_ROOM_OUTPUT = 192 * 1024
 
 
 def separate_journal(path: str, batch_path: str) -> None:
@@ -77,6 +79,31 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
         turn['references'].append({'kind': 'original_furnishing_batch', 'batch_id': origin.batch_id,
                                    'plan_digest': origin.plan.digest, 'origin_digest': origin.digest,
                                    'custody_verified_this_call': source_verified})
+    if origin is not None and origin.room_handoff is not None:
+        room = origin.room_handoff.room_plan
+        result['room_origin'] = {**origin.room_handoff.compact(),
+                                 'source_custody_verified': source_verified,
+                                 'historical_evidence_only': True}
+        result['requested_room_plan'] = room.json()
+        result['complete_original_room_furnishings_sampled_condition'] = result['complete_original_plan_sampled_condition']
+        result['room_completion_proven'] = False
+        result['terrain_completion_proven'] = False
+        result['room_assignments_observed'] = False
+        association = {slot: (area['name'], unit['name']) for area in room.json()['areas']
+                       for unit in area['units'] for slot in unit['slots']}
+        require(set(association) == {step.name for step in origin.plan.steps},
+                'original room-to-furnishing association is incomplete')
+        for target in result['targets']:
+            target['room_area'], target['room_unit'] = association[target['plan_step']]
+        turn['budget']['output_bytes_limit'] = MAX_ROOM_OUTPUT
+        turn['briefing'].update(room_completion_proven=False, terrain_completion_proven=False)
+        turn['coverage'].update(original_room_intent_retained=True,
+                                original_room_custody_verified=source_verified,
+                                room_terrain_observed=False, room_assignments_observed=False)
+        turn['references'].append(result['room_origin'])
+        turn['uncertainty'].append(
+            'The original room goal is retained, but only its furnishings are sampled here. '
+            'Construction evidence does not certify original floors, walls, access or room assignments.')
     if error:
         value['error'] = {
             'code': 'FURNITURE_BATCH_MONITOR_REFUSED',
@@ -87,7 +114,24 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
 
 
 def output(value: dict) -> bytes:
-    return selected.output(value)
+    if 'room_origin' not in value['result']:
+        return selected.output(value)
+    raw = canonical(value) + b'\n'
+    require(len(raw) <= MAX_ROOM_OUTPUT, 'complete original room monitoring result exceeds output allowance')
+    return raw
+
+
+def publish(raw: bytes) -> int:
+    # ASCII canonical output: a short write is terminal, not a reason to emit
+    # another JSON object or repeat a native acquisition after publication.
+    try:
+        text = raw.decode('ascii')
+        if sys.stdout.write(text) != len(text):
+            return 2
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        return 2
+    return 0
 
 
 def reserve(operation: str, state: State, *, source_verified: bool = False,
@@ -214,7 +258,9 @@ def main(argv: list[str] | None = None) -> int:
         if wait_result is not None:
             value['result']['wait'] = wait_result.view()
         raw = output(value)
-        if operation == 'wait' and authority is not None:
+        if authority is not None and (operation == 'wait' or last_state.goal.origin.room_handoff is not None):
+            # A newly terminal room monitor still cannot disclose cached native
+            # results after the original query authority changes during rendering.
             authority.guard()
         if operation != 'cancel':
             source_guard()
@@ -225,13 +271,12 @@ def main(argv: list[str] | None = None) -> int:
         if batch is not None:
             batch.close()
             batch = None
-        print(raw.decode('ascii'), end='')
-        return 0
+        return publish(raw)
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
         if owner is not None:
             last_state = owner.state
         value = packet(operation, last_state, native_contacted=native_contacted, verified=False, error=True)
-        print(output(value).decode('ascii'), end='')
+        publish(output(value))
         return 2
     finally:
         if owner is not None:

@@ -19,6 +19,7 @@ from construction_receipt import Cursor, Guard
 import furniture_batch as furnishing
 from furniture_plan import FurniturePlan
 from furniture_handoff import Handoff
+from room_furniture_handoff import RoomFurnitureHandoff
 
 MAX_ORIGIN = 2 * 1024 * 1024
 MAX_GOAL = MAX_ORIGIN + condition.MAX_GOAL + 16
@@ -27,6 +28,8 @@ ORIGIN_MAGIC = b'DFMFCO01'
 GOAL_MAGIC = b'DFMFCG01'
 HANDOFF_ORIGIN_MAGIC = b'DFMFCO02'
 HANDOFF_GOAL_MAGIC = b'DFMFCG02'
+ROOM_ORIGIN_MAGIC = b'DFMFCO03'
+ROOM_GOAL_MAGIC = b'DFMFCG03'
 POLICY = 'dfmcp.original-furnishing-completion/1'
 LinkedSample = condition.LinkedSample
 Progress = condition.Progress
@@ -89,6 +92,7 @@ class Origin:
     effects_identity: tuple[int, int] = derived(init=False)
     receipts: tuple[bytes, ...] = derived(init=False, repr=False)
     handoff: Handoff | None = derived(init=False, repr=False)
+    room_handoff: RoomFurnitureHandoff | None = derived(init=False, repr=False)
 
     def __post_init__(self, guard: Guard | None) -> None:
         work = _pure_guard if guard is None else guard
@@ -96,18 +100,22 @@ class Origin:
         _path(self.batch_path)
         _identity(self.manifest_identity)
         _identity(self.index_identity)
-        _blob(self.manifest_raw, furnishing.MAX_DEFINITION)
+        _blob(self.manifest_raw, furnishing.MAX_ROOM_DEFINITION)
         _blob(self.index_raw, furnishing.MAX_FILE)
         value = furnishing.unseal(self.manifest_raw)
-        require(value.get('schema') in (furnishing.SCHEMA, furnishing.HANDOFF_SCHEMA),
+        require(value.get('schema') in (furnishing.SCHEMA, furnishing.HANDOFF_SCHEMA, furnishing.ROOM_SCHEMA),
                 'wrong original batch generation')
         with_handoff = value['schema'] == furnishing.HANDOFF_SCHEMA
+        with_room = value['schema'] == furnishing.ROOM_SCHEMA
         placements.exact_object(value, {'schema', 'nonce', 'plan', 'source', 'endpoint', 'folder', 'site',
                                        'dimensions', 'first_tick', 'root_identity', 'effects_identity'}
-                                | ({'handoff'} if with_handoff else set()))
-        require(with_handoff or len(self.manifest_raw) <= furnishing.MAX_FILE,
-                'legacy original definition exceeds its fixed bound')
-        handoff = Handoff.from_json(value['handoff']) if with_handoff else None
+                                | ({'handoff'} if with_handoff else {'room_handoff'} if with_room else set()))
+        maximum = (furnishing.MAX_ROOM_DEFINITION if with_room else
+                   furnishing.MAX_DEFINITION if with_handoff else furnishing.MAX_FILE)
+        require(len(self.manifest_raw) <= maximum, 'original definition exceeds its fixed profile bound')
+        room_handoff = (RoomFurnitureHandoff.from_json(value['room_handoff'], work) if with_room else None)
+        handoff = (room_handoff.allocation if with_room else
+                   Handoff.from_json(value['handoff']) if with_handoff else None)
         exact_hex(value['nonce'], 24)
         plan = FurniturePlan.from_json(value['plan'])
         require(plan.json() == value['plan'], 'original furniture plan is not normalized')
@@ -118,6 +126,8 @@ class Origin:
         integer(value['first_tick'], 0, MAX_TICK)
         require(type(value['dimensions']) is list, 'invalid original map dimensions')
         plan.check_dimensions(value['dimensions'])
+        if room_handoff is not None:
+            room_handoff.check_dimensions(value['dimensions'], work)
         if handoff is not None:
             handoff.validate_binding(value['endpoint'], value['folder'], value['site'],
                                      source.df_version, source.dfhack_version)
@@ -139,7 +149,7 @@ class Origin:
             work()
             entry = furnishing.unseal(line)
             placements.exact_object(entry, {'batch_id', 'step', 'intent_sha256', 'file_identity', 'previous'})
-            key = 'fb-' + value['nonce'] + '-' + step.name
+            key = ('fr-' + batch_id if with_room else 'fb-' + value['nonce']) + '-' + step.name
             require(entry['batch_id'] == batch_id and entry['step'] == step.name
                     and entry['previous'] == previous and child.name == placements.filename(key),
                     'original index or child is not the complete canonical step order')
@@ -172,7 +182,7 @@ class Origin:
         for name, item in (('batch_id', batch_id), ('plan', plan), ('source', source), ('address', address),
                            ('root_identity', tuple(value['root_identity'])),
                            ('effects_identity', tuple(value['effects_identity'])), ('receipts', tuple(receipts)),
-                           ('handoff', handoff)):
+                           ('handoff', handoff), ('room_handoff', room_handoff)):
             object.__setattr__(self, name, item)
         require(len(self.encode()) <= MAX_ORIGIN, 'oversized original furnishing evidence')
         work()
@@ -207,8 +217,10 @@ class Origin:
         require(observed.encode() == self.encode(), 'original furnishing custody changed')
 
     def encode(self) -> bytes:
-        magic = ORIGIN_MAGIC if self.handoff is None else HANDOFF_ORIGIN_MAGIC
-        maximum = furnishing.MAX_FILE if self.handoff is None else furnishing.MAX_DEFINITION
+        magic = (ROOM_ORIGIN_MAGIC if self.room_handoff is not None else
+                 ORIGIN_MAGIC if self.handoff is None else HANDOFF_ORIGIN_MAGIC)
+        maximum = (furnishing.MAX_ROOM_DEFINITION if self.room_handoff is not None else
+                   furnishing.MAX_FILE if self.handoff is None else furnishing.MAX_DEFINITION)
         raw = (magic + field(_path(self.batch_path)) + _identity(self.manifest_identity)
                + _blob(self.manifest_raw, maximum) + _identity(self.index_identity)
                + _blob(self.index_raw, furnishing.MAX_FILE) + bytes([len(self.children)]))
@@ -221,10 +233,13 @@ class Origin:
     def decode(cls, raw: bytes, guard: Guard | None = None) -> Origin:
         r = Cursor(raw, MAX_ORIGIN)
         magic = r.take(8)
-        require(magic in (ORIGIN_MAGIC, HANDOFF_ORIGIN_MAGIC), 'wrong original furnishing evidence generation')
+        require(magic in (ORIGIN_MAGIC, HANDOFF_ORIGIN_MAGIC, ROOM_ORIGIN_MAGIC),
+                'wrong original furnishing evidence generation')
         path = r.string(4096)
         manifest_identity = (r.number(8), r.number(8))
-        manifest = _read_blob(r, furnishing.MAX_FILE if magic == ORIGIN_MAGIC else furnishing.MAX_DEFINITION)
+        maximum = (furnishing.MAX_ROOM_DEFINITION if magic == ROOM_ORIGIN_MAGIC else
+                   furnishing.MAX_FILE if magic == ORIGIN_MAGIC else furnishing.MAX_DEFINITION)
+        manifest = _read_blob(r, maximum)
         index_identity = (r.number(8), r.number(8))
         index = _read_blob(r, furnishing.MAX_FILE)
         children = []
@@ -239,7 +254,8 @@ class Origin:
 
     @property
     def digest(self) -> str:
-        domain = b'dfmcp.furniture-completion-origin/1\0' if self.handoff is None else b'dfmcp.furniture-completion-origin/2\0'
+        domain = (b'dfmcp.furniture-completion-origin/3\0' if self.room_handoff is not None else
+                  b'dfmcp.furniture-completion-origin/1\0' if self.handoff is None else b'dfmcp.furniture-completion-origin/2\0')
         return hashlib.sha256(domain + self.encode()).hexdigest()
 
 
@@ -289,13 +305,15 @@ class Goal:
         return self.condition.max_observations
 
     def encode(self) -> bytes:
-        magic = GOAL_MAGIC if self.origin.handoff is None else HANDOFF_GOAL_MAGIC
+        magic = (ROOM_GOAL_MAGIC if self.origin.room_handoff is not None else
+                 GOAL_MAGIC if self.origin.handoff is None else HANDOFF_GOAL_MAGIC)
         return magic + _blob(self.origin.encode(), MAX_ORIGIN) + _blob(self.condition.encode(), condition.MAX_GOAL)
 
     @classmethod
     def decode(cls, raw: bytes, guard: Guard | None = None) -> Goal:
         r = Cursor(raw, MAX_GOAL)
-        require(r.take(8) in (GOAL_MAGIC, HANDOFF_GOAL_MAGIC), 'wrong furnishing completion goal generation')
+        require(r.take(8) in (GOAL_MAGIC, HANDOFF_GOAL_MAGIC, ROOM_GOAL_MAGIC),
+                'wrong furnishing completion goal generation')
         origin = Origin.decode(_read_blob(r, MAX_ORIGIN), guard)
         goal = condition.Goal.decode(_read_blob(r, condition.MAX_GOAL))
         r.finish()
@@ -305,7 +323,8 @@ class Goal:
 
     @property
     def digest(self) -> str:
-        domain = b'dfmcp.furniture-completion-goal/1\0' if self.origin.handoff is None else b'dfmcp.furniture-completion-goal/2\0'
+        domain = (b'dfmcp.furniture-completion-goal/3\0' if self.origin.room_handoff is not None else
+                  b'dfmcp.furniture-completion-goal/1\0' if self.origin.handoff is None else b'dfmcp.furniture-completion-goal/2\0')
         return hashlib.sha256(domain + self.encode()).hexdigest()
 
 
