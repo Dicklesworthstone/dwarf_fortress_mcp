@@ -52,6 +52,9 @@ fortress_commit(plan_digest=...)
 fortress_wait(max_game_ticks=100)   # repeat until open_actions_remaining is 0
 ```
 
+`scripts/lab_stdio_walkthrough.py` runs exactly this sequence against the real
+`dwarf-fortress-mcp serve` binary over stdio.
+
 `fortress_plan` returns each step's capability, risk, created entity, sealed
 postconditions and obligation (terminal, deadline). Steps whose dependencies are
 not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`,
