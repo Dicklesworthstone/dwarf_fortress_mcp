@@ -99,6 +99,17 @@ reference progress rates are calibration, not Dwarf Fortress claims.
   `fortress.plan` returns it. Routing is pure and grants nothing; it is not
   live execution or evidence.
 
+- **Threats.** `besieged_fortress` schedules a hostile raider fought in rounds
+  by squad members or killing exposed dwarves; alerts carry a
+  capability-gated squad remedy.
+- **Policy evaluation.** `dwarf-fortress-mcp evaluate <scenario> <policy>
+  <ticks>` scores `idle` and `follow_recommendations` deterministically through
+  the eleven tools (survivors, deprivation, threats, objectives, cost).
+- **Witness revalidation.** A plan made stale only by unrelated concurrent work
+  (unchanged read witness) commits by identical-action intent replay with a
+  deterministic certificate; otherwise the explicit replay names the first
+  changed read. World changes are disclosed only to sessions holding observe.
+
 All of this is laboratory semantics and development execution; none of it is
 native, live-game, registry or production evidence.
 
