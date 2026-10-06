@@ -16,6 +16,7 @@ import furniture_inventory as inventory
 from furniture_handoff import Handoff
 from furniture_plan import MAX_BYTES, canonical, require
 from room_provisioning import MAX_PLAN_BYTES, RoomPlan
+from room_furniture_handoff import RoomFurnitureHandoff
 
 MAX_OUTPUT = 65536
 PROFILE = 'room-provisioning/1'
@@ -55,9 +56,11 @@ def encode_output(value: dict) -> bytes:
     return raw
 
 
-def allocate_plan(plan: RoomPlan, authority: inventory.Authority, budget: inventory.Budget) -> bytes:
+def allocate_plan(plan: RoomPlan, authority: inventory.Authority, budget: inventory.Budget,
+                  *, emit: str = 'report') -> bytes:
     """One native acquisition, retaining every room and every requested constraint."""
     require(type(plan) is RoomPlan, 'complete room recipe required')
+    require(type(emit) is str and emit in ('report', 'room-handoff'), 'unsupported room allocation export')
     authority.guard()
     def guard() -> None:
         budget.work()
@@ -71,38 +74,45 @@ def allocate_plan(plan: RoomPlan, authority: inventory.Authority, budget: invent
     # handoff derivation; no native read or candidate selection is repeated.
     with inventory.InventoryClient(authority, budget) as client:
         manifest, capture = client.capture_once()
-        address = f'{authority.address[0]}:{authority.address[1]}'
-        result = inventory.project(request, capture, guard, handoff_binding=(address, manifest))
-        require(result['request_digest'] == request.digest, 'allocation changed original room request')
-        if result['status'] == 'allocated':
-            handoff = Handoff.from_json(result['handoff'])
-            require(handoff.request == request and handoff.plan().json() == result['plan']
-                    and handoff.digest == result['handoff_digest'], 'allocation handoff lost room intent')
-        else:
-            require(result['status'] == 'shortage' and result['handoff'] is None
-                    and result['plan'] is None and result['assignments'] == [],
-                    'incomplete allocation must not return an executable subset')
-        result['source'].update(native_generation=manifest.generation,
-                                df_version=manifest.df_version, dfhack_version=manifest.dfhack_version)
-        result['native_capture_established'] = True
-        result['capture_release_verified'] = True
-        result['room_provisioning'] = plan.summary()
-        value = inventory.packet(result)
-        value['profile'] = PROFILE
-        turn = value['agent_turn']
-        turn['operation'] = 'rooms.allocate'
-        turn['briefing']['room_completion_proven'] = False
-        turn['coverage'].update(room_geometry='complete_intended_recipe_only',
-                                room_terrain='not_observed', native_room_assignments='not_created')
-        turn['references'].append({'kind': 'room_provisioning_recipe', 'plan_digest': plan.digest,
-                                   'furniture_request_digest': request.digest})
-        turn['uncertainty'].append(
-            'Room geometry is an unobserved proposal. Excavation, placement and completion remain '
-            'separate reviewed workflows; furniture completion alone does not establish completed rooms.')
-        raw = encode_output(value)
-        authority.guard()
-        budget.remaining()
-        return raw
+    # The verified native capture is released and the connection closed before
+    # CPU-bound allocation and composite encoding; authority/deadline stay live.
+    address = f'{authority.address[0]}:{authority.address[1]}'
+    result = inventory.project(request, capture, guard, handoff_binding=(address, manifest))
+    require(result['request_digest'] == request.digest, 'allocation changed original room request')
+    handoff = None
+    if result['status'] == 'allocated':
+        handoff = Handoff.from_json(result['handoff'])
+        require(handoff.request == request and handoff.plan().json() == result['plan']
+                and handoff.digest == result['handoff_digest'], 'allocation handoff lost room intent')
+    else:
+        require(result['status'] == 'shortage' and result['handoff'] is None
+                and result['plan'] is None and result['assignments'] == [],
+                'incomplete allocation must not return an executable subset')
+    result['source'].update(native_generation=manifest.generation,
+                            df_version=manifest.df_version, dfhack_version=manifest.dfhack_version)
+    result['native_capture_established'] = True
+    result['capture_release_verified'] = True
+    result['room_provisioning'] = plan.summary()
+    value = inventory.packet(result)
+    value['profile'] = PROFILE
+    turn = value['agent_turn']
+    turn['operation'] = 'rooms.allocate'
+    turn['briefing']['room_completion_proven'] = False
+    turn['coverage'].update(room_geometry='complete_intended_recipe_only',
+                            room_terrain='not_observed', native_room_assignments='not_created')
+    turn['references'].append({'kind': 'room_provisioning_recipe', 'plan_digest': plan.digest,
+                               'furniture_request_digest': request.digest})
+    turn['uncertainty'].append(
+        'Room geometry is an unobserved proposal. Excavation, placement and completion remain '
+        'separate reviewed workflows; furniture completion alone does not establish completed rooms.')
+    raw = encode_output(value)  # Reserve the complete diagnostic report even for a narrow export.
+    if emit == 'room-handoff':
+        require(handoff is not None, 'shortage cannot export a partial room handoff')
+        raw = RoomFurnitureHandoff(plan, handoff, checkpoint=guard).encode()
+    guard()
+    authority.guard()
+    budget.remaining()
+    return raw
 
 
 def failure(operation: str) -> bytes:
@@ -122,6 +132,7 @@ class Parser(argparse.ArgumentParser):
 
 def main(argv: list[str] | None = None) -> int:
     operation = 'unknown'
+    authority = None
     status = 0
     try:
         parser = Parser(description=__doc__)
@@ -135,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         source.add_argument('--request-file')
         source.add_argument('--plan-file')
         allocate_command.add_argument('--timeout-ms', type=int, default=10000)
+        allocate_command.add_argument('--emit', choices=('report', 'room-handoff'), default='report')
         args = parser.parse_args(argv)
         operation = args.operation
         budget = inventory.Budget(args.timeout_ms)
@@ -143,19 +155,23 @@ def main(argv: list[str] | None = None) -> int:
                          MAX_PLAN_BYTES if imported else MAX_BYTES, budget)
         plan = RoomPlan.decode(raw, budget.work) if imported else RoomPlan.from_request(raw, budget.work)
         if operation == 'allocate':
-            raw = allocate_plan(plan, inventory.Authority.load(), budget)
+            authority = inventory.Authority.load()
+            raw = allocate_plan(plan, authority, budget, emit=args.emit)
         elif args.emit == 'plan':
             raw = plan.encode()  # Canonical artifact imports intentionally require no trailing newline.
         else:
             key = 'excavation_blueprint' if args.emit == 'excavation' else 'furniture_request'
             raw = canonical(plan.json()[key])
+        if authority is not None:
+            authority.guard()
         budget.remaining()
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
         raw, status = failure(operation), 2
     try:
-        sys.stdout.buffer.write(raw)
+        if sys.stdout.buffer.write(raw) != len(raw):
+            return 2
         sys.stdout.buffer.flush()
-    except OSError:
+    except (OSError, ValueError):
         return 2
     return status
 
