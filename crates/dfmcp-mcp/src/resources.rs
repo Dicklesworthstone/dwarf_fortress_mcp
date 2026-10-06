@@ -36,7 +36,7 @@ use dfmcp_core::{Capability, RiskTier};
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 3] = ["summary", "capabilities", "handoff"];
+pub const SESSION_VIEWS: [&str; 4] = ["summary", "capabilities", "handoff", "replay"];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
 fn template_definition(uri_template: &str, name: &str, description: &str) -> Resource {
@@ -268,6 +268,24 @@ pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<
     )
 }
 
+/// `df://session/{session_id}/replay` — the session's deterministic replay
+/// bundle. Requires the negotiated `observe` capability; never changes state.
+pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
+    let operation = "df://session/replay";
+    let session = lookup(session_id_hex, operation)?;
+    let (_, ctx) = {
+        let mut guard = session.lock().map_err(|_| poisoned(operation))?;
+        next_context(&mut guard).map_err(|error| denial(operation, error))?
+    };
+    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+        return Err(denial(operation, error));
+    }
+    let mut payload = crate::server::replay_bundle_for(session_id_hex)
+        .map_err(|error| denial(operation, error))?;
+    payload["resource"] = json!(uri);
+    Ok(text_content(uri, payload.to_string()))
+}
+
 fn read_param_or_refuse(
     params: &HashMap<String, String>,
     read: impl FnOnce(&str) -> McpResult<Vec<ResourceContent>>,
@@ -324,7 +342,8 @@ pub struct SessionViewResource;
 
 const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot projection), \
      capabilities (negotiated grants and version record), handoff (resumable packet with anchor, \
-     grants, pending plan, open actions, obligations and an ordered resume protocol)";
+     grants, pending plan, open actions, obligations and an ordered resume protocol), replay \
+     (dfmcp.replay.bundle/1 of every recorded call for deterministic re-execution)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -358,6 +377,7 @@ impl ResourceHandler for SessionViewResource {
             "summary" => session_summary(raw, uri),
             "capabilities" => session_capabilities(raw, uri),
             "handoff" => session_handoff(raw, uri),
+            "replay" => session_replay(raw, uri),
             _ => Err(McpError::invalid_params(format!(
                 "invalid_params: unknown session view {view:?}; expected one of {SESSION_VIEWS:?}"
             ))),
@@ -617,7 +637,10 @@ mod tests {
             .template()
             .expect("session view template");
         assert_eq!(views.uri_template, "df://session/{session_id}/{view}");
-        assert_eq!(SESSION_VIEWS, ["summary", "capabilities", "handoff"]);
+        assert_eq!(
+            SESSION_VIEWS,
+            ["summary", "capabilities", "handoff", "replay"]
+        );
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");
     }

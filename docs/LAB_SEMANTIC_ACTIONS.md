@@ -214,3 +214,17 @@ rectangles), the live values still to resolve, and the family's own live
 preconditions. Routing is deterministic and pure: it grants no capability,
 performs no I/O, and every family remains unadmitted development execution.
 
+## Deterministic replay bundles
+
+Every tool call of a laboratory session is recorded (exact arguments, `ok`,
+error code, resulting canonical anchor). `df://session/{id}/replay` (requires
+`observe`) exports the log as a `dfmcp.replay.bundle/1` with a `calls_digest`
+over the calls. `dwarf-fortress-mcp replay bundle.json` re-executes it in a
+fresh session and prints either `ok` or the **earliest divergence**: the call
+`seq`, tool, field (`ok`, `error_code` or `anchor_after`) and the expected and
+observed values; it exits non-zero on divergence or refusal. A bundle whose
+calls do not match its digest is refused. Sessions on a shared or durable
+fortress depend on state outside their own log and are exported with
+`replayable: false`. `scripts/lab_replay_roundtrip.py` demonstrates recording,
+exact replay and localizing a tampered call over real stdio.
+

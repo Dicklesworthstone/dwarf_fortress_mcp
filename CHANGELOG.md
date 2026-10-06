@@ -50,6 +50,10 @@ readiness.
   resumed fortress recompiles each unfinished commit, verifies it reproduces
   the sealed digest, and re-proves dispatched steps against observation
   (`recovered_commits`, `carried_obligations`).
+- Deterministic replay bundles: every laboratory call is recorded and exported
+  at `df://session/{id}/replay` (`dfmcp.replay.bundle/1`); `dwarf-fortress-mcp
+  replay <bundle>` re-executes it and reports the earliest divergence by call,
+  tool and field (outcome, error code or resulting canonical anchor).
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

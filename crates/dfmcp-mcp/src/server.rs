@@ -96,6 +96,8 @@ pub(crate) struct LabSession {
     /// Steps of plans committed before a durable restart, re-proven against
     /// observation after every call until they are final.
     carried: Vec<CarriedStep>,
+    /// Every tool call of this session, for deterministic replay bundles.
+    pub(crate) replay: crate::replay::ReplayLog,
 }
 
 /// A step committed before a durable restart. No action handle survives the
@@ -1007,6 +1009,21 @@ pub(crate) fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSessi
     })
 }
 
+/// Look up a session by its hexadecimal identifier without durable fencing
+/// (diagnostic reads such as replay recording and export).
+pub(crate) fn lookup_session_str(session_id: &str) -> Result<Arc<Mutex<LabSession>>> {
+    lookup_session(parse_session_id_arg(session_id)?)
+}
+
+/// The replay bundle of a session's recorded calls.
+pub(crate) fn replay_bundle_for(session_id: &str) -> Result<serde_json::Value> {
+    let session = lookup_session_str(session_id)?;
+    let guard = session
+        .lock()
+        .map_err(|_| DfmcpError::new(ErrorCode::InternalInvariantViolation, "session poisoned"))?;
+    Ok(crate::replay::bundle_json(&guard.replay))
+}
+
 pub(crate) fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {
     if let Some(id_str) = session_id {
         let parsed = parse_session_id_arg(&id_str)?;
@@ -1439,6 +1456,7 @@ pub(crate) fn open_session_in_scenario(
         durability_fault: None,
         durable_plans: BTreeMap::new(),
         carried: Vec::new(),
+        replay: crate::replay::ReplayLog::default(),
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -1491,6 +1509,7 @@ pub(crate) fn open_session_in_scenario(
         durability_fault: _,
         durable_plans: _,
         carried: _,
+        replay: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -1515,6 +1534,18 @@ pub(crate) fn open_session_in_scenario(
         carried: recovery
             .as_ref()
             .map_or_else(Vec::new, |recovery| recovery.carried.clone()),
+        replay: {
+            let mut log = crate::replay::ReplayLog::default();
+            if shared {
+                log.mark_not_replayable("the session shares its fortress with other agents");
+            }
+            if durable {
+                log.mark_not_replayable(
+                    "the session's fortress is durable and may resume external state",
+                );
+            }
+            log
+        },
     }));
     {
         let mut registry = sessions();

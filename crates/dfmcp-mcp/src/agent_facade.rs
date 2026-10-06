@@ -1362,7 +1362,8 @@ pub fn fortress_open_session(
     shared: Option<bool>,
     durable: Option<bool>,
 ) -> String {
-    project_response(
+    let recorded = json!({"paused": paused, "fortress_selector": fortress_selector.clone(), "requested_capabilities": requested_capabilities.clone(), "max_wall_millis": max_wall_millis, "max_game_ticks": max_game_ticks, "max_entities": max_entities, "max_bytes": max_bytes, "max_output_tokens": max_output_tokens, "max_actions": max_actions, "scenario": scenario.clone(), "shared": shared, "durable": durable});
+    let response = project_response(
         crate::server::open_session_in_scenario(
             paused,
             fortress_selector,
@@ -1381,33 +1382,46 @@ pub fn fortress_open_session(
         AgentPhase::Bootstrap,
         ObservationProfile::Briefing,
         None,
-    )
+    );
+    crate::replay::record("fortress.open_session", None, recorded, &response);
+    response
 }
 
 #[tool(
     description = "Observe the current laboratory fortress through the canonical agent orientation packet. Live DFHack state remains explicitly unknown."
 )]
 pub fn fortress_observe(session_id: Option<String>) -> String {
-    project_response(
+    let recorded = json!({});
+    let response = project_response(
         crate::server::fortress_observe(session_id.clone()),
         "fortress.observe",
         AgentPhase::Orient,
         ObservationProfile::Briefing,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.observe",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Run the bounded laboratory summary query with explicit coverage, uncertainty, affordances, and next-step guidance."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
-    project_response(
+    let recorded = json!({"mode": mode});
+    let response = project_response(
         crate::server::fortress_query(session_id.clone(), mode),
         "fortress.query",
         AgentPhase::Inspect,
         ObservationProfile::Tactical,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record("fortress.query", session_id.as_deref(), recorded, &response);
+    response
 }
 
 #[tool(
@@ -1420,7 +1434,8 @@ pub fn fortress_plan(
     actions: Option<String>,
     blueprint: Option<String>,
 ) -> String {
-    project_response(
+    let recorded = json!({"summary": summary, "paused_target": paused_target, "actions": actions, "blueprint": blueprint});
+    let response = project_response(
         crate::server::plan_request(
             session_id.clone(),
             summary,
@@ -1432,33 +1447,46 @@ pub fn fortress_plan(
         AgentPhase::Propose,
         ObservationProfile::Tactical,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record("fortress.plan", session_id.as_deref(), recorded, &response);
+    response
 }
 
 #[tool(
     description = "Revalidate and idempotently commit the pending plan, then return observed effect and verification state."
 )]
 pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> String {
-    project_response(
+    let recorded = json!({"plan_digest": plan_digest});
+    let response = project_response(
         crate::server::fortress_commit(session_id.clone(), plan_digest),
         "fortress.commit",
         AgentPhase::Commit,
         ObservationProfile::Tactical,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.commit",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Poll active work and return bounded verification state. max_game_ticks lets laboratory game time pass first (only while unpaused, within the session game-tick budget) and then polls every open committed action across plans (which also dispatches deferred steps whose dependencies verified)."
 )]
 pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    project_response(
+    let recorded = json!({"max_game_ticks": max_game_ticks});
+    let response = project_response(
         crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
         "fortress.wait",
         AgentPhase::Verify,
         ObservationProfile::Pulse,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record("fortress.wait", session_id.as_deref(), recorded, &response);
+    response
 }
 
 #[tool(
@@ -1469,65 +1497,105 @@ pub fn fortress_cancel(
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
-    project_response(
+    let recorded = json!({"mode": mode, "scope": scope});
+    let response = project_response(
         crate::server::cancel_in_scope(session_id.clone(), mode, scope),
         "fortress.cancel",
         AgentPhase::Reconcile,
         ObservationProfile::Tactical,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.cancel",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Create a content-addressed laboratory checkpoint and return recovery affordances and continuity."
 )]
 pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) -> String {
-    project_response(
+    let recorded = json!({"label": label});
+    let response = project_response(
         crate::server::fortress_checkpoint(session_id.clone(), label),
         "fortress.checkpoint",
         AgentPhase::Commit,
         ObservationProfile::Tactical,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.checkpoint",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Restore a checkpoint into a new observation epoch and expose every invalidated pre-restore handle."
 )]
 pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> String {
-    project_response(
+    let recorded = json!({"checkpoint_id": checkpoint_id});
+    let response = project_response(
         crate::server::fortress_restore(session_id.clone(), checkpoint_id),
         "fortress.restore",
         AgentPhase::Reconcile,
         ObservationProfile::Forensic,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.restore",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Explain state transitions or graph dependencies with explicit epistemic and coverage limits."
 )]
 pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -> String {
-    project_response(
+    let recorded = json!({"entity_id": entity_id});
+    let response = project_response(
         crate::server::fortress_explain(session_id.clone(), entity_id),
         "fortress.explain",
         AgentPhase::Inspect,
         ObservationProfile::Forensic,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.explain",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 #[tool(
     description = "Diagnose the control plane and return findings, uncertainties, recovery guidance, and orientation."
 )]
 pub fn fortress_doctor(session_id: Option<String>) -> String {
-    project_response(
+    let recorded = json!({});
+    let response = project_response(
         crate::server::fortress_doctor(session_id.clone()),
         "fortress.doctor",
         AgentPhase::Inspect,
         ObservationProfile::Forensic,
         session_id.as_deref(),
-    )
+    );
+    crate::replay::record(
+        "fortress.doctor",
+        session_id.as_deref(),
+        recorded,
+        &response,
+    );
+    response
 }
 
 /// Run the modern-only MCP 2026-07-28 server with the agent-oriented facade.

@@ -43,11 +43,35 @@ fn run() -> Result<(), Box<dyn Error>> {
         "bridge" => bridge(env::args().nth(2))?,
         "serve" => dfmcp_mcp::run_stdio(),
         "serve-live" => dfmcp_mcp::run_live_stdio(),
+        "replay" => return replay(env::args().nth(2)),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
         }
     }
     Ok(())
+}
+
+/// Re-execute a `dfmcp.replay.bundle/1` in a fresh laboratory session and
+/// print the report; fails when the bundle diverges or cannot be replayed.
+fn replay(path: Option<String>) -> Result<(), Box<dyn Error>> {
+    let path = path.ok_or("usage: dwarf-fortress-mcp replay <bundle.json>")?;
+    let file = std::fs::File::open(&path)?;
+    let mut raw = String::new();
+    std::io::Read::read_to_string(
+        &mut std::io::Read::take(file, dfmcp_mcp::replay::MAX_BUNDLE_BYTES as u64 + 1),
+        &mut raw,
+    )?;
+    if raw.len() > dfmcp_mcp::replay::MAX_BUNDLE_BYTES {
+        return Err("replay bundle exceeds its size bound".into());
+    }
+    let bundle: serde_json::Value = serde_json::from_str(&raw)?;
+    let report = dfmcp_mcp::replay::replay_bundle(&bundle);
+    println!("{report}");
+    if report["ok"] == true {
+        Ok(())
+    } else {
+        Err("replay diverged or was refused; see the report".into())
+    }
 }
 
 fn print_help() {
@@ -66,6 +90,7 @@ COMMANDS:
     bridge      Authenticate to dfmcp_bridge and publish one canonical live read
     serve       Run the deterministic laboratory MCP server
     serve-live  Run the authenticated read-only live MCP server
+    replay      Re-execute a laboratory replay bundle and report the first divergence
     version     Print version information
     help        Print this help
 
