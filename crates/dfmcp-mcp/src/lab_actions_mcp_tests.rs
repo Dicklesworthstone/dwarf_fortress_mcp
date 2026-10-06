@@ -1595,3 +1595,82 @@ fn filters_search_proofs_and_doctor_counts_are_wired_in() -> TestResult {
     assert_eq!(doctor["active_obligations_count"], 1, "{doctor}");
     Ok(())
 }
+
+#[test]
+fn the_civilian_alert_fsm_locks_down_during_a_raid_and_sounds_the_all_clear() -> TestResult {
+    let opened = parsed(&fortress_open_session(
+        Some(false),
+        Some("72150".to_owned()),
+        Some(caps(&[
+            ("configure_military", "guarded"),
+            ("configure_logistics", "guarded"),
+        ])),
+        None,
+        Some(20_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        Some("besieged_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+    let alert = |turn: &Value, name: &str| -> Option<Value> {
+        turn["world_alerts"]
+            .as_array()?
+            .iter()
+            .find(|a| a["alert"] == name)
+            .cloned()
+    };
+    let follow = |remedy: &Value| -> std::result::Result<Value, Box<dyn std::error::Error>> {
+        let actions = remedy["arguments"]["actions"]
+            .as_str()
+            .ok_or("actions")?
+            .to_owned();
+        let planned = parsed(&fortress_plan(
+            Some(session.clone()),
+            None,
+            None,
+            Some(actions),
+            None,
+        ))?;
+        let digest = planned["plan_digest"]
+            .as_str()
+            .ok_or_else(|| format!("{planned}"))?
+            .to_owned();
+        parsed(&fortress_commit(Some(session.clone()), digest))
+    };
+    // Before arrival the hostile is approaching: lock civilians down and muster.
+    let observed = parsed(&fortress_observe(Some(session.clone())))?;
+    let lockdown = alert(&observed, "civilian_lockdown").ok_or("no lockdown alert")?;
+    assert_eq!(lockdown["remedy"]["requires"], "configure_logistics");
+    let squad = alert(&observed, "hostile").ok_or("no hostile alert")?;
+    assert_eq!(follow(&squad["remedy"])?["ok"], true);
+    // Recompute the lockdown after the squad change: civilians exclude soldiers.
+    let observed = parsed(&fortress_observe(Some(session.clone())))?;
+    let lockdown = alert(&observed, "civilian_lockdown").ok_or("no lockdown alert")?;
+    let locked = follow(&lockdown["remedy"])?;
+    assert_eq!(locked["ok"], true, "{}", locked["error"]);
+    let sheltered = parsed(&fortress_observe(Some(session.clone())))?;
+    assert!(
+        alert(&sheltered, "civilian_lockdown").is_none(),
+        "{sheltered}"
+    );
+
+    // The raid comes and goes; nobody dies; the all-clear follows.
+    let mut clear = None;
+    for _ in 0..40 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        if let Some(found) = alert(&waited, "all_clear") {
+            clear = Some(found);
+            break;
+        }
+    }
+    let clear = clear.ok_or("no all-clear after the raid")?;
+    assert_eq!(dead_dwarves(&session)?, 0);
+    assert_eq!(follow(&clear["remedy"])?["ok"], true);
+    let after = parsed(&fortress_observe(Some(session.clone())))?;
+    assert!(alert(&after, "all_clear").is_none(), "{after}");
+    Ok(())
+}

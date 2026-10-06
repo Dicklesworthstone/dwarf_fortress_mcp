@@ -798,7 +798,132 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
         }));
     }
     alerts.extend(threat_alerts(snapshot, &units));
+    alerts.extend(civilian_alert(snapshot, &units));
     alerts
+}
+
+const CIVILIAN_RESTRICTION: &str = "CIVILIAN_BURROW_RESTRICTION";
+
+/// Render one reference action as a laboratory plan step.
+fn action_step_json(action: &Action) -> Option<Json> {
+    let ids = |units: &[EntityId]| {
+        units
+            .iter()
+            .map(|u| u.get().to_string())
+            .collect::<Vec<_>>()
+    };
+    Some(match action {
+        Action::SetBurrowMembership {
+            units,
+            burrow,
+            assigned,
+        } => json!({"action": {
+            "kind": "set_burrow_membership", "units": ids(units),
+            "burrow": burrow.get().to_string(), "assigned": assigned}}),
+        Action::SetStandingOrder { key, value } => json!({"action": {
+            "kind": "set_standing_order", "key": key, "value": value}}),
+        _ => return None,
+    })
+}
+
+/// Civilian safety through `dfmcp_intent::CivilianAlertFsm`: the observed
+/// level is derived from the world (civilians in the safe burrow and the
+/// restriction order active), and the FSM's own transition supplies the
+/// remedy — lockdown while a hostile is active, all-clear once none is.
+fn civilian_alert(snapshot: &WorldSnapshot, units: &[&EntityRecord]) -> Vec<Json> {
+    let Some(burrow) = snapshot
+        .graph
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Burrow)
+        .map(|e| e.id)
+    else {
+        return Vec::new();
+    };
+    let squads: Vec<EntityId> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::Squad)
+        .map(|e| e.id)
+        .collect();
+    let civilians: Vec<EntityId> = units
+        .iter()
+        .filter(|u| !u.fields.contains_key(effects::SQUAD_FIELD))
+        .map(|u| u.id)
+        .collect();
+    if civilians.is_empty() {
+        return Vec::new();
+    }
+    let hostile_active = snapshot.graph.entities.values().any(|e| {
+        e.kind == EntityKind::Creature
+            && e.fields.get(effects::HOSTILE_FIELD).map(|f| &f.value) == Some(&Value::Bool(true))
+            && matches!(e.fields.get(effects::THREAT_STATUS_FIELD).map(|f| &f.value),
+                Some(Value::Text(status)) if status != effects::THREAT_SLAIN)
+    });
+    let burrow_field = format!("{}{}", effects::BURROW_FIELD_PREFIX, burrow.get());
+    let sheltered = civilians.iter().all(|id| {
+        snapshot
+            .graph
+            .entities
+            .get(id)
+            .and_then(|u| u.fields.get(&burrow_field))
+            .map(|f| &f.value)
+            == Some(&Value::Bool(true))
+    });
+    let restricted = snapshot
+        .graph
+        .entities
+        .get(&effects::fortress_settings_entity_id(snapshot.fortress_id))
+        .and_then(|e| {
+            e.fields.get(&format!(
+                "{}{CIVILIAN_RESTRICTION}",
+                effects::STANDING_ORDER_FIELD_PREFIX
+            ))
+        })
+        .map(|f| &f.value)
+        == Some(&Value::Text("ACTIVE".to_owned()));
+    let observed = if sheltered && restricted {
+        dfmcp_intent::ThreatLevel::EmergencyLockdown
+    } else {
+        dfmcp_intent::ThreatLevel::Peace
+    };
+    let (target, alert, severity, finding) = match (hostile_active, observed) {
+        (true, dfmcp_intent::ThreatLevel::Peace) => (
+            dfmcp_intent::ThreatLevel::EmergencyLockdown,
+            "civilian_lockdown",
+            "high",
+            format!(
+                "{} civilians are outside the safe burrow while a hostile is active",
+                civilians.len()
+            ),
+        ),
+        (false, dfmcp_intent::ThreatLevel::EmergencyLockdown) => (
+            dfmcp_intent::ThreatLevel::Peace,
+            "all_clear",
+            "low",
+            "no hostile is active; civilians are still confined to the safe burrow".to_owned(),
+        ),
+        _ => return Vec::new(),
+    };
+    let Ok(mut fsm) = dfmcp_intent::CivilianAlertFsm::new(burrow, squads) else {
+        return Vec::new();
+    };
+    fsm.confirm_observed_level(observed);
+    let Ok(actions) = fsm.transition_to(target, &civilians) else {
+        return Vec::new();
+    };
+    let steps: Vec<Json> = actions.iter().filter_map(action_step_json).collect();
+    vec![json!({
+        "alert": alert,
+        "severity": severity,
+        "finding": finding,
+        "remedy": {
+            "tool": "fortress.plan",
+            "arguments": {"actions": Json::Array(steps).to_string()},
+            "requires": "configure_logistics",
+        },
+    })]
 }
 
 /// Approaching or attacking hostiles, with a squad-assignment remedy when

@@ -21,7 +21,7 @@ pub const STEP_TICKS: u64 = 100;
 /// Longest horizon one evaluation may run.
 pub const MAX_HORIZON_TICKS: u64 = 200_000;
 
-const CAPABILITIES: [(&str, &str); 11] = [
+const CAPABILITIES: [(&str, &str); 12] = [
     ("observe", "read_only"),
     ("query", "read_only"),
     ("plan", "reversible"),
@@ -33,6 +33,7 @@ const CAPABILITIES: [(&str, &str); 11] = [
     ("configure_labor", "reversible"),
     ("configure_production", "reversible"),
     ("configure_military", "guarded"),
+    ("configure_logistics", "guarded"),
 ];
 
 fn parsed(raw: &str) -> Value {
