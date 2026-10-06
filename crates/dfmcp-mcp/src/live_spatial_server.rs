@@ -2,10 +2,16 @@
 //! arrive in one immutable capture; no independently timed snapshots are joined.
 #[path = "spatial_history.rs"]
 mod history;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "query_response.rs"]
 mod query_response;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "spatial_queries.rs"]
 mod spatial_queries;
 

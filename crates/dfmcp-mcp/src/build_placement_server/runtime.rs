@@ -236,7 +236,7 @@ pub(super) fn configuration() -> Result<Config> {
             || path[1..]
                 .split('/')
                 .any(|p| p.is_empty() || p == "." || p == "..")
-            || *&path == config.path
+            || path == config.path
         {
             return Err(denied());
         }
@@ -249,11 +249,11 @@ pub(super) fn configuration() -> Result<Config> {
             || path[1..]
                 .split('/')
                 .any(|p| p.is_empty() || p == "." || p == "..")
-            || *&path == config.path
+            || path == config.path
             || config
                 .batch_path
                 .as_ref()
-                .is_none_or(|batch| *batch == PathBuf::from(&path))
+                .is_none_or(|batch| batch.as_path() == std::path::Path::new(&path))
         {
             return Err(denied());
         }

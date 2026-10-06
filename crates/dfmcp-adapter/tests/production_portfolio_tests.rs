@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)] // integration-test fixtures assert by panicking
 #[path = "support/production_portfolio_spatial.rs"]
 mod fixture;
 use dfmcp_adapter::live_spatial::{SpatialStateView, citizens::LiveSpatialCitizenState};

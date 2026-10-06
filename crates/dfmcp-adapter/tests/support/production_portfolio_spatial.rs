@@ -1,5 +1,6 @@
 //! Synthetic full captures: available skilled citizens and one ground stack.
 //! Existing fixed operations encoding is reused; no native service is involved.
+#![allow(clippy::module_inception)] // shared fixture included under several names
 #[path = "production_spatial.rs"]
 mod base;
 use dfmcp_adapter::live_operations::OperationsProfile;

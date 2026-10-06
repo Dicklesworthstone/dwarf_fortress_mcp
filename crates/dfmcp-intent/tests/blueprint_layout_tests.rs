@@ -1,3 +1,4 @@
+#![allow(clippy::panic)] // integration tests assert by panicking
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeSet, VecDeque};

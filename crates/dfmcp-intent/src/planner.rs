@@ -940,8 +940,10 @@ mod tests {
     #[test]
     fn zero_ttl_policy_is_rejected_before_plan_construction() {
         let snapshot = snapshot();
-        let mut policy = PlanPolicy::default();
-        policy.plan_ttl_ticks = 0;
+        let policy = PlanPolicy {
+            plan_ttl_ticks: 0,
+            ..PlanPolicy::default()
+        };
         let intent = Intent {
             id: IntentId::new(4),
             anchor: snapshot.anchor(),

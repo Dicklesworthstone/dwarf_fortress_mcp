@@ -430,6 +430,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         Ok((decoded, rendered))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_prepared(
         &mut self,
         key: String,
@@ -541,6 +542,7 @@ impl<S: EffectJournalStorage> ControlEffectJournal<S> {
         self.append(next, context)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_reconciliation(
         &mut self,
         key: &str,

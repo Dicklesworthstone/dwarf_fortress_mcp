@@ -1,8 +1,12 @@
 //! Explicitly unadmitted jobs/1.2 MCP runtime. This observes the native job list;
 //! it neither merges independently timed citizen snapshots nor controls the game.
 
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "query_response.rs"]
 mod query_response;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
 

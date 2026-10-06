@@ -82,6 +82,7 @@ impl ProgressStream for Script {
         Ok(())
     }
 }
+#[allow(clippy::type_complexity)]
 fn client(tail: Vec<u8>) -> Result<(ProgressRpcClient<Script>, Rc<RefCell<Vec<u8>>>)> {
     let mut bytes = bootstrap(3);
     bytes.extend_from_slice(&tail);

@@ -684,9 +684,9 @@ fn audit_and_next_step_guard_enforce_constraints_after_reopening() {
 #[test]
 fn maximum_complete_request_and_handoff_fit_unchanged_parent_and_completion_bounds() {
     let mut model = request(32).request().clone();
-    for i in 0..32 {
-        model.slots[i].name = format!("{i:02}{}", "x".repeat(46));
-        model.slots[i].after = (0..i.min(3))
+    for (i, slot) in model.slots.iter_mut().enumerate().take(32) {
+        slot.name = format!("{i:02}{}", "x".repeat(46));
+        slot.after = (0..i.min(3))
             .map(|j| format!("{j:02}{}", "x".repeat(46)))
             .collect();
     }
@@ -718,8 +718,9 @@ fn maximum_complete_request_and_handoff_fit_unchanged_parent_and_completion_boun
     let (_, journal) = header(&binding);
     let definition = BatchDefinition::from_handoff(handoff, binding, journal).unwrap();
     assert!(definition.canonical_bytes().len() <= MAX_DEFINITION_BYTES);
-    assert!(MAX_DEFINITION_BYTES + 256 < crate::furniture_batch::store::MAX_STORE_BYTES);
-    assert!(
+    const _: () =
+        assert!(MAX_DEFINITION_BYTES + 256 < crate::furniture_batch::store::MAX_STORE_BYTES);
+    const _: () = assert!(
         MAX_DEFINITION_BYTES + 32 * crate::build_placement::MAX_RECORD_BYTES + 20_000
             < crate::construction_plan::origin::MAX_ORIGIN_BYTES
     );

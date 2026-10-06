@@ -87,11 +87,13 @@ impl ProtoWriter {
         self.varint(u64::from(zigzag));
     }
 
+    #[cfg(test)]
     fn boolean(&mut self, field: u32, value: bool) {
         self.key(field, WireType::Varint);
         self.varint(u64::from(value));
     }
 
+    #[cfg(test)]
     fn bytes(&mut self, field: u32, value: &[u8]) -> Result<()> {
         if value.len() > MAX_PROTO_PAYLOAD_BYTES {
             return Err(error(
@@ -110,6 +112,7 @@ impl ProtoWriter {
         Ok(())
     }
 
+    #[cfg(test)]
     fn string(&mut self, field: u32, value: &str) -> Result<()> {
         self.bytes(field, value.as_bytes())
     }

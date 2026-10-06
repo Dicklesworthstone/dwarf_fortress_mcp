@@ -18,7 +18,9 @@ fn fixture(name: &str) -> Result<Vec<u8>> {
         .as_str()
         .ok_or_else(|| error(ErrorCode::InvalidRequest, "fixture missing"))?;
     raw.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|v| {
             let s = std::str::from_utf8(v).map_err(|_| exhausted())?;
             u8::from_str_radix(s, 16).map_err(|_| exhausted())

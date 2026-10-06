@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+// Test fixtures shared with dfmcp-adapter are included by several test modules.
+#![cfg_attr(test, allow(clippy::duplicate_mod))]
 //! MCP presentation plane for the Dwarf Fortress semantic control plane.
 //!
 //! `dfmcp-mcp` binds the frozen 11-tool `fortress.*` narrow waist to the owned
@@ -88,12 +90,12 @@ fn run_with_runtime_cx<F: std::future::Future>(
 }
 
 fn run_modern_stdio(server: fastmcp_rust::modern::Server) {
-    if let Err(error) = run_with_runtime_cx(|cx| async move {
+    // The stdio server never returns, so the runtime can only fail to start.
+    let Err(error) = run_with_runtime_cx(|cx| async move {
         server.run_stdio_with_cx(&cx).await;
-    }) {
-        eprintln!("MCP runtime startup failed: {error}");
-        std::process::exit(1);
-    }
+    });
+    eprintln!("MCP runtime startup failed: {error}");
+    std::process::exit(1);
 }
 
 /// Render the protocol-1.0 live `fortress.open_session` Agent Turn with default

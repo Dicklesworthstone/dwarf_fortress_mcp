@@ -137,9 +137,9 @@ fn disconnected_areas_isolated_tiles_and_cycles_are_not_conflated() -> Result<()
 fn every_small_map_matches_destructive_vertex_and_edge_oracles() -> Result<(), MapError> {
     for mask in 0..512u32 {
         let mut map = grid([3, 3, 1])?;
-        for i in 0..9 {
+        for (i, cell) in map.cells.iter_mut().enumerate().take(9) {
             if mask & (1 << i) != 0 {
-                map.cells[i] = Cell::Hidden;
+                *cell = Cell::Hidden;
             }
         }
         let graph = flat_graph(&map)?;

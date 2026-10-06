@@ -37,8 +37,8 @@ fn maximal() -> Result<ProgressObservation> {
         ] {
             u32(&mut b, n);
         }
-        text(&mut b, &vec![1; 128]);
-        text(&mut b, &vec![1; 128]);
+        text(&mut b, &[1; 128]);
+        text(&mut b, &[1; 128]);
     }
     ProgressObservation::decode(&b, &(0..32).collect::<Vec<_>>())
 }

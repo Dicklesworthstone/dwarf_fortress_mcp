@@ -419,7 +419,7 @@ fn transition_rules_never_restore_dispatch_eligibility() -> Result<()> {
     assert!(transition(Some(&old), &next).is_err());
     assert_eq!(reserve(AssignmentState::CancelRequested), 1);
     assert_eq!(reserve(AssignmentState::Terminal), 0);
-    assert!(MAX_FRAME * 5 < MAX_BYTES);
+    const _: () = assert!(MAX_FRAME * 5 < MAX_BYTES);
     Ok(())
 }
 #[cfg(all(

@@ -76,7 +76,9 @@ fn fixture() -> Result<OrderRunRecord> {
         include_str!("../../../dfmcp-adapter/tests/fixtures/order_run_predicate_v1_14.hex").trim();
     let bytes = raw
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair)
                 .map_err(|_| error(ErrorCode::InvalidRequest, "fixture"))?;

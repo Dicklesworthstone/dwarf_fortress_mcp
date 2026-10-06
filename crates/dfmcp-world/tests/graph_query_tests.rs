@@ -326,6 +326,7 @@ fn corrupted_path_records_fail_instead_of_looping() -> Result<()> {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn exhaustive_three_vertex_graphs_match_independent_closure_and_distance_oracles() -> Result<()> {
     for mask in 0u16..512 {
         let mut edges = Vec::new();

@@ -5,10 +5,16 @@
 mod history;
 #[path = "live_operations_paged_server.rs"]
 pub mod paged;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "operations_production.rs"]
 mod production;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "query_response.rs"]
 mod query_response;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
 

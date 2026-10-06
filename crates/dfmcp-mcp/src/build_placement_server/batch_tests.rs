@@ -713,11 +713,11 @@ fn dense_complete_plan_reserves_future_rows_and_refuses_oversized_response() -> 
         .collect::<Vec<_>>();
     let mut document = json!({"schema":"dfmcp.furniture-plan/1","steps":rows}).to_string();
     'edges: for index in 1..rows.len() {
-        for predecessor in 0..index {
+        for predecessor in names.iter().take(index) {
             rows[index]["after"]
                 .as_array_mut()
                 .ok_or_else(exhausted)?
-                .push(json!(names[predecessor]));
+                .push(json!(predecessor));
             let candidate = json!({"schema":"dfmcp.furniture-plan/1","steps":rows}).to_string();
             if candidate.len() > dfmcp_adapter::furniture_batch::MAX_PLAN_BYTES {
                 break 'edges;

@@ -248,6 +248,7 @@ impl ProtoWriter {
         self.varint(u64::from(value));
     }
 
+    #[cfg(test)]
     fn sint32(&mut self, field: u32, value: i32) {
         self.key(field, WireType::Varint);
         let zigzag = ((value as u32) << 1) ^ ((value >> 31) as u32);

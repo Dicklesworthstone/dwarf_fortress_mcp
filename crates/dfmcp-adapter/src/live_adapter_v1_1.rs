@@ -848,6 +848,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn batch(
         generation: u64,
         requested_after_id: i32,

@@ -174,9 +174,9 @@ mod tests {
     fn every_three_by_three_obstacle_map_matches_existing_routes() -> Result<(), MapError> {
         for mask in 0..512u32 {
             let mut map = grid([3, 3, 1])?;
-            for i in 0..9 {
+            for (i, cell) in map.cells.iter_mut().enumerate().take(9) {
                 if mask & (1 << i) != 0 {
-                    map.cells[i] = Cell::Hidden;
+                    *cell = Cell::Hidden;
                 }
             }
             if !map.candidate(0) {

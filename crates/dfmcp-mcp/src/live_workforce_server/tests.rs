@@ -10,7 +10,9 @@ use std::rc::Rc;
 fn unhex(raw: &str) -> Result<Vec<u8>> {
     raw.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|b| {
             let s = std::str::from_utf8(b).map_err(|_| exhausted())?;
             u8::from_str_radix(s, 16).map_err(|_| exhausted())

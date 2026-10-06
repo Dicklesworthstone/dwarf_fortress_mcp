@@ -821,7 +821,7 @@ fn threat_alerts(snapshot: &WorldSnapshot, units: &[&EntityRecord]) -> Vec<Json>
         .count();
     let recruits: Vec<String> = units
         .iter()
-        .filter(|u| u.fields.get(effects::SQUAD_FIELD).is_none())
+        .filter(|u| !u.fields.contains_key(effects::SQUAD_FIELD))
         .take(4)
         .map(|u| u.id.get().to_string())
         .collect();

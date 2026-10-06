@@ -298,11 +298,10 @@ fn await_preflight_rejects_wrong_session_anchor_and_extra_fields_before_a_read()
             _ => input["schema"] = json!("unknown"),
         }
         let mut reads = 0;
-        let outcome = semantic_query::prepare_await(&initial, &other, &input).and_then(|needed| {
+        let outcome = semantic_query::prepare_await(&initial, &other, &input).map(|needed| {
             if needed {
                 reads += 1;
             }
-            Ok(())
         });
         assert!(outcome.is_err());
         assert_eq!(reads, 0);

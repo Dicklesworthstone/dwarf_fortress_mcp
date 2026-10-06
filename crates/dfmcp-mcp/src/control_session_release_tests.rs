@@ -105,15 +105,15 @@ impl Registered {
 impl Drop for Registered {
     fn drop(&mut self) {
         // A failing assertion must not leak the one global session permit.
-        if let Ok(mut sessions) = SESSIONS.lock() {
-            if let Some(handle) = sessions.remove(&self.id) {
-                match handle.lock() {
-                    Ok(mut g) => {
-                        g.take();
-                    }
-                    Err(e) => {
-                        e.into_inner().take();
-                    }
+        if let Ok(mut sessions) = SESSIONS.lock()
+            && let Some(handle) = sessions.remove(&self.id)
+        {
+            match handle.lock() {
+                Ok(mut g) => {
+                    g.take();
+                }
+                Err(e) => {
+                    e.into_inner().take();
                 }
             }
         }

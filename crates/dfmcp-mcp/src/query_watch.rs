@@ -142,6 +142,8 @@ struct Envelope {
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+// A transient deserialized request; boxing would only add allocation.
+#[allow(clippy::large_enum_variant)]
 enum Request {
     Watch {
         key: String,

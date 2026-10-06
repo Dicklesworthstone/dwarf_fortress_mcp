@@ -14,7 +14,9 @@ fn sample(sequence: u64, tick: u64, remaining: i32) -> Result<ProgressObservatio
         include_str!("../../dfmcp-adapter/tests/fixtures/work_order_progress_v1_12.hex").trim();
     let mut bytes = text
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let s = std::str::from_utf8(p)
                 .map_err(|_| error(ErrorCode::InvalidRequest, "test UTF-8"))?;
@@ -109,6 +111,7 @@ impl JournalStorage for Memory {
         Err(io::Error::other("test forbids repair"))
     }
 }
+#[allow(clippy::type_complexity)]
 fn setup() -> Result<(
     ProgressArchive<Memory>,
     Rc<RefCell<Vec<u8>>>,

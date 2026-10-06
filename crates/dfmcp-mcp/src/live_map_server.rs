@@ -2,8 +2,12 @@
 //! separately timed operation snapshots are merged into this terrain observation.
 #[path = "map_queries.rs"]
 mod map_queries;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "query_response.rs"]
 mod query_response;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
 

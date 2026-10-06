@@ -5,6 +5,8 @@ use super::*;
 use dfmcp_core::Digest32;
 use std::time::Instant;
 
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "operations_production.rs"]
 mod shared;
 

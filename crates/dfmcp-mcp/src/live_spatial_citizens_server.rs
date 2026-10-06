@@ -8,10 +8,16 @@ mod durable_watches;
 mod history;
 #[path = "spatial_observation.rs"]
 mod observation;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "spatial_production.rs"]
 mod production;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "query_response.rs"]
 mod query_response;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
 #[path = "spatial_session_release.rs"]
@@ -23,6 +29,8 @@ mod situation_presentation;
 #[cfg(test)]
 #[path = "spatial_situation_tests.rs"]
 mod situation_tests;
+// Shared module compiled into several servers; each copy uses a subset.
+#[allow(dead_code, clippy::duplicate_mod)]
 #[path = "spatial_queries.rs"]
 mod spatial_queries;
 #[path = "spatial_watch_batch.rs"]

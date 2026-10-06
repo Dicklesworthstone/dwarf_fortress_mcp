@@ -58,7 +58,9 @@ impl JournalStorage for Memory {
 fn hex(raw: &str) -> Result<Vec<u8>> {
     raw.trim()
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             u8::from_str_radix(
                 std::str::from_utf8(p).map_err(|_| error(ErrorCode::InvalidRequest, "hex"))?,
@@ -358,7 +360,7 @@ fn operator_watch_path_requires_a_distinct_archive_and_output_reserve_remains_bo
         )
         .is_ok()
     );
-    assert!(
+    const _: () = assert!(
         WATCH_BYTES
             > dfmcp_adapter::work_order_progress::watches::BOOK_OPEN_RESERVE
                 + dfmcp_adapter::work_order_progress::archive::MAX_ARCHIVE_BYTES

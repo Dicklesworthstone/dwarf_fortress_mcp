@@ -24,12 +24,9 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, DfmcpError, Digest32, EntityId, ErrorCode,
-    FortressId, GameTick, ObservationCursor, OperationContext, RequestId, Result, RiskTier,
-    SessionId, StateAnchor, WorkBudget,
+    FortressId, OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_world::{
-    EntityKind, Fact, FactPresence, FactSource, QueryOrder, Value as WorldValue, WorldQuery,
-};
+use dfmcp_world::{EntityKind, Fact, FactPresence, QueryOrder, Value as WorldValue, WorldQuery};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -815,6 +812,7 @@ fn unbound_error(operation: &str, phase: AgentPhase, failure: &DfmcpError) -> St
         .attach(error_payload(operation, failure))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn session_error(
     session: &LiveSession,
     operation: &str,
@@ -1970,6 +1968,8 @@ pub fn run_live_stdio() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dfmcp_core::GameTick;
+    use dfmcp_world::FactSource;
 
     #[test]
     fn capability_parser_admits_only_read_only_live_capabilities() -> Result<()> {

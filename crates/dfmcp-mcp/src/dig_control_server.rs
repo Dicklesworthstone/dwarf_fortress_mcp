@@ -407,6 +407,7 @@ enum Action {
     Inventory,
     Denied,
 }
+#[allow(clippy::too_many_arguments)]
 fn perform<S, N, G, F>(
     state: &mut State<S, N>,
     c: &OperationContext,

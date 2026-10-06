@@ -43,6 +43,8 @@ const EFFECT_BYTES: u64 = 512 * 1024 * 1024;
 const SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<Entry>> = Mutex::new(None);
+// One process-wide session entry; variant size is irrelevant.
+#[allow(clippy::large_enum_variant)]
 enum Entry {
     Placement {
         state: State<PrivateBuildFile, BuildRpc>,

@@ -419,6 +419,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn batch(
         requested_after_id: i32,
         oldest_available_id: i32,

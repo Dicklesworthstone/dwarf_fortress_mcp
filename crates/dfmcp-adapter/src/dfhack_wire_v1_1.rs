@@ -200,6 +200,7 @@ impl ProtoWriter {
         self.varint(u64::from(value));
     }
 
+    #[cfg(test)]
     fn sint32(&mut self, field: u32, value: i32) {
         self.key(field, WireType::Varint);
         let zigzag = ((value as u32) << 1) ^ ((value >> 31) as u32);
@@ -1405,6 +1406,7 @@ mod tests {
         Ok(writer.finish())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn announcement(report_id: i32) -> Result<Vec<u8>> {
         let mut writer = ProtoWriter::default();
         writer.sint32(1, report_id);
@@ -1419,6 +1421,7 @@ mod tests {
         Ok(writer.finish())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn observation_reply(
         nonce: &[u8],
         generation: u64,
@@ -1478,6 +1481,7 @@ mod tests {
         rpc_result(&writer.finish())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scripted_session(
         nonce: &[u8],
         citizen_ids: &[i32],

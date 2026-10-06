@@ -62,11 +62,13 @@ fn invalid(text: &str) -> dfmcp_core::DfmcpError {
 }
 fn decode_hex(raw: &str) -> Result<Vec<u8>> {
     let raw = raw.trim();
-    if raw.len() % 2 != 0 {
+    if !raw.len().is_multiple_of(2) {
         return Err(invalid("odd fixture"));
     }
     raw.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let a = char::from(pair[0])
                 .to_digit(16)
