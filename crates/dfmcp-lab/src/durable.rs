@@ -166,6 +166,9 @@ pub struct DurableLabStore {
     index: Index,
     torn_tail_bytes: u64,
     compactions: u64,
+    /// Fault injection: appends still allowed before the store behaves as if
+    /// the process died (nothing further reaches disk). `None` is unlimited.
+    append_budget: Option<usize>,
 }
 
 fn hex_text(text: &str) -> String {
@@ -522,6 +525,7 @@ impl DurableLabStore {
             index: Index::default(),
             torn_tail_bytes: 0,
             compactions: 0,
+            append_budget: None,
         };
         let complete = bytes
             .iter()
@@ -673,7 +677,24 @@ impl DurableLabStore {
         sync_dir(&objects)
     }
 
+    /// Fault injection for crash campaigns: allow `budget` more journal
+    /// appends, after which every write fails as if the process had died at
+    /// that boundary (objects already written stay, as after a real crash).
+    pub fn set_append_budget(&mut self, budget: Option<usize>) {
+        self.append_budget = budget;
+    }
+
     fn append(&mut self, record: Record) -> Result<()> {
+        match self.append_budget.as_mut() {
+            Some(0) => {
+                return Err(DfmcpError::new(
+                    ErrorCode::AdapterUnavailable,
+                    "injected crash: the durable store accepts no further writes",
+                ));
+            }
+            Some(remaining) => *remaining -= 1,
+            None => {}
+        }
         let payload = record.payload();
         if payload.len() > MAX_RECORD_BYTES {
             return Err(invalid("durable journal record exceeds its bound"));

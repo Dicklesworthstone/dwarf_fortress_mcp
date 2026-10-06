@@ -61,6 +61,16 @@ fn id(value: &Value, field: &str) -> std::result::Result<String, Box<dyn std::er
         .to_owned())
 }
 
+/// Durable tests share the process-wide store; run them one at a time.
+static DURABLE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serialized() -> std::sync::MutexGuard<'static, ()> {
+    match DURABLE_TESTS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 struct StateDir(std::path::PathBuf);
 
 impl Drop for StateDir {
@@ -72,6 +82,7 @@ impl Drop for StateDir {
 
 #[test]
 fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
+    let _serial = serialized();
     let dir = StateDir(
         std::env::temp_dir().join(format!("dfmcp-durable-lab-mcp-{}", std::process::id())),
     );
@@ -197,5 +208,97 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
         "finished and abandoned commits are retired: {third}"
     );
     assert_eq!(terrain(&id(&third, "session_id")?)?, at_checkpoint);
+    Ok(())
+}
+
+/// One durable commit is three journal boundaries: the commit record (before
+/// any effect), the step state, then the world head. Crashing after each
+/// must recover honestly: never a verified step without its effect.
+#[test]
+fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult {
+    let _serial = serialized();
+    let dir =
+        StateDir(std::env::temp_dir().join(format!("dfmcp-durable-crash-{}", std::process::id())));
+    let dig =
+        r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[3,3,10],"mode":"mine"}}]"#;
+    let mut outcomes = Vec::new();
+    for (case, budget) in [
+        ("after_commit_record", 1),
+        ("after_step_record", 2),
+        ("after_head", 3),
+    ] {
+        let _ = std::fs::remove_dir_all(&dir.0);
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let selector = format!("8803{budget}");
+        let opened = open_durable(&selector, Some("starter_fortress"))?;
+        let session = id(&opened, "session_id")?;
+        let planned = parsed(&fortress_plan(
+            Some(session.clone()),
+            None,
+            None,
+            Some(dig.to_owned()),
+            None,
+        ))?;
+        let digest = id(&planned, "plan_digest")?;
+        crate::server::inject_durable_crash_after(budget);
+        let _ = parsed(&fortress_commit(Some(session), digest.clone()))?;
+
+        // The process dies; a new one resumes from whatever reached disk.
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let resumed = open_durable(&selector, None)?;
+        assert_eq!(resumed["ok"], true, "{case}: {resumed}");
+        let second = id(&resumed, "session_id")?;
+        let designations = parsed(&fortress_query(
+            Some(second.clone()),
+            Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
+        ))?;
+        let world_has_effect = designations["total"].as_u64().unwrap_or(0) > 0;
+        let commits = resumed["durable"]["recovered_commits"].clone();
+        let step_state = commits[0]["steps"][0]["state"].as_str().map(str::to_owned);
+        assert_eq!(
+            commits[0]["plan_digest"],
+            digest.as_str(),
+            "{case}: {resumed}"
+        );
+        // Let time pass well beyond the obligation deadline, then look.
+        for _ in 0..10 {
+            parsed(&fortress_wait(Some(second.clone()), Some(100)))?;
+        }
+        let doctor = parsed(&fortress_doctor(Some(second)))?;
+        let carried = doctor["durability"]["carried_obligations"][0]["state"]
+            .as_str()
+            .map(str::to_owned);
+        if carried.as_deref() == Some("verified") {
+            assert!(world_has_effect, "{case}: verified without the effect");
+        }
+        outcomes.push((case, world_has_effect, step_state, carried));
+    }
+    assert_eq!(
+        outcomes,
+        vec![
+            // Nothing past the commit record survived: the plan never ran.
+            (
+                "after_commit_record",
+                false,
+                Some("not_dispatched".to_owned()),
+                None
+            ),
+            // The step was recorded dispatched but the world head was lost:
+            // the obligation is carried and fails, never verifies.
+            (
+                "after_step_record",
+                false,
+                Some("dispatched".to_owned()),
+                Some("failed".to_owned())
+            ),
+            // Everything reached disk: carried and proven by observation.
+            (
+                "after_head",
+                true,
+                Some("dispatched".to_owned()),
+                Some("verified".to_owned())
+            ),
+        ]
+    );
     Ok(())
 }

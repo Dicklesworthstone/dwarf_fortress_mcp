@@ -460,6 +460,15 @@ pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
     lab.owners.clear();
 }
 
+/// Test hook: let the open durable store accept `budget` more journal
+/// appends before behaving as if the process died.
+#[cfg(test)]
+pub(crate) fn inject_durable_crash_after(budget: usize) {
+    if let Some(store) = durable_lab().store.as_mut() {
+        store.set_append_budget(Some(budget));
+    }
+}
+
 /// Persist the session's world when it is durable and changed. A failure is
 /// kept on the session (and surfaced by the Agent Turn and doctor) rather
 /// than silently ignored; the response that caused it is already computed.
