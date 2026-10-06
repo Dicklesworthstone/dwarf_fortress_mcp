@@ -1234,18 +1234,25 @@ fn a_fortress_runs_dry_and_the_agent_brews_its_way_back() -> TestResult {
 
     // Follow the remedy: a brewing work order restocks and quenches.
     let remedy = alert_of(&thirsty, "world-drink_supply")
-        .ok_or("alert vanished")?["remedy"]["arguments"]["actions"]
+        .ok_or("alert vanished")?["remedy"]["arguments"]["blueprint"]
         .as_str()
-        .ok_or("remedy actions")?
+        .ok_or("remedy objective")?
         .to_owned();
     let planned = parsed(&fortress_plan(
         Some(session.clone()),
         None,
         None,
-        Some(remedy),
         None,
+        Some(remedy),
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
+    // The production compiler sized the order against observed (empty) stock.
+    assert_eq!(planned["production"]["feasible"], true, "{planned}");
+    assert_eq!(planned["production"]["requirements"][0]["item"], "DRINK");
+    assert_eq!(
+        planned["production"]["requirements"][0]["minimum_stock"],
+        28
+    );
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
     assert_eq!(committed["ok"], true, "{committed}");
@@ -1672,5 +1679,45 @@ fn the_civilian_alert_fsm_locks_down_during_a_raid_and_sounds_the_all_clear() ->
     assert_eq!(follow(&clear["remedy"])?["ok"], true);
     let after = parsed(&fortress_observe(Some(session.clone())))?;
     assert!(alert(&after, "all_clear").is_none(), "{after}");
+    Ok(())
+}
+
+#[test]
+fn production_objectives_compile_against_observed_stock() -> TestResult {
+    let session = open("72160", false, &ALL_EFFECTS)?;
+    let plan = |quotas: &str| {
+        parsed(&fortress_plan(
+            Some(session.clone()),
+            None,
+            None,
+            None,
+            Some(format!(r#"{{"template":"production","quotas":{quotas}}}"#)),
+        ))
+    };
+    // 40 drink in stock: a 60-drink quota needs 20 more, 4 batches of 5.
+    let drink = plan(r#"[{"item":"DRINK","minimum":60},{"item":"FOOD","minimum":75}]"#)?;
+    assert_eq!(drink["ok"], true, "{drink}");
+    let requirements = drink["production"]["requirements"]
+        .as_array()
+        .ok_or("requirements")?;
+    assert_eq!(requirements.len(), 2);
+    let kinds: Vec<(&str, u64)> = drink["steps"]
+        .as_array()
+        .ok_or("steps")?
+        .iter()
+        .filter_map(|s| Some((s["kind"].as_str()?, 0)))
+        .collect();
+    assert_eq!(kinds.len(), 2, "{drink}");
+    // Already met: refused rather than producing nothing.
+    let met = plan(r#"[{"item":"DRINK","minimum":10}]"#)?;
+    assert_eq!(met["ok"], false, "{met}");
+    // Outside the model: infeasible, with the shortage named.
+    let unknown = plan(r#"[{"item":"STEEL","minimum":5}]"#)?;
+    assert_eq!(unknown["ok"], false, "{unknown}");
+    assert!(
+        unknown["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("STEEL"))
+    );
     Ok(())
 }

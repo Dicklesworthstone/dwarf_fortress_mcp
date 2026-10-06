@@ -66,16 +66,18 @@ fn follow(session: &str, turn: &Value, tally: &mut Tally) {
     };
     let digest = match top["tool"].as_str() {
         Some("fortress.plan") => {
-            let Some(actions) = top["arguments"]["actions"].as_str() else {
+            let actions = top["arguments"]["actions"].as_str().map(str::to_owned);
+            let blueprint = top["arguments"]["blueprint"].as_str().map(str::to_owned);
+            if actions.is_none() && blueprint.is_none() {
                 return;
-            };
+            }
             tally.calls += 1;
             let planned = parsed(&f::fortress_plan(
                 Some(session.to_owned()),
                 None,
                 None,
-                Some(actions.to_owned()),
-                None,
+                actions,
+                blueprint,
             ));
             match planned["plan_digest"].as_str() {
                 Some(digest) => digest.to_owned(),

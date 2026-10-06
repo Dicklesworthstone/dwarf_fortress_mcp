@@ -1991,7 +1991,7 @@ pub(crate) fn plan_with_actions(
     paused_target: Option<bool>,
     actions: Option<String>,
 ) -> String {
-    plan_request(session_id, summary, paused_target, actions, None)
+    plan_request(session_id, summary, paused_target, actions, None, None)
 }
 
 /// `fortress.plan` over every request form: pause/resume, explicit semantic
@@ -2002,15 +2002,28 @@ pub(crate) fn plan_request(
     paused_target: Option<bool>,
     actions: Option<String>,
     blueprint: Option<String>,
+    production: Option<String>,
 ) -> String {
-    if actions.is_some() && blueprint.is_some() {
+    // A production objective arrives as a blueprint template.
+    let (blueprint, production) = match blueprint {
+        Some(raw) if crate::lab_world::is_production_objective(&raw) => (None, Some(raw)),
+        other => (other, production),
+    };
+    if [actions.is_some(), blueprint.is_some(), production.is_some()]
+        .iter()
+        .filter(|named| **named)
+        .count()
+        > 1
+    {
         return coded_error_payload(
             "fortress.plan",
             ErrorCode::InvalidRequest,
-            "a plan request names either actions or a blueprint, not both",
+            "a plan request names at most one of actions, blueprint or production",
         );
     }
-    let default_summary = if blueprint.is_some() {
+    let default_summary = if production.is_some() {
+        "meet production quotas"
+    } else if blueprint.is_some() {
         ""
     } else if actions.is_some() {
         "execute semantic actions"
@@ -2041,6 +2054,15 @@ pub(crate) fn plan_request(
                 return dfmcp_error_payload("fortress.plan", &error);
             }
             let snapshot = guard.adapter.snapshot();
+            // Production quotas compile, against observed stock, into ordinary
+            // semantic work-order steps; the plan is then sealed like any other.
+            let (actions, production_analysis) = match production {
+                Some(raw) => match crate::lab_world::production_actions(snapshot, &raw) {
+                    Ok((compiled, analysis)) => (Some(compiled), Some(analysis)),
+                    Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                },
+                None => (actions, None),
+            };
 
             let source = match (actions, blueprint) {
                 (_, Some(raw)) => PlanSource::Blueprint { summary, raw },
@@ -2072,6 +2094,7 @@ pub(crate) fn plan_request(
                         "steps": crate::lab_world::plan_steps_json(&plan),
                         "forecast": forecast_plan(&guard.adapter, &plan, &ctx),
                         "live_routing": live_routing_json(&plan),
+                        "production": production_analysis,
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
                     guard.pending = Some(PendingPlan {

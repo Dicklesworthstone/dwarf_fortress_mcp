@@ -711,6 +711,125 @@ pub(crate) const fn action_kind(action: &Action) -> &'static str {
     }
 }
 
+/// Whether a blueprint request is the production objective template.
+pub(crate) fn is_production_objective(raw: &str) -> bool {
+    raw.len() <= MAX_ACTIONS_JSON_BYTES
+        && serde_json::from_str::<Json>(raw).is_ok_and(|v| v["template"] == "production")
+}
+
+/// The laboratory recipe catalog, matching the reference effects exactly:
+/// a brewing batch yields 5 drink and a meal batch 5 food, from no modeled
+/// inputs. Lab work orders need no workshop.
+fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
+    let mut compiler = dfmcp_intent::ProductionLogisticsCompiler::without_recipes();
+    for (output, job, workshop) in [
+        ("DRINK", "BREW_DRINK", "Still"),
+        ("FOOD", "PREPARE_MEAL", "Kitchen"),
+    ] {
+        compiler.register_recipe(dfmcp_intent::ProductionRecipe {
+            output_token: output.to_owned(),
+            output_batch_size: 5,
+            input_tokens: Vec::new(),
+            workshop: BuildingKind::Workshop(workshop.to_owned()),
+            job_token: job.to_owned(),
+        });
+    }
+    compiler
+}
+
+/// Compile `{"template":"production","quotas":[{"item":"DRINK","minimum":40}]}`
+/// against observed stock (the stock ledger) into semantic work-order steps,
+/// plus the complete material analysis. Infeasible models are refused with
+/// every shortage named; nothing is guessed.
+pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<(String, Json)> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Quota {
+        item: String,
+        minimum: u32,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Objective {
+        #[allow(dead_code)]
+        template: String,
+        quotas: Vec<Quota>,
+    }
+    if raw.len() > MAX_ACTIONS_JSON_BYTES {
+        return Err(invalid("production objective exceeds its byte bound"));
+    }
+    let objective: Objective = serde_json::from_str(raw).map_err(|error| {
+        invalid(format!(
+            "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD\",\"minimum\":n}}]}}: {error}"
+        ))
+    })?;
+    let mut inventory = dfmcp_intent::InventoryStockpile::new();
+    if let Some(ledger) =
+        effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
+    {
+        for (token, field) in [
+            ("DRINK", effects::STOCK_DRINK_FIELD),
+            ("FOOD", effects::STOCK_FOOD_FIELD),
+        ] {
+            if let Some(Value::U64(held)) = ledger.fields.get(field).map(|f| &f.value) {
+                inventory.set_stock(token, u32::try_from(*held).unwrap_or(u32::MAX));
+            }
+        }
+    }
+    let quotas: Vec<dfmcp_intent::ProductionQuota> = objective
+        .quotas
+        .into_iter()
+        .map(|q| dfmcp_intent::ProductionQuota {
+            item_token: q.item,
+            minimum_stock: q.minimum,
+        })
+        .collect();
+    let plan = lab_recipes().plan_quotas(
+        &quotas,
+        &inventory,
+        dfmcp_intent::ProductionPlanningLimits::default(),
+    )?;
+    let analysis = json!({
+        "model": "laboratory recipes (5 units per batch, no modeled inputs); stock read from the stock ledger",
+        "feasible": plan.model_feasible(),
+        "requirements": plan.requirements().iter().map(|r| json!({
+            "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
+            "planned": r.planned_units, "missing": r.missing_units,
+        })).collect::<Vec<_>>(),
+        "shortages": plan.shortages().iter().map(|s| json!({
+            "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
+        })).collect::<Vec<_>>(),
+    });
+    if !plan.model_feasible() {
+        return Err(DfmcpError::new(
+            ErrorCode::PreconditionsFailed,
+            format!("production quotas are infeasible in the laboratory model: {analysis}"),
+        ));
+    }
+    if plan.steps().is_empty() {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidIntent,
+            "observed stock already meets every quota; nothing to produce",
+        ));
+    }
+    let steps: Vec<Json> = plan
+        .steps()
+        .iter()
+        .map(|step| {
+            json!({
+                "action": {
+                    "kind": "create_work_order",
+                    "name": format!("{} for quota", step.output_token.to_lowercase()),
+                    "job_token": step.job_token,
+                    "amount": step.batches,
+                },
+                "depends_on": step.depends_on,
+            })
+        })
+        .collect();
+    Ok((Json::Array(steps).to_string(), analysis))
+}
+
 /// Observed economy alerts: stocks that will run out soon, are exhausted, or
 /// dwarves left thirsty or hungry. Each names a concrete remedy plan.
 pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
@@ -732,13 +851,12 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
         return Vec::new();
     }
     let mut alerts = Vec::new();
-    for (stock, interval, need, deprived, job, noun) in [
+    for (stock, interval, need, deprived, noun) in [
         (
             effects::STOCK_DRINK_FIELD,
             effects::DRINK_INTERVAL_TICKS,
             effects::NEED_DRINK_FIELD,
             "thirsty",
-            "BREW_DRINK",
             "drink",
         ),
         (
@@ -746,7 +864,6 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
             effects::FOOD_INTERVAL_TICKS,
             effects::NEED_FOOD_FIELD,
             "hungry",
-            "PREPARE_MEAL",
             "food",
         ),
     ] {
@@ -762,12 +879,15 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
                 matches!(u.fields.get(need).map(|f| &f.value), Some(Value::Text(t)) if t == deprived)
             })
             .count();
+        // Keep about four rounds in stock; the production compiler sizes the
+        // work orders against observed stock.
+        let token = if noun == "drink" { "DRINK" } else { "FOOD" };
         let remedy = json!({
             "tool": "fortress.plan",
-            "arguments": {"actions": format!(
-                r#"[{{"action":{{"kind":"create_work_order","name":"{noun} supply","job_token":"{job}","amount":{}}}}}]"#,
-                (living * 4).div_ceil(5)
-            )},
+            "arguments": {"blueprint": json!({
+                "template": "production",
+                "quotas": [{"item": token, "minimum": living * 4}],
+            }).to_string()},
             "requires": "configure_production",
         });
         let (severity, finding) = if starving > 0 {
