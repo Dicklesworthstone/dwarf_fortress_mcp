@@ -1755,3 +1755,65 @@ fn path_queries_route_over_observed_terrain_and_hedge_unproven_absence() -> Test
     assert_eq!(again["path"], walk["path"], "routes are deterministic");
     Ok(())
 }
+
+#[test]
+fn live_plans_keep_their_world_version_readable_past_the_recent_window() -> TestResult {
+    let session = open("72160", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[2,3,10],"mode":"mine"}}]"#.to_owned()),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let sealed = planned["agent_turn"]["anchor"]["state_hash"]
+        .as_str()
+        .ok_or_else(|| planned.to_string())?
+        .to_owned();
+    // Far more versions than the recent window pass while the plan is pending.
+    for _ in 0..45 {
+        parsed(&fortress_wait(Some(session.clone()), Some(10)))?;
+    }
+    let changes = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(json!({"mode": "changes", "since": sealed}).to_string()),
+    ))?;
+    assert_eq!(changes["ok"], true, "pinned by the pending plan: {changes}");
+    let then = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(json!({"mode": "entities", "kind": "unit", "at": sealed}).to_string()),
+    ))?;
+    assert_eq!(then["ok"], true, "{then}");
+    assert_eq!(then["historical"], true);
+
+    // Committing ends the pending plan; once the window moves on, the version
+    // is collected and the refusal says so instead of guessing.
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    parsed(&fortress_commit(Some(session.clone()), digest))?;
+    for _ in 0..45 {
+        parsed(&fortress_wait(Some(session.clone()), Some(10)))?;
+    }
+    let gone = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(json!({"mode": "changes", "since": sealed}).to_string()),
+    ))?;
+    assert_eq!(gone["ok"], false, "{gone}");
+    assert!(
+        gone["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("was collected")),
+        "{gone}"
+    );
+    let never = parsed(&fortress_query(
+        Some(session),
+        Some(json!({"mode": "changes", "since": "ab".repeat(32)}).to_string()),
+    ))?;
+    assert!(
+        never["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("never observed")),
+        "{never}"
+    );
+    Ok(())
+}

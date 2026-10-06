@@ -20,6 +20,7 @@ pub mod publication;
 mod query;
 pub mod query_page;
 pub mod rebase;
+pub mod retention;
 pub mod search;
 pub mod spatial_index;
 pub mod sqlite_ledger;

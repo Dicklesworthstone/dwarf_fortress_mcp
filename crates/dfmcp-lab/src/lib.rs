@@ -182,6 +182,13 @@ impl MemoryAdapter {
         self.checkpoints.get(&checkpoint_id)
     }
 
+    /// State hashes of every checkpoint this adapter can restore.
+    pub fn checkpoint_state_hashes(&self) -> impl Iterator<Item = Digest32> + '_ {
+        self.checkpoints
+            .values()
+            .map(|snapshot| snapshot.state_hash)
+    }
+
     /// Make a durable checkpoint restorable through the ordinary restore path.
     pub fn adopt_checkpoint(
         &mut self,

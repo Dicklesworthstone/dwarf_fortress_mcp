@@ -98,9 +98,10 @@ pub(crate) struct LabSession {
     carried: Vec<CarriedStep>,
     /// Every tool call of this session, for deterministic replay bundles.
     pub(crate) replay: crate::replay::ReplayLog,
-    /// Bounded, immutable history of the world versions this session saw,
-    /// newest last, so every turn can say exactly what changed.
-    history: std::collections::VecDeque<WorldSnapshot>,
+    /// Immutable world versions this session saw, retained by reachability:
+    /// the recent window plus every version a live plan or checkpoint names,
+    /// so every turn can say exactly what changed.
+    history: dfmcp_world::retention::VersionRetention,
     /// The intent behind every committed plan, re-evaluated against each
     /// observation: dispatch success is not goal success.
     objectives: Vec<Objective>,
@@ -139,22 +140,41 @@ pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
     )
 }
 
-/// World versions each session retains for change reporting.
+/// Most recent world versions each session retains for change reporting.
 const MAX_SESSION_HISTORY: usize = 32;
+/// Older versions a session may keep alive because live work names them.
+const MAX_PINNED_VERSIONS: usize = 1_100;
 
+fn new_history() -> dfmcp_world::retention::VersionRetention {
+    dfmcp_world::retention::VersionRetention::new(MAX_SESSION_HISTORY, MAX_PINNED_VERSIONS)
+}
+
+/// Records the current world version, then frees every version that neither
+/// the recent window nor a live root reaches. Live roots: the pending plan's
+/// sealed anchor, durable in-flight plans' anchors, and every checkpoint.
 fn remember_version(session: &mut LabSession) {
-    let current = session.adapter.snapshot();
-    if session
+    let current = session.adapter.snapshot().clone();
+    session.history.record(&current);
+    let mut roots: std::collections::BTreeSet<Digest32> =
+        session.adapter.checkpoint_state_hashes().collect();
+    roots.extend(session.pending.iter().map(|p| p.plan.anchor.state_hash));
+    roots.extend(session.durable_plans.values().map(|p| p.anchor.state_hash));
+    session.history.collect(&roots);
+}
+
+/// Why a version is not readable, as an explicit, honest reason.
+fn not_retained_reason(session: &LabSession, hex: &str) -> String {
+    use dfmcp_world::retention::VersionStatus;
+    match session
         .history
-        .back()
-        .is_some_and(|last| last.state_hash == current.state_hash)
+        .find_hex(hex)
+        .map(|h| session.history.status(&h))
     {
-        return;
+        Some(VersionStatus::Collected { .. }) => format!(
+            "world version {hex} was collected: it left the last {MAX_SESSION_HISTORY} versions and no pending plan or checkpoint still names it"
+        ),
+        _ => format!("world version {hex} was never observed by this session"),
     }
-    if session.history.len() == MAX_SESSION_HISTORY {
-        session.history.pop_front();
-    }
-    session.history.push_back(current.clone());
 }
 
 /// Observed world changes from the version with `from_state_hash` to the
@@ -166,14 +186,14 @@ pub(crate) fn world_changes_since(
 ) -> Option<Vec<serde_json::Value>> {
     let session = lookup_session_str(session_id).ok()?;
     let guard = session.lock().ok()?;
-    let target = guard.history.back()?;
+    let target = guard.history.newest()?;
     if target.state_hash.to_hex() == from_state_hash {
         return Some(Vec::new());
     }
     match guard
         .history
-        .iter()
-        .find(|version| version.state_hash.to_hex() == from_state_hash)
+        .find_hex(from_state_hash)
+        .and_then(|hash| guard.history.get(&hash))
     {
         Some(base) => Some(crate::world_changes::describe(base, target)),
         None => Some(vec![json!({
@@ -182,7 +202,7 @@ pub(crate) fn world_changes_since(
             "epistemic_state": "unknown",
             "invalidates": [],
             "evidence": [],
-            "note": "the previous anchor is older than this session's retained history; observe or query to re-establish the picture",
+            "note": not_retained_reason(&guard, from_state_hash) + "; observe or query to re-establish the picture",
         })]),
     }
 }
@@ -1562,7 +1582,7 @@ pub(crate) fn open_session_in_scenario(
         durable_plans: BTreeMap::new(),
         carried: Vec::new(),
         replay: crate::replay::ReplayLog::default(),
-        history: std::collections::VecDeque::new(),
+        history: new_history(),
         objectives: Vec::new(),
     };
     let identity = probe_session.adapter.identity();
@@ -1655,7 +1675,7 @@ pub(crate) fn open_session_in_scenario(
             }
             log
         },
-        history: std::collections::VecDeque::new(),
+        history: new_history(),
         objectives: Vec::new(),
     }));
     {
@@ -1905,16 +1925,10 @@ fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
     let retained = |hash: &str| {
         guard
             .history
-            .iter()
-            .rev()
-            .find(|version| version.state_hash.to_hex() == hash)
+            .find_hex(hash)
+            .and_then(|digest| guard.history.get(&digest))
             .ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::StaleAnchor,
-                    format!(
-                        "world version {hash} is not retained; this session keeps its last {MAX_SESSION_HISTORY} versions"
-                    ),
-                )
+                DfmcpError::new(ErrorCode::StaleAnchor, not_retained_reason(guard, hash))
             })
     };
     let current = guard.adapter.snapshot();
@@ -2230,7 +2244,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
     }
     let oldest_retained = session
         .history
-        .front()
+        .oldest()
         .map(|version| version.state_hash.to_hex());
     json!({
         "ok": true,
@@ -2336,9 +2350,8 @@ fn rebase_by_witness(
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
     let base = session
         .history
-        .iter()
-        .rev()
-        .find(|version| version.anchor() == stale.plan.anchor)
+        .get(&stale.plan.anchor.state_hash)
+        .filter(|version| version.anchor() == stale.plan.anchor)
         .cloned()
         .ok_or_else(
             || json!({"accepted": false, "reason": "the sealed version is no longer retained"}),
