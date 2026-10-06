@@ -276,3 +276,76 @@ fn already_satisfied_and_malformed_requests_are_refused_before_sealing() -> Test
     assert_eq!(malformed["ok"], false, "{malformed}");
     Ok(())
 }
+
+#[test]
+fn plan_scope_cancellation_drains_dependents_and_certifies_quiescence() -> TestResult {
+    let session = open("72005", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(WORKSHOP_PLAN.to_owned()),
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    // Dig part of the room (15 tiles at 10 ticks each), then change course.
+    let waited = parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+
+    let drained = parsed(&fortress_cancel(
+        Some(session.clone()),
+        Some("stop_future_steps".to_owned()),
+        Some("plan".to_owned()),
+    ))?;
+    assert_eq!(drained["ok"], true, "{drained}");
+    let progress = &drained["drain_progress"];
+    assert_eq!(progress["actions_total"], 4);
+    assert_eq!(progress["already_terminal"], 1); // the labor change verified at commit
+    assert_eq!(progress["cancelled"], 3);
+    assert_eq!(progress["remaining_nonterminal"], 0);
+    assert_eq!(progress["quiescent"], true);
+    assert!(drained["finalize_certificate"]["digest"].is_string());
+    let after: Vec<&str> = drained["steps"]
+        .as_array()
+        .ok_or("steps")?
+        .iter()
+        .filter_map(|step| step["after"].as_str())
+        .collect();
+    assert_eq!(after, ["Cancelled", "Cancelled", "Cancelled", "Verified"]);
+    assert_eq!(
+        drained["agent_turn"]["active_work"]["obligations"],
+        json!([])
+    );
+
+    // Excavated tiles stay excavated, nothing progresses any more, and the
+    // dependent building was never created.
+    let before_more_time = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"terrain","min":[0,3,10],"max":[4,5,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(before_more_time["levels"][0]["rows"][0], ".....");
+    assert_eq!(before_more_time["counts"]["floor"], 5);
+    let later = parsed(&fortress_wait(Some(session.clone()), Some(500)))?;
+    assert_eq!(later["ok"], true, "{later}");
+    let after_more_time = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"terrain","min":[0,3,10],"max":[4,5,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(after_more_time["counts"], before_more_time["counts"]);
+    let buildings = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
+    ))?;
+    assert_eq!(buildings["total"], 0);
+
+    // Draining an already quiescent plan is an idempotent no-op.
+    let again = parsed(&fortress_cancel(
+        Some(session),
+        Some("stop_future_steps".to_owned()),
+        Some("plan".to_owned()),
+    ))?;
+    assert_eq!(again["drain_progress"]["already_terminal"], 4);
+    assert_eq!(again["drain_progress"]["quiescent"], true);
+    Ok(())
+}

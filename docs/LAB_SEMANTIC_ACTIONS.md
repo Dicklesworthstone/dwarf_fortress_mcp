@@ -58,6 +58,15 @@ not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`.
 `fortress_wait` lets time pass only while the fortress is unpaused and within
 the session's game-tick budget; a paused fortress reports `blocked`.
 
+`fortress_cancel(mode="stop_future_steps", scope="plan")` drains every
+nonterminal action of the last committed plan, dependents before their
+prerequisites. Deferred steps are never dispatched, temporal work stops without
+undoing progress (excavated tiles stay excavated), and verified actions are
+history that is never rewritten. The response reports `drain_progress`
+(total, already terminal, drained, compensated, cancelled, remaining) and a
+`finalize_certificate` digest only once nothing nonterminal remains. Without
+`scope` the historical single-action behaviour is unchanged.
+
 Commit authority is the plan's own capability set: a session that did not
 negotiate `designate` cannot commit an excavation, and an idempotent replay
 re-checks that authority. Effect capabilities are never granted by default.

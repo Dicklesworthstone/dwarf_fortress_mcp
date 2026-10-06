@@ -278,6 +278,18 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
             if let Some(action_id) = payload.get("action_id").and_then(Value::as_str) {
                 state.last_action_id = Some(action_id.to_owned());
             }
+            if let Some(steps) = payload.get("steps").and_then(Value::as_array) {
+                for step in steps {
+                    let id = step.get("action_id").and_then(Value::as_str);
+                    if let Some(view) = state
+                        .plan_actions
+                        .iter_mut()
+                        .find(|view| Some(view.action_id.as_str()) == id)
+                    {
+                        view.state = text_or_unknown(step.get("after"));
+                    }
+                }
+            }
             state.last_action_state = payload
                 .get("final_state")
                 .and_then(Value::as_str)
@@ -1211,11 +1223,15 @@ pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) ->
 }
 
 #[tool(
-    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state."
+    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default) or plan, which drains every nonterminal action of the last committed plan (dependents first) and returns drain_progress plus a finalize_certificate once quiescent. Verified actions are history and are never rewritten."
 )]
-pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> String {
+pub fn fortress_cancel(
+    session_id: Option<String>,
+    mode: Option<String>,
+    scope: Option<String>,
+) -> String {
     project_response(
-        crate::server::fortress_cancel(session_id.clone(), mode),
+        crate::server::cancel_in_scope(session_id.clone(), mode, scope),
         "fortress.cancel",
         AgentPhase::Reconcile,
         ObservationProfile::Tactical,

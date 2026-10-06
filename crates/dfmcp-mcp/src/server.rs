@@ -26,9 +26,9 @@ use dfmcp_adapter::{
     QueryRequest,
 };
 use dfmcp_core::{
-    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, DfmcpError, Digest32,
-    EntityId, ErrorCode, FortressId, IntentId, OperationContext, RequestId, Result, RiskTier,
-    SessionId, StateAnchor, WorkBudget,
+    ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, CommitState, DfmcpError,
+    Digest32, EntityId, ErrorCode, FortressId, IntentId, OperationContext, RequestId, Result,
+    RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
@@ -1301,6 +1301,30 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
     description = "Cancel the most recent committed action in this session: request, drain, compensate when authorized, and finalize."
 )]
 pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> String {
+    cancel_in_scope(session_id, mode, None)
+}
+
+/// Cancel either the most recent action (`scope` omitted or `last_action`,
+/// the historical behaviour) or every nonterminal action of the most recent
+/// committed plan (`scope="plan"`), draining dependents before their
+/// prerequisites and reporting measurable drain progress. A finalize
+/// certificate is issued only once the plan is quiescent.
+pub(crate) fn cancel_in_scope(
+    session_id: Option<String>,
+    mode: Option<String>,
+    scope: Option<String>,
+) -> String {
+    let plan_scope = match scope.as_deref() {
+        None | Some("last_action") => false,
+        Some("plan") => true,
+        Some(other) => {
+            return coded_error_payload(
+                "fortress.cancel",
+                ErrorCode::InvalidRequest,
+                &format!("unsupported cancellation scope {other:?}; use last_action or plan"),
+            );
+        }
+    };
     if mode
         .as_ref()
         .is_some_and(|value| value.len() > MAX_MODE_BYTES)
@@ -1348,6 +1372,9 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
             );
         }
     };
+    if plan_scope {
+        return drain_plan(&mut guard, cancel_mode);
+    }
     let (_, ctx) = match next_context(&mut guard) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
@@ -1372,6 +1399,111 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
             }
         }
         Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+    }
+}
+
+fn drain_plan(guard: &mut MutexGuard<'_, LabSession>, cancel_mode: CancelMode) -> String {
+    let actions = guard.last_plan_actions.clone();
+    let mut steps = Vec::with_capacity(actions.len());
+    let mut already_terminal = 0usize;
+    let mut compensated = 0usize;
+    let mut cancelled = 0usize;
+    let mut failure = None;
+    // Dependents are later steps; drain them first so no prerequisite is
+    // withdrawn underneath work that still depends on it.
+    for action_id in actions.iter().rev().copied() {
+        let before = match next_context(guard)
+            .and_then(|(_, ctx)| guard.adapter.poll_action(action_id, &ctx))
+        {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        };
+        if before.state.is_terminal() {
+            already_terminal += 1;
+            steps.push(json!({
+                "action_id": format!("{action_id}"),
+                "step": before.step_id.get(),
+                "before": format!("{:?}", before.state),
+                "after": format!("{:?}", before.state),
+                "drained": false,
+            }));
+            continue;
+        }
+        let outcome = next_context(guard)
+            .and_then(|(_, ctx)| guard.adapter.request_cancel(action_id, cancel_mode, &ctx))
+            .and_then(|_| next_context(guard))
+            .and_then(|(_, ctx)| guard.adapter.finalize_cancel(action_id, &ctx));
+        match outcome {
+            Ok(finalized) => {
+                match finalized.state {
+                    CommitState::Compensated => compensated += 1,
+                    _ => cancelled += 1,
+                }
+                steps.push(json!({
+                    "action_id": format!("{action_id}"),
+                    "step": before.step_id.get(),
+                    "before": format!("{:?}", before.state),
+                    "after": format!("{:?}", finalized.state),
+                    "drained": true,
+                }));
+            }
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+    steps.reverse();
+    let total = actions.len();
+    let drained = compensated + cancelled;
+    let remaining = total.saturating_sub(already_terminal + drained);
+    let quiescent = failure.is_none() && remaining == 0;
+    let anchor = guard.adapter.snapshot().anchor();
+    let finalize_certificate = quiescent.then(|| {
+        let mut bytes = b"dfmcp-lab-plan-drain-certificate-v1".to_vec();
+        for step in &steps {
+            bytes.extend_from_slice(step.to_string().as_bytes());
+        }
+        bytes.extend_from_slice(anchor.state_hash.as_bytes());
+        json!({
+            "digest": Digest32::of_bytes(&bytes).to_string(),
+            "anchor": anchor_json(&anchor),
+            "statement": "every action of the plan is terminal; no dispatched work remains",
+        })
+    });
+    let progress = json!({
+        "actions_total": total,
+        "already_terminal": already_terminal,
+        "drained": drained,
+        "compensated": compensated,
+        "cancelled": cancelled,
+        "remaining_nonterminal": remaining,
+        "quiescent": quiescent,
+    });
+    match failure {
+        None => json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "scope": "plan",
+            "drain_progress": progress,
+            "steps": steps,
+            "finalize_certificate": finalize_certificate,
+            "observed_anchor": anchor_json(&anchor),
+            "note": "verified actions are history and are not rewritten; plan an inverse to undo them",
+        })
+        .to_string(),
+        Some(error) => {
+            let mut payload: serde_json::Value =
+                serde_json::from_str(&dfmcp_error_payload("fortress.cancel", &error))
+                    .unwrap_or_else(|_| json!({"ok": false}));
+            payload["scope"] = json!("plan");
+            payload["drain_progress"] = progress;
+            payload["steps"] = json!(steps);
+            payload.to_string()
+        }
     }
 }
 
