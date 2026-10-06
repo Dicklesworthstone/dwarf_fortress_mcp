@@ -465,6 +465,15 @@ fn handoff_packet_lets_a_fresh_agent_resume_open_work_without_the_transcript() -
         crate::resources::session_handoff(&session, &uri).map_err(|error| format!("{error:?}"))?;
     let packet: Value = serde_json::from_str(contents[0].text.as_deref().ok_or("text")?)?;
     assert_eq!(packet["schema"], "dfmcp.lab-handoff/1");
+    assert_eq!(packet["durability"]["durable"], false);
+    assert_eq!(packet["world_alerts"], json!([]));
+    assert_eq!(
+        packet["orientation"]["replay_bundle"],
+        format!("df://session/{session}/replay")
+    );
+    assert!(
+        packet["orientation"]["changes_since_oldest_retained"]["arguments"]["mode"].is_string()
+    );
     assert_eq!(
         packet["pending_plan"]["plan_digest"],
         pending["plan_digest"]

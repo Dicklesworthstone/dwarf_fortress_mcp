@@ -2124,9 +2124,47 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
             })
         });
     }
+    let alerts = crate::lab_world::world_alerts(snapshot);
+    if session
+        .carried
+        .iter()
+        .any(|carried| carried.state == "dispatched")
+        && !snapshot.paused
+    {
+        resume.push(json!({
+            "tool": "fortress.wait",
+            "arguments": {"session_id": format!("{}", session.session_id), "max_game_ticks": 100},
+            "why": "obligations carried across a durable restart are re-proven by later observations",
+        }));
+    }
+    for alert in &alerts {
+        if alert["severity"] == "critical" {
+            let mut arguments = alert["remedy"]["arguments"].clone();
+            arguments["session_id"] = json!(format!("{}", session.session_id));
+            resume.push(json!({
+                "tool": "fortress.plan",
+                "arguments": arguments,
+                "why": alert["finding"],
+            }));
+        }
+    }
+    let oldest_retained = session
+        .history
+        .front()
+        .map(|version| version.state_hash.to_hex());
     json!({
         "ok": true,
         "schema": "dfmcp.lab-handoff/1",
+        "durability": durability_json(session),
+        "world_alerts": alerts,
+        "orientation": {
+            "replay_bundle": format!("df://session/{}/replay", session.session_id),
+            "changes_since_oldest_retained": oldest_retained.map(|hash| json!({
+                "tool": "fortress.query",
+                "arguments": {"mode": json!({"mode": "changes", "since": hash}).to_string()},
+            })),
+            "retained_versions": session.history.len(),
+        },
         "session_id": format!("{}", session.session_id),
         "fortress_id": format!("{}", session.fortress_id),
         "anchor": anchor_json(&snapshot.anchor()),
