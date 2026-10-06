@@ -8,7 +8,7 @@ use crate::build_placement::rpc::link::Link;
 use crate::live_jobs_rpc::operations::paged::{
     PagedOperationsLimits, acquire_bound, handshake_bound,
 };
-use crate::live_operations::{LiveOperationsState, OperationsProfile};
+use crate::live_operations::{LiveOperationsObservation, LiveOperationsState, OperationsProfile};
 use crate::order_run::FortressIdentity;
 use dfmcp_core::{Capability, DfmcpError, ErrorCode, GameTick, OperationContext, Result, RiskTier};
 use std::cell::Cell;
@@ -98,6 +98,64 @@ fn bind(link: &mut Link, check: &dyn Fn() -> Result<()>) -> Result<[i16; 2]> {
     Ok(methods)
 }
 
+/// Own the native connection only through acquisition and verified release.
+/// Returning owned semantic data drops the link before any canonical graph
+/// construction. Local projection must not keep an idle native source alive.
+/// The caller retains Work, so ending network ownership renews neither its
+/// deadline nor its authority and does not grant publication permission.
+fn read_observation(
+    endpoint: SocketAddr,
+    token: &[u8],
+    nonce: &[u8; 32],
+    work: &Work<'_>,
+) -> Result<LiveOperationsObservation> {
+    let check = || work.check();
+    let mut link = Link::connect_furniture_allocation(
+        endpoint,
+        work.remaining()?,
+        work.context.budget.max_bytes.min(MAX_NETWORK_BYTES),
+        work.cancellation.clone(),
+        &check,
+    )?;
+    link.greeting(&check)?;
+    let methods = bind(&mut link, &check)?;
+    let limits = PagedOperationsLimits::default();
+    let source = handshake_bound(token, nonce, limits, |request, maximum| {
+        link.frame_bounded(methods[0], request, maximum, &check)
+    })?;
+    let capture = acquire_bound(
+        token,
+        nonce,
+        limits,
+        &source,
+        true,
+        |request, maximum| link.frame_bounded(methods[1], request, maximum, &check),
+        |observation| {
+            let entities = 1usize
+                .saturating_add(observation.jobs.jobs.len())
+                .saturating_add(observation.buildings.len())
+                .saturating_add(observation.items.len());
+            if entities > work.context.budget.max_entities.min(MAX_ENTITIES) as usize {
+                return Err(exhausted());
+            }
+            require(
+                observation.jobs.world_folder == work.fortress.folder()
+                    && observation.jobs.site_id == work.fortress.site() as i32
+                    && observation.jobs.fortress_id()? == work.fortress.fortress_id(),
+                "furniture inventory capture belongs to another fortress",
+            )?;
+            let tick = observation.jobs.tick().get();
+            require(
+                tick >= work.context.anchor.tick.get(),
+                "furniture inventory capture regressed before the current tick floor",
+            )?;
+            work.high_tick.set(tick);
+            work.check()
+        },
+    )?;
+    Ok(capture.observation)
+}
+
 /// Acquire and publish one immutable native capture into a fresh paged state.
 /// The source generation is never rewritten. Complete strict decoding and a
 /// verified capture release precede projection. Returning this historical state
@@ -139,55 +197,12 @@ pub fn acquire_trusted(
         high_tick: Cell::new(context.anchor.tick.get()),
     };
     work.check()?;
-    let check = || work.check();
-    let mut link = Link::connect_furniture_allocation(
-        endpoint,
-        work.remaining()?,
-        context.budget.max_bytes.min(MAX_NETWORK_BYTES),
-        cancellation.clone(),
-        &check,
-    )?;
-    link.greeting(&check)?;
-    let methods = bind(&mut link, &check)?;
-    let limits = PagedOperationsLimits::default();
-    let source = handshake_bound(&token, &nonce, limits, |request, maximum| {
-        link.frame_bounded(methods[0], request, maximum, &check)
-    })?;
-    let capture = acquire_bound(
-        &token,
-        &nonce,
-        limits,
-        &source,
-        true,
-        |request, maximum| link.frame_bounded(methods[1], request, maximum, &check),
-        |observation| {
-            let entities = 1usize
-                .saturating_add(observation.jobs.jobs.len())
-                .saturating_add(observation.buildings.len())
-                .saturating_add(observation.items.len());
-            if entities > context.budget.max_entities.min(MAX_ENTITIES) as usize {
-                return Err(exhausted());
-            }
-            require(
-                observation.jobs.world_folder == fortress.folder()
-                    && observation.jobs.site_id == fortress.site() as i32
-                    && observation.jobs.fortress_id()? == fortress.fortress_id(),
-                "furniture inventory capture belongs to another fortress",
-            )?;
-            let tick = observation.jobs.tick().get();
-            require(
-                tick >= context.anchor.tick.get(),
-                "furniture inventory capture regressed before the current tick floor",
-            )?;
-            work.high_tick.set(tick);
-            work.check()
-        },
-    )?;
+    let observation = read_observation(endpoint, &token, &nonce, &work)?;
+    // Network ownership ended, not request ownership. Recheck current authority
+    // and the original shrinking deadline before and after local projection.
     work.check()?;
-    // The shared pager strictly decoded the entire graph and acknowledged its
-    // release. Projection retains these exact native generation/software facts.
     let mut state = LiveOperationsState::with_profile(OperationsProfile::PagedV1_4);
-    state.publish(capture.observation)?;
+    state.publish(observation)?;
     work.check()?;
     Ok(state)
 }
@@ -195,3 +210,7 @@ pub fn acquire_trusted(
 #[cfg(test)]
 #[path = "rpc_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "rpc_lifecycle_tests.rs"]
+mod lifecycle_tests;
