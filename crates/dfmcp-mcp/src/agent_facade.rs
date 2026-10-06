@@ -1392,11 +1392,17 @@ fn project_response(
         None => Vec::new(),
     };
 
-    let world_delta = world_changes(
-        session_id.as_ref(),
-        previous_anchor.as_ref(),
-        current_anchor.as_ref(),
-    );
+    // World changes disclose entity facts: only a session that negotiated
+    // observation may receive them, whatever tool it called.
+    let world_delta = if has_grant(&state, "observe") {
+        world_changes(
+            session_id.as_ref(),
+            previous_anchor.as_ref(),
+            current_anchor.as_ref(),
+        )
+    } else {
+        Vec::new()
+    };
     let mut builder = AgentTurnBuilder::new(operation, phase)
         .turn_id(format!("presentation-turn-{turn_sequence}"))
         .continuity(status, previous_anchor, None, reset_reason)

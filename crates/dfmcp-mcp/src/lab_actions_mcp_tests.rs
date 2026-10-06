@@ -1363,3 +1363,46 @@ fn an_ignored_raider_kills_and_a_mustered_squad_slays_it() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn world_changes_are_withheld_from_sessions_without_observation() -> TestResult {
+    let opened = parsed(&fortress_open_session(
+        Some(false),
+        Some("72120".to_owned()),
+        Some(vec![
+            ("plan".to_owned(), "reversible".to_owned()),
+            ("control_clock".to_owned(), "reversible".to_owned()),
+            ("configure_labor".to_owned(), "reversible".to_owned()),
+        ]),
+        None,
+        Some(2_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        Some("starter_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"set_labor","units":["1002"],"labor":"MINE","enabled":true}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let leaked = committed["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("changes")?
+        .iter()
+        .any(|c| c["kind"] == "entity_changed");
+    assert!(!leaked, "{committed}");
+    Ok(())
+}
