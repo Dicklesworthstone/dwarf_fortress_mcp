@@ -16,6 +16,8 @@ import secrets
 import sys
 
 from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_ROOM_HANDOFF_BYTES
+from terrain_furniture_handoff import TerrainFurnitureHandoff, MAX_BYTES as MAX_TERRAIN_HANDOFF_BYTES
+from room_terrain_origin import ReadBudget
 
 import furniture_plan as model
 from furniture_handoff import Handoff, MAX_BYTES as MAX_HANDOFF_BYTES
@@ -29,6 +31,8 @@ SCHEMA = 'dfmcp.furniture-batch/1'
 HANDOFF_SCHEMA = 'dfmcp.furniture-batch/2'
 MAX_DEFINITION = 65536
 ROOM_SCHEMA = 'dfmcp.furniture-batch/3'
+TERRAIN_SCHEMA = 'dfmcp.furniture-batch/4'
+MAX_TERRAIN_DEFINITION = 384 * 1024
 MAX_ROOM_DEFINITION = 128 * 1024
 MAX_ROOM_OUTPUT = 192 * 1024
 HEADER = b'{"schema":"dfmcp.furniture-batch-index/1"}\n'
@@ -82,7 +86,7 @@ class File:
     def __init__(self, root: int, name: str, budget: Budget, writable: bool, initial: bytes | None = None,
                  *, maximum: int = MAX_FILE):
         self.root, self.name, self.budget = root, name, budget
-        self.maximum = integer(maximum, 1, MAX_ROOM_DEFINITION)
+        self.maximum = integer(maximum, 1, MAX_TERRAIN_DEFINITION)
         self.fd = None
         try:
             flags = os.O_RDWR | os.O_APPEND if writable else os.O_RDONLY
@@ -156,6 +160,7 @@ class Batch:
     def __init__(self, path: str, budget: Budget, writable: bool = False):
         self.path, self.budget, self.writable = path, budget, writable
         self.files, self.effects, self.fenced = {}, None, False
+        self._terrain_context, self._terrain_journal = None, None
         self.lock = root_lock(path, budget)
         self.fd = self.lock.__enter__()
         try:
@@ -165,21 +170,29 @@ class Batch:
                     and found <= {'batch.json', 'steps.jsonl', 'effects', 'stop.json'}, 'incomplete or foreign batch inventory')
             for name in sorted(found - {'effects'}):
                 self.files[name] = File(self.fd, name, budget, writable and name == 'steps.jsonl',
-                                        maximum=MAX_ROOM_DEFINITION if name == 'batch.json' else MAX_FILE)
+                                        maximum=MAX_TERRAIN_DEFINITION if name == 'batch.json' else MAX_FILE)
             raw_definition = self.files['batch.json'].raw
             # Bound the containing envelope before general JSON parsing. Each
             # legacy profile still enforces its original byte ceiling below.
-            check_definition_depth(raw_definition, budget)
+            check_definition_depth(raw_definition, budget, terrain=True)
             value = unseal(raw_definition)
-            require(value.get('schema') in (SCHEMA, HANDOFF_SCHEMA, ROOM_SCHEMA), 'unsupported batch format')
-            with_room = value['schema'] == ROOM_SCHEMA
+            require(value.get('schema') in (SCHEMA, HANDOFF_SCHEMA, ROOM_SCHEMA, TERRAIN_SCHEMA), 'unsupported batch format')
+            with_terrain = value['schema'] == TERRAIN_SCHEMA
+            with_room = value['schema'] in (ROOM_SCHEMA, TERRAIN_SCHEMA)
+            if not with_terrain:
+                check_definition_depth(raw_definition, budget)
             with_handoff = value['schema'] == HANDOFF_SCHEMA
             storage.exact_object(value, {'schema', 'nonce', 'plan', 'source', 'endpoint', 'folder', 'site',
                                         'dimensions', 'first_tick', 'root_identity', 'effects_identity'}
-                                 | ({'handoff'} if with_handoff else {'room_handoff'} if with_room else set()))
-            maximum = MAX_ROOM_DEFINITION if with_room else MAX_DEFINITION if with_handoff else MAX_FILE
+                                 | ({'terrain_handoff'} if with_terrain else {'handoff'} if with_handoff
+                                    else {'room_handoff'} if with_room else set()))
+            maximum = (MAX_TERRAIN_DEFINITION if with_terrain else MAX_ROOM_DEFINITION if with_room
+                       else MAX_DEFINITION if with_handoff else MAX_FILE)
             require(len(raw_definition) <= maximum, 'batch definition exceeds its profile bound')
-            self.room_handoff = (RoomFurnitureHandoff.from_json(value['room_handoff'], budget.remaining)
+            self.terrain_handoff = (TerrainFurnitureHandoff.from_json(value['terrain_handoff'],
+                                    ReadBudget(budget).checkpoint) if with_terrain else None)
+            self.room_handoff = (self.terrain_handoff.room if with_terrain else
+                                 RoomFurnitureHandoff.from_json(value['room_handoff'], budget.remaining)
                                  if with_room else None)
             self.handoff = (self.room_handoff.allocation if with_room else
                             Handoff.from_json(value['handoff']) if with_handoff else None)
@@ -200,6 +213,16 @@ class Batch:
                 require(self.plan == self.handoff.plan()
                         and value['first_tick'] >= self.handoff.source.tick,
                         'batch differs from retained allocation or predates its inventory')
+            if self.terrain_handoff is not None:
+                terrain = self.terrain_handoff
+                require((value['endpoint'], value['folder'], value['site'], tuple(value['dimensions']),
+                         self.source.df_version, self.source.dfhack_version) ==
+                        (terrain.origin.json()['endpoint'], terrain.fresh.folder, terrain.fresh.site,
+                         terrain.fresh.dimensions, terrain.fresh.manifest.df_version,
+                         terrain.fresh.manifest.dfhack_version) and value['first_tick'] >= terrain.fresh.tick,
+                        'batch source changed or predates retained terrain')
+                require(not Path(terrain.origin.json()['journal_path']).is_relative_to(Path(path)),
+                        'original terrain journal must remain outside the closed batch inventory')
             for field in ('root_identity', 'effects_identity'):
                 require(type(value[field]) is list and len(value[field]) == 2, 'invalid persisted directory identity')
                 for number in value[field]:
@@ -258,6 +281,31 @@ class Batch:
             file.check()
         self.effects.check()
         require(list(self.effects.identity) == self.value['effects_identity'], 'effects directory changed')
+        if self._terrain_journal is not None:
+            # This operation already replayed and bound the complete immutable
+            # history. Recheck all bytes/path custody, not just a cached digest.
+            self._terrain_journal.verify()
+            self._terrain_journal.budget.checkpoint()
+
+    def require_terrain(self, journal=None) -> None:
+        """Hold original terrain custody for NEW work; never call during recovery."""
+        if self.terrain_handoff is None:
+            require(journal is None, 'legacy batch cannot adopt terrain custody')
+            return
+        if self._terrain_journal is None:
+            terrain = self.terrain_handoff
+            if journal is None:
+                context = terrain.origin.open(terrain.room.room_plan, self.budget)
+                held = context.__enter__()
+                self._terrain_context, self._terrain_journal = context, held
+            else:
+                require(type(journal.budget) is ReadBudget and journal.budget.parent is self.budget,
+                        'terrain and batch must share their original operation budget')
+                terrain.origin.verify(journal, terrain.room.room_plan, journal.budget.checkpoint)
+                self._terrain_journal = journal  # Borrowed from initialization's outer owner.
+        else:
+            require(journal is None or journal is self._terrain_journal, 'terrain owner already bound')
+        self.check()
 
     def bind(self, plan: Plan, manifest) -> None:
         self.bind_before(plan.before, manifest)
@@ -267,6 +315,8 @@ class Batch:
         self.bind_capture(capture, manifest)
         if self.handoff is not None:
             validate_handoff_capture(self.handoff, capture, manifest, self.value['endpoint'])
+        if self.terrain_handoff is not None:
+            self.terrain_handoff.bind_placement(capture, manifest, self.value['endpoint'])
 
     def bind_capture(self, capture, manifest) -> None:
         require(manifest == self.source and capture.generation == self.source.generation
@@ -319,6 +369,11 @@ class Batch:
         if self.room_handoff is not None:
             out['room_origin'] = self.room_handoff.compact()
             out['room_plan'] = self.room_handoff.room_plan.json()
+        if self.terrain_handoff is not None:
+            out['terrain_origin'] = self.terrain_handoff.compact()
+            out['terrain_history_verified_this_call'] = self._terrain_journal is not None
+            out['advance_allowed'] &= self._terrain_journal is not None
+            out['terrain_history_required_for_new_work'] = True
         out['inventory_digest'] = sha(canonical({'batch': self.id, 'index': sha(self.files['steps.jsonl'].raw),
             'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}))
         self.check()
@@ -366,15 +421,21 @@ class Batch:
         return self.audit()
 
     def close(self) -> None:
-        if self.effects is not None:
-            self.effects.close()
-            self.effects = None
-        for file in self.files.values():
-            file.close()
-        self.files.clear()
-        if self.fd is not None:
-            self.lock.__exit__(None, None, None)
-            self.fd = None
+        context, self._terrain_context = self._terrain_context, None
+        self._terrain_journal = None
+        try:
+            if self.effects is not None:
+                self.effects.close()
+                self.effects = None
+            for file in self.files.values():
+                file.close()
+            self.files.clear()
+            if self.fd is not None:
+                self.lock.__exit__(None, None, None)
+                self.fd = None
+        finally:
+            if context is not None:
+                context.__exit__(*sys.exc_info())
 
     def __enter__(self):
         return self
@@ -416,7 +477,12 @@ def encoded(operation: str, out: dict, ok: bool = True) -> bytes:
         turn['references'].append(out['room_origin'])
         turn['coverage']['original_room_intent'] = 'complete_retained_plan'
         turn['briefing'].update(room_completion_proven=False, terrain_completion_proven=False)
-        turn['uncertainty'].append('Original room intent is retained, not terrain-completion or room-assignment evidence.')
+        if 'terrain_origin' in out:
+            turn['references'].append(out['terrain_origin'])
+            turn['coverage']['original_terrain_history_verified_this_call'] = out['terrain_history_verified_this_call']
+            turn['uncertainty'].append('Original terrain completion is historical; retained map evidence is not current terrain or room-assignment proof.')
+        else:
+            turn['uncertainty'].append('Original room intent is retained, not terrain-completion or room-assignment evidence.')
     raw = canonical(value) + b'\n'
     require(len(raw) <= maximum, 'complete furnishing result exceeds its profile bound')
     return raw
@@ -424,8 +490,31 @@ def encoded(operation: str, out: dict, ok: bool = True) -> bytes:
 
 def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, timeout_ms: int = 10000,
                *, handoff: Handoff | None = None, room_handoff: RoomFurnitureHandoff | None = None,
+               terrain_handoff: TerrainFurnitureHandoff | None = None,
                _budget: Budget | None = None) -> dict:
     budget = _budget if _budget is not None else Budget(timeout_ms)
+    if terrain_handoff is not None:
+        require(type(terrain_handoff) is TerrainFurnitureHandoff and handoff is None and room_handoff is None,
+                'terrain, room and standalone handoff imports are mutually exclusive')
+        terrain = TerrainFurnitureHandoff.decode(terrain_handoff.encode(), ReadBudget(budget).checkpoint)
+        require(not Path(terrain.origin.json()['journal_path']).is_relative_to(Path(path)),
+                'original terrain journal must remain outside the closed batch inventory')
+        with terrain.origin.open(terrain.room.room_plan, budget) as journal:
+            out = _initialize(path, plan, folder, site, budget, room_handoff=terrain.room,
+                              terrain_handoff=terrain, terrain_journal=journal)
+            budget.publication_terrain = terrain
+            return out
+    return _initialize(path, plan, folder, site, budget, handoff=handoff, room_handoff=room_handoff)
+
+
+def _initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, budget: Budget,
+                *, handoff: Handoff | None = None, room_handoff: RoomFurnitureHandoff | None = None,
+                terrain_handoff: TerrainFurnitureHandoff | None = None, terrain_journal=None) -> dict:
+    def terrain_guard() -> None:
+        if terrain_journal is not None:
+            terrain_journal.verify()
+            terrain_journal.budget.checkpoint()
+    terrain_guard()
     if room_handoff is not None:
         require(type(room_handoff) is RoomFurnitureHandoff and handoff is None,
                 'room and standalone handoff imports are mutually exclusive')
@@ -448,6 +537,7 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         address = f'{authority.address[0]}:{authority.address[1]}'
         if handoff is not None:
             require(address == handoff.source.address, 'operator endpoint differs from allocation')
+        terrain_guard()
         with Client(authority, budget, selection(plan.ordered[0])) as client:
             reply = client.observe()
         capture = reply.capture
@@ -457,13 +547,19 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
             room_handoff.check_dimensions(capture.dimensions, budget.remaining)
         if handoff is not None:
             validate_handoff_capture(handoff, capture, reply.manifest, address)
-        value = {'schema': ROOM_SCHEMA if room_handoff is not None else SCHEMA if handoff is None else HANDOFF_SCHEMA,
+        if terrain_handoff is not None:
+            terrain_handoff.bind_placement(capture, reply.manifest, address)
+        terrain_guard()
+        value = {'schema': TERRAIN_SCHEMA if terrain_handoff is not None else ROOM_SCHEMA if room_handoff is not None else SCHEMA if handoff is None else HANDOFF_SCHEMA,
             'nonce': secrets.token_hex(24), 'plan': plan.json(),
             'source': reply.manifest.view(), 'endpoint': address,
             'folder': folder, 'site': site, 'dimensions': list(capture.dimensions), 'first_tick': capture.tick,
             'root_identity': identity(root), 'effects_identity': [2**64 - 1, 2**64 - 1]}
-        maximum = MAX_ROOM_DEFINITION if room_handoff is not None else MAX_FILE if handoff is None else MAX_DEFINITION
-        if room_handoff is not None:
+        maximum = (MAX_TERRAIN_DEFINITION if terrain_handoff is not None else MAX_ROOM_DEFINITION
+                   if room_handoff is not None else MAX_FILE if handoff is None else MAX_DEFINITION)
+        if terrain_handoff is not None:
+            value['terrain_handoff'] = terrain_handoff.json()
+        elif room_handoff is not None:
             value['room_handoff'] = room_handoff.json()
         elif handoff is not None:
             value['handoff'] = handoff.json()
@@ -475,6 +571,10 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         if room_handoff is not None:
             preview['room_origin'] = room_handoff.compact()
             preview['room_plan'] = room_handoff.room_plan.json()
+        if terrain_handoff is not None:
+            preview['terrain_origin'] = terrain_handoff.compact()
+            preview['terrain_history_verified_this_call'] = True
+            preview['terrain_history_required_for_new_work'] = True
         require(len(encoded('init', preview)) + 8192 <= output_limit(preview), 'batch output reservation exceeds bound')
         authority.guard('QueryPlacement')
         budget.remaining()
@@ -483,6 +583,7 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
             require(identity(pinned) == identity(root) and not names(root), 'initial batch directory changed')
         finally:
             os.close(pinned)
+        terrain_guard()
         os.mkdir('effects', 0o700, dir_fd=root)
         effects = storage.open_directory(str(Path(path) / 'effects'))
         try:
@@ -494,6 +595,7 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         try:
             for name, data in [('batch.json', raw), ('steps.jsonl', HEADER)]:
                 authority.guard('QueryPlacement')
+                terrain_guard()
                 published.append(File(root, name, budget, True, data,
                                       maximum=maximum if name == 'batch.json' else MAX_FILE))
             for file in published:
@@ -502,6 +604,8 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
             for file in published:
                 file.close()
     with Batch(path, budget) as batch:
+        if terrain_handoff is not None:
+            batch.require_terrain(terrain_journal)
         out = batch.audit()
         out['native_contacted'] = True
         encoded('init', out)
@@ -526,6 +630,10 @@ def review_seal(batch: Batch, step: model.Step, plan: Plan, inventory: str) -> s
 
 def review(path: str, expected_id: str, timeout_ms: int = 10000, *, _budget: Budget | None = None) -> dict:
     with Batch(path, _budget if _budget is not None else Budget(timeout_ms)) as batch:
+        require(batch.id == expected_id, 'batch identity differs from explicit selection')
+        batch.require_terrain()
+        if batch.terrain_handoff is not None:
+            batch.budget.publication_terrain = batch.terrain_handoff
         step, out = select_next(batch, expected_id)
         authority = Authority.load()
         if batch.room_handoff is not None:
@@ -559,6 +667,10 @@ def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, 
     exact_hex(expected_plan, 32)
     exact_hex(confirmation, 32)
     with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True) as batch:
+        require(batch.id == expected_id, 'batch identity differs from explicit selection')
+        batch.require_terrain()
+        if batch.terrain_handoff is not None:
+            batch.budget.publication_terrain = batch.terrain_handoff
         step, initial = select_next(batch, expected_id)
         require(len(encoded('advance', initial)) + 32768 < output_limit(initial), 'batch outcome reservation exceeds bound')
         authority = Authority.load(True)
@@ -672,8 +784,9 @@ def export_room_plan(path: str, expected_id: str, timeout_ms: int = 10000,
         return raw
 
 
-def check_definition_depth(raw: bytes, budget: Budget) -> None:
-    require(type(raw) is bytes and 1 <= len(raw) <= MAX_ROOM_DEFINITION,
+def check_definition_depth(raw: bytes, budget: Budget, *, terrain: bool = False) -> None:
+    maximum = MAX_TERRAIN_DEFINITION if terrain else MAX_ROOM_DEFINITION
+    require(type(raw) is bytes and 1 <= len(raw) <= maximum,
             'batch definition byte bound exceeded')
     depth, quoted, escaped = 0, False, False
     for offset, byte in enumerate(raw):
@@ -690,7 +803,7 @@ def check_definition_depth(raw: bytes, budget: Budget) -> None:
             quoted = True
         elif byte in (91, 123):
             depth += 1
-            require(depth <= 16, 'batch definition nesting bound exceeded')
+            require(depth <= (18 if terrain else 16), 'batch definition nesting bound exceeded')
         elif byte in (93, 125):
             depth -= 1
     budget.remaining()
@@ -731,6 +844,7 @@ def main(argv: list[str] | None = None) -> int:
             choice.add_argument('--plan')
             choice.add_argument('--handoff')
             choice.add_argument('--room-handoff')
+            choice.add_argument('--terrain-handoff')
             command.add_argument('--world-folder')
             command.add_argument('--site', type=int)
         else:
@@ -747,7 +861,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         budget = Budget(args.timeout_ms)
         if args.operation == 'init':
-            if args.room_handoff is not None:
+            if args.terrain_handoff is not None:
+                require(args.world_folder is None and args.site is None,
+                        'terrain handoff supplies original fortress; overrides are not accepted')
+                authority = Authority.load()
+                raw = read_input(args.terrain_handoff, MAX_TERRAIN_HANDOFF_BYTES)
+                terrain = TerrainFurnitureHandoff.decode(raw, ReadBudget(budget).checkpoint)
+                authority.guard('QueryPlacement')
+                h = terrain.room.allocation
+                out = initialize(args.directory, h.plan(), h.request.folder, h.request.site,
+                                 terrain_handoff=terrain, _budget=budget)
+            elif args.room_handoff is not None:
                 require(args.world_folder is None and args.site is None,
                         'room handoff supplies original fortress; overrides are not accepted')
                 authority = Authority.load()
@@ -789,6 +913,24 @@ def main(argv: list[str] | None = None) -> int:
                'error': 'Request, source, custody, confirmation or budget refused. Preserve the batch and recover original keys; do not repeat placement.'}
         output = encoded(args.operation, out, False)
         code = 2
+    terrain = getattr(budget, 'publication_terrain', None) if code == 0 else None
+    if terrain is not None:
+        attempted = False
+        try:
+            # Final CLI serialization may invoke user I/O hooks. Reopen the exact
+            # original under the SAME budget and hold it through the single write.
+            with terrain.origin.open(terrain.room.room_plan, budget):
+                if authority is not None:
+                    authority.guard('QueryPlacement')
+                budget.remaining()
+                attempted = True
+                return code if write_output(output) == 0 else 2
+        except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
+            if not attempted:
+                write_output(encoded(args.operation, {'inventory_verified': False, 'effect_status': 'unknown',
+                    'retry_permitted': False, 'construction_completion_proven': False,
+                    'error': 'Final terrain custody or authority refused. Recover original keys; do not repeat placement.'}, False))
+            return 2
     return code if write_output(output) == 0 else 2
 
 
