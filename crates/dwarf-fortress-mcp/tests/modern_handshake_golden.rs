@@ -151,7 +151,6 @@ fn assert_modern_envelope(value: &Value, expected_id: u64) {
 }
 
 #[test]
-#[ignore = "KNOWN UPSTREAM BLOCKER, NOT A PASS: fastmcp_rust v0.8.0 stops writing responses at tools/list after a successful modern server/discover, so this blocking stdio harness cannot complete. The defect is still DRAFT/unfiled in docs/DOGFOODING_FASTMCP.md; remove this ignore only with a conforming pin bump. In-process semantic coverage is not transport conformance. See bead df-fastmcp-conformance-5pj.2."]
 fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn Error>> {
     let mut client = StdioClient::spawn()?;
 
@@ -340,7 +339,30 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
     let repeat_text = commit_repeat_resp["result"]["content"][0]["text"]
         .as_str()
         .ok_or("content text missing")?;
-    assert_eq!(repeat_text, commit_text);
+    // The receipt (actions, plan identity, observed anchor) is replayed
+    // verbatim. The Agent Turn is a fresh presentation turn whose continuity
+    // basis is the anchor the session already holds after the first commit.
+    let repeat_data: Value = serde_json::from_str(repeat_text)?;
+    let without_turn = |value: &Value| {
+        let mut value = value.clone();
+        if let Some(object) = value.as_object_mut() {
+            object.remove("agent_turn");
+        }
+        value
+    };
+    assert_eq!(without_turn(&repeat_data), without_turn(&commit_data));
+    assert_eq!(
+        repeat_data["agent_turn"]["anchor"],
+        commit_data["agent_turn"]["anchor"]
+    );
+    assert_eq!(
+        repeat_data["agent_turn"]["continuity"]["basis"],
+        commit_data["agent_turn"]["anchor"]
+    );
+    assert_ne!(
+        repeat_data["agent_turn"]["turn_id"],
+        commit_data["agent_turn"]["turn_id"]
+    );
 
     // 8. Explain — transcript-tail evidence.
     let explain_req = json!({

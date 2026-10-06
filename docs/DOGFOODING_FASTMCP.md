@@ -76,6 +76,7 @@ premature; this row supersedes it.
 |---|---|---|---|---|
 | 2026-08-31 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | Modern handshake (negative cases only) | PASS on negative fixtures; full lifecycle hangs at `tools/list` after `server/discover` (DRAFT bug) | `crates/dwarf-fortress-mcp/tests/modern_handshake_golden.rs` |
 | 2026-09-22 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | External stdio client: DRAFT-A reproduced (R1), DRAFT-B re-confirmed by ignored golden test, DOC-QUESTION C captured | Defects filed upstream: #73 (discover silence), #74 (tools/list dispatch), #75 (UriParams facade re-export) | `/tmp/dfmcp_dogfood_captures/`, `repro_fastmcp_stdio.py`, issues #73/#74/#75 |
+| 2026-10-06 | `180a7c88890705217bb8e202d19555adabf24187` (main, Asupersync 0.5.0) | Real subprocess stdio: `server/discover` → `tools/list` (all eleven tools) → open → observe → plan → commit → idempotent commit replay → explain, plus the negative-era/marker fixtures | PASS for both golden tests; the `tools/list` dispatch hang (#74) no longer reproduces. The ignore was removed. The replay check now compares the receipt verbatim and requires a fresh Agent Turn whose continuity basis is the post-commit anchor. #73 and #75 were not re-executed. | `cargo test -p dwarf-fortress-mcp --test modern_handshake_golden` (2 passed, 0 ignored) |
 
 ## Open defects under the v0.8.0 pin (`12d3469`)
 
