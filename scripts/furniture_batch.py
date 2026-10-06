@@ -13,6 +13,9 @@ import json
 import os
 from pathlib import Path
 import secrets
+import sys
+
+from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_ROOM_HANDOFF_BYTES
 
 import furniture_plan as model
 from furniture_handoff import Handoff, MAX_BYTES as MAX_HANDOFF_BYTES
@@ -25,6 +28,9 @@ from build_placement_wire import Plan, Selection, canonical, exact_hex, integer,
 SCHEMA = 'dfmcp.furniture-batch/1'
 HANDOFF_SCHEMA = 'dfmcp.furniture-batch/2'
 MAX_DEFINITION = 65536
+ROOM_SCHEMA = 'dfmcp.furniture-batch/3'
+MAX_ROOM_DEFINITION = 128 * 1024
+MAX_ROOM_OUTPUT = 192 * 1024
 HEADER = b'{"schema":"dfmcp.furniture-batch-index/1"}\n'
 MAX_FILE = 32768
 MAX_OUTPUT = 65536
@@ -76,7 +82,7 @@ class File:
     def __init__(self, root: int, name: str, budget: Budget, writable: bool, initial: bytes | None = None,
                  *, maximum: int = MAX_FILE):
         self.root, self.name, self.budget = root, name, budget
-        self.maximum = integer(maximum, 1, MAX_DEFINITION)
+        self.maximum = integer(maximum, 1, MAX_ROOM_DEFINITION)
         self.fd = None
         try:
             flags = os.O_RDWR | os.O_APPEND if writable else os.O_RDONLY
@@ -159,16 +165,24 @@ class Batch:
                     and found <= {'batch.json', 'steps.jsonl', 'effects', 'stop.json'}, 'incomplete or foreign batch inventory')
             for name in sorted(found - {'effects'}):
                 self.files[name] = File(self.fd, name, budget, writable and name == 'steps.jsonl',
-                                        maximum=MAX_DEFINITION if name == 'batch.json' else MAX_FILE)
-            value = unseal(self.files['batch.json'].raw)
-            require(value.get('schema') in (SCHEMA, HANDOFF_SCHEMA), 'unsupported batch format')
+                                        maximum=MAX_ROOM_DEFINITION if name == 'batch.json' else MAX_FILE)
+            raw_definition = self.files['batch.json'].raw
+            # Bound the containing envelope before general JSON parsing. Each
+            # legacy profile still enforces its original byte ceiling below.
+            check_definition_depth(raw_definition, budget)
+            value = unseal(raw_definition)
+            require(value.get('schema') in (SCHEMA, HANDOFF_SCHEMA, ROOM_SCHEMA), 'unsupported batch format')
+            with_room = value['schema'] == ROOM_SCHEMA
             with_handoff = value['schema'] == HANDOFF_SCHEMA
             storage.exact_object(value, {'schema', 'nonce', 'plan', 'source', 'endpoint', 'folder', 'site',
                                         'dimensions', 'first_tick', 'root_identity', 'effects_identity'}
-                                 | ({'handoff'} if with_handoff else set()))
-            require(with_handoff or len(self.files['batch.json'].raw) <= MAX_FILE,
-                    'legacy batch definition exceeds original bound')
-            self.handoff = Handoff.from_json(value['handoff']) if with_handoff else None
+                                 | ({'handoff'} if with_handoff else {'room_handoff'} if with_room else set()))
+            maximum = MAX_ROOM_DEFINITION if with_room else MAX_DEFINITION if with_handoff else MAX_FILE
+            require(len(raw_definition) <= maximum, 'batch definition exceeds its profile bound')
+            self.room_handoff = (RoomFurnitureHandoff.from_json(value['room_handoff'], budget.remaining)
+                                 if with_room else None)
+            self.handoff = (self.room_handoff.allocation if with_room else
+                            Handoff.from_json(value['handoff']) if with_handoff else None)
             exact_hex(value['nonce'], 24)
             self.plan = model.FurniturePlan.from_json(value['plan'])
             self.source = storage.manifest_from(value['source'])
@@ -177,6 +191,9 @@ class Batch:
             integer(value['site'], 0, 2147483647)
             integer(value['first_tick'], 0, MAX_TICK)
             self.plan.check_dimensions(value['dimensions'])
+            if self.room_handoff is not None:
+                require(self.plan.json() == value['plan'], 'original room batch plan is not normalized')
+                self.room_handoff.check_dimensions(value['dimensions'], budget.remaining)
             if self.handoff is not None:
                 self.handoff.validate_binding(value['endpoint'], value['folder'], value['site'],
                                               self.source.df_version, self.source.dfhack_version)
@@ -221,6 +238,11 @@ class Batch:
         return entries
 
     def key(self, step: model.Step) -> str:
+        # New keys bind the complete room definition, including room-only
+        # geometry and exclusions. Legacy nonce keys are never migrated.
+        if self.room_handoff is not None:
+            require(step in self.plan.steps, 'step outside original room batch')
+            return 'fr-' + self.id + '-' + step.name
         return 'fb-' + self.value['nonce'] + '-' + step.name
 
     def check(self) -> None:
@@ -294,6 +316,9 @@ class Batch:
                    source=self.source.view(), endpoint=self.value['endpoint'], native_contacted=False)
         if self.handoff is not None:
             out['allocation'] = self.handoff.compact()
+        if self.room_handoff is not None:
+            out['room_origin'] = self.room_handoff.compact()
+            out['room_plan'] = self.room_handoff.room_plan.json()
         out['inventory_digest'] = sha(canonical({'batch': self.id, 'index': sha(self.files['steps.jsonl'].raw),
             'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}))
         self.check()
@@ -378,14 +403,34 @@ def packet(operation: str, value: dict, ok: bool = True) -> dict:
                 'references': [value['batch_id']] if known else []}}
 
 
+def output_limit(out: dict) -> int:
+    return MAX_ROOM_OUTPUT if 'room_origin' in out else MAX_OUTPUT
+
+
 def encoded(operation: str, out: dict, ok: bool = True) -> bytes:
-    raw = canonical(packet(operation, out, ok)) + b'\n'
-    require(len(raw) <= MAX_OUTPUT, 'complete furnishing result exceeds 64 KiB')
+    value = packet(operation, out, ok)
+    maximum = output_limit(out)
+    if 'room_origin' in out:
+        turn = value['agent_turn']
+        turn['budget']['maximum_output_bytes'] = maximum
+        turn['references'].append(out['room_origin'])
+        turn['coverage']['original_room_intent'] = 'complete_retained_plan'
+        turn['briefing'].update(room_completion_proven=False, terrain_completion_proven=False)
+        turn['uncertainty'].append('Original room intent is retained, not terrain-completion or room-assignment evidence.')
+    raw = canonical(value) + b'\n'
+    require(len(raw) <= maximum, 'complete furnishing result exceeds its profile bound')
     return raw
 
 
 def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, timeout_ms: int = 10000,
-               *, handoff: Handoff | None = None) -> dict:
+               *, handoff: Handoff | None = None, room_handoff: RoomFurnitureHandoff | None = None,
+               _budget: Budget | None = None) -> dict:
+    budget = _budget if _budget is not None else Budget(timeout_ms)
+    if room_handoff is not None:
+        require(type(room_handoff) is RoomFurnitureHandoff and handoff is None,
+                'room and standalone handoff imports are mutually exclusive')
+        room_handoff = RoomFurnitureHandoff.decode(room_handoff.encode(), budget.remaining)
+        handoff = room_handoff.allocation
     text_bytes(folder, 512)
     integer(site, 0, 2147483647)
     require(type(plan) is model.FurniturePlan, 'invalid complete furniture plan')
@@ -394,10 +439,12 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         handoff = Handoff.decode(canonical(handoff.json()))
         require(plan == handoff.plan() and (folder, site) == (handoff.request.folder, handoff.request.site),
                 'explicit initialization differs from original request')
-    budget = Budget(timeout_ms)
+    budget.remaining()
     with root_lock(path, budget) as root:
         require(not names(root), 'initialization requires an existing empty private directory')
         authority = Authority.load()
+        if room_handoff is not None:
+            budget.publication_authority = authority
         address = f'{authority.address[0]}:{authority.address[1]}'
         if handoff is not None:
             require(address == handoff.source.address, 'operator endpoint differs from allocation')
@@ -406,22 +453,29 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
         capture = reply.capture
         require(capture.folder == folder and capture.site == site, 'initial observation is another fortress')
         plan.check_dimensions(capture.dimensions)
+        if room_handoff is not None:
+            room_handoff.check_dimensions(capture.dimensions, budget.remaining)
         if handoff is not None:
             validate_handoff_capture(handoff, capture, reply.manifest, address)
-        value = {'schema': SCHEMA if handoff is None else HANDOFF_SCHEMA,
+        value = {'schema': ROOM_SCHEMA if room_handoff is not None else SCHEMA if handoff is None else HANDOFF_SCHEMA,
             'nonce': secrets.token_hex(24), 'plan': plan.json(),
             'source': reply.manifest.view(), 'endpoint': address,
             'folder': folder, 'site': site, 'dimensions': list(capture.dimensions), 'first_tick': capture.tick,
             'root_identity': identity(root), 'effects_identity': [2**64 - 1, 2**64 - 1]}
-        maximum = MAX_FILE if handoff is None else MAX_DEFINITION
-        if handoff is not None:
+        maximum = MAX_ROOM_DEFINITION if room_handoff is not None else MAX_FILE if handoff is None else MAX_DEFINITION
+        if room_handoff is not None:
+            value['room_handoff'] = room_handoff.json()
+        elif handoff is not None:
             value['handoff'] = handoff.json()
         # Reserve complete definition and visible original intent BEFORE creating custody.
         require(len(seal(value)) <= maximum, 'batch manifest too large')
         preview = model.progress(plan, {})
         if handoff is not None:
             preview['allocation'] = handoff.compact()
-        require(len(encoded('init', preview)) + 8192 <= MAX_OUTPUT, 'batch output reservation exceeds bound')
+        if room_handoff is not None:
+            preview['room_origin'] = room_handoff.compact()
+            preview['room_plan'] = room_handoff.room_plan.json()
+        require(len(encoded('init', preview)) + 8192 <= output_limit(preview), 'batch output reservation exceeds bound')
         authority.guard('QueryPlacement')
         budget.remaining()
         pinned = storage.open_directory(path)
@@ -470,10 +524,12 @@ def review_seal(batch: Batch, step: model.Step, plan: Plan, inventory: str) -> s
         'inventory': inventory, 'step': step.name, 'key': plan.key, 'native_plan': plan.digest.hex()}))
 
 
-def review(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
-    with Batch(path, Budget(timeout_ms)) as batch:
+def review(path: str, expected_id: str, timeout_ms: int = 10000, *, _budget: Budget | None = None) -> dict:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms)) as batch:
         step, out = select_next(batch, expected_id)
         authority = Authority.load()
+        if batch.room_handoff is not None:
+            batch.budget.publication_authority = authority
         require(authority.address == batch.address, 'operator endpoint differs from original batch')
         with Client(authority, batch.budget, selection(step)) as client:
             reply = client.observe()
@@ -498,13 +554,16 @@ def review(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
         return out
 
 
-def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, timeout_ms: int = 10000) -> dict:
+def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, timeout_ms: int = 10000,
+            *, _budget: Budget | None = None) -> dict:
     exact_hex(expected_plan, 32)
     exact_hex(confirmation, 32)
-    with Batch(path, Budget(timeout_ms), True) as batch:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True) as batch:
         step, initial = select_next(batch, expected_id)
-        require(len(encoded('advance', initial)) + 32768 < MAX_OUTPUT, 'batch outcome reservation exceeds bound')
+        require(len(encoded('advance', initial)) + 32768 < output_limit(initial), 'batch outcome reservation exceeds bound')
         authority = Authority.load(True)
+        if batch.room_handoff is not None:
+            batch.budget.publication_authority = authority
         require(authority.address == batch.address, 'operator endpoint differs from original batch')
         prior = {name: journal.raw for name, journal in batch.effects.journals.items()}
         prior_after = [j.state.terminal.after for j in batch.effects.journals.values()
@@ -534,12 +593,16 @@ def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, 
         out = batch.audit()
         out.update(native_contacted=True, advanced_step=step.name)
         encoded('advance', out)
+        if batch.room_handoff is not None:
+            authority.guard('QueryPlacement')
+            batch.budget.remaining()
+            batch.check()
         return out
 
 
 def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_ms: int = 10000,
-            *, allocation: bool = False) -> dict:
-    with Batch(path, Budget(timeout_ms)) as batch:
+            *, allocation: bool = False, _budget: Budget | None = None) -> dict:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms)) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         out = batch.audit()
         require(type(allocation) is bool and not (allocation and step_name is not None),
@@ -562,29 +625,75 @@ def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_m
         return out
 
 
-def recover(path: str, expected_id: str, step_name: str, cancel: bool = False, timeout_ms: int = 10000) -> dict:
-    with Batch(path, Budget(timeout_ms), True) as batch:
+def recover(path: str, expected_id: str, step_name: str, cancel: bool = False, timeout_ms: int = 10000,
+            *, _budget: Budget | None = None) -> dict:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         step = next((s for s in batch.plan.steps if s.name == step_name), None)
         require(step is not None, 'step outside batch')
         journal = batch.effects.get(batch.key(step))
         batch.register(step)  # Adopt a crash-before-registration intent, never dispatch it.
         authority = None if journal.state.terminal is not None else Authority.load()
+        if batch.room_handoff is not None and authority is not None:
+            batch.budget.publication_authority = authority
         batch.check()
         outcome = placement.recover(journal, authority, cancel)
         out = batch.audit()
         out.update(native_contacted=outcome['native_contacted'], recovered_step=step.name,
                    native_query_status=outcome.get('effect_status'))
         encoded('cancel' if cancel else 'query', out)
+        if batch.room_handoff is not None:
+            if authority is not None:
+                authority.guard('QueryPlacement')
+            batch.budget.remaining()
+            batch.check()
         return out
 
 
-def stop(path: str, expected_id: str, timeout_ms: int = 10000) -> dict:
-    with Batch(path, Budget(timeout_ms), True) as batch:
+def stop(path: str, expected_id: str, timeout_ms: int = 10000, *, _budget: Budget | None = None) -> dict:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         out = batch.stop()
         encoded('stop', out)
         return out
+
+
+def export_room_plan(path: str, expected_id: str, timeout_ms: int = 10000,
+                     *, _budget: Budget | None = None) -> bytes:
+    """Offline original goal recovery; never assemble a smaller successful subset."""
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms)) as batch:
+        require(batch.id == expected_id and batch.room_handoff is not None,
+                'original room plan is absent or batch identity differs')
+        out = batch.audit()
+        encoded('inspect', out)  # Reserve the complete active-work disclosure too.
+        raw = batch.room_handoff.room_plan.encode()
+        batch.check()
+        batch.budget.remaining()
+        return raw
+
+
+def check_definition_depth(raw: bytes, budget: Budget) -> None:
+    require(type(raw) is bytes and 1 <= len(raw) <= MAX_ROOM_DEFINITION,
+            'batch definition byte bound exceeded')
+    depth, quoted, escaped = 0, False, False
+    for offset, byte in enumerate(raw):
+        if offset % 256 == 0:
+            budget.remaining()
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == 92:
+                escaped = True
+            elif byte == 34:
+                quoted = False
+        elif byte == 34:
+            quoted = True
+        elif byte in (91, 123):
+            depth += 1
+            require(depth <= 16, 'batch definition nesting bound exceeded')
+        elif byte in (93, 125):
+            depth -= 1
+    budget.remaining()
 
 
 def read_input(path: str, maximum: int) -> bytes:
@@ -621,39 +730,78 @@ def main(argv: list[str] | None = None) -> int:
             choice = command.add_mutually_exclusive_group(required=True)
             choice.add_argument('--plan')
             choice.add_argument('--handoff')
-            command.add_argument('--world-folder', required=True)
-            command.add_argument('--site', required=True, type=int)
+            choice.add_argument('--room-handoff')
+            command.add_argument('--world-folder')
+            command.add_argument('--site', type=int)
         else:
             command.add_argument('--batch-id', required=True)
         if operation in ('inspect', 'query', 'cancel'):
             command.add_argument('--step', required=operation != 'inspect')
         if operation == 'inspect':
             command.add_argument('--allocation', action='store_true')
+            command.add_argument('--emit', choices=('inventory', 'room-plan'), default='inventory')
         if operation == 'advance':
             command.add_argument('--expected-plan', required=True)
             command.add_argument('--confirm-review', required=True)
     args = parser.parse_args(argv)
     try:
+        budget = Budget(args.timeout_ms)
         if args.operation == 'init':
-            handoff = read_handoff(args.handoff) if args.handoff is not None else None
-            plan = handoff.plan() if handoff is not None else read_plan(args.plan)
-            out = initialize(args.directory, plan, args.world_folder, args.site, args.timeout_ms, handoff=handoff)
+            if args.room_handoff is not None:
+                require(args.world_folder is None and args.site is None,
+                        'room handoff supplies original fortress; overrides are not accepted')
+                authority = Authority.load()
+                raw = read_input(args.room_handoff, MAX_ROOM_HANDOFF_BYTES)
+                room = RoomFurnitureHandoff.decode(raw, budget.remaining)
+                authority.guard('QueryPlacement')
+                h = room.allocation
+                out = initialize(args.directory, h.plan(), h.request.folder, h.request.site,
+                                 room_handoff=room, _budget=budget)
+            else:
+                require(args.world_folder is not None and args.site is not None,
+                        'legacy batch imports require explicit fortress selectors')
+                handoff = read_handoff(args.handoff) if args.handoff is not None else None
+                plan = handoff.plan() if handoff is not None else read_plan(args.plan)
+                out = initialize(args.directory, plan, args.world_folder, args.site,
+                                 handoff=handoff, _budget=budget)
         elif args.operation == 'advance':
-            out = advance(args.directory, args.batch_id, args.expected_plan, args.confirm_review, args.timeout_ms)
+            out = advance(args.directory, args.batch_id, args.expected_plan, args.confirm_review, _budget=budget)
         elif args.operation == 'inspect':
-            out = inspect(args.directory, args.batch_id, args.step, args.timeout_ms, allocation=args.allocation)
+            if args.emit == 'room-plan':
+                require(args.step is None and not args.allocation, 'original-room export cannot select a child or allocation')
+                output = export_room_plan(args.directory, args.batch_id, _budget=budget)
+                budget.remaining()
+                return write_output(output)
+            out = inspect(args.directory, args.batch_id, args.step, allocation=args.allocation, _budget=budget)
         elif args.operation in ('query', 'cancel'):
-            out = recover(args.directory, args.batch_id, args.step, args.operation == 'cancel', args.timeout_ms)
+            out = recover(args.directory, args.batch_id, args.step, args.operation == 'cancel', _budget=budget)
         else:
-            out = {'review': review, 'stop': stop}[args.operation](args.directory, args.batch_id, args.timeout_ms)
-        print(encoded(args.operation, out).decode('ascii'), end='')
-        return 0
+            out = {'review': review, 'stop': stop}[args.operation](args.directory, args.batch_id, _budget=budget)
+        output = encoded(args.operation, out)
+        authority = getattr(budget, 'publication_authority', None)
+        if authority is not None:
+            authority.guard('QueryPlacement')  # Still the original read credential, never a reloaded replacement.
+        budget.remaining()
+        code = 0
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
         out = {'inventory_verified': False, 'effect_status': 'unknown', 'retry_permitted': False,
                'construction_completion_proven': False,
                'error': 'Request, source, custody, confirmation or budget refused. Preserve the batch and recover original keys; do not repeat placement.'}
-        print(encoded(args.operation, out, False).decode('ascii'), end='')
+        output = encoded(args.operation, out, False)
+        code = 2
+    return code if write_output(output) == 0 else 2
+
+
+def write_output(raw: bytes) -> int:
+    # No second object, native retry or journal repair after short output I/O.
+    try:
+        if sys.stdout.buffer.write(raw) != len(raw):
+            return 2
+        sys.stdout.buffer.flush()
+    except (OSError, ValueError):
         return 2
+    return 0
+
 
 
 if __name__ == '__main__':
