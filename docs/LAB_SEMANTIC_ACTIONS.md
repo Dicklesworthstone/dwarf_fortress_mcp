@@ -126,6 +126,10 @@ scenario is refused) and the response reports `shared_world.members`.
   re-planned and re-sealed at the current anchor, preconditions rechecked) and a
   `rebase` record. The Agent Turn recommends committing the new digest; the old
   digest can never be committed.
+- **Unanimous unpause.** Any member may pause a shared fortress at once (the
+  emergency brake), which clears every unpause consent. Committing an unpause
+  records the member's consent and returns `clock_consent` (votes of members)
+  without dispatching until every current member has consented.
 - **One clock.** Any member's `fortress_wait(max_game_ticks)` advances everyone's
   work; each member proves its own obligations when it next waits.
 - **No unilateral rewrite.** `fortress_restore` is refused while other members

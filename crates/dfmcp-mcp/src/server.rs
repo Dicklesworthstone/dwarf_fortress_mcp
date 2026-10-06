@@ -92,6 +92,17 @@ pub(crate) struct LabSession {
 pub(crate) struct LeaseBook {
     manager: dfmcp_core::lease::LeaseManager,
     by_action: BTreeMap<ActionId, (SessionId, Vec<dfmcp_core::LeaseId>)>,
+    /// Members who consented to unpausing a shared fortress. Any member may
+    /// pause at once (the emergency brake), which clears every consent;
+    /// unpausing needs all current members.
+    unpause_consent: BTreeSet<SessionId>,
+}
+
+/// Whether a sealed plan sets the fortress pause flag to `paused`.
+fn plan_sets_pause(plan: &PreparedPlan, paused: bool) -> bool {
+    plan.steps
+        .iter()
+        .any(|step| step.action == Action::Pause { paused })
 }
 
 /// One fortress shared by several agent sessions: a single canonical world,
@@ -1671,6 +1682,30 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             if pending.plan.anchor != guard.adapter.snapshot().anchor() {
                 return replay_stale_plan(guard, pending);
             }
+            if guard.shared_members > 1 && plan_sets_pause(&pending.plan, false) {
+                let me = guard.session_id;
+                guard.leases.unpause_consent.insert(me);
+                let votes = guard.leases.unpause_consent.len();
+                if votes < guard.shared_members {
+                    let members = guard.shared_members;
+                    guard.pending = Some(pending);
+                    return json!({
+                        "ok": false,
+                        "error": {
+                            "operation": "fortress.commit",
+                            "code": "conflict",
+                            "message": format!(
+                                "unpause consent recorded ({votes} of {members}); the shared fortress stays paused until every member consents"
+                            ),
+                            "retryable": true,
+                            "details": [],
+                        },
+                        "clock_consent": {"votes": votes, "members": members, "policy": "unanimous_unpause"},
+                        "mutation_dispatched": false,
+                    })
+                    .to_string();
+                }
+            }
             let leases_before = guard.leases.clone();
             let plan_leases = match acquire_plan_leases(guard, &pending.plan) {
                 Ok(leases) => leases,
@@ -1724,6 +1759,12 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                         release_action_leases(guard, action.action_id);
                                     }
                                 }
+                            }
+                            if plan_sets_pause(&pending.plan, true)
+                                || plan_sets_pause(&pending.plan, false)
+                            {
+                                // A pause resets consensus; an unpause consumed it.
+                                guard.leases.unpause_consent.clear();
                             }
                             let authority = plan_authority(&pending.plan);
                             guard

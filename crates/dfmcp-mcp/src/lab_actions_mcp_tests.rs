@@ -858,3 +858,64 @@ fn observe_briefs_the_starter_fortress_under_the_default_budget() -> TestResult 
     assert_eq!(observed["world"]["counts_by_kind"]["unit"], 7);
     Ok(())
 }
+
+fn commit_pause(
+    session: &str,
+    paused: bool,
+) -> std::result::Result<Value, Box<dyn std::error::Error>> {
+    let planned = parsed(&fortress_plan(
+        Some(session.to_owned()),
+        None,
+        Some(paused),
+        None,
+    ))?;
+    if planned["ok"] != true {
+        return Ok(planned);
+    }
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    parsed(&fortress_commit(Some(session.to_owned()), digest))
+}
+
+#[test]
+fn any_member_can_pause_a_shared_fortress_but_unpausing_needs_everyone() -> TestResult {
+    let opened = parsed(&fortress_open_session(
+        Some(true),
+        Some("73004".to_owned()),
+        Some(caps(&ALL_EFFECTS)),
+        None,
+        Some(2_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        Some("starter_fortress".to_owned()),
+        Some(true),
+    ))?;
+    assert_eq!(opened["paused"], true);
+    let a = opened["session_id"].as_str().ok_or("a")?.to_owned();
+    let b = open_shared("73004", None, &ALL_EFFECTS)?;
+    let b = b["session_id"].as_str().ok_or("b")?.to_owned();
+
+    // A alone cannot unpause: its consent is recorded, nothing is dispatched.
+    let first = commit_pause(&a, false)?;
+    assert_eq!(first["ok"], false, "{first}");
+    assert_eq!(first["clock_consent"]["votes"], 1);
+    assert_eq!(first["clock_consent"]["members"], 2);
+    assert_eq!(
+        first["agent_turn"]["recommendations"][0]["recommendation_id"],
+        "await-unpause-consent"
+    );
+    assert_eq!(parsed(&fortress_observe(Some(a.clone())))?["paused"], true);
+    // B's consent completes the vote and the shared fortress unpauses.
+    let second = commit_pause(&b, false)?;
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(parsed(&fortress_observe(Some(a.clone())))?["paused"], false);
+    // Either member may pull the emergency brake at once...
+    assert_eq!(commit_pause(&a, true)?["ok"], true);
+    assert_eq!(parsed(&fortress_observe(Some(b.clone())))?["paused"], true);
+    // ...which clears consensus: B's renewed wish to unpause is not enough.
+    let again = commit_pause(&b, false)?;
+    assert_eq!(again["ok"], false, "{again}");
+    assert_eq!(again["clock_consent"]["votes"], 1);
+    Ok(())
+}

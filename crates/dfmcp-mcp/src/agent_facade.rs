@@ -729,6 +729,19 @@ fn recommendations(
     state: &SessionOrientation,
 ) -> Vec<Value> {
     if !ok {
+        if let Some(consent) = payload.get("clock_consent") {
+            return vec![recommendation(
+                "await-unpause-consent",
+                "fortress.observe",
+                "your unpause consent is recorded; the shared fortress resumes only when every member consents, and your plan stays pending",
+                "medium",
+                "medium",
+                "read_only",
+                "not_applicable",
+                false,
+                json!({"clock_consent": consent}),
+            )];
+        }
         if let Some(digest) = payload
             .get("rebased_plan")
             .and_then(|plan| plan.get("plan_digest"))
