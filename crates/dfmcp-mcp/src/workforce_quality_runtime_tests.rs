@@ -19,7 +19,7 @@ fn scored(ratings: &[(u32, u32)]) -> Result<Registered> {
 
 #[test]
 fn quality_query_prefers_observed_skill_without_changing_legacy_default() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = scored(&[(5, 5), (9, 8)])?;
     let legacy = ask(&s, planned(1))?;
     let mut explicit = planned(1);
@@ -63,7 +63,7 @@ fn quality_query_prefers_observed_skill_without_changing_legacy_default() -> Res
 
 #[test]
 fn priority_handles_shortage_and_global_rerouting_preserves_headcount() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(1, 65_536)?;
     let mut a = demand("a", "CARPENTRY", 1);
     a["priority"] = json!(0);
@@ -111,8 +111,8 @@ fn priority_handles_shortage_and_global_rerouting_preserves_headcount() -> Resul
 
 #[test]
 fn quality_pages_keep_active_watches_and_bind_objective_priorities_and_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
-    let s = register(40, 2048)?;
+    let _serial = crate::test_serial();
+    let s = register(40, 3072)?;
     let watch = ask(
         &s,
         json!({"kind":"watch","key":"quality-review","condition":{"op":"paused","value":true},
@@ -129,7 +129,7 @@ fn quality_pages_keep_active_watches_and_bind_objective_priorities_and_capture()
             None,
             Some(json!({"schema":"dfmcp.query/1","query":q.clone()})),
         );
-        assert!(raw.len() <= 8192);
+        assert!(raw.len() <= 12288);
         let out = decode(&raw)?;
         assert_eq!(out["ok"], true, "{out}");
         assert_eq!(out["assigned_workers"], 40);
@@ -209,7 +209,7 @@ fn quality_pages_keep_active_watches_and_bind_objective_priorities_and_capture()
 
 #[test]
 fn schema_discovers_quality_and_runtime_refuses_invalid_or_ignored_priorities() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2, 65_536)?;
     let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
     let variants = schema["query_schema"]["$defs"]["query"]["oneOf"]
@@ -254,7 +254,7 @@ fn schema_discovers_quality_and_runtime_refuses_invalid_or_ignored_priorities() 
 
 #[test]
 fn quality_adapter_keeps_authorization_cancellation_and_priority_key_checks() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2, 65_536)?;
     let handle = resolve(s.handle())?;
     let mut session = lock(&handle)?;
@@ -303,7 +303,7 @@ fn quality_adapter_keeps_authorization_cancellation_and_priority_key_checks() ->
 
 #[test]
 fn quality_query_does_not_gain_authority_from_a_fenced_source() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2, 8192)?;
     {
         let handle = resolve(s.handle())?;

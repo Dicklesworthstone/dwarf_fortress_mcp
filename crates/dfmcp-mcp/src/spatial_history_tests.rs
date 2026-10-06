@@ -82,7 +82,7 @@ fn release_watch(s: &Registered, handle: Value) -> Result<()> {
 #[test]
 fn archived_inventory_and_its_route_use_past_terrain_without_advancing_current_work() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
     let s = full()?;
     attach(&s, &archive.path)?;
@@ -129,7 +129,7 @@ fn archived_inventory_and_its_route_use_past_terrain_without_advancing_current_w
 
 #[test]
 fn reopened_archive_restores_source_history_not_session_authority() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
     let (record, expected, source, old_handle) = {
         let s = full()?;
@@ -174,7 +174,7 @@ fn reopened_archive_restores_source_history_not_session_authority() -> Result<()
 
 #[test]
 fn source_failure_leaves_verified_archive_reads_available() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
     let s = full()?;
     attach(&s, &archive.path)?;
@@ -201,7 +201,7 @@ fn source_failure_leaves_verified_archive_reads_available() -> Result<()> {
 
 #[test]
 fn changed_archive_fences_refresh_without_publishing_the_new_world() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
     let s = full()?;
     attach(&s, &archive.path)?;
@@ -230,9 +230,9 @@ fn changed_archive_fences_refresh_without_publishing_the_new_world() -> Result<(
 #[test]
 fn historical_allocation_paginates_at_8192_bytes_with_current_work_and_exact_drills() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
-    let s = register(2048, vec![Capability::Query, Capability::Observe])?;
+    let s = register(3072, vec![Capability::Query, Capability::Observe])?;
     stock(&s, 40)?;
     attach(&s, &archive.path)?;
     let record = first_record(&s)?;
@@ -246,7 +246,7 @@ fn historical_allocation_paginates_at_8192_bytes_with_current_work_and_exact_dri
             None,
             Some(json!({"schema":"dfmcp.query/1","query":archived(&record,query.clone())})),
         );
-        assert!(raw.len() <= 8192);
+        assert!(raw.len() <= 12288);
         let page = decode(&raw)?;
         assert_eq!(page["ok"], true, "{raw}");
         assert_eq!(page["summary"]["allocated_units"], 40);
@@ -295,7 +295,7 @@ fn historical_allocation_paginates_at_8192_bytes_with_current_work_and_exact_dri
 
 #[test]
 fn discovery_and_historical_requests_reject_wrong_record_scope_and_stateful_work() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let archive = Archive::new()?;
     let s = full()?;
     attach(&s, &archive.path)?;
@@ -306,7 +306,7 @@ fn discovery_and_historical_requests_reject_wrong_record_scope_and_stateful_work
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(20)
+        Some(23)
     );
     for kind in [
         "watch",

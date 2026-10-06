@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn archive_sessions_release_read_only_locks_without_loading_or_modifying_watches() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let writer = register(Some(&files), true, 3, &[])?;
     watch(&writer)?;
@@ -77,7 +77,7 @@ fn archive_sessions_release_read_only_locks_without_loading_or_modifying_watches
 
 #[test]
 fn closing_one_session_does_not_release_another_sessions_watches_or_baselines() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let first = register(None, false, 3, &[])?;
     let second = register(None, false, 3, &[])?;
     watch(&first)?;
@@ -104,7 +104,7 @@ fn closing_one_session_does_not_release_another_sessions_watches_or_baselines() 
 #[test]
 fn local_watches_alone_require_consent_and_repeated_sessions_do_not_fill_global_stores()
 -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     // More than the shared 128-entry watch/baseline limit; every iteration must
     // release the original records rather than merely hide its session handle.
     for _ in 0..130 {
@@ -130,7 +130,7 @@ fn local_watches_alone_require_consent_and_repeated_sessions_do_not_fill_global_
 
 #[test]
 fn new_close_receipt_survives_even_when_its_session_predates_the_entire_cache() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let long_lived = register(None, false, 3, &[])?;
     for _ in 0..=MAX_CLOSE_RECEIPTS {
         let short_lived = register(None, false, 3, &[])?;

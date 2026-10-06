@@ -6,7 +6,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "multisite fixture I/O")

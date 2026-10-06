@@ -323,7 +323,7 @@ enum Query {
         offset: usize,
         limit: Option<usize>,
     },
-    Schema,
+    Schema {},
 }
 impl Query {
     fn parse(raw: &str) -> Result<Self> {
@@ -377,7 +377,7 @@ impl Query {
                 digest(plan_digest)?;
                 tile_bounds(*offset, *limit)?;
             }
-            Self::Schema => {}
+            Self::Schema {} => {}
         }
         Ok(value)
     }
@@ -615,7 +615,7 @@ where
                 json!({"mode":"plan_tiles","idempotency_key":idempotency_key,"plan_digest":plan_digest,"offset":offset,"limit":limit}));
             Ok(json!({"ok":true,"page":page,"native_calls":0}))
         }
-        Action::Query(Query::Schema) => Ok(
+        Action::Query(Query::Schema {}) => Ok(
             json!({"ok":true,"query_schema":serde_json::from_str::<Value>(include_str!("../../../schemas/dig_control_query.json"))
             .map_err(|_|error(ErrorCode::InternalInvariantViolation,"invalid embedded mining query schema"))?,"native_calls":0}),
         ),

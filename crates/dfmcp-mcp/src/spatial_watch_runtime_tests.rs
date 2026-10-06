@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(
@@ -236,7 +235,7 @@ fn watch() -> Value {
 
 #[test]
 fn mcp_restart_discovers_watches_and_only_fresh_captures_restore_stability() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (first, opened) = register(&files, 3, &[])?;
     assert_eq!(opened["agent_turn"]["continuity"]["status"], "bootstrap");
@@ -313,7 +312,7 @@ fn mcp_restart_discovers_watches_and_only_fresh_captures_restore_stability() -> 
 #[test]
 fn mcp_reports_watch_corruption_without_hiding_it_as_output_overflow() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (s, _) = register(&files, 3, &[])?;
     assert_eq!(ask(&s, watch())?["ok"], true);
@@ -339,7 +338,7 @@ fn mcp_reports_watch_corruption_without_hiding_it_as_output_overflow() -> Result
 
 #[test]
 fn rejected_bootstrap_packet_does_not_publish_a_recovered_handle() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (s, _) = register(&files, 3, &[])?;
     assert_eq!(ask(&s, watch())?["ok"], true);

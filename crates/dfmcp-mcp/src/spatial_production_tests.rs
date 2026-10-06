@@ -8,7 +8,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "production test I/O")
@@ -208,7 +207,7 @@ fn furniture_allocation_keeps_the_full_citizen_spatial_source_and_reused_item_ge
         complete.extend_from_slice(&original_bytes[citizens_offset..]);
         LiveSpatialCitizenObservation::decode_payload(&complete, 7, "df".into(), "dfhack".into())
     }
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(
         &files,
@@ -287,7 +286,7 @@ fn retain_watch(s: &Registered) -> Result<()> {
 #[test]
 fn production_mode_and_supply_plans_use_the_coherent_source_without_sampling_watches() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 2, vec![])?;
     retain_watch(&s)?;
@@ -350,7 +349,7 @@ fn production_mode_and_supply_plans_use_the_coherent_source_without_sampling_wat
 
 #[test]
 fn production_pages_preserve_complete_counts_and_reject_changed_capture_or_scope() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 16, vec![fixture::observation(4, 16, 7, false)?])?;
     retain_watch(&s)?;
@@ -417,7 +416,7 @@ fn production_pages_preserve_complete_counts_and_reject_changed_capture_or_scope
 #[test]
 fn historical_diagnostics_and_inspections_keep_the_original_generation_after_id_reuse() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(
         &files,
@@ -468,7 +467,7 @@ fn historical_diagnostics_and_inspections_keep_the_original_generation_after_id_
 #[test]
 fn a_failed_live_source_still_allows_verified_history_and_offline_production_recovery() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
     let first = first_record(&s)?;
@@ -549,7 +548,7 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
 #[test]
 fn rejected_work_focus_authority_and_custody_do_not_acquire_or_publish() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
     let before = fs::read(&files.watches).map_err(io_error)?;

@@ -2,7 +2,6 @@ use super::*;
 
 // At most two new test sessions coexist, so these scenarios cannot consume the
 // fixed production capacity while the five original handler tests run in parallel.
-static SERIAL: Mutex<()> = Mutex::new(());
 
 fn stock(session: &Registered, count: u32) -> Result<()> {
     let handle=resolve(session.handle())?;
@@ -27,7 +26,7 @@ fn allocation(units:u64,limit:u32)->Value {
 
 #[test]
 fn diagnostics_are_available_in_the_actual_tool_without_native_io()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=full()?;
     let result=decode(&fortress_query(session.handle(),Some("production".to_owned()),None))?;
     assert_eq!(result["ok"],true);assert_eq!(result["kind"],"production_diagnosis");
@@ -49,7 +48,7 @@ fn diagnostics_are_available_in_the_actual_tool_without_native_io()->Result<()> 
 
 #[test]
 fn discovered_operations_schema_extends_but_does_not_rewrite_other_profiles()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=full()?;
     let result=decode(&fortress_query(session.handle(),Some("schema".to_owned()),None))?;
     assert_eq!(result["ok"],true);
@@ -71,7 +70,7 @@ fn discovered_operations_schema_extends_but_does_not_rewrite_other_profiles()->R
 
 #[test]
 fn shared_supply_shortage_is_exact_but_never_an_executable_plan()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=full()?;stock(&session,3)?;
     let result=ask(&session,json!({"kind":"inventory_plan","quantity_unit":"stack_units",
         "demands":[{"key":"b","units":2,"item_types":["BAR"]},
@@ -92,7 +91,7 @@ fn shared_supply_shortage_is_exact_but_never_an_executable_plan()->Result<()> {
 
 #[test]
 fn allocation_pages_fit_8192_bytes_and_keep_active_work_without_skipping_stacks()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=register(2048,vec![Capability::Observe,Capability::Query,Capability::Doctor])?;
     stock(&session,40)?;
     let created=ask(&session,json!({"kind":"watch","key":"allocation-review","label":"Wait for review tick",
@@ -130,7 +129,7 @@ fn allocation_pages_fit_8192_bytes_and_keep_active_work_without_skipping_stacks(
 
 #[test]
 fn continuations_bind_session_query_and_snapshot_but_allow_normalized_type_order()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=full()?;stock(&session,3)?;
     let mut initial=allocation(3,1);
     initial["demands"][0]["item_types"]=json!(["BAR","BOULDER"]);
@@ -152,7 +151,7 @@ fn continuations_bind_session_query_and_snapshot_but_allow_normalized_type_order
 
 #[test]
 fn invalid_focus_envelopes_units_and_budgets_fail_before_any_io()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let session=full()?;
     for query in [json!({"kind":"production_diagnosis","job":{"entity_id":"09","generation":1}}),
         json!({"kind":"production_diagnosis","job":{"entity_id":"9","generation":2}}),
@@ -174,7 +173,7 @@ fn invalid_focus_envelopes_units_and_budgets_fail_before_any_io()->Result<()> {
 
 #[test]
 fn new_analyses_reject_missing_authority_and_poisoned_sources()->Result<()> {
-    let _serial=lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let denied=register(8192,vec![Capability::Doctor])?;
     for query in [json!({"kind":"production_diagnosis"}),allocation(1,1)] {
         let value=ask(&denied,query)?;

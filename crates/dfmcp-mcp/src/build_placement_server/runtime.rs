@@ -288,6 +288,11 @@ impl RequestControl {
         if !blocking_io_authorized(&self.parent) || !blocking_io_authorized(&self.worker) {
             return Err(denied());
         }
+        // A restriction pushed onto this thread after the worker started is
+        // visible only through the ambient context; honour it as well.
+        if Cx::current().is_some_and(|ambient| !blocking_io_authorized(&ambient)) {
+            return Err(denied());
+        }
         Ok(())
     }
 }

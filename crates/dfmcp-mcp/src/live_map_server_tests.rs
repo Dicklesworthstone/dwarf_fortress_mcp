@@ -3,7 +3,6 @@ use dfmcp_adapter::live_map::tile_entity_id;
 use dfmcp_world::map_region::{MapRegion, Shape, Tile};
 use std::collections::VecDeque;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 struct Script {
     values: VecDeque<LiveMapObservation>,
     fenced: bool,
@@ -127,7 +126,7 @@ fn route(start: [u32; 3], goal: [u32; 3], limit: u32) -> Value {
 
 #[test]
 fn native_tile_queries_and_complementary_stair_route_use_actual_handlers() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let tiles = decode(&fortress_query(s.handle(), Some("tiles".to_owned()), None))?;
     assert_eq!(tiles["ok"], true);
@@ -164,7 +163,7 @@ fn native_tile_queries_and_complementary_stair_route_use_actual_handlers() -> Re
 
 #[test]
 fn liquid_watch_and_baseline_share_one_real_refresh_without_claiming_safe_terrain() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let capture = ask(
         &s,
@@ -243,7 +242,7 @@ fn flat() -> Result<LiveMapObservation> {
 }
 #[test]
 fn route_paging_keeps_active_work_and_binds_session_snapshot_and_endpoints() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let caps = vec![Capability::Observe, Capability::Query, Capability::Doctor];
     let s = register(flat()?, 2048, caps.clone())?;
     let other = register(flat()?, 2048, caps)?;
@@ -317,7 +316,7 @@ fn route_paging_keeps_active_work_and_binds_session_snapshot_and_endpoints() -> 
 }
 #[test]
 fn map_schema_adds_only_its_route_and_does_not_widen_base_variants() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let out = decode(&fortress_query(s.handle(), Some("schema".to_owned()), None))?;
     assert_eq!(out["ok"], true);
@@ -334,7 +333,7 @@ fn map_schema_adds_only_its_route_and_does_not_widen_base_variants() -> Result<(
 }
 #[test]
 fn source_failure_retains_previous_anchor_and_local_watch_management() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let w = ask(
         &s,
@@ -375,7 +374,7 @@ fn source_failure_retains_previous_anchor_and_local_watch_management() -> Result
 }
 #[test]
 fn authority_region_and_malformed_routes_fail_without_io() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(fixture()?, 8192, vec![Capability::Doctor])?;
     let denied = ask(&s, route([14, 15, 1], [14, 15, 2], 1))?;
     assert_eq!(denied["error"]["code"], "capability_denied");

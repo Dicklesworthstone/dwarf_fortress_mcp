@@ -19,7 +19,7 @@ fn comparison() -> Value {
 
 #[test]
 fn compare_models_in_live_handler_without_sampling_existing_watches() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(4096)?;
     let watched = ask(
         &s,
@@ -82,7 +82,7 @@ fn compare_models_in_live_handler_without_sampling_existing_watches() -> Result<
 
 #[test]
 fn invalid_candidate_and_source_fencing_never_yield_a_partial_comparison() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(65_536)?;
     let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
     assert_eq!(schema["ok"], true, "{schema}");

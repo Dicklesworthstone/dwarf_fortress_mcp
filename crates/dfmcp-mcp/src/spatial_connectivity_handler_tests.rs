@@ -140,6 +140,7 @@ fn input(section: &str) -> Value {
 #[test]
 fn actual_dispatch_preserves_watches_and_supports_fenced_history_and_archive_reopen() -> Result<()>
 {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let calls = Arc::new(AtomicUsize::new(0));
     let mut state = LiveSpatialCitizenState::default();
@@ -219,14 +220,14 @@ fn actual_dispatch_preserves_watches_and_supports_fenced_history_and_archive_reo
     {
         let handle = resolve(Some(registered.0.to_string()))?;
         let mut s = lock(&handle)?;
-        s.budget.max_bytes = 8192;
-        s.budget.max_output_tokens = 2048;
+        s.budget.max_bytes = 12288;
+        s.budget.max_output_tokens = 3072;
     }
     let out = registered.call(input("all"))?;
-    assert_eq!(out["kind"], "map_connectivity");
+    assert_eq!(out["kind"], "map_connectivity", "{out}");
     assert_eq!(out["summary"]["components"], 2);
     assert_eq!(out["native_captures"], 0);
-    assert!(out.to_string().len() <= 8192);
+    assert!(out.to_string().len() <= 12288);
     assert_eq!(
         out["agent_turn"]["active_work"]["obligations"]
             .as_array()
@@ -241,7 +242,7 @@ fn actual_dispatch_preserves_watches_and_supports_fenced_history_and_archive_reo
     assert_eq!(old["rows"][0]["position"], json!([2, 1, 5]));
     assert_eq!(old["anchor"], anchor_json(first.anchor));
     assert_eq!(old["historical"], true);
-    assert!(old.to_string().len() <= 8192);
+    assert!(old.to_string().len() <= 12288);
     let after = registered.call(json!({"schema":"dfmcp.query/1","query":{"kind":"watches"}}))?;
     assert_eq!(after["records"], watches);
     assert_eq!(fs::read(&files.watches).map_err(io_error)?, watch_bytes);

@@ -21,7 +21,7 @@ fn condition_timeline(s: &Registered, measurement: Value) -> Result<Value> {
 
 #[test]
 fn compound_condition_history_matches_each_exact_inspection_without_changing_work() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12)])?;
     let measurement = predicate(stock(&s)?);
@@ -78,7 +78,7 @@ fn compound_condition_history_matches_each_exact_inspection_without_changing_wor
 
 #[test]
 fn paged_condition_transitions_match_one_page_and_bind_the_failure_guard() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12)])?;
     let measurement = predicate(stock(&s)?);
@@ -134,7 +134,7 @@ fn paged_condition_transitions_match_one_page_and_bind_the_failure_guard() -> Re
 #[test]
 fn missing_and_recycled_entities_never_become_successful_historical_samples() -> Result<()> {
     use dfmcp_adapter::live_spatial::citizens::citizen_entity_id;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[])?;
     let measurement = json!({"kind":"condition_evaluation","condition":{"op":"field",
@@ -172,7 +172,7 @@ fn missing_and_recycled_entities_never_become_successful_historical_samples() ->
 #[test]
 fn failed_source_and_offline_reopening_preserve_condition_evidence_not_current_claims() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7)])?;
     let measurement = predicate(stock(&s)?);
@@ -226,7 +226,7 @@ fn failed_source_and_offline_reopening_preserve_condition_evidence_not_current_c
 
 #[test]
 fn reset_boundaries_and_unknown_guards_never_establish_continuous_completion() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(3, 7), (2, 99)])?;
     capture(&s)?;
@@ -259,7 +259,7 @@ fn reset_boundaries_and_unknown_guards_never_establish_continuous_completion() -
 #[test]
 fn malformed_conditions_output_refusal_and_current_expiry_leave_saved_work_untouched() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7)])?;
     let measurement = predicate(stock(&s)?);

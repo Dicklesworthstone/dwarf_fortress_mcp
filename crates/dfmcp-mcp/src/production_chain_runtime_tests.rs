@@ -3,7 +3,6 @@ use super::super::super::super::*;
 use super::{fixture, query};
 use std::collections::VecDeque;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 struct Script {
     values: VecDeque<LiveSpatialCitizenObservation>,
     calls: Arc<AtomicUsize>,
@@ -106,7 +105,7 @@ fn envelope(query: Value) -> Value {
 
 #[test]
 fn live_chain_query_exposes_dependencies_and_deficits_without_game_reads_or_writes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(65_536)?;
     let out = ask(&s, query())?;
     assert_eq!(out["ok"], true, "{out}");
@@ -133,7 +132,7 @@ fn live_chain_query_exposes_dependencies_and_deficits_without_game_reads_or_writ
 
 #[test]
 fn paginated_chain_keeps_current_watch_evidence_and_complete_summary() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(4096)?;
     let watch = ask(
         &s,
@@ -189,7 +188,7 @@ fn paginated_chain_keeps_current_watch_evidence_and_complete_summary() -> Result
 
 #[test]
 fn fenced_or_unauthorized_sources_cannot_be_used_for_chain_planning() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(4096)?;
     {
         let handle = resolve(s.handle())?;

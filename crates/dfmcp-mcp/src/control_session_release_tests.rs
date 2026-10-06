@@ -165,7 +165,7 @@ fn code(raw: String) -> Result<String> {
 
 #[test]
 fn close_releases_custody_and_capacity_without_changing_any_effect_state() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let before = fs::read(&f.path).map_err(io_error)?;
     for read_only in [false, true] {
@@ -204,7 +204,7 @@ fn close_releases_custody_and_capacity_without_changing_any_effect_state() -> Re
 
 #[test]
 fn refused_close_keeps_the_session_and_lock_until_a_complete_reply_fits() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     for bytes in [0, 1, 64, u64::MAX] {
@@ -255,7 +255,7 @@ fn refused_close_keeps_the_session_and_lock_until_a_complete_reply_fits() -> Res
 #[test]
 fn teardown_survives_revoked_grants_counter_exhaustion_and_fenced_journals() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     let h = resolve(s.raw())?;
@@ -283,7 +283,7 @@ fn teardown_survives_revoked_grants_counter_exhaustion_and_fenced_journals() -> 
 
 #[test]
 fn closing_a_poisoned_session_drops_resources_without_resuming_its_operations() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     let h = resolve(s.raw())?;
@@ -307,7 +307,7 @@ fn closing_a_poisoned_session_drops_resources_without_resuming_its_operations() 
 
 #[test]
 fn close_waits_for_foreground_work_then_old_waiters_cannot_run() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     let h = resolve(s.raw())?;
@@ -341,7 +341,7 @@ fn close_waits_for_foreground_work_then_old_waiters_cannot_run() -> Result<()> {
 
 #[test]
 fn simultaneous_closes_replay_one_receipt_and_release_the_permit_once() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -369,7 +369,7 @@ fn simultaneous_closes_replay_one_receipt_and_release_the_permit_once() -> Resul
 
 #[test]
 fn receipt_retention_is_bounded_and_replay_does_not_close_a_new_session() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let first = register(&f, true)?;
     let original = close_call(&first);
@@ -404,7 +404,7 @@ fn receipt_retention_is_bounded_and_replay_does_not_close_a_new_session() -> Res
 
 #[test]
 fn released_handles_cannot_alias_other_runtime_families_or_new_sessions() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     for id in [

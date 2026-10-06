@@ -52,7 +52,7 @@ enum Request {
         limit: Option<u32>,
         continuation: Option<String>,
     },
-    Baselines,
+    Baselines {},
     ReleaseBaseline {
         baseline: String,
     },
@@ -685,7 +685,7 @@ where
                 continuation.as_deref(),
             )?)
         }
-        Request::Baselines => {
+        Request::Baselines {} => {
             let baselines = lock(history)?
                 .entries
                 .iter()

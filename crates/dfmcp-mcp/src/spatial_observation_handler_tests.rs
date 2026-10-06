@@ -6,7 +6,6 @@ mod fixture;
 use dfmcp_core::GameTick;
 use std::collections::VecDeque;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 struct Script {
     values: VecDeque<LiveSpatialCitizenObservation>,
     calls: Arc<AtomicUsize>,
@@ -137,7 +136,7 @@ fn current(s: &Registered) -> Result<StateAnchor> {
 
 #[test]
 fn public_observe_and_wait_do_not_publish_expired_authority_captures() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for call in [fortress_observe, fortress_wait] {
         let s = register(5, true)?;
         let old = current(&s)?;
@@ -161,7 +160,7 @@ fn public_observe_and_wait_do_not_publish_expired_authority_captures() -> Result
 
 #[test]
 fn single_and_batch_await_keep_the_prior_watch_set_when_capture_is_refused() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for batch in [false, true] {
         let s = register(5, true)?;
         let a = watch(&s, "a", 3)?;
@@ -187,7 +186,7 @@ fn single_and_batch_await_keep_the_prior_watch_set_when_capture_is_refused() -> 
 
 #[test]
 fn accepted_shared_capture_still_advances_all_selected_watches_once() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(4, false)?;
     watch(&s, "a", 2)?;
     watch(&s, "b", 2)?;

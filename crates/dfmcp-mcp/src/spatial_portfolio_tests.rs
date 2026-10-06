@@ -9,7 +9,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "portfolio fixture I/O")
@@ -182,7 +181,7 @@ fn retain_watch(s: &Registered) -> Result<()> {
 #[test]
 fn portfolio_handler_selects_complete_tasks_without_mutating_watches_or_observations() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     retain_watch(&s)?;
@@ -238,7 +237,7 @@ fn portfolio_handler_selects_complete_tasks_without_mutating_watches_or_observat
 
 #[test]
 fn portfolio_pagination_preserves_the_optimum_and_rejects_other_models() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![fixture::observation(4, 2, 2, false)?])?;
     retain_watch(&s)?;
@@ -318,7 +317,7 @@ fn portfolio_pagination_preserves_the_optimum_and_rejects_other_models() -> Resu
 
 #[test]
 fn historical_portfolios_and_each_route_remain_bound_to_the_selected_record() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![fixture::observation(4, 2, 0, false)?])?;
     retain_watch(&s)?;
@@ -360,7 +359,7 @@ fn historical_portfolios_and_each_route_remain_bound_to_the_selected_record() ->
 
 #[test]
 fn offline_reopening_can_plan_but_cannot_claim_current_readiness() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let entry = ok(ask(&s, json!({"kind":"history","limit":1}))?)["rows"][0].clone();
@@ -414,7 +413,7 @@ fn offline_reopening_can_plan_but_cannot_claim_current_readiness() -> Result<()>
 
 #[test]
 fn malformed_tasks_small_budgets_and_revoked_authority_leave_state_unchanged() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let before = fs::read(&f.observations).map_err(io_error)?;
@@ -452,7 +451,7 @@ fn malformed_tasks_small_budgets_and_revoked_authority_leave_state_unchanged() -
 #[test]
 fn current_production_queries_refuse_changed_observation_journal_custody() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let watches = fs::read(&f.watches).map_err(io_error)?;

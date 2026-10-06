@@ -9,7 +9,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "timeline fixture I/O")
@@ -201,7 +200,7 @@ fn watch(s: &Registered) -> Result<()> {
 #[test]
 fn series_matches_exact_individual_measurements_and_leaves_watches_and_world_unchanged()
 -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12)])?;
     watch(&s)?;
@@ -253,7 +252,7 @@ fn series_matches_exact_individual_measurements_and_leaves_watches_and_world_unc
 
 #[test]
 fn pages_preserve_cross_page_deltas_and_full_packet_budgets() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12), (6, 9)])?;
     for _ in 0..3 {
@@ -312,7 +311,7 @@ fn pages_preserve_cross_page_deltas_and_full_packet_budgets() -> Result<()> {
 
 #[test]
 fn measurement_range_and_archive_head_changes_reject_old_pages() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12)])?;
     capture(&s)?;
@@ -331,7 +330,7 @@ fn measurement_range_and_archive_head_changes_reject_old_pages() -> Result<()> {
 
 #[test]
 fn equal_tick_changes_and_reset_segments_never_invent_rates() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(3, 7), (2, 99)])?;
     capture(&s)?;
@@ -352,7 +351,7 @@ fn equal_tick_changes_and_reset_segments_never_invent_rates() -> Result<()> {
 
 #[test]
 fn offline_series_matches_live_history_and_rejects_old_session_continuations() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7)])?;
     capture(&s)?;
@@ -420,7 +419,7 @@ fn offline_series_matches_live_history_and_rejects_old_session_continuations() -
 
 #[test]
 fn failed_requests_do_not_sample_watches_or_revive_expired_current_grants() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7)])?;
     watch(&s)?;
@@ -462,7 +461,7 @@ fn failed_requests_do_not_sample_watches_or_revive_expired_current_grants() -> R
 
 #[test]
 fn same_size_prefix_corruption_cannot_produce_a_partial_timeline() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[(4, 7), (5, 12)])?;
     capture(&s)?;
@@ -496,7 +495,7 @@ fn same_size_prefix_corruption_cannot_produce_a_partial_timeline() -> Result<()>
 
 #[test]
 fn schema_and_runtime_keep_series_out_of_recursive_historical_measurements() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, &[])?;
     let query = timeline(&s)?;

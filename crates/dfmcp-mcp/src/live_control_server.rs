@@ -46,8 +46,6 @@ static SLOTS: AtomicUsize = AtomicUsize::new(0);
 type SessionHandle = Arc<Mutex<Option<ControlSession>>>;
 static SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, SessionHandle>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
-#[cfg(all(test, unix))]
-static SESSION_TESTS: Mutex<()> = Mutex::new(());
 fn err(code: ErrorCode, text: &str) -> DfmcpError {
     DfmcpError::new(code, text)
 }

@@ -23,7 +23,7 @@ fn follow(s: &Registered, response: &Value) -> Result<Value> {
 
 #[test]
 fn registration_and_followup_each_publish_one_complete_checkpoint() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     let before = ask(&s, json!({"kind":"watches"}))?;
@@ -71,7 +71,7 @@ fn registration_and_followup_each_publish_one_complete_checkpoint() -> Result<()
 
 #[test]
 fn conflicts_and_response_refusal_leave_both_archives_and_the_watch_set_unchanged() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let existing = definitions()[0].clone();
@@ -106,7 +106,7 @@ fn conflicts_and_response_refusal_leave_both_archives_and_the_watch_set_unchange
 
 #[test]
 fn durable_retry_recovers_new_handles_without_sampling_or_resetting_definitions() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let first = install(&s, definitions())?;
@@ -144,7 +144,7 @@ fn durable_retry_recovers_new_handles_without_sampling_or_resetting_definitions(
 
 #[test]
 fn registration_requires_query_but_does_not_acquire_observe_authority() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     {
@@ -175,7 +175,7 @@ fn registration_requires_query_but_does_not_acquire_observe_authority() -> Resul
 
 #[test]
 fn live_schema_reuses_watch_definitions_and_archive_reads_cannot_register() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let result = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
@@ -240,7 +240,7 @@ fn live_schema_reuses_watch_definitions_and_archive_reads_cannot_register() -> R
 
 #[test]
 fn corrupt_watch_storage_prevents_partial_installation_without_any_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     fs::OpenOptions::new()

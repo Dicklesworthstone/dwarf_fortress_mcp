@@ -38,7 +38,7 @@ fn without_jobs(tick: u32) -> Result<LiveSpatialCitizenObservation> {
 
 #[test]
 fn population_watch_tracks_a_changing_roster_without_entity_handles() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     assert!(!observation(3)?.spatial().operations().jobs.jobs.is_empty());
@@ -83,7 +83,7 @@ fn population_watch_tracks_a_changing_roster_without_entity_handles() -> Result<
 
 #[test]
 fn durable_population_definitions_recover_but_restart_does_not_count_as_a_sample() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let initial = register_count(
@@ -123,7 +123,7 @@ fn durable_population_definitions_recover_but_restart_does_not_count_as_a_sample
 
 #[test]
 fn missing_native_fields_do_not_prove_a_negated_population_goal() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     assert!(!observation(3)?.spatial().operations().jobs.jobs.is_empty());
@@ -155,7 +155,7 @@ fn missing_native_fields_do_not_prove_a_negated_population_goal() -> Result<()> 
 
 #[test]
 fn count_schema_is_discoverable_and_refused_registration_leaves_no_checkpoint() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;

@@ -79,7 +79,7 @@ fn reserve(q: &mut Value, units: u64) {
 
 #[test]
 fn site_assignments_and_drilldowns_use_their_own_capture_bound_origins() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 1, true)?, vec![])?;
     retain_watch(&s)?;
@@ -119,7 +119,7 @@ fn site_assignments_and_drilldowns_use_their_own_capture_bound_origins() -> Resu
 
 #[test]
 fn pages_bind_task_locations_and_never_duplicate_assignments() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 1, true)?, vec![])?;
     retain_watch(&s)?;
@@ -161,7 +161,7 @@ fn pages_bind_task_locations_and_never_duplicate_assignments() -> Result<()> {
 
 #[test]
 fn site_reserves_cannot_be_supported_by_disconnected_remote_stock() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 10, true)?, vec![])?;
     let mut q = request();
@@ -190,7 +190,7 @@ fn site_reserves_cannot_be_supported_by_disconnected_remote_stock() -> Result<()
 
 #[test]
 fn historical_site_routes_stay_on_the_selected_record_and_leave_watches_unchanged() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(
         &files,
@@ -226,7 +226,7 @@ fn historical_site_routes_stay_on_the_selected_record_and_leave_watches_unchange
 
 #[test]
 fn offline_site_planning_and_schema_discovery_require_no_bridge() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 1, true)?, vec![])?;
     let (limits, budget) = {
@@ -273,7 +273,7 @@ fn offline_site_planning_and_schema_discovery_require_no_bridge() -> Result<()> 
 
 #[test]
 fn default_site_spellings_keep_model_and_continuation_identity() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 1, true)?, vec![])?;
     let mut q = request();
@@ -294,7 +294,7 @@ fn default_site_spellings_keep_model_and_continuation_identity() -> Result<()> {
 
 #[test]
 fn invalid_or_excluded_sites_and_refused_output_do_not_publish_or_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register_sites(&files, site_fixture::observation(3, 1, 1, true)?, vec![])?;
     let archive = fs::read(&files.observations).map_err(io_error)?;

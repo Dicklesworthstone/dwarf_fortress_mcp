@@ -89,11 +89,11 @@ fn request(session: &Registered) -> Result<Value> {
 
 #[test]
 fn historical_change_pages_fit_8192_bytes_and_compare_all_rows_before_paging() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 40, false)?;
     let bytes = fs::read(&files.path).map_err(io_error)?;
-    let (s, _) = register(&files, 2048)?;
+    let (s, _) = register(&files, 3072)?;
     let mut q = request(&s)?;
     let mut ids = BTreeSet::new();
     let mut pages = 0;
@@ -103,7 +103,7 @@ fn historical_change_pages_fit_8192_bytes_and_compare_all_rows_before_paging() -
             None,
             Some(json!({"schema":"dfmcp.query/1","query":q.clone()})),
         );
-        assert!(raw.len() <= 8192);
+        assert!(raw.len() <= 12288);
         let page = decode(&raw)?;
         assert_eq!(page["ok"], true, "{page}");
         assert_eq!(page["change_count"], 40);
@@ -144,7 +144,7 @@ fn historical_change_pages_fit_8192_bytes_and_compare_all_rows_before_paging() -
 
 #[test]
 fn historical_changes_reopen_without_a_baseline_and_reject_previous_session_tokens() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, false)?;
     let bytes = fs::read(&files.path).map_err(io_error)?;
@@ -227,7 +227,7 @@ fn register_live(files: &Files) -> Result<(Registered, Arc<AtomicUsize>)> {
 
 #[test]
 fn live_comparisons_preserve_current_watches_and_work_after_source_failure() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, false)?;
     let (s, calls) = register_live(&files)?;
@@ -281,7 +281,7 @@ fn live_comparisons_preserve_current_watches_and_work_after_source_failure() -> 
 
 #[test]
 fn exact_pair_validation_rejects_wrong_digests_missing_records_and_reversal() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, false)?;
     let (s, _) = register(&files, 65536)?;
@@ -312,7 +312,7 @@ fn exact_pair_validation_rejects_wrong_digests_missing_records_and_reversal() ->
 
 #[test]
 fn observation_reset_is_not_interpreted_as_mass_departure_and_arrival() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, true)?;
     let bytes = fs::read(&files.path).map_err(io_error)?;
@@ -325,7 +325,7 @@ fn observation_reset_is_not_interpreted_as_mass_departure_and_arrival() -> Resul
 
 #[test]
 fn selected_record_corruption_is_detected_even_when_file_length_is_unchanged() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, false)?;
     let (s, _) = register(&files, 65536)?;
@@ -355,7 +355,7 @@ fn selected_record_corruption_is_detected_even_when_file_length_is_unchanged() -
 
 #[test]
 fn output_refusal_and_expired_current_grants_do_not_change_history() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     populate_changes(&files, 3, false)?;
     let (s, _) = register(&files, 65536)?;

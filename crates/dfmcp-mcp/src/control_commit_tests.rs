@@ -124,7 +124,7 @@ fn close(s: &Registered) -> Result<Value> {
 
 #[test]
 fn commit_budget_refusal_precedes_connection_use_and_durable_intent() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(f.session(None)?)?;
     let bytes = fs::read(&f.path).map_err(io_error)?;
@@ -163,7 +163,7 @@ fn commit_budget_refusal_precedes_connection_use_and_durable_intent() -> Result<
 
 #[test]
 fn failed_opening_publication_does_not_trap_capacity_or_the_journal_lock() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let mut session = f.session(None)?;
     let id = session.id;
@@ -179,7 +179,7 @@ fn failed_opening_publication_does_not_trap_capacity_or_the_journal_lock() -> Re
 
 #[test]
 fn already_resolved_stale_handles_cannot_enter_an_operation_after_close() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(f.session(None)?)?;
     let stale = resolve(s.raw())?;
@@ -378,7 +378,7 @@ impl Drop for Bridge {
 
 #[test]
 fn real_wire_commit_close_and_reopen_preserve_terminal_or_unresolved_evidence() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     for lose_reply in [false, true] {
         let f = Fixture::new()?;
         let bridge = Bridge::new(lose_reply)?;
@@ -423,7 +423,7 @@ fn real_wire_commit_close_and_reopen_preserve_terminal_or_unresolved_evidence() 
 
 #[test]
 fn close_of_a_live_connection_sends_no_native_cancellation_or_mutation() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let bridge = Bridge::new(false)?;
     let s = register(f.session(Some(bridge.connect()?))?)?;

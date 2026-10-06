@@ -11,7 +11,6 @@ use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "acceptance fixture I/O")
@@ -162,7 +161,7 @@ fn forbid_at_next_tick(s: &mut Session, capability: Capability) -> Result<()> {
 
 #[test]
 fn observe_expiry_preserves_both_journaled_and_memory_roots() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     for durable in [false, true] {
         let (mut s, calls) = session(durable.then_some(&files), &[5])?;
@@ -189,7 +188,7 @@ fn observe_expiry_preserves_both_journaled_and_memory_roots() -> Result<()> {
 
 #[test]
 fn durable_capture_requires_query_at_the_target_but_memory_observe_does_not() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (mut s, _) = session(Some(&files), &[5])?;
     forbid_at_next_tick(&mut s, Capability::Query)?;
@@ -213,7 +212,7 @@ fn durable_capture_requires_query_at_the_target_but_memory_observe_does_not() ->
 
 #[test]
 fn deadline_refusals_before_and_after_capture_never_publish() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for durable in [false, true] {
         for (times, read) in [
             (vec![10], false),
@@ -244,7 +243,7 @@ fn deadline_refusals_before_and_after_capture_never_publish() -> Result<()> {
 
 #[test]
 fn source_receives_only_the_remaining_time_and_success_is_published_once() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (mut s, calls) = session(Some(&files), &[4, 4])?;
     let c = s.context()?;
@@ -267,7 +266,7 @@ fn source_receives_only_the_remaining_time_and_success_is_published_once() -> Re
 
 #[test]
 fn stale_cancelled_or_expired_callers_never_enter_the_source() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for case in 0..5 {
         let (mut s, calls) = session(None, &[2])?;
         let old = s.anchor()?;
@@ -293,7 +292,7 @@ fn stale_cancelled_or_expired_callers_never_enter_the_source() -> Result<()> {
 
 #[test]
 fn narrowed_entity_and_acquisition_bounds_preserve_generation_history() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for count_bound in [false, true] {
         let (mut s, calls) = session(None, &[])?;
         let old = s.state.snapshot().cloned();
@@ -321,7 +320,7 @@ fn narrowed_entity_and_acquisition_bounds_preserve_generation_history() -> Resul
 
 #[test]
 fn changed_journal_custody_refuses_before_capture_or_after_source_without_append() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for during in [false, true] {
         let files = Files::new()?;
         let (mut s, calls) = session(Some(&files), &[4])?;
@@ -356,7 +355,7 @@ fn changed_journal_custody_refuses_before_capture_or_after_source_without_append
 
 #[test]
 fn source_failure_and_epoch_reset_have_distinct_acceptance_outcomes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let (mut s, calls) = session(None, &[])?;
     let old = s.anchor()?;
     let c = s.context()?;

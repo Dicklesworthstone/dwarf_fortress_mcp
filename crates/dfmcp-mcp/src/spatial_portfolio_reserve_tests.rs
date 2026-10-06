@@ -12,7 +12,7 @@ fn reserved(units: u64) -> Value {
 
 #[test]
 fn protected_stock_is_not_reported_as_production_consumption_or_a_reservation() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     retain_watch(&s)?;
@@ -53,7 +53,7 @@ fn protected_stock_is_not_reported_as_production_consumption_or_a_reservation() 
 
 #[test]
 fn infeasible_reserves_withhold_partial_allocations_and_the_empty_optimum_claim() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let mut q = request();
@@ -84,7 +84,7 @@ fn infeasible_reserves_withhold_partial_allocations_and_the_empty_optimum_claim(
 
 #[test]
 fn reserve_pages_share_one_solution_and_cursors_bind_the_normalized_floors() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     retain_watch(&s)?;
@@ -145,7 +145,7 @@ fn reserve_pages_share_one_solution_and_cursors_bind_the_normalized_floors() -> 
 
 #[test]
 fn historical_and_offline_reserve_routes_remain_on_the_exact_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![fixture::observation(4, 2, 5, false)?])?;
     retain_watch(&s)?;
@@ -204,7 +204,7 @@ fn historical_and_offline_reserve_routes_remain_on_the_exact_capture() -> Result
 
 #[test]
 fn schema_and_no_reserve_defaults_preserve_existing_query_identity() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let original = ok(ask(&s, request())?);
@@ -241,7 +241,7 @@ fn schema_and_no_reserve_defaults_preserve_existing_query_identity() -> Result<(
 #[test]
 fn reserve_input_budget_and_custody_failures_never_write_or_capture() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let f = Files::new()?;
     let s = register(&f, vec![])?;
     let original = fs::read(&f.observations).map_err(io_error)?;

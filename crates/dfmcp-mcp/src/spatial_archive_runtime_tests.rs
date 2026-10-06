@@ -10,7 +10,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "archive fixture I/O")
@@ -247,7 +246,7 @@ fn historical(entry: &Value, q: Value) -> Value {
 
 #[test]
 fn archive_bootstrap_and_actual_queries_never_claim_live_freshness() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(3)?;
     let before = fs::read(&files.path).map_err(io_error)?;
@@ -288,7 +287,7 @@ fn archive_bootstrap_and_actual_queries_never_claim_live_freshness() -> Result<(
 
 #[test]
 fn archived_workforce_and_route_drilldowns_stay_on_the_selected_record() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
@@ -316,7 +315,7 @@ fn archived_workforce_and_route_drilldowns_stay_on_the_selected_record() -> Resu
 
 #[test]
 fn archive_pages_fit_full_packet_budgets_and_never_repeat_workers() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(41)?;
     let (s, _) = register(&files, 2048)?;
@@ -366,7 +365,7 @@ fn archive_pages_fit_full_packet_budgets_and_never_repeat_workers() -> Result<()
 
 #[test]
 fn archive_rejects_monitoring_baselines_refresh_and_all_effect_tools() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
@@ -423,7 +422,7 @@ fn archive_rejects_monitoring_baselines_refresh_and_all_effect_tools() -> Result
 
 #[test]
 fn archive_history_continuations_bind_session_and_record_identity() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
@@ -451,7 +450,7 @@ fn archive_history_continuations_bind_session_and_record_identity() -> Result<()
 #[test]
 fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error() -> Result<()> {
     use std::io::Write;
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
@@ -470,7 +469,7 @@ fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error() -> 
 
 #[test]
 fn archive_schema_advertises_nineteen_read_variants_including_condition_inspection() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
@@ -479,7 +478,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
     let variants = result["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .ok_or_else(|| error(ErrorCode::InvalidRequest, "schema variants"))?;
-    assert_eq!(variants.len(), 19);
+    assert_eq!(variants.len(), 21);
     for kind in [
         "historical_changes",
         "historical_series",
@@ -499,7 +498,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
         result["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(15)
+        Some(16)
     );
     for variant in variants {
         assert_ne!(variant["properties"]["kind"]["const"], "watch");
@@ -509,7 +508,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
 
 #[test]
 fn archive_configuration_and_bootstrap_fail_without_creating_replacement_history() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     assert!(validate_configuration(None, TailRecovery::Refuse, None).is_err());
     assert!(

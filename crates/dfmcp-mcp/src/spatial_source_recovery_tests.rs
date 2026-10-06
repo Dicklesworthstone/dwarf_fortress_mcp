@@ -12,7 +12,6 @@ use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "recovery fixture I/O")
@@ -225,7 +224,7 @@ fn recovery_request(s: &Session) -> Result<Value> {
 
 #[test]
 fn one_reconnect_preserves_handles_and_resets_progress_before_a_fresh_sample() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let created = register(&mut s)?;
     let old = s.anchor()?;
@@ -261,7 +260,7 @@ fn one_reconnect_preserves_handles_and_resets_progress_before_a_fresh_sample() -
 
 #[test]
 fn failed_and_unchanged_recovery_never_manufacture_success_samples() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let created = register(&mut s)?;
     let handle = &created["record"]["watch"];
@@ -288,7 +287,7 @@ fn failed_and_unchanged_recovery_never_manufacture_success_samples() -> Result<(
 
 #[test]
 fn recovery_revalidates_both_read_grants_before_memory_or_durable_publication() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for durable in [false, true] {
         for capability in [Capability::Observe, Capability::Query] {
             let files = Files::new()?;
@@ -325,7 +324,7 @@ fn recovery_revalidates_both_read_grants_before_memory_or_durable_publication() 
 
 #[test]
 fn malformed_or_unprivileged_requests_are_refused_before_gap_or_network() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let created = register(&mut s)?;
     let c = s.context()?;
@@ -389,7 +388,7 @@ fn malformed_or_unprivileged_requests_are_refused_before_gap_or_network() -> Res
 
 #[test]
 fn full_packet_reservation_refuses_without_interrupting_or_connecting() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let created = register(&mut s)?;
     let mut c = s.context()?;
@@ -411,7 +410,7 @@ fn full_packet_reservation_refuses_without_interrupting_or_connecting() -> Resul
 
 #[test]
 fn connection_and_capture_share_the_remaining_budget_and_expiry_stops_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let calls = Calls::default();
     let out = run(&mut s, Some(4), &calls, &[1000, 2000, 3000, 4000])?;
@@ -435,7 +434,7 @@ fn connection_and_capture_share_the_remaining_budget_and_expiry_stops_capture() 
 
 #[test]
 fn archive_and_healthy_sources_cannot_use_recovery_to_bypass_normal_lifecycle() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     for (fenced, archive) in [(false, false), (true, true)] {
         s.source = Box::new(Script {
@@ -465,7 +464,7 @@ fn archive_and_healthy_sources_cannot_use_recovery_to_bypass_normal_lifecycle() 
 
 #[test]
 fn journal_corruption_prevents_reconnect_without_repair_or_watch_changes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let mut s = session(Some(&files), true)?;
     register(&mut s)?;
@@ -490,7 +489,7 @@ fn journal_corruption_prevents_reconnect_without_repair_or_watch_changes() -> Re
 
 #[test]
 fn paired_journals_record_gap_before_reconnect_and_do_not_sample_on_success() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let mut s = session(Some(&files), true)?;
     let created = register(&mut s)?;
@@ -532,7 +531,7 @@ fn paired_journals_record_gap_before_reconnect_and_do_not_sample_on_success() ->
 
 #[test]
 fn reconnect_epoch_reset_stays_explicit_and_invalidates_the_old_watch_on_poll() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     let created = register(&mut s)?;
     let old = s.anchor()?;
@@ -549,7 +548,7 @@ fn reconnect_epoch_reset_stays_explicit_and_invalidates_the_old_watch_on_poll() 
 
 #[test]
 fn diagnostic_is_utf8_bounded_and_final_metadata_uses_the_reserved_shape() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let mut s = session(None, false)?;
     register(&mut s)?;
     let c = s.context()?;
@@ -575,7 +574,7 @@ fn diagnostic_is_utf8_bounded_and_final_metadata_uses_the_reserved_shape() -> Re
 
 #[test]
 fn failed_reconnect_gap_is_recovered_from_the_same_paired_archive_after_restart() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let mut s = session(Some(&files), true)?;
     let created = register(&mut s)?;

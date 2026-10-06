@@ -84,7 +84,7 @@ enum Query {
         offset: usize,
         limit: Option<usize>,
     },
-    Schema,
+    Schema {},
 }
 impl Query {
     fn parse(raw: &str) -> Result<Self> {
@@ -121,7 +121,7 @@ impl Query {
                     return Err(exhausted());
                 }
             }
-            Self::Schema => {}
+            Self::Schema {} => {}
         }
         Ok(query)
     }
@@ -326,7 +326,7 @@ where
             let r = state.control.get(&key, plan, &work.take(c, LOCAL_BYTES)?)?;
             Ok(json!({"ok":true,"record":presentation::record(&r),"native_calls":0}))
         }
-        Action::Query(Query::Schema) => {
+        Action::Query(Query::Schema {}) => {
             let schema: Value = serde_json::from_str(include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../schemas/dig_recovery_query.json"

@@ -3,7 +3,6 @@ use dfmcp_adapter::operations_journal::TailRecovery;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-static SERIAL_HISTORY:Mutex<()>=Mutex::new(());
 struct Archived {session:Registered,path:PathBuf,dir:PathBuf}
 impl Drop for Archived {
     fn drop(&mut self){
@@ -31,7 +30,7 @@ fn past_request(row:&Value)->Value {
 
 #[test]
 fn archived_inventory_is_queryable_without_changing_live_state_or_reading_bridge()->Result<()> {
-    let _serial=lock(&SERIAL_HISTORY)?;let fixture=archived(8192)?;let session=&fixture.session;
+    let _serial = crate::test_serial();let fixture=archived(8192)?;let session=&fixture.session;
     let before=listing(session)?;assert_eq!(before["ok"],true);assert_eq!(before["matched"],1);
     assert_eq!(session.calls.load(Ordering::SeqCst),0);
     let request=past_request(&before["rows"][0]);
@@ -53,7 +52,7 @@ fn archived_inventory_is_queryable_without_changing_live_state_or_reading_bridge
 
 #[test]
 fn journal_reopen_restores_the_exact_version_chain_but_not_session_handles()->Result<()> {
-    let _serial=lock(&SERIAL_HISTORY)?;let mut fixture=archived(8192)?;
+    let _serial = crate::test_serial();let mut fixture=archived(8192)?;
     assert_eq!(decode(&fortress_observe(fixture.session.handle()))?["ok"],true);
     let old_listing=listing(&fixture.session)?;let old_id=fixture.session.id;
     let source={let handle=resolve(fixture.session.handle())?;let guard=lock(&handle)?;
@@ -74,7 +73,7 @@ fn journal_reopen_restores_the_exact_version_chain_but_not_session_handles()->Re
 
 #[test]
 fn history_pages_fit_minimum_budget_keep_active_watches_and_bind_the_head()->Result<()> {
-    let _serial=lock(&SERIAL_HISTORY)?;let fixture=archived(2048)?;let session=&fixture.session;
+    let _serial = crate::test_serial();let fixture=archived(2048)?;let session=&fixture.session;
     let watch=ask(session,json!({"kind":"watch","key":"history-test","label":"Retain current work",
         "condition":{"op":"tick_at_least","value":105u64*403200+500},
         "deadline_tick":105u64*403200+1000,"poll_interval_ticks":1,"stable_observations":1}))?;
@@ -106,7 +105,7 @@ fn history_pages_fit_minimum_budget_keep_active_watches_and_bind_the_head()->Res
 
 #[test]
 fn historical_reads_remain_available_after_native_failure_but_never_create_work()->Result<()> {
-    let _serial=lock(&SERIAL_HISTORY)?;let fixture=archived(8192)?;let session=&fixture.session;
+    let _serial = crate::test_serial();let fixture=archived(8192)?;let session=&fixture.session;
     let row=listing(session)?["rows"][0].clone();
     assert_eq!(decode(&fortress_observe(session.handle()))?["ok"],true);
     assert_eq!(decode(&fortress_observe(session.handle()))?["ok"],false);
@@ -124,7 +123,7 @@ fn historical_reads_remain_available_after_native_failure_but_never_create_work(
 
 #[test]
 fn missing_history_bad_record_and_expired_query_authority_fail_closed()->Result<()> {
-    let _serial=lock(&SERIAL_HISTORY)?;
+    let _serial = crate::test_serial();
     {let session=full()?;assert_eq!(listing(&session)?["error"]["code"],"invalid_request");}
     let fixture=archived(8192)?;let session=&fixture.session;
     let mut request=past_request(&listing(session)?["rows"][0]);request["record_digest"]=json!("0".repeat(64));

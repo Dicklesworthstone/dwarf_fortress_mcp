@@ -5,7 +5,6 @@ use super::*;
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 
-use super::SESSION_TESTS as SERIAL;
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn io_error(_: std::io::Error) -> DfmcpError {
@@ -93,7 +92,7 @@ impl Drop for Fixture {
 
 #[test]
 fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let fixture = Fixture::new()?;
     let original = fs::read(&fixture.path).map_err(io_error)?;
     let id = next_id()?;
@@ -241,7 +240,7 @@ fn offline_recovery_tools_discover_evidence_without_a_bridge_or_mutations() -> R
 
 #[test]
 fn recovery_session_rejects_repair_and_missing_journals_before_any_connection() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let fixture = Fixture::new()?;
     let original = fs::read(&fixture.path).map_err(io_error)?;
     assert!(
@@ -267,7 +266,7 @@ fn recovery_session_rejects_repair_and_missing_journals_before_any_connection() 
 
 #[test]
 fn recovery_session_cannot_dispatch_even_if_a_caller_injects_clock_grants() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let fixture = Fixture::new()?;
     let original = fs::read(&fixture.path).map_err(io_error)?;
     let mut session = configured_session(

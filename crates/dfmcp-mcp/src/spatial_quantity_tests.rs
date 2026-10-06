@@ -69,7 +69,7 @@ fn partition(tick: u32, units: &[u32]) -> Result<LiveSpatialCitizenObservation> 
 
 #[test]
 fn quantity_inspection_is_complete_and_does_not_sample_or_persist_watch_progress() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
     let created = ok(ask(&s, watch_quantity("stock", 3))?)?;
@@ -106,7 +106,7 @@ fn quantity_inspection_is_complete_and_does_not_sample_or_persist_watch_progress
 #[test]
 fn splitting_and_merging_stacks_preserves_quantity_stability_in_a_shared_capture_batch()
 -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![partition(4, &[3, 4])?, partition(5, &[7])?])?;
     ok(ask(&s, watch_quantity("units", 3))?)?;
@@ -136,7 +136,7 @@ fn splitting_and_merging_stacks_preserves_quantity_stability_in_a_shared_capture
 
 #[test]
 fn quantity_definitions_recover_without_counting_restart_as_a_successful_sample() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
     let old = ok(ask(&s, watch_quantity("stock", 2))?)?["record"]["watch"].clone();
@@ -179,7 +179,7 @@ fn quantity_definitions_recover_without_counting_restart_as_a_successful_sample(
 
 #[test]
 fn historical_and_offline_quantity_queries_remain_on_the_exact_record() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![fixture::observation(4, 1, 12, false)?])?;
     let first = first_record(&s)?;
@@ -239,7 +239,7 @@ fn historical_and_offline_quantity_queries_remain_on_the_exact_record() -> Resul
 
 #[test]
 fn quantity_schema_is_composed_once_and_rejected_results_leave_monitoring_intact() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
     let schema = ok(decode(&fortress_query(

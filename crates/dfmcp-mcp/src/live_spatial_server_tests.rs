@@ -5,7 +5,6 @@ use dfmcp_adapter::live_operations::{
 };
 use dfmcp_world::map_region::Cell;
 use std::collections::VecDeque;
-static SERIAL: Mutex<()> = Mutex::new(());
 struct Script {
     values: VecDeque<LiveSpatialObservation>,
     calls: Arc<AtomicUsize>,
@@ -181,7 +180,7 @@ fn stock(s: &Registered, count: u32) -> Result<()> {
 }
 #[test]
 fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     for mode in ["summary", "items", "jobs", "buildings", "tiles"] {
         let v = decode(&fortress_query(s.handle(), Some(mode.to_owned()), None))?;
@@ -212,14 +211,14 @@ fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill() -> Result
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(21)
+        Some(23)
     );
     assert_eq!(s.calls.load(Ordering::SeqCst), 0);
     Ok(())
 }
 #[test]
 fn a_terrain_watch_and_inventory_baseline_advance_from_one_capture() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let capture = ask(
         &s,
@@ -277,7 +276,7 @@ fn a_terrain_watch_and_inventory_baseline_advance_from_one_capture() -> Result<(
 }
 #[test]
 fn allocation_pages_keep_current_watch_and_fit_8192_bytes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2048, vec![Capability::Query, Capability::Observe])?;
     stock(&s, 40)?;
     let w = ask(
@@ -354,7 +353,7 @@ fn allocation_pages_keep_current_watch_and_fit_8192_bytes() -> Result<()> {
 }
 #[test]
 fn continuation_binds_current_capture_session_and_origin() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let other = full()?;
     stock(&s, 3)?;
@@ -375,7 +374,7 @@ fn continuation_binds_current_capture_session_and_origin() -> Result<()> {
 }
 #[test]
 fn source_failure_preserves_anchor_and_permits_local_cleanup() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = full()?;
     let w = ask(
         &s,
@@ -413,7 +412,7 @@ fn source_failure_preserves_anchor_and_permits_local_cleanup() -> Result<()> {
 }
 #[test]
 fn authority_region_and_profile_rejections_do_not_touch_the_bridge() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(8192, vec![Capability::Doctor])?;
     let denied = ask(&s, allocation(1, 8))?;
     assert_eq!(denied["error"]["code"], "capability_denied");
@@ -459,7 +458,7 @@ mod history_cases;
 
 #[test]
 fn blueprint_preview_pages_use_one_capture_and_preserve_effect_refusal() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2048, vec![Capability::Query, Capability::Observe])?;
     let mut q = json!({"kind":"blueprint_layout","origin":[2,0,5],
         "template":{"kind":"bedroom_cluster","rooms_count":4,"room_size":[3,3]},"limit":1});

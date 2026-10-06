@@ -719,7 +719,7 @@ fn full_packets_and_fallbacks_fit_the_admitted_minimum_output_budget() -> Result
             limit: Some(8),
             continuation: None,
         }),
-        Action::Query(Query::Schema),
+        Action::Query(Query::Schema {}),
         Action::Query(Query::Tiles {
             idempotency_key: p.key().into(),
             plan_digest: p.digest().to_string(),

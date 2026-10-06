@@ -15,7 +15,6 @@ mod fixture;
 #[path = "spatial_session_release_recovery_tests.rs"]
 mod recovery;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "release fixture I/O")
@@ -223,7 +222,7 @@ fn request_close(s: &Registered, discard: bool) -> Result<Value> {
 
 #[test]
 fn close_reclaims_slots_and_sources_even_with_already_resolved_arcs() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let a = register(None, false, 3, &[])?;
     let b = register(None, false, 3, &[])?;
     assert!(Slot::reserve().is_err());
@@ -256,7 +255,7 @@ fn close_reclaims_slots_and_sources_even_with_already_resolved_arcs() -> Result<
 
 #[test]
 fn volatile_records_need_consent_and_failed_close_keeps_both_registries() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(None, false, 3, &[])?;
     watch(&s)?;
     baseline(&s)?;
@@ -291,7 +290,7 @@ fn volatile_records_need_consent_and_failed_close_keeps_both_registries() -> Res
 
 #[test]
 fn render_refusal_keeps_durable_files_locks_and_volatile_records() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(Some(&files), true, 3, &[])?;
     watch(&s)?;
@@ -336,7 +335,7 @@ fn render_refusal_keeps_durable_files_locks_and_volatile_records() -> Result<()>
 
 #[test]
 fn durable_close_preserves_original_journals_and_reopen_recovers_fresh_handles() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(Some(&files), true, 3, &[])?;
     let old_watch = watch(&s)?;
@@ -376,7 +375,7 @@ fn durable_close_preserves_original_journals_and_reopen_recovers_fresh_handles()
 
 #[test]
 fn damaged_journals_and_fenced_source_do_not_trap_session_ownership() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(Some(&files), true, 3, &[])?;
     watch(&s)?;
@@ -418,7 +417,7 @@ fn damaged_journals_and_fenced_source_do_not_trap_session_ownership() -> Result<
 #[test]
 fn exhausted_request_ids_or_expired_grants_do_not_require_new_game_authority_to_close() -> Result<()>
 {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     for case in 0..3 {
         let s = register(None, false, 3, &[])?;
         let handle = resolve(s.handle())?;
@@ -446,7 +445,7 @@ fn exhausted_request_ids_or_expired_grants_do_not_require_new_game_authority_to_
 
 #[test]
 fn concurrent_closers_wait_for_session_ownership_and_return_one_receipt() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(None, false, 3, &[])?;
     let handle = resolve(s.handle())?;
     let guard = lock(&handle)?;
@@ -490,7 +489,7 @@ fn concurrent_closers_wait_for_session_ownership_and_return_one_receipt() -> Res
 
 #[test]
 fn closed_receipts_are_bounded_and_eviction_cannot_close_a_new_session() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let first = register(None, false, 3, &[])?;
     successful(request_close(&first, false)?);
     for _ in 0..MAX_CLOSE_RECEIPTS {
@@ -511,7 +510,7 @@ fn closed_receipts_are_bounded_and_eviction_cannot_close_a_new_session() -> Resu
 
 #[test]
 fn scope_errors_and_legacy_cancel_never_release_a_session() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(None, false, 3, &[])?;
     assert_eq!(
         decode(&fortress_cancel(s.handle(), None, None))?["error"]["code"],
@@ -545,7 +544,7 @@ fn scope_errors_and_legacy_cancel_never_release_a_session() -> Result<()> {
 
 #[test]
 fn poisoned_session_can_be_released_without_clearing_or_reusing_its_world() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(None, false, 3, &[])?;
     let handle = resolve(s.handle())?;
     let panicked = std::thread::spawn(move || {

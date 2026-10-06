@@ -208,6 +208,7 @@ fn bytes(files: &Files) -> Result<(Vec<u8>, Vec<u8>)> {
 
 #[test]
 fn live_handler_keeps_paired_watches_unchanged_and_accepts_fenced_sources() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let current = live.current()?;
@@ -263,6 +264,7 @@ fn request_without_lock(result: &Value) -> Result<Value> {
 
 #[test]
 fn archive_reopen_reproduces_identity_without_observe_or_loading_watch_journal() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let input = request(&live, 2, false)?;
@@ -311,6 +313,7 @@ fn archive_reopen_reproduces_identity_without_observe_or_loading_watch_journal()
 
 #[test]
 fn exact_references_current_grants_and_range_bounds_refuse_without_writes() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let input = request(&live, 2, false)?;
@@ -341,6 +344,7 @@ fn exact_references_current_grants_and_range_bounds_refuse_without_writes() -> R
 
 #[test]
 fn corruption_after_first_terminal_sample_still_refuses_the_complete_replay() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let input = request(&live, 1, false)?;
@@ -377,6 +381,7 @@ fn corruption_after_first_terminal_sample_still_refuses_the_complete_replay() ->
 
 #[test]
 fn summary_fits_small_packet_or_refuses_whole_evidence_without_truncation() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let input = request(&live, 2, false)?;
@@ -397,6 +402,7 @@ fn summary_fits_small_packet_or_refuses_whole_evidence_without_truncation() -> R
 
 #[test]
 fn schema_discovery_and_failure_guard_are_wired_through_the_live_handler() -> Result<()> {
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let live = live(&files)?;
     let discovery = live.schema()?;

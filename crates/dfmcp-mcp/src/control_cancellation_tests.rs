@@ -157,7 +157,7 @@ fn list(s: &Registered, state: &str) -> Result<Value> {
 
 #[test]
 fn cancellation_is_queryable_explainable_and_never_commit_compatible() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     let first = success(request(&s, "a-prepared")?);
@@ -218,7 +218,7 @@ fn cancellation_is_queryable_explainable_and_never_commit_compatible() -> Result
 
 #[test]
 fn cancelled_keys_remain_retired_after_writable_and_offline_recovery() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     success(request(&s, "a-prepared")?);
@@ -253,7 +253,7 @@ fn cancelled_keys_remain_retired_after_writable_and_offline_recovery() -> Result
 
 #[test]
 fn cancellation_never_erases_dispatched_or_verified_effects() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     let before = fs::read(&f.path).map_err(io_error)?;
@@ -275,7 +275,7 @@ fn cancellation_never_erases_dispatched_or_verified_effects() -> Result<()> {
 
 #[test]
 fn cancellation_budget_authority_and_identity_refusals_leave_the_file_unchanged() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     let before = fs::read(&f.path).map_err(io_error)?;
@@ -330,7 +330,7 @@ fn cancellation_budget_authority_and_identity_refusals_leave_the_file_unchanged(
 
 #[test]
 fn injected_clock_authority_cannot_write_an_offline_recovery_journal() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, true)?;
     let before = fs::read(&f.path).map_err(io_error)?;
@@ -349,7 +349,7 @@ fn injected_clock_authority_cannot_write_an_offline_recovery_journal() -> Result
 
 #[test]
 fn new_cancellation_invalidates_history_pages_without_rewinding_later_heads() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     let before = success(decode(fortress_query(
@@ -391,7 +391,7 @@ fn new_cancellation_invalidates_history_pages_without_rewinding_later_heads() ->
 
 #[test]
 fn cancellation_and_commit_start_races_have_only_one_durable_winner() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     for _ in 0..8 {
         let f = Fixture::new()?;
         let s = register(&f, false)?;
@@ -469,7 +469,7 @@ impl PauseReconciliationSource for NoQueries {
 }
 #[test]
 fn recovery_batches_skip_cancelled_effects_without_native_reads() -> Result<()> {
-    let _serial = lock(&SESSION_TESTS)?;
+    let _serial = crate::test_serial();
     let f = Fixture::new()?;
     let s = register(&f, false)?;
     success(request(&s, "a-prepared")?);

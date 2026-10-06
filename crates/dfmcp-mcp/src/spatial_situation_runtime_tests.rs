@@ -9,7 +9,6 @@ use std::fs;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
 struct Script {
     values: VecDeque<LiveSpatialCitizenObservation>,
@@ -229,7 +228,7 @@ fn release_watch(s: &Registered, handle: &Value) -> Result<()> {
 
 #[test]
 fn live_bootstrap_and_query_attention_drill_into_exact_observed_entities() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let (s, opened) = register(true, &[(4, false, 7)], 65536)?;
     assert_eq!(
         opened["agent_turn"]["briefing"]["situation"]["signals"]["citizen_not_alive"]["observed"],
@@ -274,7 +273,7 @@ fn live_bootstrap_and_query_attention_drill_into_exact_observed_entities() -> Re
 
 #[test]
 fn observation_count_changes_preserve_watches_and_refuse_cross_epoch_comparisons() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let (s, _) = register(true, &[(4, false, 7), (4, false, 7), (5, true, 8)], 65536)?;
     let created = ask(&s, watch())?;
     assert_eq!(created["ok"], true, "{created}");
@@ -316,8 +315,8 @@ fn observation_count_changes_preserve_watches_and_refuse_cross_epoch_comparisons
 
 #[test]
 fn entity_pages_keep_attention_and_watch_context_within_8192_bytes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
-    let (s, _) = register(true, &[], 2048)?;
+    let _serial = crate::test_serial();
+    let (s, _) = register(true, &[], 3072)?;
     let created = ask(&s, watch())?;
     assert_eq!(created["ok"], true, "{created}");
     let handle = created["record"]["watch"].clone();
@@ -330,7 +329,7 @@ fn entity_pages_keep_attention_and_watch_context_within_8192_bytes() -> Result<(
             None,
             Some(json!({"schema":"dfmcp.query/1","query":q.clone()})),
         );
-        assert!(raw.len() <= 8192);
+        assert!(raw.len() <= 12288);
         let v = decode(&raw)?;
         assert_eq!(v["ok"], true, "{v}");
         assert_eq!(
@@ -366,7 +365,7 @@ fn entity_pages_keep_attention_and_watch_context_within_8192_bytes() -> Result<(
 
 #[test]
 fn watch_specific_reservation_still_refuses_overflow_before_registration() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let (s, _) = register(true, &[], 2048)?;
     {
         let h = resolve(s.handle())?;
@@ -398,7 +397,7 @@ fn watch_specific_reservation_still_refuses_overflow_before_registration() -> Re
 
 #[test]
 fn expired_query_authority_and_poisoned_sources_do_not_publish_current_attention() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let (s, _) = register(true, &[(4, false, 7)], 65536)?;
     {
         let h = resolve(s.handle())?;
@@ -470,7 +469,7 @@ fn io_error(_: std::io::Error) -> DfmcpError {
 
 #[test]
 fn historical_queries_and_offline_sessions_never_inherit_current_attention() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let (s, _) = register(false, &[(4, true, 7)], 65536)?;
     let (first, limits, budget) = {

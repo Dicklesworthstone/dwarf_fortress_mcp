@@ -110,6 +110,17 @@ pub fn run_live_v1_1_development_stdio() {
     live_server_v1_1::run_live_v1_1_development_stdio();
 }
 
+/// One process-wide serialization lock for tests that touch global session
+/// tables (each development server caps its live sessions). Poisoning by a
+/// failed test must not cascade into unrelated failures.
+#[cfg(test)]
+pub(crate) fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod runtime_entry_tests {
     use super::run_with_runtime_cx;

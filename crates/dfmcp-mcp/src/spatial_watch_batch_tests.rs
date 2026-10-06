@@ -10,7 +10,6 @@ use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 
-static SERIAL: Mutex<()> = Mutex::new(());
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 fn io_error(_: std::io::Error) -> DfmcpError {
     error(ErrorCode::CorruptLedger, "watch batch fixture I/O")
@@ -224,7 +223,7 @@ fn require_success(value: &Value) -> Result<()> {
 
 #[test]
 fn mcp_await_batch_uses_one_capture_and_one_checkpoint_for_all_watches() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4, 5], false)?;
     watch(&s, "a", 3)?;
@@ -262,7 +261,7 @@ fn mcp_await_batch_uses_one_capture_and_one_checkpoint_for_all_watches() -> Resu
 
 #[test]
 fn mcp_poll_batch_evaluates_existing_capture_without_another_read() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     watch(&s, "a", 2)?;
@@ -278,7 +277,7 @@ fn mcp_poll_batch_evaluates_existing_capture_without_another_read() -> Result<()
 
 #[test]
 fn invalid_selection_and_inadequate_preflight_budget_do_not_capture_or_write() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     let a = watch(&s, "a", 3)?;
@@ -307,7 +306,7 @@ fn invalid_selection_and_inadequate_preflight_budget_do_not_capture_or_write() -
 
 #[test]
 fn bridge_failure_preserves_all_watches_and_restart_batch_restores_stability() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     watch(&s, "a", 2)?;
@@ -338,7 +337,7 @@ fn bridge_failure_preserves_all_watches_and_restart_batch_restores_stability() -
 
 #[test]
 fn watch_storage_changed_during_capture_cannot_publish_the_candidate_set() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], true)?;
     watch(&s, "a", 2)?;
@@ -357,7 +356,7 @@ fn watch_storage_changed_during_capture_cannot_publish_the_candidate_set() -> Re
 
 #[test]
 fn authority_expiring_at_new_capture_does_not_commit_watch_progress() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[5], false)?;
     watch(&s, "a", 2)?;
@@ -380,7 +379,7 @@ fn authority_expiring_at_new_capture_does_not_commit_watch_progress() -> Result<
 
 #[test]
 fn schema_discovers_batches_but_archive_and_historical_queries_refuse_them() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
     let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
@@ -431,7 +430,7 @@ fn schema_discovers_batches_but_archive_and_historical_queries_refuse_them() -> 
 
 #[test]
 fn full_eight_watch_batch_fits_the_default_8192_token_budget() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[4], false)?;
     for index in 0..8 {

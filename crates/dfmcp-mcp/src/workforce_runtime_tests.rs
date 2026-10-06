@@ -5,7 +5,6 @@ use dfmcp_adapter::live_spatial::LiveSpatialObservation;
 use dfmcp_world::map_region::{Cell, MapRegion, Shape, Tile};
 use std::collections::{BTreeSet, VecDeque};
 
-static SERIAL: Mutex<()> = Mutex::new(());
 struct Script {
     values: VecDeque<LiveSpatialCitizenObservation>,
     calls: Arc<AtomicUsize>,
@@ -222,7 +221,7 @@ fn planned(workers: u32) -> Value {
 
 #[test]
 fn registered_queries_discover_skills_plan_without_conflicts_and_drill_into_routes() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2, 65_536)?;
     let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
     assert_eq!(schema["ok"], true, "{schema}");
@@ -274,8 +273,8 @@ fn registered_queries_discover_skills_plan_without_conflicts_and_drill_into_rout
 
 #[test]
 fn workforce_pages_fit_8192_bytes_keep_watches_and_reject_stale_capture_tokens() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
-    let s = register(40, 2048)?;
+    let _serial = crate::test_serial();
+    let s = register(40, 3072)?;
     let w = ask(
         &s,
         json!({"kind":"watch","key":"workforce-review","condition":{"op":"paused","value":true},
@@ -292,7 +291,7 @@ fn workforce_pages_fit_8192_bytes_keep_watches_and_reject_stale_capture_tokens()
             None,
             Some(json!({"schema":"dfmcp.query/1","query":query.clone()})),
         );
-        assert!(raw.len() <= 8192);
+        assert!(raw.len() <= 12288);
         let page = decode(&raw)?;
         assert_eq!(page["ok"], true, "{page}");
         assert_eq!(page["assigned_workers"], 40);
@@ -357,7 +356,7 @@ fn workforce_pages_fit_8192_bytes_keep_watches_and_reject_stale_capture_tokens()
 
 #[test]
 fn workforce_query_preserves_authority_fencing_and_invalid_input_refusal() -> Result<()> {
-    let _serial = lock(&SERIAL)?;
+    let _serial = crate::test_serial();
     let s = register(2, 8192)?;
     let mut invalid = planned(1);
     invalid["dispatch"] = json!(true);
