@@ -169,6 +169,23 @@ After admitted startup, Agent Turns also expose the exact bridge protocol, ticke
 entry, registry, decision, monotonic floor, server receipt, launch, and executable identities. Those
 fields explain authority; they do not create more authority.
 
+### Deterministic laboratory
+
+`dwarf-fortress-mcp serve` runs the same eleven tools against a deterministic laboratory
+(`docs/LAB_SEMANTIC_ACTIONS.md`): every semantic action family with game-time obligations,
+scenarios with a drink/food economy (`starter_fortress`) and a scheduled raid
+(`besieged_fortress`), shared fortresses with leases and witness-based revalidation, per-turn
+observed world changes, exact historical reads, objectives, and live routing of every sealed plan
+onto the DFHack development families. With `DFMCP_LAB_STATE_DIR` set, `durable=true` fortresses
+survive restarts with their checkpoints and carried obligations. Two operator commands use it:
+
+```text
+dwarf-fortress-mcp replay <bundle.json>                  # re-execute df://session/{id}/replay, report the first divergence
+dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>  # score idle | follow_recommendations deterministically
+```
+
+Laboratory results are semantics and calibration, never Dwarf Fortress evidence.
+
 ## Exact admission, not “works on my machine”
 
 Source presence is not compatibility evidence. One exact tuple must pass:
