@@ -49,6 +49,30 @@ fn world() -> WorldSnapshot {
     )
 }
 
+/// A completed still and a brewer: what a BREW_DRINK order needs to progress.
+fn equip_brewery(snapshot: &mut WorldSnapshot) {
+    let mut still = entity(EntityId::new(51), EntityKind::Building, "workshop:Still");
+    for (field, value) in [
+        ("building_kind", Value::Text("workshop:Still".to_owned())),
+        (
+            CONSTRUCTION_STAGE_FIELD,
+            Value::Text(STAGE_COMPLETE.to_owned()),
+        ),
+    ] {
+        still
+            .fields
+            .insert(field.to_owned(), known(value, GameTick(1)));
+    }
+    snapshot.graph.entities.insert(still.id, still);
+    if let Some(brewer) = snapshot.graph.entities.get_mut(&UNIT_A) {
+        brewer.fields.insert(
+            format!("{LABOR_FIELD_PREFIX}BREW"),
+            known(Value::Bool(true), GameTick(1)),
+        );
+    }
+    snapshot.refresh_hash();
+}
+
 fn cuboid(a: (i32, i32, i32), b: (i32, i32, i32)) -> Result<MapCuboid> {
     MapCuboid::new(MapCoord::new(a.0, a.1, a.2), MapCoord::new(b.0, b.1, b.2))
 }
@@ -275,6 +299,7 @@ fn buildings_need_open_floor_and_complete_after_construction_time() -> Result<()
 #[test]
 fn work_orders_count_down_and_complete() -> Result<()> {
     let mut s = world();
+    equip_brewery(&mut s);
     let order = Action::CreateWorkOrder {
         name: "brew".to_owned(),
         job_token: "BREW_DRINK".to_owned(),
@@ -442,6 +467,7 @@ fn dwarves_drink_and_eat_on_schedule_and_shortages_are_explicit() -> Result<()> 
 #[test]
 fn completed_brewing_restocks_and_one_long_wait_equals_many_short_ones() -> Result<()> {
     let mut a = with_ledger(0, 100);
+    equip_brewery(&mut a);
     let order = Action::CreateWorkOrder {
         name: "brew".to_owned(),
         job_token: "BREW_DRINK".to_owned(),
@@ -473,5 +499,34 @@ fn completed_brewing_restocks_and_one_long_wait_equals_many_short_ones() -> Resu
             .collect()
     };
     assert_eq!(values(&a), values(&b));
+    Ok(())
+}
+
+#[test]
+fn work_orders_stall_without_their_workshop_or_worker_and_say_why() -> Result<()> {
+    let mut s = world();
+    let order = Action::CreateWorkOrder {
+        name: "brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 1,
+        conditions: Vec::new(),
+    };
+    apply_effect(&mut s, &order, "o")?;
+    let id = created_entity_id("o", 0);
+    advance(&mut s, WORK_ORDER_TICKS_PER_UNIT * 10)?;
+    let order_fields = &s.graph.entities[&id].fields;
+    assert_eq!(order_fields[AMOUNT_REMAINING_FIELD].value, Value::U64(1));
+    assert_eq!(
+        order_fields[BLOCKED_BY_FIELD].value,
+        Value::Text(
+            "no completed workshop:Still and no living unit with the BREW labor enabled".to_owned()
+        )
+    );
+    // Equipping the brewery unblocks it; only time after that counts.
+    equip_brewery(&mut s);
+    advance(&mut s, WORK_ORDER_TICKS_PER_UNIT)?;
+    let order_fields = &s.graph.entities[&id].fields;
+    assert_eq!(order_fields[AMOUNT_REMAINING_FIELD].value, Value::U64(0));
+    assert_eq!(order_fields[BLOCKED_BY_FIELD].value, Value::Null);
     Ok(())
 }

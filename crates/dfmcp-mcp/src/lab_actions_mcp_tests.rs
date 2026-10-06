@@ -200,12 +200,15 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         Some(session.clone()),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    assert_eq!(buildings["total"], 1);
-    assert_eq!(buildings["rows"][0]["entity_id"], building);
     assert_eq!(
-        buildings["rows"][0]["fields"]["construction_stage"],
-        "complete"
+        buildings["total"], 3,
+        "the new still beside the starter still and kitchen"
     );
+    let built = buildings["rows"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["entity_id"] == building))
+        .ok_or_else(|| buildings.to_string())?;
+    assert_eq!(built["fields"]["construction_stage"], "complete");
 
     // Replaying the commit returns the original receipt, not a second effect.
     let replay = parsed(&fortress_commit(Some(session), digest))?;
@@ -372,7 +375,7 @@ fn plan_scope_cancellation_drains_dependents_and_certifies_quiescence() -> TestR
         Some(session.clone()),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    assert_eq!(buildings["total"], 0);
+    assert_eq!(buildings["total"], 2, "only the starter still and kitchen");
 
     // Draining an already quiescent plan is an idempotent no-op.
     let again = parsed(&fortress_cancel(
@@ -442,11 +445,11 @@ fn a_later_plan_does_not_strand_an_earlier_plans_deferred_steps() -> TestResult 
         Some(session),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    assert_eq!(buildings["rows"][0]["entity_id"], building);
-    assert_eq!(
-        buildings["rows"][0]["fields"]["construction_stage"],
-        "complete"
-    );
+    let built = buildings["rows"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["entity_id"] == building))
+        .ok_or_else(|| buildings.to_string())?;
+    assert_eq!(built["fields"]["construction_stage"], "complete");
     Ok(())
 }
 
@@ -1042,7 +1045,8 @@ fn a_blueprint_objective_is_decomposed_dug_and_furnished() -> TestResult {
         Some(session.clone()),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    assert_eq!(buildings["total"], 4, "{buildings}");
+    // Four furnishings plus the starter still and kitchen.
+    assert_eq!(buildings["total"], 6, "{buildings}");
     for row in buildings["rows"].as_array().ok_or("rows")? {
         assert_eq!(row["fields"]["construction_stage"], "complete", "{row}");
     }
@@ -1892,11 +1896,6 @@ fn compensation_never_inverts_a_step_that_was_never_dispatched() -> TestResult {
         Ok(row["rows"][0]["fields"]["labor.BREW"].clone())
     };
     // The brewer already brews.
-    let enabled = plan_and_commit(
-        &session,
-        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true}}]"#,
-    )?;
-    assert_eq!(enabled["ok"], true, "{enabled}");
     let before = labor(&session)?;
     assert_eq!(before, json!(true), "labor field shape");
     // A redundant enable deferred behind a dig never dispatches...
@@ -1920,5 +1919,73 @@ fn compensation_never_inverts_a_step_that_was_never_dispatched() -> TestResult {
         "compensated an effect that never happened: {drained}"
     );
     assert_eq!(drained["drain_progress"]["compensated"], 0, "{drained}");
+    Ok(())
+}
+
+#[test]
+fn production_needs_a_workshop_and_a_worker_and_a_stalled_order_fails_its_deadline() -> TestResult {
+    let session = open("72190", false, &ALL_EFFECTS)?;
+    // Take the brewer off brewing: no one can work the still any more.
+    let off = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":false}}]"#,
+    )?;
+    assert_eq!(off["ok"], true, "{off}");
+    // A production objective is refused with the blocker named, not compiled.
+    let refused = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        None,
+        Some(r#"{"template":"production","quotas":[{"item":"DRINK","minimum":200}]}"#.to_owned()),
+    ))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("BREW labor")),
+        "{refused}"
+    );
+    // A raw order still commits, then visibly stalls...
+    let ordered = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"create_work_order","name":"brew","job_token":"BREW_DRINK","amount":1}}]"#,
+    )?;
+    assert_eq!(ordered["ok"], true, "{ordered}");
+    let deadline = ordered["agent_turn"]["active_work"]["obligations"][0]["deadline_tick"]
+        .as_u64()
+        .ok_or_else(|| ordered.to_string())?;
+    parsed(&fortress_wait(Some(session.clone()), Some(20)))?;
+    let orders = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"work_order"}"#.to_owned()),
+    ))?;
+    assert!(
+        orders["rows"][0]["fields"]["blocked_by"]
+            .as_str()
+            .is_some_and(|why| why.contains("BREW")),
+        "{orders}"
+    );
+    // ...and fails loudly once its deadline passes.
+    let mut failed = None;
+    for _ in 0..10 {
+        let turn = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        if turn["agent_turn"]["attention"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|i| i["attention_id"] == "obligation-failed"))
+        {
+            failed = Some(turn);
+            break;
+        }
+    }
+    let failed = failed.ok_or("the stalled order never failed its obligation")?;
+    let tick = failed["agent_turn"]["anchor"]["game_tick"]
+        .as_u64()
+        .unwrap_or(0);
+    assert!(
+        tick >= deadline,
+        "failed before its deadline: {tick} < {deadline}"
+    );
+    assert_eq!(failed["agent_turn"]["attention"][0]["urgency"], "now");
     Ok(())
 }

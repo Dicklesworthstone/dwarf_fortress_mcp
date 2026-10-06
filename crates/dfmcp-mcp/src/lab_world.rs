@@ -47,6 +47,9 @@ pub(crate) mod starter {
     pub const INNER_BURROW: EntityId = EntityId::new(3_001);
     pub const MILITIA_SQUAD: EntityId = EntityId::new(4_001);
     pub const STOCK_LEDGER: EntityId = EntityId::new(5_001);
+    /// The fortress's working still and kitchen, built at the hall's far end.
+    pub const STILL: EntityId = EntityId::new(7_001);
+    pub const KITCHEN: EntityId = EntityId::new(7_002);
     /// The raider of `besieged_fortress`.
     pub const RAIDER: EntityId = EntityId::new(6_001);
     pub const RAIDER_ARRIVES_AT: u64 = 1_500;
@@ -177,19 +180,47 @@ fn starter_graph() -> Result<WorldGraph> {
     for (index, (name, profession)) in (0u64..).zip(dwarves) {
         let id = EntityId::new(starter::FIRST_DWARF + index);
         let x = i32::try_from(index).map_err(|_| invalid("scenario index overflow"))?;
+        let mut fields = vec![
+            ("profession", Value::Text(profession.to_owned())),
+            ("alive", Value::Bool(true)),
+            (
+                "position",
+                Value::Coord(MapCoord::new(x, 1, starter::LEVEL_Z)),
+            ),
+        ];
+        // The brewer brews and the farmer cooks: production needs both.
+        match profession {
+            "brewer" => fields.push(("labor.BREW", Value::Bool(true))),
+            "farmer" => fields.push(("labor.COOK", Value::Bool(true))),
+            _ => {}
+        }
+        graph
+            .entities
+            .insert(id, record(id, EntityKind::Unit, name, fields));
+    }
+    for (id, kind, x) in [
+        (starter::STILL, "workshop:Still", 8),
+        (starter::KITCHEN, "workshop:Kitchen", 9),
+    ] {
+        let at = MapCoord::new(x, 0, starter::LEVEL_Z);
         graph.entities.insert(
             id,
             record(
                 id,
-                EntityKind::Unit,
-                name,
+                EntityKind::Building,
+                kind,
                 vec![
-                    ("profession", Value::Text(profession.to_owned())),
-                    ("alive", Value::Bool(true)),
+                    ("building_kind", Value::Text(kind.to_owned())),
+                    ("position", Value::Coord(at)),
+                    ("footprint_min", Value::Coord(at)),
+                    ("footprint_max", Value::Coord(at)),
+                    ("material_tokens", Value::List(Vec::new())),
                     (
-                        "position",
-                        Value::Coord(MapCoord::new(x, 1, starter::LEVEL_Z)),
+                        effects::CONSTRUCTION_STAGE_FIELD,
+                        Value::Text(effects::STAGE_COMPLETE.to_owned()),
                     ),
+                    ("progress_ticks", Value::U64(effects::BUILD_TICKS)),
+                    ("required_ticks", Value::U64(effects::BUILD_TICKS)),
                 ],
             ),
         );
@@ -790,7 +821,7 @@ pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<
         dfmcp_intent::ProductionPlanningLimits::default(),
     )?;
     let analysis = json!({
-        "model": "laboratory recipes (5 units per batch, no modeled inputs); stock read from the stock ledger",
+        "model": "laboratory recipes (5 units per batch, no modeled inputs; each job needs its completed workshop and a living worker with the labor); stock read from the stock ledger",
         "feasible": plan.model_feasible(),
         "requirements": plan.requirements().iter().map(|r| json!({
             "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
@@ -810,6 +841,24 @@ pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
             "observed stock already meets every quota; nothing to produce",
+        ));
+    }
+    // An order that can never progress is not a plan: name every blocker.
+    let blockers: Vec<String> = plan
+        .steps()
+        .iter()
+        .filter_map(|step| {
+            effects::work_order_blocker(snapshot, &step.job_token)
+                .map(|why| format!("{} ({}): {why}", step.output_token, step.job_token))
+        })
+        .collect();
+    if !blockers.is_empty() {
+        return Err(DfmcpError::new(
+            ErrorCode::PreconditionsFailed,
+            format!(
+                "production cannot progress in the observed fortress: {}; build the workshop or enable the labor first",
+                blockers.join("; ")
+            ),
         ));
     }
     let steps: Vec<Json> = plan
@@ -1707,7 +1756,7 @@ mod tests {
             Some(tile_codes::SOLID_WALL)
         );
         assert_eq!(snapshot.tile_code_at(MapCoord::new(0, 0, 12)), None);
-        assert_eq!(snapshot.graph.entities.len(), 11);
+        assert_eq!(snapshot.graph.entities.len(), 13);
         assert!(scenario_snapshot("moon_base", FortressId::new(3), true).is_err());
         Ok(())
     }

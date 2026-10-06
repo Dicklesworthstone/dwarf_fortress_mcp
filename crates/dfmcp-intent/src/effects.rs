@@ -104,6 +104,47 @@ pub fn work_order_product(job_token: &str) -> Option<(&'static str, u64)> {
         _ => None,
     }
 }
+/// Workshop kind label and labor a laboratory job needs before it makes any
+/// progress. Jobs without an entry have no modeled requirement.
+#[must_use]
+pub fn work_order_requirements(job_token: &str) -> Option<(&'static str, &'static str)> {
+    match job_token {
+        "BREW_DRINK" => Some(("workshop:Still", "BREW")),
+        "PREPARE_MEAL" | "COOK_MEAL" => Some(("workshop:Kitchen", "COOK")),
+        _ => None,
+    }
+}
+
+/// Field a stalled work order carries naming what it is waiting for.
+pub const BLOCKED_BY_FIELD: &str = "blocked_by";
+
+/// Why `job_token` cannot progress in `snapshot`, if it cannot: no completed
+/// matching workshop, or no living unit with the labor enabled.
+#[must_use]
+pub fn work_order_blocker(snapshot: &WorldSnapshot, job_token: &str) -> Option<String> {
+    let (workshop, labor) = work_order_requirements(job_token)?;
+    let entities = snapshot.graph.entities.values();
+    let has_workshop = entities.clone().any(|entity| {
+        entity.kind == EntityKind::Building
+            && field_text(entity, "building_kind") == Some(workshop)
+            && field_text(entity, CONSTRUCTION_STAGE_FIELD) == Some(STAGE_COMPLETE)
+    });
+    let labor_field = format!("{LABOR_FIELD_PREFIX}{labor}");
+    let has_worker = entities.clone().any(|entity| {
+        entity.kind == EntityKind::Unit
+            && is_alive(entity)
+            && field_value(entity, &labor_field) == Some(&Value::Bool(true))
+    });
+    match (has_workshop, has_worker) {
+        (true, true) => None,
+        (false, true) => Some(format!("no completed {workshop}")),
+        (true, false) => Some(format!("no living unit with the {labor} labor enabled")),
+        (false, false) => Some(format!(
+            "no completed {workshop} and no living unit with the {labor} labor enabled"
+        )),
+    }
+}
+
 /// Laboratory calibration: game ticks to construct one building.
 pub const BUILD_TICKS: u64 = 500;
 /// Laboratory calibration: game ticks to produce one work-order unit.
@@ -1009,6 +1050,22 @@ fn entity(snapshot: &WorldSnapshot, id: EntityId) -> Result<&EntityRecord> {
 }
 
 fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
+    let job = field_text(entity(snapshot, id)?, "job_token").map(str::to_owned);
+    let blocker = job
+        .as_deref()
+        .and_then(|job| work_order_blocker(snapshot, job));
+    // A stalled order accrues no work; it says what it is waiting for.
+    let blocked = write_fields(
+        snapshot,
+        id,
+        vec![(
+            BLOCKED_BY_FIELD.to_owned(),
+            blocker.clone().map_or(Value::Null, Value::Text),
+        )],
+    )?;
+    if blocker.is_some() {
+        return Ok(blocked);
+    }
     let order = entity(snapshot, id)?;
     let work = field_u64(order, "work_ticks").saturating_add(elapsed);
     let remaining = field_u64(order, AMOUNT_REMAINING_FIELD);
@@ -1046,7 +1103,7 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
             Value::Text(STATUS_COMPLETE.to_owned()),
         ));
     }
-    write_fields(snapshot, id, fields)
+    Ok(write_fields(snapshot, id, fields)? | blocked)
 }
 
 fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {

@@ -42,7 +42,16 @@ fn world(paused: bool) -> WorldSnapshot {
             revision: 1,
             kind: EntityKind::Unit,
             label: "Urist McMiner".to_owned(),
-            fields: BTreeMap::new(),
+            // The only dwarf also brews: brewing needs a worker with the labor.
+            fields: BTreeMap::from([(
+                "labor.BREW".to_owned(),
+                dfmcp_world::Fact::known(
+                    Value::Bool(true),
+                    GameTick(1),
+                    dfmcp_world::FactSource::Derived("test".to_owned()),
+                    dfmcp_core::Digest32::ZERO,
+                ),
+            )]),
         },
     );
     WorldSnapshot::new(
@@ -52,6 +61,41 @@ fn world(paused: bool) -> WorldSnapshot {
         paused,
         graph,
     )
+}
+
+/// A completed still, so brewing orders can progress without building one.
+fn with_still(mut snapshot: WorldSnapshot) -> WorldSnapshot {
+    let fact = |value: Value| {
+        dfmcp_world::Fact::known(
+            value,
+            GameTick(1),
+            dfmcp_world::FactSource::Derived("test".to_owned()),
+            dfmcp_core::Digest32::ZERO,
+        )
+    };
+    let still = EntityId::new(201);
+    snapshot.graph.entities.insert(
+        still,
+        EntityRecord {
+            id: still,
+            generation: 1,
+            revision: 1,
+            kind: EntityKind::Building,
+            label: "workshop:Still".to_owned(),
+            fields: BTreeMap::from([
+                (
+                    "building_kind".to_owned(),
+                    fact(Value::Text("workshop:Still".to_owned())),
+                ),
+                (
+                    CONSTRUCTION_STAGE_FIELD.to_owned(),
+                    fact(Value::Text(STAGE_COMPLETE.to_owned())),
+                ),
+            ]),
+        },
+    );
+    snapshot.refresh_hash();
+    snapshot
 }
 
 fn context(adapter: &MemoryAdapter, request: u128) -> OperationContext {
@@ -308,7 +352,7 @@ fn immediate_labor_change_verifies_at_commit_and_compensates_on_cancel() -> Resu
 
 #[test]
 fn cancelled_work_order_stops_producing_but_keeps_its_record() -> Result<()> {
-    let mut adapter = MemoryAdapter::new(world(false));
+    let mut adapter = MemoryAdapter::new(with_still(world(false)));
     let intent = Intent {
         id: IntentId::new(61),
         anchor: adapter.snapshot().anchor(),
