@@ -223,6 +223,14 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.receipt)
     }
 
+    /// The last receipt of a committed plan's step, if it was committed.
+    #[must_use]
+    pub fn step_receipt(&self, plan_id: PlanId, step_id: StepId) -> Option<&ActionReceipt> {
+        self.action_by_step
+            .get(&(plan_id, step_id))
+            .and_then(|action_id| self.action_receipt(*action_id))
+    }
+
     /// The sealed plan step an action executes.
     #[must_use]
     pub fn action_step(&self, action_id: ActionId) -> Option<&PlanStep> {

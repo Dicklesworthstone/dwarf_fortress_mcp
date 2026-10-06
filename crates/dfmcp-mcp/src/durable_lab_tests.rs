@@ -90,7 +90,8 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
         Some("long hall".to_owned()),
         None,
         Some(
-            r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[7,5,10],"mode":"mine"}}]"#
+            r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[7,5,10],"mode":"mine"}},
+                {"action":{"kind":"designate_dig","min":[0,6,10],"max":[1,6,10],"mode":"mine"},"depends_on":[0]}]"#
                 .to_owned(),
         ),
         None,
@@ -142,6 +143,19 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     assert_eq!(new_epoch, old_epoch + 1, "{resumed}");
     let second = id(&resumed, "session_id")?;
 
+    // The commit made before the crash was recompiled from its recorded
+    // request against the world it was sealed on, reproducing its digest:
+    // the dispatched excavation is carried, the deferred step never ran.
+    let commits = &resumed["durable"]["recovered_commits"];
+    assert_eq!(commits.as_array().map(Vec::len), Some(1), "{resumed}");
+    assert_eq!(commits[0]["plan_digest"], planned["plan_digest"]);
+    assert_eq!(commits[0]["status"], "carried");
+    assert_eq!(commits[0]["steps"][0]["state"], "dispatched");
+    assert_eq!(commits[0]["steps"][1]["state"], "not_dispatched");
+    let carried = &resumed["durable"]["carried_obligations"];
+    assert_eq!(carried.as_array().map(Vec::len), Some(1), "{resumed}");
+    assert_eq!(carried[0]["action"], "designate_dig");
+
     // The world is exactly what was persisted.
     assert_eq!(terrain(&second)?, before_crash);
 
@@ -156,6 +170,12 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
         let waited = parsed(&fortress_wait(Some(second.clone()), Some(25)))?;
         assert_eq!(waited["ok"], true, "{waited}");
     }
+    // The carried obligation was proven by observation and retired.
+    let doctor = parsed(&fortress_doctor(Some(second.clone())))?;
+    assert_eq!(
+        doctor["durability"]["carried_obligations"][0]["state"], "verified",
+        "{doctor}"
+    );
     let finished = terrain(&second)?;
     assert_ne!(finished, before_crash);
     assert_eq!(finished[0], "........", "{finished}");
@@ -169,6 +189,13 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     crate::server::simulate_durable_restart(Some(dir.0.clone()));
     let third = open_durable("880011", None)?;
     assert_eq!(third["ok"], true, "{third}");
+    assert_eq!(
+        third["durable"]["recovered_commits"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
+        "finished and abandoned commits are retired: {third}"
+    );
     assert_eq!(terrain(&id(&third, "session_id")?)?, at_checkpoint);
     Ok(())
 }

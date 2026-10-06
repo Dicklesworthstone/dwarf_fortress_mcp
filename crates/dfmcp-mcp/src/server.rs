@@ -90,6 +90,38 @@ pub(crate) struct LabSession {
     durable_scenario: Option<String>,
     /// Last durable-persistence failure, reported until a later save succeeds.
     durability_fault: Option<String>,
+    /// Plans committed in this process on a durable fortress whose steps are
+    /// not all final; their step states are journaled after every call.
+    durable_plans: BTreeMap<Digest32, PreparedPlan>,
+    /// Steps of plans committed before a durable restart, re-proven against
+    /// observation after every call until they are final.
+    carried: Vec<CarriedStep>,
+}
+
+/// A step committed before a durable restart. No action handle survives the
+/// restart, so its sealed proof is evaluated directly against observation.
+#[derive(Clone, Debug)]
+pub(crate) struct CarriedStep {
+    plan_digest: Digest32,
+    step: dfmcp_core::StepId,
+    kind: &'static str,
+    proof: Predicate,
+    failure: Option<Predicate>,
+    deadline: Option<dfmcp_core::GameTick>,
+    /// A durable step state from `dfmcp_lab::durable::STEP_STATES`.
+    state: String,
+}
+
+impl CarriedStep {
+    fn to_json(&self) -> serde_json::Value {
+        json!({
+            "plan_digest": self.plan_digest.to_hex(),
+            "step": self.step.get(),
+            "action": self.kind,
+            "state": self.state,
+            "deadline_tick": self.deadline.map(|tick| tick.0),
+        })
+    }
 }
 
 /// Spatial leases plus the actions that hold them.
@@ -346,7 +378,96 @@ fn persist_durable_head(session: &mut LabSession) {
         return;
     };
     let snapshot = session.adapter.snapshot().clone();
-    match with_durable_store(|store| store.persist_head(&scenario, &snapshot)) {
+    let fortress = session.fortress_id;
+    // Step states first, then the head: a step is never recorded final or
+    // dispatched by a world that lacks it, and a crash between the two can
+    // only make a dispatched step fail its deadline, never verify falsely.
+    let mut finished: Vec<Digest32> = Vec::new();
+    let mut updates: Vec<(Digest32, u32, &'static str)> = Vec::new();
+    for (digest, plan) in &session.durable_plans {
+        let mut all_final = true;
+        for step in &plan.steps {
+            let token = match session
+                .adapter
+                .step_receipt(plan.id, step.id)
+                .map(|receipt| receipt.state)
+            {
+                None | Some(CommitState::Prepared) => None,
+                Some(CommitState::Verified) => Some("verified"),
+                Some(CommitState::Failed) => Some("failed"),
+                Some(CommitState::Cancelled) => Some("cancelled"),
+                Some(CommitState::Compensated) => Some("compensated"),
+                Some(_) => Some("dispatched"),
+            };
+            match token {
+                Some(token) => {
+                    all_final &= token != "dispatched";
+                    updates.push((*digest, step.id.get(), token));
+                }
+                None => all_final = false,
+            }
+        }
+        if all_final {
+            finished.push(*digest);
+        }
+    }
+    for carried in &mut session.carried {
+        if carried.state != "dispatched" {
+            continue;
+        }
+        if dfmcp_world::evaluate(&snapshot, &carried.proof) {
+            carried.state = "verified".to_owned();
+        } else if carried
+            .failure
+            .as_ref()
+            .is_some_and(|failure| dfmcp_world::evaluate(&snapshot, failure))
+            || carried
+                .deadline
+                .is_some_and(|deadline| snapshot.tick > deadline)
+        {
+            carried.state = "failed".to_owned();
+        }
+    }
+    let carried_updates: Vec<(Digest32, u32, String)> = session
+        .carried
+        .iter()
+        .map(|c| (c.plan_digest, c.step.get(), c.state.clone()))
+        .collect();
+    let carried_done: BTreeSet<Digest32> = session
+        .carried
+        .iter()
+        .map(|c| c.plan_digest)
+        .filter(|digest| {
+            session
+                .carried
+                .iter()
+                .filter(|c| c.plan_digest == *digest)
+                .all(|c| c.state != "dispatched")
+        })
+        .collect();
+    let result = with_durable_store(|store| {
+        for (digest, step, token) in &updates {
+            store.persist_step(fortress, *digest, *step, token)?;
+        }
+        for (digest, step, token) in &carried_updates {
+            // A carried commit stays visible after it is retired; only an
+            // unfinished one still takes step records.
+            if store.commit(fortress, *digest).is_some() {
+                store.persist_step(fortress, *digest, *step, token)?;
+            }
+        }
+        store.persist_head(&scenario, &snapshot)?;
+        for digest in finished.iter().chain(carried_done.iter()) {
+            store.retire_commit(fortress, *digest)?;
+        }
+        Ok(())
+    });
+    if result.is_ok() {
+        for digest in &finished {
+            session.durable_plans.remove(digest);
+        }
+    }
+    match result {
         Ok(()) => session.durability_fault = None,
         Err(error) => {
             session.durability_fault = Some(format!("{}: {}", error.code.as_str(), error.message));
@@ -403,6 +524,111 @@ struct DurableRecovery {
     recovered_from: Option<StateAnchor>,
     checkpoints: usize,
     torn_tail_bytes: u64,
+    /// Dispatched steps of earlier commits, still to be proven.
+    carried: Vec<CarriedStep>,
+    /// What happened to every earlier unfinished commit.
+    commits: Vec<serde_json::Value>,
+}
+
+/// Rebuild the steps of a commit made before a restart. The plan is
+/// recompiled from its recorded request against the exact world it was
+/// sealed on; determinism must reproduce the sealed digest, or the commit is
+/// reported unverifiable and abandoned rather than trusted.
+fn recover_commit(
+    store: &mut dfmcp_lab::durable::DurableLabStore,
+    commit: &dfmcp_lab::durable::DurableCommit,
+    carried: &mut Vec<CarriedStep>,
+) -> Result<serde_json::Value> {
+    let fortress = commit.fortress_id;
+    let sealed = store.load_snapshot(commit.sealed_state_hash)?;
+    let source = PlanSource::from_durable(&commit.source);
+    // Recompiling is a pure, internal verification read: it uses a planning
+    // grant scoped to this fortress and confers nothing on any session.
+    let context = OperationContext {
+        session_id: SessionId::new(u128::MAX),
+        request_id: RequestId::new(commit.intent_id),
+        anchor: sealed.anchor(),
+        budget: MAX_LAB_BUDGET,
+        grants: vec![CapabilityGrant {
+            capability: Capability::Plan,
+            scope: CapabilityScope {
+                fortress_id: Some(fortress),
+                ..CapabilityScope::default()
+            },
+            max_risk: RiskTier::ReadOnly,
+            expires_at_tick: None,
+            remaining_uses: None,
+        }],
+        cancellation_requested: false,
+    };
+    let recompiled = source
+        .intent(IntentId::new(commit.intent_id), &sealed)
+        .and_then(|intent| StaticPlanner::default().prepare(&sealed, &intent, &context));
+    let plan = match recompiled {
+        Ok(plan) if plan.digest == commit.plan_digest => plan,
+        outcome => {
+            let reason = match outcome {
+                Ok(plan) => format!(
+                    "recompilation produced digest {} instead of the sealed {}",
+                    plan.digest, commit.plan_digest
+                ),
+                Err(error) => error.message,
+            };
+            for step in commit.steps.keys() {
+                store.persist_step(fortress, commit.plan_digest, *step, "abandoned")?;
+            }
+            store.retire_commit(fortress, commit.plan_digest)?;
+            return Ok(json!({
+                "plan_digest": commit.plan_digest.to_hex(),
+                "status": "unverifiable",
+                "reason": reason,
+                "note": "the sealed plan could not be reproduced; its effects are indeterminate, so observe before re-planning",
+            }));
+        }
+    };
+    let mut steps = Vec::new();
+    let mut open = 0usize;
+    for step in &plan.steps {
+        let recorded = commit.steps.get(&step.id.get()).map(String::as_str);
+        let kind = crate::lab_world::action_kind(&step.action);
+        let state = match recorded {
+            None => {
+                store.persist_step(
+                    fortress,
+                    commit.plan_digest,
+                    step.id.get(),
+                    "not_dispatched",
+                )?;
+                "not_dispatched".to_owned()
+            }
+            Some(state) => state.to_owned(),
+        };
+        if state == "dispatched" {
+            open += 1;
+            let proof = step.obligation.as_ref().map_or_else(
+                || Predicate::All(step.postconditions.clone()),
+                |obligation| obligation.terminal.clone(),
+            );
+            carried.push(CarriedStep {
+                plan_digest: commit.plan_digest,
+                step: step.id,
+                kind,
+                proof,
+                failure: step.obligation.as_ref().and_then(|o| o.failure.clone()),
+                deadline: step.obligation.as_ref().map(|o| o.deadline_tick),
+                state: state.clone(),
+            });
+        }
+        steps.push(json!({"step": step.id.get(), "action": kind, "state": state}));
+    }
+    if open == 0 {
+        store.retire_commit(fortress, commit.plan_digest)?;
+    }
+    Ok(json!({
+        "plan_digest": commit.plan_digest.to_hex(),
+        "status": if open == 0 { "final" } else { "carried" },
+        "steps": steps,
+    }))
 }
 
 /// Load (or start) a durable fortress: the latest persisted world in a new
@@ -424,6 +650,8 @@ fn load_durable_fortress(
                     recovered_from: None,
                     checkpoints: 0,
                     torn_tail_bytes: report.torn_tail_bytes,
+                    carried: Vec::new(),
+                    commits: Vec::new(),
                 },
             ));
         };
@@ -453,6 +681,11 @@ fn load_durable_fortress(
             )?;
             checkpoints += 1;
         }
+        let mut carried = Vec::new();
+        let mut commits = Vec::new();
+        for commit in store.commits(fortress_id).cloned().collect::<Vec<_>>() {
+            commits.push(recover_commit(store, &commit, &mut carried)?);
+        }
         Ok((
             adapter,
             DurableRecovery {
@@ -460,6 +693,8 @@ fn load_durable_fortress(
                 recovered_from: Some(head.anchor),
                 checkpoints,
                 torn_tail_bytes: report.torn_tail_bytes,
+                carried,
+                commits,
             },
         ))
     })
@@ -487,6 +722,7 @@ fn durability_json(session: &LabSession) -> serde_json::Value {
         "scenario": scenario,
         "fault": session.durability_fault,
         "persisted_anchor": head.as_ref().map(|head| anchor_json(&head.anchor)),
+        "carried_obligations": session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>(),
         "persisted_is_current": head.as_ref().is_some_and(|head| head.anchor == session.adapter.snapshot().anchor()),
         "store": report.map(|report| json!({
             "records": report.records,
@@ -528,6 +764,45 @@ enum PlanSource {
 }
 
 impl PlanSource {
+    fn durable(&self) -> dfmcp_lab::durable::DurablePlanSource {
+        use dfmcp_lab::durable::DurablePlanSource as D;
+        match self {
+            Self::Pause {
+                summary,
+                paused_target,
+            } => D::Pause {
+                summary: summary.clone(),
+                paused: *paused_target,
+            },
+            Self::Actions { summary, raw } => D::Actions {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+            Self::Blueprint { summary, raw } => D::Blueprint {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+        }
+    }
+
+    fn from_durable(source: &dfmcp_lab::durable::DurablePlanSource) -> Self {
+        use dfmcp_lab::durable::DurablePlanSource as D;
+        match source {
+            D::Pause { summary, paused } => Self::Pause {
+                summary: summary.clone(),
+                paused_target: *paused,
+            },
+            D::Actions { summary, raw } => Self::Actions {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+            D::Blueprint { summary, raw } => Self::Blueprint {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+        }
+    }
+
     fn intent(&self, id: IntentId, snapshot: &WorldSnapshot) -> Result<Intent> {
         match self {
             Self::Actions { summary, raw } => semantic_intent(id, snapshot, summary.clone(), raw),
@@ -1162,6 +1437,8 @@ pub(crate) fn open_session_in_scenario(
         shared_members: 0,
         durable_scenario: None,
         durability_fault: None,
+        durable_plans: BTreeMap::new(),
+        carried: Vec::new(),
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -1212,6 +1489,8 @@ pub(crate) fn open_session_in_scenario(
         shared_members: _,
         durable_scenario: _,
         durability_fault: _,
+        durable_plans: _,
+        carried: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -1232,6 +1511,10 @@ pub(crate) fn open_session_in_scenario(
         shared_members: 0,
         durable_scenario: durable.then(|| scenario.clone()),
         durability_fault: None,
+        durable_plans: BTreeMap::new(),
+        carried: recovery
+            .as_ref()
+            .map_or_else(Vec::new, |recovery| recovery.carried.clone()),
     }));
     {
         let mut registry = sessions();
@@ -1301,6 +1584,8 @@ pub(crate) fn open_session_in_scenario(
             "resumed": recovery.resumed,
             "recovered_from_anchor": recovery.recovered_from.as_ref().map(anchor_json),
             "restorable_checkpoints": recovery.checkpoints,
+            "recovered_commits": recovery.commits,
+            "carried_obligations": recovery.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>(),
             "torn_tail_bytes_discarded_at_store_open": recovery.torn_tail_bytes,
             "note": if recovery.resumed {
                 "resumed the last persisted world in a new observation epoch: designations, construction and work orders continue on wait; action handles, plans and obligations from before are not carried, so re-establish them from observation. Older sessions of this fortress are fenced."
@@ -2162,8 +2447,31 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                             return dfmcp_error_payload("fortress.commit", &error);
                         }
                     };
+                    let sealed = guard
+                        .durable_scenario
+                        .is_some()
+                        .then(|| guard.adapter.snapshot().clone());
+                    if let Some(sealed) = sealed.as_ref() {
+                        // The commit record precedes the effect: after a crash a
+                        // recorded plan with no step state was never dispatched.
+                        let source = pending.source.durable();
+                        let digest = pending.plan.digest;
+                        let intent = pending.plan.intent_id.get();
+                        if let Err(error) = with_durable_store(|store| {
+                            store.persist_commit(sealed, digest, intent, source)
+                        }) {
+                            guard.leases = leases_before;
+                            guard.pending = Some(pending);
+                            return dfmcp_error_payload("fortress.commit", &error);
+                        }
+                    }
                     match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
                         Ok(receipt) => {
+                            if sealed.is_some() {
+                                guard
+                                    .durable_plans
+                                    .insert(pending.plan.digest, pending.plan.clone());
+                            }
                             guard.last_action =
                                 receipt.actions.first().map(|action| action.action_id);
                             guard.last_plan_actions = receipt
@@ -2371,6 +2679,26 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 payload["game_tick"] = json!(snapshot.tick.0);
                 payload["polled_actions"] = json!(polled_actions);
                 payload["open_actions_remaining"] = json!(guard.open_actions.len());
+                if !guard.carried.is_empty() {
+                    // Proven against this observation by the durable hook that
+                    // runs after this call; report the prior evaluation plus
+                    // an immediate re-evaluation so the agent sees progress now.
+                    let observed = guard.adapter.snapshot().clone();
+                    payload["carried_obligations"] = json!(
+                        guard
+                            .carried
+                            .iter()
+                            .map(|carried| {
+                                let mut view = carried.to_json();
+                                if carried.state == "dispatched" {
+                                    view["proven_now"] =
+                                        json!(dfmcp_world::evaluate(&observed, &carried.proof));
+                                }
+                                view
+                            })
+                            .collect::<Vec<_>>()
+                    );
+                }
                 if requested_ticks > 0 && paused {
                     payload["blocked"] = json!(
                         "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
@@ -2763,6 +3091,25 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     guard.last_plan_actions.clear();
                     guard.open_actions.clear();
                     guard.commit_receipts.clear();
+                    if guard.durable_scenario.is_some() {
+                        let fortress = guard.fortress_id;
+                        let digests: BTreeSet<Digest32> = guard
+                            .durable_plans
+                            .keys()
+                            .copied()
+                            .chain(guard.carried.iter().map(|c| c.plan_digest))
+                            .collect();
+                        guard.durable_plans.clear();
+                        guard.carried.clear();
+                        if let Err(error) = with_durable_store(|store| {
+                            for digest in &digests {
+                                store.retire_commit(fortress, *digest)?;
+                            }
+                            Ok(())
+                        }) {
+                            guard.durability_fault = Some(error.message);
+                        }
+                    }
                     json!({
                     "ok": true,
                     "session_id": format!("{}", guard.session_id),

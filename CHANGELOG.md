@@ -45,6 +45,11 @@ readiness.
   each family's own constructors, with named live resolutions (exact furniture
   item, work-detail index) and explicit refusals for everything else.
   `fortress.plan` returns it as `live_routing`. Routing grants no authority.
+- Durable obligations across restarts: durable commits journal their request
+  and sealed world before dispatch and their step states after every call; a
+  resumed fortress recompiles each unfinished commit, verifies it reproduces
+  the sealed digest, and re-proves dispatched steps against observation
+  (`recovered_commits`, `carried_obligations`).
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

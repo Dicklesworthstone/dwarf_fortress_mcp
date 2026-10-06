@@ -647,7 +647,7 @@ const fn tile_glyph(code: Option<u32>) -> char {
     }
 }
 
-const fn action_kind(action: &Action) -> &'static str {
+pub(crate) const fn action_kind(action: &Action) -> &'static str {
     match action {
         Action::Pause { .. } => "pause",
         Action::DesignateDig { .. } => "designate_dig",

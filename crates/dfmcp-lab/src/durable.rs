@@ -44,7 +44,7 @@ const JOURNAL_DOMAIN: &[u8] = b"dfmcp-lab-journal/1\0";
 /// Largest journal accepted on open.
 pub const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 /// Largest single journal record line.
-pub const MAX_RECORD_BYTES: usize = 4 * 1024;
+pub const MAX_RECORD_BYTES: usize = 64 * 1024;
 /// Largest stored snapshot object.
 pub const MAX_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 /// Records after which the journal is compacted to live heads + checkpoints.
@@ -55,6 +55,25 @@ pub const MAX_FORTRESSES: usize = 256;
 pub const MAX_CHECKPOINTS_PER_FORTRESS: usize = 256;
 const MAX_SCENARIO_BYTES: usize = 64;
 const MAX_LABEL_BYTES: usize = 256;
+/// Largest stored plan summary.
+pub const MAX_PLAN_SUMMARY_BYTES: usize = 4 * 1024;
+/// Largest stored plan request (actions or blueprint JSON).
+pub const MAX_PLAN_REQUEST_BYTES: usize = 16 * 1024;
+/// Most unfinished durable commits per fortress.
+pub const MAX_COMMITS_PER_FORTRESS: usize = 256;
+/// Most step records per durable commit.
+pub const MAX_STEPS_PER_COMMIT: usize = 256;
+/// Step states a durable commit may record. Every state but `dispatched` is
+/// final for recovery purposes.
+pub const STEP_STATES: [&str; 7] = [
+    "dispatched",
+    "verified",
+    "failed",
+    "cancelled",
+    "compensated",
+    "not_dispatched",
+    "abandoned",
+];
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -85,10 +104,43 @@ pub struct DurableCheckpoint {
     pub state_hash: Digest32,
 }
 
+/// The agent request behind a committed plan, kept so the exact sealed plan
+/// can be deterministically recompiled from the world it was sealed against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DurablePlanSource {
+    Pause { summary: String, paused: bool },
+    Actions { summary: String, raw: String },
+    Blueprint { summary: String, raw: String },
+}
+
+/// A committed plan whose steps are not all final.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableCommit {
+    pub fortress_id: FortressId,
+    pub plan_digest: Digest32,
+    /// State hash of the world the plan was sealed against (a stored object).
+    pub sealed_state_hash: Digest32,
+    pub intent_id: u128,
+    pub source: DurablePlanSource,
+    /// Last recorded state per step id; absent means never dispatched.
+    pub steps: BTreeMap<u32, String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Record {
     Head(DurableHead),
     Checkpoint(DurableCheckpoint),
+    Commit(DurableCommit),
+    Step {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        step: u32,
+        state: String,
+    },
+    Done {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+    },
 }
 
 /// What opening the store found, for doctor reports and recovery packets.
@@ -128,6 +180,15 @@ fn hex_text(text: &str) -> String {
 }
 
 fn unhex_text(raw: &str, bound: usize) -> Result<String> {
+    let text = unhex_payload(raw, bound)?;
+    if text.chars().any(char::is_control) {
+        return Err(corrupt("journal text field contains control characters"));
+    }
+    Ok(text)
+}
+
+/// Hex-encoded free text (plan requests may contain newlines).
+fn unhex_payload(raw: &str, bound: usize) -> Result<String> {
     if raw == "-" {
         return Ok(String::new());
     }
@@ -144,11 +205,7 @@ fn unhex_text(raw: &str, bound: usize) -> Result<String> {
                 .map_err(|_| corrupt("journal text field is not hexadecimal"))?,
         );
     }
-    let text = String::from_utf8(bytes).map_err(|_| corrupt("journal text field is not UTF-8"))?;
-    if text.chars().any(char::is_control) {
-        return Err(corrupt("journal text field contains control characters"));
-    }
-    Ok(text)
+    String::from_utf8(bytes).map_err(|_| corrupt("journal text field is not UTF-8"))
 }
 
 fn parse_u64(raw: &str) -> Result<u64> {
@@ -185,6 +242,42 @@ impl Record {
                 hex_text(&checkpoint.label),
                 checkpoint.state_hash.to_hex(),
             ),
+            Self::Commit(commit) => {
+                let (kind, summary, payload) = match &commit.source {
+                    DurablePlanSource::Pause { summary, paused } => {
+                        ("pause", summary, if *paused { "true" } else { "false" })
+                    }
+                    DurablePlanSource::Actions { summary, raw } => {
+                        ("actions", summary, raw.as_str())
+                    }
+                    DurablePlanSource::Blueprint { summary, raw } => {
+                        ("blueprint", summary, raw.as_str())
+                    }
+                };
+                format!(
+                    "P {} {} {} {:032x} {kind} {} {}",
+                    commit.fortress_id.get(),
+                    commit.plan_digest.to_hex(),
+                    commit.sealed_state_hash.to_hex(),
+                    commit.intent_id,
+                    hex_text(summary),
+                    hex_text(payload),
+                )
+            }
+            Self::Step {
+                fortress_id,
+                plan_digest,
+                step,
+                state,
+            } => format!(
+                "S {} {} {step} {state}",
+                fortress_id.get(),
+                plan_digest.to_hex()
+            ),
+            Self::Done {
+                fortress_id,
+                plan_digest,
+            } => format!("D {} {}", fortress_id.get(), plan_digest.to_hex()),
         }
     }
 
@@ -223,6 +316,74 @@ impl Record {
                     state_hash: parse_digest(hash)?,
                 }))
             }
+            [
+                "P",
+                fortress,
+                digest,
+                sealed,
+                intent,
+                kind,
+                summary,
+                payload,
+            ] => {
+                if intent.len() != 32
+                    || !intent
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                {
+                    return Err(corrupt("journal intent id is malformed"));
+                }
+                let intent_id = u128::from_str_radix(intent, 16)
+                    .map_err(|_| corrupt("journal intent id is malformed"))?;
+                let summary = unhex_payload(summary, MAX_PLAN_SUMMARY_BYTES)?;
+                let source = match *kind {
+                    "pause" => match unhex_text(payload, 5)?.as_str() {
+                        "true" => DurablePlanSource::Pause {
+                            summary,
+                            paused: true,
+                        },
+                        "false" => DurablePlanSource::Pause {
+                            summary,
+                            paused: false,
+                        },
+                        _ => return Err(corrupt("journal pause target is malformed")),
+                    },
+                    "actions" => DurablePlanSource::Actions {
+                        summary,
+                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+                    },
+                    "blueprint" => DurablePlanSource::Blueprint {
+                        summary,
+                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+                    },
+                    _ => return Err(corrupt("journal plan source kind is not recognized")),
+                };
+                Ok(Self::Commit(DurableCommit {
+                    fortress_id: FortressId::new(parse_u64(fortress)?),
+                    plan_digest: parse_digest(digest)?,
+                    sealed_state_hash: parse_digest(sealed)?,
+                    intent_id,
+                    source,
+                    steps: BTreeMap::new(),
+                }))
+            }
+            ["S", fortress, digest, step, state] => {
+                if !STEP_STATES.contains(state) {
+                    return Err(corrupt("journal step state is not recognized"));
+                }
+                let step = u32::try_from(parse_u64(step)?)
+                    .map_err(|_| corrupt("journal step id is malformed"))?;
+                Ok(Self::Step {
+                    fortress_id: FortressId::new(parse_u64(fortress)?),
+                    plan_digest: parse_digest(digest)?,
+                    step,
+                    state: (*state).to_owned(),
+                })
+            }
+            ["D", fortress, digest] => Ok(Self::Done {
+                fortress_id: FortressId::new(parse_u64(fortress)?),
+                plan_digest: parse_digest(digest)?,
+            }),
             _ => Err(corrupt("journal record kind or arity is not recognized")),
         }
     }
@@ -421,6 +582,13 @@ impl DurableLabStore {
                     .flat_map(BTreeMap::values)
                     .map(|checkpoint| checkpoint.state_hash),
             )
+            .chain(
+                self.index
+                    .commits
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .map(|commit| commit.sealed_state_hash),
+            )
             .collect()
     }
 
@@ -552,6 +720,87 @@ impl DurableLabStore {
         }))
     }
 
+    /// Record a committed plan, persisting the world it was sealed against.
+    pub fn persist_commit(
+        &mut self,
+        sealed: &WorldSnapshot,
+        plan_digest: Digest32,
+        intent_id: u128,
+        source: DurablePlanSource,
+    ) -> Result<()> {
+        let (summary, payload_len) = match &source {
+            DurablePlanSource::Pause { summary, .. } => (summary, 0),
+            DurablePlanSource::Actions { summary, raw }
+            | DurablePlanSource::Blueprint { summary, raw } => (summary, raw.len()),
+        };
+        if summary.len() > MAX_PLAN_SUMMARY_BYTES || payload_len > MAX_PLAN_REQUEST_BYTES {
+            return Err(invalid("plan request exceeds the durable record bound"));
+        }
+        self.write_object(sealed)?;
+        self.append(Record::Commit(DurableCommit {
+            fortress_id: sealed.fortress_id,
+            plan_digest,
+            sealed_state_hash: sealed.state_hash,
+            intent_id,
+            source,
+            steps: BTreeMap::new(),
+        }))
+    }
+
+    /// Record a step's state; repeating the current state is a no-op.
+    pub fn persist_step(
+        &mut self,
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        step: u32,
+        state: &str,
+    ) -> Result<()> {
+        if !STEP_STATES.contains(&state) {
+            return Err(invalid("unknown durable step state"));
+        }
+        if self
+            .commit(fortress_id, plan_digest)
+            .is_some_and(|commit| commit.steps.get(&step).is_some_and(|s| s == state))
+        {
+            return Ok(());
+        }
+        self.append(Record::Step {
+            fortress_id,
+            plan_digest,
+            step,
+            state: state.to_owned(),
+        })
+    }
+
+    /// Retire a commit whose steps are all final.
+    pub fn retire_commit(&mut self, fortress_id: FortressId, plan_digest: Digest32) -> Result<()> {
+        if self.commit(fortress_id, plan_digest).is_none() {
+            return Ok(());
+        }
+        self.append(Record::Done {
+            fortress_id,
+            plan_digest,
+        })
+    }
+
+    /// One unfinished durable commit.
+    #[must_use]
+    pub fn commit(&self, fortress_id: FortressId, plan_digest: Digest32) -> Option<&DurableCommit> {
+        self.index
+            .commits
+            .get(&fortress_id)
+            .and_then(|book| book.get(&plan_digest))
+    }
+
+    /// Every unfinished durable commit of a fortress, in digest order.
+    pub fn commits(&self, fortress_id: FortressId) -> impl Iterator<Item = &DurableCommit> {
+        self.index
+            .commits
+            .get(&fortress_id)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+    }
+
     /// The latest durable state of a fortress, if it has one.
     #[must_use]
     pub fn head(&self, fortress_id: FortressId) -> Option<&DurableHead> {
@@ -600,6 +849,24 @@ impl DurableLabStore {
                     .flat_map(BTreeMap::values)
                     .cloned()
                     .map(Record::Checkpoint),
+            )
+            .chain(
+                self.index
+                    .commits
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|commit| {
+                        let mut opening = commit.clone();
+                        opening.steps.clear();
+                        std::iter::once(Record::Commit(opening)).chain(commit.steps.iter().map(
+                            |(step, state)| Record::Step {
+                                fortress_id: commit.fortress_id,
+                                plan_digest: commit.plan_digest,
+                                step: *step,
+                                state: state.clone(),
+                            },
+                        ))
+                    }),
             )
             .collect();
         for record in live {
@@ -655,6 +922,7 @@ impl DurableLabStore {
 struct Index {
     heads: BTreeMap<FortressId, DurableHead>,
     checkpoints: BTreeMap<FortressId, BTreeMap<CheckpointId, DurableCheckpoint>>,
+    commits: BTreeMap<FortressId, BTreeMap<Digest32, DurableCommit>>,
 }
 
 impl Index {
@@ -681,6 +949,50 @@ impl Index {
                     ));
                 }
                 book.insert(checkpoint.checkpoint_id, checkpoint);
+            }
+            Record::Commit(commit) => {
+                let book = self.commits.entry(commit.fortress_id).or_default();
+                if book.contains_key(&commit.plan_digest) {
+                    return Err(corrupt("durable commit recorded twice"));
+                }
+                if book.len() >= MAX_COMMITS_PER_FORTRESS {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "durable laboratory fortress reached its unfinished-commit bound",
+                    ));
+                }
+                book.insert(commit.plan_digest, commit);
+            }
+            Record::Step {
+                fortress_id,
+                plan_digest,
+                step,
+                state,
+            } => {
+                let commit = self
+                    .commits
+                    .get_mut(&fortress_id)
+                    .and_then(|book| book.get_mut(&plan_digest))
+                    .ok_or_else(|| corrupt("step record names an unknown durable commit"))?;
+                if !commit.steps.contains_key(&step) && commit.steps.len() >= MAX_STEPS_PER_COMMIT {
+                    return Err(corrupt("durable commit exceeds its step bound"));
+                }
+                commit.steps.insert(step, state);
+            }
+            Record::Done {
+                fortress_id,
+                plan_digest,
+            } => {
+                let book = self
+                    .commits
+                    .get_mut(&fortress_id)
+                    .ok_or_else(|| corrupt("done record names an unknown durable commit"))?;
+                if book.remove(&plan_digest).is_none() {
+                    return Err(corrupt("done record names an unknown durable commit"));
+                }
+                if book.is_empty() {
+                    self.commits.remove(&fortress_id);
+                }
             }
         }
         Ok(())
@@ -747,6 +1059,44 @@ mod tests {
         assert_eq!(checkpoints[0].label, "before dig");
         assert_eq!(store.load_snapshot(checkpoints[0].state_hash)?, checkpoint);
         assert_eq!(store.report().records, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn commits_and_step_states_survive_reopen_and_compaction() -> Result<()> {
+        let dir = TempDir::new("commits");
+        let sealed = snapshot(5, 3);
+        let digest = Digest32::of_bytes(b"plan");
+        let source = DurablePlanSource::Actions {
+            summary: "dig".to_owned(),
+            raw: r#"[{"action":{"kind":"pause","paused":true}}]"#.to_owned(),
+        };
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            store.persist_commit(&sealed, digest, 77, source.clone())?;
+            store.persist_step(FortressId::new(5), digest, 1, "dispatched")?;
+            store.persist_step(FortressId::new(5), digest, 1, "dispatched")?;
+            store.persist_step(FortressId::new(5), digest, 2, "verified")?;
+            assert_eq!(store.report().records, 3);
+            assert!(
+                store
+                    .persist_step(FortressId::new(5), digest, 1, "bogus")
+                    .is_err()
+            );
+            store.compact()?;
+        }
+        let mut store = DurableLabStore::open(&dir.0)?;
+        let commit = store.commit(FortressId::new(5), digest).cloned();
+        let commit = commit.ok_or_else(|| corrupt("commit lost"))?;
+        assert_eq!(commit.source, source);
+        assert_eq!(commit.intent_id, 77);
+        assert_eq!(store.load_snapshot(commit.sealed_state_hash)?, sealed);
+        assert_eq!(commit.steps.get(&1).map(String::as_str), Some("dispatched"));
+        assert_eq!(commit.steps.get(&2).map(String::as_str), Some("verified"));
+        store.retire_commit(FortressId::new(5), digest)?;
+        drop(store);
+        let store = DurableLabStore::open(&dir.0)?;
+        assert_eq!(store.commits(FortressId::new(5)).count(), 0);
         Ok(())
     }
 

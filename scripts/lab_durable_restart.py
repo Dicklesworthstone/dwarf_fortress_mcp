@@ -83,12 +83,15 @@ with tempfile.TemporaryDirectory() as root:
     print("second process: resumed =", resumed["durable"]["resumed"],
           "checkpoints =", resumed["durable"]["restorable_checkpoints"],
           "epoch", resumed["durable"]["recovered_from_anchor"]["epoch"], "->", resumed["anchor"]["epoch"])
+    print("recovered commits:", [(c["status"], [s["state"] for s in c.get("steps", [])]) for c in resumed["durable"]["recovered_commits"]])
+    print("carried obligations:", [(c["action"], c["state"]) for c in resumed["durable"]["carried_obligations"]])
     after = second.tool("fortress_query", {"session_id": sid2, "mode": TERRAIN})["levels"][0]["rows"]
     assert after == before, (before, after)
     for _ in range(10):
         second.tool("fortress_wait", {"session_id": sid2, "max_game_ticks": 50})
     done = second.tool("fortress_query", {"session_id": sid2, "mode": TERRAIN})["levels"][0]["rows"]
     print("work continued after restart:", done)
+    print("carried obligations now:", [(c["action"], c["state"]) for c in second.tool("fortress_doctor", {"session_id": sid2})["durability"]["carried_obligations"]])
     assert done == ["........"] * 3, done
     restored = second.tool("fortress_restore", {"session_id": sid2, "checkpoint_id": cp["checkpoint_id"]})
     assert restored["ok"], restored

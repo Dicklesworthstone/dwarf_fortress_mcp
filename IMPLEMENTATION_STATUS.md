@@ -88,7 +88,10 @@ torn final record is ever discarded, any other damage refuses the store.
 Reopening resumes the last persisted world in a new observation epoch, adopts
 every durable checkpoint, and fences older sessions of that fortress. Work that
 lives in the world (designations, construction, orders) continues; action
-handles and obligations are deliberately not carried. Proven in-process and by
+handles are not carried, but obligations are: each unfinished commit is
+journaled (request + sealed world) before dispatch, deterministically recompiled
+on resume, accepted only if it reproduces its sealed digest, and its dispatched
+steps are re-proven against observation until verified or failed. Proven in-process and by
 `scripts/lab_durable_restart.py` across a real SIGKILL of the `serve` binary.
 This is laboratory durability, not power-loss qualification of any live effect
 journal.
