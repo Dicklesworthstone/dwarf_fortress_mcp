@@ -1880,3 +1880,45 @@ fn attention_is_ranked_bounded_and_certified_every_turn() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn compensation_never_inverts_a_step_that_was_never_dispatched() -> TestResult {
+    let session = open("72180", false, &ALL_EFFECTS)?;
+    let labor = |session: &str| -> std::result::Result<Value, Box<dyn std::error::Error>> {
+        let row = parsed(&fortress_query(
+            Some(session.to_owned()),
+            Some(r#"{"mode":"entities","kind":"unit","where":{"field":"profession","value":"brewer"}}"#.to_owned()),
+        ))?;
+        Ok(row["rows"][0]["fields"]["labor.BREW"].clone())
+    };
+    // The brewer already brews.
+    let enabled = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true}}]"#,
+    )?;
+    assert_eq!(enabled["ok"], true, "{enabled}");
+    let before = labor(&session)?;
+    assert_eq!(before, json!(true), "labor field shape");
+    // A redundant enable deferred behind a dig never dispatches...
+    let deferred = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[4,5,10],"mode":"mine"}},
+            {"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true},"depends_on":[0]}]"#,
+    )?;
+    assert_eq!(deferred["ok"], true, "{deferred}");
+    // ...so compensating the plan must not apply its inverse (disable BREW).
+    let drained = parsed(&fortress_cancel(
+        Some(session.clone()),
+        Some("compensate_reversible".to_owned()),
+        Some("plan".to_owned()),
+    ))?;
+    assert_eq!(drained["ok"], true, "{drained}");
+    assert_eq!(drained["drain_progress"]["quiescent"], true);
+    assert_eq!(
+        labor(&session)?,
+        before,
+        "compensated an effect that never happened: {drained}"
+    );
+    assert_eq!(drained["drain_progress"]["compensated"], 0, "{drained}");
+    Ok(())
+}

@@ -88,6 +88,9 @@ struct LabAction {
     stable_observations: u32,
     last_stable_anchor: Option<StateAnchor>,
     cancel_mode: Option<CancelMode>,
+    /// Whether the step's effect was ever applied. A step still waiting on
+    /// its dependencies has nothing to compensate.
+    dispatched: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -515,6 +518,7 @@ impl MemoryAdapter {
                 stable_observations: 0,
                 last_stable_anchor: None,
                 cancel_mode: None,
+                dispatched: state != CommitState::Prepared,
             },
         );
         Ok(receipt)
@@ -543,6 +547,9 @@ impl MemoryAdapter {
         let dependencies_verified = self.dependencies_verified(plan_id, &step);
         if prior_state == CommitState::Prepared && dependencies_verified {
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
+            if let Some(stored) = self.actions.get_mut(&action_id) {
+                stored.dispatched = true;
+            }
         }
 
         let mut state = prior_state;
@@ -1166,7 +1173,7 @@ impl GameAdapter for MemoryAdapter {
             ));
         }
         let mut compensation_action = None;
-        if action.cancel_mode == Some(CancelMode::CompensateReversible) {
+        if action.cancel_mode == Some(CancelMode::CompensateReversible) && action.dispatched {
             if let Some(compensation) = &action.step.compensation {
                 if !action_is_supported(compensation)
                     || !self
