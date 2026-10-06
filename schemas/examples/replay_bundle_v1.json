@@ -1,0 +1,180 @@
+{
+  "calls": [
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 0,
+        "state_hash": "bbe663df49d8c6654eaa5e8a48172a1c8ac5d6f88581dc8a719f146f6d95d993"
+      },
+      "arguments": {
+        "durable": null,
+        "fortress_selector": "660123",
+        "max_actions": null,
+        "max_bytes": null,
+        "max_entities": null,
+        "max_game_ticks": 10000,
+        "max_output_tokens": 8192,
+        "max_wall_millis": null,
+        "paused": false,
+        "requested_capabilities": [
+          [
+            "observe",
+            "read_only"
+          ],
+          [
+            "query",
+            "read_only"
+          ],
+          [
+            "plan",
+            "reversible"
+          ],
+          [
+            "control_clock",
+            "reversible"
+          ],
+          [
+            "checkpoint",
+            "guarded"
+          ],
+          [
+            "restore",
+            "guarded"
+          ],
+          [
+            "designate",
+            "guarded"
+          ]
+        ],
+        "scenario": "starter_fortress",
+        "shared": null
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 0,
+      "tool": "fortress.open_session"
+    },
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 0,
+        "state_hash": "bbe663df49d8c6654eaa5e8a48172a1c8ac5d6f88581dc8a719f146f6d95d993"
+      },
+      "arguments": {
+        "actions": "[{\"action\":{\"kind\":\"designate_dig\",\"min\":[1,3,10],\"max\":[4,4,10],\"mode\":\"mine\"}}]",
+        "blueprint": null,
+        "paused_target": null,
+        "summary": null
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 1,
+      "tool": "fortress.plan"
+    },
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 1,
+        "state_hash": "6fa71b2dfa874b3b29a60b5b2dba716e9e6ac8b1b1a320396faceb199bd72819"
+      },
+      "arguments": {
+        "plan_digest": "c1645c963bae9ab4c4b9e9b8f02ec22ec7e7fa0d6dbf3adee088140b61b9aff0"
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 2,
+      "tool": "fortress.commit"
+    },
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 1,
+        "state_hash": "6fa71b2dfa874b3b29a60b5b2dba716e9e6ac8b1b1a320396faceb199bd72819"
+      },
+      "arguments": {
+        "label": null
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 3,
+      "tool": "fortress.checkpoint"
+    },
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 101,
+        "sequence": 2,
+        "state_hash": "bbc8286c49a63ba90433be4f131cc97ce917a7bb3a769e20b71b4567b85760a9"
+      },
+      "arguments": {
+        "max_game_ticks": 100
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 4,
+      "tool": "fortress.wait"
+    },
+    {
+      "anchor_after": {
+        "epoch": 0,
+        "fortress_id": "660123",
+        "game_tick": 101,
+        "sequence": 2,
+        "state_hash": "bbc8286c49a63ba90433be4f131cc97ce917a7bb3a769e20b71b4567b85760a9"
+      },
+      "arguments": {
+        "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "error_code": "invalid_plan",
+      "ok": false,
+      "seq": 5,
+      "tool": "fortress.commit"
+    },
+    {
+      "anchor_after": {
+        "epoch": 1,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 0,
+        "state_hash": "d8f1ca7bb640ba65cb92e1e3d45a0c5a18870ea62c778afcd67ed761ef76c895"
+      },
+      "arguments": {
+        "checkpoint_id": "4e1e76004ce86d0675df6e29f8b9b44e"
+      },
+      "error_code": null,
+      "ok": true,
+      "seq": 6,
+      "tool": "fortress.restore"
+    },
+    {
+      "anchor_after": {
+        "epoch": 1,
+        "fortress_id": "660123",
+        "game_tick": 1,
+        "sequence": 0,
+        "state_hash": "d8f1ca7bb640ba65cb92e1e3d45a0c5a18870ea62c778afcd67ed761ef76c895"
+      },
+      "arguments": {},
+      "error_code": null,
+      "ok": true,
+      "seq": 7,
+      "tool": "fortress.observe"
+    }
+  ],
+  "calls_digest": "aa3e18636492bcdff582b1457fa7172f8e54c8ae9598c46319b82b721af320ac",
+  "not_replayable_reason": null,
+  "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor",
+  "replayable": true,
+  "schema": "dfmcp.replay.bundle/1",
+  "server_version": "0.0.1",
+  "truncated": false
+}

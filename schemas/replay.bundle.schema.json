@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dfmcp.local/schemas/replay.bundle.schema.json",
+  "title": "dfmcp.replay.bundle/1",
+  "description": "A laboratory session's bounded call log. Replaying re-executes every call in a fresh laboratory session and compares outcome, error code and resulting canonical anchor; calls_digest = SHA-256(\"dfmcp-replay-bundle-calls/1\\0\" || compact JSON of calls). Laboratory replay is not Dwarf Fortress evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "server_version", "replayable", "not_replayable_reason", "truncated", "calls_digest", "calls", "note"],
+  "properties": {
+    "schema": {"const": "dfmcp.replay.bundle/1"},
+    "server_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "replayable": {"type": "boolean"},
+    "not_replayable_reason": {"type": ["string", "null"], "maxLength": 256},
+    "truncated": {"type": "boolean"},
+    "calls_digest": {"$ref": "#/$defs/hex32"},
+    "note": {"type": "string"},
+    "calls": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/call"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"replayable": {"const": true}}}, "then": {"properties": {"not_replayable_reason": {"type": "null"}}}},
+    {"if": {"properties": {"replayable": {"const": false}}}, "then": {"properties": {"not_replayable_reason": {"type": "string", "minLength": 1}}}}
+  ],
+  "$defs": {
+    "hex32": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decimal_id": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$"},
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fortress_id", "epoch", "sequence", "game_tick", "state_hash"],
+      "properties": {
+        "fortress_id": {"$ref": "#/$defs/decimal_id"},
+        "epoch": {"type": "integer", "minimum": 0},
+        "sequence": {"type": "integer", "minimum": 0},
+        "game_tick": {"type": "integer", "minimum": 0},
+        "state_hash": {"$ref": "#/$defs/hex32"}
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "tool", "arguments", "ok", "error_code", "anchor_after"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "tool": {"enum": ["fortress.open_session", "fortress.observe", "fortress.query", "fortress.plan", "fortress.commit", "fortress.wait", "fortress.cancel", "fortress.checkpoint", "fortress.restore", "fortress.explain", "fortress.doctor"]},
+        "arguments": {"type": "object", "not": {"required": ["session_id"]}},
+        "ok": {"type": "boolean"},
+        "error_code": {"type": ["string", "null"], "maxLength": 64},
+        "anchor_after": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/anchor"}]}
+      }
+    }
+  }
+}

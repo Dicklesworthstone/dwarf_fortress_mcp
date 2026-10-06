@@ -379,6 +379,24 @@ mod tests {
         let report = replay_bundle(&bundle);
         assert_eq!(report["ok"], true, "{report}");
         assert_eq!(report["replayed"], 8);
+        // The replayed session's own bundle is byte-identical to the original.
+        let replayed = report["replay_session_id"]
+            .as_str()
+            .ok_or("replay session")?;
+        assert_eq!(
+            crate::server::replay_bundle_for(replayed)?.to_string(),
+            bundle.to_string()
+        );
+        if std::env::var_os("DFMCP_REGENERATE_GOLDEN").is_some() {
+            std::fs::write(
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../",
+                    "schemas/examples/replay_bundle_v1.json"
+                ),
+                serde_json::to_string_pretty(&bundle)? + "\n",
+            )?;
+        }
 
         // Changing a recorded wait localizes the divergence to that call.
         let mut tampered = bundle.clone();
@@ -393,6 +411,113 @@ mod tests {
         let mut forged = bundle;
         forged["calls"][1]["arguments"]["summary"] = json!("other");
         assert_eq!(replay_bundle(&forged)["ok"], false);
+        Ok(())
+    }
+
+    /// The checked-in golden bundle must keep replaying with zero divergence:
+    /// a change in laboratory semantics is localized to its first call.
+    #[test]
+    fn the_golden_bundle_still_replays_exactly() -> TestResult {
+        let golden: Value = serde_json::from_str(include_str!(
+            "../../../schemas/examples/replay_bundle_v1.json"
+        ))?;
+        let report = replay_bundle(&golden);
+        assert_eq!(report["ok"], true, "golden replay diverged: {report}");
+        assert_eq!(report["first_divergence"], Value::Null);
+        Ok(())
+    }
+
+    /// Replay-equality campaign: every laboratory scenario, driven through a
+    /// broad tool mix (queries of every mode, plans, commits, waits,
+    /// checkpoints, restores, cancels, explains, doctor, refused calls),
+    /// replays with zero divergence and re-exports a byte-identical bundle.
+    #[test]
+    fn every_scenario_replays_with_zero_divergence() -> TestResult {
+        let caps: Vec<(String, String)> = [
+            ("observe", "read_only"),
+            ("query", "read_only"),
+            ("plan", "reversible"),
+            ("control_clock", "reversible"),
+            ("checkpoint", "guarded"),
+            ("restore", "guarded"),
+            ("designate", "guarded"),
+            ("doctor", "read_only"),
+            ("construct", "guarded"),
+            ("configure_labor", "reversible"),
+            ("configure_production", "reversible"),
+            ("configure_military", "guarded"),
+            ("configure_logistics", "guarded"),
+        ]
+        .iter()
+        .map(|(c, r)| ((*c).to_owned(), (*r).to_owned()))
+        .collect();
+        for (index, scenario) in crate::lab_world::SCENARIOS.iter().enumerate() {
+            let opened = parsed(&f::fortress_open_session(
+                Some(false),
+                Some(format!("66090{index}")),
+                Some(caps.clone()),
+                None,
+                Some(50_000),
+                None,
+                None,
+                Some(8_192),
+                None,
+                Some((*scenario).to_owned()),
+                None,
+                None,
+            ))?;
+            let session = opened["session_id"].as_str().ok_or_else(|| opened.to_string())?.to_owned();
+            let s = || Some(session.clone());
+            for mode in [
+                None,
+                Some(r#"{"mode":"entities","kind":"unit","limit":5}"#),
+                Some(r#"{"mode":"terrain","min":[0,0,10],"max":[9,4,10]}"#),
+                Some(r#"{"mode":"search","text":"Urist","limit":3}"#),
+                Some(r#"{"mode":"path","from":[0,2,10],"to":[9,2,10]}"#),
+                Some(r#"{"mode":"entities","where":{"field":"no.such","op":"lt","value":1}}"#),
+            ] {
+                parsed(&f::fortress_query(s(), mode.map(str::to_owned)))?;
+            }
+            let plan = parsed(&f::fortress_plan(
+                s(),
+                None,
+                None,
+                Some(r#"[{"action":{"kind":"designate_dig","min":[1,3,10],"max":[3,4,10],"mode":"mine"}}]"#.to_owned()),
+                None,
+            ))?;
+            if let Some(digest) = plan["plan_digest"].as_str() {
+                parsed(&f::fortress_commit(s(), digest.to_owned()))?;
+            }
+            let checkpoint = parsed(&f::fortress_checkpoint(s(), Some("mid".to_owned())))?;
+            for _ in 0..3 {
+                parsed(&f::fortress_wait(s(), Some(400)))?;
+            }
+            parsed(&f::fortress_cancel(s(), None, None))?;
+            parsed(&f::fortress_explain(s(), Some("1001".to_owned())))?;
+            parsed(&f::fortress_doctor(s()))?;
+            parsed(&f::fortress_commit(s(), "ab".repeat(32)))?;
+            if let Some(id) = checkpoint["checkpoint_id"].as_str() {
+                parsed(&f::fortress_restore(s(), id.to_owned()))?;
+            }
+            parsed(&f::fortress_wait(s(), Some(250)))?;
+            parsed(&f::fortress_observe(s()))?;
+
+            let bundle = crate::server::replay_bundle_for(&session)?;
+            assert_eq!(bundle["replayable"], true, "{scenario}");
+            let calls = bundle["calls"].as_array().map_or(0, Vec::len);
+            assert!(calls >= 18, "{scenario}: {calls} calls");
+            let report = replay_bundle(&bundle);
+            assert_eq!(report["ok"], true, "{scenario}: {report}");
+            assert_eq!(report["replayed"], calls);
+            let replayed = report["replay_session_id"]
+                .as_str()
+                .ok_or("replay session")?;
+            assert_eq!(
+                crate::server::replay_bundle_for(replayed)?.to_string(),
+                bundle.to_string(),
+                "{scenario}: replay re-exports a byte-identical bundle"
+            );
+        }
         Ok(())
     }
 }
