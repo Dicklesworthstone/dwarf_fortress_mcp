@@ -1188,6 +1188,10 @@ fn a_fortress_runs_dry_and_the_agent_brews_its_way_back() -> TestResult {
         }
     }
     let thirsty = thirsty.ok_or("never ran dry")?;
+    assert_eq!(
+        thirsty["agent_turn"]["recommendations"][0]["recommendation_id"], "remedy-drink_supply",
+        "{thirsty}"
+    );
     assert_eq!(stock(&session)?, 0, "{thirsty}");
     let units = parsed(&fortress_query(
         Some(session.clone()),

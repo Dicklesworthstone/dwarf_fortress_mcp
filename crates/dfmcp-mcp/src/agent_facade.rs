@@ -722,7 +722,46 @@ fn error_code(payload: &Value) -> &str {
     }
 }
 
+/// A fortress need with a concrete remedy outranks routine next steps when
+/// the session holds the authority to plan it; otherwise it stays attention.
 fn recommendations(
+    operation: &str,
+    ok: bool,
+    payload: &Value,
+    state: &SessionOrientation,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    if ok
+        && state.pending_plan_digest.is_none()
+        && has_grant(state, "configure_production")
+        && let Some(alerts) = payload.get("world_alerts").and_then(Value::as_array)
+    {
+        for alert in alerts {
+            if let Some(remedy) = alert.get("remedy") {
+                out.push(recommendation(
+                    format!("remedy-{}", alert["alert"].as_str().unwrap_or("need")),
+                    "fortress.plan",
+                    format!(
+                        "{}; plan the work order that resupplies it",
+                        alert["finding"]
+                            .as_str()
+                            .unwrap_or("a fortress need is unmet")
+                    ),
+                    "high",
+                    "low",
+                    "reversible",
+                    "reversible",
+                    false,
+                    remedy["arguments"].clone(),
+                ));
+            }
+        }
+    }
+    out.extend(routine_recommendations(operation, ok, payload, state));
+    out
+}
+
+fn routine_recommendations(
     operation: &str,
     ok: bool,
     payload: &Value,
