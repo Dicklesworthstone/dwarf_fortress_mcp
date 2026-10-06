@@ -692,3 +692,71 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
     assert_eq!(again["ok"], false, "{again}");
     Ok(())
 }
+
+#[test]
+fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
+    let session = open("72009", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(WORKSHOP_PLAN.to_owned()),
+    ))?;
+    let forecast = &planned["forecast"];
+    assert_eq!(forecast["epistemic_state"], "predicted");
+    assert_eq!(forecast["available"], true, "{forecast}");
+    assert_eq!(forecast["predicted_complete"], true, "{forecast}");
+    let predicted = forecast["predicted_completion_tick"]
+        .as_u64()
+        .ok_or("predicted completion tick")?;
+    // Forecasting is side-effect free: nothing was dispatched.
+    let designations = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
+    ))?;
+    assert_eq!(designations["total"], 0);
+
+    // Reality (in 50-tick waits) agrees with the prediction to within a wait.
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    let mut actual = None;
+    for _ in 0..80 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+        if waited["open_actions_remaining"] == 0 {
+            actual = waited["game_tick"].as_u64();
+            break;
+        }
+    }
+    let actual = actual.ok_or("plan never completed")?;
+    let resolution = forecast["resolution_ticks"].as_u64().ok_or("resolution")?;
+    assert!(
+        actual.abs_diff(predicted) <= 50 + resolution,
+        "predicted {predicted} (resolution {resolution}), observed {actual}"
+    );
+
+    // A paused fortress: the forecast says the work is blocked.
+    let paused = open("72010", true, &ALL_EFFECTS)?;
+    let blocked = parsed(&fortress_plan(
+        Some(paused),
+        None,
+        None,
+        Some(dig([0, 3, 10], [1, 3, 10])),
+    ))?;
+    assert_eq!(blocked["forecast"]["blocked_by_pause"], true, "{blocked}");
+    assert_eq!(blocked["forecast"]["predicted_complete"], false);
+
+    // A step that would fail at commit is visible before committing.
+    let doomed = parsed(&fortress_plan(
+        Some(session),
+        None,
+        None,
+        Some(dig([0, 3, 9], [0, 3, 10])),
+    ))?;
+    assert_eq!(doomed["ok"], true, "{doomed}");
+    assert_eq!(doomed["forecast"]["available"], false);
+    assert_eq!(doomed["forecast"]["reason"]["code"], "preconditions_failed");
+    Ok(())
+}

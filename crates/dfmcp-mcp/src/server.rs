@@ -1186,6 +1186,7 @@ pub(crate) fn plan_with_actions(
                         "requires_checkpoint": plan.requires_checkpoint,
                         "expires_at_tick": plan.expires_at_tick.0,
                         "steps": crate::lab_world::plan_steps_json(&plan),
+                        "forecast": forecast_plan(&guard.adapter, &plan, &ctx),
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
                     guard.pending = Some(PendingPlan {
@@ -1432,6 +1433,110 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         }
     }
     payload.to_string()
+}
+
+/// Most simulated time slices a forecast may take.
+const MAX_FORECAST_SLICES: u64 = 400;
+
+/// Counterfactual: commit the sealed plan on a fork of the current world and
+/// run deterministic laboratory time forward to every step's obligation
+/// deadline, reporting when each step would verify or fail. The fork is
+/// discarded; nothing here changes canonical state or grants authority. The
+/// forecast assumes the fortress stays as it is now (paused stays paused) and
+/// that no other agent acts.
+fn forecast_plan(
+    adapter: &MemoryAdapter,
+    plan: &PreparedPlan,
+    template: &OperationContext,
+) -> serde_json::Value {
+    let mut fork = adapter.clone();
+    let context = |fork: &MemoryAdapter| OperationContext {
+        anchor: fork.snapshot().anchor(),
+        ..template.clone()
+    };
+    let start = fork.snapshot().tick;
+    let unavailable = |reason: &DfmcpError| {
+        json!({
+            "epistemic_state": "predicted",
+            "available": false,
+            "reason": {"code": reason.code.as_str(), "message": reason.message},
+        })
+    };
+    let prepared = match fork.prepare(plan, &context(&fork)) {
+        Ok(prepared) => prepared,
+        Err(error) => return unavailable(&error),
+    };
+    let receipt = match fork.commit(plan, &prepared, &context(&fork)) {
+        Ok(receipt) => receipt,
+        Err(error) => return unavailable(&error),
+    };
+    let mut outcomes: Vec<(dfmcp_core::StepId, ActionId, CommitState, Option<u64>)> = receipt
+        .actions
+        .iter()
+        .map(|action| {
+            let at = action.state.is_terminal().then_some(start.0);
+            (action.step_id, action.action_id, action.state, at)
+        })
+        .collect();
+    let horizon = plan
+        .steps
+        .iter()
+        .filter_map(|step| step.obligation.as_ref().map(|o| o.deadline_tick.0))
+        .max()
+        .unwrap_or(start.0);
+    let blocked_by_pause =
+        fork.snapshot().paused && outcomes.iter().any(|(_, _, state, _)| !state.is_terminal());
+    let span = horizon.saturating_sub(start.0);
+    let slice = span
+        .div_ceil(MAX_FORECAST_SLICES)
+        .max(dfmcp_intent::effects::DEFAULT_POLL_INTERVAL_TICKS);
+    if !blocked_by_pause && span > 0 {
+        let mut elapsed = 0u64;
+        while elapsed <= span && outcomes.iter().any(|(_, _, state, _)| !state.is_terminal()) {
+            if fork.advance_ticks(slice).is_err() {
+                break;
+            }
+            elapsed += slice;
+            for outcome in &mut outcomes {
+                if outcome.2.is_terminal() {
+                    continue;
+                }
+                if let Ok(polled) = fork.poll_action(outcome.1, &context(&fork)) {
+                    outcome.2 = polled.state;
+                    if polled.state.is_terminal() {
+                        outcome.3 = Some(fork.snapshot().tick.0);
+                    }
+                }
+            }
+        }
+    }
+    let steps: Vec<serde_json::Value> = outcomes
+        .iter()
+        .map(|(step, _, state, at)| {
+            json!({
+                "step": step.get(),
+                "predicted_state": format!("{state:?}"),
+                "predicted_terminal_tick": at,
+            })
+        })
+        .collect();
+    let completes = outcomes
+        .iter()
+        .all(|(_, _, state, _)| *state == CommitState::Verified);
+    json!({
+        "epistemic_state": "predicted",
+        "available": true,
+        "method": "deterministic_laboratory_simulation_on_a_discarded_fork",
+        "from_tick": start.0,
+        "horizon_tick": horizon,
+        "predicted_complete": completes,
+        "predicted_completion_tick": completes.then(|| outcomes.iter().filter_map(|o| o.3).max()).flatten(),
+        "resolution_ticks": slice,
+        "cadence_note": "deferred steps dispatch when a wait observes their prerequisites, so real completion also depends on how often the agent waits",
+        "blocked_by_pause": blocked_by_pause,
+        "steps": steps,
+        "assumes": "the fortress stays as it is now and no other agent acts; a prediction is not evidence",
+    })
 }
 
 /// The (capability, risk ceiling) pairs a sealed plan needs to be committed.
