@@ -21,6 +21,16 @@ use serde_json::{Value, json};
 const MAX_PRESENTATION_SESSIONS: usize = 1_024;
 const LAB_IMPLEMENTATION_PHASE: &str = "phase_0c_semantic_contract_laboratory";
 
+/// One committed plan action as the agent last observed it.
+#[derive(Clone, Debug)]
+struct PlanActionView {
+    action_id: String,
+    step: u64,
+    state: String,
+    /// The sealed step summary from `fortress.plan` (kind, obligation, ...).
+    sealed: Value,
+}
+
 #[derive(Clone, Debug)]
 struct SessionOrientation {
     anchor: Option<Value>,
@@ -30,6 +40,12 @@ struct SessionOrientation {
     adapter: Option<String>,
     compatibility: Option<String>,
     pending_plan_digest: Option<String>,
+    /// Capabilities the pending plan needs to be committed.
+    pending_plan_capabilities: Vec<String>,
+    /// Sealed per-step summaries of the pending plan (obligations, entities).
+    pending_plan_steps: Vec<Value>,
+    /// Every action of the most recently committed plan.
+    plan_actions: Vec<PlanActionView>,
     last_action_id: Option<String>,
     last_action_state: Option<String>,
     last_checkpoint_id: Option<String>,
@@ -55,6 +71,9 @@ impl SessionOrientation {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             pending_plan_digest: None,
+            pending_plan_capabilities: Vec::new(),
+            pending_plan_steps: Vec::new(),
+            plan_actions: Vec::new(),
             last_action_id: None,
             last_action_state: None,
             last_checkpoint_id: None,
@@ -183,10 +202,47 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                 .get("plan_digest")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            if state.pending_plan_digest.is_some() {
+                state.pending_plan_capabilities =
+                    string_array(payload.get("required_capabilities"));
+                if state.pending_plan_capabilities.is_empty() {
+                    // Legacy pause plans do not list their capability set.
+                    state.pending_plan_capabilities = vec!["control_clock".to_owned()];
+                }
+                state.pending_plan_steps = payload
+                    .get("steps")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+            }
         }
         "fortress.commit" => {
             state.pending_plan_digest = None;
+            let sealed_steps = std::mem::take(&mut state.pending_plan_steps);
+            state.pending_plan_capabilities.clear();
             if let Some(actions) = payload.get("actions").and_then(Value::as_array) {
+                state.plan_actions = actions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, action)| {
+                        let step = action
+                            .get("step")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(index as u64);
+                        PlanActionView {
+                            action_id: text_or_unknown(action.get("action_id")),
+                            step,
+                            state: text_or_unknown(action.get("state")),
+                            sealed: sealed_steps
+                                .iter()
+                                .find(|sealed| {
+                                    sealed.get("step").and_then(Value::as_u64) == Some(step)
+                                })
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        }
+                    })
+                    .collect();
                 if let Some(action) = actions.first() {
                     state.last_action_id = action
                         .get("action_id")
@@ -199,6 +255,18 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
         "fortress.wait" => {
             if let Some(action_id) = payload.get("action_id").and_then(Value::as_str) {
                 state.last_action_id = Some(action_id.to_owned());
+            }
+            if let Some(polled) = payload.get("plan_actions").and_then(Value::as_array) {
+                for observed in polled {
+                    let id = observed.get("action_id").and_then(Value::as_str);
+                    if let Some(view) = state
+                        .plan_actions
+                        .iter_mut()
+                        .find(|view| Some(view.action_id.as_str()) == id)
+                    {
+                        view.state = text_or_unknown(observed.get("state"));
+                    }
+                }
             }
             state.last_action_state = payload
                 .get("commit_state")
@@ -224,6 +292,9 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
         }
         "fortress.restore" => {
             state.pending_plan_digest = None;
+            state.pending_plan_capabilities.clear();
+            state.pending_plan_steps.clear();
+            state.plan_actions.clear();
             state.last_action_id = None;
             state.last_action_state = None;
         }
@@ -248,6 +319,45 @@ fn action_is_nonterminal(state: Option<&str>) -> bool {
     }
 }
 
+fn plan_work_pending(state: &SessionOrientation) -> bool {
+    state
+        .plan_actions
+        .iter()
+        .any(|view| action_is_nonterminal(Some(&view.state)))
+}
+
+fn failed_plan_actions(state: &SessionOrientation) -> Vec<&PlanActionView> {
+    state
+        .plan_actions
+        .iter()
+        .filter(|view| view.state.eq_ignore_ascii_case("failed"))
+        .collect()
+}
+
+/// A bounded game-time step for the next wait: the smallest pending poll
+/// interval times ten, within the negotiated game-tick budget.
+fn wait_ticks(state: &SessionOrientation) -> u64 {
+    let cadence = state
+        .plan_actions
+        .iter()
+        .filter(|view| action_is_nonterminal(Some(&view.state)))
+        .filter_map(|view| {
+            view.sealed
+                .get("obligation")
+                .and_then(|o| o.get("poll_interval_ticks"))
+                .and_then(Value::as_u64)
+        })
+        .min()
+        .unwrap_or(10)
+        .saturating_mul(10);
+    let budget = state
+        .budget
+        .get("max_game_ticks")
+        .and_then(Value::as_u64)
+        .unwrap_or(cadence);
+    cadence.clamp(1, budget.max(1))
+}
+
 fn active_work(state: &SessionOrientation) -> Value {
     let pending_plans = match state.pending_plan_digest.as_ref() {
         Some(digest) => vec![json!({
@@ -260,17 +370,52 @@ fn active_work(state: &SessionOrientation) -> Value {
         })],
         None => Vec::new(),
     };
-    let actions = match state.last_action_id.as_ref() {
-        Some(action_id) => vec![json!({
-            "action_id": action_id,
-            "state": state.last_action_state.as_deref().unwrap_or("unknown"),
-        })],
-        None => Vec::new(),
+    let actions: Vec<Value> = if state.plan_actions.is_empty() {
+        match state.last_action_id.as_ref() {
+            Some(action_id) => vec![json!({
+                "action_id": action_id,
+                "state": state.last_action_state.as_deref().unwrap_or("unknown"),
+            })],
+            None => Vec::new(),
+        }
+    } else {
+        state
+            .plan_actions
+            .iter()
+            .map(|view| {
+                json!({
+                    "action_id": view.action_id,
+                    "step": view.step,
+                    "kind": value_or_null(view.sealed.get("kind")),
+                    "state": view.state,
+                    "creates_entity_id": value_or_null(view.sealed.get("creates_entity_id")),
+                })
+            })
+            .collect()
     };
+    // Every nonterminal action with a sealed obligation is an open obligation:
+    // its terminal predicate must be observed before its deadline.
+    let obligations: Vec<Value> = state
+        .plan_actions
+        .iter()
+        .filter(|view| action_is_nonterminal(Some(&view.state)))
+        .filter_map(|view| {
+            let obligation = view.sealed.get("obligation").filter(|o| !o.is_null())?;
+            Some(json!({
+                "action_id": view.action_id,
+                "step": view.step,
+                "state": view.state,
+                "terminal": value_or_null(obligation.get("terminal")),
+                "deadline_tick": value_or_null(obligation.get("deadline_tick")),
+                "blocked_by_pause": state.paused == Some(true),
+                "next_step": {"tool": "fortress.wait", "arguments": {"max_game_ticks": wait_ticks(state)}},
+            }))
+        })
+        .collect();
     json!({
         "pending_plans": pending_plans,
         "actions": actions,
-        "obligations": [],
+        "obligations": obligations,
         "cancellation_drains": [],
         "indeterminate_effects": [],
         "publications": [],
@@ -340,14 +485,18 @@ fn affordances(state: &SessionOrientation) -> Vec<Value> {
     ];
 
     if let Some(digest) = state.pending_plan_digest.as_ref() {
+        let commit_granted = state
+            .pending_plan_capabilities
+            .iter()
+            .all(|capability| has_grant(state, capability));
         result.push(affordance(
             "commit-pending-plan",
             "fortress.commit",
             "commit_prepared_plan",
             "reversible",
             true,
-            control_granted,
-            (!control_granted).then_some("control_clock capability is not granted"),
+            commit_granted,
+            (!commit_granted).then_some("the session lacks a capability the sealed plan requires"),
             json!({"plan_digest": digest}),
         ));
     } else if let Some(paused) = state.paused {
@@ -489,6 +638,32 @@ fn recommendations(
             json!({"plan_digest": digest}),
         )];
     }
+    if plan_work_pending(state) {
+        if state.paused == Some(true) {
+            return vec![recommendation(
+                "resume-to-progress-work",
+                "fortress.plan",
+                "committed work cannot progress while the fortress is paused",
+                "high",
+                "high",
+                "reversible",
+                "reversible",
+                false,
+                json!({"paused_target": false, "summary": "resume so committed work can progress"}),
+            )];
+        }
+        return vec![recommendation(
+            "advance-and-verify-work",
+            "fortress.wait",
+            "committed temporal work needs game time and a later observation to be proven",
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"max_game_ticks": wait_ticks(state)}),
+        )];
+    }
     if action_is_nonterminal(state.last_action_state.as_deref()) {
         return vec![recommendation(
             "verify-active-action",
@@ -582,6 +757,23 @@ fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientat
             "evidence": [],
         })];
     }
+    let failed = failed_plan_actions(state);
+    if !failed.is_empty() {
+        return vec![json!({
+            "attention_id": "obligation-failed",
+            "category": "active_work",
+            "severity": "high",
+            "urgency": "now",
+            "confidence": {"epistemic_state": "observed", "value": 1.0},
+            "finding": format!(
+                "{} committed action(s) failed their obligation (deadline or failure predicate)",
+                failed.len()
+            ),
+            "subjects": failed.iter().map(|view| json!({"action_id": view.action_id, "step": view.step})).collect::<Vec<_>>(),
+            "likely_consequence_if_ignored": "dependent work will never dispatch and the goal will not be reached",
+            "evidence": [],
+        })];
+    }
     if state.pending_plan_digest.is_some() {
         return vec![json!({
             "attention_id": "prepared-plan-awaiting-decision",
@@ -643,11 +835,11 @@ fn coverage(payload: &Value) -> Value {
     );
     json!({
         "status": if truncated { "partial" } else { "complete_for_named_projection" },
-        "complete_domains": ["laboratory.pause_state", "laboratory.protocol_state"],
+        "complete_domains": ["laboratory.pause_state", "laboratory.protocol_state", "laboratory.world_model"],
         "partial_domains": [],
         "omitted_domains": [
             {"domain": "live_dwarf_fortress", "reason": "no live DFHack adapter is implemented"},
-            {"domain": "units_items_jobs_map", "reason": "the phase-zero memory adapter models pause state only"}
+            {"domain": "dwarf_fortress_behaviour", "reason": "laboratory effects follow the reference action model and calibrated rates, not the game"}
         ],
         "continuation": value_or_null(payload.get("continuation")),
         "absence_proof_scope": ["laboratory.pause_state", "laboratory.protocol_state"],

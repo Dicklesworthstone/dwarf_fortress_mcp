@@ -117,6 +117,23 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
             "Verified"
         ]
     );
+    // The Agent Turn carries every action and each open obligation with its
+    // deadline, and recommends letting bounded game time pass.
+    let turn = &committed["agent_turn"];
+    assert_eq!(
+        turn["active_work"]["actions"].as_array().map(Vec::len),
+        Some(4)
+    );
+    assert_eq!(
+        turn["active_work"]["obligations"].as_array().map(Vec::len),
+        Some(3)
+    );
+    assert!(turn["active_work"]["obligations"][0]["deadline_tick"].is_u64());
+    assert_eq!(turn["recommendations"][0]["tool"], "fortress.wait");
+    assert_eq!(
+        turn["recommendations"][0]["arguments"]["max_game_ticks"],
+        100
+    );
 
     let mut finished = false;
     for _ in 0..40 {
@@ -136,6 +153,11 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         }
     }
     assert!(finished, "plan never verified");
+    let settled = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(
+        settled["agent_turn"]["active_work"]["obligations"],
+        json!([])
+    );
 
     let after = parsed(&fortress_query(
         Some(session.clone()),
@@ -183,6 +205,16 @@ fn paused_fortress_makes_no_progress_and_says_why() -> TestResult {
         waited["plan_actions"][0]["state"],
         "AppliedAwaitingVerification"
     );
+    let turn = &waited["agent_turn"];
+    assert_eq!(
+        turn["active_work"]["obligations"][0]["blocked_by_pause"],
+        true
+    );
+    assert_eq!(turn["recommendations"][0]["tool"], "fortress.plan");
+    assert_eq!(
+        turn["recommendations"][0]["arguments"]["paused_target"],
+        false
+    );
     Ok(())
 }
 
@@ -200,6 +232,15 @@ fn effect_plans_need_their_own_negotiated_authority() -> TestResult {
         ),
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
+    // The commit affordance is disabled because the plan needs `designate`.
+    let commit_affordance = planned["agent_turn"]["affordances"]
+        .as_array()
+        .ok_or("affordances")?
+        .iter()
+        .find(|a| a["affordance_id"] == "commit-pending-plan")
+        .cloned()
+        .ok_or("no commit affordance")?;
+    assert_eq!(commit_affordance["enabled"], false);
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let denied = parsed(&fortress_commit(Some(session.clone()), digest))?;
     assert_eq!(denied["ok"], false, "{denied}");
