@@ -29,7 +29,13 @@ struct PlanActionView {
     state: String,
     /// The sealed step summary from `fortress.plan` (kind, obligation, ...).
     sealed: Value,
+    /// The plan forecast for this step: predicted terminal state and tick.
+    predicted: Option<(String, Option<u64>)>,
+    /// Resolution of that forecast, in game ticks.
+    forecast_resolution: u64,
 }
+
+const MAX_SURPRISES: usize = 32;
 
 #[derive(Clone, Debug)]
 struct SessionOrientation {
@@ -44,6 +50,15 @@ struct SessionOrientation {
     pending_plan_capabilities: Vec<String>,
     /// Sealed per-step summaries of the pending plan (obligations, entities).
     pending_plan_steps: Vec<Value>,
+    /// Forecast returned with the pending plan.
+    pending_forecast: Value,
+    /// Surprise records: material divergence between prediction and
+    /// observation (bounded; newest last).
+    surprises: Vec<Value>,
+    /// Surprises recorded by the current call, surfaced as attention.
+    fresh_surprises: Vec<Value>,
+    /// Game ticks the most recent wait let pass (explains coarse lateness).
+    last_wait_advance: u64,
     /// Every action of the most recently committed plan.
     plan_actions: Vec<PlanActionView>,
     last_action_id: Option<String>,
@@ -73,6 +88,10 @@ impl SessionOrientation {
             pending_plan_digest: None,
             pending_plan_capabilities: Vec::new(),
             pending_plan_steps: Vec::new(),
+            pending_forecast: Value::Null,
+            surprises: Vec::new(),
+            fresh_surprises: Vec::new(),
+            last_wait_advance: 0,
             plan_actions: Vec::new(),
             last_action_id: None,
             last_action_state: None,
@@ -214,12 +233,18 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
+                state.pending_forecast = value_or_null(payload.get("forecast"));
             }
         }
         "fortress.commit" => {
             state.pending_plan_digest = None;
             let sealed_steps = std::mem::take(&mut state.pending_plan_steps);
+            let forecast = std::mem::replace(&mut state.pending_forecast, Value::Null);
             state.pending_plan_capabilities.clear();
+            let commit_tick = payload
+                .get("observed_anchor")
+                .and_then(|anchor| anchor.get("game_tick"))
+                .and_then(Value::as_u64);
             if let Some(actions) = payload.get("actions").and_then(Value::as_array) {
                 // Earlier plans' unfinished actions remain active work.
                 state
@@ -244,9 +269,19 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                                 })
                                 .cloned()
                                 .unwrap_or(Value::Null),
+                            predicted: forecast_for_step(&forecast, step),
+                            forecast_resolution: forecast
+                                .get("resolution_ticks")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0),
                         }
                     })
                     .collect();
+                for view in &committed {
+                    if !action_is_nonterminal(Some(&view.state)) {
+                        compare_with_forecast(state, view, &view.state.clone(), commit_tick);
+                    }
+                }
                 for view in committed {
                     if !state
                         .plan_actions
@@ -269,15 +304,27 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
             if let Some(action_id) = payload.get("action_id").and_then(Value::as_str) {
                 state.last_action_id = Some(action_id.to_owned());
             }
+            state.last_wait_advance = payload
+                .get("advanced_game_ticks")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let observed_tick = payload.get("game_tick").and_then(Value::as_u64);
             if let Some(polled) = payload.get("polled_actions").and_then(Value::as_array) {
                 for observed in polled {
                     let id = observed.get("action_id").and_then(Value::as_str);
-                    if let Some(view) = state
+                    let new_state = text_or_unknown(observed.get("state"));
+                    let Some(index) = state
                         .plan_actions
-                        .iter_mut()
-                        .find(|view| Some(view.action_id.as_str()) == id)
-                    {
-                        view.state = text_or_unknown(observed.get("state"));
+                        .iter()
+                        .position(|view| Some(view.action_id.as_str()) == id)
+                    else {
+                        continue;
+                    };
+                    let was_open = action_is_nonterminal(Some(&state.plan_actions[index].state));
+                    state.plan_actions[index].state = new_state.clone();
+                    if was_open && !action_is_nonterminal(Some(&new_state)) {
+                        let view = state.plan_actions[index].clone();
+                        compare_with_forecast(state, &view, &new_state, observed_tick);
                     }
                 }
             }
@@ -341,6 +388,87 @@ fn action_is_nonterminal(state: Option<&str>) -> bool {
             )
         }
         None => false,
+    }
+}
+
+fn forecast_for_step(forecast: &Value, step: u64) -> Option<(String, Option<u64>)> {
+    if forecast.get("available").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    forecast
+        .get("steps")?
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get("step").and_then(Value::as_u64) == Some(step))
+        .map(|entry| {
+            (
+                text_or_unknown(entry.get("predicted_state")),
+                entry.get("predicted_terminal_tick").and_then(Value::as_u64),
+            )
+        })
+}
+
+fn record_surprise(state: &mut SessionOrientation, record: Value) {
+    if state.surprises.len() >= MAX_SURPRISES {
+        state.surprises.remove(0);
+    }
+    state.surprises.push(record.clone());
+    state.fresh_surprises.push(record);
+}
+
+/// Compare an action's observed terminal outcome with its forecast. A
+/// different terminal state, or completion later than the forecast by more
+/// than its resolution plus the last wait's step (which coarse waiting alone
+/// explains), is a material divergence and becomes a surprise record.
+fn compare_with_forecast(
+    state: &mut SessionOrientation,
+    view: &PlanActionView,
+    observed_state: &str,
+    observed_tick: Option<u64>,
+) {
+    let Some((predicted_state, predicted_tick)) = view.predicted.clone() else {
+        return;
+    };
+    let kind = if !predicted_state.eq_ignore_ascii_case(observed_state) {
+        Some((
+            "outcome_diverged",
+            if observed_state.eq_ignore_ascii_case("verified") {
+                "the step succeeded although the forecast predicted otherwise"
+            } else {
+                "an expected effect was not proven: the forecast predicted a different terminal state"
+            },
+        ))
+    } else {
+        match (predicted_tick, observed_tick) {
+            (Some(predicted), Some(observed))
+                if observed
+                    > predicted
+                        .saturating_add(view.forecast_resolution)
+                        .saturating_add(state.last_wait_advance) =>
+            {
+                Some((
+                    "completion_late",
+                    "completion took materially longer than forecast, beyond what wait cadence explains",
+                ))
+            }
+            _ => None,
+        }
+    };
+    if let Some((kind, explanation)) = kind {
+        record_surprise(
+            state,
+            json!({
+                "surprise_id": format!("surprise-{}-{}", view.action_id, kind),
+                "kind": kind,
+                "action_id": view.action_id,
+                "step": view.step,
+                "predicted": {"state": predicted_state, "terminal_tick": predicted_tick},
+                "observed": {"state": observed_state, "tick": observed_tick},
+                "epistemic_state": "observed",
+                "explanation": explanation,
+                "lesson_candidate": "re-forecast after observing; check for other agents or changed preconditions",
+            }),
+        );
     }
 }
 
@@ -787,6 +915,33 @@ fn changes(operation: &str, ok: bool, payload: &Value) -> Vec<Value> {
 }
 
 fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientation) -> Vec<Value> {
+    let mut items: Vec<Value> = state
+        .fresh_surprises
+        .iter()
+        .map(|surprise| {
+            json!({
+                "attention_id": value_or_null(surprise.get("surprise_id")),
+                "category": "surprise",
+                "severity": "high",
+                "urgency": "before_the_next_plan",
+                "confidence": {"epistemic_state": "observed", "value": 1.0},
+                "finding": value_or_null(surprise.get("explanation")),
+                "surprise": surprise,
+                "likely_consequence_if_ignored": "the agent keeps planning from a model the world just contradicted",
+                "evidence": [],
+            })
+        })
+        .collect();
+    items.extend(base_attention(operation, ok, payload, state));
+    items
+}
+
+fn base_attention(
+    operation: &str,
+    ok: bool,
+    payload: &Value,
+    state: &SessionOrientation,
+) -> Vec<Value> {
     if !ok {
         return vec![json!({
             "attention_id": "protocol-error",
@@ -1070,9 +1225,26 @@ fn presentation_state(
     match registry.get_mut(id) {
         Some(existing) => {
             let prior = existing.anchor.clone();
+            existing.fresh_surprises.clear();
             if is_ok(payload) {
                 update_orientation(operation, payload, existing);
             } else if let Some(rebased) = payload.get("rebased_plan") {
+                record_surprise(
+                    existing,
+                    json!({
+                        "surprise_id": format!(
+                            "surprise-{}-anchor_moved_before_commit",
+                            value_or_null(payload.get("rebase").and_then(|r| r.get("from_digest")))
+                        ),
+                        "kind": "anchor_moved_before_commit",
+                        "predicted": {"anchor": value_or_null(payload.get("rebase").and_then(|r| r.get("from_anchor")))},
+                        "observed": {"anchor": value_or_null(payload.get("rebase").and_then(|r| r.get("to_anchor")))},
+                        "epistemic_state": "observed",
+                        "explanation": "the world changed between plan and commit; the request was replayed and re-sealed",
+                        "lesson_candidate": "commit promptly after planning, or expect replay in shared fortresses",
+                    }),
+                );
+                existing.pending_forecast = value_or_null(rebased.get("forecast"));
                 // A stale commit was replayed into a new pending plan.
                 existing.pending_plan_digest = rebased
                     .get("plan_digest")

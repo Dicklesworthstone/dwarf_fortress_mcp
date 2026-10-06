@@ -1404,6 +1404,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         Ok(plan) => {
             let digest = plan.digest.to_string();
             payload["rebased_plan"] = json!({
+                "forecast": forecast_plan(&session.adapter, &plan, &ctx),
                 "plan_digest": digest,
                 "expires_at_tick": plan.expires_at_tick.0,
                 "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),

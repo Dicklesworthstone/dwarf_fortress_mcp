@@ -760,3 +760,79 @@ fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
     assert_eq!(doomed["forecast"]["reason"]["code"], "preconditions_failed");
     Ok(())
 }
+
+#[test]
+fn an_observation_that_contradicts_the_forecast_emits_a_surprise_record() -> TestResult {
+    // Planned while paused: the forecast predicts the dig cannot finish.
+    let session = open("72011", true, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(dig([0, 3, 10], [1, 3, 10])),
+    ))?;
+    assert_eq!(planned["forecast"]["predicted_complete"], false);
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    // The agent then changes the world the forecast assumed: it unpauses.
+    let resume = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        Some(false),
+        None,
+    ))?;
+    let digest = resume["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    let mut surprise = Value::Null;
+    for _ in 0..5 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+        if let Some(found) = waited["agent_turn"]["attention"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["category"] == "surprise"))
+        {
+            surprise = found["surprise"].clone();
+            break;
+        }
+    }
+    assert_eq!(surprise["kind"], "outcome_diverged", "{surprise}");
+    assert_eq!(surprise["observed"]["state"], "Verified");
+    assert_eq!(surprise["epistemic_state"], "observed");
+    Ok(())
+}
+
+#[test]
+fn a_stale_commit_is_recorded_as_a_surprise() -> TestResult {
+    let a = open_shared("73003", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73003", None, &ALL_EFFECTS)?;
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        None,
+        Some(dig([0, 3, 10], [0, 3, 10])),
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        plan_and_commit(&b, &dig([6, 3, 10], [6, 3, 10]))?["ok"],
+        true
+    );
+    let stale = parsed(&fortress_commit(Some(a), digest))?;
+    assert_eq!(stale["error"]["code"], "stale_anchor");
+    assert!(stale["rebased_plan"]["forecast"]["available"].is_boolean());
+    let surprise = stale["agent_turn"]["attention"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["category"] == "surprise"))
+        .cloned()
+        .ok_or("no surprise attention")?;
+    assert_eq!(surprise["surprise"]["kind"], "anchor_moved_before_commit");
+    Ok(())
+}

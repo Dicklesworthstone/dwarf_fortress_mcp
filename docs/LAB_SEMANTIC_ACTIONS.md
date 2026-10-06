@@ -65,6 +65,14 @@ before anything is committed. Forecasts assume no other agent acts and the
 fortress stays as it is; real completion also depends on how often the agent
 waits, because deferred steps dispatch when a wait observes their prerequisites.
 
+The Agent Turn compares those forecasts with what is later observed. When a
+step reaches a different terminal state than forecast, completes later than the
+forecast by more than its resolution plus the last wait's step, or a commit
+finds the anchor moved (and is replayed), the turn carries a **surprise record**
+(`attention` category `surprise`: predicted vs observed, explanation, lesson
+candidate), as the operating model requires: silent prediction error prevents
+learning.
+
 `fortress_plan` returns each step's capability, risk, created entity, sealed
 postconditions and obligation (terminal, deadline). Steps whose dependencies are
 not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`,
