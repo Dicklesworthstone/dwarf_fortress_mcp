@@ -40,6 +40,7 @@ fn open(
         Some(8_192),
         None,
         Some("starter_fortress".to_owned()),
+        None,
     ))?;
     assert_eq!(opened["ok"], true, "{opened}");
     assert_eq!(opened["scenario"], "starter_fortress");
@@ -516,5 +517,178 @@ fn restore_retires_open_work_so_later_waits_and_commits_still_function() -> Test
     let waited = parsed(&fortress_wait(Some(session), Some(20)))?;
     assert_eq!(waited["ok"], true, "{waited}");
     assert_eq!(waited["open_actions_remaining"], 0);
+    Ok(())
+}
+
+fn open_shared(
+    selector: &str,
+    scenario: Option<&str>,
+    extra: &[(&str, &str)],
+) -> std::result::Result<Value, Box<dyn std::error::Error>> {
+    parsed(&fortress_open_session(
+        Some(false),
+        Some(selector.to_owned()),
+        Some(caps(extra)),
+        None,
+        Some(2_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        scenario.map(str::to_owned),
+        Some(true),
+    ))
+}
+
+fn plan_and_commit(
+    session: &str,
+    actions: &str,
+) -> std::result::Result<Value, Box<dyn std::error::Error>> {
+    let planned = parsed(&fortress_plan(
+        Some(session.to_owned()),
+        None,
+        None,
+        Some(actions.to_owned()),
+    ))?;
+    if planned["ok"] != true {
+        return Ok(planned);
+    }
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    parsed(&fortress_commit(Some(session.to_owned()), digest))
+}
+
+fn dig(min: [i32; 3], max: [i32; 3]) -> String {
+    format!(
+        r#"[{{"action":{{"kind":"designate_dig","min":[{},{},{}],"max":[{},{},{}],"mode":"mine"}}}}]"#,
+        min[0], min[1], min[2], max[0], max[1], max[2]
+    )
+}
+
+#[test]
+fn agents_sharing_a_fortress_lease_regions_and_see_one_world() -> TestResult {
+    let mut caps_a = ALL_EFFECTS.to_vec();
+    caps_a.push(("restore", "guarded"));
+    let a = open_shared("73001", Some("starter_fortress"), &caps_a)?;
+    assert_eq!(a["ok"], true, "{a}");
+    assert_eq!(a["shared_world"]["joined_existing"], false);
+    let b = open_shared("73001", None, &ALL_EFFECTS)?;
+    assert_eq!(b["ok"], true, "{b}");
+    assert_eq!(b["shared_world"]["joined_existing"], true);
+    assert_eq!(b["shared_world"]["members"], 2);
+    assert_eq!(b["scenario"], "starter_fortress");
+    assert_eq!(b["anchor"], a["anchor"]);
+    let mismatched = open_shared("73001", Some("empty"), &ALL_EFFECTS)?;
+    assert_eq!(mismatched["ok"], false, "{mismatched}");
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+
+    // A leases and starts excavating a room.
+    let a_dig = plan_and_commit(&a, &dig([0, 3, 10], [4, 5, 10]))?;
+    assert_eq!(a_dig["ok"], true, "{a_dig}");
+    // B sees A's designation in the one shared world.
+    let designations = parsed(&fortress_query(
+        Some(b.clone()),
+        Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
+    ))?;
+    assert_eq!(designations["total"], 1);
+    // B cannot dig into A's leased region, and nothing changes.
+    let overlap = plan_and_commit(&b, &dig([4, 5, 10], [6, 6, 10]))?;
+    assert_eq!(overlap["ok"], false, "{overlap}");
+    assert_eq!(overlap["error"]["code"], "conflict");
+    assert!(
+        overlap["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("lease")),
+        "{overlap}"
+    );
+    // A disjoint region is fine.
+    let b_dig = plan_and_commit(&b, &dig([6, 3, 10], [8, 3, 10]))?;
+    assert_eq!(b_dig["ok"], true, "{b_dig}");
+
+    // One clock: A's waits advance B's work too.
+    for _ in 0..10 {
+        let waited = parsed(&fortress_wait(Some(a.clone()), Some(100)))?;
+        if waited["open_actions_remaining"] == 0 {
+            break;
+        }
+    }
+    let terrain = parsed(&fortress_query(
+        Some(b.clone()),
+        Some(r#"{"mode":"terrain","min":[0,3,10],"max":[8,3,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(terrain["levels"][0]["rows"][0], ".....#...");
+    let b_wait = parsed(&fortress_wait(Some(b.clone()), Some(10)))?;
+    assert_eq!(b_wait["open_actions_remaining"], 0, "{b_wait}");
+
+    // A's lease was released when its excavation verified: B may now work there.
+    let reuse = plan_and_commit(&b, &dig([4, 6, 10], [4, 7, 10]))?;
+    assert_eq!(reuse["ok"], true, "{reuse}");
+
+    // Restore would rewrite B's world too, so A may not restore.
+    let checkpoint = parsed(&fortress_checkpoint(Some(a.clone()), Some("x".to_owned())))?;
+    let refused = parsed(&fortress_restore(
+        Some(a),
+        checkpoint["checkpoint_id"]
+            .as_str()
+            .ok_or("checkpoint")?
+            .to_owned(),
+    ))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "conflict");
+    Ok(())
+}
+
+#[test]
+fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestResult {
+    let a = open_shared("73002", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73002", None, &ALL_EFFECTS)?;
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#
+                .to_owned(),
+        ),
+    ))?;
+    let stale_digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // B acts first, moving the shared anchor.
+    let b_dig = plan_and_commit(&b, &dig([0, 3, 10], [0, 3, 10]))?;
+    assert_eq!(b_dig["ok"], true, "{b_dig}");
+
+    let stale = parsed(&fortress_commit(Some(a.clone()), stale_digest.clone()))?;
+    assert_eq!(stale["ok"], false, "{stale}");
+    assert_eq!(stale["error"]["code"], "stale_anchor");
+    assert_eq!(stale["rebase"]["method"], "intent_replay");
+    assert_eq!(stale["rebase"]["from_digest"], stale_digest);
+    let rebased = stale["rebased_plan"]["plan_digest"]
+        .as_str()
+        .ok_or("rebased digest")?
+        .to_owned();
+    assert_ne!(rebased, stale_digest);
+    assert_eq!(
+        stale["agent_turn"]["recommendations"][0]["tool"],
+        "fortress.commit"
+    );
+    assert_eq!(
+        stale["agent_turn"]["recommendations"][0]["arguments"]["plan_digest"],
+        rebased
+    );
+    assert_eq!(
+        stale["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
+        rebased
+    );
+    let committed = parsed(&fortress_commit(Some(a.clone()), rebased))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_eq!(committed["actions"][0]["state"], "Verified");
+    // The stale digest can never be committed later.
+    let again = parsed(&fortress_commit(Some(a), stale_digest))?;
+    assert_eq!(again["ok"], false, "{again}");
     Ok(())
 }

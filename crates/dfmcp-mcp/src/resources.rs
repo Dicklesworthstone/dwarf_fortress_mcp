@@ -121,35 +121,40 @@ fn template_read_refusal() -> McpError {
 pub(crate) fn session_summary(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/summary";
     let session = lookup(session_id_hex, operation)?;
-    let mut guard = session.lock().map_err(|_| poisoned(operation))?;
-    let (_, ctx) = next_context(&mut guard).map_err(|error| denial(operation, error))?;
-    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-        return Err(denial(operation, error));
-    }
-    let request = dfmcp_adapter::ObservationRequest {
-        since: None,
-        projection: dfmcp_adapter::Projection::Summary,
-        interest: dfmcp_adapter::InterestSet::default(),
-        max_entities: guard.budget.max_entities,
-        max_bytes: guard.budget.max_bytes,
-        max_output_tokens: guard.budget.max_output_tokens,
-        continuation: None,
-    };
-    match guard.adapter.observe(&request, &ctx) {
-        Ok(frame) => match frame.payload {
-            dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
-                let mut payload = snapshot_json(&snapshot);
-                payload["projection"] = json!("summary");
-                payload["session_id"] = json!(format!("{}", guard.session_id));
-                payload["resource"] = json!(uri);
-                Ok(text_content(uri, payload.to_string()))
+    crate::server::with_session(
+        &session,
+        || Err(poisoned(operation)),
+        |guard| {
+            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
+            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+                return Err(denial(operation, error));
             }
-            _ => Err(McpError::internal_error(
-                "internal_invariant_violation: summary observation returned a non-snapshot payload",
-            )),
+            let request = dfmcp_adapter::ObservationRequest {
+                since: None,
+                projection: dfmcp_adapter::Projection::Summary,
+                interest: dfmcp_adapter::InterestSet::default(),
+                max_entities: guard.budget.max_entities,
+                max_bytes: guard.budget.max_bytes,
+                max_output_tokens: guard.budget.max_output_tokens,
+                continuation: None,
+            };
+            match guard.adapter.observe(&request, &ctx) {
+                Ok(frame) => match frame.payload {
+                    dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
+                        let mut payload = snapshot_json(&snapshot);
+                        payload["projection"] = json!("summary");
+                        payload["session_id"] = json!(format!("{}", guard.session_id));
+                        payload["resource"] = json!(uri);
+                        Ok(text_content(uri, payload.to_string()))
+                    }
+                    _ => Err(McpError::internal_error(
+                        "internal_invariant_violation: summary observation returned a non-snapshot payload",
+                    )),
+                },
+                Err(error) => Err(denial(operation, error)),
+            }
         },
-        Err(error) => Err(denial(operation, error)),
-    }
+    )
 }
 
 /// `df://session/{session_id}/capabilities` — the session's own negotiation
@@ -194,46 +199,51 @@ pub(crate) fn session_capabilities(
 pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://doctor";
     let session = lookup(session_id_hex, operation)?;
-    let mut guard = session.lock().map_err(|_| poisoned(operation))?;
-    let (_, ctx) = next_context(&mut guard).map_err(|error| denial(operation, error))?;
-    if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
-        return Err(denial(operation, error));
-    }
-    let health_res = guard.adapter.health(&ctx);
-    let health_opt = health_res.as_ref().ok();
-    let report = crate::doctor::DoctorInspector.generate_report(
-        active_session_count(),
-        health_opt,
-        None,
-        0,
-        0,
-    );
-    let payload = match health_res {
-        Ok(health) => json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "status": if report.is_healthy { "healthy" } else { "degraded" },
-            "active_sessions_count": report.active_sessions_count,
-            "adapter": health.identity.name,
-            "compatibility": format!("{:?}", health.identity.compatibility),
-            "fortress_loaded": health.fortress_loaded,
-            "findings": report.findings,
-            "warnings": health.warnings,
-            "current_anchor": health.current_anchor.as_ref().map(|anchor| anchor_json(anchor)),
-            "resource": uri,
-        }),
-        Err(error) => json!({
-            "ok": false,
-            "error": {
-                "operation": operation,
-                "code": error.code.as_str(),
-                "message": error.message,
-                "retryable": error.retryable,
-            },
-            "resource": uri,
-        }),
-    };
-    Ok(text_content(uri, payload.to_string()))
+    crate::server::with_session(
+        &session,
+        || Err(poisoned(operation)),
+        |guard| {
+            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
+            if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
+                return Err(denial(operation, error));
+            }
+            let health_res = guard.adapter.health(&ctx);
+            let health_opt = health_res.as_ref().ok();
+            let report = crate::doctor::DoctorInspector.generate_report(
+                active_session_count(),
+                health_opt,
+                None,
+                0,
+                0,
+            );
+            let payload = match health_res {
+                Ok(health) => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "status": if report.is_healthy { "healthy" } else { "degraded" },
+                    "active_sessions_count": report.active_sessions_count,
+                    "adapter": health.identity.name,
+                    "compatibility": format!("{:?}", health.identity.compatibility),
+                    "fortress_loaded": health.fortress_loaded,
+                    "findings": report.findings,
+                    "warnings": health.warnings,
+                    "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+                    "resource": uri,
+                }),
+                Err(error) => json!({
+                    "ok": false,
+                    "error": {
+                        "operation": operation,
+                        "code": error.code.as_str(),
+                        "message": error.message,
+                        "retryable": error.retryable,
+                    },
+                    "resource": uri,
+                }),
+            };
+            Ok(text_content(uri, payload.to_string()))
+        },
+    )
 }
 
 /// `df://session/{session_id}/handoff` — resumable handoff packet: anchor,
@@ -243,14 +253,19 @@ pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<Re
 pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/handoff";
     let session = lookup(session_id_hex, operation)?;
-    let mut guard = session.lock().map_err(|_| poisoned(operation))?;
-    let (_, ctx) = next_context(&mut guard).map_err(|error| denial(operation, error))?;
-    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-        return Err(denial(operation, error));
-    }
-    let mut payload = crate::server::handoff_json(&guard);
-    payload["resource"] = json!(uri);
-    Ok(text_content(uri, payload.to_string()))
+    crate::server::with_session(
+        &session,
+        || Err(poisoned(operation)),
+        |guard| {
+            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
+            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+                return Err(denial(operation, error));
+            }
+            let mut payload = crate::server::handoff_json(guard);
+            payload["resource"] = json!(uri);
+            Ok(text_content(uri, payload.to_string()))
+        },
+    )
 }
 
 fn read_param_or_refuse(

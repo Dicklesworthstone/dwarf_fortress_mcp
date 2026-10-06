@@ -59,6 +59,12 @@ tools: `scenario="starter_fortress"`, structured `entities`/`terrain` queries,
 `fortress.plan(actions=...)` and `fortress.wait(max_game_ticks=...)`. See
 `docs/LAB_SEMANTIC_ACTIONS.md`.
 
+Later the same day the laboratory gained multi-step Agent Turn tracking, plan-scoped
+cancellation with drain progress, a `df://session/{id}/handoff` resume packet (all
+session views now resolve on the real `serve` binary), and **shared fortresses**:
+several agent sessions on one world/clock with exclusive spatial leases at commit
+and intent replay of plans made stale by another member.
+
 The workspace runs **3,085 tests, 0 failed, 0 ignored**; the previously ignored
 end-to-end pipeline test now dispatches a real excavation and proves it by
 reconciliation. This is laboratory semantics and development execution only:

@@ -601,6 +601,23 @@ fn recommendations(
     state: &SessionOrientation,
 ) -> Vec<Value> {
     if !ok {
+        if let Some(digest) = payload
+            .get("rebased_plan")
+            .and_then(|plan| plan.get("plan_digest"))
+            .and_then(Value::as_str)
+        {
+            return vec![recommendation(
+                "commit-rebased-plan",
+                "fortress.commit",
+                "the anchor moved before commit; the request was replayed at the current anchor and re-sealed",
+                "high",
+                "medium",
+                "reversible",
+                "reversible",
+                true,
+                json!({"plan_digest": digest}),
+            )];
+        }
         return match error_code(payload) {
             "session_not_found" => vec![recommendation(
                 "recover-open-session",
@@ -1055,6 +1072,19 @@ fn presentation_state(
             let prior = existing.anchor.clone();
             if is_ok(payload) {
                 update_orientation(operation, payload, existing);
+            } else if let Some(rebased) = payload.get("rebased_plan") {
+                // A stale commit was replayed into a new pending plan.
+                existing.pending_plan_digest = rebased
+                    .get("plan_digest")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                existing.pending_plan_capabilities =
+                    string_array(rebased.get("required_capabilities"));
+                existing.pending_plan_steps = rebased
+                    .get("steps")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
             }
             let sequence = existing.advance_turn();
             (existing.clone(), prior, sequence)
@@ -1130,7 +1160,7 @@ fn project_response(
 }
 
 #[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly."
+    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -1144,6 +1174,7 @@ pub fn fortress_open_session(
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
     scenario: Option<String>,
+    shared: Option<bool>,
 ) -> String {
     project_response(
         crate::server::open_session_in_scenario(
@@ -1157,6 +1188,7 @@ pub fn fortress_open_session(
             max_output_tokens,
             max_actions,
             scenario,
+            shared,
         ),
         "fortress.open_session",
         AgentPhase::Bootstrap,
@@ -1349,6 +1381,7 @@ mod tests {
         parsed(&fortress_open_session(
             Some(true),
             Some(fortress_selector.to_owned()),
+            None,
             None,
             None,
             None,

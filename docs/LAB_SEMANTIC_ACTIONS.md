@@ -88,3 +88,30 @@ semantics for embedding and tests. Temporal steps are recorded as
 `AppliedAwaitingVerification`; `reconcile(plan, snapshot, ctx)` proves or fails
 them against whatever later observation the caller supplies (it never
 simulates time) and then dispatches newly unblocked steps.
+
+## Several agents in one fortress
+
+`fortress_open_session(shared=true, fortress_selector="N", ...)` joins (or
+creates) one shared fortress per selector. Members share a single canonical
+world, game clock and lease book; each keeps its own grants, budget, plans,
+receipts and Agent Turn. A joiner gets the existing world (naming a different
+scenario is refused) and the response reports `shared_world.members`.
+
+- **Regions are leased.** Committing an excavation or construction step takes
+  an exclusive spatial lease on its area until the step's obligation deadline.
+  Another member's commit that overlaps it is refused with `conflict` before any
+  effect; a session never conflicts with itself. Leases are released once the
+  holder observes the step terminal (verified, failed or cancelled).
+- **Stale plans are replayed, never committed blind.** If another member's
+  action or the shared clock moved the anchor after a plan was sealed, the
+  commit returns `stale_anchor` with a `rebased_plan` (the original request
+  re-planned and re-sealed at the current anchor, preconditions rechecked) and a
+  `rebase` record. The Agent Turn recommends committing the new digest; the old
+  digest can never be committed.
+- **One clock.** Any member's `fortress_wait(max_game_ticks)` advances everyone's
+  work; each member proves its own obligations when it next waits.
+- **No unilateral rewrite.** `fortress_restore` is refused while other members
+  share the fortress.
+
+Calls are serialized per fortress: each tool call holds the world for its
+duration, so every response is consistent with one anchor.

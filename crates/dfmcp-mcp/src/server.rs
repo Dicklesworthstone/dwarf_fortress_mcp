@@ -77,12 +77,205 @@ pub(crate) struct LabSession {
     commit_receipts: BTreeMap<String, String>,
     /// Authority each committed plan required; a replay must still hold it.
     commit_authority: BTreeMap<String, Vec<(Capability, RiskTier)>>,
+    /// The shared fortress this session joined, if any. While a tool call
+    /// runs, `with_session` swaps the world's adapter and lease book into
+    /// `adapter` and `leases`; otherwise they are this session's own.
+    shared: Option<Arc<Mutex<SharedWorld>>>,
+    /// Spatial leases fencing committed temporal work.
+    leases: LeaseBook,
+    /// Members of the shared fortress during the current call (0 if private).
+    shared_members: usize,
+}
+
+/// Spatial leases plus the actions that hold them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LeaseBook {
+    manager: dfmcp_core::lease::LeaseManager,
+    by_action: BTreeMap<ActionId, (SessionId, Vec<dfmcp_core::LeaseId>)>,
+}
+
+/// One fortress shared by several agent sessions: a single canonical world,
+/// clock and lease book. Each member keeps its own grants, budget, plans and
+/// receipts.
+pub(crate) struct SharedWorld {
+    adapter: MemoryAdapter,
+    leases: LeaseBook,
+    members: BTreeSet<SessionId>,
+    scenario: String,
+}
+
+/// Process-local registry of shared fortresses, keyed by fortress selector.
+static SHARED_WORLDS: LazyLock<Mutex<BTreeMap<FortressId, Arc<Mutex<SharedWorld>>>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+const MAX_SHARED_WORLDS: usize = 64;
+
+/// What a joining member learns about the shared fortress.
+struct SharedView {
+    anchor: StateAnchor,
+    paused: bool,
+    members: usize,
+    joined_existing: bool,
+    scenario: String,
+}
+
+/// Join (or create) the shared fortress for `fortress_id`. A joiner gets the
+/// existing world, never a fresh scenario; naming a different scenario is
+/// refused rather than silently ignored.
+fn join_shared_world(
+    fortress_id: FortressId,
+    session_id: SessionId,
+    scenario: &str,
+    scenario_requested: bool,
+    seed: &MemoryAdapter,
+) -> Result<(Arc<Mutex<SharedWorld>>, SharedView)> {
+    let mut registry = SHARED_WORLDS.lock().map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "shared world registry poisoned",
+        )
+    })?;
+    if let Some(world) = registry.get(&fortress_id).cloned() {
+        let mut guard = world.lock().map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "shared world poisoned",
+            )
+        })?;
+        if scenario_requested && guard.scenario != scenario {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "shared fortress {fortress_id} already runs scenario {:?}; omit scenario to join it",
+                    guard.scenario
+                ),
+            ));
+        }
+        if guard.members.len() >= MAX_SHARED_MEMBERS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "the shared fortress reached its member bound",
+            ));
+        }
+        guard.members.insert(session_id);
+        let view = SharedView {
+            anchor: guard.adapter.snapshot().anchor(),
+            paused: guard.adapter.snapshot().paused,
+            members: guard.members.len(),
+            joined_existing: true,
+            scenario: guard.scenario.clone(),
+        };
+        drop(guard);
+        return Ok((world, view));
+    }
+    if registry.len() >= MAX_SHARED_WORLDS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "the laboratory reached its shared-fortress bound",
+        ));
+    }
+    let world = SharedWorld {
+        adapter: seed.clone(),
+        leases: LeaseBook::default(),
+        members: BTreeSet::from([session_id]),
+        scenario: scenario.to_owned(),
+    };
+    let view = SharedView {
+        anchor: world.adapter.snapshot().anchor(),
+        paused: world.adapter.snapshot().paused,
+        members: 1,
+        joined_existing: false,
+        scenario: scenario.to_owned(),
+    };
+    let world = Arc::new(Mutex::new(world));
+    registry.insert(fortress_id, world.clone());
+    Ok((world, view))
+}
+
+const MAX_SHARED_MEMBERS: usize = 16;
+
+/// Run `body` against a session. For a member of a shared fortress the world
+/// lock is held for the whole call and the world's adapter and lease book are
+/// swapped into the session, so every member observes and mutates the same
+/// canonical state one call at a time. Lock order is always world, then
+/// session; nothing locks a world while holding a session.
+pub(crate) fn with_session<T>(
+    session: &Arc<Mutex<LabSession>>,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    let shared = match session.lock() {
+        Ok(guard) => guard.shared.clone(),
+        Err(_) => return poisoned(),
+    };
+    let mut world = match shared.as_ref().map(|world| world.lock()) {
+        None => None,
+        Some(Ok(world)) => Some(world),
+        Some(Err(_)) => return poisoned(),
+    };
+    let mut guard = match session.lock() {
+        Ok(guard) => guard,
+        Err(_) => return poisoned(),
+    };
+    if let Some(world) = world.as_mut() {
+        std::mem::swap(&mut guard.adapter, &mut world.adapter);
+        std::mem::swap(&mut guard.leases, &mut world.leases);
+        guard.shared_members = world.members.len();
+    }
+    let output = body(&mut guard);
+    if let Some(world) = world.as_mut() {
+        std::mem::swap(&mut guard.adapter, &mut world.adapter);
+        std::mem::swap(&mut guard.leases, &mut world.leases);
+    }
+    output
 }
 
 /// A plan sealed by `fortress_plan` and awaiting `fortress_commit`.
 struct PendingPlan {
     plan: PreparedPlan,
     digest: String,
+    /// How the intent was requested, so a stale plan can be replayed.
+    source: PlanSource,
+}
+
+/// The agent-level request behind a sealed plan.
+#[derive(Clone, Debug)]
+enum PlanSource {
+    Pause {
+        summary: String,
+        paused_target: bool,
+    },
+    Actions {
+        summary: String,
+        raw: String,
+    },
+}
+
+impl PlanSource {
+    fn intent(&self, id: IntentId, snapshot: &WorldSnapshot) -> Result<Intent> {
+        match self {
+            Self::Actions { summary, raw } => semantic_intent(id, snapshot, summary.clone(), raw),
+            Self::Pause {
+                summary,
+                paused_target,
+            } => Ok(Intent {
+                id,
+                anchor: snapshot.anchor(),
+                summary: summary.clone(),
+                terminal_condition: Predicate::Paused(*paused_target),
+                constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+                requested_actions: vec![RequestedAction {
+                    action: Action::Pause {
+                        paused: *paused_target,
+                    },
+                    preconditions: vec![Predicate::Paused(!*paused_target)],
+                    postconditions: vec![Predicate::Paused(*paused_target)],
+                    compensation: None,
+                    obligation: None,
+                    depends_on: Vec::new(),
+                }],
+            }),
+        }
+    }
 }
 
 /// MCP_SURFACE.md §Versioning: the seven negotiation items every session
@@ -541,6 +734,7 @@ pub fn fortress_open_session(
         max_output_tokens,
         max_actions,
         None,
+        None,
     )
 }
 
@@ -559,7 +753,10 @@ pub(crate) fn open_session_in_scenario(
     max_output_tokens: Option<u32>,
     max_actions: Option<u32>,
     scenario: Option<String>,
+    shared: Option<bool>,
 ) -> String {
+    let shared = shared.unwrap_or(false);
+    let scenario_requested = scenario.is_some();
     let scenario = scenario.unwrap_or_else(|| "empty".to_owned());
     if scenario.len() > 64 {
         return coded_error_payload(
@@ -653,6 +850,9 @@ pub(crate) fn open_session_in_scenario(
         open_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
         commit_authority: BTreeMap::new(),
+        shared: None,
+        leases: LeaseBook::default(),
+        shared_members: 0,
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -661,8 +861,27 @@ pub(crate) fn open_session_in_scenario(
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
     let session_id = SessionId::new(session_counter);
-    let snapshot_anchor = probe_session.adapter.snapshot().anchor();
-    let paused_after = probe_session.adapter.snapshot().paused;
+    let (shared_world, shared_view) = if shared {
+        match join_shared_world(
+            fortress_id,
+            session_id,
+            &scenario,
+            scenario_requested,
+            &probe_session.adapter,
+        ) {
+            Ok(value) => (Some(value.0), Some(value.1)),
+            Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
+        }
+    } else {
+        (None, None)
+    };
+    let (snapshot_anchor, paused_after) = match shared_view.as_ref() {
+        Some(view) => (view.anchor, view.paused),
+        None => (
+            probe_session.adapter.snapshot().anchor(),
+            probe_session.adapter.snapshot().paused,
+        ),
+    };
     // Move the probe adapter into the registered session.
     let LabSession {
         session_id: _,
@@ -678,6 +897,9 @@ pub(crate) fn open_session_in_scenario(
         open_actions: _,
         commit_receipts: _,
         commit_authority: _,
+        shared: _,
+        leases: _,
+        shared_members: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -693,6 +915,9 @@ pub(crate) fn open_session_in_scenario(
         open_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
         commit_authority: BTreeMap::new(),
+        shared: shared_world,
+        leases: LeaseBook::default(),
+        shared_members: 0,
     }));
     {
         let mut registry = sessions();
@@ -735,7 +960,13 @@ pub(crate) fn open_session_in_scenario(
         },
         "anchor": anchor_json(&snapshot_anchor),
         "paused": paused_after,
-        "scenario": scenario,
+        "scenario": shared_view.as_ref().map_or(scenario.as_str(), |view| view.scenario.as_str()),
+        "shared_world": shared_view.as_ref().map(|view| json!({
+            "fortress_id": format!("{fortress_id}"),
+            "members": view.members,
+            "joined_existing": view.joined_existing,
+            "note": "one canonical world, clock and lease book; your grants, budget, plans and receipts stay your own",
+        })),
         "note": "session_id is required for all subsequent tool calls; transport identity grants nothing",
     })
     .to_string()
@@ -754,43 +985,47 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.observe", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.observe"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.observe", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-        return dfmcp_error_payload("fortress.observe", &error);
-    }
-    let request = ObservationRequest {
-        since: None,
-        projection: Projection::Summary,
-        interest: InterestSet::default(),
-        max_entities: guard.budget.max_entities,
-        max_bytes: guard.budget.max_bytes,
-        max_output_tokens: guard.budget.max_output_tokens,
-        continuation: None,
-    };
-    match guard.adapter.observe(&request, &ctx) {
-        Ok(frame) => match frame.payload {
-            ObservationPayload::Snapshot(snapshot) => {
-                let mut payload = snapshot_json(&snapshot);
-                payload["projection"] = json!("summary");
-                payload["session_id"] = json!(format!("{}", guard.session_id));
-                payload["evidence_count"] = json!(frame.evidence.len());
-                payload.to_string()
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.observe"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.observe", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+                return dfmcp_error_payload("fortress.observe", &error);
             }
-            ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => coded_error_payload(
-                "fortress.observe",
-                ErrorCode::InternalInvariantViolation,
-                "full laboratory observation unexpectedly returned a non-snapshot payload",
-            ),
+            let request = ObservationRequest {
+                since: None,
+                projection: Projection::Summary,
+                interest: InterestSet::default(),
+                max_entities: guard.budget.max_entities,
+                max_bytes: guard.budget.max_bytes,
+                max_output_tokens: guard.budget.max_output_tokens,
+                continuation: None,
+            };
+            match guard.adapter.observe(&request, &ctx) {
+                Ok(frame) => match frame.payload {
+                    ObservationPayload::Snapshot(snapshot) => {
+                        let mut payload = snapshot_json(&snapshot);
+                        payload["projection"] = json!("summary");
+                        payload["session_id"] = json!(format!("{}", guard.session_id));
+                        payload["evidence_count"] = json!(frame.evidence.len());
+                        payload.to_string()
+                    }
+                    ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => {
+                        coded_error_payload(
+                            "fortress.observe",
+                            ErrorCode::InternalInvariantViolation,
+                            "full laboratory observation unexpectedly returned a non-snapshot payload",
+                        )
+                    }
+                },
+                Err(error) => dfmcp_error_payload("fortress.observe", &error),
+            }
         },
-        Err(error) => dfmcp_error_payload("fortress.observe", &error),
-    }
+    )
 }
 
 // ============================================================================
@@ -816,55 +1051,57 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.query", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.query"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.query", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
-        return dfmcp_error_payload("fortress.query", &error);
-    }
-    if mode != "summary" {
-        let snapshot = guard.adapter.snapshot();
-        return match crate::lab_world::query(snapshot, &mode) {
-            Ok(mut payload) => {
-                payload["ok"] = json!(true);
-                payload["session_id"] = json!(format!("{}", guard.session_id));
-                payload["anchor"] = anchor_json(&snapshot.anchor());
-                payload["game_tick"] = json!(snapshot.tick.0);
-                payload.to_string()
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.query"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.query", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
+                return dfmcp_error_payload("fortress.query", &error);
             }
-            Err(error) => dfmcp_error_payload("fortress.query", &error),
-        };
-    }
-    let request = QueryRequest {
-        anchor: ctx.anchor,
-        query: WorldQuery {
-            kinds: Vec::new(),
-            predicate: None,
-            order: QueryOrder::EntityIdAscending,
-            limit: guard.budget.max_entities,
-            continuation: None,
+            if mode != "summary" {
+                let snapshot = guard.adapter.snapshot();
+                return match crate::lab_world::query(snapshot, &mode) {
+                    Ok(mut payload) => {
+                        payload["ok"] = json!(true);
+                        payload["session_id"] = json!(format!("{}", guard.session_id));
+                        payload["anchor"] = anchor_json(&snapshot.anchor());
+                        payload["game_tick"] = json!(snapshot.tick.0);
+                        payload.to_string()
+                    }
+                    Err(error) => dfmcp_error_payload("fortress.query", &error),
+                };
+            }
+            let request = QueryRequest {
+                anchor: ctx.anchor,
+                query: WorldQuery {
+                    kinds: Vec::new(),
+                    predicate: None,
+                    order: QueryOrder::EntityIdAscending,
+                    limit: guard.budget.max_entities,
+                    continuation: None,
+                },
+                max_output_tokens: guard.budget.max_output_tokens,
+                continuation: None,
+            };
+            match guard.adapter.query(&request, &ctx) {
+                Ok(response) => {
+                    let snapshot = guard.adapter.snapshot();
+                    let mut payload = snapshot_json(snapshot);
+                    payload["matched"] = json!(response.matched);
+                    payload["returned"] = json!(response.rows.len());
+                    payload["truncated"] = json!(response.truncated);
+                    payload["continuation"] = json!(response.continuation);
+                    payload["session_id"] = json!(format!("{}", guard.session_id));
+                    payload.to_string()
+                }
+                Err(error) => dfmcp_error_payload("fortress.query", &error),
+            }
         },
-        max_output_tokens: guard.budget.max_output_tokens,
-        continuation: None,
-    };
-    match guard.adapter.query(&request, &ctx) {
-        Ok(response) => {
-            let snapshot = guard.adapter.snapshot();
-            let mut payload = snapshot_json(snapshot);
-            payload["matched"] = json!(response.matched);
-            payload["returned"] = json!(response.rows.len());
-            payload["truncated"] = json!(response.truncated);
-            payload["continuation"] = json!(response.continuation);
-            payload["session_id"] = json!(format!("{}", guard.session_id));
-            payload.to_string()
-        }
-        Err(error) => dfmcp_error_payload("fortress.query", &error),
-    }
+    )
 }
 
 // ============================================================================
@@ -909,71 +1146,59 @@ pub(crate) fn plan_with_actions(
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.plan", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.plan"),
-    };
-    let (rid, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Plan, RiskTier::ReadOnly) {
-        return dfmcp_error_payload("fortress.plan", &error);
-    }
-    let snapshot = guard.adapter.snapshot();
-
-    let intent = match actions {
-        Some(raw) => match semantic_intent(IntentId::new(rid), snapshot, summary, &raw) {
-            Ok(intent) => intent,
-            Err(error) => return dfmcp_error_payload("fortress.plan", &error),
-        },
-        None => {
-            let paused_target = paused_target.is_some_and(|value| value);
-            Intent {
-                id: IntentId::new(rid),
-                anchor: snapshot.anchor(),
-                summary,
-                terminal_condition: Predicate::Paused(paused_target),
-                constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-                requested_actions: vec![RequestedAction {
-                    action: Action::Pause {
-                        paused: paused_target,
-                    },
-                    preconditions: vec![Predicate::Paused(!paused_target)],
-                    postconditions: vec![Predicate::Paused(paused_target)],
-                    compensation: None,
-                    obligation: None,
-                    depends_on: Vec::new(),
-                }],
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.plan"),
+        |guard| {
+            let (rid, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Plan, RiskTier::ReadOnly) {
+                return dfmcp_error_payload("fortress.plan", &error);
             }
-        }
-    };
+            let snapshot = guard.adapter.snapshot();
 
-    match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
-        Ok(plan) => {
-            let digest = plan.digest.to_string();
-            let pending_digest = digest.clone();
-            let payload = json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "plan_id": format!("{}", plan.id),
-                "plan_digest": digest,
-                "terminal_condition": format!("{:?}", intent.terminal_condition),
-                "max_risk": plan.max_risk.as_str(),
-                "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
-                "requires_checkpoint": plan.requires_checkpoint,
-                "expires_at_tick": plan.expires_at_tick.0,
-                "steps": crate::lab_world::plan_steps_json(&plan),
-                "note": "sealed plan; commit it with fortress_commit before expiry",
-            });
-            guard.pending = Some(PendingPlan {
-                plan,
-                digest: pending_digest,
-            });
-            payload.to_string()
-        }
-        Err(error) => dfmcp_error_payload("fortress.plan", &error),
-    }
+            let source = match actions {
+                Some(raw) => PlanSource::Actions { summary, raw },
+                None => PlanSource::Pause {
+                    summary,
+                    paused_target: paused_target.is_some_and(|value| value),
+                },
+            };
+            let intent = match source.intent(IntentId::new(rid), snapshot) {
+                Ok(intent) => intent,
+                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+            };
+
+            match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
+                Ok(plan) => {
+                    let digest = plan.digest.to_string();
+                    let pending_digest = digest.clone();
+                    let payload = json!({
+                        "ok": true,
+                        "session_id": format!("{}", guard.session_id),
+                        "plan_id": format!("{}", plan.id),
+                        "plan_digest": digest,
+                        "terminal_condition": format!("{:?}", intent.terminal_condition),
+                        "max_risk": plan.max_risk.as_str(),
+                        "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+                        "requires_checkpoint": plan.requires_checkpoint,
+                        "expires_at_tick": plan.expires_at_tick.0,
+                        "steps": crate::lab_world::plan_steps_json(&plan),
+                        "note": "sealed plan; commit it with fortress_commit before expiry",
+                    });
+                    guard.pending = Some(PendingPlan {
+                        plan,
+                        digest: pending_digest,
+                        source,
+                    });
+                    payload.to_string()
+                }
+                Err(error) => dfmcp_error_payload("fortress.plan", &error),
+            }
+        },
+    )
 }
 
 /// Build an intent from semantic action steps. Its terminal condition is the
@@ -1100,6 +1325,115 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
     })
 }
 
+/// Exclusive spatial leases for every step that excavates or builds, held
+/// until the step's obligation deadline. A region another member is working
+/// on is refused before any effect; a session never conflicts with itself.
+/// The caller restores the prior lease book if the commit then fails.
+fn acquire_plan_leases(
+    session: &mut LabSession,
+    plan: &PreparedPlan,
+) -> Result<Vec<(dfmcp_core::StepId, Vec<dfmcp_core::LeaseId>)>> {
+    let now = session.adapter.snapshot().tick;
+    session.leases.manager.cleanup_expired_leases(now);
+    let mut acquired = Vec::new();
+    for step in &plan.steps {
+        let area = match &step.action {
+            Action::DesignateDig { area, .. } => *area,
+            Action::Build { footprint, .. } => *footprint,
+            _ => continue,
+        };
+        let ttl = step.obligation.as_ref().map_or(1, |obligation| {
+            obligation.deadline_tick.0.saturating_sub(now.0).max(1)
+        });
+        let lease = session
+            .leases
+            .manager
+            .acquire_spatial_lease(session.session_id, area, true, now, ttl)
+            .map_err(|error| {
+                DfmcpError::new(
+                    error.code,
+                    format!(
+                        "step {} cannot lease its region: {}",
+                        step.id.get(),
+                        error.message
+                    ),
+                )
+            })?;
+        acquired.push((step.id, vec![lease]));
+    }
+    Ok(acquired)
+}
+
+/// Release the spatial leases an action held once it is terminal.
+fn release_action_leases(session: &mut LabSession, action_id: ActionId) {
+    if let Some((holder, leases)) = session.leases.by_action.remove(&action_id) {
+        for lease in leases {
+            // An expired lease may already have been cleaned up.
+            let _ = session.leases.manager.release_lease(lease, holder);
+        }
+    }
+}
+
+/// A sealed plan whose anchor moved (another member acted, or game time
+/// passed) is never committed blind. Replay the original request at the
+/// current anchor: the planner re-checks every precondition and re-seals,
+/// and the new plan becomes pending for an explicit commit of its digest.
+fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
+    let rid = match next_request_id(session) {
+        Ok(value) => value,
+        Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+    };
+    let (_, ctx) = match next_context(session) {
+        Ok(value) => value,
+        Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+    };
+    let snapshot = session.adapter.snapshot();
+    let stale_error = DfmcpError::new(
+        ErrorCode::StaleAnchor,
+        "the sealed plan's anchor is no longer current; nothing was committed",
+    );
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&dfmcp_error_payload("fortress.commit", &stale_error))
+            .unwrap_or_else(|_| json!({"ok": false}));
+    let replayed = stale
+        .source
+        .intent(IntentId::new(rid), snapshot)
+        .and_then(|intent| StaticPlanner::default().prepare(snapshot, &intent, &ctx));
+    match replayed {
+        Ok(plan) => {
+            let digest = plan.digest.to_string();
+            payload["rebased_plan"] = json!({
+                "plan_digest": digest,
+                "expires_at_tick": plan.expires_at_tick.0,
+                "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+                "steps": crate::lab_world::plan_steps_json(&plan),
+            });
+            payload["rebase"] = json!({
+                "method": "intent_replay",
+                "from_digest": stale.digest,
+                "to_digest": digest,
+                "from_anchor": anchor_json(&stale.plan.anchor),
+                "to_anchor": anchor_json(&snapshot.anchor()),
+                "note": "review the rebased steps, then commit the new digest; the stale plan was discarded",
+            });
+            session.pending = Some(PendingPlan {
+                plan,
+                digest,
+                source: stale.source,
+            });
+        }
+        Err(error) => {
+            payload["rebase"] = json!({
+                "method": "intent_replay",
+                "from_digest": stale.digest,
+                "refused": {"code": error.code.as_str(), "message": error.message},
+                "note": "the original request no longer plans at the current anchor; re-observe and re-plan",
+            });
+        }
+    }
+    payload.to_string()
+}
+
 /// The (capability, risk ceiling) pairs a sealed plan needs to be committed.
 fn plan_authority(plan: &PreparedPlan) -> Vec<(Capability, RiskTier)> {
     let mut authority: BTreeMap<Capability, RiskTier> = BTreeMap::new();
@@ -1140,161 +1474,191 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.commit", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.commit"),
-    };
-    {
-        let (_, entry_ctx) = match next_context(&mut guard) {
-            Ok(value) => value,
-            Err(error) => return dfmcp_error_payload("fortress.commit", &error),
-        };
-        // Commit authority is the sealed plan's own capability set (checked
-        // here and again per step by the adapter), not a fixed clock grant.
-        let required = guard
-            .commit_authority
-            .get(&plan_digest)
-            .cloned()
-            .or_else(|| {
-                guard
-                    .pending
-                    .as_ref()
-                    .filter(|pending| pending.digest == plan_digest)
-                    .map(|pending| plan_authority(&pending.plan))
-            })
-            .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
-        for (capability, risk) in required {
-            if let Err(error) = authorize_entry(&entry_ctx, capability, risk) {
-                return dfmcp_error_payload("fortress.commit", &error);
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.commit"),
+        |guard| {
+            {
+                let (_, entry_ctx) = match next_context(guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+                };
+                // Commit authority is the sealed plan's own capability set (checked
+                // here and again per step by the adapter), not a fixed clock grant.
+                let required = guard
+                    .commit_authority
+                    .get(&plan_digest)
+                    .cloned()
+                    .or_else(|| {
+                        guard
+                            .pending
+                            .as_ref()
+                            .filter(|pending| pending.digest == plan_digest)
+                            .map(|pending| plan_authority(&pending.plan))
+                    })
+                    .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
+                for (capability, risk) in required {
+                    if let Err(error) = authorize_entry(&entry_ctx, capability, risk) {
+                        return dfmcp_error_payload("fortress.commit", &error);
+                    }
+                }
             }
-        }
-    }
 
-    // Receipt replay is independent of whichever later plan is currently
-    // pending. Reauthorize first, then return the exact stable payload without
-    // consuming or replacing that unrelated plan.
-    if let Some(payload) = guard.commit_receipts.get(&plan_digest).cloned() {
-        let (_, replay_context) = match next_context(&mut guard) {
-            Ok(value) => value,
-            Err(error) => return dfmcp_error_payload("fortress.commit", &error),
-        };
-        let required = guard
-            .commit_authority
-            .get(&plan_digest)
-            .cloned()
-            .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
-        for (capability, risk) in required {
-            if let Err(error) = replay_context.authorize(capability, risk, &[], None) {
-                return dfmcp_error_payload("fortress.commit", &error);
+            // Receipt replay is independent of whichever later plan is currently
+            // pending. Reauthorize first, then return the exact stable payload without
+            // consuming or replacing that unrelated plan.
+            if let Some(payload) = guard.commit_receipts.get(&plan_digest).cloned() {
+                let (_, replay_context) = match next_context(guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.commit", &error),
+                };
+                let required = guard
+                    .commit_authority
+                    .get(&plan_digest)
+                    .cloned()
+                    .unwrap_or_else(|| vec![(Capability::ControlClock, RiskTier::Reversible)]);
+                for (capability, risk) in required {
+                    if let Err(error) = replay_context.authorize(capability, risk, &[], None) {
+                        return dfmcp_error_payload("fortress.commit", &error);
+                    }
+                }
+                return payload;
             }
-        }
-        return payload;
-    }
 
-    let pending = match guard.pending.take() {
-        Some(pending) => pending,
-        None => {
-            return coded_error_payload(
-                "fortress.commit",
-                ErrorCode::InvalidPlan,
-                "no pending plan; call fortress_plan first",
-            );
-        }
-    };
-    if pending.digest != plan_digest {
-        guard.pending = Some(pending);
-        return coded_error_payload(
-            "fortress.commit",
-            ErrorCode::Conflict,
-            "plan digest does not match the pending prepared plan; plans are sealed over their digest",
-        );
-    }
-    if !guard.commit_receipts.contains_key(&plan_digest)
-        && guard.commit_receipts.len() >= MAX_LAB_COMMIT_RECEIPTS
-    {
-        guard.pending = Some(pending);
-        return coded_error_payload(
-            "fortress.commit",
-            ErrorCode::BudgetExceeded,
-            "session commit-receipt store reached its explicit bound",
-        );
-    }
-    if guard.open_actions.len() + pending.plan.steps.len() > MAX_OPEN_ACTIONS {
-        guard.pending = Some(pending);
-        return coded_error_payload(
-            "fortress.commit",
-            ErrorCode::BudgetExceeded,
-            "the session already tracks its maximum number of open actions; wait for or cancel existing work first",
-        );
-    }
-    let (_, prepare_ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => {
-            guard.pending = Some(pending);
-            return dfmcp_error_payload("fortress.commit", &error);
-        }
-    };
-    match guard.adapter.prepare(&pending.plan, &prepare_ctx) {
-        Ok(prepared) => {
-            let (_, commit_ctx) = match next_context(&mut guard) {
-                Ok(value) => value,
+            let pending = match guard.pending.take() {
+                Some(pending) => pending,
+                None => {
+                    return coded_error_payload(
+                        "fortress.commit",
+                        ErrorCode::InvalidPlan,
+                        "no pending plan; call fortress_plan first",
+                    );
+                }
+            };
+            if pending.digest != plan_digest {
+                guard.pending = Some(pending);
+                return coded_error_payload(
+                    "fortress.commit",
+                    ErrorCode::Conflict,
+                    "plan digest does not match the pending prepared plan; plans are sealed over their digest",
+                );
+            }
+            if !guard.commit_receipts.contains_key(&plan_digest)
+                && guard.commit_receipts.len() >= MAX_LAB_COMMIT_RECEIPTS
+            {
+                guard.pending = Some(pending);
+                return coded_error_payload(
+                    "fortress.commit",
+                    ErrorCode::BudgetExceeded,
+                    "session commit-receipt store reached its explicit bound",
+                );
+            }
+            if guard.open_actions.len() + pending.plan.steps.len() > MAX_OPEN_ACTIONS {
+                guard.pending = Some(pending);
+                return coded_error_payload(
+                    "fortress.commit",
+                    ErrorCode::BudgetExceeded,
+                    "the session already tracks its maximum number of open actions; wait for or cancel existing work first",
+                );
+            }
+            if pending.plan.anchor != guard.adapter.snapshot().anchor() {
+                return replay_stale_plan(guard, pending);
+            }
+            let leases_before = guard.leases.clone();
+            let plan_leases = match acquire_plan_leases(guard, &pending.plan) {
+                Ok(leases) => leases,
                 Err(error) => {
                     guard.pending = Some(pending);
                     return dfmcp_error_payload("fortress.commit", &error);
                 }
             };
-            match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
-                Ok(receipt) => {
-                    guard.last_action = receipt.actions.first().map(|action| action.action_id);
-                    guard.last_plan_actions = receipt
-                        .actions
-                        .iter()
-                        .map(|action| action.action_id)
-                        .collect();
-                    for action in &receipt.actions {
-                        if !action.state.is_terminal()
-                            && !guard.open_actions.contains(&action.action_id)
-                        {
-                            guard.open_actions.push(action.action_id);
+            let (_, prepare_ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => {
+                    guard.leases = leases_before;
+                    guard.pending = Some(pending);
+                    return dfmcp_error_payload("fortress.commit", &error);
+                }
+            };
+            match guard.adapter.prepare(&pending.plan, &prepare_ctx) {
+                Ok(prepared) => {
+                    let (_, commit_ctx) = match next_context(guard) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            guard.leases = leases_before;
+                            guard.pending = Some(pending);
+                            return dfmcp_error_payload("fortress.commit", &error);
+                        }
+                    };
+                    match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
+                        Ok(receipt) => {
+                            guard.last_action =
+                                receipt.actions.first().map(|action| action.action_id);
+                            guard.last_plan_actions = receipt
+                                .actions
+                                .iter()
+                                .map(|action| action.action_id)
+                                .collect();
+                            for action in &receipt.actions {
+                                if !action.state.is_terminal()
+                                    && !guard.open_actions.contains(&action.action_id)
+                                {
+                                    guard.open_actions.push(action.action_id);
+                                }
+                                if let Some((_, ids)) =
+                                    plan_leases.iter().find(|(step, _)| *step == action.step_id)
+                                {
+                                    let holder = guard.session_id;
+                                    guard
+                                        .leases
+                                        .by_action
+                                        .insert(action.action_id, (holder, ids.clone()));
+                                    if action.state.is_terminal() {
+                                        release_action_leases(guard, action.action_id);
+                                    }
+                                }
+                            }
+                            let authority = plan_authority(&pending.plan);
+                            guard
+                                .commit_authority
+                                .insert(plan_digest.clone(), authority);
+                            let snapshot = guard.adapter.snapshot();
+                            let paused = snapshot.paused;
+                            let payload = json!({
+                                "ok": true,
+                                "session_id": format!("{}", guard.session_id),
+                                "plan_id": format!("{}", receipt.plan_id),
+                                "plan_digest": receipt.plan_digest.to_string(),
+                                "actions": receipt.actions.iter().map(|action| json!({
+                                    "action_id": format!("{}", action.action_id),
+                                    "step": action.step_id.get(),
+                                    "state": format!("{:?}", action.state),
+                                    "message": action.message,
+                                })).collect::<Vec<_>>(),
+                                "observed_anchor": anchor_json(&receipt.observed_anchor),
+                                "paused": paused,
+                            });
+                            let payload_text = payload.to_string();
+                            guard
+                                .commit_receipts
+                                .insert(plan_digest.clone(), payload_text.clone());
+                            payload_text
+                        }
+                        Err(error) => {
+                            guard.leases = leases_before;
+                            guard.pending = Some(pending);
+                            dfmcp_error_payload("fortress.commit", &error)
                         }
                     }
-                    let authority = plan_authority(&pending.plan);
-                    guard
-                        .commit_authority
-                        .insert(plan_digest.clone(), authority);
-                    let snapshot = guard.adapter.snapshot();
-                    let paused = snapshot.paused;
-                    let payload = json!({
-                        "ok": true,
-                        "session_id": format!("{}", guard.session_id),
-                        "plan_id": format!("{}", receipt.plan_id),
-                        "plan_digest": receipt.plan_digest.to_string(),
-                        "actions": receipt.actions.iter().map(|action| json!({
-                            "action_id": format!("{}", action.action_id),
-                            "step": action.step_id.get(),
-                            "state": format!("{:?}", action.state),
-                            "message": action.message,
-                        })).collect::<Vec<_>>(),
-                        "observed_anchor": anchor_json(&receipt.observed_anchor),
-                        "paused": paused,
-                    });
-                    let payload_text = payload.to_string();
-                    guard
-                        .commit_receipts
-                        .insert(plan_digest.clone(), payload_text.clone());
-                    payload_text
                 }
                 Err(error) => {
+                    guard.leases = leases_before;
                     guard.pending = Some(pending);
                     dfmcp_error_payload("fortress.commit", &error)
                 }
             }
-        }
-        Err(error) => {
-            guard.pending = Some(pending);
-            dfmcp_error_payload("fortress.commit", &error)
-        }
-    }
+        },
+    )
 }
 
 // ============================================================================
@@ -1317,99 +1681,106 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.wait"),
-    };
-    {
-        let (_, entry_ctx) = match next_context(&mut guard) {
-            Ok(value) => value,
-            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-        };
-        if let Err(error) = authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly) {
-            return dfmcp_error_payload("fortress.wait", &error);
-        }
-    }
-    let Some(action_id) = guard.last_action else {
-        return coded_error_payload(
-            "fortress.wait",
-            ErrorCode::Conflict,
-            "no committed action yet; call fortress_commit first",
-        );
-    };
-    let requested_ticks = max_game_ticks.unwrap_or(0);
-    if requested_ticks > guard.budget.max_game_ticks {
-        return coded_error_payload(
-            "fortress.wait",
-            ErrorCode::BudgetExceeded,
-            "max_game_ticks exceeds the session's negotiated game-tick budget",
-        );
-    }
-    let paused = guard.adapter.snapshot().paused;
-    let advanced = if requested_ticks > 0 && !paused {
-        if let Err(error) = guard.adapter.advance_ticks(requested_ticks) {
-            return dfmcp_error_payload("fortress.wait", &error);
-        }
-        requested_ticks
-    } else {
-        0
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-    };
-    let task = match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx) {
-        Ok(task) => task,
-        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-    };
-    // Poll every open action in commit order (prerequisites before their
-    // dependents) and retire the ones that reached a terminal state.
-    let mut polled_actions = Vec::new();
-    let mut still_open = Vec::new();
-    for open in guard.open_actions.clone() {
-        let (_, poll_ctx) = match next_context(&mut guard) {
-            Ok(value) => value,
-            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-        };
-        match guard.adapter.poll_action(open, &poll_ctx) {
-            Ok(receipt) => {
-                if !receipt.state.is_terminal() {
-                    still_open.push(open);
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.wait"),
+        |guard| {
+            {
+                let (_, entry_ctx) = match next_context(guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+                };
+                if let Err(error) =
+                    authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly)
+                {
+                    return dfmcp_error_payload("fortress.wait", &error);
                 }
-                polled_actions.push(json!({
-                    "action_id": format!("{open}"),
-                    "step": receipt.step_id.get(),
-                    "state": format!("{:?}", receipt.state),
-                    "message": receipt.message,
-                }));
             }
-            Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-        }
-    }
-    guard.open_actions = still_open;
-    let snapshot = guard.adapter.snapshot();
-    let mut payload = json!({
-        "ok": true,
-        "session_id": format!("{}", guard.session_id),
-        "action_id": format!("{}", action_id),
-        "task_id": task.task_id,
-        "status": task.status.as_str(),
-        "commit_state": format!("{:?}", task.commit_state),
-        "summary": task.summary,
-        "observed_anchor": anchor_json(&snapshot.anchor()),
-    });
-    if max_game_ticks.is_some() {
-        payload["advanced_game_ticks"] = json!(advanced);
-        payload["game_tick"] = json!(snapshot.tick.0);
-        payload["polled_actions"] = json!(polled_actions);
-        payload["open_actions_remaining"] = json!(guard.open_actions.len());
-        if requested_ticks > 0 && paused {
-            payload["blocked"] = json!(
-                "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
-            );
-        }
-    }
-    payload.to_string()
+            let Some(action_id) = guard.last_action else {
+                return coded_error_payload(
+                    "fortress.wait",
+                    ErrorCode::Conflict,
+                    "no committed action yet; call fortress_commit first",
+                );
+            };
+            let requested_ticks = max_game_ticks.unwrap_or(0);
+            if requested_ticks > guard.budget.max_game_ticks {
+                return coded_error_payload(
+                    "fortress.wait",
+                    ErrorCode::BudgetExceeded,
+                    "max_game_ticks exceeds the session's negotiated game-tick budget",
+                );
+            }
+            let paused = guard.adapter.snapshot().paused;
+            let advanced = if requested_ticks > 0 && !paused {
+                if let Err(error) = guard.adapter.advance_ticks(requested_ticks) {
+                    return dfmcp_error_payload("fortress.wait", &error);
+                }
+                requested_ticks
+            } else {
+                0
+            };
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+            };
+            let task = match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx)
+            {
+                Ok(task) => task,
+                Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+            };
+            // Poll every open action in commit order (prerequisites before their
+            // dependents) and retire the ones that reached a terminal state.
+            let mut polled_actions = Vec::new();
+            let mut still_open = Vec::new();
+            for open in guard.open_actions.clone() {
+                let (_, poll_ctx) = match next_context(guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+                };
+                match guard.adapter.poll_action(open, &poll_ctx) {
+                    Ok(receipt) => {
+                        if receipt.state.is_terminal() {
+                            release_action_leases(guard, open);
+                        } else {
+                            still_open.push(open);
+                        }
+                        polled_actions.push(json!({
+                            "action_id": format!("{open}"),
+                            "step": receipt.step_id.get(),
+                            "state": format!("{:?}", receipt.state),
+                            "message": receipt.message,
+                        }));
+                    }
+                    Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+                }
+            }
+            guard.open_actions = still_open;
+            let snapshot = guard.adapter.snapshot();
+            let mut payload = json!({
+                "ok": true,
+                "session_id": format!("{}", guard.session_id),
+                "action_id": format!("{}", action_id),
+                "task_id": task.task_id,
+                "status": task.status.as_str(),
+                "commit_state": format!("{:?}", task.commit_state),
+                "summary": task.summary,
+                "observed_anchor": anchor_json(&snapshot.anchor()),
+            });
+            if max_game_ticks.is_some() {
+                payload["advanced_game_ticks"] = json!(advanced);
+                payload["game_tick"] = json!(snapshot.tick.0);
+                payload["polled_actions"] = json!(polled_actions);
+                payload["open_actions_remaining"] = json!(guard.open_actions.len());
+                if requested_ticks > 0 && paused {
+                    payload["blocked"] = json!(
+                        "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
+                    );
+                }
+            }
+            payload.to_string()
+        },
+    )
 }
 
 // ============================================================================
@@ -1460,70 +1831,72 @@ pub(crate) fn cancel_in_scope(
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.cancel"),
-    };
-    {
-        let (_, entry_ctx) = match next_context(&mut guard) {
-            Ok(value) => value,
-            Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
-        };
-        if let Err(error) =
-            authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
-        {
-            return dfmcp_error_payload("fortress.cancel", &error);
-        }
-    }
-    let Some(action_id) = guard.last_action else {
-        return coded_error_payload(
-            "fortress.cancel",
-            ErrorCode::Conflict,
-            "no committed action to cancel; call fortress_commit first",
-        );
-    };
-    let cancel_mode = match mode.as_deref() {
-        Some("emergency_pause_and_drain") => CancelMode::EmergencyPauseAndDrain,
-        Some("stop_future_steps") => CancelMode::StopFutureSteps,
-        Some("compensate_reversible") | None => CancelMode::CompensateReversible,
-        Some(other) => {
-            return error_payload(
-                "fortress.cancel",
-                &format!("unsupported cancellation mode {other:?}"),
-            );
-        }
-    };
-    if plan_scope {
-        return drain_plan(&mut guard, cancel_mode);
-    }
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
-    };
-    match guard.adapter.request_cancel(action_id, cancel_mode, &ctx) {
-        Ok(request) => {
-            let (_, finalize_ctx) = match next_context(&mut guard) {
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.cancel"),
+        |guard| {
+            {
+                let (_, entry_ctx) = match next_context(guard) {
+                    Ok(value) => value,
+                    Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+                };
+                if let Err(error) =
+                    authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
+                {
+                    return dfmcp_error_payload("fortress.cancel", &error);
+                }
+            }
+            let Some(action_id) = guard.last_action else {
+                return coded_error_payload(
+                    "fortress.cancel",
+                    ErrorCode::Conflict,
+                    "no committed action to cancel; call fortress_commit first",
+                );
+            };
+            let cancel_mode = match mode.as_deref() {
+                Some("emergency_pause_and_drain") => CancelMode::EmergencyPauseAndDrain,
+                Some("stop_future_steps") => CancelMode::StopFutureSteps,
+                Some("compensate_reversible") | None => CancelMode::CompensateReversible,
+                Some(other) => {
+                    return error_payload(
+                        "fortress.cancel",
+                        &format!("unsupported cancellation mode {other:?}"),
+                    );
+                }
+            };
+            if plan_scope {
+                return drain_plan(guard, cancel_mode);
+            }
+            let (_, ctx) = match next_context(guard) {
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
             };
-            match guard.adapter.finalize_cancel(action_id, &finalize_ctx) {
-            Ok(finalized) => json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "action_id": format!("{}", finalized.action_id),
-                "requested_state": format!("{:?}", request.state),
-                "final_state": format!("{:?}", finalized.state),
-                "note": "cancellation is request/drain/compensate/finalize; records are never deleted",
-            })
-            .to_string(),
-            Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+            match guard.adapter.request_cancel(action_id, cancel_mode, &ctx) {
+                Ok(request) => {
+                    let (_, finalize_ctx) = match next_context(guard) {
+                        Ok(value) => value,
+                        Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+                    };
+                    match guard.adapter.finalize_cancel(action_id, &finalize_ctx) {
+                Ok(finalized) => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "action_id": format!("{}", finalized.action_id),
+                    "requested_state": format!("{:?}", request.state),
+                    "final_state": format!("{:?}", finalized.state),
+                    "note": "cancellation is request/drain/compensate/finalize; records are never deleted",
+                })
+                .to_string(),
+                Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+                }
+                }
+                Err(error) => dfmcp_error_payload("fortress.cancel", &error),
             }
-        }
-        Err(error) => dfmcp_error_payload("fortress.cancel", &error),
-    }
+        },
+    )
 }
 
-fn drain_plan(guard: &mut MutexGuard<'_, LabSession>, cancel_mode: CancelMode) -> String {
+fn drain_plan(guard: &mut LabSession, cancel_mode: CancelMode) -> String {
     let actions = guard.last_plan_actions.clone();
     let mut steps = Vec::with_capacity(actions.len());
     let mut already_terminal = 0usize;
@@ -1575,6 +1948,15 @@ fn drain_plan(guard: &mut MutexGuard<'_, LabSession>, cancel_mode: CancelMode) -
                 failure = Some(error);
                 break;
             }
+        }
+    }
+    for action_id in &actions {
+        let terminal = guard
+            .adapter
+            .action_receipt(*action_id)
+            .is_some_and(|receipt| receipt.state.is_terminal());
+        if terminal {
+            release_action_leases(guard, *action_id);
         }
     }
     steps.reverse();
@@ -1649,30 +2031,33 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
             "checkpoint label exceeds its explicit byte bound",
         );
     }
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.checkpoint"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Checkpoint, RiskTier::Reversible) {
-        return dfmcp_error_payload("fortress.checkpoint", &error);
-    }
-    match guard.adapter.checkpoint(&label, &ctx) {
-        Ok(receipt) => json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "checkpoint_id": format!("{}", receipt.checkpoint_id),
-            "label": receipt.label,
-            "content_digest": receipt.content_digest.to_string(),
-            "durable": receipt.durable,
-            "anchor": anchor_json(&receipt.anchor),
-        })
-        .to_string(),
-        Err(error) => dfmcp_error_payload("fortress.checkpoint", &error),
-    }
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.checkpoint"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Checkpoint, RiskTier::Reversible)
+            {
+                return dfmcp_error_payload("fortress.checkpoint", &error);
+            }
+            match guard.adapter.checkpoint(&label, &ctx) {
+                Ok(receipt) => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "checkpoint_id": format!("{}", receipt.checkpoint_id),
+                    "label": receipt.label,
+                    "content_digest": receipt.content_digest.to_string(),
+                    "durable": receipt.durable,
+                    "anchor": anchor_json(&receipt.anchor),
+                })
+                .to_string(),
+                Err(error) => dfmcp_error_payload("fortress.checkpoint", &error),
+            }
+        },
+    )
 }
 
 // ============================================================================
@@ -1709,42 +2094,52 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.restore", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.restore"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.restore", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Restore, RiskTier::Guarded) {
-        return dfmcp_error_payload("fortress.restore", &error);
-    }
-    match guard
-        .adapter
-        .restore(CheckpointId::new(parsed_checkpoint), &ctx)
-    {
-        Ok(receipt) => {
-            guard.pending = None;
-            guard.last_action = None;
-            // The adapter forgot every pre-restore action; so must the session,
-            // or every later wait would poll handles that no longer exist.
-            guard.last_plan_actions.clear();
-            guard.open_actions.clear();
-            guard.commit_receipts.clear();
-            json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "checkpoint_id": format!("{}", receipt.checkpoint_id),
-                "prior_anchor": anchor_json(&receipt.prior_anchor),
-                "restored_anchor": anchor_json(&receipt.restored_anchor),
-                "content_digest": receipt.content_digest.to_string(),
-                "note": "new observation epoch; pending plans and action handles were invalidated",
-            })
-            .to_string()
-        }
-        Err(error) => dfmcp_error_payload("fortress.restore", &error),
-    }
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.restore"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.restore", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Restore, RiskTier::Guarded) {
+                return dfmcp_error_payload("fortress.restore", &error);
+            }
+            if guard.shared_members > 1 {
+                return coded_error_payload(
+                    "fortress.restore",
+                    ErrorCode::Conflict,
+                    "restore would rewrite a fortress other agents share; only a sole member may restore",
+                );
+            }
+            match guard
+                .adapter
+                .restore(CheckpointId::new(parsed_checkpoint), &ctx)
+            {
+                Ok(receipt) => {
+                    guard.pending = None;
+                    guard.last_action = None;
+                    guard.leases = LeaseBook::default();
+                    // The adapter forgot every pre-restore action; so must the session,
+                    // or every later wait would poll handles that no longer exist.
+                    guard.last_plan_actions.clear();
+                    guard.open_actions.clear();
+                    guard.commit_receipts.clear();
+                    json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "checkpoint_id": format!("{}", receipt.checkpoint_id),
+                    "prior_anchor": anchor_json(&receipt.prior_anchor),
+                    "restored_anchor": anchor_json(&receipt.restored_anchor),
+                    "content_digest": receipt.content_digest.to_string(),
+                    "note": "new observation epoch; pending plans and action handles were invalidated",
+                })
+                .to_string()
+                }
+                Err(error) => dfmcp_error_payload("fortress.restore", &error),
+            }
+        },
+    )
 }
 
 // ============================================================================
@@ -1760,69 +2155,76 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.explain", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.explain"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.explain", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
-        return dfmcp_error_payload("fortress.explain", &error);
-    }
-    let snapshot = guard.adapter.snapshot();
-
-    if let Some(ent_str) = entity_id {
-        if ent_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
-            return coded_error_payload(
-                "fortress.explain",
-                ErrorCode::BudgetExceeded,
-                "entity_id exceeds the maximum decimal u64 length",
-            );
-        }
-        let parsed_id: Result<EntityId> = ent_str.parse::<u64>().map(EntityId::new).map_err(|_| {
-            DfmcpError::new(ErrorCode::InvalidRequest, "entity_id must be a decimal u64")
-        });
-        let target_id = match parsed_id {
-            Ok(id) if id != EntityId::NIL => id,
-            Ok(_) => {
-                return error_payload("fortress.explain", "entity_id zero is reserved");
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.explain"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.explain", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
+                return dfmcp_error_payload("fortress.explain", &error);
             }
-            Err(error) => return dfmcp_error_payload("fortress.explain", &error),
-        };
+            let snapshot = guard.adapter.snapshot();
 
-        let deps = get_transitive_dependencies(&snapshot.graph, target_id, EdgeKind::Requires);
-        let deps_str: Vec<String> = deps.iter().map(|id| format!("{}", id.get())).collect();
-        let entity_record = snapshot.graph.entities.get(&target_id);
+            if let Some(ent_str) = entity_id {
+                if ent_str.len() > MAX_FORTRESS_SELECTOR_BYTES {
+                    return coded_error_payload(
+                        "fortress.explain",
+                        ErrorCode::BudgetExceeded,
+                        "entity_id exceeds the maximum decimal u64 length",
+                    );
+                }
+                let parsed_id: Result<EntityId> =
+                    ent_str.parse::<u64>().map(EntityId::new).map_err(|_| {
+                        DfmcpError::new(
+                            ErrorCode::InvalidRequest,
+                            "entity_id must be a decimal u64",
+                        )
+                    });
+                let target_id = match parsed_id {
+                    Ok(id) if id != EntityId::NIL => id,
+                    Ok(_) => {
+                        return error_payload("fortress.explain", "entity_id zero is reserved");
+                    }
+                    Err(error) => return dfmcp_error_payload("fortress.explain", &error),
+                };
 
-        json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "target_entity": format!("{}", target_id.get()),
-            "entity_found": entity_record.is_some(),
-            "transitive_dependencies": deps_str,
-            "note": "causal explanation derived from directed fortress multigraph topology",
-        })
-        .to_string()
-    } else {
-        let events = guard.adapter.transcript();
-        let start = events.len().saturating_sub(16);
-        let recent: Vec<String> = events
-            .iter()
-            .skip(start)
-            .map(|event| format!("{event:?}"))
-            .collect();
-        json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "transcript_len": events.len(),
-            "transcript_truncated": guard.adapter.transcript_truncated(),
-            "recent_events": recent,
-            "note": "process-local laboratory transcript only; no durable evidence bundle is implemented",
-        })
-        .to_string()
-    }
+                let deps =
+                    get_transitive_dependencies(&snapshot.graph, target_id, EdgeKind::Requires);
+                let deps_str: Vec<String> = deps.iter().map(|id| format!("{}", id.get())).collect();
+                let entity_record = snapshot.graph.entities.get(&target_id);
+
+                json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "target_entity": format!("{}", target_id.get()),
+                    "entity_found": entity_record.is_some(),
+                    "transitive_dependencies": deps_str,
+                    "note": "causal explanation derived from directed fortress multigraph topology",
+                })
+                .to_string()
+            } else {
+                let events = guard.adapter.transcript();
+                let start = events.len().saturating_sub(16);
+                let recent: Vec<String> = events
+                    .iter()
+                    .skip(start)
+                    .map(|event| format!("{event:?}"))
+                    .collect();
+                json!({
+                "ok": true,
+                "session_id": format!("{}", guard.session_id),
+                "transcript_len": events.len(),
+                "transcript_truncated": guard.adapter.transcript_truncated(),
+                "recent_events": recent,
+                "note": "process-local laboratory transcript only; no durable evidence bundle is implemented",
+            })
+            .to_string()
+            }
+        },
+    )
 }
 
 // ============================================================================
@@ -1838,39 +2240,42 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
     };
-    let mut guard = match session.lock() {
-        Ok(value) => value,
-        Err(_) => return mutex_poisoned_payload("fortress.doctor"),
-    };
-    let (_, ctx) = match next_context(&mut guard) {
-        Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
-        return dfmcp_error_payload("fortress.doctor", &error);
-    }
-    let health_res = guard.adapter.health(&ctx);
+    with_session(
+        &session,
+        || mutex_poisoned_payload("fortress.doctor"),
+        |guard| {
+            let (_, ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.doctor", &error),
+            };
+            if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
+                return dfmcp_error_payload("fortress.doctor", &error);
+            }
+            let health_res = guard.adapter.health(&ctx);
 
-    let active_sessions_count = sessions().len();
-    let health_opt = health_res.as_ref().ok();
-    let report = DoctorInspector.generate_report(active_sessions_count, health_opt, None, 0, 0);
+            let active_sessions_count = sessions().len();
+            let health_opt = health_res.as_ref().ok();
+            let report =
+                DoctorInspector.generate_report(active_sessions_count, health_opt, None, 0, 0);
 
-    match health_res {
-        Ok(health) => json!({
-            "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "status": if report.is_healthy { "healthy" } else { "degraded" },
-            "active_sessions_count": report.active_sessions_count,
-            "adapter": health.identity.name,
-            "compatibility": format!("{:?}", health.identity.compatibility),
-            "fortress_loaded": health.fortress_loaded,
-            "findings": report.findings,
-            "warnings": health.warnings,
-            "current_anchor": health.current_anchor.as_ref().map(anchor_json),
-        })
-        .to_string(),
-        Err(error) => dfmcp_error_payload("fortress.doctor", &error),
-    }
+            match health_res {
+                Ok(health) => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "status": if report.is_healthy { "healthy" } else { "degraded" },
+                    "active_sessions_count": report.active_sessions_count,
+                    "adapter": health.identity.name,
+                    "compatibility": format!("{:?}", health.identity.compatibility),
+                    "fortress_loaded": health.fortress_loaded,
+                    "findings": report.findings,
+                    "warnings": health.warnings,
+                    "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+                })
+                .to_string(),
+                Err(error) => dfmcp_error_payload("fortress.doctor", &error),
+            }
+        },
+    )
 }
 
 // ============================================================================
