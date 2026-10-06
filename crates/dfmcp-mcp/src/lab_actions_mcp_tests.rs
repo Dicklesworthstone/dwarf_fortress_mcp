@@ -1989,3 +1989,58 @@ fn production_needs_a_workshop_and_a_worker_and_a_stalled_order_fails_its_deadli
     assert_eq!(failed["agent_turn"]["attention"][0]["urgency"], "now");
     Ok(())
 }
+
+#[test]
+fn a_supply_alert_remedies_the_actual_production_blocker() -> TestResult {
+    let session = open(
+        "72200",
+        false,
+        &[
+            ("configure_labor", "reversible"),
+            ("configure_production", "reversible"),
+        ],
+    )?;
+    // Nobody brews any more.
+    let off = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":false}}]"#,
+    )?;
+    assert_eq!(off["ok"], true, "{off}");
+    let mut alert = Value::Null;
+    for _ in 0..40 {
+        let turn = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        if let Some(found) = turn["world_alerts"]
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["alert"] == "drink_supply"))
+        {
+            alert = found.clone();
+            break;
+        }
+    }
+    assert!(alert.is_object(), "no drink alert raised");
+    assert!(
+        alert["production_blocked_by"]
+            .as_str()
+            .is_some_and(|why| why.contains("BREW")),
+        "{alert}"
+    );
+    // The remedy assigns the labor (not a production plan that would be refused).
+    assert_eq!(alert["remedy"]["requires"], "configure_labor", "{alert}");
+    let actions = alert["remedy"]["arguments"]["actions"]
+        .as_str()
+        .ok_or_else(|| alert.to_string())?;
+    let assigned = plan_and_commit(&session, actions)?;
+    assert_eq!(assigned["ok"], true, "{assigned}");
+    // With a brewer again, the next alert remedies with production.
+    let turn = parsed(&fortress_wait(Some(session.clone()), Some(10)))?;
+    let next = turn["world_alerts"]
+        .as_array()
+        .and_then(|a| a.iter().find(|x| x["alert"] == "drink_supply"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    if next.is_object() {
+        assert_eq!(next["production_blocked_by"], Value::Null, "{next}");
+        assert_eq!(next["remedy"]["requires"], "configure_production", "{next}");
+    }
+    Ok(())
+}

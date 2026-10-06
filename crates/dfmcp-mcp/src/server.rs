@@ -2232,7 +2232,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         }));
     }
     for alert in &alerts {
-        if alert["severity"] == "critical" {
+        if alert["severity"] == "critical" && alert["remedy"].is_object() {
             let mut arguments = alert["remedy"]["arguments"].clone();
             arguments["session_id"] = json!(format!("{}", session.session_id));
             resume.push(json!({

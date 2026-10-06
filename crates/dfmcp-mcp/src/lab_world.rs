@@ -930,15 +930,46 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
             .count();
         // Keep about four rounds in stock; the production compiler sizes the
         // work orders against observed stock.
-        let token = if noun == "drink" { "DRINK" } else { "FOOD" };
-        let remedy = json!({
-            "tool": "fortress.plan",
-            "arguments": {"blueprint": json!({
-                "template": "production",
-                "quotas": [{"item": token, "minimum": living * 4}],
-            }).to_string()},
-            "requires": "configure_production",
-        });
+        let (token, job) = if noun == "drink" {
+            ("DRINK", "BREW_DRINK")
+        } else {
+            ("FOOD", "PREPARE_MEAL")
+        };
+        let blocker = effects::work_order_blocker(snapshot, job);
+        let labor = effects::work_order_requirements(job).map(|(_, labor)| labor);
+        // Remedy the actual blocker first: a production plan that cannot
+        // progress would only be refused.
+        let remedy = match (&blocker, labor) {
+            (None, _) => json!({
+                "tool": "fortress.plan",
+                "arguments": {"blueprint": json!({
+                    "template": "production",
+                    "quotas": [{"item": token, "minimum": living * 4}],
+                }).to_string()},
+                "requires": "configure_production",
+            }),
+            (Some(why), Some(labor)) if !why.contains("no completed") => {
+                // Prefer a dwarf outside the militia for the missing labor.
+                let worker = units
+                    .iter()
+                    .min_by_key(|u| (u.fields.contains_key(effects::SQUAD_FIELD), u.id));
+                match worker {
+                    Some(worker) => json!({
+                        "tool": "fortress.plan",
+                        "arguments": {"actions": json!([{"action": {
+                            "kind": "set_labor",
+                            "units": [worker.id.get().to_string()],
+                            "labor": labor,
+                            "enabled": true,
+                        }}]).to_string()},
+                        "requires": "configure_labor",
+                        "then": "plan production once the labor is assigned",
+                    }),
+                    None => Json::Null,
+                }
+            }
+            _ => Json::Null,
+        };
         let (severity, finding) = if starving > 0 {
             (
                 "critical",
@@ -963,6 +994,7 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
             "stock": held,
             "ticks_until_exhausted": ticks_left,
             "deprived_units": starving,
+            "production_blocked_by": blocker,
             "remedy": remedy,
         }));
     }
