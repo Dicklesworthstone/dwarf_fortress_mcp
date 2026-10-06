@@ -383,3 +383,110 @@ fn checkpoint_identifiers_are_capabilities_not_paths() -> TestResult {
     assert_eq!(restored["ok"], true, "{restored}");
     Ok(())
 }
+
+/// Capability noninterference: a session that negotiated neither `observe`
+/// nor `query` must not learn world facts through any other read channel —
+/// tool payloads, Agent Turn sections, resources, or error text.
+#[test]
+fn a_session_without_read_grants_learns_no_world_facts() -> TestResult {
+    // Facts that only observation could reveal in the besieged scenario.
+    const SECRETS: [&str; 6] = [
+        "Urist",
+        "Brewmaster",
+        "The Axes of Dawn",
+        "goblin",
+        "thirsty",
+        "Fortress stocks",
+    ];
+    let opened = parsed(&fortress_open_session(
+        Some(false),
+        Some("74010".to_owned()),
+        Some(vec![
+            ("control_clock".to_owned(), "reversible".to_owned()),
+            ("plan".to_owned(), "reversible".to_owned()),
+            ("checkpoint".to_owned(), "guarded".to_owned()),
+            ("restore".to_owned(), "guarded".to_owned()),
+        ]),
+        None,
+        Some(20_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        Some("besieged_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+    let s = || Some(session.clone());
+    let mut channels: Vec<(&str, String)> = vec![("open_session", opened.to_string())];
+    // Let the raid arrive and the barrels drain so alerts would fire.
+    for _ in 0..20 {
+        channels.push(("wait", fortress_wait(s(), Some(100))));
+    }
+    channels.push(("observe", fortress_observe(s())));
+    channels.push(("query", fortress_query(s(), None)));
+    channels.push((
+        "query_search",
+        fortress_query(s(), Some(r#"{"mode":"search","text":"Urist"}"#.to_owned())),
+    ));
+    channels.push(("explain", fortress_explain(s(), Some("1001".to_owned()))));
+    channels.push(("doctor", fortress_doctor(s())));
+    channels.push((
+        "plan",
+        fortress_plan(s(), Some("hold".to_owned()), Some(true), None, None),
+    ));
+    let checkpoint = fortress_checkpoint(s(), None);
+    channels.push(("checkpoint", checkpoint.clone()));
+    channels.push(("cancel", fortress_cancel(s(), None, None)));
+    for view in crate::resources::SESSION_VIEWS {
+        let uri = format!("df://session/{session}/{view}");
+        let read = match view {
+            "summary" => crate::resources::session_summary(&session, &uri),
+            "capabilities" => crate::resources::session_capabilities(&session, &uri),
+            "handoff" => crate::resources::session_handoff(&session, &uri),
+            "replay" => crate::resources::session_replay(&session, &uri),
+            _ => crate::resources::session_anchor(&session, &uri),
+        };
+        channels.push((view, format!("{read:?}")));
+    }
+    let mut leaks = Vec::new();
+    for (channel, text) in &channels {
+        for secret in SECRETS {
+            if text.contains(secret) {
+                leaks.push(format!("{channel} reveals {secret:?}"));
+            }
+        }
+    }
+    assert!(leaks.is_empty(), "inference channels: {leaks:#?}");
+
+    // Positive control: the same probes from a reading session do reveal
+    // these facts, so the absence above is meaningful.
+    let reader = open(
+        "74011",
+        &[
+            ("observe", "read_only"),
+            ("query", "read_only"),
+            ("control_clock", "reversible"),
+        ],
+    )?;
+    let mut seen = String::new();
+    for _ in 0..20 {
+        seen.push_str(&fortress_wait(Some(reader.clone()), Some(100)));
+    }
+    seen.push_str(&fortress_query(
+        Some(reader.clone()),
+        Some(r#"{"mode":"entities","limit":32}"#.to_owned()),
+    ));
+    seen.push_str(&fortress_query(
+        Some(reader),
+        Some(r#"{"mode":"search","text":"Urist"}"#.to_owned()),
+    ));
+    let revealed: Vec<_> = SECRETS.iter().filter(|s| seen.contains(**s)).collect();
+    assert!(
+        revealed.len() >= 3,
+        "positive control too weak: {revealed:?}"
+    );
+    Ok(())
+}
