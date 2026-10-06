@@ -1505,7 +1505,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}; entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let recorded = json!({"mode": mode});

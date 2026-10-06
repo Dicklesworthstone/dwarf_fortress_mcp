@@ -1256,6 +1256,12 @@ enum QuerySpec {
         #[serde(rename = "where")]
         filter: Option<Json>,
     },
+    /// Walkability route between two tiles (six-neighbour, observed dry
+    /// floors and complementary stairs; no digging, ramps or hidden tiles).
+    Path {
+        from: [i32; 3],
+        to: [i32; 3],
+    },
     /// Ranked lexical search over entity labels, kinds and field values.
     Search {
         text: String,
@@ -1304,6 +1310,7 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
             entities_page(snapshot, kind.as_deref(), limit, offset, predicate.as_ref())
         }
         QuerySpec::Search { text, limit } => search(snapshot, &text, limit),
+        QuerySpec::Path { from, to } => path(snapshot, from, to),
         QuerySpec::Terrain { min, max } => terrain(snapshot, coord(min), coord(max)),
     }
 }
@@ -1399,6 +1406,143 @@ pub(crate) fn filter_predicate(raw: &Json, depth: usize) -> Result<Predicate> {
         op,
         value,
     })
+}
+
+/// Largest x/y margin around a path query's endpoints.
+const PATH_MARGIN: i32 = 8;
+/// Most path points returned.
+const MAX_PATH_POINTS: usize = 64;
+
+fn path(snapshot: &WorldSnapshot, from: [i32; 3], to: [i32; 3]) -> Result<Json> {
+    use dfmcp_world::map_region::{Cell, MapRegion, Region, Shape, Tile};
+    // The bounded route region is the endpoints' bounding box plus a margin; z gets
+    // a one-level margin so a single-level route does not sit on the region boundary.
+    let margin = [PATH_MARGIN, PATH_MARGIN, 1];
+    let origin: [i32; 3] = std::array::from_fn(|axis| from[axis].min(to[axis]) - margin[axis]);
+    let mut size = [0_u32; 3];
+    for axis in 0..3 {
+        let extent = i64::from(from[axis].max(to[axis])) + i64::from(margin[axis])
+            - i64::from(origin[axis])
+            + 1;
+        size[axis] = u32::try_from(extent)
+            .map_err(|_| invalid("path endpoints are too far apart for one bounded route query"))?;
+    }
+    // Region coordinates are local: the lab map may use negative world coordinates.
+    let region = Region {
+        origin: [0, 0, 0],
+        size,
+    };
+    let volume = region
+        .volume()
+        .map_err(|_| invalid("path endpoints are too far apart for one bounded route query"))?;
+    let world = |local: [u32; 3]| -> [i32; 3] {
+        std::array::from_fn(|axis| origin[axis].saturating_add_unsigned(local[axis]))
+    };
+    let mut cells = Vec::with_capacity(volume);
+    for index in 0..volume {
+        let Some(local) = region.position(index) else {
+            return Err(invalid("path region indexing failed"));
+        };
+        let [x, y, z] = world(local);
+        cells.push(match snapshot.tile_code_at(MapCoord::new(x, y, z)) {
+            None => Cell::Hidden,
+            Some(code) => {
+                let shape = match code {
+                    tile_codes::FLOOR => Shape::Floor,
+                    tile_codes::SOLID_WALL | tile_codes::MAGMA_WALL => Shape::Wall,
+                    tile_codes::OPEN_SPACE | tile_codes::CHASM => Shape::Empty,
+                    tile_codes::STAIR => Shape::StairUpDown,
+                    tile_codes::RAMP => Shape::Ramp,
+                    _ => Shape::Other,
+                };
+                Cell::Visible(Tile {
+                    native_tiletype: code,
+                    shape,
+                    liquid_depth: 0,
+                    magma: code == tile_codes::MAGMA_WALL,
+                    traffic: 0,
+                    dig_designation: 0,
+                    building_occupancy: 0,
+                    unit_occupancy: 0,
+                    walkable_region: u32::from(matches!(shape, Shape::Floor | Shape::StairUpDown)),
+                    temperature_1: 0,
+                    temperature_2: 0,
+                })
+            }
+        });
+    }
+    let map = MapRegion { region, cells };
+    let local =
+        |c: [i32; 3]| -> [u32; 3] { std::array::from_fn(|axis| c[axis].abs_diff(origin[axis])) };
+    let route = map
+        .route(
+            local(from),
+            local(to),
+            dfmcp_world::map_region::MAX_ROUTE_WORK,
+        )
+        .map_err(|error| invalid(format!("path query failed: {error:?}")))?;
+    let reachable = !route.path.is_empty();
+    // An unobserved tile can only open a route if some walkable tile could step into
+    // it: horizontally always, vertically only through a stair-like shape.
+    let borders_unobserved = (0..volume).any(|index| {
+        let (Some(Cell::Visible(tile)), Some(position)) =
+            (map.cells.get(index), region.position(index))
+        else {
+            return false;
+        };
+        if !map.candidate(index) {
+            return false;
+        }
+        (0..3).any(|axis| {
+            [false, true].into_iter().any(|increase| {
+                if axis == 2
+                    && !(if increase {
+                        tile.shape.up()
+                    } else {
+                        tile.shape.down()
+                    })
+                {
+                    return false;
+                }
+                let mut next = position;
+                let moved = if increase {
+                    next[axis].checked_add(1)
+                } else {
+                    next[axis].checked_sub(1)
+                };
+                moved.is_some_and(|value| {
+                    next[axis] = value;
+                    region
+                        .index(next)
+                        .is_some_and(|n| matches!(map.cells.get(n), Some(Cell::Hidden)))
+                })
+            })
+        })
+    });
+    let certified = reachable
+        || route.endpoint_excluded
+        || !(route.touched_region_boundary || borders_unobserved);
+    Ok(json!({
+        "mode": "path",
+        "from": from,
+        "to": to,
+        "reachable": reachable,
+        "endpoint_not_walkable": route.endpoint_excluded,
+        "path_length": route.path.len().saturating_sub(1),
+        "path": route.path.iter().take(MAX_PATH_POINTS).map(|p| world(*p)).collect::<Vec<_>>(),
+        "path_truncated": route.path.len() > MAX_PATH_POINTS,
+        "visited_tiles": route.visited_tiles,
+        "policy": dfmcp_world::map_region::ROUTE_POLICY,
+        "region": {"origin": origin, "size": size},
+        "touched_region_boundary": route.touched_region_boundary,
+        "borders_unobserved_tiles": borders_unobserved,
+        "epistemic_state": if certified { "certified_derived" } else { "unknown" },
+        "note": if certified {
+            "derived from observed terrain under the stated walking policy"
+        } else {
+            "no route inside the bounded, observed region; a route outside it or through unobserved tiles is not ruled out"
+        },
+    }))
 }
 
 fn search(snapshot: &WorldSnapshot, text: &str, limit: Option<usize>) -> Result<Json> {

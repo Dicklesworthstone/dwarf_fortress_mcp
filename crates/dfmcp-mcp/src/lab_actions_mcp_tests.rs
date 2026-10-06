@@ -1721,3 +1721,37 @@ fn production_objectives_compile_against_observed_stock() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn path_queries_route_over_observed_terrain_and_hedge_unproven_absence() -> TestResult {
+    let session = open("72150", false, &ALL_EFFECTS)?;
+    let terrain = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"terrain","min":[-2,0,10],"max":[11,4,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(terrain["ok"], true, "{terrain}");
+    let walk = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"path","from":[0,2,10],"to":[9,2,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(walk["ok"], true, "{walk} {terrain}");
+    assert_eq!(walk["reachable"], true, "{walk} {terrain}");
+    assert_eq!(walk["path_length"], 9, "{walk}");
+    assert_eq!(walk["path"][0], json!([0, 2, 10]));
+    assert_eq!(walk["path"][9], json!([9, 2, 10]));
+    assert_eq!(walk["epistemic_state"], "certified_derived");
+
+    let rock = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"path","from":[0,2,10],"to":[10,2,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(rock["reachable"], false, "{rock}");
+    assert_eq!(rock["endpoint_not_walkable"], true, "{rock}");
+
+    let again = parsed(&fortress_query(
+        Some(session),
+        Some(r#"{"mode":"path","from":[0,2,10],"to":[9,2,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(again["path"], walk["path"], "routes are deterministic");
+    Ok(())
+}

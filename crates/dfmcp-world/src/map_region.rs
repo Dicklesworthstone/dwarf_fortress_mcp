@@ -117,10 +117,12 @@ impl Shape {
             Self::Floor | Self::StairUp | Self::StairDown | Self::StairUpDown
         )
     }
-    const fn up(self) -> bool {
+    /// Whether the shape allows climbing up.
+    pub const fn up(self) -> bool {
         matches!(self, Self::StairUp | Self::StairUpDown)
     }
-    const fn down(self) -> bool {
+    /// Whether the shape allows climbing down.
+    pub const fn down(self) -> bool {
         matches!(self, Self::StairDown | Self::StairUpDown)
     }
 }
