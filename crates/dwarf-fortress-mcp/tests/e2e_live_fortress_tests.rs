@@ -17,9 +17,9 @@ use dfmcp_core::{
     MapCuboid, ObservationCursor, OperationContext, RequestId, Result, RiskTier, SessionId,
     WorkBudget,
 };
-use dfmcp_intent::StaticPlanner;
 use dfmcp_intent::blueprint::{BlueprintPlanner, BlueprintTemplate};
 use dfmcp_intent::logistics::{InventoryStockpile, ProductionLogisticsCompiler};
+use dfmcp_intent::{PlanPolicy, StaticPlanner, effects};
 use dfmcp_world::atp::{AtpProofCapsule, AtpProofVerifier};
 use dfmcp_world::franken_fs::{SavegameArchive, SavegameScrubber};
 use dfmcp_world::search::FrankenSearchEngine;
@@ -96,14 +96,10 @@ fn sample_context(session_id: SessionId, snapshot: &WorldSnapshot) -> OperationC
 /// Fortress, load DFHack, connect to the bridge, or provide live-game evidence.
 ///
 /// The test body exercises the full pipeline (blueprint compilation → logistics
-/// work orders → two-phase mutation dispatch → FrankenFS archival → ATP Merkle
-/// verification). It is marked `#[ignore]` because the in-memory
-/// `MutationDispatcher` currently supports only the `pause` action; the rest of
-/// the pipeline is therefore blocked on a future DFHack-backed dispatcher that
-/// can carry out excavation / construction work orders against a live simulation.
-/// Run with `cargo test -- --ignored` once that dispatcher lands.
+/// work orders → two-phase mutation dispatch of a real excavation effect →
+/// obligation proof against a later observation → delta streaming → ATP Merkle
+/// verification → archival and search prototypes).
 #[test]
-#[ignore = "in-memory MutationDispatcher only supports pause; run with --ignored once the DFHack-backed dispatcher lands. See bead df-dfhack-bridge-plane-c-pic.4."]
 fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 1. Initialize world snapshot & spatial index
     let mut snapshot = sample_world_snapshot();
@@ -181,11 +177,20 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
         logistics_compiler.compile_quota_work_orders("DRINK", 50, &inventory)?;
     assert!(!work_order_actions.is_empty());
 
-    // 4. Plan compilation with StaticPlanner
+    // 4. Plan compilation with StaticPlanner. The in-memory dispatcher has no
+    //    checkpoint store, so this policy only demands checkpoints for
+    //    irreversible work; the excavation seals region-terrain postconditions.
     let ctx = sample_context(session_leader, &snapshot);
-    let plan = StaticPlanner::default().prepare(&snapshot, &blueprint_intent, &ctx)?;
+    let planner = StaticPlanner::new(PlanPolicy {
+        require_checkpoint_at_or_above: RiskTier::Irreversible,
+        ..PlanPolicy::default()
+    });
+    let plan = planner.prepare(&snapshot, &blueprint_intent, &ctx)?;
+    assert_eq!(plan.steps.len(), 1);
+    assert!(plan.steps[0].obligation.is_some());
 
-    // 5. Two-Phase Mutation Dispatch
+    // 5. Two-Phase Mutation Dispatch: the designation is applied, but the
+    //    excavation is temporal, so the action awaits proof.
     let mut dispatcher = MutationDispatcher::new();
     let prepare_receipt = dispatcher.prepare_mutation(&plan, &snapshot, &ctx)?;
     let commit_receipt =
@@ -193,30 +198,51 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     assert_eq!(commit_receipt.actions.len(), 1);
     assert_eq!(
         commit_receipt.actions[0].state,
+        dfmcp_core::CommitState::AppliedAwaitingVerification
+    );
+    // An idempotent retry returns the same receipt without a second effect.
+    assert_eq!(
+        dispatcher.commit_mutation(&plan, &prepare_receipt, &mut snapshot, &ctx)?,
+        commit_receipt
+    );
+
+    // 5b. Game time passes (reference excavation semantics), producing a later
+    //     observation; reconcile proves the obligation from that observation.
+    let elapsed = 25 * effects::DIG_TICKS_PER_TILE;
+    snapshot.tick = GameTick(snapshot.tick.0 + elapsed);
+    effects::advance_effects(&mut snapshot, elapsed)?;
+    snapshot.cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+        dfmcp_core::DfmcpError::new(dfmcp_core::ErrorCode::CursorGap, "cursor exhausted")
+    })?;
+    snapshot.refresh_hash();
+    let reconcile_ctx = sample_context(session_leader, &snapshot);
+    let reconciled = dispatcher.reconcile(&plan, &mut snapshot, &reconcile_ctx)?;
+    assert_eq!(
+        reconciled.actions[0].state,
         dfmcp_core::CommitState::Verified
     );
+    assert!(dfmcp_world::evaluate(
+        &snapshot,
+        &plan.steps[0].postconditions[0]
+    ));
 
     // 6. Continuous Delta Streaming
+    let base_cursor = snapshot.cursor;
     let mut streamer = ContinuousDeltaStreamer::new(&snapshot);
-    let next_tick = GameTick(101);
+    let next_tick = GameTick(snapshot.tick.0 + 1);
     let mut snap_after = snapshot.clone();
     snap_after.tick = next_tick;
-    snap_after.cursor = ObservationCursor {
-        epoch: 0,
-        sequence: 1,
-    };
+    snap_after.cursor = base_cursor.checked_next().ok_or_else(|| {
+        dfmcp_core::DfmcpError::new(dfmcp_core::ErrorCode::CursorGap, "cursor exhausted")
+    })?;
     snap_after.state_hash = snap_after.compute_hash();
     let next_hash = snap_after.state_hash;
-    let delta = streamer.emit_next_delta(next_tick, &[], &[], next_hash)?;
+    // Every still-present entity is reported; omitting one would mean removal.
+    let active: Vec<_> = snapshot.graph.entities.values().cloned().collect();
+    let delta = streamer.emit_next_delta(next_tick, &active, &[], next_hash)?;
 
-    assert_eq!(delta.base_cursor, ObservationCursor::ORIGIN);
-    assert_eq!(
-        delta.target_cursor,
-        ObservationCursor {
-            epoch: 0,
-            sequence: 1
-        }
-    );
+    assert_eq!(delta.base_cursor, base_cursor);
+    assert_eq!(delta.target_cursor, snap_after.cursor);
 
     // 7. ATP Merkle Proof Capsule Verification
     let capsule = AtpProofCapsule::seal(&snapshot, &snap_after, delta.clone(), next_tick)?;
@@ -242,8 +268,11 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     // 9. Full-Text Search indexing
     let mut search_engine = FrankenSearchEngine::new();
     search_engine.index_snapshot(&snapshot)?;
-    let hits = search_engine.search("Entity", 5)?;
-    assert_eq!(hits.len(), 0); // No entities initially, only chunk
+    // The only entity is the dig designation the committed plan created.
+    let designation = effects::created_entity_id(&plan.steps[0].idempotency_key, 0);
+    let hits = search_engine.search("designation", 5)?;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].entity_id, Some(designation));
 
     Ok(())
 }

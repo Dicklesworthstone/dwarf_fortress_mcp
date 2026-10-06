@@ -44,11 +44,13 @@ pub const STOCKPILE_MAX_WHEELBARROWS_FIELD: &str = "max_wheelbarrows";
 pub const STATUS_FIELD: &str = "status";
 pub const STATUS_ACTIVE: &str = "active";
 pub const STATUS_COMPLETE: &str = "complete";
+pub const STATUS_CANCELLED: &str = "cancelled";
 /// Building fields.
 pub const CONSTRUCTION_STAGE_FIELD: &str = "construction_stage";
 pub const STAGE_PLANNED: &str = "planned";
 pub const STAGE_UNDER_CONSTRUCTION: &str = "under_construction";
 pub const STAGE_COMPLETE: &str = "complete";
+pub const STAGE_CANCELLED: &str = "cancelled";
 /// Work-order and designation progress fields.
 pub const AMOUNT_REMAINING_FIELD: &str = "amount_remaining";
 pub const TILES_REMAINING_FIELD: &str = "tiles_remaining";
@@ -687,6 +689,40 @@ pub fn apply_effect(
     }
 }
 
+/// Stop the temporal work a dispatched step started, without undoing any
+/// progress already made (excavated tiles stay excavated). Immediate actions
+/// have no ongoing work. Returns whether canonical state changed.
+pub fn cancel_effect(
+    snapshot: &mut WorldSnapshot,
+    action: &Action,
+    idempotency_key: &str,
+) -> Result<bool> {
+    let (field, active, cancelled): (&str, &[&str], &str) = match action {
+        Action::DesignateDig { .. } | Action::CreateWorkOrder { .. } => {
+            (STATUS_FIELD, &[STATUS_ACTIVE], STATUS_CANCELLED)
+        }
+        Action::Build { .. } => (
+            CONSTRUCTION_STAGE_FIELD,
+            &[STAGE_PLANNED, STAGE_UNDER_CONSTRUCTION],
+            STAGE_CANCELLED,
+        ),
+        _ => return Ok(false),
+    };
+    let id = created_entity_id(idempotency_key, 0);
+    let Some(created) = snapshot.graph.entities.get(&id) else {
+        // Never dispatched (for example, still waiting on a dependency).
+        return Ok(false);
+    };
+    if !field_text(created, field).is_some_and(|value| active.contains(&value)) {
+        return Ok(false);
+    }
+    write_fields(
+        snapshot,
+        id,
+        vec![(field.to_owned(), Value::Text(cancelled.to_owned()))],
+    )
+}
+
 fn coord_field(entity: &EntityRecord, field: &str) -> Option<MapCoord> {
     match field_value(entity, field) {
         Some(Value::Coord(coord)) => Some(*coord),
@@ -708,9 +744,10 @@ pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<boo
         .values()
         .filter(|entity| match &entity.kind {
             EntityKind::WorkOrder => field_text(entity, STATUS_FIELD) == Some(STATUS_ACTIVE),
-            EntityKind::Building => {
-                field_text(entity, CONSTRUCTION_STAGE_FIELD).is_some_and(|s| s != STAGE_COMPLETE)
-            }
+            EntityKind::Building => matches!(
+                field_text(entity, CONSTRUCTION_STAGE_FIELD),
+                Some(STAGE_PLANNED | STAGE_UNDER_CONSTRUCTION)
+            ),
             kind if kind == &designation_kind => {
                 field_text(entity, STATUS_FIELD) == Some(STATUS_ACTIVE)
             }

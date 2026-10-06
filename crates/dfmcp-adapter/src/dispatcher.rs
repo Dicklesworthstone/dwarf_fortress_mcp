@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
-//! In-memory pause-only dispatcher and two-phase effect-journal laboratory.
+//! In-memory dispatcher and two-phase effect-journal laboratory.
 //!
 //! This module does not execute on the DF game thread and does not talk to DFHack. It
-//! exists to exercise prepare/commit/idempotency semantics against a `WorldSnapshot`.
+//! executes the reference action semantics of `dfmcp_intent::effects` against a
+//! `WorldSnapshot` to exercise prepare/commit/idempotency semantics, dependency
+//! gating and obligation proof. `reconcile` proves pending obligations against
+//! whatever later snapshot the caller observed; it never assumes progress.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,7 +14,7 @@ use dfmcp_core::{
     ActionId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence, EvidenceId, EvidenceKind,
     GameTick, OperationContext, PlanId, Result, StateAnchor,
 };
-use dfmcp_intent::{Action, PreparedPlan};
+use dfmcp_intent::{PlanStep, PreparedPlan, effects};
 use dfmcp_world::{WorldSnapshot, evaluate};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
@@ -140,7 +143,11 @@ impl EffectJournal {
             )
         })?;
 
-        if record.state == CommitState::Verified {
+        if matches!(
+            record.state,
+            CommitState::Verified | CommitState::AppliedAwaitingVerification
+        ) && record.state == aggregate_state(&receipt)
+        {
             return if record.receipt.as_ref() == Some(&receipt) {
                 Ok(())
             } else {
@@ -168,10 +175,14 @@ impl EffectJournal {
             || record.plan_id != receipt.plan_id
             || record.plan_digest != receipt.plan_digest
             || receipt.actions.is_empty()
-            || receipt
-                .actions
-                .iter()
-                .any(|action| action.state != CommitState::Verified)
+            || receipt.actions.iter().any(|action| {
+                !matches!(
+                    action.state,
+                    CommitState::Verified
+                        | CommitState::AppliedAwaitingVerification
+                        | CommitState::Prepared
+                )
+            })
             || unique_actions.len() != receipt.actions.len()
             || unique_steps.len() != receipt.actions.len()
             || !final_anchor_matches
@@ -181,9 +192,52 @@ impl EffectJournal {
                 "commit receipt does not match the committing journal record",
             ));
         }
-        record.state = CommitState::Verified;
+        record.state = aggregate_state(&receipt);
         record.receipt = Some(receipt);
         record.error_message = None;
+        Ok(())
+    }
+
+    /// Replace the receipt of a dispatched transaction after its pending
+    /// obligations were re-evaluated or deferred steps were dispatched.
+    pub fn record_reconciliation(
+        &mut self,
+        idempotency_key: &str,
+        receipt: CommitReceipt,
+    ) -> Result<()> {
+        validate_idempotency_key(idempotency_key)?;
+        let record = self.records.get_mut(idempotency_key).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                format!("no journal record found for idempotency key {idempotency_key}"),
+            )
+        })?;
+        let Some(prior) = record.receipt.as_ref() else {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidPlan,
+                "only a dispatched transaction can be reconciled",
+            ));
+        };
+        if prior.plan_id != receipt.plan_id
+            || prior.plan_digest != receipt.plan_digest
+            || prior.actions.len() != receipt.actions.len()
+            || prior
+                .actions
+                .iter()
+                .zip(&receipt.actions)
+                .any(|(old, new)| {
+                    old.action_id != new.action_id
+                        || old.step_id != new.step_id
+                        || (old.state.is_terminal() && old != new)
+                })
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "reconciled receipt does not extend the dispatched transaction",
+            ));
+        }
+        record.state = aggregate_state(&receipt);
+        record.receipt = Some(receipt);
         Ok(())
     }
 
@@ -227,6 +281,26 @@ impl EffectJournal {
     }
 }
 
+/// Transaction state derived from its actions: any failure fails the whole
+/// transaction, all verified verifies it, otherwise work remains pending.
+fn aggregate_state(receipt: &CommitReceipt) -> CommitState {
+    if receipt
+        .actions
+        .iter()
+        .any(|action| action.state == CommitState::Failed)
+    {
+        CommitState::Failed
+    } else if receipt
+        .actions
+        .iter()
+        .all(|action| action.state == CommitState::Verified)
+    {
+        CommitState::Verified
+    } else {
+        CommitState::AppliedAwaitingVerification
+    }
+}
+
 fn validate_idempotency_key(idempotency_key: &str) -> Result<()> {
     if idempotency_key.is_empty()
         || idempotency_key.len() > MAX_IDEMPOTENCY_KEY_BYTES
@@ -240,10 +314,12 @@ fn validate_idempotency_key(idempotency_key: &str) -> Result<()> {
     Ok(())
 }
 
-/// Two-phase, in-memory pause-only dispatcher.
+/// Two-phase, in-memory dispatcher for the reference action semantics.
 #[derive(Clone, Debug, Default)]
 pub struct MutationDispatcher {
     journal: EffectJournal,
+    /// Distinct observations on which each pending obligation held.
+    stability: BTreeMap<ActionId, (u32, Option<StateAnchor>)>,
 }
 
 impl MutationDispatcher {
@@ -251,6 +327,7 @@ impl MutationDispatcher {
     pub fn new() -> Self {
         Self {
             journal: EffectJournal::new(),
+            stability: BTreeMap::new(),
         }
     }
 
@@ -356,7 +433,12 @@ impl MutationDispatcher {
                     "idempotency record does not match the supplied sealed plan",
                 ));
             }
-            if existing.state == CommitState::Verified {
+            if matches!(
+                existing.state,
+                CommitState::Verified
+                    | CommitState::AppliedAwaitingVerification
+                    | CommitState::Failed
+            ) {
                 return existing.receipt.clone().ok_or_else(|| {
                     DfmcpError::new(
                         ErrorCode::InternalInvariantViolation,
@@ -402,86 +484,25 @@ impl MutationDispatcher {
 
         let prior_snapshot = snapshot.clone();
         let prior_journal = self.journal.clone();
+        let prior_stability = self.stability.clone();
         self.journal.record_commit_attempt(&idempotency_key)?;
         let result = (|| {
-            let mut action_receipts = Vec::new();
+            let mut action_receipts: Vec<ActionReceipt> = Vec::with_capacity(plan.steps.len());
             for step in &plan.steps {
-                if !step
-                    .preconditions
-                    .iter()
-                    .all(|predicate| evaluate(snapshot, predicate))
-                {
-                    return Err(DfmcpError::new(
-                        ErrorCode::PreconditionsFailed,
-                        format!(
-                            "preconditions for step {} are no longer established true",
-                            step.id.get()
-                        ),
-                    ));
-                }
                 let action_id = derived_action_id(plan.id, step.id);
-                let message = match &step.action {
-                    Action::Pause { paused } => {
-                        if snapshot.paused != *paused {
-                            let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
-                                DfmcpError::new(
-                                    ErrorCode::CursorGap,
-                                    "cannot publish pause mutation because the observation cursor is exhausted",
-                                )
-                            })?;
-                            snapshot.paused = *paused;
-                            snapshot.cursor = next_cursor;
-                            snapshot.refresh_hash();
-                        }
-                        format!("simulation pause state set to {paused}")
-                    }
-                    _ => {
-                        return Err(DfmcpError::new(
-                            ErrorCode::AdapterRejected,
-                            "in-memory dispatcher supports only the pause action",
-                        ));
-                    }
+                let receipt = if dependencies_verified(step, &action_receipts) {
+                    self.dispatch_step(plan, step, action_id, snapshot)?
+                } else {
+                    action_receipt(
+                        plan,
+                        step,
+                        action_id,
+                        CommitState::Prepared,
+                        snapshot,
+                        "deferred until every dependency is verified".to_owned(),
+                    )
                 };
-
-                if !step
-                    .postconditions
-                    .iter()
-                    .all(|predicate| evaluate(snapshot, predicate))
-                {
-                    return Err(DfmcpError::new(
-                        ErrorCode::AdapterRejected,
-                        format!(
-                            "postconditions for step {} are not established true",
-                            step.id.get()
-                        ),
-                    ));
-                }
-
-                let mut receipt_bytes = Vec::new();
-                receipt_bytes.extend_from_slice(b"dfmcp-dispatch-action-receipt-v1");
-                receipt_bytes.extend_from_slice(plan.digest.as_bytes());
-                receipt_bytes.extend_from_slice(&action_id.get().to_be_bytes());
-                receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
-                receipt_bytes.extend_from_slice(snapshot.state_hash.as_bytes());
-                let receipt_digest = Digest32::of_bytes(&receipt_bytes);
-
-                action_receipts.push(ActionReceipt {
-                    action_id,
-                    step_id: step.id,
-                    state: CommitState::Verified,
-                    observed_anchor: snapshot.anchor(),
-                    adapter_receipt_digest: receipt_digest,
-                    evidence: vec![Evidence {
-                        id: EvidenceId::new(action_id.get()),
-                        kind: EvidenceKind::Postcondition,
-                        subject: None,
-                        anchor: snapshot.anchor(),
-                        digest: snapshot.state_hash,
-                        summary: "in-memory postcondition evaluated against canonical snapshot"
-                            .to_owned(),
-                    }],
-                    message,
-                });
+                action_receipts.push(receipt);
             }
 
             let commit_receipt = CommitReceipt {
@@ -499,8 +520,214 @@ impl MutationDispatcher {
         if result.is_err() {
             *snapshot = prior_snapshot;
             self.journal = prior_journal;
+            self.stability = prior_stability;
         }
         result
+    }
+
+    /// Re-evaluate a dispatched transaction against the current observation:
+    /// prove or fail pending obligations, then dispatch deferred steps whose
+    /// dependencies are now verified. Terminal actions never change. The
+    /// snapshot is whatever the caller observed; this never simulates time.
+    pub fn reconcile(
+        &mut self,
+        plan: &PreparedPlan,
+        snapshot: &mut WorldSnapshot,
+        context: &OperationContext,
+    ) -> Result<CommitReceipt> {
+        plan.validate_structure()?;
+        let idempotency_key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+        let prior = self
+            .journal
+            .lookup(&idempotency_key)
+            .and_then(|record| record.receipt.clone())
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InvalidPlan,
+                    "plan has no dispatched transaction to reconcile",
+                )
+            })?;
+        if prior.plan_id != plan.id
+            || prior.plan_digest != plan.digest
+            || prior.actions.len() != plan.steps.len()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "journaled transaction does not match the supplied sealed plan",
+            ));
+        }
+        if !snapshot.hash_is_valid() || context.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "reconcile snapshot or operation context anchor is invalid",
+            ));
+        }
+        for step in &plan.steps {
+            let scope = step.action.scope();
+            context.authorize(
+                step.required_capability,
+                step.risk,
+                &scope.entity_ids,
+                scope.map_area,
+            )?;
+        }
+
+        let prior_snapshot = snapshot.clone();
+        let prior_stability = self.stability.clone();
+        let result = (|| {
+            let mut receipts: Vec<ActionReceipt> = Vec::with_capacity(plan.steps.len());
+            for (step, old) in plan.steps.iter().zip(&prior.actions) {
+                let receipt = match old.state {
+                    CommitState::AppliedAwaitingVerification => {
+                        self.evaluate_obligation(plan, step, old.action_id, snapshot)?
+                    }
+                    CommitState::Prepared if dependencies_verified(step, &receipts) => {
+                        self.dispatch_step(plan, step, old.action_id, snapshot)?
+                    }
+                    _ => old.clone(),
+                };
+                receipts.push(receipt);
+            }
+            let receipt = CommitReceipt {
+                plan_id: plan.id,
+                plan_digest: plan.digest,
+                actions: receipts,
+                checkpoint: None,
+                observed_anchor: snapshot.anchor(),
+                warnings: Vec::new(),
+            };
+            self.journal
+                .record_reconciliation(&idempotency_key, receipt.clone())?;
+            Ok(receipt)
+        })();
+        if result.is_err() {
+            *snapshot = prior_snapshot;
+            self.stability = prior_stability;
+        }
+        result
+    }
+
+    /// Apply one step's reference effect and classify its immediate outcome.
+    fn dispatch_step(
+        &mut self,
+        plan: &PreparedPlan,
+        step: &PlanStep,
+        action_id: ActionId,
+        snapshot: &mut WorldSnapshot,
+    ) -> Result<ActionReceipt> {
+        if !step
+            .preconditions
+            .iter()
+            .all(|predicate| evaluate(snapshot, predicate))
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!(
+                    "preconditions for step {} are no longer established true",
+                    step.id.get()
+                ),
+            ));
+        }
+        if effects::apply_effect(snapshot, &step.action, &step.idempotency_key)? {
+            let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::CursorGap,
+                    "cannot publish a mutation because the observation cursor is exhausted",
+                )
+            })?;
+            snapshot.cursor = next_cursor;
+            snapshot.refresh_hash();
+        }
+        if step.obligation.is_some() {
+            return self.evaluate_obligation(plan, step, action_id, snapshot);
+        }
+        if !step
+            .postconditions
+            .iter()
+            .all(|predicate| evaluate(snapshot, predicate))
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::AdapterRejected,
+                format!(
+                    "postconditions for step {} are not established true",
+                    step.id.get()
+                ),
+            ));
+        }
+        Ok(action_receipt(
+            plan,
+            step,
+            action_id,
+            CommitState::Verified,
+            snapshot,
+            "semantic postconditions verified".to_owned(),
+        ))
+    }
+
+    /// Prove, fail, or keep pending one dispatched temporal step.
+    fn evaluate_obligation(
+        &mut self,
+        plan: &PreparedPlan,
+        step: &PlanStep,
+        action_id: ActionId,
+        snapshot: &WorldSnapshot,
+    ) -> Result<ActionReceipt> {
+        let Some(obligation) = &step.obligation else {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "pending step has no obligation to evaluate",
+            ));
+        };
+        let failed = obligation
+            .failure
+            .as_ref()
+            .is_some_and(|predicate| evaluate(snapshot, predicate));
+        let holds = evaluate(snapshot, &obligation.terminal)
+            && step
+                .postconditions
+                .iter()
+                .all(|predicate| evaluate(snapshot, predicate));
+        let (stable, last) = self.stability.get(&action_id).copied().unwrap_or((0, None));
+        let anchor = snapshot.anchor();
+        let stable = if failed || !holds {
+            self.stability.insert(action_id, (0, None));
+            0
+        } else if last == Some(anchor) {
+            stable
+        } else {
+            self.stability
+                .insert(action_id, (stable.saturating_add(1), Some(anchor)));
+            stable.saturating_add(1)
+        };
+        let (state, message) = if failed {
+            (CommitState::Failed, "obligation failure predicate observed")
+        } else if holds && stable >= obligation.stable_for_observations {
+            (
+                CommitState::Verified,
+                "obligation terminal proven on stable observations",
+            )
+        } else if snapshot.tick >= obligation.deadline_tick {
+            (
+                CommitState::Failed,
+                "obligation reached its game-tick deadline without stable completion",
+            )
+        } else {
+            (
+                CommitState::AppliedAwaitingVerification,
+                "effect dispatched; obligation proof pending later observation",
+            )
+        };
+        if state.is_terminal() {
+            self.stability.remove(&action_id);
+        }
+        Ok(action_receipt(
+            plan,
+            step,
+            action_id,
+            state,
+            snapshot,
+            message.to_owned(),
+        ))
     }
 
     /// Reserved out-of-process prepare seam. It is deliberately unavailable
@@ -554,6 +781,48 @@ fn derived_action_id(plan_id: PlanId, step_id: dfmcp_core::StepId) -> ActionId {
     ActionId::new(if derived == 0 { 1 } else { derived })
 }
 
+fn dependencies_verified(step: &PlanStep, earlier: &[ActionReceipt]) -> bool {
+    step.depends_on.iter().all(|dependency| {
+        earlier
+            .iter()
+            .any(|receipt| receipt.step_id == *dependency && receipt.state == CommitState::Verified)
+    })
+}
+
+fn action_receipt(
+    plan: &PreparedPlan,
+    step: &PlanStep,
+    action_id: ActionId,
+    state: CommitState,
+    snapshot: &WorldSnapshot,
+    message: String,
+) -> ActionReceipt {
+    let mut receipt_bytes = Vec::new();
+    receipt_bytes.extend_from_slice(b"dfmcp-dispatch-action-receipt-v2");
+    receipt_bytes.extend_from_slice(plan.digest.as_bytes());
+    receipt_bytes.extend_from_slice(&action_id.get().to_be_bytes());
+    receipt_bytes.extend_from_slice(&step.id.get().to_be_bytes());
+    receipt_bytes.extend_from_slice(format!("{state:?}").as_bytes());
+    receipt_bytes.extend_from_slice(snapshot.state_hash.as_bytes());
+    let receipt_digest = Digest32::of_bytes(&receipt_bytes);
+    ActionReceipt {
+        action_id,
+        step_id: step.id,
+        state,
+        observed_anchor: snapshot.anchor(),
+        adapter_receipt_digest: receipt_digest,
+        evidence: vec![Evidence {
+            id: EvidenceId::new(action_id.get()),
+            kind: EvidenceKind::Postcondition,
+            subject: None,
+            anchor: snapshot.anchor(),
+            digest: snapshot.state_hash,
+            summary: "in-memory postcondition evaluated against canonical snapshot".to_owned(),
+        }],
+        message,
+    }
+}
+
 fn validate_dispatch_support(plan: &PreparedPlan, context: &OperationContext) -> Result<()> {
     if plan.steps.len() > context.budget.max_actions as usize {
         return Err(DfmcpError::new(
@@ -570,11 +839,11 @@ fn validate_dispatch_support(plan: &PreparedPlan, context: &OperationContext) ->
     if plan
         .steps
         .iter()
-        .any(|step| !matches!(step.action, Action::Pause { .. }) || step.obligation.is_some())
+        .any(|step| matches!(step.action, dfmcp_intent::Action::Extension { .. }))
     {
         return Err(DfmcpError::new(
             ErrorCode::AdapterRejected,
-            "in-memory dispatcher supports only immediate pause actions without obligations",
+            "in-memory dispatcher has no reference semantics for extension actions",
         ));
     }
     Ok(())
@@ -602,7 +871,7 @@ mod tests {
         Capability, CapabilityGrant, CapabilityScope, FortressId, IntentId, ObservationCursor,
         RequestId, RiskTier, SessionId, WorkBudget,
     };
-    use dfmcp_intent::{Constraint, Intent, RequestedAction, StaticPlanner};
+    use dfmcp_intent::{Action, Constraint, Intent, RequestedAction, StaticPlanner};
     use dfmcp_world::{Predicate, WorldGraph};
 
     fn sample_snapshot() -> WorldSnapshot {
@@ -762,5 +1031,156 @@ mod tests {
         let result = dispatcher.prepare_mutation(&plan, &mutated_anchor_snapshot, &context);
         assert!(result.is_err());
         Ok(())
+    }
+
+    #[test]
+    fn dependent_steps_wait_for_observed_proof_then_dispatch_on_reconcile() -> Result<()> {
+        use dfmcp_core::{EntityId, MapCoord, MapCuboid};
+        use dfmcp_intent::{DigMode, PlanPolicy};
+        use dfmcp_world::terrain::{region_tiles, uniform_chunk};
+        use dfmcp_world::{ChunkCoord, EntityKind, EntityRecord, tile_codes};
+
+        let miner = EntityId::new(5);
+        let mut graph = WorldGraph::default();
+        let rock = ChunkCoord { x: 0, y: 0, z: 3 };
+        graph
+            .chunks
+            .insert(rock, uniform_chunk(rock, tile_codes::SOLID_WALL));
+        graph.entities.insert(
+            miner,
+            EntityRecord {
+                id: miner,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Unit,
+                label: "miner".to_owned(),
+                fields: BTreeMap::new(),
+            },
+        );
+        let mut snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(100),
+            ObservationCursor::ORIGIN,
+            false,
+            graph,
+        );
+        let mut context = sample_context(&snapshot);
+        context.grants.push(CapabilityGrant {
+            capability: Capability::ConfigureLabor,
+            scope: CapabilityScope::default(),
+            max_risk: RiskTier::Reversible,
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+        let area = MapCuboid::new(MapCoord::new(0, 0, 3), MapCoord::new(1, 0, 3))?;
+        let request = |action, depends_on| RequestedAction {
+            action,
+            preconditions: Vec::new(),
+            postconditions: Vec::new(),
+            compensation: None,
+            obligation: None,
+            depends_on,
+        };
+        let intent = Intent {
+            id: IntentId::new(3),
+            anchor: snapshot.anchor(),
+            summary: "dig, then stop mining".to_owned(),
+            terminal_condition: Predicate::Paused(true),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+            requested_actions: vec![
+                request(
+                    Action::DesignateDig {
+                        area,
+                        mode: DigMode::Mine,
+                    },
+                    Vec::new(),
+                ),
+                request(
+                    Action::SetLabor {
+                        units: vec![miner],
+                        labor: "MINE".to_owned(),
+                        enabled: false,
+                    },
+                    vec![0],
+                ),
+            ],
+        };
+        let plan = StaticPlanner::new(PlanPolicy {
+            require_checkpoint_at_or_above: RiskTier::Irreversible,
+            ..PlanPolicy::default()
+        })
+        .prepare(&snapshot, &intent, &context)?;
+        let mut dispatcher = MutationDispatcher::new();
+        let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+        let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+        assert_eq!(
+            committed
+                .actions
+                .iter()
+                .map(|a| a.state)
+                .collect::<Vec<_>>(),
+            vec![
+                CommitState::AppliedAwaitingVerification,
+                CommitState::Prepared
+            ]
+        );
+        let labor_field = format!("{}MINE", effects::LABOR_FIELD_PREFIX);
+        assert!(
+            !snapshot.graph.entities[&miner]
+                .fields
+                .contains_key(&labor_field)
+        );
+
+        // Reconciling the same observation proves nothing new.
+        let context = sample_context_with_labor(&snapshot, &context);
+        let unchanged = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
+        assert_eq!(unchanged.actions[1].state, CommitState::Prepared);
+
+        // A later observation shows the excavation done: reconcile proves it
+        // and only then dispatches the dependent labor change.
+        for coord in region_tiles(area) {
+            snapshot.set_tile_code(coord, tile_codes::FLOOR)?;
+        }
+        snapshot.tick = GameTick(130);
+        snapshot.cursor = snapshot
+            .cursor
+            .checked_next()
+            .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "cursor"))?;
+        snapshot.refresh_hash();
+        let context = sample_context_with_labor(&snapshot, &context);
+        let reconciled = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
+        assert_eq!(
+            reconciled
+                .actions
+                .iter()
+                .map(|a| a.state)
+                .collect::<Vec<_>>(),
+            vec![CommitState::Verified, CommitState::Verified]
+        );
+        assert_eq!(
+            snapshot.graph.entities[&miner].fields[&labor_field].value,
+            dfmcp_world::Value::Bool(false)
+        );
+        let key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+        assert_eq!(
+            dispatcher.journal().lookup(&key).map(|record| record.state),
+            Some(CommitState::Verified)
+        );
+        // Replaying the original commit returns the latest journaled receipt.
+        assert_eq!(
+            dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?,
+            reconciled
+        );
+        Ok(())
+    }
+
+    fn sample_context_with_labor(
+        snapshot: &WorldSnapshot,
+        prior: &OperationContext,
+    ) -> OperationContext {
+        OperationContext {
+            anchor: snapshot.anchor(),
+            ..prior.clone()
+        }
     }
 }

@@ -13,7 +13,7 @@ use dfmcp_core::{
     EvidenceId, EvidenceKind, FortressId, GameTick, ObservationCursor, OperationContext, PlanId,
     Result, RiskTier, StateAnchor, StepId,
 };
-use dfmcp_intent::{Action, PlanStep, PreparedPlan};
+use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
 pub mod chaos;
 
 pub use chaos::{
@@ -111,6 +111,12 @@ impl MemoryAdapter {
             Capability::Observe,
             Capability::Query,
             Capability::Plan,
+            Capability::Designate,
+            Capability::Construct,
+            Capability::ConfigureLabor,
+            Capability::ConfigureProduction,
+            Capability::ConfigureLogistics,
+            Capability::ConfigureMilitary,
             Capability::ControlClock,
             Capability::Checkpoint,
             Capability::Restore,
@@ -228,9 +234,17 @@ impl MemoryAdapter {
                 "laboratory observation cursor is exhausted",
             )
         })?;
-        self.snapshot.tick = next_tick;
-        self.snapshot.cursor = next_cursor;
-        self.snapshot.refresh_hash();
+        // Work transitions on a shadow so a failed effect leaves no partial state.
+        let mut next = self.snapshot.clone();
+        next.tick = next_tick;
+        next.cursor = next_cursor;
+        // A paused fortress does no work; forced laboratory time while paused
+        // advances the clock only.
+        if !next.paused {
+            effects::advance_effects(&mut next, amount)?;
+        }
+        next.refresh_hash();
+        self.snapshot = next;
         self.record_event(LabEvent::TickAdvanced(self.snapshot.tick));
         Ok(())
     }
@@ -375,7 +389,7 @@ impl MemoryAdapter {
             ));
         }
         let state = if self.dependencies_verified(plan_id, step) {
-            apply_action(&mut self.snapshot, &step.action)?;
+            apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
             if step
                 .postconditions
                 .iter()
@@ -439,7 +453,7 @@ impl MemoryAdapter {
 
         let dependencies_verified = self.dependencies_verified(plan_id, &step);
         if prior_state == CommitState::Prepared && dependencies_verified {
-            apply_action(&mut self.snapshot, &step.action)?;
+            apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
         }
 
         let mut state = prior_state;
@@ -1004,7 +1018,7 @@ impl GameAdapter for MemoryAdapter {
 
         let state = CommitState::CancelRequested;
         if mode == CancelMode::EmergencyPauseAndDrain && !self.snapshot.paused {
-            apply_action(&mut self.snapshot, &Action::Pause { paused: true })?;
+            apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
         }
         if let Some(stored) = self.actions.get_mut(&action_id) {
             stored.cancel_mode = Some(mode);
@@ -1083,13 +1097,17 @@ impl GameAdapter for MemoryAdapter {
                     &compensation_scope.entity_ids,
                     compensation_scope.map_area,
                 )?;
-                apply_action(&mut self.snapshot, compensation)?;
+                stop_action_work(&mut self.snapshot, &action.step)?;
+                let compensation_key = format!("{}:compensation", action.step.idempotency_key);
+                apply_action(&mut self.snapshot, compensation, &compensation_key)?;
                 compensation_action = Some(derived_compensation_id(action_id));
                 state = CommitState::Compensated;
             } else {
+                stop_action_work(&mut self.snapshot, &action.step)?;
                 state = CommitState::Cancelled;
             }
         } else {
+            stop_action_work(&mut self.snapshot, &action.step)?;
             state = CommitState::Cancelled;
         }
         let message = match state {
@@ -1179,7 +1197,29 @@ impl GameAdapter for MemoryAdapter {
 }
 
 fn action_is_supported(action: &Action) -> bool {
-    matches!(action, Action::Pause { .. })
+    !matches!(action, Action::Extension { .. })
+}
+
+/// Publish a changed snapshot as the next observation.
+fn publish_change(snapshot: &mut WorldSnapshot) -> Result<()> {
+    let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::CursorGap,
+            "cannot publish a laboratory mutation because the observation cursor is exhausted",
+        )
+    })?;
+    snapshot.cursor = next_cursor;
+    snapshot.refresh_hash();
+    Ok(())
+}
+
+fn stop_action_work(snapshot: &mut WorldSnapshot, step: &PlanStep) -> Result<()> {
+    let mut next = snapshot.clone();
+    if effects::cancel_effect(&mut next, &step.action, &step.idempotency_key)? {
+        publish_change(&mut next)?;
+        *snapshot = next;
+    }
+    Ok(())
 }
 
 fn replayed_cancel_receipt(action_id: ActionId, action: &LabAction) -> CancelReceipt {
@@ -1194,27 +1234,19 @@ fn replayed_cancel_receipt(action_id: ActionId, action: &LabAction) -> CancelRec
     }
 }
 
-fn apply_action(snapshot: &mut WorldSnapshot, action: &Action) -> Result<()> {
-    match action {
-        Action::Pause { paused } => {
-            if snapshot.paused != *paused {
-                let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
-                    DfmcpError::new(
-                        ErrorCode::CursorGap,
-                        "cannot publish pause mutation because the observation cursor is exhausted",
-                    )
-                })?;
-                snapshot.paused = *paused;
-                snapshot.cursor = next_cursor;
-                snapshot.refresh_hash();
-            }
-            Ok(())
-        }
-        _ => Err(DfmcpError::new(
-            ErrorCode::AdapterRejected,
-            "laboratory adapter received an unsupported semantic action",
-        )),
+/// Apply one action's reference semantics. Effects run on a shadow, so an
+/// effect that fails a precondition leaves canonical state untouched.
+fn apply_action(
+    snapshot: &mut WorldSnapshot,
+    action: &Action,
+    idempotency_key: &str,
+) -> Result<()> {
+    let mut next = snapshot.clone();
+    if effects::apply_effect(&mut next, action, idempotency_key)? {
+        publish_change(&mut next)?;
+        *snapshot = next;
     }
+    Ok(())
 }
 
 fn build_action_receipt(
@@ -1469,9 +1501,19 @@ mod tests {
             WorldGraph::default(),
         ));
         let identity = adapter.identity();
-        assert!(identity.capabilities.contains(&Capability::ControlClock));
-        assert!(!identity.capabilities.contains(&Capability::Designate));
-        assert!(!identity.capabilities.contains(&Capability::Construct));
+        for capability in [
+            Capability::ControlClock,
+            Capability::Designate,
+            Capability::Construct,
+            Capability::ConfigureLabor,
+            Capability::ConfigureProduction,
+            Capability::ConfigureLogistics,
+            Capability::ConfigureMilitary,
+        ] {
+            assert!(identity.capabilities.contains(&capability));
+        }
+        // Extensions have no reference semantics in the laboratory.
+        assert!(!identity.capabilities.contains(&Capability::Extension));
     }
 
     #[test]
@@ -1483,28 +1525,22 @@ mod tests {
             true,
             WorldGraph::default(),
         );
-        let area = MapCuboid::new(MapCoord { x: 1, y: 1, z: 0 }, MapCoord { x: 2, y: 2, z: 0 })?;
         let intent = Intent {
             id: IntentId::new(9),
             anchor: snapshot.anchor(),
-            summary: "designate a tiny test excavation".to_owned(),
+            summary: "run an extension the laboratory cannot model".to_owned(),
             terminal_condition: Predicate::Paused(false),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![RequestedAction {
-                action: Action::DesignateDig {
-                    area,
-                    mode: DigMode::Mine,
+                action: Action::Extension {
+                    namespace: "lab".to_owned(),
+                    name: "noop".to_owned(),
+                    parameters: std::collections::BTreeMap::new(),
                 },
                 preconditions: vec![Predicate::Paused(true)],
                 postconditions: vec![Predicate::Paused(true)],
                 compensation: None,
-                obligation: Some(ObligationSpec {
-                    terminal: Predicate::Paused(true),
-                    failure: Some(Predicate::Paused(false)),
-                    deadline_tick: GameTick(20),
-                    poll_interval_ticks: 1,
-                    stable_for_observations: 1,
-                }),
+                obligation: None,
                 depends_on: Vec::new(),
             }],
         };

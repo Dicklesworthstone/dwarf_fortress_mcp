@@ -128,11 +128,20 @@ impl StaticPlanner {
             let mut normalized = normalize_requested(requested);
             let idempotency_key =
                 derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
+            // A synthesized deadline starts after every prerequisite's
+            // deadline: dependent work cannot begin before its inputs exist.
+            let earliest_start = normalized
+                .depends_on
+                .iter()
+                .filter_map(|dependency| steps.get(*dependency as usize))
+                .filter_map(|step: &PlanStep| step.obligation.as_ref())
+                .map(|obligation| obligation.deadline_tick)
+                .fold(snapshot.tick, GameTick::max);
             complete_reference_semantics(
                 &mut normalized,
                 &idempotency_key,
                 intent.anchor.fortress_id,
-                snapshot.tick,
+                earliest_start,
             )?;
             validate_action(&normalized.action, &self.policy, context)?;
             validate_constraints(intent, &normalized.action)?;

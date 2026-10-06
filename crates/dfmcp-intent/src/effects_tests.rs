@@ -350,3 +350,32 @@ fn extensions_have_no_reference_semantics() {
         Some(ErrorCode::AdapterRejected)
     );
 }
+
+#[test]
+fn cancellation_stops_temporal_work_without_undoing_progress() -> Result<()> {
+    let mut s = world();
+    let dig = Action::DesignateDig {
+        area: cuboid((0, 0, 10), (3, 0, 10))?,
+        mode: DigMode::Mine,
+    };
+    apply_effect(&mut s, &dig, "d")?;
+    advance(&mut s, DIG_TICKS_PER_TILE)?;
+    assert!(cancel_effect(&mut s, &dig, "d")?);
+    assert!(!cancel_effect(&mut s, &dig, "d")?);
+    assert!(!advance(&mut s, 1_000)?);
+    assert_eq!(
+        s.tile_code_at(MapCoord::new(0, 0, 10)),
+        Some(tile_codes::FLOOR)
+    );
+    assert_eq!(
+        s.tile_code_at(MapCoord::new(1, 0, 10)),
+        Some(tile_codes::SOLID_WALL)
+    );
+    let labor = Action::SetLabor {
+        units: vec![UNIT_A],
+        labor: "MINE".to_owned(),
+        enabled: true,
+    };
+    assert!(!cancel_effect(&mut s, &labor, "l")?);
+    Ok(())
+}
