@@ -75,6 +75,33 @@ reconciliation. This is laboratory semantics and development execution only:
 no DFHack mutation, native, live-game, registry or production evidence. The
 reference progress rates are calibration, not Dwarf Fortress claims.
 
+### Laboratory agent loop: changes, history, replay, economy, objectives (2026-10-06)
+
+- **What changed, every turn.** Each lab session retains its last 32 exact
+  canonical world versions; every Agent Turn's `changes` reports observed world
+  changes since the agent's previous anchor (entities created/removed/changed
+  with field before/after, terrain per level with bounding box and transitions,
+  clock and pause). `fortress.query` reads any retained version exactly
+  (`"at"`) and diffs it against now (`{"mode":"changes","since":...}`).
+- **Deterministic replay.** Every lab call is recorded; `df://session/{id}/replay`
+  exports `dfmcp.replay.bundle/1`; `dwarf-fortress-mcp replay` re-executes it
+  and names the earliest divergent call and field.
+- **Economy.** The starter fortress has drink/food stocks consumed over game
+  time, explicit thirsty/hungry needs, producing work orders, and
+  `world_alerts` raised as attention and top recommendations with an exact
+  remedy plan (laboratory calibration only).
+- **Objectives.** Committed intents are tracked and their terminal conditions
+  re-evaluated against observation (`objective_status`), separate from action
+  dispatch state.
+- **Live routing.** `dfmcp_adapter::live_routing` maps each sealed step onto the
+  live development families (control/1.7, dig/1.16 rectangles, build/1.19
+  furniture, work-orders/1.10, workforce/1.17) or refuses with a reason;
+  `fortress.plan` returns it. Routing is pure and grants nothing; it is not
+  live execution or evidence.
+
+All of this is laboratory semantics and development execution; none of it is
+native, live-game, registry or production evidence.
+
 ### Crash-durable laboratory fortresses (2026-10-06)
 
 `fortress_open_session(durable=true)` makes a laboratory fortress survive
