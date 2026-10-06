@@ -101,6 +101,20 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         .ok_or("build step names no created entity")?
         .to_owned();
     assert_eq!(planned["steps"][3]["compensable"], true);
+    // The dig touches x=0, which has no complete halo for dig/1.16; the
+    // still and the brewing order have no live family; the labor maps onto
+    // workforce/1.17. The plan says all of this before anything is committed.
+    let routing = &planned["live_routing"];
+    assert_eq!(routing["fully_routable"], false, "{routing}");
+    assert_eq!(routing["steps"][0]["routable"], false);
+    assert!(
+        routing["steps"][0]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("dig/1.16"))
+    );
+    assert_eq!(routing["steps"][1]["routable"], false);
+    assert_eq!(routing["steps"][2]["routable"], false);
+    assert_eq!(routing["steps"][3]["protocol"], "workforce/1.17");
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
 
     let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;

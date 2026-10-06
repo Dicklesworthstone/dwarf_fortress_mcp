@@ -55,6 +55,7 @@ pub mod live_observation_v1_1;
 pub mod live_operations;
 pub mod live_projection;
 pub mod live_projection_v1_1;
+pub mod live_routing;
 pub mod live_session;
 pub mod live_session_v1_1;
 pub mod live_spatial;

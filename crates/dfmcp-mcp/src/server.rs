@@ -354,6 +354,24 @@ fn persist_durable_head(session: &mut LabSession) {
     }
 }
 
+/// Fail closed while a durable fortress has state it could not persist:
+/// retry the save, and refuse further effects until it succeeds.
+fn durability_gate(session: &mut LabSession) -> Result<()> {
+    if session.durability_fault.is_none() {
+        return Ok(());
+    }
+    persist_durable_head(session);
+    match &session.durability_fault {
+        None => Ok(()),
+        Some(fault) => Err(DfmcpError::new(
+            ErrorCode::AdapterUnavailable,
+            format!(
+                "durable fortress could not persist its latest state ({fault}); effects are refused until persistence recovers"
+            ),
+        )),
+    }
+}
+
 /// Whether a private durable session has been superseded by a newer one.
 fn ensure_durable_owner(session: &Arc<Mutex<LabSession>>) -> Result<()> {
     let (session_id, fortress_id, private_durable) = match session.lock() {
@@ -1539,6 +1557,7 @@ pub(crate) fn plan_request(
                         "expires_at_tick": plan.expires_at_tick.0,
                         "steps": crate::lab_world::plan_steps_json(&plan),
                         "forecast": forecast_plan(&guard.adapter, &plan, &ctx),
+                        "live_routing": live_routing_json(&plan),
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
                     guard.pending = Some(PendingPlan {
@@ -1757,6 +1776,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
             let digest = plan.digest.to_string();
             payload["rebased_plan"] = json!({
                 "forecast": forecast_plan(&session.adapter, &plan, &ctx),
+                "live_routing": live_routing_json(&plan),
                 "plan_digest": digest,
                 "expires_at_tick": plan.expires_at_tick.0,
                 "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
@@ -1892,6 +1912,73 @@ fn forecast_plan(
     })
 }
 
+/// How the sealed plan maps onto the live DFHack development families: the
+/// typed request per step or the reason none exists. Routing grants nothing.
+fn live_routing_json(plan: &PreparedPlan) -> serde_json::Value {
+    use dfmcp_adapter::live_routing::{LiveRequest, LiveResolution, route_plan};
+    let route = match route_plan(plan) {
+        Ok(route) => route,
+        Err(error) => return json!({"error": error.message}),
+    };
+    let steps: Vec<serde_json::Value> = route
+        .steps
+        .iter()
+        .map(|step| match &step.outcome {
+            Ok(routed) => {
+                let request = match &routed.request {
+                    LiveRequest::Pause { paused } => json!({"pause": paused}),
+                    LiveRequest::Dig { regions } => json!({
+                        "dig_regions": regions.iter().map(|r| r.coordinates()).collect::<Vec<_>>(),
+                    }),
+                    LiveRequest::Furniture { kind, target } => {
+                        json!({"furniture": kind.as_str(), "target": target})
+                    }
+                    LiveRequest::WorkOrder { spec } => {
+                        json!({"recipe": spec.recipe().as_str(), "amount": spec.amount()})
+                    }
+                    LiveRequest::WorkDetail { units, assigned } => {
+                        json!({"units": units, "assigned": assigned})
+                    }
+                };
+                let requires: Vec<String> = routed
+                    .requires
+                    .iter()
+                    .map(|r| match r {
+                        LiveResolution::FurnitureItem { kind } => {
+                            format!(
+                                "an exact unclaimed {} item from a live inventory read",
+                                kind.as_str()
+                            )
+                        }
+                        LiveResolution::WorkDetailForLabor { labor } => {
+                            format!("the live work detail that carries labor {labor}")
+                        }
+                    })
+                    .collect();
+                json!({
+                    "step": step.step.get(),
+                    "routable": true,
+                    "protocol": routed.family.protocol(),
+                    "request": request,
+                    "requires_live_resolution": requires,
+                    "live_preconditions": routed.live_preconditions,
+                })
+            }
+            Err(refusal) => json!({
+                "step": step.step.get(),
+                "routable": false,
+                "reason": refusal.reason,
+            }),
+        })
+        .collect();
+    json!({
+        "fully_routable": route.fully_routable(),
+        "protocols": route.families().iter().map(|f| f.protocol()).collect::<Vec<_>>(),
+        "steps": steps,
+        "admission": "unadmitted development families only; routing is not authority and no live effect is admitted",
+    })
+}
+
 /// The (capability, risk ceiling) pairs a sealed plan needs to be committed.
 fn plan_authority(plan: &PreparedPlan) -> Vec<(Capability, RiskTier)> {
     let mut authority: BTreeMap<Capability, RiskTier> = BTreeMap::new();
@@ -1936,6 +2023,9 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
         &session,
         || mutex_poisoned_payload("fortress.commit"),
         |guard| {
+            if let Err(error) = durability_gate(guard) {
+                return dfmcp_error_payload("fortress.commit", &error);
+            }
             {
                 let (_, entry_ctx) = match next_context(guard) {
                     Ok(value) => value,
@@ -2173,6 +2263,9 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
         &session,
         || mutex_poisoned_payload("fortress.wait"),
         |guard| {
+            if let Err(error) = durability_gate(guard) {
+                return dfmcp_error_payload("fortress.wait", &error);
+            }
             {
                 let (_, entry_ctx) = match next_context(guard) {
                     Ok(value) => value,
@@ -2341,6 +2434,9 @@ pub(crate) fn cancel_in_scope(
         &session,
         || mutex_poisoned_payload("fortress.cancel"),
         |guard| {
+            if let Err(error) = durability_gate(guard) {
+                return dfmcp_error_payload("fortress.cancel", &error);
+            }
             {
                 let (_, entry_ctx) = match next_context(guard) {
                     Ok(value) => value,
@@ -2541,6 +2637,9 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
         &session,
         || mutex_poisoned_payload("fortress.checkpoint"),
         |guard| {
+            if let Err(error) = durability_gate(guard) {
+                return dfmcp_error_payload("fortress.checkpoint", &error);
+            }
             let (_, ctx) = match next_context(guard) {
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.checkpoint", &error),
@@ -2634,6 +2733,9 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         &session,
         || mutex_poisoned_payload("fortress.restore"),
         |guard| {
+            if let Err(error) = durability_gate(guard) {
+                return dfmcp_error_payload("fortress.restore", &error);
+            }
             let (_, ctx) = match next_context(guard) {
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.restore", &error),

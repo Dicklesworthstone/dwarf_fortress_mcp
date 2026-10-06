@@ -182,3 +182,23 @@ malformed record or corrupt object refuses the store. The journal is compacted
 to live records (and unreferenced objects removed) every 1,024 records.
 `scripts/lab_durable_restart.py` demonstrates it across a SIGKILL.
 
+## Live routing of sealed plans
+
+Every `fortress_plan` response carries `live_routing`: how each sealed step maps
+onto the live DFHack development families (`dfmcp_adapter::live_routing`), or
+why it cannot.
+
+| Semantic action | Live family | Limits |
+|---|---|---|
+| `pause` | control/1.7 | — |
+| `designate_dig` (`mine`) | dig/1.16 | tiled into ≤8×8 single-level rectangles in z,y,x order; x,y ≥ 1 (complete halo); ≤64 rectangles per step; other modes refused |
+| `build` `furniture:Bed/Chair/Table` | build/1.19 | single-tile footprint at its location; needs an exact live item |
+| `create_work_order` `CONSTRUCT_BED/DOOR/TABLE/THRONE` | work-orders/1.10 | wooden only, amount 1..100, no conditions |
+| `set_labor` | workforce/1.17 | work-detail membership for ≤32 units, game paused; needs the live detail carrying the labor |
+| stockpile, squad, burrow, standing order, extension | none | refused with a reason |
+
+Each routable step lists the typed request (for example the exact dig
+rectangles), the live values still to resolve, and the family's own live
+preconditions. Routing is deterministic and pure: it grants no capability,
+performs no I/O, and every family remains unadmitted development execution.
+

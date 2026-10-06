@@ -37,6 +37,16 @@ readiness.
   (`WorldSnapshot::from_canonical_bytes`). `fortress.wait(max_game_ticks)` now
   lets time pass without a committed action. `scripts/lab_durable_restart.py`
   proves it across a SIGKILL. Laboratory only.
+- Semantic-to-live routing (`dfmcp_adapter::live_routing`): every sealed plan
+  step is translated onto the live development families — pause → control/1.7,
+  mining → dig/1.16 rectangles (tiled ≤8×8 per level in z,y,x order), bed/
+  chair/table → build/1.19, wooden bed/door/table/chair orders →
+  work-orders/1.10, labor → workforce/1.17 work-detail membership — validated by
+  each family's own constructors, with named live resolutions (exact furniture
+  item, work-detail index) and explicit refusals for everything else.
+  `fortress.plan` returns it as `live_routing`. Routing grants no authority.
+- Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
+  and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
   complete. Laboratory only.
 
