@@ -140,9 +140,9 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
         assert_eq!(waited["ok"], true, "{waited}");
         assert_eq!(waited["advanced_game_ticks"], 100);
-        let states: Vec<&str> = waited["plan_actions"]
+        let states: Vec<&str> = waited["polled_actions"]
             .as_array()
-            .ok_or("plan_actions")?
+            .ok_or("polled_actions")?
             .iter()
             .filter_map(|a| a["state"].as_str())
             .collect();
@@ -202,7 +202,7 @@ fn paused_fortress_makes_no_progress_and_says_why() -> TestResult {
     assert_eq!(waited["advanced_game_ticks"], 0);
     assert!(waited["blocked"].is_string());
     assert_eq!(
-        waited["plan_actions"][0]["state"],
+        waited["polled_actions"][0]["state"],
         "AppliedAwaitingVerification"
     );
     let turn = &waited["agent_turn"];
@@ -347,5 +347,68 @@ fn plan_scope_cancellation_drains_dependents_and_certifies_quiescence() -> TestR
     ))?;
     assert_eq!(again["drain_progress"]["already_terminal"], 4);
     assert_eq!(again["drain_progress"]["quiescent"], true);
+    Ok(())
+}
+
+#[test]
+fn a_later_plan_does_not_strand_an_earlier_plans_deferred_steps() -> TestResult {
+    let session = open("72006", false, &ALL_EFFECTS)?;
+    let first = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[2,3,10],"mode":"mine"}},
+                {"action":{"kind":"build","building":"furniture:Bed","location":[1,3,10],"min":[1,3,10],"max":[1,3,10]},"depends_on":[0]}]"#
+                .to_owned(),
+        ),
+    ))?;
+    let building = first["steps"][1]["creates_entity_id"]
+        .as_str()
+        .ok_or("created entity")?
+        .to_owned();
+    let digest = first["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    // A second, unrelated plan becomes the "last" plan.
+    let second = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#
+                .to_owned(),
+        ),
+    ))?;
+    let digest = second["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    // The first plan's obligations are still visible as active work.
+    assert_eq!(
+        committed["agent_turn"]["active_work"]["obligations"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    let mut remaining = None;
+    for _ in 0..20 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        remaining = waited["open_actions_remaining"].as_u64();
+        if remaining == Some(0) {
+            break;
+        }
+    }
+    assert_eq!(remaining, Some(0));
+    let buildings = parsed(&fortress_query(
+        Some(session),
+        Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
+    ))?;
+    assert_eq!(buildings["rows"][0]["entity_id"], building);
+    assert_eq!(
+        buildings["rows"][0]["fields"]["construction_stage"],
+        "complete"
+    );
     Ok(())
 }

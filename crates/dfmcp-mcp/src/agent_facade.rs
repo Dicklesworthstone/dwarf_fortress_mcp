@@ -221,7 +221,11 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
             let sealed_steps = std::mem::take(&mut state.pending_plan_steps);
             state.pending_plan_capabilities.clear();
             if let Some(actions) = payload.get("actions").and_then(Value::as_array) {
-                state.plan_actions = actions
+                // Earlier plans' unfinished actions remain active work.
+                state
+                    .plan_actions
+                    .retain(|view| action_is_nonterminal(Some(&view.state)));
+                let committed: Vec<PlanActionView> = actions
                     .iter()
                     .enumerate()
                     .map(|(index, action)| {
@@ -243,6 +247,15 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                         }
                     })
                     .collect();
+                for view in committed {
+                    if !state
+                        .plan_actions
+                        .iter()
+                        .any(|existing| existing.action_id == view.action_id)
+                    {
+                        state.plan_actions.push(view);
+                    }
+                }
                 if let Some(action) = actions.first() {
                     state.last_action_id = action
                         .get("action_id")
@@ -256,7 +269,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
             if let Some(action_id) = payload.get("action_id").and_then(Value::as_str) {
                 state.last_action_id = Some(action_id.to_owned());
             }
-            if let Some(polled) = payload.get("plan_actions").and_then(Value::as_array) {
+            if let Some(polled) = payload.get("polled_actions").and_then(Value::as_array) {
                 for observed in polled {
                     let id = observed.get("action_id").and_then(Value::as_str);
                     if let Some(view) = state
@@ -1210,7 +1223,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
 }
 
 #[tool(
-    description = "Poll active work and return bounded verification state. max_game_ticks lets laboratory game time pass first (only while unpaused, within the session game-tick budget) and then reports every action of the last committed plan."
+    description = "Poll active work and return bounded verification state. max_game_ticks lets laboratory game time pass first (only while unpaused, within the session game-tick budget) and then polls every open committed action across plans (which also dispatches deferred steps whose dependencies verified)."
 )]
 pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
     project_response(

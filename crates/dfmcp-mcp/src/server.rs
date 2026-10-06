@@ -69,6 +69,10 @@ pub(crate) struct LabSession {
     last_action: Option<ActionId>,
     /// Every action of the most recent committed plan, in step order.
     last_plan_actions: Vec<ActionId>,
+    /// Every committed action, across plans, that was not terminal when last
+    /// polled. `fortress.wait` polls all of them, which is also what
+    /// dispatches deferred steps once their dependencies verify.
+    open_actions: Vec<ActionId>,
     /// Bounded plan-digest to payload map for idempotent re-commit (ADR-006).
     commit_receipts: BTreeMap<String, String>,
     /// Authority each committed plan required; a replay must still hold it.
@@ -158,6 +162,8 @@ static NEXT_SESSION_COUNTER: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new
 
 const MAX_LAB_SESSIONS: usize = 1_024;
 const MAX_LAB_COMMIT_RECEIPTS: usize = 4_096;
+/// Committed actions a session may have open (not yet terminal) at once.
+const MAX_OPEN_ACTIONS: usize = 1_024;
 const MAX_CAPABILITY_REQUESTS: usize = 32;
 const MAX_CAPABILITY_NAME_BYTES: usize = 64;
 const MAX_RISK_NAME_BYTES: usize = 32;
@@ -645,6 +651,7 @@ pub(crate) fn open_session_in_scenario(
         pending: None,
         last_action: None,
         last_plan_actions: Vec::new(),
+        open_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
         commit_authority: BTreeMap::new(),
     };
@@ -669,6 +676,7 @@ pub(crate) fn open_session_in_scenario(
         pending: _,
         last_action: _,
         last_plan_actions: _,
+        open_actions: _,
         commit_receipts: _,
         commit_authority: _,
     } = probe_session;
@@ -683,6 +691,7 @@ pub(crate) fn open_session_in_scenario(
         pending: None,
         last_action: None,
         last_plan_actions: Vec::new(),
+        open_actions: Vec::new(),
         commit_receipts: BTreeMap::new(),
         commit_authority: BTreeMap::new(),
     }));
@@ -1123,6 +1132,14 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             "session commit-receipt store reached its explicit bound",
         );
     }
+    if guard.open_actions.len() + pending.plan.steps.len() > MAX_OPEN_ACTIONS {
+        guard.pending = Some(pending);
+        return coded_error_payload(
+            "fortress.commit",
+            ErrorCode::BudgetExceeded,
+            "the session already tracks its maximum number of open actions; wait for or cancel existing work first",
+        );
+    }
     let (_, prepare_ctx) = match next_context(&mut guard) {
         Ok(value) => value,
         Err(error) => {
@@ -1147,6 +1164,13 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         .iter()
                         .map(|action| action.action_id)
                         .collect();
+                    for action in &receipt.actions {
+                        if !action.state.is_terminal()
+                            && !guard.open_actions.contains(&action.action_id)
+                        {
+                            guard.open_actions.push(action.action_id);
+                        }
+                    }
                     let authority = plan_authority(&pending.plan);
                     guard
                         .commit_authority
@@ -1251,22 +1275,31 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
         Ok(task) => task,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    let mut plan_actions = Vec::new();
-    for planned in guard.last_plan_actions.clone() {
+    // Poll every open action in commit order (prerequisites before their
+    // dependents) and retire the ones that reached a terminal state.
+    let mut polled_actions = Vec::new();
+    let mut still_open = Vec::new();
+    for open in guard.open_actions.clone() {
         let (_, poll_ctx) = match next_context(&mut guard) {
             Ok(value) => value,
             Err(error) => return dfmcp_error_payload("fortress.wait", &error),
         };
-        match guard.adapter.poll_action(planned, &poll_ctx) {
-            Ok(receipt) => plan_actions.push(json!({
-                "action_id": format!("{planned}"),
-                "step": receipt.step_id.get(),
-                "state": format!("{:?}", receipt.state),
-                "message": receipt.message,
-            })),
+        match guard.adapter.poll_action(open, &poll_ctx) {
+            Ok(receipt) => {
+                if !receipt.state.is_terminal() {
+                    still_open.push(open);
+                }
+                polled_actions.push(json!({
+                    "action_id": format!("{open}"),
+                    "step": receipt.step_id.get(),
+                    "state": format!("{:?}", receipt.state),
+                    "message": receipt.message,
+                }));
+            }
             Err(error) => return dfmcp_error_payload("fortress.wait", &error),
         }
     }
+    guard.open_actions = still_open;
     let snapshot = guard.adapter.snapshot();
     let mut payload = json!({
         "ok": true,
@@ -1281,7 +1314,8 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
     if max_game_ticks.is_some() {
         payload["advanced_game_ticks"] = json!(advanced);
         payload["game_tick"] = json!(snapshot.tick.0);
-        payload["plan_actions"] = json!(plan_actions);
+        payload["polled_actions"] = json!(polled_actions);
+        payload["open_actions_remaining"] = json!(guard.open_actions.len());
         if requested_ticks > 0 && paused {
             payload["blocked"] = json!(
                 "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"

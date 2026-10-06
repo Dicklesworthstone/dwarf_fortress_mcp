@@ -49,12 +49,15 @@ fortress_plan(actions='[
   {"action":{"kind":"create_work_order","name":"brew","job_token":"BREW_DRINK","amount":2},"depends_on":[1]},
   {"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true}}]')
 fortress_commit(plan_digest=...)
-fortress_wait(max_game_ticks=100)   # repeat until every plan_actions entry is Verified
+fortress_wait(max_game_ticks=100)   # repeat until open_actions_remaining is 0
 ```
 
 `fortress_plan` returns each step's capability, risk, created entity, sealed
 postconditions and obligation (terminal, deadline). Steps whose dependencies are
-not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`.
+not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`,
+which polls every open action of every committed plan in commit order (so a
+later plan never strands an earlier plan's deferred steps) and reports them in
+`polled_actions` with `open_actions_remaining`.
 `fortress_wait` lets time pass only while the fortress is unpaused and within
 the session's game-tick budget; a paused fortress reports `blocked`.
 
