@@ -23,7 +23,7 @@ pub mod rebase;
 pub mod retention;
 pub mod search;
 pub mod spatial_index;
-pub mod sqlite_ledger;
+pub mod table_ledger;
 pub mod terrain;
 pub mod topology;
 pub mod workforce_allocation;
@@ -65,7 +65,7 @@ pub use query::{
     evaluate_for,
 };
 pub use query_page::{execute_bounded_query, execute_query};
-pub use sqlite_ledger::{
-    CapsuleRow, DeltaRow, SnapshotRow, SqliteLedgerConfig, SqliteProductionLedger,
+pub use table_ledger::{
+    CapsuleRow, DeltaRow, SnapshotRow, TableLedgerConfig, TableLedgerPrototype,
 };
 pub use terrain::{MAX_REGION_TERRAIN_TILES, RegionTruth, tile_codes};

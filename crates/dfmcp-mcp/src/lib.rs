@@ -23,7 +23,7 @@ pub mod dig_recovery_server;
 pub mod doctor;
 pub mod ee_memory;
 pub mod evaluation;
-pub mod http_transport;
+pub mod http_resumption_lab;
 pub mod job_control_session;
 mod lab_world;
 pub mod live_control_server;
@@ -58,7 +58,7 @@ pub use agent_turn::{
 };
 pub use doctor::{DoctorDiagnosticReport, DoctorInspector};
 pub use ee_memory::{EeMemoryBatch, EeMemoryItem};
-pub use http_transport::{
+pub use http_resumption_lab::{
     HttpSessionResumeToken, HttpTransportSessionManager, MAX_HTTP_MESSAGE_BYTES,
     MAX_HTTP_SESSION_BUFFER_BYTES, MAX_HTTP_SESSIONS, MAX_HTTP_TOTAL_BUFFER_BYTES,
     MAX_RESUMPTION_BUFFER_SIZE,

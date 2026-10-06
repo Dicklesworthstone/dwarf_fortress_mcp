@@ -3,7 +3,7 @@
 //! Integration tests for WP-MCP-02 Streamable HTTP Transport & Resumption.
 
 use dfmcp_core::{Result, SessionId};
-use dfmcp_mcp::http_transport::{HttpSessionResumeToken, HttpTransportSessionManager};
+use dfmcp_mcp::http_resumption_lab::{HttpSessionResumeToken, HttpTransportSessionManager};
 
 #[test]
 fn test_http_session_token_validation() -> Result<()> {
@@ -18,7 +18,7 @@ fn test_http_session_token_validation() -> Result<()> {
 }
 
 #[test]
-fn test_http_transport_session_isolation() -> Result<()> {
+fn test_http_resumption_lab_session_isolation() -> Result<()> {
     let mut manager = HttpTransportSessionManager::new();
     let s1 = SessionId::new(1);
     let s2 = SessionId::new(2);

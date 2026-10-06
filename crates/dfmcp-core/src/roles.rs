@@ -158,7 +158,7 @@ pub struct DelegationToken {
     pub delegatee_session: SessionId,
     pub grants: Vec<CapabilityGrant>,
     pub expires_at_tick: Option<GameTick>,
-    pub integrity_digest: Digest32,
+    pub delegation_digest: Digest32,
 }
 
 impl DelegationToken {
@@ -166,7 +166,7 @@ impl DelegationToken {
     ///
     /// This is deliberately not called a signature: it contains no secret or private key.
     #[must_use]
-    pub fn compute_integrity_digest(
+    pub fn compute_delegation_digest(
         token_id: u64,
         issuer: SessionId,
         delegatee: SessionId,
@@ -309,7 +309,7 @@ impl RoleManager {
             )
         })?;
 
-        let integrity_digest = DelegationToken::compute_integrity_digest(
+        let delegation_digest = DelegationToken::compute_delegation_digest(
             token_id,
             issuer,
             delegatee,
@@ -323,7 +323,7 @@ impl RoleManager {
             delegatee_session: delegatee,
             grants,
             expires_at_tick,
-            integrity_digest,
+            delegation_digest,
         };
 
         if self.delegations.insert(token_id, token.clone()).is_some() {
@@ -351,7 +351,7 @@ impl RoleManager {
             ));
         }
 
-        let expected_digest = DelegationToken::compute_integrity_digest(
+        let expected_digest = DelegationToken::compute_delegation_digest(
             token.token_id,
             token.issuer_session,
             token.delegatee_session,
@@ -359,7 +359,7 @@ impl RoleManager {
             token.expires_at_tick,
         );
 
-        if token.integrity_digest != expected_digest {
+        if token.delegation_digest != expected_digest {
             return Err(DfmcpError::new(
                 ErrorCode::CapabilityDenied,
                 "delegation token integrity digest mismatch",

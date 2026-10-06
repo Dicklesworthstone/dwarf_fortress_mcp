@@ -2,7 +2,7 @@
 
 //! In-memory persistence-contract prototype for world state and effect journals.
 //!
-//! Despite the compatibility-preserving type names, this module does not open SQLite,
+//! This module does not open SQLite or any database,
 //! write a WAL, or provide crash durability. It exists only to exercise table-like
 //! invariants until the admitted owned persistence crate is integrated.
 
@@ -23,7 +23,7 @@ const MAX_EFFECT_MESSAGE_BYTES: usize = 4_096;
 
 /// Prospective persistence settings retained as contract data; currently not applied.
 #[derive(Clone, Debug)]
-pub struct SqliteLedgerConfig {
+pub struct TableLedgerConfig {
     pub journal_mode: String,
     pub synchronous: String,
     pub busy_timeout_millis: u32,
@@ -31,7 +31,7 @@ pub struct SqliteLedgerConfig {
     pub compaction_horizon_checkpoints: usize,
 }
 
-impl Default for SqliteLedgerConfig {
+impl Default for TableLedgerConfig {
     fn default() -> Self {
         Self {
             journal_mode: "WAL".to_owned(),
@@ -78,17 +78,17 @@ pub struct SnapshotRow {
 
 /// In-memory table prototype. This is neither SQLite-backed nor durable.
 #[derive(Clone, Debug, Default)]
-pub struct SqliteProductionLedger {
-    config: SqliteLedgerConfig,
+pub struct TableLedgerPrototype {
+    config: TableLedgerConfig,
     capsules_table: BTreeMap<Digest32, CapsuleRow>,
     deltas_table: BTreeMap<Digest32, DeltaRow>,
     snapshots_table: BTreeMap<Digest32, SnapshotRow>,
     effects_table: BTreeMap<String, EffectJournalRecord>,
 }
 
-impl SqliteProductionLedger {
+impl TableLedgerPrototype {
     #[must_use]
-    pub fn new(config: SqliteLedgerConfig) -> Self {
+    pub fn new(config: TableLedgerConfig) -> Self {
         Self {
             config,
             capsules_table: BTreeMap::new(),
@@ -355,7 +355,7 @@ impl SqliteProductionLedger {
 
     /// Configuration parameters.
     #[must_use]
-    pub fn config(&self) -> &SqliteLedgerConfig {
+    pub fn config(&self) -> &TableLedgerConfig {
         &self.config
     }
 }
@@ -408,8 +408,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sqlite_ledger_crud_operations() -> Result<()> {
-        let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
+    fn test_table_ledger_crud_operations() -> Result<()> {
+        let mut ledger = TableLedgerPrototype::new(TableLedgerConfig::default());
         let snap1 = sample_snapshot(100, ObservationCursor::ORIGIN);
         ledger.insert_snapshot(&snap1)?;
 
@@ -435,8 +435,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sqlite_ledger_delta_compaction() -> Result<()> {
-        let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
+    fn test_table_ledger_delta_compaction() -> Result<()> {
+        let mut ledger = TableLedgerPrototype::new(TableLedgerConfig::default());
 
         for seq in 1..=10 {
             let delta = StateDelta {

@@ -24,7 +24,7 @@ use dfmcp_world::atp::{AtpProofCapsule, AtpProofVerifier};
 use dfmcp_world::franken_fs::{SavegameArchive, SavegameScrubber};
 use dfmcp_world::search::FrankenSearchEngine;
 use dfmcp_world::spatial_index::ChunkSpatialIndex;
-use dfmcp_world::sqlite_ledger::{SqliteLedgerConfig, SqliteProductionLedger};
+use dfmcp_world::table_ledger::{TableLedgerConfig, TableLedgerPrototype};
 use dfmcp_world::{ChunkCoord, MapChunk, TerrainRun, WorldGraph, WorldSnapshot};
 
 fn sample_world_snapshot() -> WorldSnapshot {
@@ -253,11 +253,11 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
     );
 
     // 8. In-memory table and archive contract prototypes
-    let mut sqlite_ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
-    sqlite_ledger.insert_snapshot(&snapshot)?;
-    sqlite_ledger.insert_snapshot(&snap_after)?;
-    sqlite_ledger.insert_delta(&delta)?;
-    assert!(sqlite_ledger.verify_storage_integrity().is_ok());
+    let mut table_ledger = TableLedgerPrototype::new(TableLedgerConfig::default());
+    table_ledger.insert_snapshot(&snapshot)?;
+    table_ledger.insert_snapshot(&snap_after)?;
+    table_ledger.insert_delta(&delta)?;
+    assert!(table_ledger.verify_storage_integrity().is_ok());
 
     let mut fs_archive = SavegameArchive::new();
     fs_archive.store_snapshot(&snapshot)?;

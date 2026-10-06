@@ -6,7 +6,7 @@
 use dfmcp_core::{
     CommitState, DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
 };
-use dfmcp_world::sqlite_ledger::{SqliteLedgerConfig, SqliteProductionLedger};
+use dfmcp_world::table_ledger::{TableLedgerConfig, TableLedgerPrototype};
 use dfmcp_world::{EffectJournalRecord, ObservationCapsule, StateDelta, WorldGraph, WorldSnapshot};
 
 fn sample_snapshot(tick: u64, cursor: ObservationCursor) -> WorldSnapshot {
@@ -21,7 +21,7 @@ fn sample_snapshot(tick: u64, cursor: ObservationCursor) -> WorldSnapshot {
 
 #[test]
 fn test_table_prototype_capsule_and_delta_roundtrip() -> Result<()> {
-    let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
+    let mut ledger = TableLedgerPrototype::new(TableLedgerConfig::default());
 
     let snap_base = sample_snapshot(100, ObservationCursor::ORIGIN);
     let snap_target = sample_snapshot(
@@ -76,7 +76,7 @@ fn test_table_prototype_capsule_and_delta_roundtrip() -> Result<()> {
 
 #[test]
 fn test_table_prototype_effect_records() -> Result<()> {
-    let mut ledger = SqliteProductionLedger::new(SqliteLedgerConfig::default());
+    let mut ledger = TableLedgerPrototype::new(TableLedgerConfig::default());
 
     let effect = EffectJournalRecord {
         effect_id: "eff_12345".to_owned(),
