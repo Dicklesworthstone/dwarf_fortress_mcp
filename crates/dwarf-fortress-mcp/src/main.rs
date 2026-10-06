@@ -44,6 +44,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "serve" => dfmcp_mcp::run_stdio(),
         "serve-live" => dfmcp_mcp::run_live_stdio(),
         "replay" => return replay(env::args().nth(2)),
+        "evaluate" => return evaluate(env::args().skip(2).collect()),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
         }
@@ -74,6 +75,27 @@ fn replay(path: Option<String>) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Score a policy on a laboratory scenario: `evaluate <scenario> <policy> <ticks>`.
+fn evaluate(args: Vec<String>) -> Result<(), Box<dyn Error>> {
+    let [scenario, policy, ticks] = args.as_slice() else {
+        return Err(format!(
+            "usage: dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>; policies: {:?}",
+            dfmcp_mcp::evaluation::POLICIES
+        )
+        .into());
+    };
+    let ticks: u64 = ticks
+        .parse()
+        .map_err(|_| "ticks must be a positive integer")?;
+    let report = dfmcp_mcp::evaluation::evaluate(scenario, policy, ticks);
+    println!("{report}");
+    if report["ok"] == true {
+        Ok(())
+    } else {
+        Err("evaluation was refused; see the report".into())
+    }
+}
+
 fn print_help() {
     println!(
         "\
@@ -91,6 +113,7 @@ COMMANDS:
     serve       Run the deterministic laboratory MCP server
     serve-live  Run the authenticated read-only live MCP server
     replay      Re-execute a laboratory replay bundle and report the first divergence
+    evaluate    Score a policy on a laboratory scenario: evaluate <scenario> <policy> <ticks>
     version     Print version information
     help        Print this help
 

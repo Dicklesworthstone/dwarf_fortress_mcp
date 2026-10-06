@@ -72,6 +72,9 @@ readiness.
 - Laboratory threats: `besieged_fortress` schedules a hostile raider that
   fights squad members in rounds or kills exposed dwarves, with `hostile`
   alerts and a capability-gated squad-assignment remedy.
+- Policy evaluation harness: `dwarf-fortress-mcp evaluate <scenario> <policy>
+  <ticks>` scores `idle` or `follow_recommendations` deterministically through
+  the eleven tools (survivors, deprivation, threats, objectives, cost).
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

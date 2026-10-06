@@ -20,6 +20,7 @@ pub mod dig_control_server;
 pub mod dig_recovery_server;
 pub mod doctor;
 pub mod ee_memory;
+pub mod evaluation;
 pub mod http_transport;
 pub mod job_control_session;
 mod lab_world;

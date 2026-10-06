@@ -279,3 +279,17 @@ assigns up to four unassigned dwarves to the squad; when the session holds the
 remedy's capability (`configure_military`) it becomes the top recommendation.
 Remedies are always gated by the capability they name (`requires`).
 
+## Evaluating agent policies
+
+`dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>` plays a scenario for
+a bounded number of game ticks through the same eleven tools, in 100-tick
+steps, and prints a deterministic `dfmcp.lab-evaluation/1` report: dwarves
+alive, dwarf-steps spent thirsty or hungry, hostiles slain, objectives
+achieved, plus cost (tool calls, plans committed and refused). Policies:
+`idle` (only waits) and `follow_recommendations` (after each wait, plans and
+commits the Agent Turn's top recommendation when it is a concrete plan or
+commit). On `besieged_fortress` over 20,000 ticks `idle` loses all seven
+dwarves while `follow_recommendations` musters the squad, slays the raider,
+keeps everyone supplied and achieves every objective it commits. The same
+scenario, policy and horizon always produce the same report and final anchor.
+
