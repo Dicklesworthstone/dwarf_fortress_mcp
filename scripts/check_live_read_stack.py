@@ -296,8 +296,10 @@ def check_mcp_and_cli(failures: list[Failure]) -> None:
     for tool in COMPILED_LIVE_TOOLS:
         signature = re.search(rf"pub fn {re.escape(tool)}\s*\((.*?)\)\s*->", server, re.S)
         if signature is not None:
-            arguments = signature.group(1).lower()
-            require(all(secret not in arguments for secret in ["token", "secret", "endpoint"]), server_path, f"{tool} exposes deployment secrets as MCP arguments", failures)
+            # Whole parameter-name segments: `max_output_tokens` is a budget, not a secret.
+            names = re.findall(r"([a-z_][a-z0-9_]*)\s*:", signature.group(1).lower())
+            segments = {segment for name in names for segment in name.split("_")}
+            require(not segments & {"token", "secret", "endpoint", "nonce", "password"}, server_path, f"{tool} exposes deployment secrets as MCP arguments", failures)
     for needle, message in [
         ("DFMCP_BRIDGE_TOKEN", "bearer authentication is not sourced from process configuration"),
         ('"mutation_admissible": false', "live Agent Turn does not make read-only posture explicit"),

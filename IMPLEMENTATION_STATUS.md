@@ -1219,6 +1219,8 @@ The checked-in compatibility registry remains:
 }
 ```
 
+No fresh full latest-nightly qualification receipt is checked in for the current head.
+
 Consequences:
 
 - no Dwarf Fortress/DFHack/plugin/source/protocol/platform tuple is currently admitted;

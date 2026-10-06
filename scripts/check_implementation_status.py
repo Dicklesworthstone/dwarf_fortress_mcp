@@ -134,7 +134,11 @@ def check_registry(root: Path, contract: dict[str, Any]) -> None:
     )
     path = resolve_repository_path(root, expected.get("path"), "contract.compatibility_registry.path")
     registry = read_json(path, "compatibility registry")
-    require_exact_keys(registry, {"schema_version", "status", "entries"}, "compatibility_registry")
+    require_exact_keys(
+        registry, {"schema_version", "status", "entries", "revocations"}, "compatibility_registry"
+    )
+    if registry.get("revocations") != []:
+        fail("checked-in compatibility registry unexpectedly carries revocations")
     if registry.get("schema_version") != expected.get("schema_version"):
         fail("compatibility registry schema differs from the current status contract")
     if registry.get("status") != expected.get("required_status"):
@@ -257,7 +261,11 @@ def check_bridge_generations(root: Path, contract: dict[str, Any]) -> None:
         observed_protocols.append(protocol)
         path = resolve_repository_path(root, expected.get("path"), f"contract.bridge_generations[{index}].path")
         bridge = read_json(path, f"protocol-{protocol} bridge contract")
-        if bridge.get("method_manifest") != expected.get("method_manifest"):
+        manifest = bridge.get("method_manifest")
+        if manifest is None and isinstance(bridge.get("methods"), list):
+            # Protocol 1.0 states its methods as objects rather than a manifest.
+            manifest = [method.get("name") for method in bridge["methods"] if isinstance(method, dict)]
+        if manifest != expected.get("method_manifest"):
             fail(f"protocol {protocol} method manifest differs from status contract")
         methods = bridge.get("methods")
         if not isinstance(methods, list):
@@ -291,9 +299,10 @@ def check_documents(root: Path, contract: dict[str, Any]) -> None:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             fail(f"cannot read authoritative document {relative}: {exc}")
-        normalized = text.casefold()
+        # Markers survive re-wrapping and Markdown blockquote prefixes.
+        normalized = " ".join(text.replace("\n>", "\n").split()).casefold()
         for marker in markers:
-            if marker.casefold() not in normalized:
+            if " ".join(marker.split()).casefold() not in normalized:
                 fail(f"authoritative document {relative} omits status marker {marker!r}")
 
 

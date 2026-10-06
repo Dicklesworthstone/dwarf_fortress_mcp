@@ -592,6 +592,8 @@ readiness.
 
 ### Current evidence status
 
+- There is no admitted live tuple: the checked-in compatibility registry is empty, and protocol 1.1
+  remains explicitly unadmitted development source.
 - Spatial situation/attention has fifteen registered but uncompiled and unexecuted Rust scenarios.
   Six independent watch-packet JSON reference cases fit the minimum output budget; this is not
   execution of Rust rules, watch transitions, actual MCP or native/live-game behavior.

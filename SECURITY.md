@@ -7,8 +7,8 @@ resources, files, protocols, and time windows explicitly granted to it. Untruste
 recommendations, local artifacts, and compatibility metadata must never become ambient authority.
 Failure or uncertainty reduces authority; it never expands it.
 
-The current live protocols are read-only. The checked-in compatibility registry has no admitted
-entries. No current deployment is authorized merely because source exists or a development server
+The admitted live protocol (1.0) is read-only; mutation RPCs exist only in unadmitted development
+profiles. The checked-in compatibility registry has no admitted entries. No current deployment is authorized merely because source exists or a development server
 runs.
 
 ## Trust posture

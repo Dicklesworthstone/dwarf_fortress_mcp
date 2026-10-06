@@ -8,8 +8,9 @@ long-lived civilization rather than a keyboard-and-screen toy.**
 > anti-rollback machinery, source-bound executable qualification, a protocol-bound V2 process
 > boundary, and an implemented protocol-1.1 retained-announcement development stack. The checked-in
 > compatibility registry is **empty**. No live tuple is admitted, protocol 1.1 is not in the
-> production runner map, no live mutation RPC exists, and the final current source generation has
-> no newly checked-in full qualification receipt. Read
+> production runner map, no admitted live mutation RPC exists (pause, dig, build, work-order and
+> workforce mutation RPCs exist only as unadmitted development profiles), and the final current
+> source generation has no newly checked-in full qualification receipt. Read
 > [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) before interpreting target architecture as
 > deployed behavior.
 

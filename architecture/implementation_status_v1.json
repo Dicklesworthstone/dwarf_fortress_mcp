@@ -4,7 +4,7 @@
   "phase": "0D-R0+1A-source",
   "compatibility_registry": {
     "path": "architecture/live_compatibility_registry_v1.json",
-    "schema_version": "dfmcp.live-compatibility-registry/1",
+    "schema_version": "dfmcp.live-compatibility-registry/2",
     "required_status": "no_admitted_live_tuples",
     "required_entry_count": 0
   },
@@ -63,19 +63,19 @@
       "protocol 1.1",
       "development runtime",
       "protocol-bound V2",
-      "No live mutation RPC",
+      "no admitted live mutation capability",
       "No fresh full latest-nightly qualification receipt is checked in"
     ],
     "README.md": [
       "compatibility registry is **empty**",
       "protocol 1.1 is not in the production runner map",
-      "no live mutation RPC exists"
+      "no admitted live mutation RPC exists"
     ],
     "CHANGELOG.md": [
       "Current evidence status",
       "no admitted live tuple",
       "protocol 1.1 remains explicitly unadmitted development source",
-      "No live mutation RPC or capability exists"
+      "No admitted live mutation capability exists"
     ],
     "ROADMAP.md": [
       "The checked-in compatibility registry is empty",

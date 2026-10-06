@@ -246,15 +246,16 @@ def check_gate_wiring() -> None:
     for marker in [
         "python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py",
         "python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py",
-        "'source_bundle_contract':digest(root/'architecture/source_bundle_v1.json')",
-        "'stable_repository_reader':digest(root/'scripts/read_stable_repository_file.py')",
-        "'source_bundle_creator':digest(root/'scripts/create_source_bundle.py')",
-        "'source_bundle_wrapper':digest(root/'scripts/create_source_bundle.sh')",
-        "'source_bundle_verifier':digest(root/'scripts/verify_source_bundle.py')",
-        "'source_bundle_checker':digest(root/'scripts/check_source_bundle.py')",
-        "'source_bundle_tests':digest(root/'scripts/test_source_bundle.py')",
-        "'source_bundle_output_tests':digest(root/'scripts/test_source_bundle_output_location.py')",
-        "'source_bundle_documentation':digest(root/'docs/SOURCE_BUNDLE.md')",
+        # The receipt's source snapshot digests every tracked file (contract and
+        # documentation included); qualification must still compile-check the
+        # bundle tooling itself.
+        "scripts/read_stable_repository_file.py",
+        "scripts/create_source_bundle.py",
+        "scripts/create_source_bundle.sh",
+        "scripts/verify_source_bundle.py",
+        "scripts/check_source_bundle.py",
+        "scripts/test_source_bundle.py",
+        "scripts/test_source_bundle_output_location.py",
     ]:
         require(marker in qualify, f"qualify_local.sh omits source bundle marker {marker}")
 

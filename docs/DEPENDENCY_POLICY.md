@@ -74,6 +74,12 @@ The pure semantic core does not depend on filesystem, sockets, clocks, environme
 
 ## 5. `asupersync` integration
 
+`asupersync` is pinned as `=0.5.0` from crates.io rather than by git revision. The owned
+`fastmcp_rust` pin resolves exactly that published version, and a second git copy would split the
+runtime's `Cx` and task types. `scripts/check_dependency_policy.py` therefore accepts an owned crate
+at an exact `=x.y.z` version only when `Cargo.lock` resolves exactly one copy of it, at that version,
+with a registry checksum.
+
 When admitted, `asupersync` replaces custom runtime scaffolding rather than coexisting with it. All blocking/effectful APIs accept `&Cx` or a project wrapper that preserves authority and budget semantics. There is one timer system, one cancellation tree, one task ownership model, and one deterministic lab.
 
 ## 6. Franken-suite integration

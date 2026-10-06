@@ -10,6 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "architecture/dependency_allowlist.toml"
 OWNED_GIT_PREFIX = "https://github.com/Dicklesworthstone/"
 FULL_GIT_REVISION = re.compile(r"^[0-9a-fA-F]{40}$")
+EXACT_VERSION = re.compile(r"=[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def locked_versions(name: str) -> list[tuple[str, bool]]:
+    """(version, has registry checksum) for every locked copy of `name`."""
+    lock = load_toml(ROOT / "Cargo.lock")
+    return [
+        (str(package.get("version")), "checksum" in package)
+        for package in lock.get("package", [])
+        if package.get("name") == name
+    ]
 
 
 def dependency_spec(specification: Any, workspace_deps: dict[str, Any], declared_name: str) -> Any:
@@ -158,8 +169,21 @@ def main() -> int:
                     continue
 
                 if owned_name:
+                    # An owned crate published to crates.io may be pinned to one exact
+                    # version when the lockfile resolves exactly that single copy with a
+                    # registry checksum: this is how the owned fastmcp pin itself resolves
+                    # asupersync, and a second (git) copy would split the runtime types.
+                    version = specification.get("version") if isinstance(specification, dict) else specification
+                    if isinstance(version, str) and EXACT_VERSION.fullmatch(version):
+                        resolved = locked_versions(package_name)
+                        if resolved == [(version[1:], True)]:
+                            continue
+                        failures.append(
+                            f"{location}: owned dependency {package_name} pins {version} but Cargo.lock resolves {resolved}"
+                        )
+                        continue
                     failures.append(
-                        f"{location}: owned dependency {package_name} must use a verified local path or exact owned git rev"
+                        f"{location}: owned dependency {package_name} must use a verified local path, exact owned git rev, or exact =x.y.z registry pin"
                     )
                     continue
                 if package not in phase_zero and package not in fundamental:
