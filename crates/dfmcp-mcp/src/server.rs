@@ -458,6 +458,12 @@ pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
     let mut lab = durable_lab();
     lab.store = None;
     lab.owners.clear();
+    drop(lab);
+    // Durable shared worlds die with the process too; process-local ones
+    // belong to other (parallel) tests and stay.
+    if let Ok(mut registry) = SHARED_WORLDS.lock() {
+        registry.retain(|_, world| world.lock().is_ok_and(|world| !world.durable));
+    }
 }
 
 /// Test hook: let the open durable store accept `budget` more journal

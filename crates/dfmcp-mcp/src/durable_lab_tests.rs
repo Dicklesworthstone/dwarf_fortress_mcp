@@ -302,3 +302,78 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
     );
     Ok(())
 }
+
+#[test]
+fn a_shared_durable_fortress_resumes_for_every_member() -> TestResult {
+    let _serial = serialized();
+    let dir =
+        StateDir(std::env::temp_dir().join(format!("dfmcp-durable-shared-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let open_shared_durable = |scenario: Option<&str>| {
+        parsed(&fortress_open_session(
+            Some(false),
+            Some("880077".to_owned()),
+            Some(caps()),
+            None,
+            Some(100_000),
+            None,
+            None,
+            Some(8_192),
+            None,
+            scenario.map(str::to_owned),
+            Some(true),
+            Some(true),
+        ))
+    };
+    let a = open_shared_durable(Some("starter_fortress"))?;
+    assert_eq!(a["ok"], true, "{a}");
+    let b = open_shared_durable(None)?;
+    assert_eq!(b["ok"], true, "{b}");
+    assert_eq!(b["shared_world"]["members"], 2);
+    // A process-local member cannot join a durable shared fortress.
+    let local = parsed(&fortress_open_session(
+        Some(false),
+        Some("880077".to_owned()),
+        Some(caps()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(true),
+        Some(false),
+    ))?;
+    assert_eq!(local["ok"], false, "{local}");
+
+    let (a, b) = (id(&a, "session_id")?, id(&b, "session_id")?);
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[3,3,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    let committed = parsed(&fortress_commit(Some(a), id(&planned, "plan_digest")?))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    // B's wait moves the shared clock; the excavation completes.
+    for _ in 0..3 {
+        parsed(&fortress_wait(Some(b.clone()), Some(20)))?;
+    }
+    let before = terrain(&b)?;
+
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let a2 = open_shared_durable(None)?;
+    assert_eq!(a2["ok"], true, "{a2}");
+    assert_eq!(a2["durable"]["resumed"], true, "{a2}");
+    let b2 = open_shared_durable(None)?;
+    assert_eq!(b2["shared_world"]["joined_existing"], true, "{b2}");
+    assert_eq!(terrain(&id(&b2, "session_id")?)?, before);
+    assert_eq!(terrain(&id(&a2, "session_id")?)?, before);
+    Ok(())
+}
