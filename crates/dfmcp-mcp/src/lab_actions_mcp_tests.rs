@@ -1521,3 +1521,77 @@ fn every_response_fits_the_negotiated_output_budget() -> TestResult {
     assert_ne!(terrain["output_budget"]["tier"], "full", "{terrain}");
     Ok(())
 }
+
+#[test]
+fn filters_search_proofs_and_doctor_counts_are_wired_in() -> TestResult {
+    let session = open("72140", false, &ALL_EFFECTS)?;
+    // Let the barrels run dry so some dwarves become thirsty.
+    for _ in 0..80 {
+        parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+    }
+    let thirsty = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(
+            r#"{"mode":"entities","kind":"unit","where":{"field":"need.drink","op":"eq","value":"thirsty"}}"#
+                .to_owned(),
+        ),
+    ))?;
+    assert_eq!(thirsty["ok"], true, "{thirsty}");
+    assert_eq!(thirsty["filtered"], true);
+    let total = thirsty["total"].as_u64().ok_or("total")?;
+    assert!(total > 0, "{thirsty}");
+    assert!(
+        thirsty["rows"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().all(|r| r["fields"]["need.drink"] == "thirsty"))
+    );
+    let either = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"unit","where":{"any":[{"field":"need.drink","value":"thirsty"},{"not":{"field":"need.drink","value":"thirsty"}}]}}"#.to_owned()),
+    ))?;
+    assert_eq!(
+        either["total"], 7,
+        "complementary filters cover the domain: {either}"
+    );
+    let malformed = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","where":{"field":"x","op":"like","value":1}}"#.to_owned()),
+    ))?;
+    assert_eq!(malformed["ok"], false);
+
+    let found = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"search","text":"Brewmaster","limit":3}"#.to_owned()),
+    ))?;
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["hits"][0]["entity_id"], "1003", "{found}");
+
+    let explained = parsed(&fortress_explain(
+        Some(session.clone()),
+        Some("1003".to_owned()),
+    ))?;
+    assert_eq!(
+        explained["inclusion_proof"]["verifies"], true,
+        "{explained}"
+    );
+    assert_eq!(explained["entity"]["kind"], "unit");
+
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[6,5,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    parsed(&fortress_commit(Some(session.clone()), digest))?;
+    let doctor = parsed(&fortress_doctor(Some(session)))?;
+    // The dig holds a spatial lease and an open obligation; the doctor now
+    // counts them instead of reporting fixed zeros.
+    assert_eq!(doctor["active_leases_count"], 1, "{doctor}");
+    assert_eq!(doctor["active_obligations_count"], 1, "{doctor}");
+    Ok(())
+}

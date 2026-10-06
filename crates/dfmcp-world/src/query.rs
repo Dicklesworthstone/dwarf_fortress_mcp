@@ -361,6 +361,14 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
     evaluate_truth(snapshot, None, predicate).is_true()
 }
 
+/// Evaluate `predicate` with `candidate` standing in for every unanchored
+/// (`EntityId::NIL`) entity reference, as a query row filter does. Unknown
+/// facts are not matches.
+#[must_use]
+pub fn evaluate_for(snapshot: &WorldSnapshot, candidate: EntityId, predicate: &Predicate) -> bool {
+    evaluate_truth(snapshot, Some(candidate), predicate).is_true()
+}
+
 fn compare(left: &Value, op: CompareOp, right: &Value) -> bool {
     let ordering = match (left, right) {
         (Value::I64(left), Value::I64(right)) => left.partial_cmp(right),

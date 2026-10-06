@@ -3547,12 +3547,33 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
                     get_transitive_dependencies(&snapshot.graph, target_id, EdgeKind::Requires);
                 let deps_str: Vec<String> = deps.iter().map(|id| format!("{}", id.get())).collect();
                 let entity_record = snapshot.graph.entities.get(&target_id);
+                // A checkable claim: the entity's canonical record is included
+                // under this anchor's Merkle root (hand-offs can cite it).
+                let tree = dfmcp_world::MerkleStateTree::from_snapshot(snapshot);
+                let proof = tree.generate_entity_proof(target_id).map(|proof| {
+                    json!({
+                        "entities_root": tree.entities_root.to_hex(),
+                        "overall_root": tree.overall_root.to_hex(),
+                        "leaf_digest": proof.leaf_digest.to_hex(),
+                        "sibling_hashes": proof.sibling_hashes.iter().map(|h| h.to_hex()).collect::<Vec<_>>(),
+                        "sibling_is_left": proof.sibling_is_left,
+                        "verifies": proof.verify_root(&tree.overall_root),
+                    })
+                });
 
                 json!({
                     "ok": true,
                     "session_id": format!("{}", guard.session_id),
                     "target_entity": format!("{}", target_id.get()),
                     "entity_found": entity_record.is_some(),
+                    "entity": entity_record.map(|entity| json!({
+                        "kind": entity.kind.as_str(),
+                        "label": entity.label,
+                        "generation": entity.generation,
+                        "revision": entity.revision,
+                    })),
+                    "inclusion_proof": proof,
+                    "anchor": anchor_json(&snapshot.anchor()),
                     "transitive_dependencies": deps_str,
                     "note": "causal explanation derived from directed fortress multigraph topology",
                 })
@@ -3607,8 +3628,18 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
 
             let active_sessions_count = sessions().len();
             let health_opt = health_res.as_ref().ok();
-            let report =
-                DoctorInspector.generate_report(active_sessions_count, health_opt, None, 0, 0);
+            let report = DoctorInspector.generate_report(
+                active_sessions_count,
+                health_opt,
+                None,
+                guard.leases.manager.active_lease_count(),
+                guard.open_actions.len()
+                    + guard
+                        .carried
+                        .iter()
+                        .filter(|c| c.state == "dispatched")
+                        .count(),
+            );
 
             match health_res {
                 Ok(health) => json!({
@@ -3616,6 +3647,8 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                     "session_id": format!("{}", guard.session_id),
                     "status": if report.is_healthy { "healthy" } else { "degraded" },
                     "active_sessions_count": report.active_sessions_count,
+                    "active_leases_count": report.active_leases_count,
+                    "active_obligations_count": report.active_obligations_count,
                     "adapter": health.identity.name,
                     "compatibility": format!("{:?}", health.identity.compatibility),
                     "fortress_loaded": health.fortress_loaded,

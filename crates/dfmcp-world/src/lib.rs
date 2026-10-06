@@ -58,6 +58,7 @@ pub use model::{
 };
 pub use query::{
     CompareOp, Predicate, QueryCost, QueryOrder, QueryPlanCost, QueryResult, WorldQuery, evaluate,
+    evaluate_for,
 };
 pub use query_page::{execute_bounded_query, execute_query};
 pub use sqlite_ledger::{

@@ -1006,6 +1006,15 @@ enum QuerySpec {
         kind: Option<String>,
         limit: Option<usize>,
         offset: Option<usize>,
+        /// Row filter: `{"field","op","value"}`, `{"all":[..]}`, `{"any":[..]}`
+        /// or `{"not":{..}}`; unknown or absent facts never match.
+        #[serde(rename = "where")]
+        filter: Option<Json>,
+    },
+    /// Ranked lexical search over entity labels, kinds and field values.
+    Search {
+        text: String,
+        limit: Option<usize>,
     },
     Terrain {
         min: [i32; 3],
@@ -1027,6 +1036,7 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
             kind: None,
             limit: None,
             offset: None,
+            filter: None,
         }
     } else {
         serde_json::from_str(raw).map_err(|error| {
@@ -1040,9 +1050,139 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
             kind,
             limit,
             offset,
-        } => entities_page(snapshot, kind.as_deref(), limit, offset),
+            filter,
+        } => {
+            let predicate = filter
+                .as_ref()
+                .map(|raw| filter_predicate(raw, 0))
+                .transpose()?;
+            entities_page(snapshot, kind.as_deref(), limit, offset, predicate.as_ref())
+        }
+        QuerySpec::Search { text, limit } => search(snapshot, &text, limit),
         QuerySpec::Terrain { min, max } => terrain(snapshot, coord(min), coord(max)),
     }
+}
+
+/// Most nested filter levels.
+const MAX_FILTER_DEPTH: usize = 6;
+/// Most children of one `all`/`any` filter.
+const MAX_FILTER_CHILDREN: usize = 16;
+
+fn filter_value(raw: &Json) -> Result<Value> {
+    Ok(match raw {
+        Json::Bool(value) => Value::Bool(*value),
+        Json::String(text) if text.len() <= MAX_NAME_BYTES => Value::Text(text.clone()),
+        Json::Number(number) => match (number.as_u64(), number.as_i64()) {
+            (Some(value), _) => Value::U64(value),
+            (None, Some(value)) => Value::I64(value),
+            _ => return Err(invalid("filter numbers must be integers")),
+        },
+        _ => {
+            return Err(invalid(
+                "filter values are booleans, integers or short strings",
+            ));
+        }
+    })
+}
+
+/// Compile a row filter into a predicate whose entity references stand for
+/// the row (`EntityId::NIL`).
+pub(crate) fn filter_predicate(raw: &Json, depth: usize) -> Result<Predicate> {
+    if depth > MAX_FILTER_DEPTH {
+        return Err(invalid("filter nesting exceeds its bound"));
+    }
+    let children = |items: &Json| -> Result<Vec<Predicate>> {
+        let items = items
+            .as_array()
+            .filter(|items| !items.is_empty() && items.len() <= MAX_FILTER_CHILDREN)
+            .ok_or_else(|| invalid(format!("all/any take 1..={MAX_FILTER_CHILDREN} filters")))?;
+        items
+            .iter()
+            .map(|item| filter_predicate(item, depth + 1))
+            .collect()
+    };
+    let object = raw
+        .as_object()
+        .ok_or_else(|| invalid("a filter is a JSON object"))?;
+    match (object.get("all"), object.get("any"), object.get("not")) {
+        (Some(items), None, None) if object.len() == 1 => {
+            return Ok(Predicate::All(children(items)?));
+        }
+        (None, Some(items), None) if object.len() == 1 => {
+            return Ok(Predicate::Any(children(items)?));
+        }
+        (None, None, Some(inner)) if object.len() == 1 => {
+            return Ok(Predicate::Not(Box::new(filter_predicate(
+                inner,
+                depth + 1,
+            )?)));
+        }
+        _ => {}
+    }
+    let field = object
+        .get("field")
+        .and_then(Json::as_str)
+        .filter(|field| !field.is_empty() && field.len() <= MAX_NAME_BYTES)
+        .ok_or_else(|| invalid("a comparison filter names a field"))?;
+    let op = match object.get("op").and_then(Json::as_str).unwrap_or("eq") {
+        "eq" => CompareOp::Eq,
+        "ne" => CompareOp::Ne,
+        "lt" => CompareOp::Lt,
+        "le" => CompareOp::Le,
+        "gt" => CompareOp::Gt,
+        "ge" => CompareOp::Ge,
+        other => {
+            return Err(invalid(format!(
+                "unknown filter op {other:?}; use eq|ne|lt|le|gt|ge"
+            )));
+        }
+    };
+    let value = filter_value(
+        object
+            .get("value")
+            .ok_or_else(|| invalid("a comparison filter carries a value"))?,
+    )?;
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "field" | "op" | "value"))
+    {
+        return Err(invalid("a comparison filter has only field, op and value"));
+    }
+    Ok(Predicate::FieldCompare {
+        entity_id: EntityId::NIL,
+        field: field.to_owned(),
+        op,
+        value,
+    })
+}
+
+fn search(snapshot: &WorldSnapshot, text: &str, limit: Option<usize>) -> Result<Json> {
+    let limit = limit.unwrap_or(10);
+    if limit == 0
+        || limit > MAX_ENTITY_PAGE
+        || text.trim().is_empty()
+        || text.len() > MAX_NAME_BYTES
+    {
+        return Err(invalid(format!(
+            "search needs non-empty text of at most {MAX_NAME_BYTES} bytes and a limit of 1..={MAX_ENTITY_PAGE}"
+        )));
+    }
+    let mut engine = dfmcp_world::FrankenSearchEngine::new();
+    engine.index_snapshot(snapshot)?;
+    let hits = engine.search(text, limit)?;
+    Ok(json!({
+        "mode": "search",
+        "text": text,
+        "returned": hits.len(),
+        "ranking": "lexical (BM25-style) over labels, kinds and field values; ties by identity",
+        "hits": hits.iter().map(|hit| json!({
+            "entity_id": hit.entity_id.map(|id| id.get().to_string()),
+            "event_id": hit.event_id.map(|id| id.get().to_string()),
+            "title": hit.title,
+            "snippet": hit.snippet,
+            "score_micros": hit.score_micros,
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 fn entities_page(
@@ -1050,6 +1190,7 @@ fn entities_page(
     kind: Option<&str>,
     limit: Option<usize>,
     offset: Option<usize>,
+    filter: Option<&Predicate>,
 ) -> Result<Json> {
     let limit = limit.unwrap_or(25);
     if limit == 0 || limit > MAX_ENTITY_PAGE {
@@ -1063,6 +1204,9 @@ fn entities_page(
         .entities
         .values()
         .filter(|entity| kind.is_none_or(|kind| entity.kind.as_str() == kind))
+        .filter(|entity| {
+            filter.is_none_or(|predicate| dfmcp_world::evaluate_for(snapshot, entity.id, predicate))
+        })
         .collect();
     if offset > matching.len() {
         return Err(DfmcpError::new(
@@ -1091,6 +1235,7 @@ fn entities_page(
     Ok(json!({
         "mode": "entities",
         "kind": kind,
+        "filtered": filter.is_some(),
         "total": matching.len(),
         "offset": offset,
         "returned": rows.len(),

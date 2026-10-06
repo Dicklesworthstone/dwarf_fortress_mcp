@@ -162,26 +162,34 @@ fn insert_ascending<K: Ord, V>(
 }
 
 fn entity_kind(name: String) -> EntityKind {
-    match name.as_str() {
-        "fortress" => EntityKind::Fortress,
-        "unit" => EntityKind::Unit,
-        "item" => EntityKind::Item,
-        "building" => EntityKind::Building,
-        "job" => EntityKind::Job,
-        "work_order" => EntityKind::WorkOrder,
-        "stockpile" => EntityKind::Stockpile,
-        "zone" => EntityKind::Zone,
-        "burrow" => EntityKind::Burrow,
-        "squad" => EntityKind::Squad,
-        "military_order" => EntityKind::MilitaryOrder,
-        "tile_feature" => EntityKind::TileFeature,
-        "plant" => EntityKind::Plant,
-        "creature" => EntityKind::Creature,
-        "historical_figure" => EntityKind::HistoricalFigure,
-        "civilization" => EntityKind::Civilization,
-        "announcement" => EntityKind::Announcement,
-        "syndrome" => EntityKind::Syndrome,
-        _ => EntityKind::Other(name),
+    EntityKind::from_name(&name)
+}
+
+impl EntityKind {
+    /// The kind a canonical name denotes (`Other` for unregistered names).
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "fortress" => EntityKind::Fortress,
+            "unit" => EntityKind::Unit,
+            "item" => EntityKind::Item,
+            "building" => EntityKind::Building,
+            "job" => EntityKind::Job,
+            "work_order" => EntityKind::WorkOrder,
+            "stockpile" => EntityKind::Stockpile,
+            "zone" => EntityKind::Zone,
+            "burrow" => EntityKind::Burrow,
+            "squad" => EntityKind::Squad,
+            "military_order" => EntityKind::MilitaryOrder,
+            "tile_feature" => EntityKind::TileFeature,
+            "plant" => EntityKind::Plant,
+            "creature" => EntityKind::Creature,
+            "historical_figure" => EntityKind::HistoricalFigure,
+            "civilization" => EntityKind::Civilization,
+            "announcement" => EntityKind::Announcement,
+            "syndrome" => EntityKind::Syndrome,
+            _ => EntityKind::Other(name.to_owned()),
+        }
     }
 }
 
