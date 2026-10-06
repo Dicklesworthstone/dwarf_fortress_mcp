@@ -1097,7 +1097,40 @@ fn every_turn_reports_what_changed_in_the_world() -> TestResult {
     assert_eq!(terrain["bounding_box"]["max"], json!([4, 4, 10]));
 
     // Nothing changed since: an observe reports no world changes.
-    let observed = parsed(&fortress_observe(Some(session)))?;
+    let observed = parsed(&fortress_observe(Some(session.clone())))?;
     assert!(kinds(&observed).is_empty(), "{observed}");
+
+    // Any retained version can be read exactly, and diffed against now.
+    let before = committed["agent_turn"]["anchor"]["state_hash"]
+        .as_str()
+        .ok_or("anchor")?
+        .to_owned();
+    let past = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(format!(
+            r#"{{"mode":"terrain","min":[2,3,10],"max":[4,4,10],"at":"{before}"}}"#
+        )),
+    ))?;
+    assert_eq!(past["ok"], true, "{past}");
+    assert_eq!(past["historical"], true);
+    assert_eq!(past["levels"][0]["rows"][0], "###");
+    let since = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(format!(r#"{{"mode":"changes","since":"{before}"}}"#)),
+    ))?;
+    assert_eq!(since["ok"], true, "{since}");
+    assert!(
+        since["changes"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|c| c["kind"] == "terrain_changed"))
+    );
+    let unknown = parsed(&fortress_query(
+        Some(session),
+        Some(format!(
+            r#"{{"mode":"changes","since":"{}"}}"#,
+            "ab".repeat(32)
+        )),
+    ))?;
+    assert_eq!(unknown["ok"], false);
     Ok(())
 }

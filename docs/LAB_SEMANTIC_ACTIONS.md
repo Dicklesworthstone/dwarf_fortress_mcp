@@ -241,3 +241,10 @@ entities per turn, with `entity_changes_omitted` beyond that) and
 as `wall->floor`). If the previous anchor aged out of the history the turn says
 `history_not_retained` (epistemic state `unknown`) instead of guessing.
 
+The same history serves exact historical reads: any `fortress_query` entities
+or terrain request may add `"at": "<state_hash>"` to read that retained version
+exactly (`historical: true`, with the current anchor alongside), and
+`{"mode":"changes","since":"<state_hash>"}` lists the observed changes from
+that version to now. A version outside the retained history is refused with
+`stale_anchor`, never approximated.
+

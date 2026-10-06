@@ -58,6 +58,9 @@ readiness.
   agent's previous anchor (entities created/removed/changed with field
   before/after, terrain per level with bounding box and transitions, clock and
   pause), from a bounded per-session history of canonical world versions.
+- Exact historical reads over retained world versions: `fortress.query` accepts
+  `"at": <state_hash>` and `{"mode":"changes","since":<state_hash>}`. Structured
+  queries are no longer silently capped at 64 bytes.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

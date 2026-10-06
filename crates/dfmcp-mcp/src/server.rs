@@ -984,7 +984,7 @@ const MAX_RISK_NAME_BYTES: usize = 32;
 const MAX_FORTRESS_SELECTOR_BYTES: usize = 20;
 const MAX_SUMMARY_BYTES: usize = 4_096;
 const MAX_LABEL_BYTES: usize = 256;
-const MAX_MODE_BYTES: usize = 64;
+const MAX_MODE_BYTES: usize = crate::lab_world::MAX_QUERY_JSON_BYTES;
 const U128_HEX_ID_BYTES: usize = 32;
 const DIGEST_HEX_BYTES: usize = 64;
 const MAX_LAB_BUDGET: WorkBudget = WorkBudget {
@@ -1784,6 +1784,13 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
                 return dfmcp_error_payload("fortress.query", &error);
             }
+            if mode.trim_start().starts_with('{') {
+                match historical_query(guard, &mode) {
+                    Ok(Some(payload)) => return payload,
+                    Ok(None) => {}
+                    Err(error) => return dfmcp_error_payload("fortress.query", &error),
+                }
+            }
             if mode != "summary" {
                 let snapshot = guard.adapter.snapshot();
                 return match crate::lab_world::query(snapshot, &mode) {
@@ -1824,6 +1831,81 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             }
         },
     )
+}
+
+/// Queries over retained world versions: `{"mode":"changes","since":H}`
+/// reports observed changes from version `H` to now, and any entities or
+/// terrain query with `"at":H` reads version `H` exactly. `Ok(None)` means the
+/// request is an ordinary current-state query.
+fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
+    let mut spec: serde_json::Value = serde_json::from_str(raw).map_err(|error| {
+        DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            format!("query is not JSON: {error}"),
+        )
+    })?;
+    let retained = |hash: &str| {
+        guard
+            .history
+            .iter()
+            .rev()
+            .find(|version| version.state_hash.to_hex() == hash)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::StaleAnchor,
+                    format!(
+                        "world version {hash} is not retained; this session keeps its last {MAX_SESSION_HISTORY} versions"
+                    ),
+                )
+            })
+    };
+    let current = guard.adapter.snapshot();
+    if spec["mode"] == "changes" {
+        let since = spec["since"].as_str().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "changes query needs \"since\": a state_hash from an earlier anchor",
+            )
+        })?;
+        let base = retained(since)?;
+        let changes = crate::world_changes::describe(base, current);
+        return Ok(Some(
+            json!({
+                "ok": true,
+                "session_id": format!("{}", guard.session_id),
+                "mode": "changes",
+                "since_anchor": anchor_json(&base.anchor()),
+                "anchor": anchor_json(&current.anchor()),
+                "changes": changes,
+                "epistemic_state": "observed",
+            })
+            .to_string(),
+        ));
+    }
+    let Some(at) = spec
+        .get("at")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(None);
+    };
+    if let Some(object) = spec.as_object_mut() {
+        object.remove("at");
+    }
+    let version = if current.state_hash.to_hex() == at {
+        current
+    } else {
+        retained(&at)?
+    };
+    let mut payload = crate::lab_world::query(version, &spec.to_string())?;
+    payload["ok"] = json!(true);
+    payload["session_id"] = json!(format!("{}", guard.session_id));
+    payload["anchor"] = anchor_json(&version.anchor());
+    payload["game_tick"] = json!(version.tick.0);
+    payload["historical"] = json!(version.state_hash != current.state_hash);
+    payload["current_anchor"] = anchor_json(&current.anchor());
+    payload["epistemic_state"] = json!("observed");
+    Ok(Some(payload.to_string()))
 }
 
 // ============================================================================
