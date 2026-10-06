@@ -101,20 +101,20 @@ pub(crate) fn scenario_snapshot(
     ))
 }
 
-/// A 48x48 rock level with a carved 10x3 entrance hall, seven dwarves, a
-/// stockpile, a burrow and a squad.
+/// Three 48x48 rock levels (z 9..11) with a carved 10x3 entrance hall on
+/// z=10, seven dwarves, a stockpile, a burrow and a squad.
 fn starter_graph() -> Result<WorldGraph> {
     let mut graph = WorldGraph::default();
-    for x in -1..=1 {
-        for y in -1..=1 {
-            let coord = ChunkCoord {
-                x,
-                y,
-                z: starter::LEVEL_Z,
-            };
-            graph
-                .chunks
-                .insert(coord, uniform_chunk(coord, tile_codes::SOLID_WALL));
+    // Solid rock one level above and below too, so blueprint hazard checks
+    // can see the complete one-tile halo around work on the main level.
+    for z in starter::LEVEL_Z - 1..=starter::LEVEL_Z + 1 {
+        for x in -1..=1 {
+            for y in -1..=1 {
+                let coord = ChunkCoord { x, y, z };
+                graph
+                    .chunks
+                    .insert(coord, uniform_chunk(coord, tile_codes::SOLID_WALL));
+            }
         }
     }
     let mut snapshot = WorldSnapshot::new(
@@ -443,6 +443,98 @@ pub(crate) fn parse_steps(raw: &str) -> Result<Vec<RequestedAction>> {
             })
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Blueprints
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(tag = "template", rename_all = "snake_case", deny_unknown_fields)]
+enum BlueprintSpec {
+    BedroomCluster {
+        origin: [i32; 3],
+        rooms: u32,
+        room_size: [u8; 2],
+    },
+    DiningHall {
+        origin: [i32; 3],
+        width: u8,
+        height: u8,
+    },
+    WorkshopHub {
+        origin: [i32; 3],
+        bays: u32,
+    },
+    StockpileVault {
+        origin: [i32; 3],
+        width: u8,
+        height: u8,
+        category: String,
+    },
+}
+
+/// Parse `{"template": "bedroom_cluster"|"dining_hall"|"workshop_hub"|
+/// "stockpile_vault", "origin": [x,y,z], ...}` into a blueprint template.
+pub(crate) fn parse_blueprint(raw: &str) -> Result<(MapCoord, dfmcp_intent::BlueprintTemplate)> {
+    if raw.len() > MAX_QUERY_JSON_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "blueprint request exceeds its byte bound",
+        ));
+    }
+    let spec: BlueprintSpec = serde_json::from_str(raw).map_err(|error| {
+        invalid(format!(
+            "blueprint must be {{\"template\":\"bedroom_cluster|dining_hall|workshop_hub|stockpile_vault\",\"origin\":[x,y,z],...}}: {error}"
+        ))
+    })?;
+    use dfmcp_intent::BlueprintTemplate as T;
+    Ok(match spec {
+        BlueprintSpec::BedroomCluster {
+            origin,
+            rooms,
+            room_size,
+        } => (
+            coord(origin),
+            T::BedroomCluster {
+                rooms_count: rooms,
+                room_size: (room_size[0], room_size[1]),
+            },
+        ),
+        BlueprintSpec::DiningHall {
+            origin,
+            width,
+            height,
+        } => (coord(origin), T::DiningHall { width, height }),
+        BlueprintSpec::WorkshopHub { origin, bays } => {
+            (coord(origin), T::WorkshopHub { bays_count: bays })
+        }
+        BlueprintSpec::StockpileVault {
+            origin,
+            width,
+            height,
+            category,
+        } => (
+            coord(origin),
+            T::StockpileVault {
+                width,
+                height,
+                category: name(category, "stockpile category")?,
+            },
+        ),
+    })
+}
+
+/// The spatial index the blueprint hazard preflight reads, built from every
+/// canonical chunk of the observed world.
+pub(crate) fn spatial_index(
+    snapshot: &WorldSnapshot,
+) -> Result<dfmcp_world::spatial_index::ChunkSpatialIndex> {
+    let mut index = dfmcp_world::spatial_index::ChunkSpatialIndex::new();
+    for chunk in snapshot.graph.chunks.values() {
+        index.insert_or_update_chunk(chunk)?;
+    }
+    Ok(index)
 }
 
 // ---------------------------------------------------------------------------
@@ -858,7 +950,11 @@ mod tests {
             snapshot.tile_code_at(MapCoord::new(-16, -16, starter::LEVEL_Z)),
             Some(tile_codes::SOLID_WALL)
         );
-        assert_eq!(snapshot.tile_code_at(MapCoord::new(0, 0, 9)), None);
+        assert_eq!(
+            snapshot.tile_code_at(MapCoord::new(0, 0, 9)),
+            Some(tile_codes::SOLID_WALL)
+        );
+        assert_eq!(snapshot.tile_code_at(MapCoord::new(0, 0, 12)), None);
         assert_eq!(snapshot.graph.entities.len(), 10);
         assert!(scenario_snapshot("moon_base", FortressId::new(3), true).is_err());
         Ok(())

@@ -86,6 +86,7 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         Some("brewery".to_owned()),
         None,
         Some(WORKSHOP_PLAN.to_owned()),
+        None,
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
     assert_eq!(planned["max_risk"], "guarded");
@@ -195,6 +196,7 @@ fn paused_fortress_makes_no_progress_and_says_why() -> TestResult {
             r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[1,3,10],"mode":"mine"}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
@@ -231,6 +233,7 @@ fn effect_plans_need_their_own_negotiated_authority() -> TestResult {
             r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[1,3,10],"mode":"mine"}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     assert_eq!(planned["ok"], true, "{planned}");
     // The commit affordance is disabled because the plan needs `designate`.
@@ -266,6 +269,7 @@ fn already_satisfied_and_malformed_requests_are_refused_before_sealing() -> Test
             r#"[{"action":{"kind":"designate_dig","min":[0,0,10],"max":[2,0,10],"mode":"mine"}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     assert_eq!(noop["ok"], false, "{noop}");
     let malformed = parsed(&fortress_plan(
@@ -273,6 +277,7 @@ fn already_satisfied_and_malformed_requests_are_refused_before_sealing() -> Test
         None,
         None,
         Some(r#"[{"action":{"kind":"designate_dig","min":[0,0,10]}}]"#.to_owned()),
+        None,
     ))?;
     assert_eq!(malformed["ok"], false, "{malformed}");
     Ok(())
@@ -286,6 +291,7 @@ fn plan_scope_cancellation_drains_dependents_and_certifies_quiescence() -> TestR
         None,
         None,
         Some(WORKSHOP_PLAN.to_owned()),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
@@ -363,6 +369,7 @@ fn a_later_plan_does_not_strand_an_earlier_plans_deferred_steps() -> TestResult 
                 {"action":{"kind":"build","building":"furniture:Bed","location":[1,3,10],"min":[1,3,10],"max":[1,3,10]},"depends_on":[0]}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     let building = first["steps"][1]["creates_entity_id"]
         .as_str()
@@ -382,6 +389,7 @@ fn a_later_plan_does_not_strand_an_earlier_plans_deferred_steps() -> TestResult 
             r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     let digest = second["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
@@ -422,6 +430,7 @@ fn handoff_packet_lets_a_fresh_agent_resume_open_work_without_the_transcript() -
         None,
         None,
         Some(WORKSHOP_PLAN.to_owned()),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;
@@ -431,6 +440,7 @@ fn handoff_packet_lets_a_fresh_agent_resume_open_work_without_the_transcript() -
         Some(session.clone()),
         None,
         Some(true),
+        None,
         None,
     ))?;
     assert_eq!(pending["ok"], true, "{pending}");
@@ -481,6 +491,7 @@ fn restore_retires_open_work_so_later_waits_and_commits_still_function() -> Test
         None,
         None,
         Some(WORKSHOP_PLAN.to_owned()),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     assert_eq!(
@@ -508,6 +519,7 @@ fn restore_retires_open_work_so_later_waits_and_commits_still_function() -> Test
             r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[0,3,10],"mode":"mine"}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     assert_eq!(
@@ -549,6 +561,7 @@ fn plan_and_commit(
         None,
         None,
         Some(actions.to_owned()),
+        None,
     ))?;
     if planned["ok"] != true {
         return Ok(planned);
@@ -656,6 +669,7 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
             r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#
                 .to_owned(),
         ),
+        None,
     ))?;
     let stale_digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     // B acts first, moving the shared anchor.
@@ -701,6 +715,7 @@ fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
         None,
         None,
         Some(WORKSHOP_PLAN.to_owned()),
+        None,
     ))?;
     let forecast = &planned["forecast"];
     assert_eq!(forecast["epistemic_state"], "predicted");
@@ -744,6 +759,7 @@ fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
         None,
         None,
         Some(dig([0, 3, 10], [1, 3, 10])),
+        None,
     ))?;
     assert_eq!(blocked["forecast"]["blocked_by_pause"], true, "{blocked}");
     assert_eq!(blocked["forecast"]["predicted_complete"], false);
@@ -753,7 +769,8 @@ fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
         Some(session),
         None,
         None,
-        Some(dig([0, 3, 9], [0, 3, 10])),
+        Some(dig([0, 3, 11], [0, 3, 12])),
+        None,
     ))?;
     assert_eq!(doomed["ok"], true, "{doomed}");
     assert_eq!(doomed["forecast"]["available"], false);
@@ -770,6 +787,7 @@ fn an_observation_that_contradicts_the_forecast_emits_a_surprise_record() -> Tes
         None,
         None,
         Some(dig([0, 3, 10], [1, 3, 10])),
+        None,
     ))?;
     assert_eq!(planned["forecast"]["predicted_complete"], false);
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
@@ -782,6 +800,7 @@ fn an_observation_that_contradicts_the_forecast_emits_a_surprise_record() -> Tes
         Some(session.clone()),
         None,
         Some(false),
+        None,
         None,
     ))?;
     let digest = resume["plan_digest"].as_str().ok_or("digest")?.to_owned();
@@ -819,6 +838,7 @@ fn a_stale_commit_is_recorded_as_a_surprise() -> TestResult {
         None,
         None,
         Some(dig([0, 3, 10], [0, 3, 10])),
+        None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
     assert_eq!(
@@ -867,6 +887,7 @@ fn commit_pause(
         Some(session.to_owned()),
         None,
         Some(paused),
+        None,
         None,
     ))?;
     if planned["ok"] != true {
@@ -917,5 +938,73 @@ fn any_member_can_pause_a_shared_fortress_but_unpausing_needs_everyone() -> Test
     let again = commit_pause(&b, false)?;
     assert_eq!(again["ok"], false, "{again}");
     assert_eq!(again["clock_consent"]["votes"], 1);
+    Ok(())
+}
+
+#[test]
+fn a_blueprint_objective_is_decomposed_dug_and_furnished() -> TestResult {
+    let session = open("72101", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        None,
+        Some(
+            r#"{"template":"bedroom_cluster","origin":[3,5,10],"rooms":4,"room_size":[3,3]}"#
+                .to_owned(),
+        ),
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let steps = planned["steps"].as_array().ok_or("steps")?;
+    let beds: Vec<&Value> = steps
+        .iter()
+        .filter(|step| step["kind"] == "build")
+        .collect();
+    assert_eq!(beds.len(), 4, "{planned}");
+    // Every bed waits for its room's excavation; the planner, not the agent,
+    // derived those dependencies and their obligations.
+    for bed in &beds {
+        assert_eq!(bed["depends_on"].as_array().map(Vec::len), Some(1), "{bed}");
+        assert!(bed["obligation"]["deadline_tick"].is_u64(), "{bed}");
+    }
+    assert_eq!(planned["forecast"]["available"], true, "{planned}");
+
+    // Asking for both an objective and explicit actions is ambiguous.
+    let both = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(dig([0, 3, 10], [0, 3, 10])),
+        Some(r#"{"template":"dining_hall","origin":[3,5,10],"width":3,"height":3}"#.to_owned()),
+    ))?;
+    assert_eq!(both["ok"], false, "{both}");
+
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let mut settled = false;
+    for _ in 0..19 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        assert_eq!(waited["ok"], true, "{waited}");
+        if waited["open_actions_remaining"] == 0 {
+            settled = true;
+            break;
+        }
+    }
+    assert!(settled, "blueprint work never settled");
+    let buildings = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
+    ))?;
+    assert_eq!(buildings["total"], 4, "{buildings}");
+    for row in buildings["rows"].as_array().ok_or("rows")? {
+        assert_eq!(row["fields"]["construction_stage"], "complete", "{row}");
+    }
+    // The first bedroom is open floor now.
+    let room = parsed(&fortress_query(
+        Some(session),
+        Some(r#"{"mode":"terrain","min":[3,5,10],"max":[5,7,10]}"#.to_owned()),
+    ))?;
+    assert_eq!(room["levels"][0]["rows"], json!(["...", "...", "..."]));
     Ok(())
 }

@@ -25,6 +25,11 @@ readiness.
   world and clock, exclusive spatial leases at commit, intent replay of plans
   made stale by another member, unanimous unpause with an any-member emergency
   pause, and no unilateral restore.
+- Objective decomposition: `fortress.plan(blueprint=...)` compiles a blueprint
+  template into hazard-checked excavation steps and dependent furnishing steps
+  with sealed obligations (`BlueprintPlanner::compile_furnished_blueprint_intent`).
+  The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
+  complete. Laboratory only.
 
 ### Fixed
 

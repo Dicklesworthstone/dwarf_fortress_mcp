@@ -1409,16 +1409,23 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 }
 
 #[tool(
-    description = "Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step."
+    description = "Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step. Instead of actions, blueprint is an objective the planner decomposes (dig every room, then furnish it, with dependencies): {\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]} (a bed per room), {\"template\":\"dining_hall\",\"origin\",\"width\",\"height\"} (table and chair), {\"template\":\"workshop_hub\",\"origin\",\"bays\"}, {\"template\":\"stockpile_vault\",\"origin\",\"width\",\"height\",\"category\"}."
 )]
 pub fn fortress_plan(
     session_id: Option<String>,
     summary: Option<String>,
     paused_target: Option<bool>,
     actions: Option<String>,
+    blueprint: Option<String>,
 ) -> String {
     project_response(
-        crate::server::plan_with_actions(session_id.clone(), summary, paused_target, actions),
+        crate::server::plan_request(
+            session_id.clone(),
+            summary,
+            paused_target,
+            actions,
+            blueprint,
+        ),
         "fortress.plan",
         AgentPhase::Propose,
         ObservationProfile::Tactical,
@@ -1609,6 +1616,7 @@ mod tests {
             Some(session_id),
             Some("resume the lab".to_owned()),
             Some(false),
+            None,
             None,
         ))?;
         assert_eq!(planned["ok"], true);

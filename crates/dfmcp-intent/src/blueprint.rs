@@ -4,8 +4,9 @@
 //!
 //! Geometry is bounded and connected where the template requires access. The
 //! legacy index supplies only a limited magma/span preflight, not a native safety
-//! proof. Terrain-completion predicates remain `False`: source geometry and a
-//! transport acknowledgement cannot establish that excavation has completed.
+//! proof. Each excavation seals a region-terrain postcondition and obligation:
+//! completion is proven only by later observation of the target terrain, never by
+//! source geometry or a transport acknowledgement.
 
 use dfmcp_core::{
     DfmcpError, ErrorCode, GameTick, IntentId, MapCoord, MapCuboid, Result, RiskTier, StateAnchor,
@@ -214,6 +215,75 @@ impl BlueprintPlanner {
 
 const MAX_HAZARD_TILES: u64 = 131_072;
 
+impl BlueprintPlanner {
+    /// Compile a blueprint and furnish its rooms: a bed in every bedroom, and a
+    /// table with a chair in a dining hall, each placed at the room's centre
+    /// and depending on that room's excavation. Furniture steps carry the
+    /// reference construction semantics (and default obligations) once sealed.
+    pub fn compile_furnished_blueprint_intent(
+        &self,
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        origin: MapCoord,
+        template: BlueprintTemplate,
+        spatial_index: &ChunkSpatialIndex,
+    ) -> Result<Intent> {
+        let furniture: &[&str] = match &template {
+            BlueprintTemplate::BedroomCluster { .. } => &["Bed"],
+            BlueprintTemplate::DiningHall { .. } => &["Table", "Chair"],
+            _ => &[],
+        };
+        let layout = self.layout(origin, template.clone())?;
+        let mut intent =
+            self.compile_blueprint_intent(intent_id, anchor, origin, template, spatial_index)?;
+        let mut added = Vec::new();
+        for (index, part) in layout.excavations().iter().enumerate() {
+            if part.role != ExcavationRole::Room {
+                continue;
+            }
+            let dependency = u32::try_from(index)
+                .map_err(|_| invalid("blueprint step index exceeds its representation"))?;
+            let centre = MapCoord {
+                x: part.area.min.x + (part.area.max.x - part.area.min.x) / 2,
+                y: part.area.min.y + (part.area.max.y - part.area.min.y) / 2,
+                z: part.area.min.z,
+            };
+            for (offset, name) in furniture.iter().enumerate() {
+                let shift = i32::try_from(offset).map_err(|_| invalid("furniture offset"))?;
+                let location = MapCoord {
+                    x: if centre.x + shift <= part.area.max.x {
+                        centre.x + shift
+                    } else {
+                        centre.x - shift
+                    },
+                    ..centre
+                };
+                added.push(RequestedAction {
+                    action: Action::Build {
+                        kind: crate::action::BuildingKind::Furniture((*name).to_owned()),
+                        location,
+                        footprint: MapCuboid::new(location, location)?,
+                        material: crate::action::MaterialSelector::default(),
+                    },
+                    preconditions: Vec::new(),
+                    postconditions: Vec::new(),
+                    compensation: None,
+                    obligation: None,
+                    depends_on: vec![dependency],
+                });
+            }
+        }
+        if intent.requested_actions.len() + added.len() > layout::MAX_BLUEPRINT_ACTIONS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "furnished blueprint exceeds 64 steps",
+            ));
+        }
+        intent.requested_actions.extend(added);
+        Ok(intent)
+    }
+}
+
 fn hazard_halo(area: &MapCuboid) -> Result<MapCuboid> {
     if area.min.x > area.max.x || area.min.y > area.max.y || area.min.z > area.max.z {
         return Err(invalid("hazard scan requires an ordered cuboid"));
@@ -345,6 +415,36 @@ mod tests {
                 requested.obligation.as_ref().map(|o| &o.terminal),
                 Some(&requested.postconditions[0])
             );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn furnished_bedrooms_get_a_bed_each_after_their_room_is_dug() -> Result<()> {
+        let intent = BlueprintPlanner.compile_furnished_blueprint_intent(
+            IntentId::new(1),
+            anchor(),
+            MapCoord { x: 0, y: 0, z: 100 },
+            BlueprintTemplate::BedroomCluster {
+                rooms_count: 4,
+                room_size: (3, 3),
+            },
+            &covered_spatial_index()?,
+        )?;
+        let beds: Vec<&RequestedAction> = intent
+            .requested_actions
+            .iter()
+            .filter(|requested| matches!(requested.action, Action::Build { .. }))
+            .collect();
+        assert_eq!(beds.len(), 4);
+        for bed in beds {
+            let room = &intent.requested_actions[bed.depends_on[0] as usize];
+            let (Action::Build { location, .. }, Action::DesignateDig { area, .. }) =
+                (&bed.action, &room.action)
+            else {
+                return Err(invalid("unexpected blueprint step shapes"));
+            };
+            assert!(area.contains(*location));
         }
         Ok(())
     }

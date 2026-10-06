@@ -259,12 +259,34 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// An objective: a blueprint template decomposed by the blueprint
+    /// planner into dig, furnishing and dependency steps.
+    Blueprint {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl PlanSource {
     fn intent(&self, id: IntentId, snapshot: &WorldSnapshot) -> Result<Intent> {
         match self {
             Self::Actions { summary, raw } => semantic_intent(id, snapshot, summary.clone(), raw),
+            Self::Blueprint { summary, raw } => {
+                let (origin, template) = crate::lab_world::parse_blueprint(raw)?;
+                let index = crate::lab_world::spatial_index(snapshot)?;
+                let mut intent = dfmcp_intent::BlueprintPlanner
+                    .compile_furnished_blueprint_intent(
+                        id,
+                        snapshot.anchor(),
+                        origin,
+                        template,
+                        &index,
+                    )?;
+                if !summary.is_empty() {
+                    intent.summary = summary.clone();
+                }
+                Ok(intent)
+            }
             Self::Pause {
                 summary,
                 paused_target,
@@ -1141,7 +1163,28 @@ pub(crate) fn plan_with_actions(
     paused_target: Option<bool>,
     actions: Option<String>,
 ) -> String {
-    let default_summary = if actions.is_some() {
+    plan_request(session_id, summary, paused_target, actions, None)
+}
+
+/// `fortress.plan` over every request form: pause/resume, explicit semantic
+/// actions, or a blueprint objective the planner decomposes into steps.
+pub(crate) fn plan_request(
+    session_id: Option<String>,
+    summary: Option<String>,
+    paused_target: Option<bool>,
+    actions: Option<String>,
+    blueprint: Option<String>,
+) -> String {
+    if actions.is_some() && blueprint.is_some() {
+        return coded_error_payload(
+            "fortress.plan",
+            ErrorCode::InvalidRequest,
+            "a plan request names either actions or a blueprint, not both",
+        );
+    }
+    let default_summary = if blueprint.is_some() {
+        ""
+    } else if actions.is_some() {
         "execute semantic actions"
     } else {
         "unpause the simulation"
@@ -1171,9 +1214,10 @@ pub(crate) fn plan_with_actions(
             }
             let snapshot = guard.adapter.snapshot();
 
-            let source = match actions {
-                Some(raw) => PlanSource::Actions { summary, raw },
-                None => PlanSource::Pause {
+            let source = match (actions, blueprint) {
+                (_, Some(raw)) => PlanSource::Blueprint { summary, raw },
+                (Some(raw), None) => PlanSource::Actions { summary, raw },
+                (None, None) => PlanSource::Pause {
                     summary,
                     paused_target: paused_target.is_some_and(|value| value),
                 },

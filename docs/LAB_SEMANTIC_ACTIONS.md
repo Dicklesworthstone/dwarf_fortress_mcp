@@ -52,6 +52,19 @@ fortress_commit(plan_digest=...)
 fortress_wait(max_game_ticks=100)   # repeat until open_actions_remaining is 0
 ```
 
+Instead of explicit actions an agent can state an objective:
+
+```text
+fortress_plan(blueprint='{"template":"bedroom_cluster","origin":[3,5,10],"rooms":4,"room_size":[3,3]}')
+```
+
+The blueprint planner lays out rooms, doorways, corridors and an entrance,
+refuses the objective when its one-tile hazard halo is not completely observed
+or touches magma (or a span is unsupported), and adds furnishing steps — a bed
+per bedroom, a table and chair in a dining hall — each depending on its room's
+excavation. The result is an ordinary sealed plan with forecast; `actions` and
+`blueprint` are mutually exclusive.
+
 `scripts/lab_stdio_walkthrough.py` runs exactly this sequence against the real
 `dwarf-fortress-mcp serve` binary over stdio.
 
@@ -95,7 +108,7 @@ Commit authority is the plan's own capability set: a session that did not
 negotiate `designate` cannot commit an excavation, and an idempotent replay
 re-checks that authority. Effect capabilities are never granted by default.
 
-The `starter_fortress` scenario is a 48x48 rock level at z=10 with a carved
+The `starter_fortress` scenario is 48x48 rock at z=9..11 with, at z=10, a carved
 10x3 hall at (0..9, 0..2), seven dwarves (entity IDs 1001–1007), a stockpile
 (2001), a burrow (3001) and a squad (4001).
 

@@ -63,7 +63,11 @@ Later the same day the laboratory gained multi-step Agent Turn tracking, plan-sc
 cancellation with drain progress, a `df://session/{id}/handoff` resume packet (all
 session views now resolve on the real `serve` binary), and **shared fortresses**:
 several agent sessions on one world/clock with exclusive spatial leases at commit
-and intent replay of plans made stale by another member.
+and intent replay of plans made stale by another member. `fortress.plan(blueprint=...)`
+now accepts an objective (bedroom cluster, dining hall, workshop hub, stockpile vault)
+that the blueprint planner decomposes, after a bounded hazard preflight, into dig
+steps plus furnishing steps (a bed per bedroom; table and chair in a dining hall)
+that depend on their room's excavation.
 
 The workspace runs **3,085 tests, 0 failed, 0 ignored**; the previously ignored
 end-to-end pipeline test now dispatches a real excavation and proves it by
