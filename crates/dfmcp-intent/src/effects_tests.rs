@@ -379,3 +379,99 @@ fn cancellation_stops_temporal_work_without_undoing_progress() -> Result<()> {
     assert!(!cancel_effect(&mut s, &labor, "l")?);
     Ok(())
 }
+
+fn with_ledger(drink: u64, food: u64) -> WorldSnapshot {
+    let mut snapshot = world();
+    let mut ledger = entity(
+        EntityId::new(91),
+        EntityKind::Other(STOCK_LEDGER_KIND.to_owned()),
+        "stocks",
+    );
+    for (field, value) in [
+        (STOCK_DRINK_FIELD, drink),
+        (STOCK_FOOD_FIELD, food),
+        (METABOLISM_TICKS_FIELD, 0),
+    ] {
+        ledger
+            .fields
+            .insert(field.to_owned(), known(Value::U64(value), GameTick(1)));
+    }
+    snapshot.graph.entities.insert(ledger.id, ledger);
+    snapshot.refresh_hash();
+    snapshot
+}
+
+fn ledger_u64(snapshot: &WorldSnapshot, field: &str) -> u64 {
+    field_u64(&snapshot.graph.entities[&EntityId::new(91)], field)
+}
+
+fn need(snapshot: &WorldSnapshot, unit: EntityId, field: &str) -> Option<String> {
+    field_text(&snapshot.graph.entities[&unit], field).map(str::to_owned)
+}
+
+#[test]
+fn dwarves_drink_and_eat_on_schedule_and_shortages_are_explicit() -> Result<()> {
+    let mut snapshot = with_ledger(3, 10);
+    // Less than one interval: nothing is consumed, only time is accounted.
+    advance(&mut snapshot, DRINK_INTERVAL_TICKS - 1)?;
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 3);
+    assert_eq!(need(&snapshot, UNIT_A, NEED_DRINK_FIELD), None);
+    // One drinking round for two dwarves.
+    advance(&mut snapshot, 1)?;
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 1);
+    assert_eq!(
+        need(&snapshot, UNIT_B, NEED_DRINK_FIELD).as_deref(),
+        Some("satisfied")
+    );
+    // The next round has one unit for two dwarves: the later one goes without.
+    advance(&mut snapshot, DRINK_INTERVAL_TICKS)?;
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 0);
+    assert_eq!(
+        need(&snapshot, UNIT_A, NEED_DRINK_FIELD).as_deref(),
+        Some("satisfied")
+    );
+    assert_eq!(
+        need(&snapshot, UNIT_B, NEED_DRINK_FIELD).as_deref(),
+        Some("thirsty")
+    );
+    // Food every second drinking round: 10 - 2 = 8.
+    assert_eq!(ledger_u64(&snapshot, STOCK_FOOD_FIELD), 8);
+    Ok(())
+}
+
+#[test]
+fn completed_brewing_restocks_and_one_long_wait_equals_many_short_ones() -> Result<()> {
+    let mut a = with_ledger(0, 100);
+    let order = Action::CreateWorkOrder {
+        name: "brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 4,
+        conditions: Vec::new(),
+    };
+    apply_effect(&mut a, &order, "brew-key")?;
+    a.refresh_hash();
+    let mut b = a.clone();
+    advance(&mut a, 3_000)?;
+    for _ in 0..30 {
+        advance(&mut b, 100)?;
+    }
+    // Four units of five drinks, minus two rounds for two dwarves.
+    assert_eq!(ledger_u64(&a, STOCK_DRINK_FIELD), 20 - 4);
+    // Fact stamps record when each value was written; the values agree.
+    let values = |s: &WorldSnapshot| -> Vec<(EntityId, String, Value)> {
+        s.graph
+            .entities
+            .values()
+            .flat_map(|e| {
+                e.fields
+                    .iter()
+                    .filter(|(name, _)| {
+                        name.as_str() != "work_ticks" && name.as_str() != METABOLISM_TICKS_FIELD
+                    })
+                    .map(|(name, fact)| (e.id, name.clone(), fact.value.clone()))
+            })
+            .collect()
+    };
+    assert_eq!(values(&a), values(&b));
+    Ok(())
+}

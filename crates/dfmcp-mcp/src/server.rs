@@ -1734,6 +1734,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["session_id"] = json!(format!("{}", guard.session_id));
                         payload["evidence_count"] = json!(frame.evidence.len());
                         payload["world"] = crate::lab_world::briefing(&snapshot);
+                        payload["world_alerts"] = json!(crate::lab_world::world_alerts(&snapshot));
                         payload.to_string()
                     }
                     ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => {
@@ -2850,6 +2851,8 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 payload["game_tick"] = json!(snapshot.tick.0);
                 payload["polled_actions"] = json!(polled_actions);
                 payload["open_actions_remaining"] = json!(guard.open_actions.len());
+                payload["world_alerts"] =
+                    json!(crate::lab_world::world_alerts(guard.adapter.snapshot()));
                 if !guard.carried.is_empty() {
                     // Proven against this observation by the durable hook that
                     // runs after this call; report the prior evaluation plus

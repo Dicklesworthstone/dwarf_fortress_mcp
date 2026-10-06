@@ -61,6 +61,10 @@ readiness.
 - Exact historical reads over retained world versions: `fortress.query` accepts
   `"at": <state_hash>` and `{"mode":"changes","since":<state_hash>}`. Structured
   queries are no longer silently capped at 64 bytes.
+- Laboratory fortress economy: a stock ledger, drink/food consumption over
+  game time, explicit `thirsty`/`hungry` needs on shortage, work orders that
+  produce stock, and `world_alerts` raised as `fortress_needs` attention with
+  an exact remedy plan.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

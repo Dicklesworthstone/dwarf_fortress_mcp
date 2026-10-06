@@ -964,6 +964,21 @@ fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientat
             })
         })
         .collect();
+    if let Some(alerts) = payload.get("world_alerts").and_then(Value::as_array) {
+        items.extend(alerts.iter().map(|alert| {
+            json!({
+                "attention_id": format!("world-{}", alert["alert"].as_str().unwrap_or("alert")),
+                "category": "fortress_needs",
+                "severity": value_or_null(alert.get("severity")),
+                "urgency": if alert["severity"] == "critical" { "now" } else { "before_the_next_plan" },
+                "confidence": {"epistemic_state": "observed", "value": 1.0},
+                "finding": value_or_null(alert.get("finding")),
+                "remedy": value_or_null(alert.get("remedy")),
+                "likely_consequence_if_ignored": "dwarves go without and the fortress declines",
+                "evidence": [],
+            })
+        }));
+    }
     items.extend(base_attention(operation, ok, payload, state));
     items
 }

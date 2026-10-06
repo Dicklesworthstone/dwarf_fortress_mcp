@@ -1134,3 +1134,102 @@ fn every_turn_reports_what_changed_in_the_world() -> TestResult {
     assert_eq!(unknown["ok"], false);
     Ok(())
 }
+
+#[test]
+fn a_fortress_runs_dry_and_the_agent_brews_its_way_back() -> TestResult {
+    let session = open("72088", false, &ALL_EFFECTS)?;
+    let alert_of = |turn: &Value, id: &str| -> Option<Value> {
+        turn["agent_turn"]["attention"]
+            .as_array()?
+            .iter()
+            .find(|a| a["attention_id"] == id)
+            .cloned()
+    };
+    let stock = |session: &str| -> std::result::Result<u64, Box<dyn std::error::Error>> {
+        let rows = parsed(&fortress_query(
+            Some(session.to_owned()),
+            Some(r#"{"mode":"entities","kind":"stock_ledger"}"#.to_owned()),
+        ))?;
+        rows["rows"][0]["fields"]["stock.drink"]
+            .as_u64()
+            .ok_or_else(|| format!("no drink stock in {rows}").into())
+    };
+    assert_eq!(stock(&session)?, 40);
+    let opening = parsed(&fortress_observe(Some(session.clone())))?;
+    assert!(
+        alert_of(&opening, "world-drink_supply").is_none(),
+        "{opening}"
+    );
+
+    // Seven dwarves drink seven units every 1,200 ticks: 40 units last five
+    // rounds, and the warning comes while there is still time to act.
+    let mut warned = None;
+    for _ in 0..60 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+        if let Some(alert) = alert_of(&waited, "world-drink_supply") {
+            warned = Some(alert);
+            break;
+        }
+    }
+    let warned = warned.ok_or("never warned about drink")?;
+    assert_eq!(warned["severity"], "high", "{warned}");
+    assert_eq!(warned["category"], "fortress_needs");
+    assert_eq!(warned["remedy"]["tool"], "fortress.plan");
+
+    // Ignore it until the barrels are empty and dwarves go thirsty.
+    let mut thirsty = None;
+    for _ in 0..60 {
+        let waited = parsed(&fortress_wait(Some(session.clone()), Some(200)))?;
+        if let Some(alert) = alert_of(&waited, "world-drink_supply")
+            && alert["severity"] == "critical"
+        {
+            thirsty = Some(waited);
+            break;
+        }
+    }
+    let thirsty = thirsty.ok_or("never ran dry")?;
+    assert_eq!(stock(&session)?, 0, "{thirsty}");
+    let units = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"unit"}"#.to_owned()),
+    ))?;
+    assert!(
+        units["rows"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|u| u["fields"]["need.drink"] == "thirsty")),
+        "{units}"
+    );
+
+    // Follow the remedy: a brewing work order restocks and quenches.
+    let remedy = alert_of(&thirsty, "world-drink_supply")
+        .ok_or("alert vanished")?["remedy"]["arguments"]["actions"]
+        .as_str()
+        .ok_or("remedy actions")?
+        .to_owned();
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(remedy),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    for _ in 0..20 {
+        parsed(&fortress_wait(Some(session.clone()), Some(100)))?;
+    }
+    assert!(stock(&session)? > 0);
+    let units = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(r#"{"mode":"entities","kind":"unit"}"#.to_owned()),
+    ))?;
+    assert!(
+        units["rows"].as_array().is_some_and(|rows| rows
+            .iter()
+            .all(|u| u["fields"]["need.drink"] == "satisfied")),
+        "{units}"
+    );
+    Ok(())
+}

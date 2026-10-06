@@ -62,6 +62,31 @@ pub const FORTRESS_SETTINGS_KIND: &str = "fortress_settings";
 
 /// Laboratory calibration: game ticks of labor to excavate one tile.
 pub const DIG_TICKS_PER_TILE: u64 = 10;
+/// Entity kind of a fortress's consumable stock ledger (laboratory economy).
+pub const STOCK_LEDGER_KIND: &str = "stock_ledger";
+/// Drink units held by the stock ledger.
+pub const STOCK_DRINK_FIELD: &str = "stock.drink";
+/// Food units held by the stock ledger.
+pub const STOCK_FOOD_FIELD: &str = "stock.food";
+/// Game ticks of metabolism the ledger has accounted for.
+pub const METABOLISM_TICKS_FIELD: &str = "metabolism_ticks";
+/// Each living dwarf drinks one unit per this many ticks (calibration).
+pub const DRINK_INTERVAL_TICKS: u64 = 1_200;
+/// Each living dwarf eats one unit per this many ticks (calibration).
+pub const FOOD_INTERVAL_TICKS: u64 = 2_400;
+/// Unit need fields: `satisfied`, or `thirsty` / `hungry` after a shortage.
+pub const NEED_DRINK_FIELD: &str = "need.drink";
+pub const NEED_FOOD_FIELD: &str = "need.food";
+
+/// The stock a completed work-order unit adds, if its job produces any.
+#[must_use]
+pub fn work_order_product(job_token: &str) -> Option<(&'static str, u64)> {
+    match job_token {
+        "BREW_DRINK" => Some((STOCK_DRINK_FIELD, 5)),
+        "PREPARE_MEAL" | "COOK_MEAL" => Some((STOCK_FOOD_FIELD, 5)),
+        _ => None,
+    }
+}
 /// Laboratory calibration: game ticks to construct one building.
 pub const BUILD_TICKS: u64 = 500;
 /// Laboratory calibration: game ticks to produce one work-order unit.
@@ -763,6 +788,90 @@ pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<boo
             _ => advance_designation(snapshot, id, elapsed)?,
         };
     }
+    changed |= advance_metabolism(snapshot, elapsed)?;
+    Ok(changed)
+}
+
+/// The fortress's stock ledger, if the world has one (lowest id wins).
+#[must_use]
+pub fn stock_ledger(snapshot: &WorldSnapshot) -> Option<EntityId> {
+    snapshot
+        .graph
+        .entities
+        .values()
+        .find(|entity| matches!(&entity.kind, EntityKind::Other(kind) if kind == STOCK_LEDGER_KIND))
+        .map(|entity| entity.id)
+}
+
+/// Living dwarves consume drink and food as game time passes. Production
+/// (above) is applied first, so a meal finished in the same interval feeds.
+/// When a stock runs short the dwarves served last (highest id) go without
+/// and their need turns `thirsty` / `hungry`; a later full meal satisfies
+/// everyone again. A world without a stock ledger has no metabolism.
+fn advance_metabolism(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
+    let Some(ledger) = stock_ledger(snapshot) else {
+        return Ok(false);
+    };
+    let before = field_u64(entity(snapshot, ledger)?, METABOLISM_TICKS_FIELD);
+    let after = before.saturating_add(elapsed);
+    let living: Vec<EntityId> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| {
+            entity.kind == EntityKind::Unit
+                && field_value(entity, "alive") != Some(&Value::Bool(false))
+        })
+        .map(|entity| entity.id)
+        .collect();
+    let mut changed = write_fields(
+        snapshot,
+        ledger,
+        vec![(METABOLISM_TICKS_FIELD.to_owned(), Value::U64(after))],
+    )?;
+    for (stock_field, interval, need_field, deprived) in [
+        (
+            STOCK_DRINK_FIELD,
+            DRINK_INTERVAL_TICKS,
+            NEED_DRINK_FIELD,
+            "thirsty",
+        ),
+        (
+            STOCK_FOOD_FIELD,
+            FOOD_INTERVAL_TICKS,
+            NEED_FOOD_FIELD,
+            "hungry",
+        ),
+    ] {
+        let meals = after / interval - before / interval;
+        if meals == 0 || living.is_empty() {
+            continue;
+        }
+        let mut held = field_u64(entity(snapshot, ledger)?, stock_field);
+        let mut served = living.len();
+        for _ in 0..meals {
+            let wanted = living.len() as u64;
+            served = usize::try_from(held.min(wanted)).unwrap_or(living.len());
+            held -= held.min(wanted);
+        }
+        changed |= write_fields(
+            snapshot,
+            ledger,
+            vec![(stock_field.to_owned(), Value::U64(held))],
+        )?;
+        for (index, unit) in living.iter().enumerate() {
+            let need = if index < served {
+                "satisfied"
+            } else {
+                deprived
+            };
+            changed |= write_fields(
+                snapshot,
+                *unit,
+                vec![(need_field.to_owned(), Value::Text(need.to_owned()))],
+            )?;
+        }
+    }
     Ok(changed)
 }
 
@@ -780,7 +889,22 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
     let work = field_u64(order, "work_ticks").saturating_add(elapsed);
     let remaining = field_u64(order, AMOUNT_REMAINING_FIELD);
     let produced = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
+    let product = field_text(order, "job_token").and_then(work_order_product);
     let remaining = remaining - produced;
+    if produced > 0
+        && let Some((stock_field, per_unit)) = product
+        && let Some(ledger) = stock_ledger(snapshot)
+    {
+        let held = field_u64(entity(snapshot, ledger)?, stock_field);
+        write_fields(
+            snapshot,
+            ledger,
+            vec![(
+                stock_field.to_owned(),
+                Value::U64(held.saturating_add(produced.saturating_mul(per_unit))),
+            )],
+        )?;
+    }
     let mut fields = vec![
         (AMOUNT_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
         (

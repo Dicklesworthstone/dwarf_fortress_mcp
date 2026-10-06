@@ -248,3 +248,21 @@ exactly (`historical: true`, with the current anchor alongside), and
 that version to now. A version outside the retained history is refused with
 `stale_anchor`, never approximated.
 
+## Fortress economy
+
+`starter_fortress` has a stock ledger (entity 5001, kind `stock_ledger`) with
+`stock.drink` 40 and `stock.food` 60. As game time passes every living dwarf
+drinks one unit per 1,200 ticks and eats one per 2,400 ticks (laboratory
+calibration). When a stock runs short the dwarves served last (highest id)
+go without and their `need.drink` / `need.food` turns `thirsty` / `hungry`;
+a later full round makes everyone `satisfied` again. Work orders produce
+stock: each `BREW_DRINK` unit adds 5 drink, each `PREPARE_MEAL`/`COOK_MEAL`
+unit 5 food, applied before consumption in the same interval.
+
+`fortress_observe` and `fortress_wait` return `world_alerts` and the Agent Turn
+raises them as `fortress_needs` attention: `high` when a stock lasts less than
+four rounds, `critical` when it is exhausted or dwarves are deprived. Each alert
+carries a `remedy` — the exact `fortress.plan` arguments for a work order
+sized for about four rounds. Worlds without a ledger (`empty`) have no
+metabolism. None of these rates are claims about Dwarf Fortress.
+

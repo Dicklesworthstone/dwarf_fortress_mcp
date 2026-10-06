@@ -46,6 +46,10 @@ pub(crate) mod starter {
     pub const FOOD_STOCKPILE: EntityId = EntityId::new(2_001);
     pub const INNER_BURROW: EntityId = EntityId::new(3_001);
     pub const MILITIA_SQUAD: EntityId = EntityId::new(4_001);
+    pub const STOCK_LEDGER: EntityId = EntityId::new(5_001);
+    /// Opening drink and food: a few days for seven dwarves.
+    pub const OPENING_DRINK: u64 = 40;
+    pub const OPENING_FOOD: u64 = 60;
     /// Excavation level of the starter fortress.
     pub const LEVEL_Z: i32 = 10;
 }
@@ -178,6 +182,22 @@ fn starter_graph() -> Result<WorldGraph> {
             .entities
             .insert(id, record(id, kind, label, Vec::new()));
     }
+    graph.entities.insert(
+        starter::STOCK_LEDGER,
+        record(
+            starter::STOCK_LEDGER,
+            EntityKind::Other(effects::STOCK_LEDGER_KIND.to_owned()),
+            "Fortress stocks",
+            vec![
+                (
+                    effects::STOCK_DRINK_FIELD,
+                    Value::U64(starter::OPENING_DRINK),
+                ),
+                (effects::STOCK_FOOD_FIELD, Value::U64(starter::OPENING_FOOD)),
+                (effects::METABOLISM_TICKS_FIELD, Value::U64(0)),
+            ],
+        ),
+    );
     Ok(graph)
 }
 
@@ -662,6 +682,95 @@ pub(crate) const fn action_kind(action: &Action) -> &'static str {
     }
 }
 
+/// Observed economy alerts: stocks that will run out soon, are exhausted, or
+/// dwarves left thirsty or hungry. Each names a concrete remedy plan.
+pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
+    let Some(ledger) =
+        effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
+    else {
+        return Vec::new();
+    };
+    let units: Vec<&EntityRecord> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Unit
+                && e.fields.get("alive").map(|f| &f.value) != Some(&Value::Bool(false))
+        })
+        .collect();
+    if units.is_empty() {
+        return Vec::new();
+    }
+    let mut alerts = Vec::new();
+    for (stock, interval, need, deprived, job, noun) in [
+        (
+            effects::STOCK_DRINK_FIELD,
+            effects::DRINK_INTERVAL_TICKS,
+            effects::NEED_DRINK_FIELD,
+            "thirsty",
+            "BREW_DRINK",
+            "drink",
+        ),
+        (
+            effects::STOCK_FOOD_FIELD,
+            effects::FOOD_INTERVAL_TICKS,
+            effects::NEED_FOOD_FIELD,
+            "hungry",
+            "PREPARE_MEAL",
+            "food",
+        ),
+    ] {
+        let held = match ledger.fields.get(stock).map(|f| &f.value) {
+            Some(Value::U64(held)) => *held,
+            _ => continue,
+        };
+        let living = units.len() as u64;
+        let ticks_left = held / living * interval;
+        let starving = units
+            .iter()
+            .filter(|u| {
+                matches!(u.fields.get(need).map(|f| &f.value), Some(Value::Text(t)) if t == deprived)
+            })
+            .count();
+        let remedy = json!({
+            "tool": "fortress.plan",
+            "arguments": {"actions": format!(
+                r#"[{{"action":{{"kind":"create_work_order","name":"{noun} supply","job_token":"{job}","amount":{}}}}}]"#,
+                (living * 4).div_ceil(5)
+            )},
+            "requires": "configure_production",
+        });
+        let (severity, finding) = if starving > 0 {
+            (
+                "critical",
+                format!("{starving} dwarves are {deprived}: the fortress is out of {noun}"),
+            )
+        } else if held == 0 {
+            ("critical", format!("the fortress has no {noun} left"))
+        } else if ticks_left < 4 * interval {
+            (
+                "high",
+                format!(
+                    "{noun} runs out in about {ticks_left} game ticks ({held} units for {living} dwarves)"
+                ),
+            )
+        } else {
+            continue;
+        };
+        alerts.push(json!({
+            "alert": format!("{noun}_supply"),
+            "severity": severity,
+            "finding": finding,
+            "stock": held,
+            "ticks_until_exhausted": ticks_left,
+            "deprived_units": starving,
+            "remedy": remedy,
+        }));
+    }
+    alerts
+}
+
 /// Sealed plan steps with the entities they will create and the exact
 /// predicates that must be observed before they count as done.
 pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
@@ -955,7 +1064,7 @@ mod tests {
             Some(tile_codes::SOLID_WALL)
         );
         assert_eq!(snapshot.tile_code_at(MapCoord::new(0, 0, 12)), None);
-        assert_eq!(snapshot.graph.entities.len(), 10);
+        assert_eq!(snapshot.graph.entities.len(), 11);
         assert!(scenario_snapshot("moon_base", FortressId::new(3), true).is_err());
         Ok(())
     }
