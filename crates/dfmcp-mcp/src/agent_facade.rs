@@ -733,16 +733,19 @@ fn recommendations(
     let mut out = Vec::new();
     if ok
         && state.pending_plan_digest.is_none()
-        && has_grant(state, "configure_production")
         && let Some(alerts) = payload.get("world_alerts").and_then(Value::as_array)
     {
         for alert in alerts {
-            if let Some(remedy) = alert.get("remedy") {
+            if let Some(remedy) = alert.get("remedy").filter(|remedy| {
+                remedy["requires"]
+                    .as_str()
+                    .is_some_and(|capability| has_grant(state, capability))
+            }) {
                 out.push(recommendation(
                     format!("remedy-{}", alert["alert"].as_str().unwrap_or("need")),
                     "fortress.plan",
                     format!(
-                        "{}; plan the work order that resupplies it",
+                        "{}; plan the remedy",
                         alert["finding"]
                             .as_str()
                             .unwrap_or("a fortress need is unmet")

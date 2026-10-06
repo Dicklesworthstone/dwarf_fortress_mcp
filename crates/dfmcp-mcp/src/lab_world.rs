@@ -37,7 +37,7 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 2] = ["empty", "starter_fortress"];
+pub(crate) const SCENARIOS: [&str; 3] = ["empty", "starter_fortress", "besieged_fortress"];
 
 /// Starter-fortress entity identities.
 pub(crate) mod starter {
@@ -47,6 +47,10 @@ pub(crate) mod starter {
     pub const INNER_BURROW: EntityId = EntityId::new(3_001);
     pub const MILITIA_SQUAD: EntityId = EntityId::new(4_001);
     pub const STOCK_LEDGER: EntityId = EntityId::new(5_001);
+    /// The raider of `besieged_fortress`.
+    pub const RAIDER: EntityId = EntityId::new(6_001);
+    pub const RAIDER_ARRIVES_AT: u64 = 1_500;
+    pub const RAIDER_HEALTH: u64 = 120;
     /// Opening drink and food: a few days for seven dwarves.
     pub const OPENING_DRINK: u64 = 40;
     pub const OPENING_FOOD: u64 = 60;
@@ -90,6 +94,31 @@ pub(crate) fn scenario_snapshot(
     let graph = match scenario {
         "empty" => WorldGraph::default(),
         "starter_fortress" => starter_graph()?,
+        "besieged_fortress" => {
+            let mut graph = starter_graph()?;
+            graph.entities.insert(
+                starter::RAIDER,
+                record(
+                    starter::RAIDER,
+                    EntityKind::Creature,
+                    "Goblin raider",
+                    vec![
+                        (effects::HOSTILE_FIELD, Value::Bool(true)),
+                        (effects::HEALTH_FIELD, Value::U64(starter::RAIDER_HEALTH)),
+                        (
+                            effects::ARRIVES_AT_FIELD,
+                            Value::U64(starter::RAIDER_ARRIVES_AT),
+                        ),
+                        (
+                            effects::THREAT_STATUS_FIELD,
+                            Value::Text(effects::THREAT_APPROACHING.to_owned()),
+                        ),
+                        (effects::COMBAT_ROUNDS_FIELD, Value::U64(0)),
+                    ],
+                ),
+            );
+            graph
+        }
         other => {
             return Err(invalid(format!(
                 "unknown laboratory scenario {other:?}; expected one of {SCENARIOS:?}"
@@ -768,7 +797,76 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
             "remedy": remedy,
         }));
     }
+    alerts.extend(threat_alerts(snapshot, &units));
     alerts
+}
+
+/// Approaching or attacking hostiles, with a squad-assignment remedy when
+/// the fortress has a squad and dwarves not yet in it.
+fn threat_alerts(snapshot: &WorldSnapshot, units: &[&EntityRecord]) -> Vec<Json> {
+    let squad = snapshot
+        .graph
+        .entities
+        .values()
+        .find(|e| e.kind == EntityKind::Squad)
+        .map(|e| e.id);
+    let soldiers = units
+        .iter()
+        .filter(|u| {
+            matches!(
+                u.fields.get(effects::SQUAD_FIELD).map(|f| &f.value),
+                Some(Value::Entity(_))
+            )
+        })
+        .count();
+    let recruits: Vec<String> = units
+        .iter()
+        .filter(|u| u.fields.get(effects::SQUAD_FIELD).is_none())
+        .take(4)
+        .map(|u| u.id.get().to_string())
+        .collect();
+    snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Creature
+                && e.fields.get(effects::HOSTILE_FIELD).map(|f| &f.value) == Some(&Value::Bool(true))
+        })
+        .filter_map(|hostile| {
+            let status = match hostile.fields.get(effects::THREAT_STATUS_FIELD).map(|f| &f.value) {
+                Some(Value::Text(status)) if status != effects::THREAT_SLAIN => status.clone(),
+                _ => return None,
+            };
+            let arrives = match hostile.fields.get(effects::ARRIVES_AT_FIELD).map(|f| &f.value) {
+                Some(Value::U64(tick)) => *tick,
+                _ => 0,
+            };
+            let attacking = status == effects::THREAT_ATTACKING;
+            let remedy = squad.filter(|_| soldiers < 4 && !recruits.is_empty()).map(|squad| {
+                json!({
+                    "tool": "fortress.plan",
+                    "arguments": {"actions": format!(
+                        r#"[{{"action":{{"kind":"assign_squad","units":{},"squad":"{}"}}}}]"#,
+                        json!(recruits),
+                        squad.get()
+                    )},
+                    "requires": "configure_military",
+                })
+            });
+            Some(json!({
+                "alert": "hostile",
+                "severity": if attacking { "critical" } else { "high" },
+                "finding": if attacking {
+                    format!("{} is attacking; {soldiers} dwarves are in a squad", hostile.label)
+                } else {
+                    format!("{} arrives at tick {arrives}; {soldiers} dwarves are in a squad", hostile.label)
+                },
+                "subject": hostile.id.get().to_string(),
+                "remedy": remedy,
+            }))
+        })
+        .collect()
 }
 
 /// Sealed plan steps with the entities they will create and the exact

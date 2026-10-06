@@ -266,3 +266,16 @@ carries a `remedy` — the exact `fortress.plan` arguments for a work order
 sized for about four rounds. Worlds without a ledger (`empty`) have no
 metabolism. None of these rates are claims about Dwarf Fortress.
 
+## Threats
+
+`scenario="besieged_fortress"` is the starter fortress plus a goblin raider
+(entity 6001, kind `creature`, `hostile`, health 120) that arrives at tick
+1,500. From arrival it fights in 100-tick rounds: every living dwarf in a squad
+deals 10 damage per round; with no soldiers it kills one exposed dwarf (alive
+and in no burrow, highest id first) every third round (`alive: false`,
+`cause_of_death`). At health 0 it is `slain`. `world_alerts` report the raider
+as `high` while approaching and `critical` while attacking, with a remedy that
+assigns up to four unassigned dwarves to the squad; when the session holds the
+remedy's capability (`configure_military`) it becomes the top recommendation.
+Remedies are always gated by the capability they name (`requires`).
+

@@ -1255,3 +1255,107 @@ fn a_fortress_runs_dry_and_the_agent_brews_its_way_back() -> TestResult {
     );
     Ok(())
 }
+
+fn open_besieged(selector: &str) -> std::result::Result<String, Box<dyn std::error::Error>> {
+    let opened = parsed(&fortress_open_session(
+        Some(false),
+        Some(selector.to_owned()),
+        Some(caps(&[
+            ("configure_military", "guarded"),
+            ("designate", "guarded"),
+        ])),
+        None,
+        Some(20_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        Some("besieged_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    Ok(opened["session_id"]
+        .as_str()
+        .ok_or("session_id missing")?
+        .to_owned())
+}
+
+fn dead_dwarves(session: &str) -> std::result::Result<usize, Box<dyn std::error::Error>> {
+    let units = parsed(&fortress_query(
+        Some(session.to_owned()),
+        Some(r#"{"mode":"entities","kind":"unit"}"#.to_owned()),
+    ))?;
+    Ok(units["rows"]
+        .as_array()
+        .ok_or("rows")?
+        .iter()
+        .filter(|u| u["fields"]["alive"] == false)
+        .count())
+}
+
+#[test]
+fn an_ignored_raider_kills_and_a_mustered_squad_slays_it() -> TestResult {
+    // Ignored: the raider arrives at tick 1,500 and kills exposed dwarves.
+    let ignored = open_besieged("72101")?;
+    let warned = parsed(&fortress_observe(Some(ignored.clone())))?;
+    let alert = warned["world_alerts"][0].clone();
+    assert_eq!(alert["alert"], "hostile", "{warned}");
+    assert_eq!(alert["severity"], "high");
+    for _ in 0..20 {
+        parsed(&fortress_wait(Some(ignored.clone()), Some(100)))?;
+    }
+    assert!(dead_dwarves(&ignored)? >= 1);
+
+    // Mustered: follow the remedy as soon as the raider attacks.
+    let ready = open_besieged("72102")?;
+    let mut attacked = None;
+    for _ in 0..20 {
+        let waited = parsed(&fortress_wait(Some(ready.clone()), Some(100)))?;
+        if waited["world_alerts"]
+            .as_array()
+            .is_some_and(|alerts| alerts.iter().any(|a| a["severity"] == "critical"))
+        {
+            attacked = Some(waited);
+            break;
+        }
+    }
+    let attacked = attacked.ok_or("raider never attacked")?;
+    let top = &attacked["agent_turn"]["recommendations"][0];
+    assert_eq!(top["recommendation_id"], "remedy-hostile", "{attacked}");
+    let actions = top["arguments"]["actions"]
+        .as_str()
+        .ok_or("remedy actions")?
+        .to_owned();
+    let planned = parsed(&fortress_plan(
+        Some(ready.clone()),
+        None,
+        None,
+        Some(actions),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(ready.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    for _ in 0..5 {
+        parsed(&fortress_wait(Some(ready.clone()), Some(100)))?;
+    }
+    let raider = parsed(&fortress_query(
+        Some(ready.clone()),
+        Some(r#"{"mode":"entities","kind":"creature"}"#.to_owned()),
+    ))?;
+    assert_eq!(
+        raider["rows"][0]["fields"]["threat_status"], "slain",
+        "{raider}"
+    );
+    assert_eq!(dead_dwarves(&ready)?, 0);
+    let after = parsed(&fortress_observe(Some(ready)))?;
+    assert!(
+        !after["world_alerts"]
+            .as_array()
+            .is_some_and(|alerts| alerts.iter().any(|a| a["alert"] == "hostile")),
+        "{after}"
+    );
+    Ok(())
+}

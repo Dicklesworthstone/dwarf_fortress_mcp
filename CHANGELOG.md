@@ -69,6 +69,9 @@ readiness.
   re-evaluated against each observation; the Agent Turn briefing's
   `objective_status` (and observe, wait and handoff) report `achieved` or
   `not_yet_observed` separately from action dispatch state.
+- Laboratory threats: `besieged_fortress` schedules a hostile raider that
+  fights squad members in rounds or kills exposed dwarves, with `hostile`
+  alerts and a capability-gated squad-assignment remedy.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

@@ -78,6 +78,23 @@ pub const FOOD_INTERVAL_TICKS: u64 = 2_400;
 pub const NEED_DRINK_FIELD: &str = "need.drink";
 pub const NEED_FOOD_FIELD: &str = "need.food";
 
+/// Hostile creature fields (laboratory threat model).
+pub const HOSTILE_FIELD: &str = "hostile";
+pub const HEALTH_FIELD: &str = "health";
+pub const ARRIVES_AT_FIELD: &str = "arrives_at_tick";
+pub const THREAT_STATUS_FIELD: &str = "threat_status";
+pub const THREAT_APPROACHING: &str = "approaching";
+pub const THREAT_ATTACKING: &str = "attacking";
+pub const THREAT_SLAIN: &str = "slain";
+/// Game ticks per combat round while a hostile is attacking.
+pub const COMBAT_ROUND_TICKS: u64 = 100;
+/// Damage each squad member deals per round.
+pub const SOLDIER_DAMAGE_PER_ROUND: u64 = 10;
+/// An unopposed hostile kills one exposed dwarf every this many rounds.
+pub const ROUNDS_PER_KILL: u64 = 3;
+/// Combat rounds a threat has fought (kept on the creature).
+pub const COMBAT_ROUNDS_FIELD: &str = "combat_rounds";
+
 /// The stock a completed work-order unit adds, if its job produces any.
 #[must_use]
 pub fn work_order_product(job_token: &str) -> Option<(&'static str, u64)> {
@@ -789,6 +806,113 @@ pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<boo
         };
     }
     changed |= advance_metabolism(snapshot, elapsed)?;
+    changed |= advance_threats(snapshot, elapsed)?;
+    Ok(changed)
+}
+
+fn is_alive(entity: &EntityRecord) -> bool {
+    field_value(entity, "alive") != Some(&Value::Bool(false))
+}
+
+/// Hostile creatures arrive at their scheduled tick and then fight in
+/// rounds. Living squad members wound the hostile; with no soldiers it kills
+/// one exposed dwarf (alive and in no burrow) every few rounds, highest id
+/// first. A slain hostile stops. Everything is a deterministic function of
+/// the snapshot and elapsed ticks (one long wait equals many short ones up to
+/// round boundaries).
+fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
+    let hostiles: Vec<EntityId> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| {
+            entity.kind == EntityKind::Creature
+                && field_value(entity, HOSTILE_FIELD) == Some(&Value::Bool(true))
+                && field_text(entity, THREAT_STATUS_FIELD) != Some(THREAT_SLAIN)
+        })
+        .map(|entity| entity.id)
+        .collect();
+    let now = snapshot.tick.0;
+    let start = now.saturating_sub(elapsed);
+    let mut changed = false;
+    for hostile in hostiles {
+        let arrives = field_u64(entity(snapshot, hostile)?, ARRIVES_AT_FIELD);
+        if now < arrives {
+            continue;
+        }
+        if field_text(entity(snapshot, hostile)?, THREAT_STATUS_FIELD) != Some(THREAT_ATTACKING) {
+            changed |= write_fields(
+                snapshot,
+                hostile,
+                vec![(
+                    THREAT_STATUS_FIELD.to_owned(),
+                    Value::Text(THREAT_ATTACKING.to_owned()),
+                )],
+            )?;
+        }
+        // Rounds completed since arrival, before and after this advance.
+        let since = |tick: u64| tick.saturating_sub(arrives) / COMBAT_ROUND_TICKS;
+        let rounds = since(now) - since(start.max(arrives));
+        for _ in 0..rounds {
+            let soldiers = snapshot
+                .graph
+                .entities
+                .values()
+                .filter(|unit| {
+                    unit.kind == EntityKind::Unit
+                        && is_alive(unit)
+                        && matches!(field_value(unit, SQUAD_FIELD), Some(Value::Entity(_)))
+                })
+                .count() as u64;
+            let creature = entity(snapshot, hostile)?;
+            let fought = field_u64(creature, COMBAT_ROUNDS_FIELD) + 1;
+            let health = field_u64(creature, HEALTH_FIELD)
+                .saturating_sub(soldiers * SOLDIER_DAMAGE_PER_ROUND);
+            let mut fields = vec![
+                (COMBAT_ROUNDS_FIELD.to_owned(), Value::U64(fought)),
+                (HEALTH_FIELD.to_owned(), Value::U64(health)),
+            ];
+            if health == 0 {
+                fields.push((
+                    THREAT_STATUS_FIELD.to_owned(),
+                    Value::Text(THREAT_SLAIN.to_owned()),
+                ));
+            }
+            changed |= write_fields(snapshot, hostile, fields)?;
+            if health == 0 {
+                break;
+            }
+            if soldiers == 0 && fought % ROUNDS_PER_KILL == 0 {
+                let victim = snapshot
+                    .graph
+                    .entities
+                    .values()
+                    .rev()
+                    .find(|unit| {
+                        unit.kind == EntityKind::Unit
+                            && is_alive(unit)
+                            && !unit.fields.iter().any(|(name, fact)| {
+                                name.starts_with(BURROW_FIELD_PREFIX)
+                                    && fact.value == Value::Bool(true)
+                            })
+                    })
+                    .map(|unit| unit.id);
+                if let Some(victim) = victim {
+                    changed |= write_fields(
+                        snapshot,
+                        victim,
+                        vec![
+                            ("alive".to_owned(), Value::Bool(false)),
+                            (
+                                "cause_of_death".to_owned(),
+                                Value::Text("hostile attack".to_owned()),
+                            ),
+                        ],
+                    )?;
+                }
+            }
+        }
+    }
     Ok(changed)
 }
 
