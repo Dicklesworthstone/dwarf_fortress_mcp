@@ -133,6 +133,17 @@ scenario is refused) and the response reports `shared_world.members`.
   Another member's commit that overlaps it is refused with `conflict` before any
   effect; a session never conflicts with itself. Leases are released once the
   holder observes the step terminal (verified, failed or cancelled).
+- **Unrelated concurrent work does not force a replay.** A sealed plan's
+  read witness is every entity, edge and pause flag its predicates and action
+  scopes name, plus every terrain region they touch widened by a one-tile
+  hazard halo. If the anchor moved but nothing in the witness changed between
+  the version the plan was sealed on and now, the intent is replayed at the
+  current anchor and, when the replay performs the very same actions, committed
+  directly; the receipt carries `witness_rebase` (a certificate naming both
+  digests, both state hashes and the witness) and a retry with the original
+  digest returns the same receipt. Anything unbounded or outside the retained
+  history falls back to the explicit replay below, with `witness_check`
+  naming the first read that changed.
 - **Stale plans are replayed, never committed blind.** If another member's
   action or the shared clock moved the anchor after a plan was sealed, the
   commit returns `stale_anchor` with a `rebased_plan` (the original request

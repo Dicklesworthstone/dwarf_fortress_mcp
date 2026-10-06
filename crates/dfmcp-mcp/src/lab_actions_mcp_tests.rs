@@ -710,14 +710,18 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
         None,
     ))?;
     let stale_digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
-    // B acts first, moving the shared anchor.
-    let b_dig = plan_and_commit(&b, &dig([0, 3, 10], [0, 3, 10]))?;
-    assert_eq!(b_dig["ok"], true, "{b_dig}");
+    // B acts first on the very dwarf A's plan reads, moving the anchor.
+    let b_labor = plan_and_commit(
+        &b,
+        r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MASON","enabled":true}}]"#,
+    )?;
+    assert_eq!(b_labor["ok"], true, "{b_labor}");
 
     let stale = parsed(&fortress_commit(Some(a.clone()), stale_digest.clone()))?;
     assert_eq!(stale["ok"], false, "{stale}");
     assert_eq!(stale["error"]["code"], "stale_anchor");
     assert_eq!(stale["rebase"]["method"], "intent_replay");
+    assert_eq!(stale["witness_check"]["change"]["entity_id"], "1001");
     assert_eq!(stale["rebase"]["from_digest"], stale_digest);
     let rebased = stale["rebased_plan"]["plan_digest"]
         .as_str()
@@ -879,10 +883,12 @@ fn a_stale_commit_is_recorded_as_a_surprise() -> TestResult {
         None,
     ))?;
     let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // B excavates a tile inside A's hazard halo before A commits.
     assert_eq!(
-        plan_and_commit(&b, &dig([6, 3, 10], [6, 3, 10]))?["ok"],
+        plan_and_commit(&b, &dig([1, 3, 10], [1, 3, 10]))?["ok"],
         true
     );
+    parsed(&fortress_wait(Some(b.clone()), Some(20)))?;
     let stale = parsed(&fortress_commit(Some(a), digest))?;
     assert_eq!(stale["error"]["code"], "stale_anchor");
     assert!(stale["rebased_plan"]["forecast"]["available"].is_boolean());
@@ -1404,5 +1410,46 @@ fn world_changes_are_withheld_from_sessions_without_observation() -> TestResult 
         .iter()
         .any(|c| c["kind"] == "entity_changed");
     assert!(!leaked, "{committed}");
+    Ok(())
+}
+
+#[test]
+fn unrelated_concurrent_work_commits_by_unchanged_read_witness() -> TestResult {
+    let a = open_shared("73010", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73010", None, &ALL_EFFECTS)?;
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    let sealed = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // B works far away: the anchor moves, nothing A read changes.
+    assert_eq!(
+        plan_and_commit(&b, &dig([8, 3, 10], [8, 3, 10]))?["ok"],
+        true
+    );
+    let committed = parsed(&fortress_commit(Some(a.clone()), sealed.clone()))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_eq!(committed["actions"][0]["state"], "Verified");
+    let rebase = &committed["witness_rebase"];
+    assert_eq!(rebase["certificate"]["from_digest"], sealed);
+    assert_ne!(rebase["certificate"]["to_digest"], sealed);
+    assert_eq!(
+        rebase["certificate"]["witness"]["entities"],
+        json!(["1001"])
+    );
+    assert!(rebase["certificate_digest"].is_string());
+    // Retrying with the digest A sealed returns the same receipt.
+    let retry = parsed(&fortress_commit(Some(a), sealed))?;
+    assert_eq!(retry["actions"], committed["actions"]);
     Ok(())
 }

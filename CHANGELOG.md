@@ -75,6 +75,11 @@ readiness.
 - Policy evaluation harness: `dwarf-fortress-mcp evaluate <scenario> <policy>
   <ticks>` scores `idle` or `follow_recommendations` deterministically through
   the eleven tools (survivors, deprivation, threats, objectives, cost).
+- Witness-based revalidation: a plan made stale only by unrelated concurrent
+  work (unchanged read witness of entities, edges, pause and haloed terrain)
+  commits directly via identical-action intent replay with a deterministic
+  `witness_rebase` certificate; otherwise the explicit replay names the first
+  changed read.
 - Durable laboratory sessions fail closed: commit, wait, cancel, checkpoint
   and restore are refused while the latest state could not be persisted.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are

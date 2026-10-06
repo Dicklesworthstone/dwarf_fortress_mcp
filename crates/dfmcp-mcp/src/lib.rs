@@ -43,6 +43,7 @@ pub mod replay;
 pub mod resources;
 pub mod server;
 pub mod tasks;
+mod witness;
 mod world_changes;
 
 pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};

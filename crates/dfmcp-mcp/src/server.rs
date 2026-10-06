@@ -2286,6 +2286,47 @@ fn release_action_leases(session: &mut LabSession, action_id: ActionId) {
 /// passed) is never committed blind. Replay the original request at the
 /// current anchor: the planner re-checks every precondition and re-seals,
 /// and the new plan becomes pending for an explicit commit of its digest.
+/// Revalidate a stale plan by its read witness: when nothing the plan read
+/// changed between the version it was sealed on and now, replay its intent
+/// at the current anchor and accept the replay if it performs the very same
+/// actions. Returns the re-sealed plan and its certificate, or why not.
+fn rebase_by_witness(
+    session: &mut LabSession,
+    stale: &PendingPlan,
+) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
+    let base = session
+        .history
+        .iter()
+        .rev()
+        .find(|version| version.anchor() == stale.plan.anchor)
+        .cloned()
+        .ok_or_else(
+            || json!({"accepted": false, "reason": "the sealed version is no longer retained"}),
+        )?;
+    let witness = crate::witness::ReadWitness::of(&stale.plan);
+    let now = session.adapter.snapshot().clone();
+    if let Some(change) = witness.first_change(&base, &now) {
+        return Err(
+            json!({"accepted": false, "reason": "a read of the plan changed", "change": change}),
+        );
+    }
+    let refused = |error: DfmcpError| json!({"accepted": false, "reason": error.message});
+    let rid = next_request_id(session).map_err(refused)?;
+    let (_, ctx) = next_context(session).map_err(refused)?;
+    let plan = stale
+        .source
+        .intent(IntentId::new(rid), &now)
+        .and_then(|intent| StaticPlanner::default().prepare(&now, &intent, &ctx))
+        .map_err(refused)?;
+    if !crate::witness::same_actions(&stale.plan, &plan) {
+        return Err(
+            json!({"accepted": false, "reason": "the replayed intent no longer yields the same actions"}),
+        );
+    }
+    let certificate = crate::witness::certificate(&stale.plan, &plan, &base, &now, &witness);
+    Ok((plan, certificate))
+}
+
 fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
     let rid = match next_request_id(session) {
         Ok(value) => value,
@@ -2653,8 +2694,29 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     "the session already tracks its maximum number of open actions; wait for or cancel existing work first",
                 );
             }
+            let mut pending = pending;
+            let requested_digest = plan_digest.clone();
+            let mut plan_digest = plan_digest.clone();
+            let mut witness_rebase = None;
             if pending.plan.anchor != guard.adapter.snapshot().anchor() {
-                return replay_stale_plan(guard, pending);
+                match rebase_by_witness(guard, &pending) {
+                    Ok((plan, certificate)) => {
+                        plan_digest = plan.digest.to_string();
+                        pending = PendingPlan {
+                            plan,
+                            digest: plan_digest.clone(),
+                            source: pending.source,
+                        };
+                        witness_rebase = Some(certificate);
+                    }
+                    Err(reason) => {
+                        let mut payload: serde_json::Value =
+                            serde_json::from_str(&replay_stale_plan(guard, pending))
+                                .unwrap_or_else(|_| json!({"ok": false}));
+                        payload["witness_check"] = reason;
+                        return payload.to_string();
+                    }
+                }
             }
             if guard.shared_members > 1 && plan_sets_pause(&pending.plan, false) {
                 let me = guard.session_id;
@@ -2792,11 +2854,26 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                 })).collect::<Vec<_>>(),
                                 "observed_anchor": anchor_json(&receipt.observed_anchor),
                                 "paused": paused,
+                                "witness_rebase": witness_rebase,
                             });
                             let payload_text = payload.to_string();
                             guard
                                 .commit_receipts
                                 .insert(plan_digest.clone(), payload_text.clone());
+                            if requested_digest != plan_digest {
+                                // A retry with the digest the agent sealed must
+                                // return this same receipt.
+                                guard
+                                    .commit_receipts
+                                    .insert(requested_digest.clone(), payload_text.clone());
+                                if let Some(authority) =
+                                    guard.commit_authority.get(&plan_digest).cloned()
+                                {
+                                    guard
+                                        .commit_authority
+                                        .insert(requested_digest.clone(), authority);
+                                }
+                            }
                             payload_text
                         }
                         Err(error) => {
