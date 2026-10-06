@@ -24,7 +24,7 @@ fn sha256_matches_standard_known_answer_vectors() {
     ];
 
     for (message, expected) in vectors {
-        assert_eq!(sha256(message).to_string(), expected);
+        assert_eq!(Digest32::from_bytes(sha256(message)).to_hex(), expected);
         assert_eq!(Digest32::of_bytes(message).to_string(), expected);
     }
 }
@@ -45,7 +45,7 @@ fn sha256_distinguishes_prefix_and_boundary_ambiguities() {
 
 #[test]
 fn digest_display_is_fixed_width_lowercase_hex() {
-    let rendered = sha256(b"canonical display").to_string();
+    let rendered = Digest32::from_bytes(sha256(b"canonical display")).to_string();
     assert_eq!(rendered.len(), 64);
     assert!(
         rendered
@@ -56,6 +56,6 @@ fn digest_display_is_fixed_width_lowercase_hex() {
 
 #[test]
 fn zero_digest_is_not_the_digest_of_empty_input() {
-    assert_ne!(Digest32::ZERO, sha256(b""));
+    assert_ne!(Digest32::ZERO, Digest32::from_bytes(sha256(b"")));
     assert_eq!(Digest32::ZERO.to_string(), "0".repeat(64));
 }

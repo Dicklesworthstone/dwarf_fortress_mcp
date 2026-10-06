@@ -159,3 +159,4 @@ fn inherited_runtime_restriction_interrupts_allocation_before_result_publication
     })?;
     assert_eq!(output, "owner-restriction-observed");
     Ok(())
+}

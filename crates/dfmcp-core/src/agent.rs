@@ -1128,14 +1128,14 @@ impl AgentTurnState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ObservationCursor, sha256};
+    use crate::{Digest32, ObservationCursor};
 
     fn anchor(epoch: u64, sequence: u64) -> StateAnchor {
         StateAnchor {
             fortress_id: FortressId::new(7),
             cursor: ObservationCursor { epoch, sequence },
             tick: GameTick::new(sequence),
-            state_hash: sha256(&[epoch as u8, sequence as u8]),
+            state_hash: Digest32::of_bytes(&[epoch as u8, sequence as u8]),
         }
     }
 
@@ -1223,7 +1223,7 @@ mod tests {
             invocation: SemanticInvocation {
                 tool: FortressTool::Plan,
                 family: "control_clock".to_owned(),
-                arguments_digest: sha256(b"pause=false"),
+                arguments_digest: Digest32::of_bytes(b"pause=false"),
                 argument_summary: "resume the simulation".to_owned(),
             },
             capability: Capability::ControlClock,

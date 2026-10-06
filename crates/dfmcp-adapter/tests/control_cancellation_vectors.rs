@@ -22,7 +22,7 @@ impl Memory {
     fn from_bytes(bytes: Vec<u8>) -> Self {
         Self(Arc::new(Mutex::new(Cursor::new(bytes))))
     }
-    fn bytes(&self) -> Result<Vec<u8>> {
+    fn snapshot(&self) -> Result<Vec<u8>> {
         Ok(self
             .lock()
             .map_err(|_| DfmcpError::new(ErrorCode::CorruptLedger, "test memory unavailable"))?
@@ -127,7 +127,7 @@ fn public_cancellation_bytes_match_the_independent_sha256_vector() -> Result<()>
         "887fb94aad95b4a4c2d270b27dacfb0eba4f1fc32b5169f961ec810f6bcef354"
     );
     assert_eq!(record.state, DurablePauseState::CancelledBeforeDispatch);
-    let bytes = memory.bytes()?;
+    let bytes = memory.snapshot()?;
     assert_eq!(
         Digest32::of_bytes(&bytes).to_string(),
         "25f115661f385a23817e59069ac9c7317bc53002244af4671a4ef27e39c46c9d"
@@ -140,7 +140,7 @@ fn public_cancellation_bytes_match_the_independent_sha256_vector() -> Result<()>
 #[test]
 fn cancellation_replay_rejects_every_corrupted_byte_and_incomplete_prefix() -> Result<()> {
     let (_, memory) = fixture()?;
-    let bytes = memory.bytes()?;
+    let bytes = memory.snapshot()?;
     for index in 0..bytes.len() {
         let mut changed = bytes.clone();
         changed[index] ^= 1;

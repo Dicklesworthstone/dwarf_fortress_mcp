@@ -559,9 +559,7 @@ fn run_capsule(page_size: u32, include_names: bool) -> Result<(), Box<dyn Error>
 }
 
 fn run_agent_turn() -> Result<(), Box<dyn Error>> {
-    let encoded = dfmcp_mcp::live_server::fortress_open_session(
-        None, None, None, None, None, None, None, None, None,
-    );
+    let encoded = dfmcp_mcp::live_open_session_agent_turn();
     let value: JsonValue = serde_json::from_str(&encoded)?;
     if value.get("agent_turn").is_none() {
         return Err("fortress_open_session did not return an Agent Turn Packet".into());

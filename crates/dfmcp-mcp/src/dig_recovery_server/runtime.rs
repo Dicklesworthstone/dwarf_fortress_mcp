@@ -184,7 +184,7 @@ impl RequestControl {
     }
     fn check(&self) -> Result<()> {
         self.checkpoint()?;
-        if self.parent.io().is_none() || self.worker.io().is_none() {
+        if !self.parent.capabilities().io || !self.worker.capabilities().io {
             return Err(denied());
         }
         Ok(())

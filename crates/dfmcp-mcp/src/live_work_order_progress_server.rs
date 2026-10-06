@@ -86,7 +86,7 @@ fn runtime_io() -> Result<()> {
             "progress request cancelled",
         )
     })?;
-    if cx.io().is_none() {
+    if !cx.capabilities().io {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "inherited runtime denies progress I/O",

@@ -114,7 +114,7 @@ fn runtime_io() -> Result<()> {
             "job runtime request is cancelled",
         )
     })?;
-    if cx.io().is_none() {
+    if !cx.capabilities().io {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "inherited runtime context does not permit job MCP I/O",

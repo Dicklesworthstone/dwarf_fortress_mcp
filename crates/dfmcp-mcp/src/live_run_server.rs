@@ -51,7 +51,7 @@ fn runtime_io() -> Result<()> {
             "run foreground request cancelled",
         )
     })?;
-    if cx.io().is_none() {
+    if !cx.capabilities().io {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "inherited context denies run MCP I/O",

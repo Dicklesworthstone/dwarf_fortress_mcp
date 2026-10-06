@@ -376,7 +376,7 @@ fn runtime_io() -> Result<()> {
             "creation request cancelled",
         )
     })?;
-    if cx.io().is_none() {
+    if !cx.capabilities().io {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "inherited context denies creation MCP I/O",

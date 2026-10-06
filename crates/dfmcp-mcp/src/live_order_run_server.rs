@@ -619,7 +619,7 @@ fn runtime_io() -> Result<()> {
             "conditional-run request cancelled",
         )
     })?;
-    if cx.io().is_none() {
+    if !cx.capabilities().io {
         return Err(error(
             ErrorCode::CapabilityDenied,
             "inherited runtime context denies I/O",

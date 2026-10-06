@@ -91,6 +91,14 @@ fn run_modern_stdio(server: fastmcp_rust::modern::Server) {
     }
 }
 
+/// Render the protocol-1.0 live `fortress.open_session` Agent Turn with default
+/// arguments. Endpoint and credentials remain process configuration; this
+/// exists so the live probe binary can exercise the private tool module.
+#[must_use]
+pub fn live_open_session_agent_turn() -> String {
+    live_server::fortress_open_session(None, None, None, None, None, None, None, None, None)
+}
+
 pub fn run_live_v1_1_development_stdio() {
     const ADMITTED_PROTOCOL_ENVIRONMENT: &str = "DFMCP_ADMITTED_BRIDGE_PROTOCOL";
     if std::env::var_os(ADMITTED_PROTOCOL_ENVIRONMENT).is_some() {

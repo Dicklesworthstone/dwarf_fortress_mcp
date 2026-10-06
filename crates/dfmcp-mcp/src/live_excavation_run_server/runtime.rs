@@ -43,7 +43,7 @@ impl Control {
             self.cancellation.cancel();
             return Err(error(ErrorCode::CancellationRequested, "excavation request cancelled"));
         }
-        if self.parent.io().is_none() || self.worker.io().is_none() {
+        if !self.parent.capabilities().io || !self.worker.capabilities().io {
             self.cancellation.cancel(); return Err(denied());
         }
         Ok(())
@@ -65,7 +65,7 @@ pub(super) async fn owned<F>(op: &'static str, f: F) -> String
 where F: FnOnce(Control) -> String + Send + 'static,
 {
     let Some(cx) = Cx::current() else { return unbound(op, &denied()); };
-    if cx.checkpoint().is_err() || cx.io().is_none() { return unbound(op, &denied()); }
+    if cx.checkpoint().is_err() || !cx.capabilities().io { return unbound(op, &denied()); }
     let started = Instant::now();
     let abandoned = Arc::new(AtomicBool::new(false));
     let cancellation = ExcavationCancellation::default();
@@ -83,7 +83,7 @@ where F: FnOnce(Control) -> String + Send + 'static,
     let result = poll_fn(|context| {
         // Cancellation wakes the join; signal the existing bounded socket's
         // handle before polling it. Dropping this future signals it too.
-        if cx.checkpoint().is_err() || cx.io().is_none() { cancellation.cancel(); }
+        if cx.checkpoint().is_err() || !cx.capabilities().io { cancellation.cancel(); }
         joined.as_mut().poll(context)
     }).await;
     match result {
