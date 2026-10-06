@@ -14,12 +14,10 @@ use dfmcp_core::{
     Result, RiskTier, StateAnchor, StepId,
 };
 use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
-pub mod chaos;
 pub mod durable;
+pub mod faults;
 
-pub use chaos::{
-    ChaosHarness, ChaosScenario, DeterminismCertificate, DeterministicRng, FaultInjectionPolicy,
-};
+pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
 
 use dfmcp_world::{WorldGraph, WorldSnapshot, evaluate, execute_bounded_query};
 
