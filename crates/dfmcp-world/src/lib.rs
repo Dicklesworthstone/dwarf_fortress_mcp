@@ -3,6 +3,7 @@
 pub mod atp;
 mod attention;
 mod canonical;
+pub mod canonical_decode;
 mod checkpoint;
 mod delta;
 pub mod franken_fs;

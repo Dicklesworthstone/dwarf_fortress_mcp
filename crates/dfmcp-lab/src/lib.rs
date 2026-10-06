@@ -15,6 +15,7 @@ use dfmcp_core::{
 };
 use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
 pub mod chaos;
+pub mod durable;
 
 pub use chaos::{
     ChaosHarness, ChaosScenario, DeterminismCertificate, DeterministicRng, FaultInjectionPolicy,
@@ -77,6 +78,8 @@ pub enum LabEvent {
     Restored(CheckpointId),
     SnapshotInjected(StateAnchor),
     TickAdvanced(GameTick),
+    /// The world was recovered from durable storage into a new epoch.
+    Recovered(StateAnchor),
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +154,66 @@ impl MemoryAdapter {
     #[must_use]
     pub const fn snapshot(&self) -> &WorldSnapshot {
         &self.snapshot
+    }
+
+    /// An adapter over a world recovered from durable storage. The world
+    /// enters a new observation epoch, so no cursor, plan or action handle
+    /// from before the recovery can be mistaken for current.
+    pub fn recovered(mut snapshot: WorldSnapshot) -> Result<Self> {
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "recovered snapshot failed its content-hash seal",
+            ));
+        }
+        snapshot.cursor = snapshot.cursor.checked_reset_epoch().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CursorGap,
+                "cannot recover because the observation epoch is exhausted",
+            )
+        })?;
+        snapshot.refresh_hash();
+        let mut adapter = Self::new(snapshot);
+        adapter.record_event(LabEvent::Recovered(adapter.snapshot.anchor()));
+        Ok(adapter)
+    }
+
+    /// The world state a checkpoint captured.
+    #[must_use]
+    pub fn checkpoint_snapshot(&self, checkpoint_id: CheckpointId) -> Option<&WorldSnapshot> {
+        self.checkpoints.get(&checkpoint_id)
+    }
+
+    /// Make a durable checkpoint restorable through the ordinary restore path.
+    pub fn adopt_checkpoint(
+        &mut self,
+        checkpoint_id: CheckpointId,
+        snapshot: WorldSnapshot,
+    ) -> Result<()> {
+        if checkpoint_id == CheckpointId::NIL
+            || snapshot.fortress_id != self.snapshot.fortress_id
+            || !snapshot.hash_is_valid()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "adopted checkpoint is unsealed or belongs to another fortress",
+            ));
+        }
+        match self.checkpoints.get(&checkpoint_id) {
+            Some(existing) if *existing == snapshot => Ok(()),
+            Some(_) => Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "checkpoint identifier already names different content",
+            )),
+            None if self.checkpoints.len() >= MAX_LAB_CHECKPOINTS => Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "laboratory checkpoint store reached its explicit bound",
+            )),
+            None => {
+                self.checkpoints.insert(checkpoint_id, snapshot);
+                Ok(())
+            }
+        }
     }
 
     /// The last receipt recorded for an action, without polling (and so
