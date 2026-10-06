@@ -289,6 +289,12 @@ impl DurableLedger {
         &self.head_snapshot
     }
 
+    /// Every published capsule, oldest first.
+    #[must_use]
+    pub fn capsules(&self) -> &[ObservationCapsule] {
+        &self.capsules
+    }
+
     #[must_use]
     pub fn capsule_count(&self) -> usize {
         self.capsules.len()

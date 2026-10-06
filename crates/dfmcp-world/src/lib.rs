@@ -16,6 +16,7 @@ pub mod map_reachability;
 pub mod map_region;
 pub mod merkle;
 mod model;
+pub mod publication;
 mod query;
 pub mod query_page;
 pub mod rebase;
@@ -56,6 +57,7 @@ pub use model::{
     ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence, FactSource,
     MapChunk, TerrainRun, Value, WorldEvent, WorldEventKind, WorldGraph, WorldSnapshot,
 };
+pub use publication::{CapsulePublisher, PublishedRoot, RootReader};
 pub use query::{
     CompareOp, Predicate, QueryCost, QueryOrder, QueryPlanCost, QueryResult, WorldQuery, evaluate,
     evaluate_for,
