@@ -689,19 +689,11 @@ fn uncertainties_json(session: &LiveSession) -> Vec<JsonValue> {
     values
 }
 
-fn references_json(session: &LiveSession) -> Vec<JsonValue> {
-    let id = session.session_id.to_string();
-    let mut values = vec![
-        json!({"kind": "resource", "uri": format!("df://session/{id}/summary")}),
-        json!({"kind": "resource", "uri": format!("df://session/{id}/capabilities")}),
-    ];
-    if let Ok(anchor) = session.current_anchor() {
-        values.push(json!({
-            "kind": "resource",
-            "uri": format!("df://fortress/{}/anchor", anchor.fortress_id),
-        }));
-    }
-    values
+/// The live server registers no MCP resources, so its Agent Turn names none:
+/// a reference an agent cannot resolve is worse than no reference. The
+/// laboratory's `df://session/...` views exist only on the laboratory server.
+fn references_json(_session: &LiveSession) -> Vec<JsonValue> {
+    Vec::new()
 }
 
 #[allow(clippy::too_many_arguments)]
