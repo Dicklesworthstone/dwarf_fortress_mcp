@@ -111,3 +111,17 @@ once executed):
 
 dfmcp-side note: `dfmcp-mcp/src/resources.rs` uses the alias-transparency spelling and must be
 revisited when the pin advances past a facade fix.
+
+## Re-check at pin 180a7c88 (2026-10-06)
+
+Against the real `dwarf-fortress-mcp serve` binary over stdio:
+
+- DRAFT-A (follow-up `tools/list` never dispatched after `server/discover`): **not reproducible**;
+  discover then `tools/list` both answer.
+- DRAFT-B (`server/discover` silent when `_meta` lacks `clientInfo`): **not reproducible**;
+  discover answers.
+- DRAFT-C (legacy `initialize` refusal lists `supported: ["2026-07-28","2024-11-05"]`): still
+  reproduces; remains the documentation question recorded above, not a dispatch defect.
+
+`scripts/lab_stdio_walkthrough.py`, `scripts/lab_durable_restart.py` and
+`scripts/lab_replay_roundtrip.py` exercise the full modern lifecycle on this pin.
