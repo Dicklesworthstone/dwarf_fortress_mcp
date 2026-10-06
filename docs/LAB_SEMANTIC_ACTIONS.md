@@ -150,3 +150,35 @@ scenario is refused) and the response reports `shared_world.members`.
 
 Calls are serialized per fortress: each tool call holds the world for its
 duration, so every response is consistent with one anchor.
+
+## Crash-durable fortresses
+
+When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
+`fortress_open_session(durable=true, fortress_selector="N", ...)` makes fortress
+`N` survive process loss:
+
+- every state change is persisted after the tool call that made it, and every
+  `fortress_checkpoint` is persisted (`durable: true` in its receipt);
+- reopening `N` with `durable=true` after a restart resumes the last persisted
+  world in a **new observation epoch** (`durable.resumed`,
+  `recovered_from_anchor`, `restorable_checkpoints`); naming a different
+  scenario is refused;
+- checkpoints taken before the restart restore normally;
+- designations, construction and work orders live in the world, so they keep
+  progressing on `fortress_wait(max_game_ticks)` (which no longer needs a
+  committed action); action handles, plans and obligations from before the
+  restart are not carried and must be re-established from observation;
+- reopening a durable fortress fences every older session of it (`conflict`),
+  so two writers never interleave; a second server process on the same
+  directory is refused by the store lock;
+- `fortress_doctor` reports `durability` (persisted anchor, whether it is
+  current, journal records, chain head, torn tail discarded at open).
+
+Storage: `journal` (one `<chain> <record>` line per head/checkpoint, SHA-256
+chained) plus `objects/<sha256>.snap` holding exact canonical snapshot bytes.
+Objects are synced and renamed before the record naming them is appended and
+synced. On open only an incomplete final record is discarded; a broken chain,
+malformed record or corrupt object refuses the store. The journal is compacted
+to live records (and unreferenced objects removed) every 1,024 records.
+`scripts/lab_durable_restart.py` demonstrates it across a SIGKILL.
+

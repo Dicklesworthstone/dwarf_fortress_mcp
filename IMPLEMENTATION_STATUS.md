@@ -75,6 +75,24 @@ reconciliation. This is laboratory semantics and development execution only:
 no DFHack mutation, native, live-game, registry or production evidence. The
 reference progress rates are calibration, not Dwarf Fortress claims.
 
+### Crash-durable laboratory fortresses (2026-10-06)
+
+`fortress_open_session(durable=true)` makes a laboratory fortress survive
+process loss when the operator sets `DFMCP_LAB_STATE_DIR` (absolute, `0700`;
+MCP callers cannot choose paths). `dfmcp_lab::durable::DurableLabStore` stores
+each world state and checkpoint as its exact canonical snapshot bytes
+(content-addressed, strictly decoded by the new
+`WorldSnapshot::from_canonical_bytes`) named by an exclusively locked SHA-256
+hash-chained journal; objects are synced before the record naming them; only a
+torn final record is ever discarded, any other damage refuses the store.
+Reopening resumes the last persisted world in a new observation epoch, adopts
+every durable checkpoint, and fences older sessions of that fortress. Work that
+lives in the world (designations, construction, orders) continues; action
+handles and obligations are deliberately not carried. Proven in-process and by
+`scripts/lab_durable_restart.py` across a real SIGKILL of the `serve` binary.
+This is laboratory durability, not power-loss qualification of any live effect
+journal.
+
 ### Whole-workspace Rust test execution (2026-10-06)
 
 For the first time in recent history the complete workspace test graph built

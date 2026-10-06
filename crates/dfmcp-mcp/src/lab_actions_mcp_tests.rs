@@ -41,6 +41,7 @@ fn open(
         None,
         Some("starter_fortress".to_owned()),
         None,
+        None,
     ))?;
     assert_eq!(opened["ok"], true, "{opened}");
     assert_eq!(opened["scenario"], "starter_fortress");
@@ -549,6 +550,7 @@ fn open_shared(
         None,
         scenario.map(str::to_owned),
         Some(true),
+        None,
     ))
 }
 
@@ -871,6 +873,7 @@ fn observe_briefs_the_starter_fortress_under_the_default_budget() -> TestResult 
         None,
         Some("starter_fortress".to_owned()),
         None,
+        None,
     ))?;
     let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
     let observed = parsed(&fortress_observe(Some(session)))?;
@@ -911,6 +914,7 @@ fn any_member_can_pause_a_shared_fortress_but_unpausing_needs_everyone() -> Test
         None,
         Some("starter_fortress".to_owned()),
         Some(true),
+        None,
     ))?;
     assert_eq!(opened["paused"], true);
     let a = opened["session_id"].as_str().ok_or("a")?.to_owned();

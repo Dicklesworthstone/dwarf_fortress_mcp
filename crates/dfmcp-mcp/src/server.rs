@@ -85,6 +85,11 @@ pub(crate) struct LabSession {
     leases: LeaseBook,
     /// Members of the shared fortress during the current call (0 if private).
     shared_members: usize,
+    /// Scenario name when this session's fortress is crash-durable: every
+    /// state change is persisted to the durable laboratory store.
+    durable_scenario: Option<String>,
+    /// Last durable-persistence failure, reported until a later save succeeds.
+    durability_fault: Option<String>,
 }
 
 /// Spatial leases plus the actions that hold them.
@@ -113,6 +118,7 @@ pub(crate) struct SharedWorld {
     leases: LeaseBook,
     members: BTreeSet<SessionId>,
     scenario: String,
+    durable: bool,
 }
 
 /// Process-local registry of shared fortresses, keyed by fortress selector.
@@ -138,6 +144,7 @@ fn join_shared_world(
     scenario: &str,
     scenario_requested: bool,
     seed: &MemoryAdapter,
+    durable: bool,
 ) -> Result<(Arc<Mutex<SharedWorld>>, SharedView)> {
     let mut registry = SHARED_WORLDS.lock().map_err(|_| {
         DfmcpError::new(
@@ -158,6 +165,20 @@ fn join_shared_world(
                 format!(
                     "shared fortress {fortress_id} already runs scenario {:?}; omit scenario to join it",
                     guard.scenario
+                ),
+            ));
+        }
+        if guard.durable != durable {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "shared fortress {fortress_id} is {}; open it with durable={}",
+                    if guard.durable {
+                        "crash-durable"
+                    } else {
+                        "process-local"
+                    },
+                    guard.durable
                 ),
             ));
         }
@@ -189,6 +210,7 @@ fn join_shared_world(
         leases: LeaseBook::default(),
         members: BTreeSet::from([session_id]),
         scenario: scenario.to_owned(),
+        durable,
     };
     let view = SharedView {
         anchor: world.adapter.snapshot().anchor(),
@@ -233,11 +255,231 @@ pub(crate) fn with_session<T>(
         guard.shared_members = world.members.len();
     }
     let output = body(&mut guard);
+    persist_durable_head(&mut guard);
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
     }
     output
+}
+
+/// Operator-selected directory for crash-durable laboratory fortresses.
+/// Never client-selected: MCP callers can only ask for `durable=true`.
+const LAB_STATE_DIR_ENV: &str = "DFMCP_LAB_STATE_DIR";
+
+/// The durable laboratory store, opened on first use, plus which session
+/// currently owns each private durable fortress.
+#[derive(Default)]
+struct DurableLab {
+    store: Option<dfmcp_lab::durable::DurableLabStore>,
+    /// The newest private session per durable fortress. Opening a durable
+    /// fortress again (for example after an agent lost its session) fences
+    /// every older session of it so two writers never interleave.
+    owners: BTreeMap<FortressId, SessionId>,
+}
+
+static DURABLE_LAB: LazyLock<Mutex<DurableLab>> =
+    LazyLock::new(|| Mutex::new(DurableLab::default()));
+
+fn durable_lab() -> MutexGuard<'static, DurableLab> {
+    match DURABLE_LAB.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+/// Run `body` against the durable store, opening it from the operator's
+/// configuration on first use.
+fn with_durable_store<T>(
+    body: impl FnOnce(&mut dfmcp_lab::durable::DurableLabStore) -> Result<T>,
+) -> Result<T> {
+    let mut lab = durable_lab();
+    if lab.store.is_none() {
+        #[cfg(test)]
+        let configured = match TEST_STATE_DIR.lock() {
+            Ok(guard) => guard.clone().map(std::ffi::OsString::from),
+            Err(_) => None,
+        };
+        #[cfg(not(test))]
+        let configured = std::env::var_os(LAB_STATE_DIR_ENV);
+        let root = configured.ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                format!(
+                    "durable laboratory fortresses are disabled: the operator has not set {LAB_STATE_DIR_ENV} to an absolute directory"
+                ),
+            )
+        })?;
+        lab.store = Some(dfmcp_lab::durable::DurableLabStore::open(
+            std::path::Path::new(&root),
+        )?);
+    }
+    match lab.store.as_mut() {
+        Some(store) => body(store),
+        None => Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "durable store vanished after opening",
+        )),
+    }
+}
+
+#[cfg(test)]
+static TEST_STATE_DIR: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+/// Test hook: drop the durable store (releasing its lock) and forget owners,
+/// exactly what a process exit does, then use `dir` as the configured root.
+#[cfg(test)]
+pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
+    if let Ok(mut guard) = TEST_STATE_DIR.lock() {
+        *guard = dir;
+    }
+    let mut lab = durable_lab();
+    lab.store = None;
+    lab.owners.clear();
+}
+
+/// Persist the session's world when it is durable and changed. A failure is
+/// kept on the session (and surfaced by the Agent Turn and doctor) rather
+/// than silently ignored; the response that caused it is already computed.
+fn persist_durable_head(session: &mut LabSession) {
+    let Some(scenario) = session.durable_scenario.clone() else {
+        return;
+    };
+    let snapshot = session.adapter.snapshot().clone();
+    match with_durable_store(|store| store.persist_head(&scenario, &snapshot)) {
+        Ok(()) => session.durability_fault = None,
+        Err(error) => {
+            session.durability_fault = Some(format!("{}: {}", error.code.as_str(), error.message));
+        }
+    }
+}
+
+/// Whether a private durable session has been superseded by a newer one.
+fn ensure_durable_owner(session: &Arc<Mutex<LabSession>>) -> Result<()> {
+    let (session_id, fortress_id, private_durable) = match session.lock() {
+        Ok(guard) => (
+            guard.session_id,
+            guard.fortress_id,
+            guard.durable_scenario.is_some() && guard.shared.is_none(),
+        ),
+        Err(_) => return Ok(()),
+    };
+    if !private_durable {
+        return Ok(());
+    }
+    match durable_lab().owners.get(&fortress_id) {
+        Some(owner) if *owner != session_id => Err(DfmcpError::new(
+            ErrorCode::Conflict,
+            format!(
+                "this session was superseded: durable fortress {fortress_id} was reopened by session {owner}; continue there"
+            ),
+        )
+        .retryable(false)),
+        _ => Ok(()),
+    }
+}
+
+/// What reopening a durable fortress recovered.
+struct DurableRecovery {
+    resumed: bool,
+    recovered_from: Option<StateAnchor>,
+    checkpoints: usize,
+    torn_tail_bytes: u64,
+}
+
+/// Load (or start) a durable fortress: the latest persisted world in a new
+/// observation epoch with every durable checkpoint restorable, or the named
+/// scenario when the store has never seen this fortress.
+fn load_durable_fortress(
+    fortress_id: FortressId,
+    scenario: &mut String,
+    scenario_requested: bool,
+    fresh: &MemoryAdapter,
+) -> Result<(MemoryAdapter, DurableRecovery)> {
+    with_durable_store(|store| {
+        let report = store.report();
+        let Some(head) = store.head(fortress_id).cloned() else {
+            return Ok((
+                fresh.clone(),
+                DurableRecovery {
+                    resumed: false,
+                    recovered_from: None,
+                    checkpoints: 0,
+                    torn_tail_bytes: report.torn_tail_bytes,
+                },
+            ));
+        };
+        if scenario_requested && head.scenario != *scenario {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "durable fortress {fortress_id} already runs scenario {:?}; omit scenario to resume it",
+                    head.scenario
+                ),
+            ));
+        }
+        scenario.clone_from(&head.scenario);
+        let snapshot = store.load_snapshot(head.anchor.state_hash)?;
+        if snapshot.fortress_id != fortress_id {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "durable head belongs to a different fortress",
+            ));
+        }
+        let mut adapter = MemoryAdapter::recovered(snapshot)?;
+        let mut checkpoints = 0;
+        for checkpoint in store.checkpoints(fortress_id).cloned().collect::<Vec<_>>() {
+            adapter.adopt_checkpoint(
+                checkpoint.checkpoint_id,
+                store.load_snapshot(checkpoint.state_hash)?,
+            )?;
+            checkpoints += 1;
+        }
+        Ok((
+            adapter,
+            DurableRecovery {
+                resumed: true,
+                recovered_from: Some(head.anchor),
+                checkpoints,
+                torn_tail_bytes: report.torn_tail_bytes,
+            },
+        ))
+    })
+}
+
+/// Doctor view of durability for one session.
+fn durability_json(session: &LabSession) -> serde_json::Value {
+    let Some(scenario) = session.durable_scenario.as_ref() else {
+        return json!({
+            "durable": false,
+            "note": "process-local: this fortress is lost when the server process exits",
+        });
+    };
+    let lab = durable_lab();
+    let report = lab
+        .store
+        .as_ref()
+        .map(dfmcp_lab::durable::DurableLabStore::report);
+    let head = lab
+        .store
+        .as_ref()
+        .and_then(|store| store.head(session.fortress_id).cloned());
+    json!({
+        "durable": true,
+        "scenario": scenario,
+        "fault": session.durability_fault,
+        "persisted_anchor": head.as_ref().map(|head| anchor_json(&head.anchor)),
+        "persisted_is_current": head.as_ref().is_some_and(|head| head.anchor == session.adapter.snapshot().anchor()),
+        "store": report.map(|report| json!({
+            "records": report.records,
+            "fortresses": report.fortresses,
+            "checkpoints": report.checkpoints,
+            "chain_head": report.chain_head.to_hex(),
+            "torn_tail_bytes_discarded_at_open": report.torn_tail_bytes,
+            "compactions": report.compactions,
+        })),
+        "note": "laboratory durability: world state and checkpoints survive process loss; action handles and obligations do not",
+    })
 }
 
 /// A plan sealed by `fortress_plan` and awaiting `fortress_commit`.
@@ -475,7 +717,9 @@ pub(crate) fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSessi
 pub(crate) fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {
     if let Some(id_str) = session_id {
         let parsed = parse_session_id_arg(&id_str)?;
-        lookup_session(parsed)
+        let session = lookup_session(parsed)?;
+        ensure_durable_owner(&session)?;
+        Ok(session)
     } else {
         Err(DfmcpError::new(
             ErrorCode::InvalidRequest,
@@ -768,6 +1012,7 @@ pub fn fortress_open_session(
         max_actions,
         None,
         None,
+        None,
     )
 }
 
@@ -787,10 +1032,12 @@ pub(crate) fn open_session_in_scenario(
     max_actions: Option<u32>,
     scenario: Option<String>,
     shared: Option<bool>,
+    durable: Option<bool>,
 ) -> String {
     let shared = shared.unwrap_or(false);
+    let durable = durable.unwrap_or(false);
     let scenario_requested = scenario.is_some();
-    let scenario = scenario.unwrap_or_else(|| "empty".to_owned());
+    let mut scenario = scenario.unwrap_or_else(|| "empty".to_owned());
     if scenario.len() > 64 {
         return coded_error_payload(
             "fortress.open_session",
@@ -869,6 +1116,15 @@ pub(crate) fn open_session_in_scenario(
         Ok(snapshot) => snapshot,
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
+    let fresh = MemoryAdapter::new(seed);
+    let (seed_adapter, recovery) = if durable {
+        match load_durable_fortress(fortress_id, &mut scenario, scenario_requested, &fresh) {
+            Ok((adapter, recovery)) => (adapter, Some(recovery)),
+            Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
+        }
+    } else {
+        (fresh, None)
+    };
     let probe_session = LabSession {
         session_id: SessionId::new(0), // placeholder; replaced below
         fortress_id,
@@ -876,7 +1132,7 @@ pub(crate) fn open_session_in_scenario(
         budget,
         negotiation: SessionNegotiation::laboratory(String::from("pending")),
         next_request_id: 0,
-        adapter: MemoryAdapter::new(seed),
+        adapter: seed_adapter,
         pending: None,
         last_action: None,
         last_plan_actions: Vec::new(),
@@ -886,6 +1142,8 @@ pub(crate) fn open_session_in_scenario(
         shared: None,
         leases: LeaseBook::default(),
         shared_members: 0,
+        durable_scenario: None,
+        durability_fault: None,
     };
     let identity = probe_session.adapter.identity();
     let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
@@ -901,6 +1159,7 @@ pub(crate) fn open_session_in_scenario(
             &scenario,
             scenario_requested,
             &probe_session.adapter,
+            durable,
         ) {
             Ok(value) => (Some(value.0), Some(value.1)),
             Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
@@ -933,6 +1192,8 @@ pub(crate) fn open_session_in_scenario(
         shared: _,
         leases: _,
         shared_members: _,
+        durable_scenario: _,
+        durability_fault: _,
     } = probe_session;
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
@@ -951,6 +1212,8 @@ pub(crate) fn open_session_in_scenario(
         shared: shared_world,
         leases: LeaseBook::default(),
         shared_members: 0,
+        durable_scenario: durable.then(|| scenario.clone()),
+        durability_fault: None,
     }));
     {
         let mut registry = sessions();
@@ -968,7 +1231,29 @@ pub(crate) fn open_session_in_scenario(
                 "fresh session identifier unexpectedly collided with an existing session",
             );
         }
-        registry.insert(session_id, session);
+        registry.insert(session_id, session.clone());
+    }
+    if durable {
+        if !shared {
+            durable_lab().owners.insert(fortress_id, session_id);
+        }
+        // Persist the opening state (a resumed world's new epoch included) now,
+        // so a crash before the first state change still resumes it.
+        let fault = with_session(
+            &session,
+            || Some("session poisoned".to_owned()),
+            |guard| {
+                persist_durable_head(guard);
+                guard.durability_fault.clone()
+            },
+        );
+        if let Some(fault) = fault {
+            return coded_error_payload(
+                "fortress.open_session",
+                ErrorCode::AdapterUnavailable,
+                &format!("durable fortress could not be persisted: {fault}"),
+            );
+        }
     }
     let granted_strings: Vec<&str> = requested_caps
         .iter()
@@ -994,6 +1279,17 @@ pub(crate) fn open_session_in_scenario(
         "anchor": anchor_json(&snapshot_anchor),
         "paused": paused_after,
         "scenario": shared_view.as_ref().map_or(scenario.as_str(), |view| view.scenario.as_str()),
+        "durable": recovery.as_ref().map(|recovery| json!({
+            "resumed": recovery.resumed,
+            "recovered_from_anchor": recovery.recovered_from.as_ref().map(anchor_json),
+            "restorable_checkpoints": recovery.checkpoints,
+            "torn_tail_bytes_discarded_at_store_open": recovery.torn_tail_bytes,
+            "note": if recovery.resumed {
+                "resumed the last persisted world in a new observation epoch: designations, construction and work orders continue on wait; action handles, plans and obligations from before are not carried, so re-establish them from observation. Older sessions of this fortress are fenced."
+            } else {
+                "new crash-durable fortress: every state change and checkpoint is persisted and survives server restarts"
+            },
+        })),
         "shared_world": shared_view.as_ref().map(|view| json!({
             "fortress_id": format!("{fortress_id}"),
             "members": view.members,
@@ -1888,13 +2184,17 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     return dfmcp_error_payload("fortress.wait", &error);
                 }
             }
-            let Some(action_id) = guard.last_action else {
+            let action_id = guard.last_action;
+            // Without any committed action, a bounded wait still lets game
+            // time pass for work that already lives in the world (for
+            // example designations carried across a durable restart).
+            if action_id.is_none() && max_game_ticks.is_none_or(|ticks| ticks == 0) {
                 return coded_error_payload(
                     "fortress.wait",
                     ErrorCode::Conflict,
-                    "no committed action yet; call fortress_commit first",
+                    "no committed action yet; call fortress_commit first, or pass max_game_ticks to let time pass",
                 );
-            };
+            }
             let requested_ticks = max_game_ticks.unwrap_or(0);
             if requested_ticks > guard.budget.max_game_ticks {
                 return coded_error_payload(
@@ -1916,7 +2216,11 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
-            let task = match crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx)
+            let task = match action_id
+                .map(|action_id| {
+                    crate::tasks::project_action_task(&mut guard.adapter, action_id, &ctx)
+                })
+                .transpose()
             {
                 Ok(task) => task,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
@@ -1949,16 +2253,26 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             }
             guard.open_actions = still_open;
             let snapshot = guard.adapter.snapshot();
-            let mut payload = json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "action_id": format!("{}", action_id),
-                "task_id": task.task_id,
-                "status": task.status.as_str(),
-                "commit_state": format!("{:?}", task.commit_state),
-                "summary": task.summary,
-                "observed_anchor": anchor_json(&snapshot.anchor()),
-            });
+            let mut payload = match (action_id, task) {
+                (Some(action_id), Some(task)) => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "action_id": format!("{}", action_id),
+                    "task_id": task.task_id,
+                    "status": task.status.as_str(),
+                    "commit_state": format!("{:?}", task.commit_state),
+                    "summary": task.summary,
+                    "observed_anchor": anchor_json(&snapshot.anchor()),
+                }),
+                _ => json!({
+                    "ok": true,
+                    "session_id": format!("{}", guard.session_id),
+                    "action_id": null,
+                    "status": "time_passed",
+                    "summary": "no action of this session is open; game time passed for work already in the world",
+                    "observed_anchor": anchor_json(&snapshot.anchor()),
+                }),
+            };
             if max_game_ticks.is_some() {
                 payload["advanced_game_ticks"] = json!(advanced);
                 payload["game_tick"] = json!(snapshot.tick.0);
@@ -2236,16 +2550,46 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
                 return dfmcp_error_payload("fortress.checkpoint", &error);
             }
             match guard.adapter.checkpoint(&label, &ctx) {
-                Ok(receipt) => json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "checkpoint_id": format!("{}", receipt.checkpoint_id),
-                    "label": receipt.label,
-                    "content_digest": receipt.content_digest.to_string(),
-                    "durable": receipt.durable,
-                    "anchor": anchor_json(&receipt.anchor),
-                })
-                .to_string(),
+                Ok(receipt) => {
+                    let (durable, durability_error) = if guard.durable_scenario.is_some() {
+                        let persisted = guard
+                            .adapter
+                            .checkpoint_snapshot(receipt.checkpoint_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                DfmcpError::new(
+                                    ErrorCode::InternalInvariantViolation,
+                                    "checkpoint vanished before it could be persisted",
+                                )
+                            })
+                            .and_then(|snapshot| {
+                                with_durable_store(|store| {
+                                    store.persist_checkpoint(
+                                        receipt.checkpoint_id,
+                                        &receipt.label,
+                                        &snapshot,
+                                    )
+                                })
+                            });
+                        match persisted {
+                            Ok(()) => (true, None),
+                            Err(error) => (false, Some(error.message)),
+                        }
+                    } else {
+                        (receipt.durable, None)
+                    };
+                    json!({
+                        "ok": true,
+                        "session_id": format!("{}", guard.session_id),
+                        "checkpoint_id": format!("{}", receipt.checkpoint_id),
+                        "label": receipt.label,
+                        "content_digest": receipt.content_digest.to_string(),
+                        "durable": durable,
+                        "durability_error": durability_error,
+                        "anchor": anchor_json(&receipt.anchor),
+                    })
+                    .to_string()
+                }
                 Err(error) => dfmcp_error_payload("fortress.checkpoint", &error),
             }
         },
@@ -2462,6 +2806,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                     "findings": report.findings,
                     "warnings": health.warnings,
                     "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+                    "durability": durability_json(guard),
                 })
                 .to_string(),
                 Err(error) => dfmcp_error_payload("fortress.doctor", &error),

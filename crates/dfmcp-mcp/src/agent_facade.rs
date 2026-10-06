@@ -1345,7 +1345,7 @@ fn project_response(
 }
 
 #[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress."
+    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -1360,6 +1360,7 @@ pub fn fortress_open_session(
     max_actions: Option<u32>,
     scenario: Option<String>,
     shared: Option<bool>,
+    durable: Option<bool>,
 ) -> String {
     project_response(
         crate::server::open_session_in_scenario(
@@ -1374,6 +1375,7 @@ pub fn fortress_open_session(
             max_actions,
             scenario,
             shared,
+            durable,
         ),
         "fortress.open_session",
         AgentPhase::Bootstrap,
@@ -1582,6 +1584,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ))
     }
 
@@ -1685,3 +1688,7 @@ mod tests {
 #[cfg(test)]
 #[path = "lab_actions_mcp_tests.rs"]
 mod lab_actions_tests;
+
+#[cfg(test)]
+#[path = "durable_lab_tests.rs"]
+mod durable_lab_tests;

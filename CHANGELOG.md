@@ -28,6 +28,15 @@ readiness.
 - Objective decomposition: `fortress.plan(blueprint=...)` compiles a blueprint
   template into hazard-checked excavation steps and dependent furnishing steps
   with sealed obligations (`BlueprintPlanner::compile_furnished_blueprint_intent`).
+- Crash-durable laboratory fortresses (`fortress_open_session(durable=true)` with
+  the operator-set `DFMCP_LAB_STATE_DIR`): every state change and checkpoint is
+  persisted as content-addressed canonical snapshots named by a locked,
+  hash-chained journal (`dfmcp_lab::durable`); reopening after a restart resumes
+  the world in a new observation epoch with checkpoints restorable and older
+  sessions fenced. Strict canonical snapshot decoding
+  (`WorldSnapshot::from_canonical_bytes`). `fortress.wait(max_game_ticks)` now
+  lets time pass without a committed action. `scripts/lab_durable_restart.py`
+  proves it across a SIGKILL. Laboratory only.
   The `starter_fortress` now has observed rock at z 9..11 so hazard halos are
   complete. Laboratory only.
 
