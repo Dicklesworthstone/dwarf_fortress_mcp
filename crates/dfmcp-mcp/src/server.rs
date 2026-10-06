@@ -1727,6 +1727,10 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
         Ok(receipt) => {
             guard.pending = None;
             guard.last_action = None;
+            // The adapter forgot every pre-restore action; so must the session,
+            // or every later wait would poll handles that no longer exist.
+            guard.last_plan_actions.clear();
+            guard.open_actions.clear();
             guard.commit_receipts.clear();
             json!({
                 "ok": true,

@@ -464,3 +464,57 @@ fn handoff_packet_lets_a_fresh_agent_resume_open_work_without_the_transcript() -
     assert_eq!(again["anchor"], packet["anchor"]);
     Ok(())
 }
+
+#[test]
+fn restore_retires_open_work_so_later_waits_and_commits_still_function() -> TestResult {
+    let mut caps = ALL_EFFECTS.to_vec();
+    caps.push(("restore", "guarded"));
+    let session = open("72008", false, &caps)?;
+    let checkpoint = parsed(&fortress_checkpoint(
+        Some(session.clone()),
+        Some("before-digging".to_owned()),
+    ))?;
+    assert_eq!(checkpoint["ok"], true, "{checkpoint}");
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(WORKSHOP_PLAN.to_owned()),
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    let restored = parsed(&fortress_restore(
+        Some(session.clone()),
+        checkpoint["checkpoint_id"]
+            .as_str()
+            .ok_or("checkpoint id")?
+            .to_owned(),
+    ))?;
+    assert_eq!(restored["ok"], true, "{restored}");
+    assert_eq!(
+        restored["agent_turn"]["active_work"]["obligations"],
+        json!([])
+    );
+    // New work after the restore runs normally.
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[0,3,10],"max":[0,3,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    assert_eq!(
+        parsed(&fortress_commit(Some(session.clone()), digest))?["ok"],
+        true
+    );
+    let waited = parsed(&fortress_wait(Some(session), Some(20)))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+    assert_eq!(waited["open_actions_remaining"], 0);
+    Ok(())
+}
