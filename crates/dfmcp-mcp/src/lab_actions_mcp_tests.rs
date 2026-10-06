@@ -412,3 +412,55 @@ fn a_later_plan_does_not_strand_an_earlier_plans_deferred_steps() -> TestResult 
     );
     Ok(())
 }
+
+#[test]
+fn handoff_packet_lets_a_fresh_agent_resume_open_work_without_the_transcript() -> TestResult {
+    let session = open("72007", false, &ALL_EFFECTS)?;
+    let planned = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(WORKSHOP_PLAN.to_owned()),
+    ))?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    // A new plan is left pending, too.
+    let pending = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        Some(true),
+        None,
+    ))?;
+    assert_eq!(pending["ok"], true, "{pending}");
+
+    let uri = format!("df://session/{session}/handoff");
+    let contents =
+        crate::resources::session_handoff(&session, &uri).map_err(|error| format!("{error:?}"))?;
+    let packet: Value = serde_json::from_str(contents[0].text.as_deref().ok_or("text")?)?;
+    assert_eq!(packet["schema"], "dfmcp.lab-handoff/1");
+    assert_eq!(
+        packet["pending_plan"]["plan_digest"],
+        pending["plan_digest"]
+    );
+    assert_eq!(packet["open_actions"].as_array().map(Vec::len), Some(3));
+    assert!(packet["open_actions"][0]["obligation"]["deadline_tick"].is_u64());
+    assert_eq!(packet["committed_plan_digests"][0], digest);
+    let tools: Vec<&str> = packet["resume_protocol"]
+        .as_array()
+        .ok_or("resume_protocol")?
+        .iter()
+        .filter_map(|step| step["tool"].as_str())
+        .collect();
+    assert_eq!(
+        tools,
+        ["fortress.observe", "fortress.commit", "fortress.wait"]
+    );
+    // Reading the packet never polls or dispatches: states are unchanged.
+    let again =
+        crate::resources::session_handoff(&session, &uri).map_err(|error| format!("{error:?}"))?;
+    let again: Value = serde_json::from_str(again[0].text.as_deref().ok_or("text")?)?;
+    assert_eq!(again["open_actions"], packet["open_actions"]);
+    assert_eq!(again["anchor"], packet["anchor"]);
+    Ok(())
+}

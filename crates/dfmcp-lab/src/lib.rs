@@ -153,6 +153,19 @@ impl MemoryAdapter {
         &self.snapshot
     }
 
+    /// The last receipt recorded for an action, without polling (and so
+    /// without dispatching deferred work or changing state).
+    #[must_use]
+    pub fn action_receipt(&self, action_id: ActionId) -> Option<&ActionReceipt> {
+        self.actions.get(&action_id).map(|action| &action.receipt)
+    }
+
+    /// The sealed plan step an action executes.
+    #[must_use]
+    pub fn action_step(&self, action_id: ActionId) -> Option<&PlanStep> {
+        self.actions.get(&action_id).map(|action| &action.step)
+    }
+
     #[must_use]
     pub fn transcript(&self) -> &VecDeque<LabEvent> {
         &self.transcript

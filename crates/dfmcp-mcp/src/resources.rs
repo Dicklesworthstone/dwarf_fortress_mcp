@@ -30,8 +30,13 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, RiskTier};
 
-const SESSION_SUMMARY_TEMPLATE: &str = "df://session/{session_id}/summary";
-const SESSION_CAPABILITIES_TEMPLATE: &str = "df://session/{session_id}/capabilities";
+/// One template serves every session view. The pinned fastmcp router admits
+/// at most one template per compatible leading literal (`df://session/`), so
+/// separate per-view templates would be silently dropped; dispatching on the
+/// `view` capture keeps the documented URIs exactly.
+const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
+/// Views served under `df://session/{session_id}/{view}`.
+pub const SESSION_VIEWS: [&str; 3] = ["summary", "capabilities", "handoff"];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
 fn template_definition(uri_template: &str, name: &str, description: &str) -> Resource {
@@ -231,6 +236,23 @@ pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<Re
     Ok(text_content(uri, payload.to_string()))
 }
 
+/// `df://session/{session_id}/handoff` — resumable handoff packet: anchor,
+/// grants, pending plan, open actions with obligations, and an ordered resume
+/// protocol. Requires the session's negotiated `observe` capability. Reading
+/// it never polls, dispatches, or changes state.
+pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
+    let operation = "df://session/handoff";
+    let session = lookup(session_id_hex, operation)?;
+    let mut guard = session.lock().map_err(|_| poisoned(operation))?;
+    let (_, ctx) = next_context(&mut guard).map_err(|error| denial(operation, error))?;
+    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+        return Err(denial(operation, error));
+    }
+    let mut payload = crate::server::handoff_json(&guard);
+    payload["resource"] = json!(uri);
+    Ok(text_content(uri, payload.to_string()))
+}
+
 fn read_param_or_refuse(
     params: &HashMap<String, String>,
     read: impl FnOnce(&str) -> McpResult<Vec<ResourceContent>>,
@@ -245,75 +267,6 @@ fn read_param_or_refuse(
 // ============================================================================
 // Resource handlers
 // ============================================================================
-
-/// `df://session/{session_id}/summary` — requires `observe`.
-pub struct SessionSummaryResource;
-
-impl ResourceHandler for SessionSummaryResource {
-    fn definition(&self) -> Resource {
-        template_definition(
-            SESSION_SUMMARY_TEMPLATE,
-            "session-summary",
-            "Bounded snapshot projection at the session's laboratory anchor",
-        )
-    }
-
-    fn template(&self) -> Option<ResourceTemplate> {
-        Some(template_of(
-            SESSION_SUMMARY_TEMPLATE,
-            "session-summary",
-            "Bounded snapshot projection at the session's laboratory anchor",
-        ))
-    }
-
-    fn read(&self, _ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
-        Err(template_read_refusal())
-    }
-
-    fn read_with_uri(
-        &self,
-        _ctx: &McpContext,
-        uri: &str,
-        params: &HashMap<String, String>,
-    ) -> McpResult<Vec<ResourceContent>> {
-        read_param_or_refuse(params, |raw| session_summary(raw, uri))
-    }
-}
-
-/// `df://session/{session_id}/capabilities` — self-description, no capability
-/// beyond a valid session.
-pub struct SessionCapabilitiesResource;
-
-impl ResourceHandler for SessionCapabilitiesResource {
-    fn definition(&self) -> Resource {
-        template_definition(
-            SESSION_CAPABILITIES_TEMPLATE,
-            "session-capabilities",
-            "The session's negotiated capability grants and version negotiation record",
-        )
-    }
-
-    fn template(&self) -> Option<ResourceTemplate> {
-        Some(template_of(
-            SESSION_CAPABILITIES_TEMPLATE,
-            "session-capabilities",
-            "The session's negotiated capability grants and version negotiation record",
-        ))
-    }
-
-    fn read(&self, _ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
-        Err(template_read_refusal())
-    }
-
-    fn read_with_uri(
-        &self,
-        _ctx: &McpContext,
-        uri: &str,
-        params: &HashMap<String, String>,
-    ) -> McpResult<Vec<ResourceContent>> {
-        read_param_or_refuse(params, |raw| session_capabilities(raw, uri))
-    }
-}
 
 /// `df://doctor/{session_id}` — requires `doctor`.
 pub struct DoctorBundleResource;
@@ -349,14 +302,61 @@ impl ResourceHandler for DoctorBundleResource {
     }
 }
 
+/// `df://session/{session_id}/{view}` for `summary` (requires `observe`),
+/// `capabilities` (self-description, a valid session suffices) and `handoff`
+/// (requires `observe`).
+pub struct SessionViewResource;
+
+const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot projection), \
+     capabilities (negotiated grants and version record), handoff (resumable packet with anchor, \
+     grants, pending plan, open actions, obligations and an ordered resume protocol)";
+
+impl ResourceHandler for SessionViewResource {
+    fn definition(&self) -> Resource {
+        template_definition(
+            SESSION_VIEW_TEMPLATE,
+            "session-view",
+            SESSION_VIEW_DESCRIPTION,
+        )
+    }
+
+    fn template(&self) -> Option<ResourceTemplate> {
+        Some(template_of(
+            SESSION_VIEW_TEMPLATE,
+            "session-view",
+            SESSION_VIEW_DESCRIPTION,
+        ))
+    }
+
+    fn read(&self, _ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
+        Err(template_read_refusal())
+    }
+
+    fn read_with_uri(
+        &self,
+        _ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<Vec<ResourceContent>> {
+        let view = params.get("view").map_or("", String::as_str);
+        read_param_or_refuse(params, |raw| match view {
+            "summary" => session_summary(raw, uri),
+            "capabilities" => session_capabilities(raw, uri),
+            "handoff" => session_handoff(raw, uri),
+            _ => Err(McpError::invalid_params(format!(
+                "invalid_params: unknown session view {view:?}; expected one of {SESSION_VIEWS:?}"
+            ))),
+        })
+    }
+}
+
 /// Registration helper used by `server.rs::run_stdio` so the resource order
 /// stays next to the tool registrations.
 pub fn register_all(
     builder: fastmcp_rust::modern::ServerBuilder,
 ) -> fastmcp_rust::modern::ServerBuilder {
     builder
-        .resource(SessionSummaryResource)
-        .resource(SessionCapabilitiesResource)
+        .resource(SessionViewResource)
         .resource(DoctorBundleResource)
 }
 
@@ -598,15 +598,11 @@ mod tests {
 
     #[test]
     fn resource_templates_advertise_session_scoped_families() {
-        let summary = SessionSummaryResource.template().expect("summary template");
-        assert_eq!(summary.uri_template, "df://session/{session_id}/summary");
-        let capabilities = SessionCapabilitiesResource
+        let views = SessionViewResource
             .template()
-            .expect("capabilities template");
-        assert_eq!(
-            capabilities.uri_template,
-            "df://session/{session_id}/capabilities"
-        );
+            .expect("session view template");
+        assert_eq!(views.uri_template, "df://session/{session_id}/{view}");
+        assert_eq!(SESSION_VIEWS, ["summary", "capabilities", "handoff"]);
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");
     }

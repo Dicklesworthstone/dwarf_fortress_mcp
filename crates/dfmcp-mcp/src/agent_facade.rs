@@ -1318,6 +1318,9 @@ pub fn run_stdio() {
         .tool(FortressRestore)
         .tool(FortressExplain)
         .tool(FortressDoctor)
+        // Every Agent Turn references these session resources; serve them.
+        .resource(crate::resources::SessionViewResource)
+        .resource(crate::resources::DoctorBundleResource)
         .request_timeout(30)
         .instructions(
             "Dwarf Fortress semantic control plane (laboratory slice). Call fortress_open_session \

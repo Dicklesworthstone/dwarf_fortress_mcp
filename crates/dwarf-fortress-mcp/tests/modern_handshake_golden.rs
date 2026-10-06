@@ -488,3 +488,61 @@ fn test_negative_era_refusal_and_marker_validations() -> Result<(), Box<dyn Erro
     }
     Ok(())
 }
+
+/// Every Agent Turn references `df://session/{id}/summary|capabilities|handoff`;
+/// all three must resolve on the real `serve` binary (the pinned router admits
+/// only one `df://session/` template, so one view template serves them).
+#[test]
+fn test_session_resources_resolve_over_stdio() -> Result<(), Box<dyn Error>> {
+    let mut client = StdioClient::spawn()?;
+    let discover = client.send(&json!({
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": { "_meta": modern_meta() }
+    }))?;
+    assert_eq!(discover["id"], 1);
+    let opened = client.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {
+            "_meta": modern_meta(),
+            "name": "fortress_open_session",
+            "arguments": { "paused": true }
+        }
+    }))?;
+    assert_modern_envelope(&opened, 2);
+    let open_data: Value = serde_json::from_str(
+        opened["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or("content text missing")?,
+    )?;
+    let session_id = open_data["session_id"]
+        .as_str()
+        .ok_or("session_id missing")?
+        .to_owned();
+    let references = open_data["agent_turn"]["references"]
+        .as_array()
+        .ok_or("references missing")?
+        .clone();
+    assert_eq!(references.len(), 3);
+    for (index, reference) in references.iter().enumerate() {
+        let uri = reference["uri"].as_str().ok_or("reference uri")?;
+        let id = 3 + index as u64;
+        let read = client.send(&json!({
+            "jsonrpc": "2.0", "id": id, "method": "resources/read",
+            "params": { "_meta": modern_meta(), "uri": uri }
+        }))?;
+        assert_modern_envelope(&read, id);
+        let body: Value = serde_json::from_str(
+            read["result"]["contents"][0]["text"]
+                .as_str()
+                .ok_or("resource text missing")?,
+        )?;
+        assert_eq!(body["ok"], true, "{uri}: {body}");
+        assert_eq!(body["session_id"], session_id.as_str());
+    }
+    let unknown = client.send(&json!({
+        "jsonrpc": "2.0", "id": 9, "method": "resources/read",
+        "params": { "_meta": modern_meta(), "uri": format!("df://session/{session_id}/secrets") }
+    }))?;
+    assert!(unknown.get("error").is_some(), "{unknown}");
+    Ok(())
+}

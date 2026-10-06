@@ -81,7 +81,6 @@ pub(crate) struct LabSession {
 
 /// A plan sealed by `fortress_plan` and awaiting `fortress_commit`.
 struct PendingPlan {
-    #[allow(dead_code)]
     plan: PreparedPlan,
     digest: String,
 }
@@ -1013,6 +1012,94 @@ fn semantic_intent(
     })
 }
 
+/// A resumable handoff packet: everything a fresh agent needs to continue this
+/// session safely without the transcript. Read-only; it grants nothing.
+pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
+    let snapshot = session.adapter.snapshot();
+    let action_view = |action_id: ActionId| {
+        let receipt = session.adapter.action_receipt(action_id);
+        let step = session.adapter.action_step(action_id);
+        json!({
+            "action_id": format!("{action_id}"),
+            "step": receipt.map(|r| r.step_id.get()),
+            "state": receipt.map(|r| format!("{:?}", r.state)),
+            "risk": step.map(|s| s.risk.as_str()),
+            "capability": step.map(|s| s.required_capability.as_str()),
+            "obligation": step.and_then(|s| s.obligation.as_ref()).map(|o| json!({
+                "terminal": crate::lab_world::predicate_json(&o.terminal),
+                "deadline_tick": o.deadline_tick.0,
+            })),
+        })
+    };
+    let pending = session.pending.as_ref().map(|pending| {
+        json!({
+            "plan_digest": pending.digest,
+            "expires_at_tick": pending.plan.expires_at_tick.0,
+            "anchor_sequence": pending.plan.anchor.cursor.sequence,
+            "required_capabilities": plan_authority(&pending.plan)
+                .iter()
+                .map(|(capability, risk)| json!({"capability": capability.as_str(), "max_risk": risk.as_str()}))
+                .collect::<Vec<_>>(),
+            "steps": crate::lab_world::plan_steps_json(&pending.plan),
+        })
+    });
+    let mut resume = vec![json!({
+        "tool": "fortress.observe",
+        "arguments": {"session_id": format!("{}", session.session_id)},
+        "why": "re-establish the current anchor before acting on anything below",
+    })];
+    if let Some(pending) = session.pending.as_ref() {
+        resume.push(json!({
+            "tool": "fortress.commit",
+            "arguments": {"session_id": format!("{}", session.session_id), "plan_digest": pending.digest},
+            "why": "a sealed plan awaits commit; it is refused if the anchor moved, in which case re-plan the same intent",
+        }));
+    }
+    if !session.open_actions.is_empty() {
+        resume.push(if snapshot.paused {
+            json!({
+                "tool": "fortress.plan",
+                "arguments": {"session_id": format!("{}", session.session_id), "paused_target": false},
+                "why": "committed work is open but the fortress is paused, so it cannot progress",
+            })
+        } else {
+            json!({
+                "tool": "fortress.wait",
+                "arguments": {"session_id": format!("{}", session.session_id), "max_game_ticks": 100},
+                "why": "committed work is open; let bounded game time pass and prove obligations",
+            })
+        });
+    }
+    json!({
+        "ok": true,
+        "schema": "dfmcp.lab-handoff/1",
+        "session_id": format!("{}", session.session_id),
+        "fortress_id": format!("{}", session.fortress_id),
+        "anchor": anchor_json(&snapshot.anchor()),
+        "game_tick": snapshot.tick.0,
+        "paused": snapshot.paused,
+        "granted_capabilities": session
+            .grants
+            .iter()
+            .map(|grant| json!({"capability": grant.capability.as_str(), "max_risk": grant.max_risk.as_str()}))
+            .collect::<Vec<_>>(),
+        "budget": {
+            "max_game_ticks": session.budget.max_game_ticks,
+            "max_entities": session.budget.max_entities,
+            "max_bytes": session.budget.max_bytes,
+            "max_output_tokens": session.budget.max_output_tokens,
+            "max_actions": session.budget.max_actions,
+        },
+        "pending_plan": pending,
+        "open_actions": session.open_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
+        "last_plan_actions": session.last_plan_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
+        "committed_plan_digests": session.commit_receipts.keys().collect::<Vec<_>>(),
+        "resume_protocol": resume,
+        "authority": "reading this packet grants nothing; every commit and cancel re-checks the session's negotiated grants",
+        "epistemic_note": "action states are the last recorded receipts; fortress.wait re-evaluates them against a fresh observation",
+    })
+}
+
 /// The (capability, risk ceiling) pairs a sealed plan needs to be committed.
 fn plan_authority(plan: &PreparedPlan) -> Vec<(Capability, RiskTier)> {
     let mut authority: BTreeMap<Capability, RiskTier> = BTreeMap::new();
@@ -1822,8 +1909,7 @@ pub fn run_stdio() {
         .tool(FortressRestore)
         .tool(FortressExplain)
         .tool(FortressDoctor)
-        .resource(crate::resources::SessionSummaryResource)
-        .resource(crate::resources::SessionCapabilitiesResource)
+        .resource(crate::resources::SessionViewResource)
         .resource(crate::resources::DoctorBundleResource)
         .request_timeout(30)
         .instructions(

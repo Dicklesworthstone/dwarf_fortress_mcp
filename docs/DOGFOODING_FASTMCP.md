@@ -78,6 +78,12 @@ premature; this row supersedes it.
 | 2026-09-22 | `12d3469df8081ffdb663019ee4936324fedc98d5` (fastmcp_rust v0.8.0) | External stdio client: DRAFT-A reproduced (R1), DRAFT-B re-confirmed by ignored golden test, DOC-QUESTION C captured | Defects filed upstream: #73 (discover silence), #74 (tools/list dispatch), #75 (UriParams facade re-export) | `/tmp/dfmcp_dogfood_captures/`, `repro_fastmcp_stdio.py`, issues #73/#74/#75 |
 | 2026-10-06 | `180a7c88890705217bb8e202d19555adabf24187` (main, Asupersync 0.5.0) | Real subprocess stdio: `server/discover` → `tools/list` (all eleven tools) → open → observe → plan → commit → idempotent commit replay → explain, plus the negative-era/marker fixtures | PASS for both golden tests; the `tools/list` dispatch hang (#74) no longer reproduces. The ignore was removed. The replay check now compares the receipt verbatim and requires a fresh Agent Turn whose continuity basis is the post-commit anchor. #73 and #75 were not re-executed. | `cargo test -p dwarf-fortress-mcp --test modern_handshake_golden` (2 passed, 0 ignored) |
 
+## Findings under the `180a7c8` pin
+
+| Draft | Finding | Reproduction | Expected | Actual | Classification / disposition |
+|---|---|---|---|---|---|
+| DRAFT-E | Resource templates whose leading literal prefixes are compatible are rejected as possibly overlapping, and `ServerBuilder::resource` only logs the rejection (`log::warn!`), so the server starts with templates silently missing. | Register `df://session/{session_id}/summary` then `df://session/{session_id}/capabilities`; `resources/templates/list` shows only the first, and reads of the second return `-32602 Resource not found`. | Either admit literal-suffix-disjoint templates or fail the build/startup loudly. | Second template dropped; only a log line records it. | *ergonomics* (the conservative overlap rule is documented in the router; the silent drop is the obstructive part). Not worked around: dfmcp now serves the documented URIs from one `df://session/{session_id}/{view}` template, which is a design choice, not a mask. Regression: `test_session_resources_resolve_over_stdio`. Unfiled. |
+
 ## Open defects under the v0.8.0 pin (`12d3469`)
 
 Findings from the 2026-08-31 dogfooding pass; not yet filed as upstream
