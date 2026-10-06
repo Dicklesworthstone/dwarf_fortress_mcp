@@ -603,6 +603,103 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
     )
 }
 
+/// Most active-work entries and units a briefing lists explicitly.
+const MAX_BRIEFING_ITEMS: usize = 16;
+
+fn text_field<'a>(entity: &'a EntityRecord, name: &str) -> Option<&'a str> {
+    match entity.fields.get(name).map(|fact| &fact.value) {
+        Some(Value::Text(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// A bounded situational briefing of the whole laboratory world: entity counts
+/// by kind (complete), active work with progress, and the dwarves. Lists are
+/// capped and say how many were omitted; counts are always complete.
+pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
+    let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
+    for entity in snapshot.graph.entities.values() {
+        *counts.entry(entity.kind.as_str()).or_insert(0) += 1;
+    }
+    let active: Vec<&EntityRecord> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| {
+            matches!(
+                text_field(entity, effects::STATUS_FIELD),
+                Some(effects::STATUS_ACTIVE)
+            ) || matches!(
+                text_field(entity, effects::CONSTRUCTION_STAGE_FIELD),
+                Some(effects::STAGE_PLANNED | effects::STAGE_UNDER_CONSTRUCTION)
+            )
+        })
+        .collect();
+    let active_work: Vec<Json> = active
+        .iter()
+        .take(MAX_BRIEFING_ITEMS)
+        .map(|entity| {
+            let progress: BTreeMap<String, Json> = [
+                effects::TILES_REMAINING_FIELD,
+                effects::AMOUNT_REMAINING_FIELD,
+                effects::CONSTRUCTION_STAGE_FIELD,
+                "progress_ticks",
+                "required_ticks",
+            ]
+            .iter()
+            .filter_map(|name| {
+                entity
+                    .fields
+                    .get(*name)
+                    .map(|fact| ((*name).to_owned(), value_json(&fact.value)))
+            })
+            .collect();
+            json!({
+                "entity_id": entity.id.get().to_string(),
+                "kind": entity.kind.as_str(),
+                "label": entity.label,
+                "progress": progress,
+            })
+        })
+        .collect();
+    let units: Vec<&EntityRecord> = snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| entity.kind == EntityKind::Unit)
+        .collect();
+    let dwarves: Vec<Json> = units
+        .iter()
+        .take(MAX_BRIEFING_ITEMS)
+        .map(|unit| {
+            let labors: Vec<&str> = unit
+                .fields
+                .iter()
+                .filter(|(name, fact)| {
+                    name.starts_with(effects::LABOR_FIELD_PREFIX) && fact.value == Value::Bool(true)
+                })
+                .map(|(name, _)| &name[effects::LABOR_FIELD_PREFIX.len()..])
+                .collect();
+            json!({
+                "entity_id": unit.id.get().to_string(),
+                "name": unit.label,
+                "profession": text_field(unit, "profession"),
+                "enabled_labors": labors,
+                "squad": unit.fields.get(effects::SQUAD_FIELD).map(|fact| value_json(&fact.value)),
+            })
+        })
+        .collect();
+    json!({
+        "counts_by_kind": counts,
+        "terrain_chunks_observed": snapshot.graph.chunks.len(),
+        "active_work": active_work,
+        "active_work_omitted": active.len().saturating_sub(MAX_BRIEFING_ITEMS),
+        "dwarves": dwarves,
+        "dwarves_omitted": units.len().saturating_sub(MAX_BRIEFING_ITEMS),
+        "drill_down": "fortress.query with {\"mode\":\"entities\",\"kind\":...} or {\"mode\":\"terrain\",...}",
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 enum QuerySpec {
@@ -788,6 +885,23 @@ mod tests {
         ] {
             assert!(parse_steps(bad).is_err(), "{bad}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn briefing_counts_everything_and_lists_active_work_and_dwarves() -> Result<()> {
+        let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(3), false)?;
+        let dig = Action::DesignateDig {
+            area: cuboid([0, 3, 10], [1, 3, 10])?,
+            mode: DigMode::Mine,
+        };
+        effects::apply_effect(&mut snapshot, &dig, "k")?;
+        let briefing = briefing(&snapshot);
+        assert_eq!(briefing["counts_by_kind"]["unit"], 7);
+        assert_eq!(briefing["counts_by_kind"]["dig_designation"], 1);
+        assert_eq!(briefing["active_work"][0]["progress"]["tiles_remaining"], 2);
+        assert_eq!(briefing["dwarves"].as_array().map(Vec::len), Some(7));
+        assert_eq!(briefing["dwarves"][0]["profession"], "miner");
         Ok(())
     }
 

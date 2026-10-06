@@ -1012,6 +1012,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["projection"] = json!("summary");
                         payload["session_id"] = json!(format!("{}", guard.session_id));
                         payload["evidence_count"] = json!(frame.evidence.len());
+                        payload["world"] = crate::lab_world::briefing(&snapshot);
                         payload.to_string()
                     }
                     ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => {

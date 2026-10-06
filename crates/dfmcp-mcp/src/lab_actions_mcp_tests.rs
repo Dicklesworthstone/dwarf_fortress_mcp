@@ -836,3 +836,25 @@ fn a_stale_commit_is_recorded_as_a_surprise() -> TestResult {
     assert_eq!(surprise["surprise"]["kind"], "anchor_moved_before_commit");
     Ok(())
 }
+
+#[test]
+fn observe_briefs_the_starter_fortress_under_the_default_budget() -> TestResult {
+    let opened = parsed(&fortress_open_session(
+        Some(true),
+        Some("72012".to_owned()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("starter_fortress".to_owned()),
+        None,
+    ))?;
+    let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+    let observed = parsed(&fortress_observe(Some(session)))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    assert_eq!(observed["world"]["counts_by_kind"]["unit"], 7);
+    Ok(())
+}
