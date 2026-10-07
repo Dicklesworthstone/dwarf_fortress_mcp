@@ -147,6 +147,22 @@ native, live-game, registry or production evidence.
   §14.2 adversary class to a test (tainted text, closed vocabularies, forged or
   replayed digests, forged sessions, hostile sizes, checkpoint-id traversal); a
   session without observe/query learns no world fact through any channel.
+- **Measured, not asserted.** `dwarf-fortress-mcp bench [iterations]` scores
+  SLO-001..015 through the eleven-tool facade. Release build, 500 iterations,
+  this container: p99 heartbeat 0.34 ms, delta 0.39 ms, entities query 0.33 ms,
+  10-step plan 4.1 ms (SLO-001..004 pass); briefing median 1,444 tokens
+  (SLO-007 pass); RSS 11 MiB (SLO-011 pass); 500 publication fault schedules
+  with no divergence and 99 journal crash points recovered (SLO-008/010
+  partial: below the 10,000/1,000 sample targets); mutating responses carry
+  identity (SLO-014 pass). **Failing:** SLO-005 heartbeat median 473 tokens
+  (target 150) and SLO-006 delta median 667 tokens (target 500) once the bench
+  fortress is in a supply crisis. SLO-009/013/015 need the live corpus.
+- **Semantic profiles.** Pulse turns omit the briefing, affordance catalogue
+  and references (named in `coverage.omitted_by_profile`) and drop repeated
+  anchors and boilerplate; briefings elide default-valued affordance fields.
+- **Anchor v2.** `dfmcp_core::StateAnchorV2` is the complete version tuple with
+  strict canonical bytes and a total continuity classification, exposed on
+  `df://session/{id}/anchor`; v1 remains the wire anchor.
 - **Fixes found by these tests.** Path endpoints overflowed `i32` arithmetic;
   plan-scope `compensate_reversible` applied the inverse of deferred steps that
   never dispatched.

@@ -98,6 +98,11 @@ readiness.
 - PUB-OBS root-last `CapsulePublisher`, seed-pinned `FaultSchedule` campaigns (replacing
   `chaos.rs`), the `dfmcp.replay.bundle/1` JSON schema with a golden replay regression, an
   adversarial threat corpus, and a capability noninterference test.
+- `dwarf-fortress-mcp bench [iterations]`: laboratory SLO-001..015 scorecard (latency, output
+  tokens, fault-schedule correctness, RSS, response identity; live-only rows marked N/A). Pulse and
+  briefing observation profiles are now semantic shapings with named omissions.
+- `dfmcp_core::StateAnchorV2`: the complete anchor tuple with strict canonical bytes and a total
+  continuity classification, exposed on the session anchor resource.
 - Renamed capability-implying names: `table_ledger` (was `sqlite_ledger`),
   `http_resumption_lab` (was `http_transport`), `e2e_lab_fortress_tests`, and
   `DelegationToken.delegation_digest`.
