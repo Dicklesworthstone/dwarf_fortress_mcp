@@ -5,8 +5,8 @@
 //! (control/1.7 pause, dig/1.16, build/1.19 furniture, work-orders/1.10,
 //! workforce/1.17). This module is the single, pure, deterministic seam
 //! between the two: for every step of a [`PreparedPlan`] it yields either the
-//! exact typed live request (already validated by that family's own
-//! constructors) or an explicit refusal naming what the live surface lacks.
+//! bounded advisory request or an explicit refusal naming what the live surface
+//! lacks. Canonical identities and semantic constraints survive translation.
 //!
 //! Routing is not authority. A route grants nothing, performs no I/O and never
 //! weakens a family's own preconditions, journals or confirmation; every
@@ -14,15 +14,27 @@
 //! `IMPLEMENTATION_STATUS.md` exists. Values that only a fresh live read can
 //! supply (a concrete furniture item, a work-detail index) are left as named
 //! resolution requirements rather than guessed.
+//!
+//! [`LiveRoutingEvidence`] binds resolution to an exact source-qualified canonical
+//! snapshot and its typed live projection. Resolution produces a native plan for
+//! review, never permission to prepare or dispatch it. Bead:
+//! `df-dfhack-bridge-plane-c-pic.4`.
 
 use std::collections::BTreeSet;
 
 use dfmcp_core::{EntityId, MapCoord, MapCuboid, Result, StepId};
-use dfmcp_intent::{Action, BuildingKind, DigMode, PlanStep, PreparedPlan};
+use dfmcp_intent::{Action, BuildingKind, DigMode, MaterialSelector, PlanStep, PreparedPlan};
 
-use crate::build_placement::BuildKind;
+use crate::build_placement::{BuildKind, BuildSelection};
 use crate::dig_designation::DigRegion;
 use crate::work_orders::{WorkOrderRecipe, WorkOrderSpec};
+
+#[path = "live_routing_resolution.rs"]
+mod resolution;
+pub use resolution::{
+    LiveIdentitySchema, LiveRoutingEvidence, NativeUnitIdentity, ResolvedFurnitureRoute,
+    ResolvedWorkforceRoute, resolve_furniture_step, resolve_workforce_step,
+};
 
 /// Largest dig/1.16 rectangle edge.
 pub const MAX_DIG_EDGE: i32 = 8;
@@ -69,15 +81,19 @@ impl LiveFamily {
 /// A value the live family needs that only a fresh live read can supply.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LiveResolution {
-    /// An exact unclaimed furniture item of this kind, reachable from the
-    /// target (furniture allocation over an operations/1.4 inventory).
-    FurnitureItem { kind: BuildKind },
-    /// The work-detail index whose labor set contains this labor (from the
-    /// workforce/1.17 capture of exactly these units, taken while paused).
+    /// An exact eligible item and evidence for every retained material rule.
+    /// The current native capture cannot resolve token or allocation policies.
+    FurnitureItem {
+        kind: BuildKind,
+        material: MaterialSelector,
+    },
+    /// An exact canonical-to-native identity resolution and a selected-only
+    /// detail containing only this labor, with no overlapping permission on
+    /// removal. Broad work-detail membership is not a single-labor action.
     WorkDetailForLabor { labor: String },
 }
 
-/// The typed live request for one semantic step.
+/// An advisory request, not a native wire request or dispatch permission.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LiveRequest {
     Pause {
@@ -90,12 +106,15 @@ pub enum LiveRequest {
     Furniture {
         kind: BuildKind,
         target: [u32; 3],
+        material: MaterialSelector,
     },
     WorkOrder {
         spec: WorkOrderSpec,
     },
     WorkDetail {
-        units: Vec<u32>,
+        /// Original canonical entities. These must never be cast to native IDs.
+        units: Vec<EntityId>,
+        labor: String,
         assigned: bool,
     },
 }
@@ -132,7 +151,8 @@ pub struct PlanRoute {
 }
 
 impl PlanRoute {
-    /// Whether every step has a live route.
+    /// Whether every step has an advisory family route. This does not establish
+    /// that resolution, authority, compatibility, or native preparation can pass.
     #[must_use]
     pub fn fully_routable(&self) -> bool {
         self.steps.iter().all(|step| step.outcome.is_ok())
@@ -163,6 +183,33 @@ fn coord_u32(value: i32, what: &str) -> std::result::Result<u32, LiveRefusal> {
 /// Tile `area` into dig/1.16 rectangles: one z level at a time, at most
 /// 8x8, in canonical z, y, x order. The union is exactly `area`.
 pub fn tile_dig_area(area: MapCuboid) -> std::result::Result<Vec<DigRegion>, LiveRefusal> {
+    // Check the whole native geometry before subtracting signed coordinates or
+    // iterating. Public MapCuboid fields can bypass its constructor.
+    if area.min.x > area.max.x
+        || area.min.y > area.max.y
+        || area.min.z > area.max.z
+        || !(1..=32766).contains(&area.min.x)
+        || !(1..=32766).contains(&area.max.x)
+        || !(1..=32766).contains(&area.min.y)
+        || !(1..=32766).contains(&area.max.y)
+        || !(1..=32766).contains(&area.min.z)
+        || !(1..=32766).contains(&area.max.z)
+    {
+        return Err(LiveRefusal {
+            reason: "dig/1.16 needs ordered native coordinates and a complete halo".to_owned(),
+        });
+    }
+    let width = u64::from((area.max.x - area.min.x + 1) as u32);
+    let height = u64::from((area.max.y - area.min.y + 1) as u32);
+    let levels = u64::from((area.max.z - area.min.z + 1) as u32);
+    let count = width.div_ceil(MAX_DIG_EDGE as u64) * height.div_ceil(MAX_DIG_EDGE as u64) * levels;
+    if count > MAX_DIG_REGIONS_PER_STEP as u64 {
+        return Err(LiveRefusal {
+            reason: format!(
+                "excavation needs more than {MAX_DIG_REGIONS_PER_STEP} dig/1.16 rectangles; split it into smaller steps"
+            ),
+        });
+    }
     let mut regions = Vec::new();
     for z in area.min.z..=area.max.z {
         let mut y = area.min.y;
@@ -223,20 +270,15 @@ pub fn work_order_recipe(job_token: &str) -> Option<WorkOrderRecipe> {
     }
 }
 
-fn unit_ids(units: &[EntityId]) -> std::result::Result<Vec<u32>, LiveRefusal> {
-    if units.is_empty() || units.len() > MAX_WORKFORCE_UNITS {
+fn unit_ids(units: &[EntityId]) -> std::result::Result<Vec<EntityId>, LiveRefusal> {
+    if units.is_empty() || units.len() > MAX_WORKFORCE_UNITS || units.contains(&EntityId::NIL) {
         return Err(LiveRefusal {
-            reason: format!("workforce/1.17 observes 1..={MAX_WORKFORCE_UNITS} units at once"),
+            reason: format!(
+                "workforce/1.17 needs 1..={MAX_WORKFORCE_UNITS} nonzero canonical unit identities"
+            ),
         });
     }
-    let mut ids = units
-        .iter()
-        .map(|unit| {
-            u32::try_from(unit.get()).map_err(|_| LiveRefusal {
-                reason: format!("unit {unit} is not a native unit id"),
-            })
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut ids = units.to_vec();
     ids.sort_unstable();
     ids.dedup();
     Ok(ids)
@@ -246,9 +288,39 @@ fn single_tile(footprint: MapCuboid, location: MapCoord) -> bool {
     footprint.min == footprint.max && footprint.min == location
 }
 
+fn route_shape(action: &Action) -> std::result::Result<(), LiveRefusal> {
+    let valid_token = |token: &str, maximum: usize| {
+        !token.is_empty() && token.len() <= maximum && !token.chars().any(char::is_control)
+    };
+    match action {
+        Action::SetLabor { labor, .. } if !valid_token(labor, 64) => Err(LiveRefusal {
+            reason: "workforce/1.17 labor keys require 1..=64 non-control UTF-8 bytes".to_owned(),
+        }),
+        Action::Build { material, .. }
+            if material.required_tokens.len() > 64
+                || material.forbidden_tokens.len() > 64
+                || material.required_tokens.iter().chain(&material.forbidden_tokens)
+                    .any(|token| !valid_token(token, 128))
+                || !material.required_tokens.is_disjoint(&material.forbidden_tokens) =>
+        {
+            Err(LiveRefusal {
+                reason: "material selectors require disjoint bounded token sets (at most 64 per set, 128 bytes per token)".to_owned(),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Route one sealed step onto its live family, or explain why it cannot be.
 #[must_use]
 pub fn route_step(step: &PlanStep) -> StepRoute {
+    if let Err(refusal) = route_shape(&step.action) {
+        return StepRoute {
+            step: step.id,
+            idempotency_key: step.idempotency_key.clone(),
+            outcome: Err(refusal),
+        };
+    }
     let outcome = match &step.action {
         Action::Pause { paused } => Ok(RoutedStep {
             family: LiveFamily::ControlV1_7,
@@ -278,7 +350,7 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
             kind,
             location,
             footprint,
-            ..
+            material,
         } => match kind {
             BuildingKind::Furniture(name) => match furniture_kind(name) {
                 Some(kind) if single_tile(*footprint, *location) => {
@@ -287,16 +359,23 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
                         coord_u32(location.y, "y"),
                         coord_u32(location.z, "z"),
                     ) {
-                        (Ok(x), Ok(y), Ok(z)) => Ok(RoutedStep {
+                        (Ok(x), Ok(y), Ok(z)) => BuildSelection::new(kind, 0, [x, y, z])
+                        .map_err(|error| LiveRefusal { reason: error.message })
+                        .map(|selection| RoutedStep {
                             family: LiveFamily::BuildV1_19,
                             request: LiveRequest::Furniture {
                                 kind,
-                                target: [x, y, z],
+                                target: selection.target(),
+                                material: material.clone(),
                             },
-                            requires: vec![LiveResolution::FurnitureItem { kind }],
+                            requires: vec![LiveResolution::FurnitureItem {
+                                kind,
+                                material: material.clone(),
+                            }],
                             live_preconditions: vec![
                                 "the target is an observed, unoccupied floor tile with a complete same-level halo",
-                                "an exact unclaimed item of the kind is reachable",
+                                "an exact eligible item of the kind is selected from one live capture",
+                                "every material, nearest-item and reservation constraint must be established; unsupported constraints are refused",
                             ],
                         }),
                         (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => Err(error),
@@ -341,6 +420,7 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
             family: LiveFamily::WorkforceV1_17,
             request: LiveRequest::WorkDetail {
                 units,
+                labor: labor.clone(),
                 assigned: *enabled,
             },
             requires: vec![LiveResolution::WorkDetailForLabor {
@@ -348,7 +428,9 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
             }],
             live_preconditions: vec![
                 "the game is paused while the work-detail membership changes",
-                "the resolved detail is automatic, selected-only and includes the labor",
+                "canonical unit identities are resolved from the exact source schema, snapshot and native capture",
+                "the resolved detail is automatic, selected-only and contains only the requested labor",
+                "removal has no other granting detail and readback changes no other labor",
             ],
         }),
         Action::ConfigureStockpile { .. } => {
@@ -474,13 +556,15 @@ mod tests {
             routed.request,
             LiveRequest::Furniture {
                 kind: BuildKind::Bed,
-                target: [5, 6, 10]
+                target: [5, 6, 10],
+                material: MaterialSelector::default(),
             }
         );
         assert_eq!(
             routed.requires,
             vec![LiveResolution::FurnitureItem {
-                kind: BuildKind::Bed
+                kind: BuildKind::Bed,
+                material: MaterialSelector::default(),
             }]
         );
         let still = route_step(&step(Action::Build {
@@ -526,11 +610,17 @@ mod tests {
         }));
         match labor.outcome {
             Ok(RoutedStep {
-                request: LiveRequest::WorkDetail { units, assigned },
+                request:
+                    LiveRequest::WorkDetail {
+                        units,
+                        assigned,
+                        labor,
+                    },
                 requires,
                 ..
             }) => {
-                assert_eq!(units, vec![3, 9]);
+                assert_eq!(units, vec![EntityId::new(3), EntityId::new(9)]);
+                assert_eq!(labor, "MINE");
                 assert!(assigned);
                 assert_eq!(
                     requires,

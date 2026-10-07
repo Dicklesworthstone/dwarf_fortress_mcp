@@ -3237,20 +3237,23 @@ fn forecast_plan(
         .max(dfmcp_intent::effects::DEFAULT_POLL_INTERVAL_TICKS);
     if !blocked_by_pause && span > 0 {
         let mut elapsed = 0u64;
-        while elapsed <= span && outcomes.iter().any(|(_, _, state, _)| !state.is_terminal()) {
-            if fork.advance_ticks(slice).is_err() {
-                break;
+        while elapsed < span && outcomes.iter().any(|(_, _, state, _)| !state.is_terminal()) {
+            let advance = slice.min(span - elapsed);
+            if let Err(error) = fork.advance_ticks(advance) {
+                return unavailable(&error);
             }
-            elapsed += slice;
+            elapsed += advance;
             for outcome in &mut outcomes {
                 if outcome.2.is_terminal() {
                     continue;
                 }
-                if let Ok(polled) = fork.poll_action(outcome.1, &context(&fork)) {
-                    outcome.2 = polled.state;
-                    if polled.state.is_terminal() {
-                        outcome.3 = Some(fork.snapshot().tick.0);
-                    }
+                let polled = match fork.poll_action(outcome.1, &context(&fork)) {
+                    Ok(polled) => polled,
+                    Err(error) => return unavailable(&error),
+                };
+                outcome.2 = polled.state;
+                if polled.state.is_terminal() {
+                    outcome.3 = Some(fork.snapshot().tick.0);
                 }
             }
         }
@@ -3302,34 +3305,45 @@ fn live_routing_json(plan: &PreparedPlan) -> serde_json::Value {
                     LiveRequest::Dig { regions } => json!({
                         "dig_regions": regions.iter().map(|r| r.coordinates()).collect::<Vec<_>>(),
                     }),
-                    LiveRequest::Furniture { kind, target } => {
-                        json!({"furniture": kind.as_str(), "target": target})
+                    LiveRequest::Furniture { kind, target, material } => {
+                        json!({"furniture": kind.as_str(), "target": target,
+                            "material": {
+                                "required_tokens": material.required_tokens,
+                                "forbidden_tokens": material.forbidden_tokens,
+                                "prefer_nearest": material.prefer_nearest,
+                                "reserve_count": material.reserve_count,
+                            },
+                        })
                     }
                     LiveRequest::WorkOrder { spec } => {
                         json!({"recipe": spec.recipe().as_str(), "amount": spec.amount()})
                     }
-                    LiveRequest::WorkDetail { units, assigned } => {
-                        json!({"units": units, "assigned": assigned})
+                    LiveRequest::WorkDetail { units, labor, assigned } => {
+                        json!({"canonical_units": units.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                            "labor": labor, "assigned": assigned,
+                            "native_units": null,
+                        })
                     }
                 };
                 let requires: Vec<String> = routed
                     .requires
                     .iter()
                     .map(|r| match r {
-                        LiveResolution::FurnitureItem { kind } => {
+                        LiveResolution::FurnitureItem { kind, .. } => {
                             format!(
-                                "an exact unclaimed {} item from a live inventory read",
+                                "an exact unclaimed {} item from a live inventory read satisfying every retained material selector",
                                 kind.as_str()
                             )
                         }
                         LiveResolution::WorkDetailForLabor { labor } => {
-                            format!("the live work detail that carries labor {labor}")
+                            format!("an evidence-bound native unit mapping and selected-only work detail containing exactly labor {labor}; verify the native readback changed no other labor")
                         }
                     })
                     .collect();
                 json!({
                     "step": step.step.get(),
                     "routable": true,
+                    "execution_ready": false,
                     "protocol": routed.family.protocol(),
                     "dev_server": routed.family.dev_server(),
                     "dev_server_observations": match &routed.request {
@@ -3353,6 +3367,7 @@ fn live_routing_json(plan: &PreparedPlan) -> serde_json::Value {
         .collect();
     json!({
         "fully_routable": route.fully_routable(),
+        "execution_ready": false,
         "protocols": route.families().iter().map(|f| f.protocol()).collect::<Vec<_>>(),
         "steps": steps,
         "admission": "unadmitted development families only; routing is not authority and no live effect is admitted",

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-07 — Evidence-bound native routing and truthful forecast refusal
+
+- Preserve canonical workforce IDs, exact labor and all furniture material
+  constraints in advisory routes. Resolve native IDs through the real V1 or
+  spatial/1.8 projection with exact source and canonical generation evidence.
+- Resolve workforce candidates only from an exact paused capture and an
+  unambiguous single-labor detail. Reject overlapping disable grants and require
+  independent readback that no other labor changed. Bind furniture candidates
+  to exact item/material/position/flag/map evidence and refuse unsupported selectors.
+- Validate native coordinate and tiling bounds before route construction. MCP
+  output exposes canonical IDs and unresolved native values, retains material
+  constraints, and explicitly marks advisory routes as not execution-ready.
+- Return unavailable forecasts on actual simulation/poll refusal and clip the
+  final slice to its horizon. Add two MCP regressions; their execution remains
+  pending under the shared-memory build limit.
+- Frozen routing execution passed all 17 focused tests, zero failures/ignored,
+  with unchanged source hashes. No generic native dispatcher or live admission
+  is claimed; full semantic execution custody remains a separate increment.
+
 ## 2026-10-07 — Causal, bounded reference time advancement
 
 - Advance construction, excavation, production, meals and combat on one causal

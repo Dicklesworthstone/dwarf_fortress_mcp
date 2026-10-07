@@ -823,3 +823,82 @@ fn ordinary_stop_needs_production_authority_but_no_clock_grant() -> TestResult {
     assert!(!snapshot(&session)?.paused);
     Ok(())
 }
+
+#[test]
+fn forecast_and_one_long_wait_respect_completed_order_causality() -> TestResult {
+    let session = open("73622")?;
+    let start = snapshot(&session)?.tick.0;
+    let actions = json!([
+        {"action": {
+            "kind": "create_work_order", "name": "first part",
+            "job_token": "MAKE_PART", "amount": 1, "conditions": [],
+        }},
+        {"action": {
+            "kind": "create_work_order", "name": "assembly",
+            "job_token": "ASSEMBLE_PART", "amount": 1,
+            "conditions": [{"kind": "completed_order", "order_name": "first part"}],
+        }},
+    ])
+    .to_string();
+    let planned = plan(&session, &actions)?;
+    assert_eq!(planned["forecast"]["available"], true, "{planned}");
+    assert_eq!(planned["forecast"]["predicted_complete"], true, "{planned}");
+    assert_eq!(
+        planned["forecast"]["steps"][0]["predicted_terminal_tick"],
+        start + 50
+    );
+    assert_eq!(
+        planned["forecast"]["steps"][1]["predicted_terminal_tick"],
+        start + 100
+    );
+    assert_eq!(snapshot(&session)?.tick.0, start);
+    let committed = commit(&session, &planned)?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let waited = wait(&session, 100)?;
+    assert_eq!(waited["open_actions_remaining"], 0, "{waited}");
+    assert_eq!(snapshot(&session)?.tick.0, start + 100);
+    Ok(())
+}
+
+#[test]
+fn forecast_reports_advancement_refusal_instead_of_an_available_prediction() -> TestResult {
+    let session = open("73623")?;
+    in_session(&session, |guard| {
+        let mut injected = guard.adapter.snapshot().clone();
+        let future = injected
+            .tick
+            .checked_add(10)
+            .ok_or_else(|| fixture_error("fixture tick overflow"))?;
+        injected
+            .graph
+            .entities
+            .values_mut()
+            .next()
+            .ok_or_else(|| fixture_error("fixture entity missing"))?
+            .fields
+            .insert(
+                "future_model_input".to_owned(),
+                Fact::known(
+                    WorldValue::Bool(true),
+                    future,
+                    FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                    Digest32::ZERO,
+                ),
+            );
+        injected.cursor = injected
+            .cursor
+            .checked_next()
+            .ok_or_else(|| fixture_error("fixture cursor overflow"))?;
+        injected.refresh_hash();
+        guard.adapter.inject_snapshot(injected)
+    })?;
+    let before = snapshot(&session)?;
+    let planned = plan(&session, &order("one part", "MAKE_PART", 1, json!([])))?;
+    assert_eq!(planned["forecast"]["available"], false, "{planned}");
+    assert_eq!(
+        planned["forecast"]["reason"]["code"], "preconditions_failed",
+        "{planned}"
+    );
+    assert_eq!(snapshot(&session)?, before);
+    Ok(())
+}

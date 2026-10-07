@@ -44,6 +44,50 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Evidence-bound live routing and honest forecasts (2026-10-07)
+
+Advisory live routes now preserve canonical unit IDs, the exact requested labor,
+and every furniture material selector. V1 unit IDs decode through their actual
+native-plus-one projection; spatial/1.8 uses its actual citizen namespace.
+`LiveRoutingEvidence` binds resolution to a validated typed projection, canonical
+anchor, source digest, bridge generation and independently issued fact/domain
+scope. Missing or untrusted evidence cannot turn route metadata into a native ID.
+
+`resolve_workforce_step` requires the exact native paused capture, selected unit
+set and one unambiguous selected-only work detail containing only the requested
+labor. Disabling refuses another detail that might continue granting that labor.
+Its immediate effect verifier requires native Applied and readback showing the
+requested labor value with all other columns unchanged. `resolve_furniture_step`
+binds exact native item identity, material IDs, position, flags, target and map
+dimensions to spatial evidence. Non-default material tokens, nearest selection
+and reservation policies remain explicit and unresolved because the current
+native capture cannot prove them. Geometry is bounded before tiling or offering
+a native route, including cuboids constructed without their validating constructor.
+
+MCP routing output identifies canonical units as strings, leaves native units
+unresolved, includes the retained material selector and explicitly reports
+`execution_ready: false`. The new Rust resolvers produce source-bound native
+plan candidates with the original step key; they do not execute, preserve full
+semantic custody through a native journal, complete original obligations or add
+admission. The remaining semantic-to-native execution handoff is separate work.
+
+Forecast advancement and poll errors now return `available: false` with their
+actual reason instead of an available partial prediction. The final simulated
+slice stops at the sealed horizon. Two new MCP source tests compare a dependency
+forecast with one long real wait and exercise an unavailable future-input forecast.
+
+**Evidence:** all 17 focused adapter routing tests passed (13 new resolution cases
+and four existing routing cases), with zero failures or ignored tests and all
+383 scoped source hashes unchanged. Tests use the real projection constructors,
+strict workforce codecs and checked-in furniture capture fixture. Changed Rust
+passes scoped Rustfmt and independent source review. The final core also passed
+163 intent and 82 lab tests. The two new MCP tests remain unexecuted: MCP source
+has not compiled after pinned asupersync compilation exceeded available shared
+memory. A read-only resource review found about 1.6 GiB compiler headroom against
+a previously observed 5.924 GiB compiler RSS lower bound; no repeated build or
+qualification success is inferred. Full workspace, native and live qualification
+remain pending; the registry and production protocol map are unchanged.
+
 ### Causal reference time and bounded progress (2026-10-07)
 
 Reference physical work now advances at actual production, construction,

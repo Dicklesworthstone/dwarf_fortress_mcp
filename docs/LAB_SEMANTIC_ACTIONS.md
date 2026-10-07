@@ -74,7 +74,10 @@ run forward to every obligation deadline, reporting each step's predicted
 terminal state and tick, `predicted_completion_tick`, `blocked_by_pause`, and the
 forecast's `resolution_ticks`. A step that would fail at commit (for example
 digging unobserved terrain) shows up as `available: false` with the refusal,
-before anything is committed. Forecasts assume no other agent acts and the
+before anything is committed. Advancement and polling refusals also make the
+forecast unavailable with their actual reason; a failed partial simulation is
+not reported as an available prediction. The final slice is clipped to the
+requested obligation horizon. Forecasts assume no other agent acts and the
 fortress stays as it is; real completion also depends on how often the agent
 waits, because deferred steps dispatch when a wait observes their prerequisites.
 
@@ -299,10 +302,10 @@ why it cannot.
 | Semantic action | Live family | Limits |
 |---|---|---|
 | `pause` | control/1.7 | — |
-| `designate_dig` (`mine`) | dig/1.16 | tiled into ≤8×8 single-level rectangles in z,y,x order; x,y ≥ 1 (complete halo); ≤64 rectangles per step; other modes refused |
-| `build` `furniture:Bed/Chair/Table` | build/1.19 | single-tile footprint at its location; needs an exact live item |
+| `designate_dig` (`mine`) | dig/1.16 | tiled into ≤8×8 single-level rectangles in z,y,x order; ordered coordinates 1..32766 on all axes for a complete halo; ≤64 rectangles per step; other modes refused |
+| `build` `furniture:Bed/Chair/Table` | build/1.19 | single-tile footprint at its location and native coordinate bounds; needs an exact live item satisfying every retained material constraint |
 | `create_work_order` `CONSTRUCT_BED/DOOR/TABLE/THRONE` | work-orders/1.10 | wooden only, amount 1..100, no conditions |
-| `set_labor` | workforce/1.17 | work-detail membership for ≤32 units, game paused; needs the live detail carrying the labor |
+| `set_labor` | workforce/1.17 | ≤32 canonical units; evidence-bound native mapping, game paused and one selected-only detail containing exactly the requested labor |
 | stockpile, squad, burrow, standing order, extension | none | refused with a reason |
 
 Each routable step lists the typed request (for example the exact dig
@@ -311,6 +314,23 @@ preconditions, the unadmitted development server that executes the family
 (`dev_server`) and, for excavation, the exact `fortress.observe` region call per
 rectangle for that server (`dev_server_observations`). Routing is deterministic and pure: it grants no capability,
 performs no I/O, and every family remains unadmitted development execution.
+
+`execution_ready` remains explicitly false at both route and step level.
+Workforce requests expose `canonical_units` as decimal strings, the exact
+`labor`, and `native_units: null`; canonical IDs are never cast to native IDs.
+Furniture requests retain all four material selector fields. A family match
+alone cannot establish a unit mapping, item selection or semantic success.
+
+The Rust `LiveRoutingEvidence` constructors bind actual V1 or spatial/1.8
+projections to independently issued source/domain evidence. Workforce resolution
+requires an exact paused native capture and one unambiguous single-labor detail;
+removal refuses overlapping grants. Even native `Applied` must pass a separate
+readback check preserving every other labor column. Furniture resolution binds
+exact source item identity, material IDs, position, eligibility and map dimensions.
+Non-default token, nearest-item or reservation selectors explicitly refuse until
+the native family can establish them. These APIs produce reviewable native plan
+candidates and grant no dispatch or original-goal authority. See
+`docs/LIVE_SEMANTIC_ROUTING.md` for the complete source and identity contract.
 
 ## Deterministic replay bundles
 
