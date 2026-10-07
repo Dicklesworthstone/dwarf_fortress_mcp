@@ -44,6 +44,40 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Causal reference time and bounded progress (2026-10-07)
+
+Reference physical work now advances at actual production, construction,
+excavation, metabolism and combat boundaries. Work eligibility is frozen for
+each interval, so a completed predecessor or workshop cannot retroactively
+award work, consumption releases a stock gate only for later time, and a dead
+worker cannot produce afterward. Same-tick production uses ascending entity
+order before meals and combat; competing orders retain earned partial work.
+The same source world produces identical physical values across successful
+wait partitions without claiming identical publication metadata or proof cadence.
+Internal events never create obligation observations or stability samples.
+
+`EffectAdvanceLimits` bounds a physical call to 1,000,000 game ticks, 200,000
+events and 100,000,000 charged work units, with caller-selected smaller limits.
+Cached pending tile sets avoid quadratic excavation scans and update overlapping
+designations. Aggregate cached footprints are capped at 1,048,576 tiles before
+any region allocation or terrain read. Future source facts, invalid active counters, unobserved excavation
+terrain, counter overflow and exhausted budgets refuse. The existing adapter
+transaction shadow preserves the complete world, receipts and transcript on a
+failed advance. This adds no native timing model or live execution capability.
+
+**Evidence:** the frozen source passed all 163 intent tests and all 82 lab tests
+(50 unit, 11 deferred, 13 durable-progress and eight full-action), with zero
+failures or ignored tests. The 12 new timeline tests compare long and irregular
+waits with one-tick advances and check causality, competing stock gates, workshop
+completion, deaths, overlapping excavation, source facts and bounded atomic
+refusal. Three new full-action cases prove dependency timing, foreground-only
+obligation samples and unchanged world/receipts/transcript on horizon refusal.
+Four older future-input fixtures now expect the stronger source-time refusal.
+The 109 intent-scope and 391 lab-scope source hashes remained unchanged across
+their respective final runs. Changed Rust passes scoped formatting checks.
+These are exact development test results; full workspace, native and live
+qualification remain pending, and MCP has not compiled or executed.
+
 ### MCP physical-work cleanup, clock authority and recovery custody (2026-10-07)
 
 The MCP laboratory now uses actual physical-work inspection alongside immutable
@@ -102,7 +136,7 @@ fixture. All changed Rust files parse under Rustfmt and received independent
 source review. **The final MCP source has not compiled or executed.** Protected
 local build attempts were stopped or SIGKILLed before tests under the shared
 8 GiB memory limit while unrelated compilers consumed the available memory;
-a final-source check is being retried after that headroom recovered.
+later final-source checks still failed before MCP source compilation.
 There are no GitHub Actions runs to substitute. Full workspace formatting,
 Clippy, debug/release tests, rustdoc, `verify.sh` and `qualify_local.sh` remain
 pending; no Rust-qualified, native, live or registry admission claim is made.
@@ -119,11 +153,12 @@ Eligible inventory counts release stock and material gates; unavailable,
 untrusted, inconsistent, future or malformed observations remain blockers.
 Named dependencies require one established order name, complete status and zero
 remaining work. Material gates do not imply consumption or reservation.
-Same-product thresholds bound production arithmetically at the first unit that
-crosses the threshold. Blocked elapsed time is not banked; earlier partial work
-is retained. Forecasts use this same reference transition logic. The existing
-entity ordering and metabolism phase still affect when a later advance sees
-newly released gates; wait-partition invariance is not claimed.
+Same-product thresholds stop production after the first unit that crosses the
+threshold. Blocked elapsed time is not banked; earlier partial work is retained.
+Forecasts use this same reference transition logic. The causal event timeline
+now releases changing gates at their actual boundaries, preserving physical
+outcomes across successful wait partitions; foreground proof and deferred
+step-dispatch cadence remain separate.
 
 The MCP action grammar and production quota compiler preserve conditions and
 show them in sealed step views. Legacy orders missing condition records cannot

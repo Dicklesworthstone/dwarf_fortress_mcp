@@ -14,7 +14,7 @@
 //! Progress rates are a laboratory calibration, not a claim about Dwarf
 //! Fortress throughput.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
     DfmcpError, Digest32, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid, Result,
@@ -1073,49 +1073,612 @@ fn require_progress_selectors(snapshot: &WorldSnapshot) -> Result<()> {
     Ok(())
 }
 
-/// Progress all active temporal work by `elapsed` game ticks, deterministically
-/// in ascending entity order. Call after advancing `snapshot.tick`. Returns
-/// whether canonical state changed; the caller owns the cursor and hash.
-/// Unavailable or ineligible progress inputs refuse advancement; they are
-/// never zero work or completed work. This reference model accepts only its
-/// registered laboratory sources, not live DFHack or replay provenance.
-/// As with [`apply_effect`], use a transaction shadow so a
-/// later refusal does not publish earlier effects from the same advancement.
+/// Hard limits for one reference advancement. A caller may reduce these limits,
+/// but cannot turn a large request into an unbounded simulation loop.
+pub const MAX_EFFECT_ADVANCE_TICKS: u64 = 1_000_000;
+pub const MAX_EFFECT_ADVANCE_EVENTS: u64 = 200_000;
+pub const MAX_EFFECT_ADVANCE_WORK_UNITS: u64 = 100_000_000;
+/// Aggregate excavation footprint admitted before allocating any pending-tile
+/// sets. A work budget alone must not permit enormous simultaneous caches.
+pub const MAX_EFFECT_ADVANCE_CACHED_DIG_TILES: u64 = 1_048_576;
+
+/// Explicit CPU-work budget for the reference event timeline. Work units charge
+/// source facts, entity and condition scans, and terrain visits before the work.
+/// They are a deterministic algorithmic bound, not elapsed wall-clock time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectAdvanceLimits {
+    pub max_game_ticks: u64,
+    pub max_events: u64,
+    pub max_work_units: u64,
+}
+
+impl Default for EffectAdvanceLimits {
+    fn default() -> Self {
+        Self {
+            max_game_ticks: MAX_EFFECT_ADVANCE_TICKS,
+            max_events: MAX_EFFECT_ADVANCE_EVENTS,
+            max_work_units: MAX_EFFECT_ADVANCE_WORK_UNITS,
+        }
+    }
+}
+
+struct EffectAdvanceBudget {
+    limits: EffectAdvanceLimits,
+    events: u64,
+    work_units: u64,
+}
+
+fn advance_budget_error(message: &str) -> DfmcpError {
+    DfmcpError::new(ErrorCode::BudgetExceeded, message)
+}
+
+impl EffectAdvanceBudget {
+    fn new(limits: EffectAdvanceLimits, elapsed: u64) -> Result<Self> {
+        if limits.max_game_ticks > MAX_EFFECT_ADVANCE_TICKS
+            || limits.max_events > MAX_EFFECT_ADVANCE_EVENTS
+            || limits.max_work_units > MAX_EFFECT_ADVANCE_WORK_UNITS
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "reference advancement limits exceed the supported hard bounds",
+            ));
+        }
+        if elapsed > limits.max_game_ticks {
+            return Err(advance_budget_error(
+                "reference advancement exceeds its game-tick budget",
+            ));
+        }
+        Ok(Self {
+            limits,
+            events: 0,
+            work_units: 0,
+        })
+    }
+
+    fn charge(&mut self, amount: u64) -> Result<()> {
+        let next = self.work_units.checked_add(amount).ok_or_else(|| {
+            advance_budget_error("reference advancement work accounting overflowed")
+        })?;
+        if next > self.limits.max_work_units {
+            return Err(advance_budget_error(
+                "reference advancement exhausted its source/entity/terrain work budget",
+            ));
+        }
+        self.work_units = next;
+        Ok(())
+    }
+
+    fn event(&mut self) -> Result<()> {
+        if self.events >= self.limits.max_events {
+            return Err(advance_budget_error(
+                "reference advancement exhausted its event budget",
+            ));
+        }
+        self.events += 1;
+        Ok(())
+    }
+}
+
+/// Advance physical effects on their causal timeline. The caller has already
+/// advanced snapshot.tick by elapsed and owns the cursor and hash. Eligibility
+/// is evaluated at the beginning of each interval; newly completed workshops,
+/// prerequisites, and newly consumed inventory affect only subsequent work.
+///
+/// At a shared tick, construction and excavation settle first, then production
+/// units in ascending entity order, then drink/food consumption, then arrivals
+/// and combat in ascending hostile order. A worker killed at that tick cannot
+/// contribute to a later interval. Internal event boundaries are not foreground
+/// observations and do not poll obligations or manufacture proof samples.
+///
+/// Successful advances have identical physical values under different wait
+/// partitions. Publication cursors, revisions and observation metadata still
+/// belong to each caller's actual observation cadence. Unavailable source facts
+/// never become zero or completed work. As with apply_effect, use a transaction
+/// shadow: any later refusal must discard the entire requested advance.
 pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
+    advance_effects_with_limits(snapshot, elapsed, EffectAdvanceLimits::default())
+}
+
+/// The explicitly budgeted form of advance_effects. The original destination
+/// tick is restored on success or refusal; callers must discard the shadow's
+/// other changes after a refusal.
+pub fn advance_effects_with_limits(
+    snapshot: &mut WorldSnapshot,
+    elapsed: u64,
+    limits: EffectAdvanceLimits,
+) -> Result<bool> {
     if elapsed == 0 {
         return Ok(false);
     }
-    require_progress_selectors(snapshot)?;
-    let designation_kind = EntityKind::Other(DIG_DESIGNATION_KIND.to_owned());
-    let active: Vec<(EntityId, EntityKind)> = snapshot
+    let mut budget = EffectAdvanceBudget::new(limits, elapsed)?;
+    let destination = snapshot.tick;
+    let start = destination.0.checked_sub(elapsed).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "reference advancement elapsed ticks precede the source timeline",
+        )
+    })?;
+    // The caller advanced only the clock. Validate original authority before
+    // rewinding it: a fact from inside the proposed interval must not become
+    // legitimate simply because the destination clock has reached it.
+    budget.charge(snapshot.graph.entities.len() as u64 + snapshot.graph.edges.len() as u64)?;
+    for facts in snapshot
         .graph
         .entities
         .values()
-        .filter(|entity| match &entity.kind {
-            EntityKind::WorkOrder => {
-                field_text(entity, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE)
-            }
-            EntityKind::Building => matches!(
-                field_text(entity, CONSTRUCTION_STAGE_FIELD, snapshot.tick),
-                Some(STAGE_PLANNED | STAGE_UNDER_CONSTRUCTION)
-            ),
-            kind if kind == &designation_kind => {
-                field_text(entity, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE)
-            }
-            _ => false,
-        })
-        .map(|entity| (entity.id, entity.kind.clone()))
-        .collect();
-    let mut changed = false;
-    for (id, kind) in active {
-        changed |= match kind {
-            EntityKind::WorkOrder => advance_work_order(snapshot, id, elapsed)?,
-            EntityKind::Building => advance_building(snapshot, id, elapsed)?,
-            _ => advance_designation(snapshot, id, elapsed)?,
-        };
+        .map(|record| &record.fields)
+        .chain(snapshot.graph.edges.values().map(|record| &record.fields))
+    {
+        budget.charge(facts.len() as u64)?;
+        if facts.values().any(|fact| {
+            fact.observed_at.0 > start && laboratory_fact_value(fact, fact.observed_at).is_some()
+        }) {
+            return Err(precondition(
+                "reference advancement cannot promote a future-dated known source fact",
+            ));
+        }
     }
-    changed |= advance_metabolism(snapshot, elapsed)?;
-    changed |= advance_threats(snapshot, elapsed)?;
+    snapshot.tick = GameTick(start);
+    let result = advance_timeline(snapshot, destination, elapsed, &mut budget);
+    snapshot.tick = destination;
+    result
+}
+
+enum ConditionRecord {
+    Known(Vec<WorkOrderCondition>),
+    Unavailable(String),
+}
+
+struct TimelineOrder {
+    id: EntityId,
+    job: String,
+    product: Option<(&'static str, u64)>,
+    conditions: ConditionRecord,
+}
+
+struct TimelineDig {
+    area: MapCuboid,
+    target: u32,
+    // Coordinate tuples preserve canonical z/y/x excavation order. These sets
+    // are built once, then updated for intersecting designations after a tile
+    // changes; completing a large region does not rescan it for every tile.
+    pending: BTreeSet<(i32, i32, i32)>,
+}
+
+struct EffectTimeline {
+    orders: Vec<TimelineOrder>,
+    buildings: Vec<EntityId>,
+    digs: BTreeMap<EntityId, TimelineDig>,
+    hostiles: Vec<EntityId>,
+    ledger: Option<EntityId>,
+    entity_count: u64,
+    population_width: u64,
+}
+
+fn active_order(snapshot: &WorldSnapshot, id: EntityId) -> Result<bool> {
+    Ok(field_text(entity(snapshot, id)?, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE))
+}
+
+fn active_building(snapshot: &WorldSnapshot, id: EntityId) -> Result<bool> {
+    Ok(matches!(
+        field_text(
+            entity(snapshot, id)?,
+            CONSTRUCTION_STAGE_FIELD,
+            snapshot.tick
+        ),
+        Some(STAGE_PLANNED | STAGE_UNDER_CONSTRUCTION)
+    ))
+}
+
+fn designation_area(record: &EntityRecord, tick: GameTick) -> Result<MapCuboid> {
+    let (Some(min), Some(max)) = (
+        coord_field(record, "area_min", tick),
+        coord_field(record, "area_max", tick),
+    ) else {
+        return Err(precondition(
+            "dig designation requires eligible area coordinates before reference progress",
+        ));
+    };
+    MapCuboid::new(min, max)
+}
+
+impl EffectTimeline {
+    fn new(
+        snapshot: &WorldSnapshot,
+        elapsed: u64,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<Self> {
+        let entity_count = snapshot.graph.entities.len() as u64;
+        budget.charge(entity_count.saturating_mul(3))?;
+        require_progress_selectors(snapshot)?;
+        // Count complete requested footprints before allocating even the first
+        // cache. This also refuses oversized overlapping regions before terrain
+        // reads, so a malicious source cannot allocate up to the CPU-work cap.
+        budget.charge(entity_count)?;
+        let mut cached_tiles = 0u64;
+        for record in snapshot.graph.entities.values() {
+            if matches!(&record.kind, EntityKind::Other(kind) if kind == DIG_DESIGNATION_KIND)
+                && active_order(snapshot, record.id)?
+            {
+                let tiles = validate_region(designation_area(record, snapshot.tick)?)?;
+                cached_tiles = cached_tiles.checked_add(tiles).ok_or_else(|| {
+                    advance_budget_error("aggregate cached excavation footprint overflowed")
+                })?;
+                if cached_tiles > MAX_EFFECT_ADVANCE_CACHED_DIG_TILES {
+                    return Err(advance_budget_error(
+                        "aggregate cached excavation footprint exceeds its explicit tile bound",
+                    ));
+                }
+            }
+        }
+        let mut timeline = Self {
+            orders: Vec::new(),
+            buildings: Vec::new(),
+            digs: BTreeMap::new(),
+            hostiles: Vec::new(),
+            ledger: stock_ledger(snapshot),
+            entity_count,
+            population_width: 0,
+        };
+        for record in snapshot.graph.entities.values() {
+            if record.kind == EntityKind::Unit {
+                timeline.population_width = timeline
+                    .population_width
+                    .checked_add(record.fields.len() as u64 + 1)
+                    .ok_or_else(|| advance_budget_error("population scan accounting overflowed"))?;
+            }
+            match &record.kind {
+                EntityKind::WorkOrder if active_order(snapshot, record.id)? => {
+                    let job = field_text(record, "job_token", snapshot.tick).ok_or_else(|| {
+                        precondition("work order requires an eligible known job token before reference progress")
+                    })?;
+                    validate_condition_text(job)?;
+                    let work = field_u64(record, "work_ticks", snapshot.tick)?;
+                    let remaining = field_u64(record, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
+                    if work >= WORK_ORDER_TICKS_PER_UNIT || remaining == 0 {
+                        return Err(precondition(
+                            "active work order has noncanonical progress counters",
+                        ));
+                    }
+                    let conditions = match field_value(record, WORK_ORDER_CONDITIONS_FIELD, snapshot.tick) {
+                        Some(stored) => match decode_conditions(stored) {
+                            Ok(conditions) => ConditionRecord::Known(conditions),
+                            Err(error) => ConditionRecord::Unavailable(error.message),
+                        },
+                        None => ConditionRecord::Unavailable(
+                            "work-order conditions are not established; legacy orders require an explicit condition record".to_owned(),
+                        ),
+                    };
+                    timeline.orders.push(TimelineOrder {
+                        id: record.id,
+                        job: job.to_owned(),
+                        product: work_order_product(job),
+                        conditions,
+                    });
+                }
+                EntityKind::Building if active_building(snapshot, record.id)? => {
+                    let required = field_u64(record, "required_ticks", snapshot.tick)?;
+                    let progress = field_u64(record, "progress_ticks", snapshot.tick)?;
+                    if required == 0 || progress >= required {
+                        return Err(precondition(
+                            "active building has noncanonical progress counters",
+                        ));
+                    }
+                    timeline.buildings.push(record.id);
+                }
+                EntityKind::Other(kind)
+                    if kind == DIG_DESIGNATION_KIND && active_order(snapshot, record.id)? =>
+                {
+                    let area = designation_area(record, snapshot.tick)?;
+                    let tiles = validate_region(area)?;
+                    budget.charge(tiles)?;
+                    let target =
+                        u32::try_from(field_u64(record, "target_tile_code", snapshot.tick)?)
+                            .map_err(|_| {
+                                precondition("dig designation target tile code is invalid")
+                            })?;
+                    if field_u64(record, "work_ticks", snapshot.tick)? >= DIG_TICKS_PER_TILE {
+                        return Err(precondition(
+                            "active dig designation has noncanonical progress counters",
+                        ));
+                    }
+                    let mut pending = BTreeSet::new();
+                    for coord in region_tiles(area) {
+                        let code = snapshot.tile_code_at(coord).ok_or_else(|| {
+                            precondition("active dig designation includes unobserved terrain")
+                        })?;
+                        if code != target {
+                            pending.insert((coord.z, coord.y, coord.x));
+                        }
+                    }
+                    timeline.digs.insert(
+                        record.id,
+                        TimelineDig {
+                            area,
+                            target,
+                            pending,
+                        },
+                    );
+                }
+                EntityKind::Creature
+                    if field_value(record, HOSTILE_FIELD, snapshot.tick)
+                        == Some(&Value::Bool(true))
+                        && matches!(
+                            field_text(record, THREAT_STATUS_FIELD, snapshot.tick),
+                            Some(THREAT_APPROACHING | THREAT_ATTACKING)
+                        ) =>
+                {
+                    field_u64(record, ARRIVES_AT_FIELD, snapshot.tick)?;
+                    timeline.hostiles.push(record.id);
+                }
+                _ => {}
+            }
+        }
+        if let Some(ledger) = timeline.ledger {
+            field_u64(
+                entity(snapshot, ledger)?,
+                METABOLISM_TICKS_FIELD,
+                snapshot.tick,
+            )?
+            .checked_add(elapsed)
+            .ok_or_else(|| {
+                advance_budget_error("metabolism clock would overflow during reference advancement")
+            })?;
+        }
+        Ok(timeline)
+    }
+
+    fn gate(
+        &self,
+        snapshot: &WorldSnapshot,
+        order: &TimelineOrder,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<ProductionGate> {
+        let conditions = match &order.conditions {
+            ConditionRecord::Known(conditions) => conditions,
+            ConditionRecord::Unavailable(reason) => {
+                return Ok(ProductionGate::Blocked(reason.clone()));
+            }
+        };
+        budget.charge(
+            self.entity_count
+                .saturating_mul(conditions.len() as u64 + 3)
+                .saturating_add(conditions.len() as u64 + 1),
+        )?;
+        if let Some(blocker) = work_order_blocker(snapshot, &order.job) {
+            return Ok(ProductionGate::Blocked(blocker));
+        }
+        Ok(production_gate(
+            snapshot,
+            order.id,
+            conditions,
+            order.product,
+        ))
+    }
+
+    fn next_interval(
+        &self,
+        snapshot: &WorldSnapshot,
+        remaining: u64,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<(u64, Vec<usize>)> {
+        budget.charge(
+            (self.orders.len() + self.buildings.len() + self.digs.len() + self.hostiles.len())
+                as u64
+                + 1,
+        )?;
+        let mut delta = remaining;
+        let mut ready = Vec::new();
+        for (index, order) in self.orders.iter().enumerate() {
+            if active_order(snapshot, order.id)?
+                && matches!(
+                    self.gate(snapshot, order, budget)?,
+                    ProductionGate::Ready { .. }
+                )
+            {
+                let work = field_u64(entity(snapshot, order.id)?, "work_ticks", snapshot.tick)?;
+                delta = delta.min(WORK_ORDER_TICKS_PER_UNIT - work);
+                ready.push(index);
+            }
+        }
+        for id in &self.buildings {
+            if active_building(snapshot, *id)? {
+                let building = entity(snapshot, *id)?;
+                delta = delta.min(
+                    field_u64(building, "required_ticks", snapshot.tick)?
+                        - field_u64(building, "progress_ticks", snapshot.tick)?,
+                );
+            }
+        }
+        for (id, dig) in &self.digs {
+            let work = field_u64(entity(snapshot, *id)?, "work_ticks", snapshot.tick)?;
+            delta = delta.min(if dig.pending.is_empty() {
+                1
+            } else {
+                DIG_TICKS_PER_TILE - work
+            });
+        }
+        if let Some(ledger) = self.ledger {
+            let metabolism = field_u64(
+                entity(snapshot, ledger)?,
+                METABOLISM_TICKS_FIELD,
+                snapshot.tick,
+            )?;
+            delta = delta.min(DRINK_INTERVAL_TICKS - metabolism % DRINK_INTERVAL_TICKS);
+            delta = delta.min(FOOD_INTERVAL_TICKS - metabolism % FOOD_INTERVAL_TICKS);
+        }
+        for id in &self.hostiles {
+            let hostile = entity(snapshot, *id)?;
+            if field_text(hostile, THREAT_STATUS_FIELD, snapshot.tick) == Some(THREAT_SLAIN) {
+                continue;
+            }
+            let arrival = field_u64(hostile, ARRIVES_AT_FIELD, snapshot.tick)?;
+            delta = delta.min(if snapshot.tick.0 < arrival {
+                arrival - snapshot.tick.0
+            } else {
+                COMBAT_ROUND_TICKS - (snapshot.tick.0 - arrival) % COMBAT_ROUND_TICKS
+            });
+        }
+        Ok((delta, ready))
+    }
+
+    fn advance_digs(
+        &mut self,
+        snapshot: &mut WorldSnapshot,
+        elapsed: u64,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<bool> {
+        budget.charge(self.digs.len() as u64 * 2)?;
+        let mut earned = Vec::with_capacity(self.digs.len());
+        let mut changed = false;
+        let ids: Vec<EntityId> = self.digs.keys().copied().collect();
+        for id in ids {
+            let work = field_u64(entity(snapshot, id)?, "work_ticks", snapshot.tick)? + elapsed;
+            earned.push((id, work));
+            if work < DIG_TICKS_PER_TILE {
+                continue;
+            }
+            let Some((coord, target)) = self.digs.get(&id).and_then(|dig| {
+                dig.pending
+                    .first()
+                    .map(|(z, y, x)| (MapCoord::new(*x, *y, *z), dig.target))
+            }) else {
+                continue;
+            };
+            // Tile replacement decodes a bounded 256-tile chunk. Every active
+            // overlapping designation sees the resulting terrain at this tick.
+            budget.charge(self.digs.len() as u64 + 256)?;
+            changed |= snapshot.set_tile_code(coord, target)?;
+            for dig in self.digs.values_mut() {
+                if dig.area.contains(coord) {
+                    let key = (coord.z, coord.y, coord.x);
+                    if dig.target == target {
+                        dig.pending.remove(&key);
+                    } else {
+                        dig.pending.insert(key);
+                    }
+                }
+            }
+        }
+        for (id, work) in earned {
+            let remaining = self
+                .digs
+                .get(&id)
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "active designation disappeared from timeline",
+                    )
+                })?
+                .pending
+                .len() as u64;
+            let mut fields = vec![
+                (TILES_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
+                (
+                    "work_ticks".to_owned(),
+                    Value::U64(if remaining == 0 {
+                        0
+                    } else {
+                        work % DIG_TICKS_PER_TILE
+                    }),
+                ),
+            ];
+            if remaining == 0 {
+                fields.push((
+                    STATUS_FIELD.to_owned(),
+                    Value::Text(STATUS_COMPLETE.to_owned()),
+                ));
+            }
+            changed |= write_fields(snapshot, id, fields)?;
+        }
+        self.digs.retain(|id, _| {
+            snapshot.graph.entities.get(id).is_some_and(|record| {
+                field_text(record, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE)
+            })
+        });
+        Ok(changed)
+    }
+
+    fn charge_population(&self, budget: &mut EffectAdvanceBudget, combat: bool) -> Result<()> {
+        let visits = self
+            .population_width
+            .saturating_add(self.entity_count.saturating_mul(5));
+        budget.charge(if combat {
+            visits.saturating_mul(self.hostiles.len() as u64 + 1)
+        } else {
+            visits
+        })
+    }
+
+    fn refresh_blockers(
+        &self,
+        snapshot: &mut WorldSnapshot,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<bool> {
+        let mut changed = false;
+        for order in &self.orders {
+            if active_order(snapshot, order.id)? {
+                let blocker = match self.gate(snapshot, order, budget)? {
+                    ProductionGate::Ready { .. } => None,
+                    ProductionGate::Blocked(reason) => Some(reason),
+                };
+                changed |= write_production_blocker(snapshot, order.id, blocker)?;
+            }
+        }
+        Ok(changed)
+    }
+}
+
+fn advance_timeline(
+    snapshot: &mut WorldSnapshot,
+    destination: GameTick,
+    elapsed: u64,
+    budget: &mut EffectAdvanceBudget,
+) -> Result<bool> {
+    let mut timeline = EffectTimeline::new(snapshot, elapsed, budget)?;
+    let mut changed = false;
+    if !timeline.hostiles.is_empty() {
+        timeline.charge_population(budget, true)?;
+        // A threat already at its arrival boundary is attacking at the source
+        // tick. This does not award a combat round or consume elapsed work.
+        changed |= advance_threats(snapshot, 0)?;
+    }
+    while snapshot.tick < destination {
+        budget.event()?;
+        let (delta, ready) =
+            timeline.next_interval(snapshot, destination.0 - snapshot.tick.0, budget)?;
+        if delta == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "reference event timeline did not advance",
+            ));
+        }
+        snapshot.tick = GameTick(snapshot.tick.0 + delta);
+        for id in &timeline.buildings {
+            if active_building(snapshot, *id)? {
+                changed |= advance_building(snapshot, *id, delta)?;
+            }
+        }
+        changed |= timeline.advance_digs(snapshot, delta, budget)?;
+        for index in ready {
+            changed |= advance_ready_work_order(
+                snapshot,
+                &timeline,
+                &timeline.orders[index],
+                delta,
+                budget,
+            )?;
+        }
+        if timeline.ledger.is_some() {
+            timeline.charge_population(budget, false)?;
+            changed |= advance_metabolism(snapshot, delta)?;
+        }
+        if !timeline.hostiles.is_empty() {
+            timeline.charge_population(budget, true)?;
+            changed |= advance_threats(snapshot, delta)?;
+        }
+        changed |= timeline.refresh_blockers(snapshot, budget)?;
+    }
     Ok(changed)
 }
 
@@ -1243,7 +1806,9 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
                 })
                 .count() as u64;
             let creature = entity(snapshot, hostile)?;
-            let fought = field_u64(creature, COMBAT_ROUNDS_FIELD, snapshot.tick)?.saturating_add(1);
+            let fought = field_u64(creature, COMBAT_ROUNDS_FIELD, snapshot.tick)?
+                .checked_add(1)
+                .ok_or_else(|| advance_budget_error("combat round counter would overflow"))?;
             let health = field_u64(creature, HEALTH_FIELD, snapshot.tick)?
                 .saturating_sub(soldiers * SOLDIER_DAMAGE_PER_ROUND);
             let mut fields = vec![
@@ -1307,7 +1872,7 @@ pub fn stock_ledger(snapshot: &WorldSnapshot) -> Option<EntityId> {
 }
 
 /// Living dwarves consume drink and food as game time passes. Production
-/// (above) is applied first, so a meal finished in the same interval feeds.
+/// settled at the same tick is available for that meal.
 /// When a stock runs short the dwarves served last (highest id) go without
 /// and their need turns `thirsty` / `hungry`; a later full meal satisfies
 /// everyone again. A world without a stock ledger has no metabolism.
@@ -1321,7 +1886,9 @@ fn advance_metabolism(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool
         METABOLISM_TICKS_FIELD,
         snapshot.tick,
     )?;
-    let after = before.saturating_add(elapsed);
+    let after = before
+        .checked_add(elapsed)
+        .ok_or_else(|| advance_budget_error("metabolism clock would overflow"))?;
     let living: Vec<EntityId> = snapshot
         .graph
         .entities
@@ -1531,83 +2098,86 @@ fn write_production_blocker(
     )
 }
 
-fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
-    let order = entity(snapshot, id)?;
-    let job = field_text(order, "job_token", snapshot.tick).ok_or_else(|| {
-        precondition(format!(
-            "work order {} requires an eligible known job token before reference progress",
-            id.get()
-        ))
-    })?;
-    let work = field_u64(order, "work_ticks", snapshot.tick)?.saturating_add(elapsed);
-    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
-    let product = work_order_product(job);
-    let Some(stored) = field_value(order, WORK_ORDER_CONDITIONS_FIELD, snapshot.tick) else {
-        return write_production_blocker(snapshot, id, Some(
-            "work-order conditions are not established; legacy orders require an explicit condition record".to_owned(),
-        ));
-    };
-    let conditions = match decode_conditions(stored) {
-        Ok(conditions) => conditions,
-        Err(error) => return write_production_blocker(snapshot, id, Some(error.message)),
-    };
-    if let Some(blocker) = work_order_blocker(snapshot, job) {
-        return write_production_blocker(snapshot, id, Some(blocker));
+fn advance_ready_work_order(
+    snapshot: &mut WorldSnapshot,
+    timeline: &EffectTimeline,
+    order: &TimelineOrder,
+    elapsed: u64,
+    budget: &mut EffectAdvanceBudget,
+) -> Result<bool> {
+    let record = entity(snapshot, order.id)?;
+    let work = field_u64(record, "work_ticks", snapshot.tick)? + elapsed;
+    if work < WORK_ORDER_TICKS_PER_UNIT {
+        // Eligibility was frozen at the source boundary. Another order's
+        // completion cannot revoke work already earned through this interval.
+        return write_fields(
+            snapshot,
+            order.id,
+            vec![("work_ticks".to_owned(), Value::U64(work))],
+        );
     }
-    let unit_limit = match production_gate(snapshot, id, &conditions, product) {
-        ProductionGate::Ready { unit_limit } => unit_limit,
-        ProductionGate::Blocked(blocker) => {
-            // Previously earned partial work is retained; blocked elapsed
-            // ticks are discarded, not banked for a later favorable sample.
-            return write_production_blocker(snapshot, id, Some(blocker));
-        }
-    };
-    let possible = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
-    let produced = possible.min(unit_limit);
-    let remaining = remaining - produced;
+    if work != WORK_ORDER_TICKS_PER_UNIT {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "production interval crossed a unit boundary",
+        ));
+    }
+    // A completion is admitted against stock after earlier simultaneous
+    // completions. A losing order keeps all 49 pre-completion ticks; only the
+    // rejected final tick is discarded. Retaining the interval's starting
+    // counter instead would make arbitrary caller cuts change physical work.
+    if !matches!(
+        timeline.gate(snapshot, order, budget)?,
+        ProductionGate::Ready { unit_limit: 1.. }
+    ) {
+        return write_fields(
+            snapshot,
+            order.id,
+            vec![(
+                "work_ticks".to_owned(),
+                Value::U64(WORK_ORDER_TICKS_PER_UNIT - 1),
+            )],
+        );
+    }
+    let remaining = field_u64(
+        entity(snapshot, order.id)?,
+        AMOUNT_REMAINING_FIELD,
+        snapshot.tick,
+    )?
+    .checked_sub(1)
+    .ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "production completed an order with no remaining units",
+        )
+    })?;
     let mut changed = false;
-    if produced > 0
-        && let Some((stock_field, per_unit)) = product
-        && let Some(ledger) = stock_ledger(snapshot)
+    if let Some((stock_field, per_unit)) = order.product
+        && let Some(ledger) = timeline.ledger
     {
         let held = field_u64(entity(snapshot, ledger)?, stock_field, snapshot.tick)?;
+        let produced = held
+            .checked_add(per_unit)
+            .ok_or_else(|| advance_budget_error("production would overflow its stock counter"))?;
         changed |= write_fields(
             snapshot,
             ledger,
-            vec![(
-                stock_field.to_owned(),
-                Value::U64(held.saturating_add(produced.saturating_mul(per_unit))),
-            )],
+            vec![(stock_field.to_owned(), Value::U64(produced))],
         )?;
     }
-    let blocker = if remaining > 0 {
-        match production_gate(snapshot, id, &conditions, product) {
-            ProductionGate::Blocked(blocker) => Some(blocker),
-            ProductionGate::Ready { .. } => None,
-        }
-    } else {
-        None
-    };
-    let gated_after_progress = blocker.is_some();
-    changed |= write_production_blocker(snapshot, id, blocker)?;
     let mut fields = vec![
         (AMOUNT_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
-        (
-            "work_ticks".to_owned(),
-            Value::U64(if remaining == 0 || gated_after_progress {
-                0
-            } else {
-                work % WORK_ORDER_TICKS_PER_UNIT
-            }),
-        ),
+        ("work_ticks".to_owned(), Value::U64(0)),
     ];
     if remaining == 0 {
         fields.push((
             STATUS_FIELD.to_owned(),
             Value::Text(STATUS_COMPLETE.to_owned()),
         ));
+        fields.push((BLOCKED_BY_FIELD.to_owned(), Value::Null));
     }
-    Ok(write_fields(snapshot, id, fields)? | changed)
+    changed |= write_fields(snapshot, order.id, fields)?;
+    Ok(changed)
 }
 
 fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
@@ -1639,62 +2209,10 @@ fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) ->
     )
 }
 
-fn advance_designation(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
-    let designation = entity(snapshot, id)?;
-    let (Some(min), Some(max)) = (
-        coord_field(designation, "area_min", snapshot.tick),
-        coord_field(designation, "area_max", snapshot.tick),
-    ) else {
-        return Err(precondition(
-            "dig designation requires eligible area coordinates before reference progress",
-        ));
-    };
-    let area = MapCuboid::new(min, max)?;
-    let target = u32::try_from(field_u64(designation, "target_tile_code", snapshot.tick)?)
-        .map_err(|_| {
-            DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "dig designation target tile code is invalid",
-            )
-        })?;
-    let work = field_u64(designation, "work_ticks", snapshot.tick)?.saturating_add(elapsed);
-    let budget = work / DIG_TICKS_PER_TILE;
-    let mut changed = false;
-    if budget > 0 {
-        let pending: Vec<MapCoord> = region_tiles(area)
-            .filter(|coord| {
-                snapshot
-                    .tile_code_at(*coord)
-                    .is_some_and(|code| code != target)
-            })
-            .take(usize::try_from(budget).unwrap_or(usize::MAX))
-            .collect();
-        for coord in pending {
-            changed |= snapshot.set_tile_code(coord, target)?;
-        }
-    }
-    let remaining = count_remaining(snapshot, area, target);
-    let mut fields = vec![
-        (TILES_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
-        (
-            "work_ticks".to_owned(),
-            Value::U64(if remaining == 0 {
-                0
-            } else {
-                work % DIG_TICKS_PER_TILE
-            }),
-        ),
-    ];
-    if remaining == 0 {
-        fields.push((
-            STATUS_FIELD.to_owned(),
-            Value::Text(STATUS_COMPLETE.to_owned()),
-        ));
-    }
-    changed |= write_fields(snapshot, id, fields)?;
-    Ok(changed)
-}
-
 #[cfg(test)]
 #[path = "effects_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "effects_timeline_tests.rs"]
+mod timeline_tests;

@@ -2395,17 +2395,16 @@ mod tests {
             );
 
             if !paused {
-                // The low-level model expects its caller to validate the source
-                // before advancing the tick. Moving it first demonstrates the
-                // former adapter bug: the unobserved counter becomes usable.
+                // The low-level timeline now repeats the source-time check.
+                // Advancing a caller's shadow clock cannot legitimize this fact.
                 let mut promoted = source.clone();
                 promoted.tick = GameTick(51);
-                effects::advance_effects(&mut promoted, 50)?;
-                assert_eq!(
-                    promoted.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD]
-                        .value,
-                    Value::U64(0)
+                let result = effects::advance_effects(&mut promoted, 50);
+                assert!(
+                    matches!(result, Err(error) if error.code == ErrorCode::PreconditionsFailed)
                 );
+                assert_eq!(promoted.graph, source.graph);
+                assert_eq!(promoted.tick, GameTick(51));
             }
             let mut adapter = MemoryAdapter::new(source.clone());
             let result = adapter.advance_ticks(50);

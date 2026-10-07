@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-07 — Causal, bounded reference time advancement
+
+- Advance construction, excavation, production, meals and combat on one causal
+  event timeline. Freeze interval eligibility so completed prerequisites and
+  workshops release only later work and killed workers stop producing.
+- Preserve physical outcomes across successful wait partitions. Resolve
+  simultaneous stock completions canonically, retain earned partial work, and
+  keep internal simulation events separate from obligation observations.
+- Add explicit tick, event and aggregate work budgets; reject future source
+  facts, invalid active counters, unknown excavation terrain and counter
+  overflow. Adapter refusal remains atomic across the entire requested advance.
+- Cache pending excavation tiles and update intersecting designations instead
+  of repeatedly scanning whole regions, with a separate aggregate cache bound
+  checked before allocation. Add twelve timeline regressions and three full-action
+  laboratory regressions. Frozen execution: 163 intent and 82 lab tests passed,
+  with zero failures or ignored tests. Full workspace/native/live qualification
+  and MCP compilation remain pending.
+
 ## 2026-10-07 — MCP cleanup, retained ownership and recovery of running work
 
 - Keep Failed and early Verified actions visible until their physical work is

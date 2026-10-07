@@ -407,7 +407,8 @@ calibration). When a stock runs short the dwarves served last (highest id)
 go without and their `need.drink` / `need.food` turns `thirsty` / `hungry`;
 a later full round makes everyone `satisfied` again. Work orders produce
 stock: each `BREW_DRINK` unit adds 5 drink, each `PREPARE_MEAL`/`COOK_MEAL`
-unit 5 food, applied before consumption in the same interval.
+unit 5 food. Production that completes on a meal boundary is available for
+that meal; later production cannot feed an earlier meal.
 
 `fortress_observe` and `fortress_wait` return `world_alerts` and the Agent Turn
 raises them as `fortress_needs` attention: `high` when a stock lasts less than
@@ -447,23 +448,21 @@ does not infer native recipes, material consumption, path access, or DFHack
 eligibility.
 
 Conditions gate production units. For an order producing the stock it checks,
-one indivisible unit may cross the threshold; the next unit is blocked. A large
-advance applies the same limit arithmetically, rather than bypassing the check
-or looping over an unbounded amount. A blocked order remains active and records
-the first canonical reason in `blocked_by`. Previously earned partial-unit work
-is retained, but blocked elapsed ticks are discarded. A later favorable
-observation can resume work using only newly granted time. Completing the
-requested amount ends the order; conditions do not create recurring orders.
+one indivisible unit may cross the threshold; the next unit is blocked. The
+bounded event timeline checks the gate at every completion. A blocked order
+remains active and records the first canonical reason in `blocked_by`.
+Previously earned partial-unit work is retained, but blocked elapsed ticks are
+discarded. A later stock or dependency event can release work for subsequent
+time in the same advance. Completing the requested amount ends the order;
+conditions do not create recurring orders.
 
 Named dependencies use the source-qualified `order_name` field, never display
 labels. Missing or ambiguous names, self-reference, cancelled predecessors, and
 unknown completion evidence block. Establishing uniqueness also requires the
-other work-order names in the supplied domain to be known. All work retains the
-existing ascending-entity processing order: a predecessor processed earlier in
-one advance may release a later order in that advance. Metabolism runs after
-production, so consumption can release a stock gate on the next advance.
-Dependent orders and changing inventory therefore do not claim identical timing
-under different partitions of a wait, or native-game timing.
+other work-order names in the supplied domain to be known. A prerequisite's
+completion releases its dependent only for time after that completion. A
+50-tick prerequisite followed by a 50-tick dependent therefore needs 100 ticks,
+regardless of their entity IDs or how the caller divides those ticks into waits.
 
 The reference boundary accepts at most 64 conditions and 256 non-control bytes
 per token/name; the MCP request retains its existing 128-byte name limit and
@@ -488,6 +487,52 @@ retain their original identity; if recompilation cannot reproduce a retained
 seal under the stronger default proof, the existing recovery path keeps it
 indeterminate. Conditional production adds no live mutation capability or
 compatibility admission.
+
+### Causal time, competing work and bounded advancement
+
+The reference model advances between actual work and world-event boundaries:
+production units, construction completion, excavated tiles, meals, hostile
+arrival and combat rounds. Eligibility is frozen at the start of each positive
+interval. At a shared boundary, construction and excavation settle first,
+production completions settle in ascending entity order, drink and food are
+consumed, and then arrivals and combat settle in ascending hostile order.
+Current production blockers are refreshed after those events. A newly completed
+workshop, consumed stock, completed prerequisite or worker death changes the
+next interval; it never grants or removes time from an earlier interval.
+
+When two orders reach the same stock threshold together, the earlier canonical
+entity may complete the unit that crosses it. The other order retains 49 of its
+50 required work ticks; only the refused completion tick is discarded. Unequal
+partial work instead completes in actual time order. This preserves earned
+work and prevents arbitrary wait boundaries from changing which order wins.
+Excavations cache their pending terrain once per advance and update overlapping
+designations when a tile changes, avoiding a full region scan per excavated tile.
+
+With the same source world and no intervening actions, successful advances
+produce the same physical values under different wait partitions: stock,
+remaining work, partial work, terrain, needs and life state. The public snapshot
+cursor, revisions and observation timestamps still reflect actual publication.
+Internal events do not poll obligations or add stability samples. Deferred plan
+steps still dispatch only when a foreground poll observes their prerequisites,
+so dispatch and proof cadence remain distinct from physical simulation timing.
+These are reference-model semantics, not native Dwarf Fortress timing claims.
+
+`advance_effects_with_limits` accepts an explicit `EffectAdvanceLimits`; the
+ordinary `advance_effects` wrapper uses the hard defaults: at most 1,000,000
+game ticks, 200,000 timeline intervals and 100,000,000 deterministic work units
+per physical advance. Callers can reduce these limits. Aggregate excavation
+footprints also have a hard 1,048,576-tile cache bound, checked before any region
+allocation or terrain read. Source facts, entity and condition scans, population
+scans and terrain visits consume the work budget.
+Budget or counter overflow returns `BudgetExceeded`. Future-dated eligible facts
+are rejected against the source tick before time moves. Active work with
+noncanonical counters or unknown excavation terrain refuses instead of guessing.
+
+The effect function operates on its caller's transaction shadow. `MemoryAdapter`
+publishes only after the entire requested advance succeeds; refusal preserves
+the original world, receipts and transcript even if earlier internal events
+would have succeeded. Budget admission is per call: splitting an otherwise
+oversized request does not grant an oversized single call admission.
 
 ## Threats
 

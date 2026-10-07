@@ -216,8 +216,11 @@ fn field(adapter: &MemoryAdapter, id: EntityId, name: &str) -> Option<Value> {
 fn run_workshop() -> Result<(dfmcp_core::Digest32, Vec<u64>, PreparedPlan)> {
     let mut adapter = MemoryAdapter::new(world(true));
     let intent = workshop_intent(adapter.snapshot())?;
-    let plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
     // Planner defaults are sealed: dig proves its region, build and brew prove
     // the entities their idempotency keys will create.
     assert_eq!(
@@ -252,8 +255,11 @@ fn run_workshop() -> Result<(dfmcp_core::Digest32, Vec<u64>, PreparedPlan)> {
         constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
         requested_actions: vec![request(Action::Pause { paused: false }, Vec::new())],
     };
-    let unpause_plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &unpause, &context(&adapter, 4))?;
+    let unpause_plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &unpause,
+        &context(&adapter, 4),
+    )?;
     commit(&mut adapter, &unpause_plan, 5)?;
 
     let mut verified_at = vec![0u64; 3];
@@ -329,8 +335,11 @@ fn immediate_labor_change_verifies_at_commit_and_compensates_on_cancel() -> Resu
             Vec::new(),
         )],
     };
-    let plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
     assert!(plan.steps[0].compensation.is_some());
     let prepared = adapter.prepare(&plan, &context(&adapter, 2))?;
     let receipt = adapter.commit(&plan, &prepared, &context(&adapter, 3))?;
@@ -369,8 +378,11 @@ fn cancelled_work_order_stops_producing_but_keeps_its_record() -> Result<()> {
             Vec::new(),
         )],
     };
-    let plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
     let action = commit(&mut adapter, &plan, 2)?[0];
     let order = effects::created_entity_id(&plan.steps[0].idempotency_key, 0);
     adapter.advance_ticks(effects::WORK_ORDER_TICKS_PER_UNIT * 3)?;
@@ -425,8 +437,11 @@ fn excavation_that_misses_its_explicit_deadline_fails() -> Result<()> {
         constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
         requested_actions: vec![dig],
     };
-    let plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
     let action = commit(&mut adapter, &plan, 2)?[0];
     let mut last = CommitState::Prepared;
     for request_id in 3..10u128 {
@@ -462,13 +477,231 @@ fn excavation_over_unobserved_terrain_is_rejected_without_partial_state() -> Res
             Vec::new(),
         )],
     };
-    let plan =
-        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
     let before = adapter.snapshot().clone();
     let failure = commit(&mut adapter, &plan, 2)
         .err()
         .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "accepted"))?;
     assert_eq!(failure.code, ErrorCode::PreconditionsFailed);
     assert_eq!(adapter.snapshot(), &before);
+    Ok(())
+}
+
+// Bind these execution fixtures to the exact modeled completion of their
+// original actions; the planner rejects tautological intent goals.
+fn bind_action_completion_goal(intent: &mut Intent) -> Result<()> {
+    let mut predicates = Vec::new();
+    for (index, requested) in intent.requested_actions.iter().enumerate() {
+        let index = u32::try_from(index).map_err(|_| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "fixture step index overflow")
+        })?;
+        let action = requested.action.normalized();
+        let key = dfmcp_intent::derive_step_idempotency_key(
+            intent.id,
+            intent.anchor,
+            dfmcp_core::StepId::new(index),
+            &action,
+        );
+        predicates.extend(effects::default_postconditions(
+            &action,
+            &key,
+            intent.anchor.fortress_id,
+        ));
+    }
+    intent.terminal_condition = Predicate::All(predicates);
+    Ok(())
+}
+
+#[test]
+fn conditional_orders_receive_only_time_after_their_prerequisite_completes() -> Result<()> {
+    let mut seed = MemoryAdapter::new(world(false));
+    let mut intent = Intent {
+        id: IntentId::new(901),
+        anchor: seed.snapshot().anchor(),
+        summary: "make a part, then assemble it".to_owned(),
+        terminal_condition: Predicate::True,
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![
+            request(
+                Action::CreateWorkOrder {
+                    name: "first part".to_owned(),
+                    job_token: "MAKE_PART".to_owned(),
+                    amount: 1,
+                    conditions: Vec::new(),
+                },
+                Vec::new(),
+            ),
+            request(
+                Action::CreateWorkOrder {
+                    name: "assembly".to_owned(),
+                    job_token: "ASSEMBLE_PART".to_owned(),
+                    amount: 1,
+                    conditions: vec![dfmcp_intent::WorkOrderCondition::CompletedOrder {
+                        order_name: "first part".to_owned(),
+                    }],
+                },
+                Vec::new(),
+            ),
+        ],
+    };
+    bind_action_completion_goal(&mut intent)?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        seed.snapshot(),
+        &intent,
+        &context(&seed, 1),
+    )?;
+    let actions = commit(&mut seed, &plan, 2)?;
+    let first = effects::created_entity_id(&plan.steps[0].idempotency_key, 0);
+    let second = effects::created_entity_id(&plan.steps[1].idempotency_key, 0);
+    let mut at_boundary = seed.clone();
+    at_boundary.advance_ticks(50)?;
+    assert_eq!(
+        field(&at_boundary, first, AMOUNT_REMAINING_FIELD),
+        Some(Value::U64(0))
+    );
+    assert_eq!(
+        field(&at_boundary, second, AMOUNT_REMAINING_FIELD),
+        Some(Value::U64(1))
+    );
+    assert_eq!(
+        field(&at_boundary, second, "work_ticks"),
+        Some(Value::U64(0)),
+        "prerequisite completion cannot grant time from before its boundary"
+    );
+
+    for partition in [
+        vec![100],
+        vec![25, 25, 25, 25],
+        vec![1; 100],
+        vec![49, 1, 49, 1],
+        vec![33, 33, 34],
+    ] {
+        let mut adapter = seed.clone();
+        for ticks in &partition {
+            adapter.advance_ticks(*ticks)?;
+        }
+        for (id, action) in [first, second].into_iter().zip(actions.iter().copied()) {
+            assert_eq!(
+                field(&adapter, id, AMOUNT_REMAINING_FIELD),
+                Some(Value::U64(0)),
+                "{partition:?}"
+            );
+            assert_eq!(
+                field(&adapter, id, "work_ticks"),
+                Some(Value::U64(0)),
+                "{partition:?}"
+            );
+            assert_eq!(
+                poll(&mut adapter, action, 3)?,
+                CommitState::Verified,
+                "{partition:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn internal_time_boundaries_do_not_manufacture_obligation_samples() -> Result<()> {
+    let mut seed = MemoryAdapter::new(world(false));
+    let mut order = request(
+        Action::CreateWorkOrder {
+            name: "two observed samples".to_owned(),
+            job_token: "MAKE_PART".to_owned(),
+            amount: 1,
+            conditions: Vec::new(),
+        },
+        Vec::new(),
+    );
+    order.obligation = Some(ObligationSpec {
+        terminal: Predicate::Paused(false),
+        failure: None,
+        deadline_tick: GameTick(1_000),
+        poll_interval_ticks: 1,
+        stable_for_observations: 2,
+    });
+    let mut intent = Intent {
+        id: IntentId::new(902),
+        anchor: seed.snapshot().anchor(),
+        summary: "physical completion still requires observed proof".to_owned(),
+        terminal_condition: Predicate::True,
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![order],
+    };
+    bind_action_completion_goal(&mut intent)?;
+    intent.requested_actions[0]
+        .obligation
+        .as_mut()
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "fixture obligation missing",
+            )
+        })?
+        .terminal = intent.terminal_condition.clone();
+    let plan = StaticPlanner::default().prepare_laboratory(
+        seed.snapshot(),
+        &intent,
+        &context(&seed, 1),
+    )?;
+    let action = commit(&mut seed, &plan, 2)?[0];
+    for partition in [vec![100], vec![1; 100]] {
+        let mut adapter = seed.clone();
+        for ticks in partition {
+            adapter.advance_ticks(ticks)?;
+        }
+        assert!(adapter.action_work_state(action)?.is_quiescent());
+        assert_eq!(
+            poll(&mut adapter, action, 3)?,
+            CommitState::AppliedAwaitingVerification
+        );
+        assert_eq!(
+            poll(&mut adapter, action, 4)?,
+            CommitState::AppliedAwaitingVerification
+        );
+        adapter.advance_ticks(1)?;
+        assert_eq!(poll(&mut adapter, action, 5)?, CommitState::Verified);
+    }
+    Ok(())
+}
+
+#[test]
+fn refused_time_horizon_preserves_world_receipts_and_transcript() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(world(false));
+    let mut intent = Intent {
+        id: IntentId::new(903),
+        anchor: adapter.snapshot().anchor(),
+        summary: "bounded temporal execution".to_owned(),
+        terminal_condition: Predicate::True,
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![request(
+            Action::CreateWorkOrder {
+                name: "bounded order".to_owned(),
+                job_token: "MAKE_PART".to_owned(),
+                amount: 2,
+                conditions: Vec::new(),
+            },
+            Vec::new(),
+        )],
+    };
+    bind_action_completion_goal(&mut intent)?;
+    let plan = StaticPlanner::default().prepare_laboratory(
+        adapter.snapshot(),
+        &intent,
+        &context(&adapter, 1),
+    )?;
+    let action = commit(&mut adapter, &plan, 2)?[0];
+    let snapshot = adapter.snapshot().clone();
+    let receipt = adapter.action_receipt(action).cloned();
+    let transcript = adapter.transcript().clone();
+    let result = adapter.advance_ticks(u64::MAX - snapshot.tick.0);
+    assert!(result.is_err_and(|error| error.code == ErrorCode::BudgetExceeded));
+    assert_eq!(adapter.snapshot(), &snapshot);
+    assert_eq!(adapter.action_receipt(action), receipt.as_ref());
+    assert_eq!(adapter.transcript(), &transcript);
     Ok(())
 }

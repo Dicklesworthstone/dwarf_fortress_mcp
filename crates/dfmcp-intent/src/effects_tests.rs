@@ -951,6 +951,9 @@ fn unavailable_or_untrusted_counts_cannot_satisfy_any_production_condition() -> 
                 .entities
                 .get_mut(&EntityId::new(91))
                 .ok_or_else(|| precondition("missing test ledger"))?;
+            let future = replacement
+                .as_ref()
+                .is_some_and(|fact| fact.observed_at > original.tick);
             match replacement {
                 Some(fact) => {
                     ledger.fields.insert(field.to_owned(), fact);
@@ -959,7 +962,7 @@ fn unavailable_or_untrusted_counts_cannot_satisfy_any_production_condition() -> 
                     ledger.fields.remove(field);
                 }
             }
-            advance(&mut snapshot, 500)?;
+            advance_ineligible_variant(&mut snapshot, 500, future)?;
             assert_eq!(
                 field_u64(
                     &snapshot.graph.entities[&id],
@@ -973,14 +976,16 @@ fn unavailable_or_untrusted_counts_cannot_satisfy_any_production_condition() -> 
                 field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
                 0
             );
-            assert!(
-                field_text(
-                    &snapshot.graph.entities[&id],
-                    BLOCKED_BY_FIELD,
-                    snapshot.tick
-                )
-                .is_some()
-            );
+            if !future {
+                assert!(
+                    field_text(
+                        &snapshot.graph.entities[&id],
+                        BLOCKED_BY_FIELD,
+                        snapshot.tick
+                    )
+                    .is_some()
+                );
+            }
             set_test_field(&mut snapshot, EntityId::new(91), field, Value::U64(count))?;
             advance(&mut snapshot, 49)?;
             assert_eq!(
@@ -1044,6 +1049,9 @@ fn legacy_untrusted_and_malformed_condition_records_never_become_unconditional()
             .entities
             .get_mut(&id)
             .ok_or_else(|| precondition("missing test order"))?;
+        let future = replacement
+            .as_ref()
+            .is_some_and(|fact| fact.observed_at > original.tick);
         match &replacement {
             Some(fact) => {
                 order
@@ -1054,7 +1062,7 @@ fn legacy_untrusted_and_malformed_condition_records_never_become_unconditional()
                 order.fields.remove(WORK_ORDER_CONDITIONS_FIELD);
             }
         }
-        advance(&mut snapshot, 500)?;
+        advance_ineligible_variant(&mut snapshot, 500, future)?;
         assert_eq!(
             field_u64(
                 &snapshot.graph.entities[&id],
@@ -1067,14 +1075,16 @@ fn legacy_untrusted_and_malformed_condition_records_never_become_unconditional()
             field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
             0
         );
-        assert!(
-            field_text(
-                &snapshot.graph.entities[&id],
-                BLOCKED_BY_FIELD,
-                snapshot.tick
-            )
-            .is_some()
-        );
+        if !future {
+            assert!(
+                field_text(
+                    &snapshot.graph.entities[&id],
+                    BLOCKED_BY_FIELD,
+                    snapshot.tick
+                )
+                .is_some()
+            );
+        }
         assert_eq!(
             snapshot.graph.entities[&id]
                 .fields
@@ -1177,6 +1187,28 @@ fn unknown_names_or_completion_evidence_cannot_release_named_dependents() -> Res
         completed_order_blocker(&original, target, "upstream")
             .is_some_and(|reason| reason.contains("uniquely"))
     );
+    Ok(())
+}
+
+// Future-dated eligible input now refuses the whole timeline at its source.
+// Other unavailable variants remain observable blocked work. Exercise refusal
+// on a transaction shadow and retain the original source for the recovery check.
+fn advance_ineligible_variant(
+    snapshot: &mut WorldSnapshot,
+    ticks: u64,
+    future: bool,
+) -> Result<()> {
+    if future {
+        let mut shadow = snapshot.clone();
+        let error = advance(&mut shadow, ticks).err();
+        assert_eq!(
+            error.map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(shadow.graph, snapshot.graph);
+    } else {
+        advance(snapshot, ticks)?;
+    }
     Ok(())
 }
 
@@ -1575,6 +1607,7 @@ fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock
         for replacement in
             ineligible_reference_inputs(&original.graph.entities[&subject].fields[field])
         {
+            let future = replacement.observed_at > original.tick;
             let mut snapshot = original.clone();
             snapshot
                 .graph
@@ -1583,7 +1616,7 @@ fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock
                 .unwrap()
                 .fields
                 .insert(field.to_owned(), replacement);
-            advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
+            advance_ineligible_variant(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10, future)?;
             assert_eq!(
                 field_u64(
                     &snapshot.graph.entities[&id],
@@ -1596,14 +1629,16 @@ fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock
                 field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
                 0
             );
-            assert!(
-                field_text(
-                    &snapshot.graph.entities[&id],
-                    BLOCKED_BY_FIELD,
-                    snapshot.tick
-                )
-                .is_some_and(|reason| reason.contains("not established"))
-            );
+            if !future {
+                assert!(
+                    field_text(
+                        &snapshot.graph.entities[&id],
+                        BLOCKED_BY_FIELD,
+                        snapshot.tick
+                    )
+                    .is_some_and(|reason| reason.contains("not established"))
+                );
+            }
             // Restoring the registered input permits work again; uncertain
             // candidates do not poison future authoritative observations.
             snapshot
