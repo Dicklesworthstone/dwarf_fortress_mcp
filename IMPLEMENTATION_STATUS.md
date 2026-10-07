@@ -44,6 +44,44 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Source-qualified world predicate evidence (2026-10-07)
+
+The pure world layer now separates readable predicate values from evidence that
+may support an execution decision. `PredicateEvidence` borrows one immutable,
+hash-valid snapshot and binds exact source and domain grants to its full anchor.
+Its default scope grants no observation authority. Observed and certified
+derived grants require exact producer identifiers and nonzero digests; replay
+and agent assertions cannot acquire a grant. The explicit laboratory scope
+admits only the two registered reference derivations under their existing
+zero-digest convention, with consistent known presence and nonfuture timestamps.
+
+Positive entity/relation observation and complete-domain absence are separate
+rights. Missing records and uncovered terrain remain unknown; relations also
+require observed endpoints. Unknown leaves remain unknown through negation and
+boolean composition. Canonical kind aliases have identical evidence meaning,
+ambiguous duplicate kind grants are rejected, and lookup keys must match
+canonical record identities. Source/policy and predicate bounds are checked
+before evaluation. Profile metadata and canonical hashes alone confer no source
+authenticity, completeness, or capability authority.
+
+**Evidence: the initial world evidence implementation passed all 178 actual
+locked, offline Cargo world tests, zero failed and zero ignored**, including
+13 new source, digest, freshness, presence, anchor, coverage and malformed-input
+tests. Review then corrected canonical kind alias handling and added two
+regressions. That follow-up passed formatting, but its full 180-test run was
+interrupted by an execution-service disconnection; no passing result was
+received. The available compiler is `rustc 1.100.0-nightly (908501772 2026-08-30)`.
+Sources recovered through GitHub after the disconnection are reviewed source,
+not a claim that the final published generation passed the interrupted run.
+
+This increment provides the shared evidence primitive. Threading it through
+planning, reference effects, deferred execution, obligations and MCP recovery
+is the next increment under `df-predicate-evidence-authority-r7m`. The observing
+shell remains responsible for independent source admission and issuing grants;
+the explicit laboratory constructor is not an imported-data or live-source
+admission path. No native, live, registry or full-workspace qualification is
+claimed.
+
 ### MCP profile queries and faithful observation rendering (2026-10-07)
 
 The public laboratory query accepts

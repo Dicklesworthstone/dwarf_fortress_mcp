@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-07 — Source-qualified predicate evidence
+
+- Bind execution evidence to one immutable canonical snapshot, exact admitted
+  source digests and explicit observed/complete domains. Default scopes grant
+  nothing; replay, assertions and profile metadata cannot issue authority.
+- Keep unavailable, future and unadmitted facts unknown through negation and
+  boolean composition. Require observed relation endpoints and bounded terrain
+  coverage; distinguish positive membership from complete-domain absence.
+- Give canonical kind aliases identical truth and coverage semantics, reject
+  ambiguous duplicate grants, and validate lookup keys against hashed identities.
+- Provide explicit registered laboratory input eligibility without granting
+  native effects. The initial implementation passed 178 actual world Cargo
+  tests including 13 new evidence cases; two alias follow-up tests and the
+  final generation await executable verification after the executor outage.
+
 ## 2026-10-07 — Usable MCP profiles and faithful bounded observations
 
 - Expose all five typed completeness profiles through the existing laboratory

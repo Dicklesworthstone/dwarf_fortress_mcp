@@ -368,7 +368,7 @@ pub fn evaluate_truth_for(
     evaluate_truth(snapshot, Some(candidate), predicate)
 }
 
-fn compare(left: &Value, op: CompareOp, right: &Value) -> PredicateTruth {
+pub(crate) fn compare(left: &Value, op: CompareOp, right: &Value) -> PredicateTruth {
     let ordering = match (left, right) {
         (Value::I64(left), Value::I64(right)) => left.partial_cmp(right),
         (Value::U64(left), Value::U64(right)) => left.partial_cmp(right),

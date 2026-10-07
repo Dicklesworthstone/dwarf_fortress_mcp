@@ -7,6 +7,7 @@ pub mod canonical_decode;
 mod checkpoint;
 mod completeness;
 mod delta;
+mod evidence;
 pub mod franken_fs;
 pub mod graph_query;
 pub mod inventory_allocation;
@@ -58,6 +59,10 @@ pub use completeness::{
 pub use delta::{
     ContinuationToken, StateDelta, WorldChange, apply_delta, build_delta, compute_snapshot_diff,
     diff_snapshots,
+};
+pub use evidence::{
+    EvidenceCoverage, EvidencePolicy, EvidenceSource, PredicateEvidence, lab_fact_is_eligible,
+    laboratory_fact_value,
 };
 pub use ledger::{DurableLedger, EffectJournalRecord, ObservationCapsule, WitnessSet};
 pub use model::{
