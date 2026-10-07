@@ -44,6 +44,28 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Immediate laboratory postconditions and transactional refusal (2026-10-07)
+
+Non-temporal laboratory actions must establish every sealed postcondition at
+the actual effect boundary. False or unknown postconditions return
+`AdapterRejected` instead of leaving an action indefinitely pending without a
+proof obligation or deadline. The same rule applies when a prepared successor
+first dispatches during polling. Existing commit and deferred-poll transaction
+shadows restore the world, receipts, dispatch flags and transcript on refusal,
+preserving a clean retry. Explicit temporal actions continue through their
+canonical proof monitors.
+
+Two new regressions cover initial and deferred actions with unavailable,
+asserted and known-false postconditions. Existing temporal workflows retain
+their explicit or planner-synthesized obligations. The deferred post-effect
+shape-error regression uses a field exceeding the actual predicate limit,
+ensuring it exercises the rollback path.
+
+**Evidence: source and regression review only.** The execution service remains
+unavailable, so this final increment has not compiled or executed. Final
+formatting, targeted tests and the repository qualification scripts remain
+pending under `df-predicate-evidence-authority-r7m`.
+
 ### Canonical adapter cadence and atomic deferred polling (2026-10-07)
 
 Both reference adapters now own a canonical `ObligationRuntime` for each

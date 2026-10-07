@@ -500,7 +500,10 @@ impl MemoryAdapter {
             } else if predicates_established(&observation, &step.postconditions)? {
                 CommitState::Verified
             } else {
-                CommitState::AppliedAwaitingVerification
+                return Err(DfmcpError::new(
+                    ErrorCode::AdapterRejected,
+                    format!("immediate postconditions for step {} are not established true", step.id),
+                ));
             }
         } else {
             CommitState::Prepared
@@ -625,7 +628,10 @@ impl MemoryAdapter {
             } else if predicates_established(&observation, &step.postconditions)? {
                 state = CommitState::Verified;
             } else {
-                state = CommitState::AppliedAwaitingVerification;
+                return Err(DfmcpError::new(
+                    ErrorCode::AdapterRejected,
+                    format!("immediate postconditions for step {} are not established true", step.id),
+                ));
             }
         }
 
@@ -2144,7 +2150,7 @@ mod tests {
                 })?;
                 action.step.postconditions = vec![Predicate::FieldCompare {
                     entity_id: dfmcp_core::EntityId::new(9),
-                    field: String::new(),
+                    field: "x".repeat(257),
                     op: CompareOp::Eq,
                     value: Value::Bool(true),
                 }];
@@ -2161,6 +2167,131 @@ mod tests {
             assert_eq!(attempted.action_receipt(deferred).cloned(), before_receipt);
             assert_eq!(attempted.transcript(), &before_transcript);
             assert!(!attempted.actions[&deferred].dispatched);
+        }
+        Ok(())
+    }
+
+
+    fn unproved_immediate_facts(tick: GameTick) -> [Option<dfmcp_world::Fact>; 3] {
+        use dfmcp_world::{Fact, FactSource, Value};
+        [
+            None,
+            Some(Fact::known(
+                Value::Bool(true),
+                tick,
+                FactSource::AgentAssertion("expected immediate result".to_owned()),
+                dfmcp_core::Digest32::ZERO,
+            )),
+            Some(authority_fact(false, tick)),
+        ]
+    }
+
+    #[test]
+    fn immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal() -> Result<(), DfmcpError> {
+        for fact in unproved_immediate_facts(GameTick(1)) {
+            let mut source = WorldSnapshot::new(
+                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            );
+            add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
+            if let Some(fact) = fact {
+                set_authority_field(&mut source, "immediate_done", fact)?;
+            }
+            let mut intent = unpause_intent(&source, 71, None);
+            intent.requested_actions[0].postconditions = vec![
+                Predicate::Paused(false),
+                authority_predicate("immediate_done"),
+            ];
+            let plan = StaticPlanner::default()
+                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let mut adapter = MemoryAdapter::new(source);
+            let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+            let before = adapter.clone();
+
+            let result = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3));
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::AdapterRejected));
+            assert_eq!(adapter.snapshot, before.snapshot);
+            assert!(adapter.snapshot.paused);
+            assert!(adapter.actions.is_empty());
+            assert_eq!(adapter.action_by_step, before.action_by_step);
+            assert_eq!(adapter.commits, before.commits);
+            assert_eq!(adapter.prepared, before.prepared);
+            assert_eq!(adapter.plans, before.plans);
+            assert_eq!(adapter.transcript(), before.transcript());
+            assert_eq!(adapter.nonce, before.nonce);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn deferred_immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal() -> Result<(), DfmcpError> {
+        for fact in unproved_immediate_facts(GameTick(1)) {
+            let mut source = WorldSnapshot::new(
+                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            );
+            add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
+            set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
+            if let Some(fact) = fact {
+                set_authority_field(&mut source, "immediate_done", fact)?;
+            }
+            let mut intent = unpause_intent(&source, 72, Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: None,
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            }));
+            intent.terminal_condition = Predicate::All(vec![
+                Predicate::Paused(true),
+                authority_predicate("done"),
+                authority_predicate("immediate_done"),
+            ]).normalized();
+            intent.requested_actions.push(RequestedAction {
+                action: Action::Pause { paused: true },
+                preconditions: vec![authority_predicate("ready")],
+                postconditions: vec![
+                    Predicate::Paused(true),
+                    authority_predicate("immediate_done"),
+                ],
+                compensation: None,
+                obligation: None,
+                depends_on: vec![0],
+            });
+            let plan = StaticPlanner::default()
+                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let mut adapter = MemoryAdapter::new(source);
+            let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+            let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+            assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(committed.actions[1].state, CommitState::Prepared);
+            adapter.advance_ticks(1)?;
+            let tick = adapter.snapshot.tick;
+            set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
+            assert_eq!(
+                adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+                CommitState::Verified
+            );
+            let deferred = committed.actions[1].action_id;
+            let before = adapter.clone();
+
+            let result = adapter.poll_action(deferred, &context(adapter.snapshot(), 5));
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::AdapterRejected));
+            assert_eq!(adapter.snapshot, before.snapshot);
+            assert!(!adapter.snapshot.paused);
+            assert_eq!(adapter.actions.len(), before.actions.len());
+            for (action_id, prior) in &before.actions {
+                let current = &adapter.actions[action_id];
+                assert_eq!(current.receipt, prior.receipt);
+                assert_eq!(current.dispatched, prior.dispatched);
+                assert_eq!(current.obligation_runtime.is_some(), prior.obligation_runtime.is_some());
+            }
+            assert!(!adapter.actions[&deferred].dispatched);
+            assert!(adapter.actions[&deferred].obligation_runtime.is_none());
+            assert_eq!(adapter.action_by_step, before.action_by_step);
+            assert_eq!(adapter.commits, before.commits);
+            assert_eq!(adapter.prepared, before.prepared);
+            assert_eq!(adapter.plans, before.plans);
+            assert_eq!(adapter.transcript(), before.transcript());
+            assert_eq!(adapter.nonce, before.nonce);
         }
         Ok(())
     }

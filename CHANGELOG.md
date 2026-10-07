@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-07 — Atomic refusal of unverified immediate laboratory effects
+
+- Require established postconditions for non-temporal laboratory actions at
+  initial and deferred dispatch. Return `AdapterRejected` for false or unknown
+  evidence instead of retaining an action without a completion monitor.
+- Restore the whole commit or deferred poll on refusal, including world state,
+  receipts, dispatch flags and transcript. Preserve explicit temporal waiting.
+- Add two initial/deferred rollback regressions and correct the malformed
+  predicate fixture to exceed the actual field-size limit. Final executable
+  verification remains pending during the execution-service outage.
+
 ## 2026-10-07 — Canonical temporal proof and atomic deferred polling
 
 - Replace both adapters' duplicate stability counters with the shared obligation
