@@ -30,15 +30,10 @@ fn estimate_tokens(text: &str) -> u64 {
 }
 
 fn strip_nulls(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            map.retain(|_, v| !v.is_null());
-            for v in map.values_mut() {
-                strip_nulls(v);
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(strip_nulls),
-        _ => {}
+    // Only presentation defaults at this object level may be removed. Nested
+    // nulls can be known values in evidence or exact query/action arguments.
+    if let Value::Object(map) = value {
+        map.retain(|_, v| !v.is_null());
     }
 }
 
@@ -97,9 +92,8 @@ fn compact_turn(turn: &mut Value) {
     if let Some(budget) = turn.get_mut("budget") {
         *budget = json!({"admitted": budget["admitted"]});
     }
-    if let Some(coverage) = turn.get_mut("coverage") {
-        *coverage = json!({"status": coverage["status"]});
-    }
+    // Coverage and continuations are part of the truth of the response. A
+    // smaller envelope must retain what an empty or partial result proves.
     strip_nulls(turn);
 }
 
@@ -213,15 +207,10 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
                 }
             }
         }
-        turn["coverage"] = json!({
-            "status": turn["coverage"]["status"],
-            "attention_selection": {
-                "certified": turn["coverage"]["attention_selection"]["certified"],
-                "excluded": turn["coverage"]["attention_selection"]["excluded"],
-                "selected": turn["coverage"]["attention_selection"]["selected"],
-            },
-            "omitted_by_profile": PULSE_OMITS,
-        });
+        if !turn["coverage"].is_object() {
+            turn["coverage"] = json!({});
+        }
+        turn["coverage"]["omitted_by_profile"] = json!(PULSE_OMITS);
         strip_nulls(turn);
     }
     shaped.to_string()
@@ -242,7 +231,9 @@ const OPTIONAL_SECTIONS: [&str; 10] = [
     "steps",
 ];
 
-/// Every array in `value` with at least two items, as (path, serialized size).
+/// Only whole presentation records may be removed. Arrays inside a field,
+/// predicate, action, coordinate, evidence chain or query are semantic values;
+/// shortening them would invent a different known fact or plan.
 fn arrays(value: &Value, path: &mut Vec<String>, out: &mut Vec<(String, usize)>, skip_turn: bool) {
     match value {
         Value::Object(map) => {
@@ -257,7 +248,23 @@ fn arrays(value: &Value, path: &mut Vec<String>, out: &mut Vec<(String, usize)>,
             }
         }
         Value::Array(items) => {
-            if items.len() > 1 {
+            let removable = match path.as_slice() {
+                [name] => matches!(
+                    name.as_str(),
+                    "rows" | "levels" | "hits" | "polled_actions" | "steps"
+                ),
+                [parent, name] if parent == "world" => {
+                    matches!(name.as_str(), "dwarves" | "active_work")
+                }
+                [turn, work, _] if !skip_turn && turn == "agent_turn" && work == "active_work" => {
+                    true
+                }
+                [turn, name] if !skip_turn && turn == "agent_turn" && name == "recommendations" => {
+                    true
+                }
+                _ => false,
+            };
+            if removable && items.len() > 1 {
                 out.push((path.join("."), value.to_string().len()));
             }
             for (index, child) in items.iter().enumerate() {
@@ -294,6 +301,95 @@ fn fits(payload: &Value, record: &Value, budget: u64) -> Option<String> {
     (estimate_tokens(&text) <= budget).then_some(text)
 }
 
+fn partial_coverage(coverage: &mut Value) {
+    if !coverage.is_object() {
+        *coverage = json!({});
+    }
+    let mut partial = coverage["partial_domains"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(complete) = coverage["complete_domains"].as_array() {
+        for domain in complete {
+            if !partial.contains(domain) {
+                partial.push(domain.clone());
+            }
+        }
+    }
+    coverage["status"] = json!("partial");
+    coverage["partial_domains"] = json!(partial);
+    coverage["complete_domains"] = json!([]);
+    coverage["absence_proof_scope"] = json!([]);
+    coverage["page_complete"] = json!(false);
+    coverage["omitted_for_output_budget"] = json!(true);
+}
+
+/// Keep the page cursor consistent with the records the client actually got,
+/// and withdraw response-level completeness after any presentation omission.
+fn record_omission(payload: &mut Value, path: &str) {
+    if payload.get("complete_domain").is_some() {
+        payload["complete_domain"] = json!(false);
+    }
+    if payload.get("absence_proven").is_some() {
+        payload["absence_proven"] = json!(false);
+    }
+    payload["truncated"] = json!(true);
+    if let Some(coverage) = payload.get_mut("observation_coverage") {
+        partial_coverage(coverage);
+    }
+    if let Some(turn) = payload
+        .get_mut("agent_turn")
+        .filter(|turn| turn.is_object())
+    {
+        if !turn["coverage"].is_object() {
+            turn["coverage"] = json!({});
+        }
+        partial_coverage(&mut turn["coverage"]);
+    }
+    if path != "rows" || !matches!(payload["mode"].as_str(), Some("entities" | "observation")) {
+        return;
+    }
+    let returned = payload["rows"].as_array().map_or(0, Vec::len) as u64;
+    let offset = payload["offset"].as_u64().unwrap_or(0);
+    let end = offset.saturating_add(returned);
+    payload["returned"] = json!(returned);
+    let more = payload["total"].as_u64().is_some_and(|total| end < total)
+        && payload["section_included"].as_bool() != Some(false);
+    if !more {
+        payload["next_offset"] = Value::Null;
+        payload["continuation"] = Value::Null;
+        if let Some(coverage) = payload.get_mut("observation_coverage") {
+            coverage["continuation"] = Value::Null;
+        }
+        if let Some(turn) = payload
+            .get_mut("agent_turn")
+            .filter(|turn| turn.is_object())
+        {
+            turn["coverage"]["continuation"] = Value::Null;
+        }
+        return;
+    }
+    if let Some(mut next) = payload
+        .get("query")
+        .filter(|query| query.is_object())
+        .cloned()
+    {
+        next["offset"] = json!(end);
+        next["limit"] = json!(returned.max(1));
+        payload["next_offset"] = json!(end);
+        payload["continuation"] = next.clone();
+        if let Some(coverage) = payload.get_mut("observation_coverage") {
+            coverage["continuation"] = next.clone();
+        }
+        if let Some(turn) = payload
+            .get_mut("agent_turn")
+            .filter(|turn| turn.is_object())
+        {
+            turn["coverage"]["continuation"] = next;
+        }
+    }
+}
+
 fn minimal(payload: &Value) -> Value {
     let mut out = Map::new();
     for key in [
@@ -316,6 +412,7 @@ fn minimal(payload: &Value) -> Value {
             "operation": turn["operation"],
             "anchor": turn["anchor"],
             "continuity": {"status": turn["continuity"]["status"]},
+            "coverage": turn["coverage"],
             "active_work": turn["active_work"],
             "recommendations": turn["recommendations"].as_array().map(|r| r.iter().take(1).cloned().collect::<Vec<_>>()),
         }),
@@ -371,10 +468,11 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
         items.truncate(total / 2);
         let returned = items.len();
         let entry = truncated
-            .entry(path)
+            .entry(path.clone())
             .or_insert_with(|| json!({"total": total}));
         entry["returned"] = json!(returned);
         record["truncated"] = Value::Object(truncated.clone());
+        record_omission(&mut payload, &path);
         if let Some(text) = fits(&payload, &record, max_output_tokens) {
             return text;
         }
@@ -390,6 +488,7 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
             *section = json!({"omitted_for_output_budget": true});
             omitted.push(key);
             record["omitted"] = json!(omitted);
+            record_omission(&mut payload, key);
             if let Some(text) = fits(&payload, &record, max_output_tokens) {
                 return text;
             }
@@ -397,6 +496,7 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
     }
 
     record["tier"] = json!("minimal");
+    record_omission(&mut payload, "minimal_envelope");
     let mut small = minimal(&payload);
     if let Some(text) = fits(&small, &record, max_output_tokens) {
         return text;
@@ -415,6 +515,7 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
         let total = items.len();
         items.truncate(total / 2);
         record["minimal_truncated"][path.as_str()] = json!({"total": total, "returned": total / 2});
+        record_omission(&mut small, &path);
         if let Some(text) = fits(&small, &record, max_output_tokens) {
             return text;
         }
@@ -516,5 +617,158 @@ mod tests {
         let parsed: Value = serde_json::from_str(&fit(&small, 1_500)).unwrap_or(Value::Null);
         assert_eq!(parsed["x"], 1);
         assert_eq!(parsed["output_budget"]["tier"], "full");
+    }
+}
+
+#[cfg(test)]
+mod semantic_omission_tests {
+    use super::*;
+
+    fn covered_page() -> Value {
+        let coverage = json!({"status":"complete_for_named_projection",
+            "complete_domains":[{"domain":"laboratory.entities","kind":"unit"}],
+            "partial_domains":[], "absence_proof_scope":["laboratory.entities"],
+            "source_complete":true, "page_complete":true});
+        json!({
+            "ok":true,"mode":"entities","session_id":"s","offset":0,"returned":100,"total":100,
+            "complete_domain":true,"absence_proven":false,
+            "query":{"mode":"entities","kind":"unit","limit":100,"offset":0,"at":"exact-source-hash",
+                "where":{"field":"alive","value":true}},
+            "rows":(0..100).map(|i| json!({"entity_id":i.to_string(),"label":"a complete row",
+                "fields":{"assignment":[1,2,3,null]},"field_presence":{"assignment":{"state":"known"}}})).collect::<Vec<_>>(),
+            "observation_coverage":coverage,
+            "agent_turn":{"schema":"dfmcp.agent_turn/1","operation":"fortress.query",
+                "anchor":{"state_hash":"exact-source-hash"},"continuity":{"status":"continuous"},
+                "coverage":coverage,"active_work":{},"recommendations":[]}
+        })
+    }
+
+    #[test]
+    fn output_truncation_repairs_page_cursor_and_withdraws_absence_claims()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let original = covered_page();
+        let output: Value = serde_json::from_str(&fit(&original.to_string(), 1800))?;
+        let rows = output["rows"]
+            .as_array()
+            .ok_or("budget should retain a page of rows")?;
+        assert!(!rows.is_empty() && rows.len() < 100, "{output}");
+        assert_eq!(output["returned"], rows.len());
+        assert_eq!(output["next_offset"], rows.len());
+        assert_eq!(output["continuation"]["offset"], rows.len());
+        assert_eq!(output["continuation"]["at"], "exact-source-hash");
+        assert_eq!(output["continuation"]["where"], original["query"]["where"]);
+        assert_eq!(output["complete_domain"], false);
+        assert_eq!(output["observation_coverage"]["status"], "partial");
+        assert_eq!(output["agent_turn"]["coverage"]["status"], "partial");
+        assert_eq!(
+            output["observation_coverage"]["partial_domains"],
+            original["observation_coverage"]["complete_domains"]
+        );
+        assert_eq!(
+            output["agent_turn"]["coverage"]["absence_proof_scope"],
+            json!([])
+        );
+        for row in rows {
+            assert_eq!(row["fields"]["assignment"], json!([1, 2, 3, null]));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_single_known_list_is_omitted_as_a_record_instead_of_rewritten()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = covered_page();
+        let value = json!((0..4000).collect::<Vec<_>>());
+        response["rows"] = json!([{"entity_id":"1","fields":{"members":value},
+            "field_presence":{"members":{"state":"known"}}}]);
+        response["total"] = json!(1);
+        response["returned"] = json!(1);
+        let output: Value = serde_json::from_str(&fit(&response.to_string(), 900))?;
+        if let Some(rows) = output["rows"].as_array() {
+            assert_eq!(rows[0]["fields"]["members"], value);
+        } else {
+            assert!(matches!(
+                output["output_budget"]["tier"].as_str(),
+                Some("sections_omitted" | "minimal" | "refused")
+            ));
+            if output["output_budget"]["tier"] != "refused" {
+                assert_eq!(output["agent_turn"]["coverage"]["status"], "partial");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn profile_shaping_and_compaction_preserve_semantic_nulls_and_coverage()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = covered_page();
+        response["rows"] = json!([]);
+        response["agent_turn"]["changes"] = json!([{"before":{"slot":null},"after":{"slot":7}}]);
+        let pulse: Value =
+            serde_json::from_str(&shape_for_profile(&response.to_string(), "pulse"))?;
+        assert!(
+            pulse["agent_turn"]["changes"][0]["before"]
+                .get("slot")
+                .is_some()
+        );
+        assert_eq!(
+            pulse["agent_turn"]["coverage"]["absence_proof_scope"],
+            response["agent_turn"]["coverage"]["absence_proof_scope"]
+        );
+        let mut turn = response["agent_turn"].clone();
+        compact_turn(&mut turn);
+        assert!(turn["changes"][0]["before"].get("slot").is_some());
+        assert_eq!(turn["coverage"], response["agent_turn"]["coverage"]);
+        Ok(())
+    }
+    #[test]
+    fn profiled_pages_keep_section_source_anchor_and_complete_chunk_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = covered_page();
+        response["mode"] = json!("observation");
+        response["query"] = json!({"mode":"observation","section":"chunks",
+            "completeness_profile":"spatial","at":"exact-source-hash","offset":0,"limit":100});
+        let runs = json!([{"tile_code":1,"length":100},{"tile_code":2,"length":156}]);
+        response["rows"] = json!(
+            (0..100)
+                .map(|i| json!({"coord":[i,0,10],
+            "terrain_runs":runs}))
+                .collect::<Vec<_>>()
+        );
+        let output: Value = serde_json::from_str(&fit(&response.to_string(), 1600))?;
+        let rows = output["rows"]
+            .as_array()
+            .ok_or("budget should retain profiled rows")?;
+        assert!(!rows.is_empty() && rows.len() < 100);
+        assert_eq!(output["returned"], rows.len());
+        assert_eq!(output["continuation"]["offset"], rows.len());
+        assert_eq!(output["continuation"]["at"], "exact-source-hash");
+        assert_eq!(output["continuation"]["completeness_profile"], "spatial");
+        assert_eq!(output["continuation"]["section"], "chunks");
+        for row in rows {
+            assert_eq!(row["terrain_runs"], runs);
+        }
+        assert_eq!(output["agent_turn"]["coverage"]["status"], "partial");
+        Ok(())
+    }
+    #[test]
+    fn omitting_an_empty_or_finished_page_does_not_invent_a_continuation() {
+        for (included, total, offset) in [(false, 0, 0), (true, 0, 0), (true, 4, 4)] {
+            let mut response = covered_page();
+            response["mode"] = json!("observation");
+            response["section_included"] = json!(included);
+            response["total"] = json!(total);
+            response["offset"] = json!(offset);
+            response["rows"] = json!([]);
+            response["query"] = json!({"mode":"observation","section":"events",
+                "completeness_profile":"control-minimum","at":"exact-source-hash",
+                "offset":offset,"limit":100});
+            record_omission(&mut response, "rows");
+            assert_eq!(response["returned"], 0);
+            assert!(response["next_offset"].is_null());
+            assert!(response["continuation"].is_null());
+            assert!(response["observation_coverage"]["continuation"].is_null());
+            assert!(response["agent_turn"]["coverage"]["continuation"].is_null());
+        }
     }
 }

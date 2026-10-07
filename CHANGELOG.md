@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-07 — Usable MCP profiles and faithful bounded observations
+
+- Expose all five typed completeness profiles through the existing laboratory
+  query, with bounded entity, relation, chunk and retained-event sections.
+  Keep source/projected identity separate and bind continuation to the exact
+  source hash, profile and section.
+- Preserve explicit field presence in entity and change views. Withhold stale,
+  redacted and otherwise unavailable compatibility values; distinguish known
+  null, absent and unrecorded fields. Mark nested binary length summaries as
+  omitted content.
+- Make query coverage reflect pagination, unresolved predicates, selected
+  record domains and profile omissions. Excluded empty sections never prove
+  absence; historical coverage follows the source of the returned records.
+- Fix output reduction to preserve complete semantic values, remove whole
+  records, retain and downgrade coverage, and repair continuations without
+  skipping records or looping over exhausted sections.
+- Compile the four actual MCP source modules and pass all 29 of their tests
+  with real dependencies, including 22 new regressions. This is module-level
+  execution evidence; complete server/transport qualification remains blocked
+  by the recorded memory limit.
+
 ## 2026-10-07 — Typed completeness profiles and exact-base capsules
 
 - Implement all five typed observation profiles with explicit field omission,

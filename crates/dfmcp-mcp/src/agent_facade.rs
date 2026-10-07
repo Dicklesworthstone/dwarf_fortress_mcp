@@ -1176,21 +1176,10 @@ fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
 }
 
 fn coverage(payload: &Value) -> Value {
-    let truncated = matches!(
-        payload.get("truncated").and_then(Value::as_bool),
-        Some(true)
-    );
-    json!({
-        "status": if truncated { "partial" } else { "complete_for_named_projection" },
-        "complete_domains": ["laboratory.pause_state", "laboratory.protocol_state", "laboratory.world_model"],
-        "partial_domains": [],
-        "omitted_domains": [
-            {"domain": "live_dwarf_fortress", "reason": "no live DFHack adapter is implemented"},
-            {"domain": "dwarf_fortress_behaviour", "reason": "laboratory effects follow the reference action model and calibrated rates, not the game"}
-        ],
-        "continuation": value_or_null(payload.get("continuation")),
-        "absence_proof_scope": ["laboratory.pause_state", "laboratory.protocol_state"],
-    })
+    let fallback = extract_anchor(payload, None);
+    // Historical rows name their own anchor even when the orientation spine
+    // also names the current head. Coverage must follow the returned rows.
+    crate::observation_projection::coverage(payload, payload.get("anchor").or(fallback.as_ref()))
 }
 
 fn budget(state: &SessionOrientation) -> Value {
@@ -1591,7 +1580,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let recorded = json!({"mode": mode});

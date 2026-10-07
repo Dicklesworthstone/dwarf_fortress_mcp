@@ -44,6 +44,46 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### MCP profile queries and faithful observation rendering (2026-10-07)
+
+The public laboratory query accepts
+`{"mode":"observation","completeness_profile":"spatial","section":"chunks","limit":25}`.
+All five canonical profiles are usable, with bounded pages for entities,
+relations, map chunks and retained events. Responses identify the original
+source anchor separately from the projected anchor and envelope digest.
+Continuations preserve the source hash, profile, section and next returned
+record; the existing historical router resolves that exact retained source.
+
+The JSON rendering includes explicit field presence, including omission for
+binary length summaries nested in records, events and overlays. Unavailable
+retained values are withheld from entity views, briefings and change evidence;
+known null remains distinct from absent or unrecorded fields. Query coverage
+names its exact record-membership domain. Excluded sections and unresolved
+filters cannot certify absence. Successful historical coverage follows the
+queried source even while the Agent Turn orients to the current session head.
+
+Output budgets now remove whole presentation records, preserve semantic lists,
+coordinates, predicates and known null members, retain coverage, downgrade
+omitted domains to partial, and repair continuation offsets to the records
+actually returned. Empty, excluded and exhausted sections have no continuation.
+The public query description and laboratory documentation explain the new mode.
+
+**Evidence: the actual projection, budget, laboratory query and world-change
+source modules compiled and passed all 29 unit tests, zero failures or ignored
+tests**, linked against real world/intent and pinned serde dependencies without
+replacement module bodies. Source hashes were stable across compilation and
+execution. These 29 tests include 22 newly added MCP regressions; the ordinary
+world/intent Cargo suites separately passed 290 tests. Relevant changed source
+passed rustfmt. Independent review covered the historical router and facade.
+
+This module harness does not compile or execute the complete MCP server,
+facade macros, supervisor or stdio transport. A fresh full-library preflight
+found about 0.73 GB of recoverable memory headroom, below the unchanged
+Asupersync compiler's previously observed roughly 2.9 GB RSS before termination,
+so another full build was not started. Full workspace qualification and live
+admission remain unestablished. The completeness-profile bead's pure profile,
+presence, round-trip and exact-base acceptance is implemented and tested.
+
 ### Typed completeness profiles and observation capsules (2026-10-07)
 
 The world now implements all five typed completeness profiles through immutable
@@ -71,8 +111,8 @@ delta variants, malformed frames, identity forgery and encoding/decoding
 bounds. The focused eight-test rerun is included in that total. The recorded
 compiler is `rustc 1.100.0-nightly (908501772 2026-08-30)`; tested source hashes
 were unchanged. This is targeted Rust test evidence, not full workspace,
-native, live, or registry qualification. MCP presentation integration is being
-completed as a separate increment.
+native, live, or registry qualification. MCP presentation integration evidence
+is documented separately above.
 
 ### Presence-safe temporal execution (2026-10-07)
 

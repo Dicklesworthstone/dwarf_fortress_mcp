@@ -140,8 +140,21 @@ Profiles are semantic contracts:
 | `forensic` | Evidence-complete bounded reconciliation, diagnosis, audit, or replay. |
 | `custom` | Explicit bounded union of registered projections; unknown projections fail closed. |
 
-The phase-zero laboratory currently projects these profile names over a pause/protocol-state slice;
-it does not claim the full live profile content described by the target contract.
+Laboratory presentation profiles operate over the process-local reference world
+and protocol state. They do not establish the full live content described by
+the target contract.
+
+The laboratory also implements the separate canonical completeness profiles
+`control-minimum`, `operations`, `spatial`, `historical`, and `research-full`.
+Use `fortress.query` with
+`{"mode":"observation","completeness_profile":"spatial","section":"chunks","limit":25}`.
+The closed section selection accepts `entities`, `relations`, `chunks`, or
+`events`. Pages retain distinct source and projected anchors, field-presence
+metadata, explicit profile omissions, and a continuation bound to the original
+source hash. Coverage certifies record membership only within the named
+included section; excluded empty sections never prove absence. The bounded JSON
+rendering is separate from canonical profile envelope bytes. Full semantics
+and examples are in `docs/LAB_SEMANTIC_ACTIONS.md` and `docs/WORLD_MODEL.md`.
 
 ## Tools
 

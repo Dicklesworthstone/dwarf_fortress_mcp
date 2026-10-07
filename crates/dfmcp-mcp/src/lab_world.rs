@@ -621,30 +621,7 @@ pub(crate) fn spatial_index(
 // JSON projections
 // ---------------------------------------------------------------------------
 
-const JSON_SAFE_INTEGER: u64 = (1 << 53) - 1;
-
-pub(crate) fn value_json(value: &Value) -> Json {
-    match value {
-        Value::Null => Json::Null,
-        Value::Bool(value) => json!(value),
-        Value::I64(value) if value.unsigned_abs() <= JSON_SAFE_INTEGER => json!(value),
-        Value::I64(value) => json!(value.to_string()),
-        Value::U64(value) if *value <= JSON_SAFE_INTEGER => json!(value),
-        Value::U64(value) => json!(value.to_string()),
-        Value::Fixed { units, scale } => json!({"units": units.to_string(), "scale": scale}),
-        Value::Text(value) => json!(value),
-        Value::Entity(id) => json!({"entity_id": id.get().to_string()}),
-        Value::Coord(c) => json!([c.x, c.y, c.z]),
-        Value::Bytes(bytes) => json!({"bytes": bytes.len()}),
-        Value::List(values) => Json::Array(values.iter().map(value_json).collect()),
-        Value::Object(values) => Json::Object(
-            values
-                .iter()
-                .map(|(key, value)| (key.clone(), value_json(value)))
-                .collect(),
-        ),
-    }
-}
+pub(crate) use crate::observation_projection::value_json;
 
 const fn op_name(op: CompareOp) -> &'static str {
     match op {
@@ -1232,7 +1209,7 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
 const MAX_BRIEFING_ITEMS: usize = 16;
 
 fn text_field<'a>(entity: &'a EntityRecord, name: &str) -> Option<&'a str> {
-    match entity.fields.get(name).map(|fact| &fact.value) {
+    match entity.fields.get(name).and_then(Fact::known_value) {
         Some(Value::Text(value)) => Some(value),
         _ => None,
     }
@@ -1273,10 +1250,12 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
             ]
             .iter()
             .filter_map(|name| {
-                entity
-                    .fields
-                    .get(*name)
-                    .map(|fact| ((*name).to_owned(), value_json(&fact.value)))
+                entity.fields.get(*name).map(|fact| {
+                    (
+                        (*name).to_owned(),
+                        crate::observation_projection::fact_value(fact),
+                    )
+                })
             })
             .collect();
             json!({
@@ -1301,7 +1280,8 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
                 .fields
                 .iter()
                 .filter(|(name, fact)| {
-                    name.starts_with(effects::LABOR_FIELD_PREFIX) && fact.value == Value::Bool(true)
+                    name.starts_with(effects::LABOR_FIELD_PREFIX)
+                        && fact.known_value() == Some(&Value::Bool(true))
                 })
                 .map(|(name, _)| &name[effects::LABOR_FIELD_PREFIX.len()..])
                 .collect();
@@ -1310,7 +1290,7 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
                 "name": unit.label,
                 "profession": text_field(unit, "profession"),
                 "enabled_labors": labors,
-                "squad": unit.fields.get(effects::SQUAD_FIELD).map(|fact| value_json(&fact.value)),
+                "squad": unit.fields.get(effects::SQUAD_FIELD).map(crate::observation_projection::fact_value),
             })
         })
         .collect();
@@ -1325,9 +1305,45 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
     })
 }
 
+/// A page always names exactly one collection of a profiled observation.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ObservationSection {
+    Entities,
+    Relations,
+    Chunks,
+    Events,
+}
+
+impl ObservationSection {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Entities => "entities",
+            Self::Relations => "relations",
+            Self::Chunks => "chunks",
+            Self::Events => "events",
+        }
+    }
+
+    const fn domain(self) -> &'static str {
+        match self {
+            Self::Entities => "laboratory.entity_records",
+            Self::Relations => "laboratory.relation_records",
+            Self::Chunks => "laboratory.chunk_records",
+            Self::Events => "laboratory.retained_event_records",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 enum QuerySpec {
+    Observation {
+        completeness_profile: String,
+        section: Option<ObservationSection>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    },
     Entities {
         kind: Option<String>,
         limit: Option<usize>,
@@ -1355,7 +1371,7 @@ enum QuerySpec {
 }
 
 /// Answer the structured laboratory query modes. `raw` is either the bare
-/// word `entities` or a JSON object with a `mode` of `entities` or `terrain`.
+/// word `entities` or a closed JSON object naming one of the query modes.
 pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
     if raw.len() > MAX_QUERY_JSON_BYTES {
         return Err(DfmcpError::new(
@@ -1373,7 +1389,7 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
     } else {
         serde_json::from_str(raw).map_err(|error| {
             invalid(format!(
-                "query mode must be \"summary\", \"entities\", or a JSON object with mode entities|terrain: {error}"
+                "query mode must be \"summary\", \"entities\", or a JSON object with mode entities|observation|terrain|search|path: {error}"
             ))
         })?
     };
@@ -1388,8 +1404,21 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Json> {
                 .as_ref()
                 .map(|raw| filter_predicate(raw, 0))
                 .transpose()?;
-            entities_page(snapshot, kind.as_deref(), limit, offset, predicate.as_ref())
+            entities_page(
+                snapshot,
+                kind.as_deref(),
+                limit,
+                offset,
+                predicate.as_ref(),
+                filter.as_ref(),
+            )
         }
+        QuerySpec::Observation {
+            completeness_profile,
+            section,
+            limit,
+            offset,
+        } => observation_page(snapshot, &completeness_profile, section, limit, offset),
         QuerySpec::Search { text, limit } => search(snapshot, &text, limit),
         QuerySpec::Path { from, to } => path(snapshot, from, to),
         QuerySpec::Terrain { min, max } => terrain(snapshot, coord(min), coord(max)),
@@ -1672,6 +1701,7 @@ fn entities_page(
     limit: Option<usize>,
     offset: Option<usize>,
     filter: Option<&Predicate>,
+    raw_filter: Option<&Json>,
 ) -> Result<Json> {
     let limit = limit.unwrap_or(25);
     if limit == 0 || limit > MAX_ENTITY_PAGE {
@@ -1680,15 +1710,23 @@ fn entities_page(
         )));
     }
     let offset = offset.unwrap_or(0);
-    let matching: Vec<&EntityRecord> = snapshot
+    let mut matching = Vec::new();
+    let mut unknown_filter_rows = 0usize;
+    for entity in snapshot
         .graph
         .entities
         .values()
         .filter(|entity| kind.is_none_or(|kind| entity.kind.as_str() == kind))
-        .filter(|entity| {
-            filter.is_none_or(|predicate| dfmcp_world::evaluate_for(snapshot, entity.id, predicate))
-        })
-        .collect();
+    {
+        let truth = filter.map_or(dfmcp_world::PredicateTruth::True, |predicate| {
+            dfmcp_world::evaluate_truth_for(snapshot, entity.id, predicate)
+        });
+        match truth {
+            dfmcp_world::PredicateTruth::True => matching.push(entity),
+            dfmcp_world::PredicateTruth::False => {}
+            dfmcp_world::PredicateTruth::Unknown => unknown_filter_rows += 1,
+        }
+    }
     if offset > matching.len() {
         return Err(DfmcpError::new(
             ErrorCode::CursorGap,
@@ -1699,20 +1737,25 @@ fn entities_page(
         .iter()
         .skip(offset)
         .take(limit)
-        .map(|entity| {
-            json!({
-                "entity_id": entity.id.get().to_string(),
-                "kind": entity.kind.as_str(),
-                "label": entity.label,
-                "generation": entity.generation,
-                "revision": entity.revision,
-                "fields": entity.fields.iter()
-                    .map(|(name, fact)| (name.clone(), value_json(&fact.value)))
-                    .collect::<BTreeMap<_, _>>(),
-            })
-        })
+        .map(|entity| crate::observation_projection::entity_json(entity))
         .collect();
     let end = offset + rows.len();
+    let page_complete = offset == 0 && end == matching.len();
+    let complete_domain = page_complete && unknown_filter_rows == 0;
+    let domain = json!({"domain": "laboratory.entities", "kind": kind, "where": raw_filter});
+    let mut query = json!({"mode": "entities", "limit": limit, "offset": offset,
+        "at": snapshot.state_hash.to_hex()});
+    if let Some(kind) = kind {
+        query["kind"] = json!(kind);
+    }
+    if let Some(filter) = raw_filter {
+        query["where"] = filter.clone();
+    }
+    let continuation = (end < matching.len()).then(|| {
+        let mut next = query.clone();
+        next["offset"] = json!(end);
+        next
+    });
     Ok(json!({
         "mode": "entities",
         "kind": kind,
@@ -1721,8 +1764,178 @@ fn entities_page(
         "offset": offset,
         "returned": rows.len(),
         "next_offset": (end < matching.len()).then_some(end),
-        "complete_domain": true,
+        "truncated": !page_complete,
+        "source_complete": true,
+        "unknown_filter_rows": unknown_filter_rows,
+        "complete_domain": complete_domain,
+        "absence_proven": matching.is_empty() && complete_domain,
+        "query": query,
+        "continuation": continuation,
+        "observation_coverage": {
+            "status": if complete_domain { "complete_for_named_projection" } else { "partial" },
+            "complete_domains": if complete_domain { vec![domain.clone()] } else { vec![] },
+            "partial_domains": if complete_domain { vec![] } else { vec![domain.clone()] },
+            "source_complete": true,
+            "page_complete": page_complete,
+            "unknown_filter_rows": unknown_filter_rows,
+            "absence_proof_scope": if complete_domain { vec![domain] } else { vec![] },
+            "continuation": continuation,
+        },
         "rows": rows,
+    }))
+}
+
+/// Render a bounded page from an immutable typed profile. The canonical
+/// envelope and the source snapshot have separate hashes. Only the source
+/// hash is a retained history address and may appear in a continuation.
+fn observation_page(
+    snapshot: &WorldSnapshot,
+    profile: &str,
+    section: Option<ObservationSection>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Json> {
+    use crate::observation_projection::{
+        anchor_json, entity_json, fact_value, presence_json, value_presence,
+    };
+    use dfmcp_world::{CompletenessProfile, ProfiledSnapshot, ProjectionProvenance};
+
+    let profile = CompletenessProfile::parse(profile)?;
+    let section = section.unwrap_or(ObservationSection::Entities);
+    let limit = limit.unwrap_or(25);
+    if limit == 0 || limit > MAX_ENTITY_PAGE {
+        return Err(invalid(format!(
+            "observation page limit must be 1..={MAX_ENTITY_PAGE}"
+        )));
+    }
+    let offset = offset.unwrap_or(0);
+    let provenance = ProjectionProvenance {
+        source_schema: "dfmcp-world-snapshot-v1".to_owned(),
+        source_manifest: dfmcp_core::Digest32::of_bytes(
+            b"dfmcp.lab-observation-source/1;schema=dfmcp-world-snapshot-v1;engine=dfmcp_intent::effects;scope=process-local-reference",
+        ),
+    };
+    let projected = ProfiledSnapshot::project(snapshot, profile, provenance, BTreeMap::new())?;
+    let graph = &projected.snapshot().graph;
+    let included = match section {
+        ObservationSection::Entities | ObservationSection::Relations => true,
+        ObservationSection::Chunks => profile.includes_map_chunks(),
+        ObservationSection::Events => profile.includes_events(),
+    };
+    let (total, source_total) = match section {
+        ObservationSection::Entities => (graph.entities.len(), snapshot.graph.entities.len()),
+        ObservationSection::Relations => (graph.edges.len(), snapshot.graph.edges.len()),
+        ObservationSection::Chunks => (graph.chunks.len(), snapshot.graph.chunks.len()),
+        ObservationSection::Events => (graph.events.len(), snapshot.graph.events.len()),
+    };
+    if offset > total {
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "observation page offset is beyond the selected profile section",
+        ));
+    }
+    let rows: Vec<Json> = match section {
+        ObservationSection::Entities => graph.entities.values().skip(offset).take(limit)
+            .map(entity_json).collect(),
+        ObservationSection::Relations => graph.edges.values().skip(offset).take(limit).map(|edge| {
+            json!({
+                "edge_id": edge.id.to_string(), "revision": edge.revision, "kind": edge.kind.as_str(),
+                "from": edge.from.to_string(), "to": edge.to.to_string(),
+                "fields": edge.fields.iter().map(|(name, fact)| (name.clone(), fact_value(fact)))
+                    .collect::<BTreeMap<_, _>>(),
+                "field_presence": edge.fields.iter().map(|(name, fact)| (name.clone(), presence_json(fact)))
+                    .collect::<BTreeMap<_, _>>(),
+            })
+        }).collect(),
+        ObservationSection::Chunks => graph.chunks.values().skip(offset).take(limit).map(|chunk| {
+            json!({
+                "coord": [chunk.coord.x, chunk.coord.y, chunk.coord.z],
+                "revision": chunk.revision, "width": chunk.width, "height": chunk.height,
+                "chunk_hash": chunk.compute_hash().to_hex(),
+                "terrain_runs": chunk.terrain_runs.iter().map(|run| {
+                    json!({"tile_code": run.tile_code, "length": run.length})
+                }).collect::<Vec<_>>(),
+                "sparse_overlays": chunk.sparse_overlays.iter().map(|(at, fields)| (at.to_string(),
+                    json!({
+                        "fields": fields.iter().map(|(name, value)| (name.clone(), value_json(value)))
+                            .collect::<BTreeMap<_, _>>(),
+                        "field_presence": fields.iter().map(|(name, value)| (name.clone(), value_presence(value)))
+                            .collect::<BTreeMap<_, _>>(),
+                    })
+                )).collect::<BTreeMap<_, _>>(),
+            })
+        }).collect(),
+        ObservationSection::Events => graph.events.values().skip(offset).take(limit).map(|event| {
+            json!({
+                "event_id": event.id.to_string(), "tick": event.tick.0, "kind": event.kind.as_str(),
+                "subject": event.subject.map(|id| id.to_string()), "summary": event.summary,
+                "fields": event.fields.iter().map(|(name, value)| (name.clone(), value_json(value)))
+                    .collect::<BTreeMap<_, _>>(),
+                "field_presence": event.fields.iter().map(|(name, value)| (name.clone(), value_presence(value)))
+                    .collect::<BTreeMap<_, _>>(),
+            })
+        }).collect(),
+    };
+    let end = offset + rows.len();
+    let page_complete = offset == 0 && end == total;
+    let complete_domain = included && page_complete;
+    let domain = json!({
+        "domain": section.domain(), "scope": "record_membership",
+        "completeness_profile": profile.as_str(), "section": section.as_str(),
+    });
+    let query = json!({
+        "mode": "observation", "completeness_profile": profile.as_str(), "section": section.as_str(),
+        "limit": limit, "offset": offset, "at": snapshot.state_hash.to_hex(),
+    });
+    let continuation = (included && end < total).then(|| {
+        let mut next = query.clone();
+        next["offset"] = json!(end);
+        next
+    });
+    let omitted_domains = if included {
+        vec![]
+    } else {
+        vec![
+            json!({"domain": section.domain(), "reason": "excluded_by_completeness_profile",
+            "completeness_profile": profile.as_str()}),
+        ]
+    };
+    Ok(json!({
+        "mode": "observation", "completeness_profile": profile.as_str(), "section": section.as_str(),
+        "anchor": anchor_json(&projected.source_anchor()),
+        "source_anchor": anchor_json(&projected.source_anchor()),
+        "projected_anchor": anchor_json(&projected.snapshot().anchor()),
+        "profile_digest": projected.digest().to_hex(),
+        "provenance": {
+            "source_schema": projected.provenance().source_schema,
+            "source_manifest": projected.provenance().source_manifest.to_hex(),
+            "source": "process_local_laboratory_snapshot",
+        },
+        "rendering": {
+            "format": "bounded_json_records", "canonical_envelope": false,
+            "binary_payloads": "length_summary_with_explicit_omission",
+            "field_knowledge": "consult_each_field_presence",
+            "action_authority": "a profile does not authorize an action",
+        },
+        "included_sections": {
+            "entities": true, "relations": true,
+            "chunks": profile.includes_map_chunks(), "events": profile.includes_events(),
+        },
+        "section_included": included, "source_total": source_total, "total": total,
+        "offset": offset, "returned": rows.len(), "next_offset": (included && end < total).then_some(end),
+        "source_complete": included, "complete_domain": complete_domain,
+        "absence_proven": included && total == 0 && page_complete,
+        "truncated": !complete_domain,
+        "query": query, "continuation": continuation, "rows": rows,
+        "observation_coverage": {
+            "status": if complete_domain { "complete_for_named_projection" } else { "partial" },
+            "anchor": anchor_json(&projected.source_anchor()),
+            "complete_domains": if complete_domain { vec![domain.clone()] } else { vec![] },
+            "partial_domains": if !complete_domain && included { vec![domain.clone()] } else { vec![] },
+            "omitted_domains": omitted_domains, "page_complete": included && page_complete,
+            "absence_proof_scope": if complete_domain { vec![domain] } else { vec![] },
+            "continuation": continuation,
+        },
     }))
 }
 
@@ -1856,6 +2069,323 @@ mod tests {
             .is_err()
         );
         assert!(query(&snapshot, "everything").is_err());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod observation_coverage_tests {
+    use super::*;
+    use dfmcp_world::FactPresence;
+
+    #[test]
+    fn entity_pages_keep_exact_filter_and_anchor_without_claiming_complete_results() -> Result<()> {
+        let snapshot = scenario_snapshot("starter_fortress", FortressId::new(71), true)?;
+        let page = query(
+            &snapshot,
+            r#"{"mode":"entities","kind":"unit","limit":2,"where":{"field":"alive","value":true}}"#,
+        )?;
+        assert_eq!(page["returned"], 2);
+        assert_eq!(page["total"], 7);
+        assert_eq!(page["complete_domain"], false);
+        assert_eq!(page["absence_proven"], false);
+        assert_eq!(page["observation_coverage"]["status"], "partial");
+        let mut next = page["continuation"].clone();
+        assert_eq!(next["at"], snapshot.state_hash.to_hex());
+        assert_eq!(next["offset"], 2);
+        assert_eq!(next["where"], json!({"field":"alive","value":true}));
+        // The server resolves and strips the historical anchor before routing.
+        if let Some(object) = next.as_object_mut() {
+            object.remove("at");
+        }
+        let second = query(&snapshot, &next.to_string())?;
+        assert_eq!(second["rows"][0]["entity_id"], "1003");
+        assert_eq!(second["complete_domain"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn unresolved_filters_cannot_certify_empty_results_even_under_negation() -> Result<()> {
+        let snapshot = scenario_snapshot("starter_fortress", FortressId::new(72), true)?;
+        let unknown = query(
+            &snapshot,
+            r#"{"mode":"entities","kind":"unit","where":{"not":{"field":"future.unknown","value":true}}}"#,
+        )?;
+        assert_eq!(unknown["total"], 0);
+        assert_eq!(unknown["unknown_filter_rows"], 7);
+        assert_eq!(unknown["complete_domain"], false);
+        assert_eq!(unknown["absence_proven"], false);
+        assert_eq!(
+            unknown["observation_coverage"]["absence_proof_scope"],
+            json!([])
+        );
+        let absent = query(
+            &snapshot,
+            r#"{"mode":"entities","kind":"unit","where":{"field":"alive","value":false}}"#,
+        )?;
+        assert_eq!(absent["total"], 0);
+        assert_eq!(absent["unknown_filter_rows"], 0);
+        assert_eq!(absent["complete_domain"], true);
+        assert_eq!(absent["absence_proven"], true);
+        Ok(())
+    }
+
+    #[test]
+    fn entity_and_briefing_views_do_not_reveal_unavailable_retained_values() -> Result<()> {
+        let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(73), true)?;
+        let Some(unit) = snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(starter::FIRST_DWARF))
+        else {
+            return Err(invalid("fixture unit missing"));
+        };
+        let mut redacted = Fact::with_presence(
+            FactPresence::Redacted("test policy".into()),
+            snapshot.tick,
+            FactSource::Replay,
+            dfmcp_core::Digest32::ZERO,
+        );
+        redacted.value = Value::Text("retained hidden assignment".into());
+        unit.fields.insert("squad".into(), redacted.clone());
+        unit.fields.insert("profession".into(), redacted);
+        snapshot.refresh_hash();
+        let page = query(&snapshot, r#"{"mode":"entities","kind":"unit","limit":1}"#)?;
+        assert!(page["rows"][0]["fields"]["squad"].is_null());
+        assert_eq!(
+            page["rows"][0]["field_presence"]["squad"]["state"],
+            "redacted"
+        );
+        assert!(!page.to_string().contains("retained hidden assignment"));
+        assert!(
+            !briefing(&snapshot)
+                .to_string()
+                .contains("retained hidden assignment")
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod profiled_observation_query_tests {
+    use super::*;
+    use dfmcp_core::{EdgeId, EventId};
+    use dfmcp_world::{CompletenessProfile, EdgeKind, EdgeRecord, WorldEvent, WorldEventKind};
+
+    fn fixture() -> Result<WorldSnapshot> {
+        let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(81), true)?;
+        let binary = Value::List(vec![Value::Null, Value::Bytes(vec![1, 2, 3, 4])]);
+        snapshot.graph.edges.insert(
+            EdgeId::new(1),
+            EdgeRecord {
+                id: EdgeId::new(1),
+                revision: 1,
+                kind: EdgeKind::AssignedTo,
+                from: EntityId::new(starter::FIRST_DWARF),
+                to: starter::STILL,
+                fields: BTreeMap::from([("future.binary".into(), lab_fact(binary.clone()))]),
+            },
+        );
+        snapshot.graph.events.insert(
+            EventId::new(1),
+            WorldEvent {
+                id: EventId::new(1),
+                tick: snapshot.tick,
+                kind: WorldEventKind::AdapterNotice,
+                subject: Some(starter::STILL),
+                summary: "reference observation".into(),
+                fields: BTreeMap::from([
+                    ("future.binary".into(), binary.clone()),
+                    ("known_null".into(), Value::Null),
+                ]),
+            },
+        );
+        let Some(chunk) = snapshot.graph.chunks.values_mut().next() else {
+            return Err(invalid("fixture chunk missing"));
+        };
+        chunk
+            .sparse_overlays
+            .insert(0, BTreeMap::from([("future.binary".into(), binary)]));
+        snapshot.refresh_hash();
+        Ok(snapshot)
+    }
+
+    fn request(
+        snapshot: &WorldSnapshot,
+        profile: &str,
+        section: &str,
+        limit: usize,
+    ) -> Result<Json> {
+        query(
+            snapshot,
+            &json!({"mode":"observation", "completeness_profile":profile,
+            "section":section, "limit":limit})
+            .to_string(),
+        )
+    }
+
+    #[test]
+    fn all_five_profiles_keep_the_source_anchor_separate_from_the_projection() -> Result<()> {
+        let snapshot = fixture()?;
+        for profile in CompletenessProfile::ALL {
+            let page = request(&snapshot, profile.as_str(), "entities", 2)?;
+            assert_eq!(
+                page["source_anchor"]["state_hash"],
+                snapshot.state_hash.to_hex()
+            );
+            assert_eq!(page["anchor"], page["source_anchor"]);
+            assert_eq!(page["continuation"]["at"], snapshot.state_hash.to_hex());
+            assert_eq!(
+                page["continuation"]["completeness_profile"],
+                profile.as_str()
+            );
+            assert_eq!(page["continuation"]["section"], "entities");
+            assert_eq!(
+                page["rows"][0]["entity_id"],
+                starter::FIRST_DWARF.to_string()
+            );
+            assert_eq!(page["returned"], 2);
+            assert_eq!(page["complete_domain"], false);
+            assert_eq!(page["rendering"]["canonical_envelope"], false);
+            if profile == CompletenessProfile::ResearchFull {
+                assert_eq!(page["projected_anchor"], page["source_anchor"]);
+            } else {
+                assert_ne!(
+                    page["projected_anchor"]["state_hash"],
+                    page["source_anchor"]["state_hash"]
+                );
+            }
+        }
+        let historical = request(&snapshot, "historical", "entities", 2)?;
+        assert!(historical["rows"][0]["fields"]["profession"].is_null());
+        assert_eq!(
+            historical["rows"][0]["field_presence"]["profession"]["state"],
+            "omitted"
+        );
+        assert_eq!(
+            historical["rows"][0]["field_presence"]["profession"]["projection"],
+            "historical"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn continuations_keep_the_profile_and_section_and_resume_at_the_next_record() -> Result<()> {
+        let snapshot = fixture()?;
+        let first = request(&snapshot, "spatial", "chunks", 2)?;
+        let mut continuation = first["continuation"].clone();
+        assert_eq!(continuation["offset"], 2);
+        assert_eq!(continuation["at"], snapshot.state_hash.to_hex());
+        assert_eq!(continuation["completeness_profile"], "spatial");
+        assert_eq!(continuation["section"], "chunks");
+        let Some(object) = continuation.as_object_mut() else {
+            return Err(invalid("expected continuation"));
+        };
+        object.remove("at"); // Resolved by the server's existing retained-history router.
+        let second = query(&snapshot, &continuation.to_string())?;
+        let Some(expected) = snapshot.graph.chunks.values().nth(2) else {
+            return Err(invalid("fixture third chunk missing"));
+        };
+        assert_eq!(
+            second["rows"][0]["coord"],
+            json!([expected.coord.x, expected.coord.y, expected.coord.z])
+        );
+        assert_ne!(second["rows"][0]["coord"], first["rows"][1]["coord"]);
+        assert_eq!(second["complete_domain"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn excluded_sections_do_not_turn_present_records_into_proven_absence() -> Result<()> {
+        let snapshot = fixture()?;
+        for (profile, section) in [
+            ("operations", "chunks"),
+            ("control-minimum", "events"),
+            ("spatial", "events"),
+            ("historical", "chunks"),
+        ] {
+            let page = request(&snapshot, profile, section, 100)?;
+            assert_eq!(page["section_included"], false);
+            assert!(page["source_total"].as_u64().is_some_and(|total| total > 0));
+            assert_eq!(page["total"], 0);
+            assert_eq!(page["rows"], json!([]));
+            assert_eq!(page["complete_domain"], false);
+            assert_eq!(page["absence_proven"], false);
+            assert_eq!(page["observation_coverage"]["status"], "partial");
+            assert_eq!(
+                page["observation_coverage"]["absence_proof_scope"],
+                json!([])
+            );
+            assert_eq!(
+                page["observation_coverage"]["omitted_domains"][0]["reason"],
+                "excluded_by_completeness_profile"
+            );
+        }
+        let empty = scenario_snapshot("empty", FortressId::new(82), true)?;
+        let included = request(&empty, "research-full", "events", 100)?;
+        assert_eq!(included["absence_proven"], true);
+        let omitted = request(&empty, "control-minimum", "events", 100)?;
+        assert_eq!(omitted["absence_proven"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn relations_chunks_and_events_preserve_structure_and_mark_binary_omission() -> Result<()> {
+        let snapshot = fixture()?;
+        let relations = request(&snapshot, "research-full", "relations", 100)?;
+        assert_eq!(
+            relations["rows"][0]["from"],
+            starter::FIRST_DWARF.to_string()
+        );
+        assert_eq!(relations["rows"][0]["to"], starter::STILL.to_string());
+        assert_eq!(
+            relations["rows"][0]["fields"]["future.binary"],
+            json!([null, {"bytes":4}])
+        );
+        assert_eq!(
+            relations["rows"][0]["field_presence"]["future.binary"]["state"],
+            "omitted"
+        );
+        let chunks = request(&snapshot, "spatial", "chunks", 100)?;
+        assert_eq!(chunks["rows"][0]["terrain_runs"][0]["length"], 256);
+        assert_eq!(
+            chunks["rows"][0]["sparse_overlays"]["0"]["fields"]["future.binary"],
+            json!([null, {"bytes":4}])
+        );
+        assert_eq!(
+            chunks["rows"][0]["sparse_overlays"]["0"]["field_presence"]["future.binary"]["state"],
+            "omitted"
+        );
+        let events = request(&snapshot, "historical", "events", 100)?;
+        assert_eq!(
+            events["rows"][0]["field_presence"]["future.binary"]["state"],
+            "omitted"
+        );
+        assert!(events["rows"][0]["fields"].get("known_null").is_some());
+        assert_eq!(
+            events["rows"][0]["field_presence"]["known_null"]["state"],
+            "known"
+        );
+        assert_eq!(events["complete_domain"], true);
+        assert_eq!(
+            events["observation_coverage"]["complete_domains"][0]["scope"],
+            "record_membership"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn observation_requests_refuse_unknown_profiles_sections_and_invalid_pages() -> Result<()> {
+        let snapshot = fixture()?;
+        for raw in [
+            r#"{"mode":"observation","completeness_profile":"everything"}"#,
+            r#"{"mode":"observation","completeness_profile":"research-full","section":"memory"}"#,
+            r#"{"mode":"observation","completeness_profile":"spatial","limit":0}"#,
+            r#"{"mode":"observation","completeness_profile":"spatial","limit":101}"#,
+            r#"{"mode":"observation","completeness_profile":"historical","offset":1000}"#,
+        ] {
+            assert!(query(&snapshot, raw).is_err(), "{raw}");
+        }
         Ok(())
     }
 }

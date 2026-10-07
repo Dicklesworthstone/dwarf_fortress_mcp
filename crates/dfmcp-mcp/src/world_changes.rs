@@ -11,10 +11,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use dfmcp_world::{ChunkCoord, EntityRecord, MapChunk, WorldSnapshot};
+use dfmcp_world::{ChunkCoord, EntityRecord, Fact, MapChunk, WorldSnapshot};
 use serde_json::{Value, json};
 
-use crate::lab_world::{tile_name, value_json};
+use crate::lab_world::tile_name;
+use crate::observation_projection::{fact_value, presence_json};
 
 /// Most entity changes listed in one turn.
 pub(crate) const MAX_ENTITY_CHANGES: usize = 24;
@@ -39,6 +40,21 @@ fn entity_subject(entity: &EntityRecord) -> Value {
     })
 }
 
+fn change_presence(fact: Option<&Fact>) -> Value {
+    match fact {
+        Some(fact) => {
+            let mut presence = presence_json(fact);
+            presence["recorded"] = json!(true);
+            presence
+        }
+        None => json!({
+            "state": "unknown",
+            "recorded": false,
+            "reason": "field is not present in the retained entity record",
+        }),
+    }
+}
+
 fn field_changes(before: &EntityRecord, after: &EntityRecord) -> (Vec<Value>, usize) {
     let names: BTreeSet<&String> = before.fields.keys().chain(after.fields.keys()).collect();
     let mut changed = Vec::new();
@@ -58,8 +74,10 @@ fn field_changes(before: &EntityRecord, after: &EntityRecord) -> (Vec<Value>, us
         if changed.len() < MAX_FIELDS_PER_ENTITY {
             changed.push(json!({
                 "field": name,
-                "before": old.map_or(Value::Null, |fact| value_json(&fact.value)),
-                "after": new.map_or(Value::Null, |fact| value_json(&fact.value)),
+                "before": old.map_or(Value::Null, fact_value),
+                "after": new.map_or(Value::Null, fact_value),
+                "before_presence": change_presence(old),
+                "after_presence": change_presence(new),
             }));
         }
     }
@@ -240,4 +258,126 @@ pub(crate) fn describe(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Valu
     }
     out.extend(terrain_changes(base, target));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, ObservationCursor, StateAnchor};
+    use dfmcp_world::{EntityKind, FactPresence, FactSource, Value as WorldValue};
+
+    fn anchor() -> StateAnchor {
+        StateAnchor {
+            fortress_id: FortressId::new(7),
+            cursor: ObservationCursor::ORIGIN,
+            tick: GameTick(20),
+            state_hash: Digest32::ZERO,
+        }
+    }
+
+    fn record(fact: Option<Fact>) -> EntityRecord {
+        EntityRecord {
+            id: EntityId::new(1),
+            generation: 1,
+            revision: 1,
+            kind: EntityKind::Unit,
+            label: "Urist".to_owned(),
+            fields: fact
+                .into_iter()
+                .map(|fact| ("subject".to_owned(), fact))
+                .collect(),
+        }
+    }
+
+    fn fact(presence: FactPresence) -> Fact {
+        Fact::with_presence(presence, GameTick(20), FactSource::Replay, Digest32::ZERO)
+    }
+
+    #[test]
+    fn unavailable_change_values_are_withheld_with_their_presence_intact() {
+        for presence in [
+            FactPresence::Absent,
+            FactPresence::Unknown("not observed".to_owned()),
+            FactPresence::Unsupported("not supported".to_owned()),
+            FactPresence::Omitted("outside projection".to_owned()),
+            FactPresence::Redacted("policy/1".to_owned()),
+            FactPresence::Stale(anchor()),
+            FactPresence::Known(WorldValue::Bool(true)),
+        ] {
+            let mut before = fact(presence.clone());
+            before.value = WorldValue::Text("withheld-before".to_owned());
+            let mut after = fact(presence);
+            after.value = WorldValue::Text("withheld-after".to_owned());
+            let before_presence = presence_json(&before);
+            let after_presence = presence_json(&after);
+            let (changes, total) = field_changes(&record(Some(before)), &record(Some(after)));
+            assert_eq!(total, 1);
+            assert!(changes[0]["before"].is_null());
+            assert!(changes[0]["after"].is_null());
+            assert_eq!(
+                changes[0]["before_presence"]["state"],
+                before_presence["state"]
+            );
+            assert_eq!(
+                changes[0]["after_presence"]["state"],
+                after_presence["state"]
+            );
+            assert_eq!(changes[0]["before_presence"]["recorded"], true);
+            assert!(!json!(changes).to_string().contains("withheld-"));
+        }
+    }
+
+    #[test]
+    fn unrecorded_fields_are_distinct_from_explicit_absence_and_known_null() {
+        for (before, after, old_state, new_state, old_recorded, new_recorded) in [
+            (
+                None,
+                Some(fact(FactPresence::Absent)),
+                "unknown",
+                "absent",
+                false,
+                true,
+            ),
+            (
+                Some(fact(FactPresence::Absent)),
+                None,
+                "absent",
+                "unknown",
+                true,
+                false,
+            ),
+            (
+                Some(fact(FactPresence::Known(WorldValue::Null))),
+                Some(fact(FactPresence::Absent)),
+                "known",
+                "absent",
+                true,
+                true,
+            ),
+        ] {
+            let (changes, total) = field_changes(&record(before), &record(after));
+            assert_eq!(total, 1);
+            assert!(changes[0]["before"].is_null());
+            assert!(changes[0]["after"].is_null());
+            assert_eq!(changes[0]["before_presence"]["state"], old_state);
+            assert_eq!(changes[0]["after_presence"]["state"], new_state);
+            assert_eq!(changes[0]["before_presence"]["recorded"], old_recorded);
+            assert_eq!(changes[0]["after_presence"]["recorded"], new_recorded);
+        }
+    }
+
+    #[test]
+    fn known_structured_values_keep_null_members_in_change_evidence() {
+        let before = record(Some(fact(FactPresence::Known(WorldValue::Object(
+            BTreeMap::from([("slot".to_owned(), WorldValue::Null)]),
+        )))));
+        let after = record(Some(fact(FactPresence::Known(WorldValue::Object(
+            BTreeMap::from([("slot".to_owned(), WorldValue::U64(7))]),
+        )))));
+        let (changes, total) = field_changes(&before, &after);
+        assert_eq!(total, 1);
+        assert_eq!(changes[0]["before"], json!({"slot": null}));
+        assert_eq!(changes[0]["after"], json!({"slot": 7}));
+        assert_eq!(changes[0]["before_presence"]["state"], "known");
+    }
 }

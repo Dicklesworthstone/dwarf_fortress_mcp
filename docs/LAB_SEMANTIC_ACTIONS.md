@@ -296,6 +296,58 @@ fortress depend on state outside their own log and are exported with
 `replayable: false`. `scripts/lab_replay_roundtrip.py` demonstrates recording,
 exact replay and localizing a tampered call over real stdio.
 
+## Typed observation profiles and complete records
+
+The laboratory query mode `observation` exposes the canonical completeness
+profiles through the existing query tool:
+
+```python
+fortress_query(mode='{"mode":"observation","completeness_profile":"operations","section":"entities","limit":25}')
+fortress_query(mode='{"mode":"observation","completeness_profile":"spatial","section":"chunks","limit":10}')
+fortress_query(mode='{"mode":"observation","completeness_profile":"historical","section":"events","limit":25}')
+```
+
+The five profile names are `control-minimum`, `operations`, `spatial`,
+`historical`, and `research-full`. The closed `section` selection accepts
+`entities` (default), `relations`, `chunks`, or `events`; page limits are
+1 through 100. See `WORLD_MODEL.md` for each profile's exact inclusion policy.
+These are content profiles, separate from the Agent Turn presentation profiles.
+
+Every page identifies its original `source_anchor`, separate
+`projected_anchor`, profile envelope digest, source schema and laboratory
+manifest. The JSON is a bounded rendering of records; it is not the canonical
+envelope encoding. World-library callers can use the immutable profiled
+snapshot and capsule codecs for exact canonical round-trips. These reference
+observations establish no live Dwarf Fortress capability or action authority.
+
+Rows preserve complete structured values, entity/relation identities, relation
+endpoints, terrain RLE runs, event fields, and explicit field-presence metadata.
+Unknown, absent, unsupported, omitted, redacted, and stale facts do not expose
+retained compatibility values as current knowledge. Known null is distinct
+from absence. Binary payloads retain the established byte-length rendering and
+are explicitly marked `omitted`, including when nested inside a list, event
+field, or chunk overlay.
+
+Coverage names the selected **record-membership** domain. Complete membership
+does not make every field known. Excluded sections report
+`section_included: false` and explicit profile omissions; an empty excluded
+section never proves absence. Historical event coverage refers only to the
+supplied retained event window.
+
+Pass the serialized `continuation` object as the next query's `mode` argument.
+It preserves the source hash, profile, section, limit, and next offset. The
+existing historical router resolves that exact source; an expired source
+anchor is refused. A projected hash is never substituted for the retained
+source address. If the output budget shortens a page, the continuation resumes
+after the records actually returned. Empty, excluded, or exhausted collections
+have no continuation.
+
+Ordinary `entities` queries also return exact scope and pagination metadata.
+A filter with unresolved rows cannot prove absence, including under negation.
+Response reduction removes whole records and marks their domain partial; it
+does not shorten semantic field lists, coordinates, predicates, or evidence,
+and it preserves known null members and the coverage needed to interpret them.
+
 ## What changed, every turn
 
 Each session retains a bounded history (32 versions) of the exact canonical
@@ -309,8 +361,8 @@ entities per turn, with `entity_changes_omitted` beyond that) and
 as `wall->floor`). If the previous anchor aged out of the history the turn says
 `history_not_retained` (epistemic state `unknown`) instead of guessing.
 
-The same history serves exact historical reads: any `fortress_query` entities
-or terrain request may add `"at": "<state_hash>"` to read that retained version
+The same history serves exact historical reads: structured `fortress_query`
+requests, including observation profile pages, may add `"at": "<state_hash>"` to read that retained version
 exactly (`historical: true`, with the current anchor alongside), and
 `{"mode":"changes","since":"<state_hash>"}` lists the observed changes from
 that version to now. A version outside the retained history is refused with
