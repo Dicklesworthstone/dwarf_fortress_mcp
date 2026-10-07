@@ -15,7 +15,7 @@ use dfmcp_core::{
     GameTick, OperationContext, PlanId, Result, StateAnchor,
 };
 use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision_with_evidence};
-use dfmcp_intent::{PlanStep, PreparedPlan, effects};
+use dfmcp_intent::{ObligationRuntime, ObligationStatus, PlanStep, PreparedPlan, effects};
 use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
@@ -319,8 +319,8 @@ fn validate_idempotency_key(idempotency_key: &str) -> Result<()> {
 #[derive(Clone, Debug, Default)]
 pub struct MutationDispatcher {
     journal: EffectJournal,
-    /// Distinct observations on which each pending obligation held.
-    stability: BTreeMap<ActionId, (u32, Option<StateAnchor>)>,
+    /// Each temporal action uses the shared observation/cadence proof engine.
+    obligations: BTreeMap<ActionId, ObligationRuntime>,
 }
 
 impl MutationDispatcher {
@@ -328,7 +328,7 @@ impl MutationDispatcher {
     pub fn new() -> Self {
         Self {
             journal: EffectJournal::new(),
-            stability: BTreeMap::new(),
+            obligations: BTreeMap::new(),
         }
     }
 
@@ -476,7 +476,7 @@ impl MutationDispatcher {
 
         let prior_snapshot = snapshot.clone();
         let prior_journal = self.journal.clone();
-        let prior_stability = self.stability.clone();
+        let prior_obligations = self.obligations.clone();
         self.journal.record_commit_attempt(&idempotency_key)?;
         let result = (|| {
             let mut action_receipts: Vec<ActionReceipt> = Vec::with_capacity(plan.steps.len());
@@ -512,7 +512,7 @@ impl MutationDispatcher {
         if result.is_err() {
             *snapshot = prior_snapshot;
             self.journal = prior_journal;
-            self.stability = prior_stability;
+            self.obligations = prior_obligations;
         }
         result
     }
@@ -565,7 +565,7 @@ impl MutationDispatcher {
         }
 
         let prior_snapshot = snapshot.clone();
-        let prior_stability = self.stability.clone();
+        let prior_obligations = self.obligations.clone();
         let result = (|| {
             // Reuse one sealed observation while proving pending work. A newly
             // dispatched effect ends that borrow and obtains fresh evidence.
@@ -622,7 +622,7 @@ impl MutationDispatcher {
         })();
         if result.is_err() {
             *snapshot = prior_snapshot;
-            self.stability = prior_stability;
+            self.obligations = prior_obligations;
         }
         result
     }
@@ -645,6 +645,13 @@ impl MutationDispatcher {
                 ),
             ));
         }
+        if self.obligations.contains_key(&action_id) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "action already has a registered proof monitor",
+            ));
+        }
+        let obligation_runtime = register_step_obligation(action_id, step, snapshot)?;
         if effects::apply_effect(snapshot, &step.action, &step.idempotency_key)? {
             let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
                 DfmcpError::new(
@@ -656,7 +663,8 @@ impl MutationDispatcher {
             snapshot.refresh_hash();
         }
         let observation = PredicateEvidence::laboratory(snapshot)?;
-        if step.obligation.is_some() {
+        if let Some(runtime) = obligation_runtime {
+            self.obligations.insert(action_id, runtime);
             return self.evaluate_obligation(plan, step, action_id, &observation);
         }
         if !predicates_established(&observation, &step.postconditions)? {
@@ -687,55 +695,20 @@ impl MutationDispatcher {
         observation: &PredicateEvidence<'_>,
     ) -> Result<ActionReceipt> {
         let snapshot = observation.snapshot();
-        let Some(obligation) = &step.obligation else {
-            return Err(DfmcpError::new(
+        let runtime = self.obligations.get_mut(&action_id).ok_or_else(|| {
+            DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
-                "pending step has no obligation to evaluate",
-            ));
-        };
-        let failed = obligation
-            .failure
-            .as_ref()
-            .map_or(Ok(false), |predicate| observation.establishes(predicate))?;
-        let holds = observation.establishes(&obligation.terminal)?
-            && predicates_established(observation, &step.postconditions)?;
-        let (stable, last) = self.stability.get(&action_id).copied().unwrap_or((0, None));
-        let anchor = snapshot.anchor();
-        let stable = if failed || !holds {
-            self.stability.insert(action_id, (0, None));
-            0
-        } else if last == Some(anchor) {
-            stable
-        } else {
-            self.stability
-                .insert(action_id, (stable.saturating_add(1), Some(anchor)));
-            stable.saturating_add(1)
-        };
-        let (state, message) = if failed {
-            (CommitState::Failed, "obligation failure predicate observed")
-        } else if snapshot.tick > obligation.deadline_tick {
-            (
-                CommitState::Failed,
-                "obligation deadline passed before stable completion was observed",
+                "pending temporal step has no registered proof monitor",
             )
-        } else if holds && stable >= obligation.stable_for_observations {
-            (
-                CommitState::Verified,
-                "obligation terminal proven on stable observations",
-            )
-        } else if snapshot.tick >= obligation.deadline_tick {
-            (
-                CommitState::Failed,
-                "obligation reached its game-tick deadline without stable completion",
-            )
-        } else {
-            (
-                CommitState::AppliedAwaitingVerification,
-                "effect dispatched; obligation proof pending later observation",
-            )
+        })?;
+        let state = obligation_commit_state(runtime, action_id, observation)?;
+        let message = match state {
+            CommitState::Verified => "obligation terminal proven on stable scheduled observations",
+            CommitState::Failed => "obligation failed or exhausted its deadline without stable proof",
+            _ => "effect dispatched; obligation proof pending later observation",
         };
         if state.is_terminal() {
-            self.stability.remove(&action_id);
+            self.obligations.remove(&action_id);
         }
         Ok(action_receipt(
             plan,
@@ -786,6 +759,44 @@ impl MutationDispatcher {
     /// Access mutable reference to internal effect journal.
     pub fn journal_mut(&mut self) -> &mut EffectJournal {
         &mut self.journal
+    }
+}
+
+/// Register at the actual effect boundary. The creation observation sets the
+/// cadence floor but cannot provide a positive stability sample.
+fn register_step_obligation(
+    action_id: ActionId,
+    step: &PlanStep,
+    snapshot: &WorldSnapshot,
+) -> Result<Option<ObligationRuntime>> {
+    let Some(mut spec) = step.obligation.clone() else {
+        return Ok(None);
+    };
+    let mut terminal = vec![spec.terminal];
+    terminal.extend(step.postconditions.iter().cloned());
+    spec.terminal = Predicate::All(terminal).normalized();
+    let mut runtime = ObligationRuntime::new();
+    runtime.register_obligation_at(action_id, spec, snapshot)?;
+    Ok(Some(runtime))
+}
+
+/// Use the shared obligation engine for sampling, continuity, and deadlines.
+fn obligation_commit_state(
+    runtime: &mut ObligationRuntime,
+    action_id: ActionId,
+    observation: &PredicateEvidence<'_>,
+) -> Result<CommitState> {
+    runtime.step_tick_with_evidence(observation)?;
+    match runtime.get_status(action_id) {
+        Some(ObligationStatus::Fulfilled { .. }) => Ok(CommitState::Verified),
+        Some(ObligationStatus::Failed { .. }) => Ok(CommitState::Failed),
+        Some(ObligationStatus::Pending | ObligationStatus::Active { .. }) => {
+            Ok(CommitState::AppliedAwaitingVerification)
+        }
+        _ => Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "action proof monitor is missing or not in an observable lifecycle state",
+        )),
     }
 }
 
@@ -1132,7 +1143,9 @@ mod tests {
 
             snapshot.tick = GameTick(101);
             snapshot.cursor.sequence += 1;
+            set_authority_field(&mut snapshot, "ready", authority_fact(true, GameTick(101)))?;
             set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(101)))?;
+            set_authority_field(&mut snapshot, "failed", authority_fact(false, GameTick(101)))?;
             let context = sample_context(&snapshot);
             let verified = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
             assert_eq!(verified.actions[0].state, CommitState::Verified);
@@ -1199,6 +1212,144 @@ mod tests {
         assert_eq!(reconciled.actions[1].state, CommitState::Failed);
         assert!(reconciled.actions[1].message.contains("not dispatched"));
         assert!(!snapshot.paused);
+        Ok(())
+    }
+
+
+    fn cadence_transaction(
+        interval: u64,
+        stable: u32,
+        deadline: u64,
+    ) -> Result<(MutationDispatcher, PreparedPlan, WorldSnapshot, ActionId)> {
+        let mut snapshot = sample_snapshot();
+        add_authority_fields(&mut snapshot, authority_fact(true, GameTick(100)));
+        set_authority_field(&mut snapshot, "failed", authority_fact(false, GameTick(100)))?;
+        let mut plan = unpause_plan(&snapshot)?;
+        plan.steps[0].obligation = Some(dfmcp_intent::ObligationSpec {
+            terminal: authority_predicate("done"),
+            failure: Some(authority_predicate("failed")),
+            deadline_tick: GameTick(deadline),
+            poll_interval_ticks: interval,
+            stable_for_observations: stable,
+        });
+        reseal_authority_plan(&mut plan)?;
+        let context = sample_context(&snapshot);
+        let mut dispatcher = MutationDispatcher::new();
+        let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+        let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+        assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+        Ok((dispatcher, plan, snapshot, committed.actions[0].action_id))
+    }
+
+    fn next_cadence_observation(snapshot: &mut WorldSnapshot, tick: u64) -> Result<()> {
+        snapshot.tick = GameTick(tick);
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
+        })?;
+        snapshot.refresh_hash();
+        Ok(())
+    }
+
+    fn reconcile_cadence(
+        dispatcher: &mut MutationDispatcher,
+        plan: &PreparedPlan,
+        snapshot: &mut WorldSnapshot,
+    ) -> Result<ActionReceipt> {
+        let context = sample_context(snapshot);
+        let receipt = dispatcher.reconcile(plan, snapshot, &context)?;
+        receipt.actions.first().cloned().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test action receipt")
+        })
+    }
+
+    #[test]
+    fn dispatcher_stability_requires_elapsed_cadence_and_distinct_game_ticks() -> Result<()> {
+        let (mut dispatcher, plan, mut snapshot, _) = cadence_transaction(5, 2, 130)?;
+        for tick in [100, 104, 105, 105, 109] {
+            next_cadence_observation(&mut snapshot, tick)?;
+            let receipt = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
+            assert_eq!(receipt.state, CommitState::AppliedAwaitingVerification, "tick {tick}");
+        }
+        next_cadence_observation(&mut snapshot, 110)?;
+        let terminal = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
+        assert_eq!(terminal.state, CommitState::Verified);
+        assert_eq!(terminal.observed_anchor.tick, GameTick(110));
+        next_cadence_observation(&mut snapshot, 111)?;
+        set_authority_field(&mut snapshot, "done", authority_fact(false, GameTick(111)))?;
+        assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?, terminal);
+        Ok(())
+    }
+
+    #[test]
+    fn dispatcher_off_cadence_contradictions_reset_the_streak_without_delaying_next_poll() -> Result<()> {
+        use dfmcp_world::{Fact, FactSource, Value};
+        for ineligible in [
+            authority_fact(false, GameTick(106)),
+            Fact::known(Value::Bool(true), GameTick(106),
+                FactSource::AgentAssertion("predicted complete".to_owned()), Digest32::ZERO),
+        ] {
+            let (mut dispatcher, plan, mut snapshot, _) = cadence_transaction(5, 2, 130)?;
+            next_cadence_observation(&mut snapshot, 105)?;
+            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            next_cadence_observation(&mut snapshot, 106)?;
+            set_authority_field(&mut snapshot, "done", ineligible)?;
+            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            next_cadence_observation(&mut snapshot, 107)?;
+            set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(107)))?;
+            reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
+            next_cadence_observation(&mut snapshot, 110)?;
+            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            next_cadence_observation(&mut snapshot, 115)?;
+            let terminal = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
+            assert_eq!(terminal.state, CommitState::Verified);
+            assert_eq!(terminal.observed_anchor.tick, GameTick(115));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dispatcher_deadline_and_failure_precedence_do_not_wait_for_cadence() -> Result<()> {
+        let (mut exact, plan, mut snapshot, _) = cadence_transaction(100, 1, 104)?;
+        let mut late = exact.clone();
+        let mut late_snapshot = snapshot.clone();
+        next_cadence_observation(&mut snapshot, 104)?;
+        assert_eq!(reconcile_cadence(&mut exact, &plan, &mut snapshot)?.state, CommitState::Verified);
+        next_cadence_observation(&mut late_snapshot, 105)?;
+        assert_eq!(reconcile_cadence(&mut late, &plan, &mut late_snapshot)?.state, CommitState::Failed);
+        let (mut insufficient, plan, mut snapshot, _) = cadence_transaction(100, 2, 104)?;
+        next_cadence_observation(&mut snapshot, 104)?;
+        assert_eq!(reconcile_cadence(&mut insufficient, &plan, &mut snapshot)?.state, CommitState::Failed);
+        for tick in [101, 104] {
+            let (mut failed, plan, mut snapshot, _) = cadence_transaction(100, 1, 104)?;
+            next_cadence_observation(&mut snapshot, tick)?;
+            set_authority_field(&mut snapshot, "failed", authority_fact(true, GameTick(tick)))?;
+            assert_eq!(reconcile_cadence(&mut failed, &plan, &mut snapshot)?.state, CommitState::Failed);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pending_dispatcher_proofs_reject_lineage_changes_and_forked_cursors_atomically() -> Result<()> {
+        let (mut dispatcher, plan, mut snapshot, _) = cadence_transaction(5, 2, 130)?;
+        next_cadence_observation(&mut snapshot, 105)?;
+        reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
+        let key = format!("dfmcp_tx_1_{}", plan.digest);
+        for case in 0..4 {
+            let mut candidate = snapshot.clone();
+            match case {
+                0 => candidate.fortress_id = FortressId::new(2),
+                1 => candidate.cursor.epoch += 1,
+                2 => candidate.paused = true, // same cursor, different semantic bytes
+                _ => candidate.tick = GameTick(104),
+            }
+            candidate.refresh_hash();
+            let mut attempted = dispatcher.clone();
+            let result = reconcile_cadence(&mut attempted, &plan, &mut candidate);
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
+            assert_eq!(attempted.journal().lookup(&key), dispatcher.journal().lookup(&key));
+        }
+        next_cadence_observation(&mut snapshot, 110)?;
+        assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::Verified);
         Ok(())
     }
 

@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Canonical adapter cadence and atomic deferred polling (2026-10-07)
+
+Both reference adapters now own a canonical `ObligationRuntime` for each
+dispatched temporal action. Registration occurs at the actual effect boundary,
+including deferred dispatch, and binds the conjunction of the sealed terminal
+condition and all postconditions. The registration observation sets the cadence
+floor. Different hashes or cursors at the same game tick cannot manufacture
+additional stability; an off-cadence contradiction or loss of eligible evidence
+resets the unfinished streak. Failure precedence, fixed deadlines, an eligible
+exact-deadline sample, observation lineage and immutable terminal receipts all
+use the shared engine.
+
+Laboratory time advancement validates the original hash and canonical lookup
+identities before creating its transaction shadow. It also rejects pre-existing
+future-dated known facts from registered reference producers, so moving the
+clock alone cannot grant them input or proof authority, even while paused.
+Arbitrary-source prediction metadata remains inspectable and untrusted, while
+genuine new reference writes retain the destination tick. A deferred poll now
+publishes its effect, monitor, receipt, dispatch flag and transcript together;
+post-effect verification errors and cursor exhaustion restore the prior adapter.
+
+Ten new tests cover both adapters' cadence, same-tick polls, contradictions,
+deadlines, failure priority, terminal preservation and lineage refusal, plus
+clock-source integrity and deferred-poll rollback. Authority recovery fixtures
+now explicitly establish a fresh valid observation before expecting success.
+A repository-wide source/test/demo caller audit also completed the explicit
+laboratory planner migrations.
+
+**Evidence: final sources and regression bodies were independently reviewed and
+the uploaded GitHub blobs were read back byte-for-byte. This cadence/atomicity
+increment has not compiled or executed.** The execution service remained
+unavailable after the recorded disconnect, including a subsequent read-only
+probe. Final formatting, tests, `scripts/verify.sh` and
+`scripts/qualify_local.sh` remain pending; no full qualification or admission
+is asserted. The complete source implementation remains tracked as in progress
+under `df-predicate-evidence-authority-r7m` until final executable verification.
+
 ### Source-authorized execution and recovery (2026-10-07)
 
 Static planning, deferred-step admission and the canonical obligation/recovery
@@ -83,8 +120,8 @@ final bytes. New tests remain enabled for execution on a functioning host.
 
 The shared world primitive's earlier 178-test result is recorded separately
 below. Full final-source tests, formatting and workspace qualification remain
-pending. The separate adapter cadence increment will replace its duplicate
-stability counters with the canonical runtime. This source work is tracked by
+pending. The adapter cadence increment now replaces its duplicate stability counters
+with the canonical runtime, as described above. This source work is tracked by
 `df-predicate-evidence-authority-r7m` and grants no live/native admission.
 
 ### Source-qualified world predicate evidence (2026-10-07)
@@ -117,9 +154,9 @@ received. The available compiler is `rustc 1.100.0-nightly (908501772 2026-08-30
 Sources recovered through GitHub after the disconnection are reviewed source,
 not a claim that the final published generation passed the interrupted run.
 
-This increment provides the shared evidence primitive. Threading it through
-planning, reference effects, deferred execution, obligations and MCP recovery
-is the next increment under `df-predicate-evidence-authority-r7m`. The observing
+This increment provides the shared evidence primitive. Its planning, reference
+effect, deferred execution, obligation and MCP recovery integration is documented
+above under `df-predicate-evidence-authority-r7m`. The observing
 shell remains responsible for independent source admission and issuing grants;
 the explicit laboratory constructor is not an imported-data or live-source
 admission path. No native, live, registry or full-workspace qualification is

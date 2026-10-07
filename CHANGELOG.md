@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-07 — Canonical temporal proof and atomic deferred polling
+
+- Replace both adapters' duplicate stability counters with the shared obligation
+  runtime, registered at actual dispatch. Require eligible later game-tick
+  samples for the complete sealed goal and retain immutable terminal receipts.
+- Preserve scheduled cadence, same-tick refusal, off-cadence contradiction
+  resets, failure precedence, fixed deadlines and exact observation lineage.
+- Validate the original source before laboratory time advances; future-dated
+  registered facts, forged hashes and lookup aliases cannot become trusted
+  through clock movement. Preserve untrusted prediction metadata and real new
+  model observations.
+- Roll back deferred-poll effects, proof monitors, receipts, dispatch flags and
+  transcripts on error. Add ten focused regressions and repair fresh-observation
+  fixtures. Final source is reviewed and GitHub-verified; executable gates
+  remain pending while the execution service is unavailable.
+
 ## 2026-10-07 — Source-authorized planning, simulation and recovered goals
 
 - Require explicit admitted evidence for planning, deferred admission, obligation

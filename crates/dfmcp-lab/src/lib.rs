@@ -14,7 +14,7 @@ use dfmcp_core::{
     Result, RiskTier, StateAnchor, StepId,
 };
 use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision_with_evidence};
-use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
+use dfmcp_intent::{Action, ObligationRuntime, ObligationStatus, PlanStep, PreparedPlan, effects};
 pub mod durable;
 pub mod faults;
 
@@ -86,8 +86,7 @@ struct LabAction {
     plan_id: PlanId,
     step: PlanStep,
     receipt: ActionReceipt,
-    stable_observations: u32,
-    last_stable_anchor: Option<StateAnchor>,
+    obligation_runtime: Option<ObligationRuntime>,
     cancel_mode: Option<CancelMode>,
     /// Whether the step's effect was ever applied. A step still waiting on
     /// its dependencies has nothing to compensate.
@@ -327,6 +326,9 @@ impl MemoryAdapter {
                 "laboratory observation cursor is exhausted",
             )
         })?;
+        // Check the source before moving the clock. A pre-existing future
+        // timestamp cannot become observation authority just because time passed.
+        validate_tick_advance_source(&self.snapshot)?;
         // Work transitions on a shadow so a failed effect leaves no partial state.
         let mut next = self.snapshot.clone();
         next.tick = next_tick;
@@ -481,6 +483,7 @@ impl MemoryAdapter {
                 "derived laboratory action identity collided with existing state",
             ));
         }
+        let mut obligation_runtime = None;
         let state = if self.dependencies_verified(plan_id, step) {
             let observation = PredicateEvidence::laboratory(&self.snapshot)?;
             if !predicates_established(&observation, &step.preconditions)? {
@@ -489,11 +492,12 @@ impl MemoryAdapter {
                     format!("step {} failed dispatch-time revalidation", step.id),
                 ));
             }
+            obligation_runtime = register_step_obligation(action_id, step, &self.snapshot)?;
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
             let observation = PredicateEvidence::laboratory(&self.snapshot)?;
-            if predicates_established(&observation, &step.postconditions)?
-                && step.obligation.is_none()
-            {
+            if let Some(runtime) = obligation_runtime.as_mut() {
+                obligation_commit_state(runtime, action_id, &observation)?
+            } else if predicates_established(&observation, &step.postconditions)? {
                 CommitState::Verified
             } else {
                 CommitState::AppliedAwaitingVerification
@@ -504,6 +508,7 @@ impl MemoryAdapter {
         let summary = match state {
             CommitState::Prepared => "waiting for dependency verification",
             CommitState::Verified => "semantic postconditions verified",
+            CommitState::Failed => "obligation failure observed after dispatch",
             _ => "action applied; semantic verification remains pending",
         };
         let receipt = build_action_receipt(
@@ -521,8 +526,7 @@ impl MemoryAdapter {
                 plan_id,
                 step: step.clone(),
                 receipt: receipt.clone(),
-                stable_observations: 0,
-                last_stable_anchor: None,
+                obligation_runtime,
                 cancel_mode: None,
                 dispatched: state != CommitState::Prepared,
             },
@@ -535,7 +539,7 @@ impl MemoryAdapter {
         action_id: ActionId,
         context: &OperationContext,
     ) -> Result<ActionReceipt> {
-        let (plan_id, step, prior_receipt, stable, prior_stable_anchor) = self
+        let (plan_id, step, prior_receipt, mut obligation_runtime) = self
             .actions
             .get(&action_id)
             .map(|action| {
@@ -543,8 +547,7 @@ impl MemoryAdapter {
                     action.plan_id,
                     action.step.clone(),
                     action.receipt.clone(),
-                    action.stable_observations,
-                    action.last_stable_anchor,
+                    action.obligation_runtime.clone(),
                 )
             })
             .ok_or_else(|| {
@@ -598,6 +601,7 @@ impl MemoryAdapter {
                     "polling a deferred step requires an available action budget",
                 ));
             }
+            obligation_runtime = register_step_obligation(action_id, &step, &self.snapshot)?;
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
             if let Some(stored) = self.actions.get_mut(&action_id) {
                 stored.dispatched = true;
@@ -605,47 +609,19 @@ impl MemoryAdapter {
         }
 
         let mut state = prior_state;
-        let mut stable_observations = stable;
-        let mut last_stable_anchor = prior_stable_anchor;
         if matches!(
             state,
             CommitState::Prepared | CommitState::AppliedAwaitingVerification
         ) && dependencies_verified
         {
             let observation = PredicateEvidence::laboratory(&self.snapshot)?;
-            if let Some(obligation) = &step.obligation {
-                let failure_triggered = obligation
-                    .failure
-                    .as_ref()
-                    .map_or(Ok(false), |predicate| observation.establishes(predicate))?;
-                let completed = observation.establishes(&obligation.terminal)?
-                    && predicates_established(&observation, &step.postconditions)?;
-                if failure_triggered || self.snapshot.tick > obligation.deadline_tick {
-                    stable_observations = 0;
-                    last_stable_anchor = None;
-                    state = CommitState::Failed;
-                } else if completed {
-                    let current_anchor = self.snapshot.anchor();
-                    if last_stable_anchor != Some(current_anchor) {
-                        stable_observations = stable_observations.saturating_add(1);
-                        last_stable_anchor = Some(current_anchor);
-                    }
-                    if stable_observations >= obligation.stable_for_observations {
-                        state = CommitState::Verified;
-                    } else if self.snapshot.tick >= obligation.deadline_tick {
-                        state = CommitState::Failed;
-                    } else {
-                        state = CommitState::AppliedAwaitingVerification;
-                    }
-                } else {
-                    stable_observations = 0;
-                    last_stable_anchor = None;
-                    state = if self.snapshot.tick >= obligation.deadline_tick {
-                        CommitState::Failed
-                    } else {
-                        CommitState::AppliedAwaitingVerification
-                    };
-                }
+            if let Some(runtime) = obligation_runtime.as_mut() {
+                state = obligation_commit_state(runtime, action_id, &observation)?;
+            } else if step.obligation.is_some() {
+                return Err(DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "dispatched temporal action has no registered proof monitor",
+                ));
             } else if predicates_established(&observation, &step.postconditions)? {
                 state = CommitState::Verified;
             } else {
@@ -672,8 +648,7 @@ impl MemoryAdapter {
         );
         if let Some(action) = self.actions.get_mut(&action_id) {
             action.receipt = receipt.clone();
-            action.stable_observations = stable_observations;
-            action.last_stable_anchor = last_stable_anchor;
+            action.obligation_runtime = obligation_runtime;
         }
         self.record_event(LabEvent::ActionPolled(action_id, state));
         Ok(receipt)
@@ -1081,7 +1056,19 @@ impl GameAdapter for MemoryAdapter {
     ) -> Result<ActionReceipt> {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-        self.refresh_action(action_id, context)
+        if !self.actions.get(&action_id).is_some_and(|action| {
+            action.receipt.state == CommitState::Prepared
+        }) {
+            return self.refresh_action(action_id, context);
+        }
+        // A poll can dispatch deferred work. Its effect, proof monitor, receipt
+        // and transcript must publish together, just as they do during commit.
+        let prior = self.clone();
+        let result = self.refresh_action(action_id, context);
+        if result.is_err() {
+            *self = prior;
+        }
+        result
     }
 
     fn request_cancel(
@@ -1329,6 +1316,64 @@ impl GameAdapter for MemoryAdapter {
                 "laboratory checkpoint restored into a new observation epoch",
             )],
         })
+    }
+}
+
+/// Advancing reference time may create new observations at the destination
+/// tick, but cannot legitimize future-dated facts already present at the source.
+fn validate_tick_advance_source(snapshot: &WorldSnapshot) -> Result<()> {
+    let observation = PredicateEvidence::laboratory(snapshot)?;
+    let source = observation.snapshot();
+    let fields = source.graph.entities.values().flat_map(|entity| entity.fields.values())
+        .chain(source.graph.edges.values().flat_map(|edge| edge.fields.values()));
+    for fact in fields {
+        if fact.observed_at > source.tick
+            && dfmcp_world::laboratory_fact_value(fact, fact.observed_at).is_some()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "laboratory clock advancement cannot promote a future-dated known source fact",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Register at the actual effect boundary. The creation observation sets the
+/// cadence floor but cannot provide a positive stability sample.
+fn register_step_obligation(
+    action_id: ActionId,
+    step: &PlanStep,
+    snapshot: &WorldSnapshot,
+) -> Result<Option<ObligationRuntime>> {
+    let Some(mut spec) = step.obligation.clone() else {
+        return Ok(None);
+    };
+    let mut terminal = vec![spec.terminal];
+    terminal.extend(step.postconditions.iter().cloned());
+    spec.terminal = Predicate::All(terminal).normalized();
+    let mut runtime = ObligationRuntime::new();
+    runtime.register_obligation_at(action_id, spec, snapshot)?;
+    Ok(Some(runtime))
+}
+
+/// Use the shared obligation engine for sampling, continuity, and deadlines.
+fn obligation_commit_state(
+    runtime: &mut ObligationRuntime,
+    action_id: ActionId,
+    observation: &PredicateEvidence<'_>,
+) -> Result<CommitState> {
+    runtime.step_tick_with_evidence(observation)?;
+    match runtime.get_status(action_id) {
+        Some(ObligationStatus::Fulfilled { .. }) => Ok(CommitState::Verified),
+        Some(ObligationStatus::Failed { .. }) => Ok(CommitState::Failed),
+        Some(ObligationStatus::Pending | ObligationStatus::Active { .. }) => {
+            Ok(CommitState::AppliedAwaitingVerification)
+        }
+        _ => Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "action proof monitor is missing or not in an observable lifecycle state",
+        )),
     }
 }
 
@@ -1699,6 +1744,16 @@ mod tests {
             let pending = adapter.poll_action(action_id, &context(adapter.snapshot(), 4))?;
             assert_eq!(pending.state, CommitState::AppliedAwaitingVerification);
 
+            // A fresh observation resolves every previously ineligible model input
+            // before advancing the reference clock.
+            let tick = adapter.snapshot.tick;
+            set_authority_field(&mut adapter.snapshot, "ready", authority_fact(true, tick))?;
+            set_authority_field(&mut adapter.snapshot, "done", authority_fact(false, tick))?;
+            set_authority_field(&mut adapter.snapshot, "failed", authority_fact(false, tick))?;
+            adapter.snapshot.cursor = adapter.snapshot.cursor.checked_next().ok_or_else(|| {
+                DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
+            })?;
+            adapter.snapshot.refresh_hash();
             adapter.advance_ticks(1)?;
             let fact = authority_fact(true, adapter.snapshot.tick);
             set_authority_field(&mut adapter.snapshot, "done", fact)?;
@@ -1789,6 +1844,324 @@ mod tests {
         assert_eq!(refused.state, CommitState::Failed);
         assert!(!adapter.snapshot.paused);
         assert!(refused.message.contains("not dispatched"));
+        Ok(())
+    }
+
+
+    fn cadence_adapter(
+        interval: u64,
+        stable: u32,
+        deadline: u64,
+    ) -> Result<(MemoryAdapter, dfmcp_core::ActionId), DfmcpError> {
+        let mut source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+        );
+        add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
+        set_authority_field(&mut source, "failed", authority_fact(false, GameTick(1)))?;
+        let intent = unpause_intent(&source, 51, Some(ObligationSpec {
+            terminal: authority_predicate("done"),
+            failure: Some(authority_predicate("failed")),
+            deadline_tick: GameTick(deadline),
+            poll_interval_ticks: interval,
+            stable_for_observations: stable,
+        }));
+        let plan = StaticPlanner::default()
+            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let mut adapter = MemoryAdapter::new(source);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+        let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+        assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+        Ok((adapter, committed.actions[0].action_id))
+    }
+
+    #[test]
+    fn temporal_proof_requires_scheduled_samples_at_distinct_game_ticks() -> Result<(), DfmcpError> {
+        let (mut adapter, action_id) = cadence_adapter(5, 2, 30)?;
+        let pending = |adapter: &mut MemoryAdapter| -> Result<(), DfmcpError> {
+            let receipt = adapter.poll_action(action_id, &context(adapter.snapshot(), 9))?;
+            assert_eq!(receipt.state, CommitState::AppliedAwaitingVerification);
+            Ok(())
+        };
+        pending(&mut adapter)?; // Dispatch at tick 1 is the cadence floor.
+        adapter.advance_ticks(4)?;
+        pending(&mut adapter)?; // Tick 5 is still before the first due sample.
+        adapter.advance_ticks(1)?;
+        pending(&mut adapter)?; // Tick 6 supplies only sample 1.
+
+        // A genuinely new canonical observation at the same game tick cannot
+        // manufacture a second sample, even when its cursor/hash changed.
+        adapter.snapshot.cursor = adapter.snapshot.cursor.checked_next().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
+        })?;
+        adapter.snapshot.refresh_hash();
+        pending(&mut adapter)?;
+        adapter.advance_ticks(4)?;
+        pending(&mut adapter)?;
+        adapter.advance_ticks(1)?;
+        let terminal = adapter.poll_action(action_id, &context(adapter.snapshot(), 10))?;
+        assert_eq!(terminal.state, CommitState::Verified);
+        assert_eq!(terminal.observed_anchor.tick, GameTick(11));
+
+        adapter.advance_ticks(1)?;
+        let fact = authority_fact(false, adapter.snapshot.tick);
+        set_authority_field(&mut adapter.snapshot, "done", fact)?;
+        assert_eq!(adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?, terminal);
+        Ok(())
+    }
+
+    #[test]
+    fn off_cadence_contradiction_resets_stability_without_moving_the_poll_floor() -> Result<(), DfmcpError> {
+        use dfmcp_world::{Fact, FactSource, Value};
+        for ineligible in [
+            authority_fact(false, GameTick(7)),
+            Fact::known(Value::Bool(true), GameTick(7),
+                FactSource::AgentAssertion("predicted complete".to_owned()), dfmcp_core::Digest32::ZERO),
+        ] {
+            let (mut adapter, action_id) = cadence_adapter(5, 2, 30)?;
+            adapter.advance_ticks(5)?;
+            assert_eq!(
+                adapter.poll_action(action_id, &context(adapter.snapshot(), 10))?.state,
+                CommitState::AppliedAwaitingVerification
+            );
+            adapter.advance_ticks(1)?;
+            set_authority_field(&mut adapter.snapshot, "done", ineligible)?;
+            assert_eq!(
+                adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?.state,
+                CommitState::AppliedAwaitingVerification
+            );
+            adapter.advance_ticks(1)?;
+            let fact = authority_fact(true, adapter.snapshot.tick);
+            set_authority_field(&mut adapter.snapshot, "done", fact)?;
+            adapter.poll_action(action_id, &context(adapter.snapshot(), 12))?;
+            adapter.advance_ticks(3)?;
+            assert_eq!(
+                adapter.poll_action(action_id, &context(adapter.snapshot(), 13))?.state,
+                CommitState::AppliedAwaitingVerification
+            ); // Tick 11 is the replacement first sample, not completion.
+            adapter.advance_ticks(5)?;
+            let terminal = adapter.poll_action(action_id, &context(adapter.snapshot(), 14))?;
+            assert_eq!(terminal.state, CommitState::Verified);
+            assert_eq!(terminal.observed_anchor.tick, GameTick(16));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn temporal_deadline_and_failure_precedence_apply_between_scheduled_polls() -> Result<(), DfmcpError> {
+        let (mut exact, action_id) = cadence_adapter(100, 1, 5)?;
+        let mut late = exact.clone();
+        exact.advance_ticks(4)?;
+        assert_eq!(
+            exact.poll_action(action_id, &context(exact.snapshot(), 10))?.state,
+            CommitState::Verified
+        ); // A sufficient final sample is eligible at the exact deadline.
+        late.advance_ticks(5)?;
+        assert_eq!(
+            late.poll_action(action_id, &context(late.snapshot(), 11))?.state,
+            CommitState::Failed
+        );
+        let (mut insufficient, action_id) = cadence_adapter(100, 2, 5)?;
+        insufficient.advance_ticks(4)?;
+        assert_eq!(
+            insufficient.poll_action(action_id, &context(insufficient.snapshot(), 12))?.state,
+            CommitState::Failed
+        );
+        for elapsed in [1, 4] {
+            let (mut failed, action_id) = cadence_adapter(100, 1, 5)?;
+            failed.advance_ticks(elapsed)?;
+            let fact = authority_fact(true, failed.snapshot.tick);
+            set_authority_field(&mut failed.snapshot, "failed", fact)?;
+            assert_eq!(
+                failed.poll_action(action_id, &context(failed.snapshot(), 13))?.state,
+                CommitState::Failed
+            ); // Failure beats a positive terminal even off cadence or at deadline.
+        }
+        Ok(())
+    }
+
+
+    fn time_guard_order(paused: bool) -> Result<(WorldSnapshot, dfmcp_core::EntityId), DfmcpError> {
+        let mut source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, paused, WorldGraph::default()
+        );
+        let key = "clock-source-authority";
+        super::apply_action(&mut source, &Action::CreateWorkOrder {
+            name: "one unit of reference work".to_owned(),
+            job_token: "MAKE_TEST".to_owned(),
+            amount: 1,
+            conditions: Vec::new(),
+        }, key)?;
+        Ok((source, dfmcp_intent::effects::created_entity_id(key, 0)))
+    }
+
+    #[test]
+    fn advancing_time_cannot_promote_a_preexisting_future_dated_work_counter() -> Result<(), DfmcpError> {
+        use dfmcp_intent::effects;
+        use dfmcp_world::Value;
+        for paused in [false, true] {
+            let (mut source, order_id) = time_guard_order(paused)?;
+            let order = source.graph.entities.get_mut(&order_id).ok_or_else(|| {
+                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+            })?;
+            let counter = order.fields.get_mut(effects::AMOUNT_REMAINING_FIELD).ok_or_else(|| {
+                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test remaining count")
+            })?;
+            counter.observed_at = GameTick(2);
+            source.refresh_hash();
+            assert!(dfmcp_world::laboratory_fact_value(
+                &source.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD],
+                source.tick
+            ).is_none());
+
+            if !paused {
+                // The low-level model expects its caller to validate the source
+                // before advancing the tick. Moving it first demonstrates the
+                // former adapter bug: the unobserved counter becomes usable.
+                let mut promoted = source.clone();
+                promoted.tick = GameTick(51);
+                effects::advance_effects(&mut promoted, 50)?;
+                assert_eq!(
+                    promoted.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD].value,
+                    Value::U64(0)
+                );
+            }
+            let mut adapter = MemoryAdapter::new(source.clone());
+            let result = adapter.advance_ticks(50);
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::PreconditionsFailed));
+            assert_eq!(adapter.snapshot(), &source);
+            assert!(adapter.transcript().is_empty());
+        }
+
+        // The original observation must be bound before the model receives its
+        // unsealed next-tick shadow: advancing time cannot repair a forged hash
+        // or a canonical serialization that concealed an aliased entity key.
+        for aliased_entity in [false, true] {
+            let (mut source, order_id) = time_guard_order(false)?;
+            if aliased_entity {
+                let record = source.graph.entities.remove(&order_id).ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+                })?;
+                let alias = if order_id == dfmcp_core::EntityId::new(1) {
+                    dfmcp_core::EntityId::new(2)
+                } else {
+                    dfmcp_core::EntityId::new(1)
+                };
+                source.graph.entities.insert(alias, record);
+                source.refresh_hash();
+                assert!(source.hash_is_valid());
+            } else {
+                source.paused = true;
+                assert!(!source.hash_is_valid());
+            }
+            let mut adapter = MemoryAdapter::new(source.clone());
+            assert!(adapter.advance_ticks(50).is_err());
+            assert_eq!(adapter.snapshot(), &source);
+            assert!(adapter.transcript().is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn clock_guard_preserves_untrusted_metadata_and_new_owned_model_observations() -> Result<(), DfmcpError> {
+        use dfmcp_intent::effects;
+        use dfmcp_world::{Fact, FactSource, Value};
+        let (mut source, order_id) = time_guard_order(false)?;
+        let order = source.graph.entities.get_mut(&order_id).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+        })?;
+        for (field, producer) in [
+            ("prediction", FactSource::AgentAssertion("agent model".to_owned())),
+            ("imported_forecast", FactSource::Derived("unregistered-forecast/1".to_owned())),
+        ] {
+            order.fields.insert(field.to_owned(), Fact::known(
+                Value::Bool(true), GameTick(2), producer, dfmcp_core::Digest32::ZERO
+            ));
+        }
+        source.refresh_hash();
+        let mut adapter = MemoryAdapter::new(source);
+        adapter.advance_ticks(50)?;
+        let current = adapter.snapshot();
+        let counter = &current.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD];
+        assert_eq!(current.tick, GameTick(51));
+        assert_eq!(counter.value, Value::U64(0));
+        assert_eq!(counter.observed_at, current.tick);
+        assert!(dfmcp_world::laboratory_fact_value(counter, current.tick).is_some());
+        for field in ["prediction", "imported_forecast"] {
+            assert!(dfmcp_world::laboratory_fact_value(
+                &current.graph.entities[&order_id].fields[field], current.tick
+            ).is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn deferred_poll_rolls_back_world_dispatch_flag_receipt_and_transcript_on_error() -> Result<(), DfmcpError> {
+        use dfmcp_world::{CompareOp, Value};
+        let mut source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+        );
+        add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
+        set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
+        let mut intent = unpause_intent(&source, 61, Some(ObligationSpec {
+            terminal: authority_predicate("done"),
+            failure: None,
+            deadline_tick: GameTick(10),
+            poll_interval_ticks: 1,
+            stable_for_observations: 1,
+        }));
+        intent.requested_actions.push(RequestedAction {
+            action: Action::Pause { paused: true },
+            preconditions: vec![authority_predicate("ready")],
+            postconditions: vec![Predicate::Paused(true)],
+            compensation: None,
+            obligation: None,
+            depends_on: vec![0],
+        });
+        let plan = StaticPlanner::default()
+            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let mut adapter = MemoryAdapter::new(source);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+        let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+        adapter.advance_ticks(1)?;
+        let tick = adapter.snapshot.tick;
+        set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
+        assert_eq!(
+            adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+            CommitState::Verified
+        );
+        let deferred = committed.actions[1].action_id;
+        for cursor_exhausted in [false, true] {
+            let mut attempted = adapter.clone();
+            if cursor_exhausted {
+                attempted.snapshot.cursor.sequence = u64::MAX;
+                attempted.snapshot.refresh_hash();
+            } else {
+                // Inject corruption at the stored-proof boundary. The valid
+                // deferred pause effect runs before this malformed predicate
+                // is evaluated, so an error must undo that effect and all flags.
+                let action = attempted.actions.get_mut(&deferred).ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing deferred action")
+                })?;
+                action.step.postconditions = vec![Predicate::FieldCompare {
+                    entity_id: dfmcp_core::EntityId::new(9),
+                    field: String::new(),
+                    op: CompareOp::Eq,
+                    value: Value::Bool(true),
+                }];
+            }
+            let before_snapshot = attempted.snapshot.clone();
+            let before_receipt = attempted.action_receipt(deferred).cloned();
+            let before_transcript = attempted.transcript().clone();
+            let result = attempted.poll_action(deferred, &context(attempted.snapshot(), 5));
+            assert!(result.is_err());
+            if cursor_exhausted {
+                assert!(matches!(result, Err(error) if error.code == ErrorCode::CursorGap));
+            }
+            assert_eq!(attempted.snapshot, before_snapshot);
+            assert_eq!(attempted.action_receipt(deferred).cloned(), before_receipt);
+            assert_eq!(attempted.transcript(), &before_transcript);
+            assert!(!attempted.actions[&deferred].dispatched);
+        }
         Ok(())
     }
 
@@ -1980,7 +2353,10 @@ mod tests {
         assert_eq!(repeated.state, CommitState::AppliedAwaitingVerification);
 
         adapter.advance_ticks(1)?;
-        let distinct = adapter.poll_action(action_id, &context(adapter.snapshot(), 6))?;
+        let first_due = adapter.poll_action(action_id, &context(adapter.snapshot(), 6))?;
+        assert_eq!(first_due.state, CommitState::AppliedAwaitingVerification);
+        adapter.advance_ticks(1)?;
+        let distinct = adapter.poll_action(action_id, &context(adapter.snapshot(), 7))?;
         assert_eq!(distinct.state, CommitState::Verified);
         Ok(())
     }
