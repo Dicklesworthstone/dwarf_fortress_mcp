@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-07 — Shared durable execution and conservative recovery
+
+- Wire carried obligations to the canonical recovery monitor under current
+  Observe authority. Keep unreproducible plans, invalid proof specifications and
+  ambiguous legacy records indeterminate, retaining their durable provenance.
+- Explicitly anchor deferred nondispatch without prematurely finishing its plan.
+  Missing legacy records at a changed world head cannot silently prove absence.
+- Share outstanding plans, recovery monitors, pending restore state and save
+  faults with the common world. Reuse existing shared worlds without recovery or
+  an epoch bump; remove failed admissions without leaving unreachable members.
+- Fence private replacement through complete calls and publication, and reject
+  mixed private/shared durable writers. Publish checkpoint restore and old-plan
+  abandonment atomically, retaining pending retirement for retry after failure.
+- Add focused MCP restart, authority, sharing and restore regressions. Reapply
+  the reviewed integration through GitHub during the execution-service outage;
+  the resulting source is independently reviewed but not formatted, compiled or
+  process-tested in that environment.
+
 ## 2026-10-07 — Canonical observation-only obligation recovery
 
 - Add `RecoveredObligation` around the canonical runtime, retaining original

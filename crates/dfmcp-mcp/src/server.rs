@@ -18,7 +18,7 @@
 //! `design/registries/CAPABILITIES.md` for the negotiated-capability registry.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 
 use crate::doctor::DoctorInspector;
 use dfmcp_adapter::{
@@ -30,7 +30,10 @@ use dfmcp_core::{
     Digest32, EntityId, ErrorCode, FortressId, IntentId, OperationContext, RequestId, Result,
     RiskTier, SessionId, StateAnchor, WorkBudget,
 };
-use dfmcp_intent::{Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner};
+use dfmcp_intent::{
+    Action, Constraint, Intent, ObligationStatus, PreparedPlan, RecoveredObligation,
+    RequestedAction, StaticPlanner,
+};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
 use dfmcp_world::{EdgeKind, Predicate, QueryOrder, WorldQuery, WorldSnapshot};
@@ -96,6 +99,8 @@ pub(crate) struct LabSession {
     /// Plans committed in this process on a durable fortress whose steps are
     /// not all final; their step states are journaled after every call.
     durable_plans: BTreeMap<Digest32, PreparedPlan>,
+    /// Retirement staged by restore, published with the restored world.
+    durable_restore: BTreeMap<Digest32, Vec<u32>>,
     /// Steps of plans committed before a durable restart, re-proven against
     /// observation after every call until they are final.
     carried: Vec<CarriedStep>,
@@ -215,12 +220,17 @@ pub(crate) fn world_changes_since(
 #[derive(Clone, Debug)]
 pub(crate) struct CarriedStep {
     plan_digest: Digest32,
-    step: dfmcp_core::StepId,
+    step: Option<dfmcp_core::StepId>,
     kind: &'static str,
     proof: Predicate,
     failure: Option<Predicate>,
     deadline: Option<dfmcp_core::GameTick>,
-    /// A durable step state from `dfmcp_lab::durable::STEP_STATES`.
+    monitor: Option<RecoveredObligation>,
+    recorded_state: String,
+    proof_anchor: Option<StateAnchor>,
+    observation_error: Option<String>,
+    failure_reason: Option<String>,
+    /// Durable state, or indeterminate when recovery cannot certify it.
     state: String,
 }
 
@@ -228,12 +238,93 @@ impl CarriedStep {
     fn to_json(&self) -> serde_json::Value {
         json!({
             "plan_digest": self.plan_digest.to_hex(),
-            "step": self.step.get(),
+            "step": self.step.map(|step| step.get()),
             "action": self.kind,
             "state": self.state,
             "deadline_tick": self.deadline.map(|tick| tick.0),
+            "failure_predicate": self.failure.as_ref().map(crate::lab_world::predicate_json),
+            "recorded_state": self.recorded_state,
+            "proof_anchor": self.proof_anchor.as_ref().map(anchor_json),
+            "observation_error": self.observation_error,
+            "failure_reason": self.failure_reason,
+            "recovery_class": if self.state == "indeterminate" { "reconciliation_required" } else { "never_unchanged" },
+            "blind_retry_allowed": false,
+            "stability": self.monitor.as_ref().and_then(|monitor| match monitor.status() {
+                Some(ObligationStatus::Active { consecutive_stable_observations, .. }) => Some(json!({
+                    "consecutive_observations": consecutive_stable_observations,
+                    "recovery_anchor": anchor_json(&monitor.recovery_anchor()),
+                    "policy": "unfinished stability resets at recovery; archived frontier is not a positive sample",
+                })),
+                _ => None,
+            }),
         })
     }
+
+    fn is_final(&self) -> bool {
+        matches!(
+            self.state.as_str(),
+            "verified" | "failed" | "cancelled" | "compensated" | "not_dispatched" | "abandoned"
+        )
+    }
+}
+
+/// Current Observe authority gates every resumed proof. Advance on a shadow
+/// so an invalid observation cannot partially certify the recovery frontier.
+fn observe_carried(session: &mut LabSession) -> Result<()> {
+    if !session.carried.iter().any(|step| step.state == "dispatched") {
+        return Ok(());
+    }
+    let ctx = context_for(session, session.next_request_id);
+    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+        for step in &mut session.carried {
+            if step.state == "dispatched" {
+                if let Some(monitor) = &mut step.monitor {
+                    monitor.observation_interrupted()?;
+                }
+                step.observation_error = Some(format!("{}: {}", error.code.as_str(), error.message));
+            }
+        }
+        return Err(error);
+    }
+    let snapshot = session.adapter.snapshot();
+    let mut next = session.carried.clone();
+    for step in &mut next {
+        if step.state != "dispatched" {
+            continue;
+        }
+        step.observation_error = None;
+        if let Some(monitor) = &mut step.monitor {
+            if let Err(error) = monitor.observe(snapshot) {
+                for retained in &mut session.carried {
+                    if retained.state == "dispatched" {
+                        if let Some(monitor) = &mut retained.monitor {
+                            monitor.observation_interrupted()?;
+                        }
+                        retained.observation_error =
+                            Some(format!("{}: {}", error.code.as_str(), error.message));
+                    }
+                }
+                return Err(error);
+            }
+            match monitor.status() {
+                Some(ObligationStatus::Fulfilled { .. }) => {
+                    step.state = "verified".to_owned();
+                    step.proof_anchor = monitor.last_observation_anchor();
+                }
+                Some(ObligationStatus::Failed { reason, .. }) => {
+                    step.state = "failed".to_owned();
+                    step.failure_reason = Some(reason.clone());
+                    step.proof_anchor = monitor.last_observation_anchor();
+                }
+                _ => {}
+            }
+        } else if dfmcp_world::evaluate(snapshot, &step.proof) {
+            step.state = "verified".to_owned();
+            step.proof_anchor = Some(snapshot.anchor());
+        }
+    }
+    session.carried = next;
+    Ok(())
 }
 
 /// Spatial leases plus the actions that hold them.
@@ -263,14 +354,21 @@ pub(crate) struct SharedWorld {
     members: BTreeSet<SessionId>,
     scenario: String,
     durable: bool,
+    durable_plans: BTreeMap<Digest32, PreparedPlan>,
+    durable_restore: BTreeMap<Digest32, Vec<u32>>,
+    carried: Vec<CarriedStep>,
+    durability_fault: Option<String>,
 }
 
-/// Process-local registry of shared fortresses, keyed by fortress selector.
+/// Admission drains existing calls before changing durable ownership. Calls
+/// retain a read guard through their last durable publication.
+static LAB_ADMISSION: RwLock<()> = RwLock::new(());
+
 static SHARED_WORLDS: LazyLock<Mutex<BTreeMap<FortressId, Arc<Mutex<SharedWorld>>>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 const MAX_SHARED_WORLDS: usize = 64;
+const MAX_SHARED_MEMBERS: usize = 16;
 
-/// What a joining member learns about the shared fortress.
 struct SharedView {
     anchor: StateAnchor,
     paused: bool,
@@ -279,17 +377,22 @@ struct SharedView {
     scenario: String,
 }
 
-/// Join (or create) the shared fortress for `fortress_id`. A joiner gets the
-/// existing world, never a fresh scenario; naming a different scenario is
-/// refused rather than silently ignored.
+struct SharedAdmission {
+    world: Arc<Mutex<SharedWorld>>,
+    view: SharedView,
+    adapter: MemoryAdapter,
+    recovery: Option<DurableRecovery>,
+}
+
+/// Existing joins borrow the running owner without replaying durable recovery.
 fn join_shared_world(
     fortress_id: FortressId,
     session_id: SessionId,
-    scenario: &str,
+    scenario: &mut String,
     scenario_requested: bool,
     seed: &MemoryAdapter,
     durable: bool,
-) -> Result<(Arc<Mutex<SharedWorld>>, SharedView)> {
+) -> Result<SharedAdmission> {
     let mut registry = SHARED_WORLDS.lock().map_err(|_| {
         DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
@@ -298,12 +401,9 @@ fn join_shared_world(
     })?;
     if let Some(world) = registry.get(&fortress_id).cloned() {
         let mut guard = world.lock().map_err(|_| {
-            DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "shared world poisoned",
-            )
+            DfmcpError::new(ErrorCode::InternalInvariantViolation, "shared world poisoned")
         })?;
-        if scenario_requested && guard.scenario != scenario {
+        if scenario_requested && guard.scenario != *scenario {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
                 format!(
@@ -317,11 +417,7 @@ fn join_shared_world(
                 ErrorCode::InvalidRequest,
                 format!(
                     "shared fortress {fortress_id} is {}; open it with durable={}",
-                    if guard.durable {
-                        "crash-durable"
-                    } else {
-                        "process-local"
-                    },
+                    if guard.durable { "crash-durable" } else { "process-local" },
                     guard.durable
                 ),
             ));
@@ -333,6 +429,8 @@ fn join_shared_world(
             ));
         }
         guard.members.insert(session_id);
+        scenario.clone_from(&guard.scenario);
+        let adapter = guard.adapter.clone();
         let view = SharedView {
             anchor: guard.adapter.snapshot().anchor(),
             paused: guard.adapter.snapshot().paused,
@@ -341,7 +439,7 @@ fn join_shared_world(
             scenario: guard.scenario.clone(),
         };
         drop(guard);
-        return Ok((world, view));
+        return Ok(SharedAdmission { world, view, adapter, recovery: None });
     }
     if registry.len() >= MAX_SHARED_WORLDS {
         return Err(DfmcpError::new(
@@ -349,12 +447,23 @@ fn join_shared_world(
             "the laboratory reached its shared-fortress bound",
         ));
     }
+    let (adapter, recovery) = if durable {
+        let (adapter, recovery) =
+            load_durable_fortress(fortress_id, scenario, scenario_requested, seed)?;
+        (adapter, Some(recovery))
+    } else {
+        (seed.clone(), None)
+    };
     let world = SharedWorld {
-        adapter: seed.clone(),
+        adapter: adapter.clone(),
         leases: LeaseBook::default(),
         members: BTreeSet::from([session_id]),
         scenario: scenario.to_owned(),
         durable,
+        durable_plans: BTreeMap::new(),
+        durable_restore: BTreeMap::new(),
+        carried: recovery.as_ref().map_or_else(Vec::new, |recovery| recovery.carried.clone()),
+        durability_fault: None,
     };
     let view = SharedView {
         anchor: world.adapter.snapshot().anchor(),
@@ -365,17 +474,29 @@ fn join_shared_world(
     };
     let world = Arc::new(Mutex::new(world));
     registry.insert(fortress_id, world.clone());
-    Ok((world, view))
+    Ok(SharedAdmission { world, view, adapter, recovery })
 }
 
-const MAX_SHARED_MEMBERS: usize = 16;
-
-/// Run `body` against a session. For a member of a shared fortress the world
-/// lock is held for the whole call and the world's adapter and lease book are
-/// swapped into the session, so every member observes and mutates the same
-/// canonical state one call at a time. Lock order is always world, then
-/// session; nothing locks a world while holding a session.
+/// Admission precedes world and session locks and lasts through publication.
+/// The late owner check fences a handle resolved just before replacement.
 pub(crate) fn with_session<T>(
+    session: &Arc<Mutex<LabSession>>,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    let _admission = match LAB_ADMISSION.read() {
+        Ok(guard) => guard,
+        Err(_) => return poisoned(),
+    };
+    if ensure_durable_owner(session).is_err() {
+        return poisoned();
+    }
+    with_session_admitted(session, poisoned, body)
+}
+
+/// Opening already holds the write admission guard and uses this helper to
+/// avoid recursively acquiring a read guard.
+fn with_session_admitted<T>(
     session: &Arc<Mutex<LabSession>>,
     poisoned: impl FnOnce() -> T,
     body: impl FnOnce(&mut LabSession) -> T,
@@ -396,6 +517,10 @@ pub(crate) fn with_session<T>(
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
+        std::mem::swap(&mut guard.durable_plans, &mut world.durable_plans);
+        std::mem::swap(&mut guard.durable_restore, &mut world.durable_restore);
+        std::mem::swap(&mut guard.carried, &mut world.carried);
+        std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
         guard.shared_members = world.members.len();
     }
     let output = body(&mut guard);
@@ -404,6 +529,10 @@ pub(crate) fn with_session<T>(
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
+        std::mem::swap(&mut guard.durable_plans, &mut world.durable_plans);
+        std::mem::swap(&mut guard.durable_restore, &mut world.durable_restore);
+        std::mem::swap(&mut guard.carried, &mut world.carried);
+        std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
     }
     output
 }
@@ -475,6 +604,10 @@ static TEST_STATE_DIR: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 /// exactly what a process exit does, then use `dir` as the configured root.
 #[cfg(test)]
 pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
+    let _admission = match LAB_ADMISSION.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     if let Ok(mut guard) = TEST_STATE_DIR.lock() {
         *guard = dir;
     }
@@ -532,34 +665,26 @@ fn persist_durable_head(session: &mut LabSession) {
                     all_final &= token != "dispatched";
                     updates.push((*digest, step.id.get(), token));
                 }
-                None => all_final = false,
+                None => {
+                    all_final = false;
+                    // This live step can still dispatch later. Its current
+                    // absence nevertheless belongs in the atomic frontier.
+                    updates.push((*digest, step.id.get(), "not_dispatched"));
+                }
             }
         }
         if all_final {
             finished.push(*digest);
         }
     }
-    for carried in &mut session.carried {
-        if carried.state != "dispatched" {
-            continue;
-        }
-        if dfmcp_world::evaluate(&snapshot, &carried.proof) {
-            carried.state = "verified".to_owned();
-        } else if carried
-            .failure
-            .as_ref()
-            .is_some_and(|failure| dfmcp_world::evaluate(&snapshot, failure))
-            || carried
-                .deadline
-                .is_some_and(|deadline| snapshot.tick > deadline)
-        {
-            carried.state = "failed".to_owned();
-        }
-    }
+    // Authorization gates proof independently of persistence: even a denied
+    // read must not prevent saving the world's current state.
+    let _ = observe_carried(session);
     let carried_updates: Vec<(Digest32, u32, String)> = session
         .carried
         .iter()
-        .map(|c| (c.plan_digest, c.step.get(), c.state.clone()))
+        .filter(|c| c.state != "indeterminate")
+        .filter_map(|c| Some((c.plan_digest, c.step?.get(), c.state.clone())))
         .collect();
     let carried_done: BTreeSet<Digest32> = session
         .carried
@@ -570,7 +695,7 @@ fn persist_durable_head(session: &mut LabSession) {
                 .carried
                 .iter()
                 .filter(|c| c.plan_digest == *digest)
-                .all(|c| c.state != "dispatched")
+                .all(CarriedStep::is_final)
         })
         .collect();
     let result = with_durable_store(|store| {
@@ -583,6 +708,11 @@ fn persist_durable_head(session: &mut LabSession) {
             // unfinished one still takes step records.
             if store.commit(fortress, *digest).is_some() {
                 frontier.insert((*digest, *step), token.clone());
+            }
+        }
+        for (digest, steps) in &session.durable_restore {
+            for step in steps {
+                frontier.insert((*digest, *step), "abandoned".to_owned());
             }
         }
         let frontier: Vec<_> = frontier
@@ -598,6 +728,7 @@ fn persist_durable_head(session: &mut LabSession) {
         let retired: Vec<_> = finished
             .iter()
             .chain(carried_done.iter())
+            .chain(session.durable_restore.keys())
             .copied()
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -608,6 +739,7 @@ fn persist_durable_head(session: &mut LabSession) {
         for digest in &finished {
             session.durable_plans.remove(digest);
         }
+        session.durable_restore.clear();
     }
     match result {
         Ok(()) => session.durability_fault = None,
@@ -637,26 +769,51 @@ fn durability_gate(session: &mut LabSession) -> Result<()> {
 
 /// Whether a private durable session has been superseded by a newer one.
 fn ensure_durable_owner(session: &Arc<Mutex<LabSession>>) -> Result<()> {
-    let (session_id, fortress_id, private_durable) = match session.lock() {
+    let (session_id, fortress_id, durable, shared) = match session.lock() {
         Ok(guard) => (
             guard.session_id,
             guard.fortress_id,
-            guard.durable_scenario.is_some() && guard.shared.is_none(),
+            guard.durable_scenario.is_some(),
+            guard.shared.clone(),
         ),
-        Err(_) => return Ok(()),
+        Err(_) => {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "session poisoned",
+            ));
+        }
     };
-    if !private_durable {
+    if !durable {
         return Ok(());
     }
+    if let Some(shared) = shared {
+        let registry = SHARED_WORLDS.lock().map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "shared world registry poisoned",
+            )
+        })?;
+        return if registry.get(&fortress_id).is_some_and(|current| Arc::ptr_eq(current, &shared)) {
+            Ok(())
+        } else {
+            Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "this shared durable session belongs to an earlier process epoch; open a new session",
+            ))
+        };
+    }
     match durable_lab().owners.get(&fortress_id) {
-        Some(owner) if *owner != session_id => Err(DfmcpError::new(
+        Some(owner) if *owner == session_id => Ok(()),
+        Some(owner) => Err(DfmcpError::new(
             ErrorCode::Conflict,
             format!(
                 "this session was superseded: durable fortress {fortress_id} was reopened by session {owner}; continue there"
             ),
-        )
-        .retryable(false)),
-        _ => Ok(()),
+        ).retryable(false)),
+        None => Err(DfmcpError::new(
+            ErrorCode::Conflict,
+            "this durable session no longer owns the fortress; open a new session",
+        )),
     }
 }
 
@@ -675,17 +832,20 @@ struct DurableRecovery {
 /// Rebuild the steps of a commit made before a restart. The plan is
 /// recompiled from its recorded request against the exact world it was
 /// sealed on; determinism must reproduce the sealed digest, or the commit is
-/// reported unverifiable and abandoned rather than trusted.
+/// retained as indeterminate instead of claiming its earlier effects were absent.
 fn recover_commit(
     store: &mut dfmcp_lab::durable::DurableLabStore,
     commit: &dfmcp_lab::durable::DurableCommit,
     carried: &mut Vec<CarriedStep>,
+    recovered: &WorldSnapshot,
 ) -> Result<serde_json::Value> {
     let fortress = commit.fortress_id;
     let sealed = store.load_snapshot(commit.sealed_state_hash)?;
+    let original_head = store.head(fortress).cloned();
+    let head_diverged = original_head.as_ref().is_none_or(|head| head.anchor != sealed.anchor());
     let source = PlanSource::from_durable(&commit.source);
-    // Recompiling is a pure, internal verification read: it uses a planning
-    // grant scoped to this fortress and confers nothing on any session.
+    // This internal pure planning grant verifies the sealed request. It
+    // confers no authority on a session, action, or recovery monitor.
     let context = OperationContext {
         session_id: SessionId::new(u128::MAX),
         request_id: RequestId::new(commit.intent_id),
@@ -716,15 +876,28 @@ fn recover_commit(
                 ),
                 Err(error) => error.message,
             };
-            for step in commit.steps.keys() {
-                store.persist_step(fortress, commit.plan_digest, *step, "abandoned")?;
-            }
-            store.retire_commit(fortress, commit.plan_digest)?;
+            carried.push(CarriedStep {
+                plan_digest: commit.plan_digest,
+                step: None,
+                kind: "unverifiable_plan",
+                proof: Predicate::False,
+                failure: None,
+                deadline: None,
+                monitor: None,
+                recorded_state: "unverifiable".to_owned(),
+                proof_anchor: None,
+                observation_error: Some(reason.clone()),
+                failure_reason: None,
+                state: "indeterminate".to_owned(),
+            });
             return Ok(json!({
                 "plan_digest": commit.plan_digest.to_hex(),
                 "status": "unverifiable",
                 "reason": reason,
-                "note": "the sealed plan could not be reproduced; its effects are indeterminate, so observe before re-planning",
+                "state": "indeterminate",
+                "recorded_steps": commit.steps,
+                "blind_retry_allowed": false,
+                "note": "the sealed plan could not be reproduced; its durable record remains retained and its effects require reconciliation before re-planning",
             }));
         }
     };
@@ -733,35 +906,102 @@ fn recover_commit(
     for step in &plan.steps {
         let recorded = commit.steps.get(&step.id.get()).map(String::as_str);
         let kind = crate::lab_world::action_kind(&step.action);
+        let recorded_anchor = commit.step_anchors.get(&step.id.get()).copied();
+        // Legacy peers could publish a head without the originating session's
+        // step record. Divergent unanchored absence cannot prove nondispatch.
+        let unanchored_absence = recorded_anchor.is_none()
+            && head_diverged
+            && matches!(recorded, None | Some("not_dispatched" | "abandoned"));
         let state = match recorded {
-            None => {
-                store.persist_step(
-                    fortress,
-                    commit.plan_digest,
-                    step.id.get(),
-                    "not_dispatched",
-                )?;
+            None if !unanchored_absence => {
+                if let Some(head) = &original_head {
+                    store.persist_progress(
+                        &head.scenario,
+                        &sealed,
+                        &[dfmcp_lab::durable::DurableStepUpdate {
+                            plan_digest: commit.plan_digest,
+                            step: step.id.get(),
+                            state: "not_dispatched".to_owned(),
+                        }],
+                        &[],
+                    )?;
+                }
                 "not_dispatched".to_owned()
             }
+            None => "not_recorded".to_owned(),
             Some(state) => state.to_owned(),
         };
-        if state == "dispatched" {
+        let unanchored_terminal = recorded_anchor.is_none()
+            && matches!(state.as_str(), "verified" | "failed" | "cancelled" | "compensated");
+        if state == "dispatched" || unanchored_terminal || unanchored_absence {
             open += 1;
-            let proof = step.obligation.as_ref().map_or_else(
-                || Predicate::All(step.postconditions.clone()),
-                |obligation| obligation.terminal.clone(),
-            );
+            let mut predicates = step.postconditions.clone();
+            if let Some(obligation) = &step.obligation {
+                predicates.push(obligation.terminal.clone());
+            }
+            let proof = Predicate::All(predicates).normalized();
+            let mut identity = b"dfmcp-recovered-obligation-v1".to_vec();
+            identity.extend_from_slice(commit.plan_digest.as_bytes());
+            identity.extend_from_slice(&step.id.get().to_be_bytes());
+            let proof_id = ActionId::new(Digest32::of_bytes(&identity).first_u128().max(1));
+            let monitor_result = if unanchored_terminal || unanchored_absence {
+                Ok(None)
+            } else if let Some(obligation) = &step.obligation {
+                let mut spec = obligation.clone();
+                spec.terminal = proof.clone();
+                RecoveredObligation::new(proof_id, spec, sealed.tick, recovered).map(Some)
+            } else {
+                proof.validate_shape().and_then(|()| {
+                    if matches!(proof, Predicate::True | Predicate::False) {
+                        Err(DfmcpError::new(
+                            ErrorCode::InvalidPlan,
+                            "recovered effect has no nontrivial proof predicate",
+                        ))
+                    } else {
+                        Ok(None)
+                    }
+                })
+            };
+            let (monitor, monitor_error) = match monitor_result {
+                Ok(monitor) => (monitor, None),
+                Err(error) => (None, Some(format!(
+                    "recovered proof specification is inadmissible: {}: {}",
+                    error.code.as_str(), error.message,
+                ))),
+            };
+            let unresolved = unanchored_terminal || unanchored_absence || monitor_error.is_some();
             carried.push(CarriedStep {
                 plan_digest: commit.plan_digest,
-                step: step.id,
+                step: Some(step.id),
                 kind,
                 proof,
                 failure: step.obligation.as_ref().and_then(|o| o.failure.clone()),
                 deadline: step.obligation.as_ref().map(|o| o.deadline_tick),
-                state: state.clone(),
+                monitor,
+                recorded_state: state.clone(),
+                proof_anchor: None,
+                observation_error: if unanchored_terminal {
+                    Some("legacy terminal state has no atomic world frontier; its effects require reconciliation".to_owned())
+                } else if unanchored_absence {
+                    Some("the legacy world advanced without an anchored dispatch record; absence of that record cannot prove the effect was not dispatched".to_owned())
+                } else {
+                    monitor_error
+                },
+                failure_reason: None,
+                state: if unresolved { "indeterminate".to_owned() } else { state.clone() },
             });
         }
-        steps.push(json!({"step": step.id.get(), "action": kind, "state": state}));
+        let recovered_state = carried.last()
+            .filter(|carried| carried.plan_digest == commit.plan_digest && carried.step == Some(step.id))
+            .map_or(state.as_str(), |carried| carried.state.as_str());
+        steps.push(json!({
+            "step": step.id.get(), "action": kind, "state": recovered_state,
+            "recorded_state": recorded,
+            "recorded_anchor": recorded_anchor.as_ref().map(anchor_json),
+            "blind_retry_allowed": false,
+            "proof_class": if unanchored_terminal || unanchored_absence { "unanchored_legacy_record" }
+                else if recorded_anchor.is_some() { "atomic_world_frontier" } else { "not_proven" },
+        }));
     }
     if open == 0 {
         store.retire_commit(fortress, commit.plan_digest)?;
@@ -826,7 +1066,7 @@ fn load_durable_fortress(
         let mut carried = Vec::new();
         let mut commits = Vec::new();
         for commit in store.commits(fortress_id).cloned().collect::<Vec<_>>() {
-            commits.push(recover_commit(store, &commit, &mut carried)?);
+            commits.push(recover_commit(store, &commit, &mut carried, adapter.snapshot())?);
         }
         Ok((
             adapter,
@@ -874,7 +1114,7 @@ fn durability_json(session: &LabSession) -> serde_json::Value {
             "torn_tail_bytes_discarded_at_open": report.torn_tail_bytes,
             "compactions": report.compactions,
         })),
-        "note": "laboratory durability: world state and checkpoints survive process loss; action handles and obligations do not",
+        "note": "laboratory durability: world state, checkpoints and bounded recovery proofs survive process loss; adapter action handles and dispatch authority do not",
     })
 }
 
@@ -1255,6 +1495,7 @@ pub(crate) fn authorize_entry(
 pub(crate) fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
     json!({
         "fortress_id": format!("{}", anchor.fortress_id),
+        "game_tick": anchor.tick.0,
         "epoch": anchor.cursor.epoch,
         "sequence": anchor.cursor.sequence,
         "state_hash": anchor.state_hash.to_string(),
@@ -1569,94 +1810,102 @@ pub(crate) fn open_session_in_scenario(
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
     let fresh = MemoryAdapter::new(seed);
-    let (seed_adapter, recovery) = if durable {
-        match load_durable_fortress(fortress_id, &mut scenario, scenario_requested, &fresh) {
-            Ok((adapter, recovery)) => (adapter, Some(recovery)),
-            Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
+    let _admission = match LAB_ADMISSION.write() {
+        Ok(guard) => guard,
+        Err(_) => return mutex_poisoned_payload("fortress.open_session"),
+    };
+    // Exclude in-flight publication and concurrent opens while changing
+    // ownership. Private and shared writers cannot target the same store.
+    if durable {
+        if shared {
+            if durable_lab().owners.contains_key(&fortress_id) {
+                return coded_error_payload(
+                    "fortress.open_session",
+                    ErrorCode::Conflict,
+                    "this durable fortress has a private owner; restart the server before changing it to shared mode",
+                );
+            }
+        } else {
+            let shared_exists = match SHARED_WORLDS.lock() {
+                Ok(registry) => registry.contains_key(&fortress_id),
+                Err(_) => return mutex_poisoned_payload("fortress.open_session"),
+            };
+            if shared_exists {
+                return coded_error_payload(
+                    "fortress.open_session",
+                    ErrorCode::Conflict,
+                    "this fortress has a shared owner; restart the server before changing it to private durable mode",
+                );
+            }
+            let previous_owner = durable_lab().owners.get(&fortress_id).copied();
+            if let Some(previous) = previous_owner.and_then(|id| lookup_session(id).ok()) {
+                let fault = with_session_admitted(
+                    &previous,
+                    || Some("previous session unavailable".to_owned()),
+                    |guard| {
+                        persist_durable_head(guard);
+                        guard.durability_fault.clone()
+                    },
+                );
+                if let Some(fault) = fault {
+                    return coded_error_payload(
+                        "fortress.open_session",
+                        ErrorCode::AdapterUnavailable,
+                        &format!("the current owner has unpublished durable state: {fault}; recover persistence before replacing it"),
+                    );
+                }
+            }
         }
-    } else {
-        (fresh, None)
-    };
-    let probe_session = LabSession {
-        session_id: SessionId::new(0), // placeholder; replaced below
-        fortress_id,
-        grants: grants.clone(),
-        budget,
-        negotiation: SessionNegotiation::laboratory(String::from("pending")),
-        next_request_id: 0,
-        adapter: seed_adapter,
-        pending: None,
-        last_action: None,
-        last_plan_actions: Vec::new(),
-        open_actions: Vec::new(),
-        commit_receipts: BTreeMap::new(),
-        commit_authority: BTreeMap::new(),
-        shared: None,
-        leases: LeaseBook::default(),
-        shared_members: 0,
-        durable_scenario: None,
-        durability_fault: None,
-        durable_plans: BTreeMap::new(),
-        carried: Vec::new(),
-        replay: crate::replay::ReplayLog::default(),
-        history: new_history(),
-        objectives: Vec::new(),
-    };
-    let identity = probe_session.adapter.identity();
-    let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
+    } else if shared && durable_lab().owners.contains_key(&fortress_id) {
+        return coded_error_payload(
+            "fortress.open_session",
+            ErrorCode::Conflict,
+            "this fortress has a private durable owner; restart the server before opening a shared world with that selector",
+        );
+    }
+    if sessions().len() >= MAX_LAB_SESSIONS {
+        return coded_error_payload(
+            "fortress.open_session",
+            ErrorCode::BudgetExceeded,
+            "process-local laboratory reached its explicit session bound",
+        );
+    }
     let session_counter = match next_session_counter() {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
     };
     let session_id = SessionId::new(session_counter);
-    let (shared_world, shared_view) = if shared {
+    let (adapter, recovery, shared_world, shared_view) = if shared {
         match join_shared_world(
             fortress_id,
             session_id,
-            &scenario,
+            &mut scenario,
             scenario_requested,
-            &probe_session.adapter,
+            &fresh,
             durable,
         ) {
-            Ok(value) => (Some(value.0), Some(value.1)),
+            Ok(admission) => (
+                admission.adapter,
+                admission.recovery,
+                Some(admission.world),
+                Some(admission.view),
+            ),
+            Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
+        }
+    } else if durable {
+        match load_durable_fortress(fortress_id, &mut scenario, scenario_requested, &fresh) {
+            Ok((adapter, recovery)) => (adapter, Some(recovery), None, None),
             Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
         }
     } else {
-        (None, None)
+        (fresh, None, None, None)
     };
-    let (snapshot_anchor, paused_after) = match shared_view.as_ref() {
-        Some(view) => (view.anchor, view.paused),
-        None => (
-            probe_session.adapter.snapshot().anchor(),
-            probe_session.adapter.snapshot().paused,
-        ),
-    };
-    // Move the probe adapter into the registered session.
-    let LabSession {
-        session_id: _,
-        fortress_id: _,
-        grants: _,
-        budget: _,
-        negotiation: _,
-        next_request_id: _,
-        adapter,
-        pending: _,
-        last_action: _,
-        last_plan_actions: _,
-        open_actions: _,
-        commit_receipts: _,
-        commit_authority: _,
-        shared: _,
-        leases: _,
-        shared_members: _,
-        durable_scenario: _,
-        durability_fault: _,
-        durable_plans: _,
-        carried: _,
-        replay: _,
-        history: _,
-        objectives: _,
-    } = probe_session;
+    let identity = adapter.identity();
+    let negotiation = SessionNegotiation::laboratory(format!("{:?}", identity.compatibility));
+    let (snapshot_anchor, paused_after) = shared_view.as_ref().map_or_else(
+        || (adapter.snapshot().anchor(), adapter.snapshot().paused),
+        |view| (view.anchor, view.paused),
+    );
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
         fortress_id,
@@ -1677,9 +1926,12 @@ pub(crate) fn open_session_in_scenario(
         durable_scenario: durable.then(|| scenario.clone()),
         durability_fault: None,
         durable_plans: BTreeMap::new(),
-        carried: recovery
-            .as_ref()
-            .map_or_else(Vec::new, |recovery| recovery.carried.clone()),
+        durable_restore: BTreeMap::new(),
+        carried: if shared {
+            Vec::new()
+        } else {
+            recovery.as_ref().map_or_else(Vec::new, |recovery| recovery.carried.clone())
+        },
         replay: {
             let mut log = crate::replay::ReplayLog::default();
             if shared {
@@ -1715,14 +1967,14 @@ pub(crate) fn open_session_in_scenario(
     }
     // Retain the opening world version so the first turn that changes it can
     // say exactly what changed.
-    with_session(&session, || (), |_| ());
+    with_session_admitted(&session, || (), |_| ());
     if durable {
         if !shared {
             durable_lab().owners.insert(fortress_id, session_id);
         }
         // Persist the opening state (a resumed world's new epoch included) now,
         // so a crash before the first state change still resumes it.
-        let fault = with_session(
+        let fault = with_session_admitted(
             &session,
             || Some("session poisoned".to_owned()),
             |guard| {
@@ -1731,6 +1983,18 @@ pub(crate) fn open_session_in_scenario(
             },
         );
         if let Some(fault) = fault {
+            if shared {
+                // Preserve the world and its pending frontier, but do not
+                // leave an unreachable member blocking unanimous unpause.
+                sessions().remove(&session_id);
+                let world = session.lock().ok().and_then(|guard| guard.shared.clone());
+                if let Some(world) = world {
+                    if let Ok(mut guard) = world.lock() {
+                        guard.members.remove(&session_id);
+                        guard.leases.unpause_consent.remove(&session_id);
+                    }
+                }
+            }
             return coded_error_payload(
                 "fortress.open_session",
                 ErrorCode::AdapterUnavailable,
@@ -1770,11 +2034,15 @@ pub(crate) fn open_session_in_scenario(
             "carried_obligations": recovery.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>(),
             "torn_tail_bytes_discarded_at_store_open": recovery.torn_tail_bytes,
             "note": if recovery.resumed {
-                "resumed the last persisted world in a new observation epoch: designations, construction and work orders continue on wait; action handles, plans and obligations from before are not carried, so re-establish them from observation. Older sessions of this fortress are fenced."
+                "resumed the last persisted world in a new observation epoch: existing world work continues on wait; prior action handles and dispatch authority are gone. Recovered proof monitors keep sealed deadlines and require current authorized observations. Older sessions are fenced."
             } else {
                 "new crash-durable fortress: every state change and checkpoint is persisted and survives server restarts"
             },
-        })),
+        })).or_else(|| durable.then(|| json!({
+            "resumed": false,
+            "joined_existing": true,
+            "note": "joined the running durable fortress without replaying recovery or changing its observation epoch; durable progress and persistence faults are shared",
+        }))),
         "shared_world": shared_view.as_ref().map(|view| json!({
             "fortress_id": format!("{fortress_id}"),
             "members": view.members,
@@ -3071,6 +3339,9 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 }
             }
             guard.open_actions = still_open;
+            if let Err(error) = observe_carried(guard) {
+                return dfmcp_error_payload("fortress.wait", &error);
+            }
             let snapshot = guard.adapter.snapshot();
             let mut payload = match (action_id, task) {
                 (Some(action_id), Some(task)) => json!({
@@ -3103,23 +3374,10 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     json!(crate::lab_world::world_alerts(guard.adapter.snapshot()));
                 payload["objectives"] = objectives_json(guard);
                 if !guard.carried.is_empty() {
-                    // Proven against this observation by the durable hook that
-                    // runs after this call; report the prior evaluation plus
-                    // an immediate re-evaluation so the agent sees progress now.
-                    let observed = guard.adapter.snapshot().clone();
+                    // The bounded evaluation above owns proof status; a raw
+                    // predicate match cannot substitute for cadence/stability.
                     payload["carried_obligations"] = json!(
-                        guard
-                            .carried
-                            .iter()
-                            .map(|carried| {
-                                let mut view = carried.to_json();
-                                if carried.state == "dispatched" {
-                                    view["proven_now"] =
-                                        json!(dfmcp_world::evaluate(&observed, &carried.proof));
-                                }
-                                view
-                            })
-                            .collect::<Vec<_>>()
+                        guard.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
                     );
                 }
                 if requested_ticks > 0 && paused {
@@ -3504,6 +3762,26 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     "restore would rewrite a fortress other agents share; only a sole member may restore",
                 );
             }
+            // Capture retirement before changing the world. Only unfinished
+            // dispatches are abandoned; earlier terminal proof stays intact.
+            let restored_commits = if guard.durable_scenario.is_some() {
+                match with_durable_store(|store| {
+                    Ok(store.commits(guard.fortress_id).map(|commit| {
+                        (
+                            commit.plan_digest,
+                            commit.steps.iter()
+                                .filter(|(_, state)| state.as_str() == "dispatched")
+                                .map(|(step, _)| *step)
+                                .collect(),
+                        )
+                    }).collect::<BTreeMap<Digest32, Vec<u32>>>())
+                }) {
+                    Ok(commits) => commits,
+                    Err(error) => return dfmcp_error_payload("fortress.restore", &error),
+                }
+            } else {
+                BTreeMap::new()
+            };
             match guard
                 .adapter
                 .restore(CheckpointId::new(parsed_checkpoint), &ctx)
@@ -3519,23 +3797,11 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     guard.commit_receipts.clear();
                     guard.objectives.clear();
                     if guard.durable_scenario.is_some() {
-                        let fortress = guard.fortress_id;
-                        let digests: BTreeSet<Digest32> = guard
-                            .durable_plans
-                            .keys()
-                            .copied()
-                            .chain(guard.carried.iter().map(|c| c.plan_digest))
-                            .collect();
+                        // Retain the retirement set after an unsuccessful save
+                        // so another call can retry the same atomic frontier.
+                        guard.durable_restore = restored_commits;
                         guard.durable_plans.clear();
                         guard.carried.clear();
-                        if let Err(error) = with_durable_store(|store| {
-                            for digest in &digests {
-                                store.retire_commit(fortress, *digest)?;
-                            }
-                            Ok(())
-                        }) {
-                            guard.durability_fault = Some(error.message);
-                        }
                     }
                     json!({
                     "ok": true,

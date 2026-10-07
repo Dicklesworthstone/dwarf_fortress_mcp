@@ -44,30 +44,59 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
-### Canonical observation-only recovery primitive (2026-10-07)
+### Faithful restart monitoring and shared durable ownership (2026-10-07)
 
-`RecoveredObligation` now exposes restart-safe proof monitoring through the
-canonical obligation runtime. It keeps the original sealed specification,
-absolute deadline and registration tick; resets unfinished stability at restart
-or observation interruption; and treats the archived frontier as a cadence floor,
-not a new positive sample. Exact-deadline evidence remains eligible, late first
-proof fails, failure predicates retain precedence, stale or forked observations
-are rejected, and terminal evidence anchors remain immutable. This pure primitive
-cannot dispatch an action, advance the clock or grant observation authority.
+`RecoveredObligation` is an observation-only wrapper around the canonical
+obligation runtime. It retains the original sealed specification, absolute
+deadline and registration tick, while resetting unfinished stability after a
+restart or observation interruption. The archived recovery frontier is a cadence
+floor, not another positive sample. Fresh observations obey the normal cadence,
+failure precedence and exact-deadline rules; terminal proof anchors are immutable.
 
-**Evidence: all 118 tests in the ordinary locked/offline Cargo `dfmcp-intent`
-suite passed, including nine new recovery cases, with 0 failures or ignored
-tests.** The focused nine-case run is included in that total, not counted twice.
-The unchanged recovery module was fully recorded before the execution service
-went offline and was preserved from those observed contents through GitHub.
-The separate durable-store validation below adds 26 different passing cases.
+The MCP recovery source uses those monitors under the acting session's current
+Observe authority. Legacy terminal records without atomic world anchors and
+plans or proof specifications that cannot be reconstructed remain indeterminate
+and retain their durable provenance. Recovery never dispatches or authorizes a
+retry. Original terminal evidence remains distinguishable from fresh proof.
+New frontiers also explicitly anchor deferred steps as not dispatched without
+finishing their plans. Missing or unanchored legacy nondispatch/abandonment at a
+world head that differs from the sealed basis remains indeterminate; absence
+of a journal step alone cannot prove that an old peer saved no effect.
 
-The MCP integration with shared ownership, current observation authority,
-conservative legacy recovery and atomic restore is a separate increment still
-pending publication. This primitive alone does not establish MCP process
-execution, full-workspace Rust qualification, native/live qualification or
-production admission. Tracked under `df-franken-storage-mvcc-54h.1`; the broader
-owned storage integrations remain open.
+Shared laboratory worlds now own unfinished durable plans, carried monitors,
+pending restore abandonment and persistence faults. A peer therefore cannot
+save the common world while omitting another member's outstanding progress or
+bypass its failed save. Joining an existing shared world reuses it without a
+second recovery or epoch bump. Failed joins remove their new member and session
+without dropping the common world's outstanding progress. A read/write admission
+fence serializes private reopen against complete calls and publication, including
+already-resolved older session handles, and rejects mixed private/shared durable
+writers. Checkpoint restore publishes the restored world and old-plan abandonment
+together, retaining pending retirement for retry when publication fails.
+
+**Evidence: the ordinary Cargo `dfmcp-intent` suite passed all 118 tests,
+including nine new recovery cases**, with locked offline dependencies and the
+recorded nightly toolchain. The new cases cover cadence and duplicate reads,
+exact versus late deadline proof, an already-expired frontier, failure-predicate
+precedence, off-cadence contradiction, repeated restart, observation interruption,
+lineage regression and immutable terminal evidence. The 26 exact-source
+durable-store tests described below also passed, for 144 distinct passing cases
+in this increment's validation. The separately run nine-case filter is not
+counted twice.
+
+The MCP integration was reapplied through GitHub from the recorded reviewed
+changes after the execution service disconnected, then reviewed as a new source
+generation. It is not asserted byte-identical to the unavailable workspace copy.
+The intent module and exports remain unchanged from `be2a9ff`. The MCP server
+and regression cases have not compiled or executed; final-source formatting and
+aggregate qualification checks also remain pending while the executor is offline.
+The unchanged pinned Asupersync dependency had no usable cached build and could
+not compile within the available shared memory and disk headroom before that
+outage. These changes do not establish full Rust qualification or any native,
+live or production admission. Tracking
+remains under the laboratory storage beads `df-franken-storage-mvcc-54h.1` and
+`df-franken-storage-mvcc-54h.2`, with current authority also covered by
+`df-cx-authority-budget-threading-lmu`.
 
 ### Atomic laboratory world and execution recovery (2026-10-07)
 
@@ -95,8 +124,8 @@ frontiers, invalid input, proof-anchor preservation, corrupt objects, byte limit
 and injected write/sync failures. Resource pressure killed the ordinary Cargo
 test build in the unchanged adapter, so the exact module was compiled and run
 in isolation. This is not a full laboratory or MCP qualification claim. The MCP
-crash regressions are source present and remain unexecuted; shared-session durable
-ownership and faithful carried-obligation monitoring are separate follow-up work.
+crash regressions are source present and remain unexecuted; the separate
+shared-session and carried-obligation increment is described above.
 
 Tracked as laboratory progress under `df-franken-storage-mvcc-54h.1` and
 `df-franken-storage-mvcc-54h.2`; this does not complete the owned FrankenSQLite or

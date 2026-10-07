@@ -202,8 +202,8 @@ When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
 - checkpoints taken before the restart restore normally;
 - designations, construction and work orders live in the world, so they keep
   progressing on `fortress_wait(max_game_ticks)` (which no longer needs a
-  committed action); action handles, plans and obligations from before the
-  restart are not carried and must be re-established from observation;
+  committed action). Adapter action handles do not survive restart; unfinished
+  sealed obligations are recovered as observation-only proof monitors;
 - **commits survive too.** Before a durable commit dispatches anything, its
   agent request and the exact world it was sealed against are journaled. After
   each call, submitted step transitions, the world head and completed-plan
@@ -212,17 +212,37 @@ When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
   transitions retain their exact snapshot anchors through compaction; older
   step records remain distinguishable by their missing anchors. On resume each
   unfinished commit is deterministically recompiled from that request and world
-  and must reproduce its sealed digest (otherwise it is reported `unverifiable`
-  and abandoned, never trusted). Dispatched steps come back as
-  `carried_obligations` whose sealed proof (obligation terminal predicate or
-  postconditions) is evaluated against every later observation until they are
-  `verified`, or `failed` at their failure predicate or deadline; steps that
-  were never dispatched are reported `not_dispatched` (they had no effect).
-  `recovered_commits` lists every step's recovered state. A restore abandons
-  every carried and in-flight commit;
-- reopening a durable fortress fences every older session of it (`conflict`),
-  so two writers never interleave; a second server process on the same
-  directory is refused by the store lock;
+  and must reproduce its sealed digest. Unreproducible plans, inadmissible proof
+  specifications and legacy terminal states without atomic proof anchors stay
+  `indeterminate`, retain their durable records and require reconciliation.
+  Missing or unanchored legacy nondispatch/abandonment also remains indeterminate
+  when the saved world differs from the sealed basis. New frontiers explicitly
+  anchor deferred steps as `not_dispatched` while keeping their plans open.
+  Ambiguous work is never silently retired or made eligible for blind retry.
+  Dispatched steps come back as `carried_obligations`; their sealed postconditions
+  and terminal predicate are proved through the normal obligation runtime.
+  Recovery preserves the original absolute deadline and polling interval, resets
+  an unfinished stability streak, and does not count the archived frontier as a
+  fresh positive sample. Repeated reads at one tick cannot manufacture progress.
+  Exact-deadline proof is eligible; first proof after the deadline fails.
+  A current Observe grant is required, and an interrupted observation resets an
+  unfinished stability streak. `recovered_commits` lists recovered states and
+  original evidence anchors. Recovery never redispatches actions;
+- a restore publishes its restored world and abandonment of every old carried
+  or in-flight commit in one atomic frontier. Pending abandonment survives a
+  failed save in memory for retry; a crash before publication recovers the
+  preceding world together with its original work records;
+- reopening a private durable fortress fences its older sessions. The ownership
+  check remains locked through each call and its save, including calls that
+  resolved a session before the replacement opened. Shared durable sessions
+  hold their unfinished plans, carried monitors and persistence fault in the
+  common world. A peer cannot bypass another member's failed save. Joining an
+  already running shared fortress does not reload the journal, bump its epoch
+  or reconstruct its work again (`durable.joined_existing: true`,
+  `durable.resumed: false`). Failed joins remove their new membership without
+  dropping the world's outstanding progress. Mixing private and shared durable
+  writers for one fortress in the same process is refused; a second server
+  process on the same directory is refused by the store lock;
 - `fortress_doctor` reports `durability` (persisted anchor, whether it is
   current, journal records, chain head, torn tail discarded at open).
 
