@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-07 — Executable conditional production
+
+- Enforce typed stock thresholds, material-availability gates and uniquely
+  named completed-order dependencies in actual reference production and its
+  forecasts. Persist explicit canonical conditions and bind them, the order
+  name and job identity into completion proof and work ownership inspection.
+- Carry conditions through MCP requests, sealed step views and production
+  blueprints. Require eligible exact inventory counts; unknown evidence blocks
+  production. Cap same-product output at the first per-unit threshold crossing
+  and discard blocked elapsed time without discarding prior partial work.
+- Document bounds, inventory namespaces, model timing and legacy compatibility.
+  Existing orders without condition records stay blocked for reconciliation.
+- Actual intent suite: 151 passed, including ten new regressions. Four MCP
+  condition tests and the added identity-mutation drain regression are present;
+  their execution is pending while shared memory pressure blocks the MCP build.
+
 ## 2026-10-07 — Physical work inspection and authorized terminal cleanup
 
 - Distinguish immutable goal outcomes from running reference work. Inspect the

@@ -386,6 +386,79 @@ carries a `remedy` — the exact `fortress.plan` arguments for a work order
 sized for about four rounds. Worlds without a ledger (`empty`) have no
 metabolism. None of these rates are claims about Dwarf Fortress.
 
+### Conditional production
+
+Work orders accept a bounded `conditions` array through the ordinary laboratory
+action request. For example, this requests two brewing units, allowing work only
+while the modeled drink count is below 50:
+
+```json
+[{"action":{"kind":"create_work_order","name":"brew to 50","job_token":"BREW_DRINK","amount":2,"conditions":[{"kind":"item_count_below","item_token":"DRINK","threshold":50}]}}]
+```
+
+All conditions must hold. Their closed JSON forms and reference meanings are:
+
+| Condition | JSON fields after `kind` | Required evidence |
+|---|---|---|
+| `item_count_below` | `item_token`, `threshold` | The selected exact unsigned stock count is strictly below the threshold. |
+| `material_available` | `material_token`, `minimum` | The selected exact unsigned material count is at least the minimum. This is an availability gate; it consumes and reserves nothing. |
+| `completed_order` | `order_name` | Exactly one other work order has this established semantic name, `status="complete"`, and `amount_remaining=0`. |
+
+`DRINK` and `FOOD` item tokens use the existing `stock.drink` and `stock.food`
+fields. Other exact item tokens use `stock.item.<TOKEN>`; material tokens use
+`stock.material.<TOKEN>`. These are separate namespaces on the existing
+lowest-ID `stock_ledger`, not totals inferred from item records. The producer or
+scenario must supply an explicit count: a missing field is unknown, including
+when a material minimum is zero. Counts, condition records, and dependency
+evidence must have eligible laboratory provenance and known, consistent,
+nonfuture values. Retained assertions, replay values, omissions, or stale fields
+cannot release production. This defines a laboratory inventory contract; it
+does not infer native recipes, material consumption, path access, or DFHack
+eligibility.
+
+Conditions gate production units. For an order producing the stock it checks,
+one indivisible unit may cross the threshold; the next unit is blocked. A large
+advance applies the same limit arithmetically, rather than bypassing the check
+or looping over an unbounded amount. A blocked order remains active and records
+the first canonical reason in `blocked_by`. Previously earned partial-unit work
+is retained, but blocked elapsed ticks are discarded. A later favorable
+observation can resume work using only newly granted time. Completing the
+requested amount ends the order; conditions do not create recurring orders.
+
+Named dependencies use the source-qualified `order_name` field, never display
+labels. Missing or ambiguous names, self-reference, cancelled predecessors, and
+unknown completion evidence block. Establishing uniqueness also requires the
+other work-order names in the supplied domain to be known. All work retains the
+existing ascending-entity processing order: a predecessor processed earlier in
+one advance may release a later order in that advance. Metabolism runs after
+production, so consumption can release a stock gate on the next advance.
+Dependent orders and changing inventory therefore do not claim identical timing
+under different partitions of a wait, or native-game timing.
+
+The reference boundary accepts at most 64 conditions and 256 non-control bytes
+per token/name; the MCP request retains its existing 128-byte name limit and
+16-KiB total action-request bound. Condition lookup requires a complete supplied
+domain of at most 65,536 entities. Exact duplicates are removed and conditions
+are sorted for both normalized action identity and the stored typed `conditions`
+list. Compound conditions retain conjunction semantics. The production blueprint
+now forwards its calculated stock thresholds into these executable conditions,
+and refuses requested stock quantities without eligible current evidence.
+
+New work orders always store an explicit condition list, including an empty list
+for unconditional work, plus their semantic name. Their default completion proof
+binds that exact condition list, name and job token as well as complete status
+and zero remaining work. The created identity remains derived from the sealed
+step key, so retries cannot replace an existing order with different conditions.
+
+Older saved orders without a condition record remain blocked: the missing field
+cannot reveal whether the old implementation discarded a nonempty request.
+There is no automatic upgrade to an empty list. An explicit trusted migration or
+observation is required to establish that configuration. Existing sealed plans
+retain their original identity; if recompilation cannot reproduce a retained
+seal under the stronger default proof, the existing recovery path keeps it
+indeterminate. Conditional production adds no live mutation capability or
+compatibility admission.
+
 ## Threats
 
 `scenario="besieged_fortress"` is the starter fortress plus a goblin raider

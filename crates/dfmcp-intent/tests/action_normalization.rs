@@ -161,6 +161,35 @@ fn test_create_work_order_normalization_and_metadata() {
 }
 
 #[test]
+fn duplicate_work_order_conjunctions_have_the_same_normalized_action_identity() {
+    let count = WorkOrderCondition::ItemCountBelow {
+        item_token: "DRINK".to_owned(),
+        threshold: 20,
+    };
+    let material = WorkOrderCondition::MaterialAvailable {
+        material_token: "PLANT".to_owned(),
+        minimum: 2,
+    };
+    let canonical = Action::CreateWorkOrder {
+        name: "conditional brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 4,
+        conditions: vec![count.clone(), material.clone()],
+    }
+    .normalized();
+    let duplicated = Action::CreateWorkOrder {
+        name: "conditional brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 4,
+        conditions: vec![material.clone(), count.clone(), material, count],
+    }
+    .normalized();
+    assert_eq!(canonical, duplicated);
+    assert_eq!(canonical.canonical_bytes(), duplicated.canonical_bytes());
+    assert_eq!(duplicated.normalized(), duplicated);
+}
+
+#[test]
 fn test_squad_and_burrow_normalization_and_metadata() -> Result<(), Box<dyn Error>> {
     let squad_action = Action::AssignSquad {
         units: vec![EntityId::new(99), EntityId::new(12), EntityId::new(99)],

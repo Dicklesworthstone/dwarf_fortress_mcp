@@ -427,7 +427,11 @@ fn with_ledger(drink: u64, food: u64) -> WorldSnapshot {
 }
 
 fn ledger_u64(snapshot: &WorldSnapshot, field: &str) -> Result<u64> {
-    field_u64(&snapshot.graph.entities[&EntityId::new(91)], field, snapshot.tick)
+    field_u64(
+        &snapshot.graph.entities[&EntityId::new(91)],
+        field,
+        snapshot.tick,
+    )
 }
 
 fn need(snapshot: &WorldSnapshot, unit: EntityId, field: &str) -> Option<String> {
@@ -528,6 +532,651 @@ fn work_orders_stall_without_their_workshop_or_worker_and_say_why() -> Result<()
     let order_fields = &s.graph.entities[&id].fields;
     assert_eq!(order_fields[AMOUNT_REMAINING_FIELD].value, Value::U64(0));
     assert_eq!(order_fields[BLOCKED_BY_FIELD].value, Value::Null);
+    Ok(())
+}
+
+fn conditional_order(name: &str, amount: u32, conditions: Vec<WorkOrderCondition>) -> Action {
+    Action::CreateWorkOrder {
+        name: name.to_owned(),
+        job_token: "MAKE_TEST_ITEM".to_owned(),
+        amount,
+        conditions,
+    }
+}
+
+fn item_below(token: &str, threshold: u32) -> WorkOrderCondition {
+    WorkOrderCondition::ItemCountBelow {
+        item_token: token.to_owned(),
+        threshold,
+    }
+}
+
+fn material_at_least(token: &str, minimum: u32) -> WorkOrderCondition {
+    WorkOrderCondition::MaterialAvailable {
+        material_token: token.to_owned(),
+        minimum,
+    }
+}
+
+fn set_test_field(
+    snapshot: &mut WorldSnapshot,
+    id: EntityId,
+    field: &str,
+    value: Value,
+) -> Result<()> {
+    write_fields(snapshot, id, vec![(field.to_owned(), value)])?;
+    Ok(())
+}
+
+#[test]
+fn work_order_conditions_round_trip_canonically_and_conflicting_retry_cannot_erase_them()
+-> Result<()> {
+    let conditions = vec![material_at_least("WOOD", 2), item_below("BARREL", 5)];
+    let action = conditional_order("barrels", 2, conditions.clone());
+    let mut left = world();
+    let mut right = left.clone();
+    apply_effect(&mut left, &action, "conditional")?;
+    let reordered = conditional_order(
+        "barrels",
+        2,
+        vec![
+            conditions[1].clone(),
+            conditions[0].clone(),
+            conditions[1].clone(),
+        ],
+    );
+    apply_effect(&mut right, &reordered, "conditional")?;
+    assert_eq!(left.graph, right.graph);
+    let id = created_entity_id("conditional", 0);
+    let stored = &left.graph.entities[&id].fields[WORK_ORDER_CONDITIONS_FIELD].value;
+    assert_eq!(
+        decode_conditions(stored)?,
+        vec![conditions[1].clone(), conditions[0].clone()]
+    );
+    let before = left.graph.clone();
+    for retry in [&action, &conditional_order("barrels", 2, Vec::new())] {
+        assert!(
+            apply_effect(&mut left, retry, "conditional")
+                .is_err_and(|e| e.code == ErrorCode::Conflict)
+        );
+        assert_eq!(left.graph, before);
+    }
+    // Reference proof binds the original configuration, not just a counter.
+    set_test_field(&mut left, id, AMOUNT_REMAINING_FIELD, Value::U64(0))?;
+    set_test_field(
+        &mut left,
+        id,
+        STATUS_FIELD,
+        Value::Text(STATUS_COMPLETE.to_owned()),
+    )?;
+    assert!(all_hold(
+        &left,
+        &default_postconditions(&action, "conditional", left.fortress_id)
+    ));
+    set_test_field(
+        &mut left,
+        id,
+        WORK_ORDER_CONDITIONS_FIELD,
+        Value::List(Vec::new()),
+    )?;
+    assert!(!all_hold(
+        &left,
+        &default_postconditions(&action, "conditional", left.fortress_id)
+    ));
+    Ok(())
+}
+
+#[test]
+fn condition_bounds_are_checked_before_creating_an_effect() {
+    for conditions in [
+        vec![item_below("DRINK", 1); MAX_WORK_ORDER_CONDITIONS + 1],
+        vec![item_below(
+            &"x".repeat(MAX_WORK_ORDER_CONDITION_BYTES + 1),
+            1,
+        )],
+        vec![item_below("", 1)],
+        vec![material_at_least("WOOD\n", 1)],
+    ] {
+        let mut snapshot = world();
+        let before = snapshot.graph.clone();
+        assert!(
+            apply_effect(
+                &mut snapshot,
+                &conditional_order("bounded", 1, conditions),
+                "bound"
+            )
+            .is_err()
+        );
+        assert_eq!(snapshot.graph, before);
+    }
+}
+
+#[test]
+fn compound_stock_and_material_conditions_gate_work_without_banking_blocked_ticks() -> Result<()> {
+    let mut snapshot = with_ledger(40, 60);
+    let action = conditional_order(
+        "conditional",
+        2,
+        vec![item_below("DRINK", 45), material_at_least("WOOD", 2)],
+    );
+    let id = created_entity_id("gates", 0);
+    apply_effect(&mut snapshot, &action, "gates")?;
+    // A missing material field is unknown, even if the requested minimum is zero.
+    advance(&mut snapshot, 500)?;
+    assert_eq!(
+        field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+        0
+    );
+    assert!(
+        field_text(
+            &snapshot.graph.entities[&id],
+            BLOCKED_BY_FIELD,
+            snapshot.tick
+        )
+        .is_some_and(|reason| reason.contains("not established"))
+    );
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        "stock.material.WOOD",
+        Value::U64(2),
+    )?;
+    advance(&mut snapshot, 30)?;
+    assert_eq!(
+        field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+        30
+    );
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        STOCK_DRINK_FIELD,
+        Value::U64(45),
+    )?;
+    advance(&mut snapshot, 500)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&id],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        2
+    );
+    assert_eq!(
+        field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+        30
+    );
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        STOCK_DRINK_FIELD,
+        Value::U64(44),
+    )?;
+    advance(&mut snapshot, 20)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&id],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        1
+    );
+    assert_eq!(
+        field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+        0
+    );
+    assert_eq!(ledger_u64(&snapshot, "stock.material.WOOD")?, 2);
+    Ok(())
+}
+
+#[test]
+fn same_product_threshold_caps_large_advances_and_compound_limits_at_unit_boundaries() -> Result<()>
+{
+    let mut one = with_ledger(0, 100);
+    equip_brewery(&mut one);
+    let action = Action::CreateWorkOrder {
+        name: "brew to threshold".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 20,
+        conditions: vec![item_below("DRINK", 20), item_below("DRINK", 6)],
+    };
+    let id = created_entity_id("threshold", 0);
+    apply_effect(&mut one, &action, "threshold")?;
+    let mut many = one.clone();
+    advance(&mut one, 500)?;
+    for _ in 0..10 {
+        advance(&mut many, 50)?;
+    }
+    for snapshot in [&one, &many] {
+        // The second indivisible five-drink unit crosses six; the third is blocked.
+        assert_eq!(ledger_u64(snapshot, STOCK_DRINK_FIELD)?, 10);
+        assert_eq!(
+            field_u64(
+                &snapshot.graph.entities[&id],
+                AMOUNT_REMAINING_FIELD,
+                snapshot.tick
+            )?,
+            18
+        );
+        assert_eq!(
+            field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+            0
+        );
+        assert!(
+            field_text(
+                &snapshot.graph.entities[&id],
+                BLOCKED_BY_FIELD,
+                snapshot.tick
+            )
+            .is_some_and(|reason| reason.contains("not below 6"))
+        );
+    }
+    // Release the gate and give it one tick: the earlier blocked tail is gone.
+    set_test_field(
+        &mut one,
+        EntityId::new(91),
+        STOCK_DRINK_FIELD,
+        Value::U64(0),
+    )?;
+    advance(&mut one, 1)?;
+    assert_eq!(
+        field_u64(&one.graph.entities[&id], AMOUNT_REMAINING_FIELD, one.tick)?,
+        18
+    );
+    assert_eq!(
+        field_u64(&one.graph.entities[&id], "work_ticks", one.tick)?,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn exact_generic_stock_tokens_do_not_alias_material_or_missing_inventory() -> Result<()> {
+    let mut snapshot = with_ledger(0, 0);
+    let action = conditional_order(
+        "barrels",
+        1,
+        vec![item_below("BARREL", 1), material_at_least("WOOD", 0)],
+    );
+    let id = created_entity_id("generic", 0);
+    apply_effect(&mut snapshot, &action, "generic")?;
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        "stock.material.BARREL",
+        Value::U64(0),
+    )?;
+    advance(&mut snapshot, 50)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&id],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        1
+    );
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        "stock.item.BARREL",
+        Value::U64(0),
+    )?;
+    advance(&mut snapshot, 50)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&id],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        1
+    );
+    set_test_field(
+        &mut snapshot,
+        EntityId::new(91),
+        "stock.material.WOOD",
+        Value::U64(0),
+    )?;
+    advance(&mut snapshot, 50)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&id],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn named_completion_requires_one_authoritative_completed_order_and_never_a_label() -> Result<()> {
+    let mut snapshot = world();
+    let upstream = conditional_order("upstream", 1, Vec::new());
+    let downstream = conditional_order(
+        "downstream",
+        1,
+        vec![WorkOrderCondition::CompletedOrder {
+            order_name: "upstream".to_owned(),
+        }],
+    );
+    let source = created_entity_id("source", 0);
+    let target = created_entity_id("target", 0);
+    apply_effect(&mut snapshot, &downstream, "target")?;
+    advance(&mut snapshot, 50)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&target],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        1
+    );
+    apply_effect(&mut snapshot, &upstream, "source")?;
+    assert!(completed_order_blocker(&snapshot, target, "upstream").is_some());
+    set_test_field(
+        &mut snapshot,
+        source,
+        STATUS_FIELD,
+        Value::Text(STATUS_CANCELLED.to_owned()),
+    )?;
+    set_test_field(&mut snapshot, source, AMOUNT_REMAINING_FIELD, Value::U64(0))?;
+    assert!(completed_order_blocker(&snapshot, target, "upstream").is_some());
+    set_test_field(
+        &mut snapshot,
+        source,
+        STATUS_FIELD,
+        Value::Text(STATUS_COMPLETE.to_owned()),
+    )?;
+    snapshot
+        .graph
+        .entities
+        .get_mut(&source)
+        .ok_or_else(|| precondition("missing test order"))?
+        .label = "renamed display label".to_owned();
+    assert!(completed_order_blocker(&snapshot, target, "upstream").is_none());
+    assert!(
+        completed_order_blocker(&snapshot, source, "upstream")
+            .is_some_and(|reason| reason.contains("itself"))
+    );
+    // Another complete or active order with the same semantic name is ambiguous.
+    apply_effect(&mut snapshot, &upstream, "duplicate")?;
+    assert!(
+        completed_order_blocker(&snapshot, target, "upstream")
+            .is_some_and(|reason| reason.contains("ambiguous"))
+    );
+    let duplicate = created_entity_id("duplicate", 0);
+    set_test_field(
+        &mut snapshot,
+        duplicate,
+        WORK_ORDER_NAME_FIELD,
+        Value::Text("different".to_owned()),
+    )?;
+    set_test_field(
+        &mut snapshot,
+        duplicate,
+        STATUS_FIELD,
+        Value::Text(STATUS_CANCELLED.to_owned()),
+    )?;
+    advance(&mut snapshot, 50)?;
+    assert_eq!(
+        field_u64(
+            &snapshot.graph.entities[&target],
+            AMOUNT_REMAINING_FIELD,
+            snapshot.tick
+        )?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn unavailable_or_untrusted_counts_cannot_satisfy_any_production_condition() -> Result<()> {
+    for (condition, field, count) in [
+        (item_below("BARREL", 1), "stock.item.BARREL", 0),
+        (material_at_least("WOOD", 1), "stock.material.WOOD", 1),
+        (material_at_least("WOOD", 0), "stock.material.WOOD", 0),
+    ] {
+        let mut original = with_ledger(40, 60);
+        let action = conditional_order("source-gated", 1, vec![condition]);
+        let id = created_entity_id("source-gated", 0);
+        apply_effect(&mut original, &action, "source-gated")?;
+        set_test_field(&mut original, EntityId::new(91), field, Value::U64(count))?;
+        let fact = original.graph.entities[&EntityId::new(91)].fields[field].clone();
+        let variants = unavailable_variants(&fact, original.anchor())
+            .into_iter()
+            .chain(ineligible_reference_inputs(&fact).into_iter().map(Some));
+        for replacement in variants {
+            let mut snapshot = original.clone();
+            let ledger = snapshot
+                .graph
+                .entities
+                .get_mut(&EntityId::new(91))
+                .ok_or_else(|| precondition("missing test ledger"))?;
+            match replacement {
+                Some(fact) => {
+                    ledger.fields.insert(field.to_owned(), fact);
+                }
+                None => {
+                    ledger.fields.remove(field);
+                }
+            }
+            advance(&mut snapshot, 500)?;
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&id],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                1,
+                "{field}"
+            );
+            assert_eq!(
+                field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+                0
+            );
+            assert!(
+                field_text(
+                    &snapshot.graph.entities[&id],
+                    BLOCKED_BY_FIELD,
+                    snapshot.tick
+                )
+                .is_some()
+            );
+            set_test_field(&mut snapshot, EntityId::new(91), field, Value::U64(count))?;
+            advance(&mut snapshot, 49)?;
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&id],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                1
+            );
+            advance(&mut snapshot, 1)?;
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&id],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                0
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_untrusted_and_malformed_condition_records_never_become_unconditional() -> Result<()> {
+    let mut original = world();
+    let action = conditional_order("strict record", 1, Vec::new());
+    let id = created_entity_id("record", 0);
+    apply_effect(&mut original, &action, "record")?;
+    let fact = original.graph.entities[&id].fields[WORK_ORDER_CONDITIONS_FIELD].clone();
+    let mut variants = unavailable_variants(&fact, original.anchor());
+    variants.extend(ineligible_reference_inputs(&fact).into_iter().map(Some));
+    let valid = condition_value(&item_below("DRINK", 1));
+    for malformed in [
+        Value::List(vec![Value::Text("not a typed condition".to_owned())]),
+        Value::List(vec![valid.clone(), valid]),
+        Value::List(vec![Value::Object(BTreeMap::from([(
+            "kind".to_owned(),
+            Value::Text("new_unrecognized_condition".to_owned()),
+        )]))]),
+        Value::List(vec![
+            condition_value(&item_below("DRINK", 1));
+            MAX_WORK_ORDER_CONDITIONS + 1
+        ]),
+        Value::List(vec![Value::Object(BTreeMap::from([
+            (
+                "kind".to_owned(),
+                Value::Text("item_count_below".to_owned()),
+            ),
+            ("item_token".to_owned(), Value::Text("DRINK".to_owned())),
+            ("threshold".to_owned(), Value::U64(u64::MAX)),
+        ]))]),
+    ] {
+        variants.push(Some(known(malformed, original.tick)));
+    }
+    for replacement in variants {
+        let mut snapshot = original.clone();
+        let order = snapshot
+            .graph
+            .entities
+            .get_mut(&id)
+            .ok_or_else(|| precondition("missing test order"))?;
+        match &replacement {
+            Some(fact) => {
+                order
+                    .fields
+                    .insert(WORK_ORDER_CONDITIONS_FIELD.to_owned(), fact.clone());
+            }
+            None => {
+                order.fields.remove(WORK_ORDER_CONDITIONS_FIELD);
+            }
+        }
+        advance(&mut snapshot, 500)?;
+        assert_eq!(
+            field_u64(
+                &snapshot.graph.entities[&id],
+                AMOUNT_REMAINING_FIELD,
+                snapshot.tick
+            )?,
+            1
+        );
+        assert_eq!(
+            field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+            0
+        );
+        assert!(
+            field_text(
+                &snapshot.graph.entities[&id],
+                BLOCKED_BY_FIELD,
+                snapshot.tick
+            )
+            .is_some()
+        );
+        assert_eq!(
+            snapshot.graph.entities[&id]
+                .fields
+                .get(WORK_ORDER_CONDITIONS_FIELD),
+            replacement.as_ref()
+        );
+        set_test_field(
+            &mut snapshot,
+            id,
+            WORK_ORDER_CONDITIONS_FIELD,
+            Value::List(Vec::new()),
+        )?;
+        advance(&mut snapshot, 50)?;
+        assert_eq!(
+            field_u64(
+                &snapshot.graph.entities[&id],
+                AMOUNT_REMAINING_FIELD,
+                snapshot.tick
+            )?,
+            0
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn unknown_names_or_completion_evidence_cannot_release_named_dependents() -> Result<()> {
+    let mut original = world();
+    let source = created_entity_id("named-source", 0);
+    let target = created_entity_id("named-target", 0);
+    apply_effect(
+        &mut original,
+        &conditional_order("upstream", 1, Vec::new()),
+        "named-source",
+    )?;
+    set_test_field(
+        &mut original,
+        source,
+        STATUS_FIELD,
+        Value::Text(STATUS_COMPLETE.to_owned()),
+    )?;
+    set_test_field(&mut original, source, AMOUNT_REMAINING_FIELD, Value::U64(0))?;
+    let action = conditional_order(
+        "dependent",
+        1,
+        vec![WorkOrderCondition::CompletedOrder {
+            order_name: "upstream".to_owned(),
+        }],
+    );
+    apply_effect(&mut original, &action, "named-target")?;
+    for field in [WORK_ORDER_NAME_FIELD, STATUS_FIELD, AMOUNT_REMAINING_FIELD] {
+        let fact = original.graph.entities[&source].fields[field].clone();
+        let variants = unavailable_variants(&fact, original.anchor())
+            .into_iter()
+            .chain(ineligible_reference_inputs(&fact).into_iter().map(Some));
+        for replacement in variants {
+            let mut snapshot = original.clone();
+            let order = snapshot
+                .graph
+                .entities
+                .get_mut(&source)
+                .ok_or_else(|| precondition("missing test order"))?;
+            match replacement {
+                Some(fact) => {
+                    order.fields.insert(field.to_owned(), fact);
+                }
+                None => {
+                    order.fields.remove(field);
+                }
+            }
+            assert!(
+                completed_order_blocker(&snapshot, target, "upstream").is_some(),
+                "{field}"
+            );
+            let progress = advance(&mut snapshot, 50);
+            assert!(
+                progress.is_ok()
+                    || progress.is_err_and(|e| e.code == ErrorCode::PreconditionsFailed)
+            );
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&target],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                1,
+                "{field}"
+            );
+        }
+    }
+    // A second order of unknown name prevents proving uniqueness, even when
+    // its display label looks unrelated to the requested dependency.
+    let mut extra = entity(EntityId::new(2), EntityKind::WorkOrder, "unrelated label");
+    extra.fields.insert(
+        STATUS_FIELD.to_owned(),
+        known(Value::Text(STATUS_CANCELLED.to_owned()), original.tick),
+    );
+    original.graph.entities.insert(extra.id, extra);
+    assert!(
+        completed_order_blocker(&original, target, "upstream")
+            .is_some_and(|reason| reason.contains("uniquely"))
+    );
     Ok(())
 }
 
@@ -684,11 +1333,25 @@ fn unavailable_workshop_worker_and_life_facts_cannot_release_production() -> Res
         advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
         let id = created_entity_id("blocked", 0);
         assert_eq!(
-            field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?,
+            field_u64(
+                &snapshot.graph.entities[&id],
+                AMOUNT_REMAINING_FIELD,
+                snapshot.tick
+            )?,
             1
         );
-        assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD, snapshot.tick).is_some());
-        assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?, 0);
+        assert!(
+            field_text(
+                &snapshot.graph.entities[&id],
+                BLOCKED_BY_FIELD,
+                snapshot.tick
+            )
+            .is_some()
+        );
+        assert_eq!(
+            field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+            0
+        );
         snapshot
             .graph
             .entities
@@ -819,7 +1482,6 @@ fn unavailable_military_selectors_cannot_determine_combat_outcomes() -> Result<(
     Ok(())
 }
 
-
 // These records deliberately keep the same, apparently useful values. Only
 // their provenance or observation horizon changes, so a value-only consumer
 // would launder them into registered reference-effect results.
@@ -858,13 +1520,26 @@ fn ineligible_progress_and_lifecycle_inputs_cannot_become_reference_completion()
         apply_effect(&mut original, &action, "provenance")?;
         let id = created_entity_id("provenance", 0);
         for field in fields {
-            for replacement in ineligible_reference_inputs(&original.graph.entities[&id].fields[field]) {
+            for replacement in
+                ineligible_reference_inputs(&original.graph.entities[&id].fields[field])
+            {
                 let mut snapshot = original.clone();
-                snapshot.graph.entities.get_mut(&id).unwrap().fields
+                snapshot
+                    .graph
+                    .entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .fields
                     .insert(field.to_owned(), replacement);
                 let before = snapshot.graph.clone();
-                let error = advance(&mut snapshot, BUILD_TICKS * 10).err().map(|error| error.code);
-                assert_eq!(error, Some(ErrorCode::PreconditionsFailed), "{action:?}: {field}");
+                let error = advance(&mut snapshot, BUILD_TICKS * 10)
+                    .err()
+                    .map(|error| error.code);
+                assert_eq!(
+                    error,
+                    Some(ErrorCode::PreconditionsFailed),
+                    "{action:?}: {field}"
+                );
                 assert_eq!(snapshot.graph, before, "{action:?}: {field}");
             }
         }
@@ -888,25 +1563,68 @@ fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock
     ] {
         let mut original = world();
         equip_brewery(&mut original);
-        original.graph.entities.get_mut(&UNIT_A).unwrap().fields
+        original
+            .graph
+            .entities
+            .get_mut(&UNIT_A)
+            .unwrap()
+            .fields
             .insert("alive".to_owned(), known(Value::Bool(true), original.tick));
         apply_effect(&mut original, &action, "source-blocked")?;
         let id = created_entity_id("source-blocked", 0);
-        for replacement in ineligible_reference_inputs(&original.graph.entities[&subject].fields[field]) {
+        for replacement in
+            ineligible_reference_inputs(&original.graph.entities[&subject].fields[field])
+        {
             let mut snapshot = original.clone();
-            snapshot.graph.entities.get_mut(&subject).unwrap().fields
+            snapshot
+                .graph
+                .entities
+                .get_mut(&subject)
+                .unwrap()
+                .fields
                 .insert(field.to_owned(), replacement);
             advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
-            assert_eq!(field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 1);
-            assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?, 0);
-            assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD, snapshot.tick)
-                .is_some_and(|reason| reason.contains("not established")));
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&id],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                1
+            );
+            assert_eq!(
+                field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?,
+                0
+            );
+            assert!(
+                field_text(
+                    &snapshot.graph.entities[&id],
+                    BLOCKED_BY_FIELD,
+                    snapshot.tick
+                )
+                .is_some_and(|reason| reason.contains("not established"))
+            );
             // Restoring the registered input permits work again; uncertain
             // candidates do not poison future authoritative observations.
-            snapshot.graph.entities.get_mut(&subject).unwrap().fields
-                .insert(field.to_owned(), original.graph.entities[&subject].fields[field].clone());
+            snapshot
+                .graph
+                .entities
+                .get_mut(&subject)
+                .unwrap()
+                .fields
+                .insert(
+                    field.to_owned(),
+                    original.graph.entities[&subject].fields[field].clone(),
+                );
             advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT)?;
-            assert_eq!(field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 0);
+            assert_eq!(
+                field_u64(
+                    &snapshot.graph.entities[&id],
+                    AMOUNT_REMAINING_FIELD,
+                    snapshot.tick
+                )?,
+                0
+            );
         }
     }
     Ok(())
@@ -915,22 +1633,64 @@ fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock
 #[test]
 fn untrusted_population_inputs_cannot_omit_units_from_consumption_or_combat() -> Result<()> {
     for (original, field, value, ticks) in [
-        (with_ledger(10, 10), "alive".to_owned(), Value::Bool(true), DRINK_INTERVAL_TICKS),
-        (with_ledger(10, 10), "alive".to_owned(), Value::Bool(false), DRINK_INTERVAL_TICKS),
-        (with_active_threat(), "alive".to_owned(), Value::Bool(false), COMBAT_ROUND_TICKS),
-        (with_active_threat(), SQUAD_FIELD.to_owned(), Value::Entity(SQUAD), COMBAT_ROUND_TICKS),
-        (with_active_threat(), SQUAD_FIELD.to_owned(), Value::Null, COMBAT_ROUND_TICKS),
-        (with_active_threat(), format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()), Value::Bool(true),
-            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL),
-        (with_active_threat(), format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()), Value::Bool(false),
-            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL),
+        (
+            with_ledger(10, 10),
+            "alive".to_owned(),
+            Value::Bool(true),
+            DRINK_INTERVAL_TICKS,
+        ),
+        (
+            with_ledger(10, 10),
+            "alive".to_owned(),
+            Value::Bool(false),
+            DRINK_INTERVAL_TICKS,
+        ),
+        (
+            with_active_threat(),
+            "alive".to_owned(),
+            Value::Bool(false),
+            COMBAT_ROUND_TICKS,
+        ),
+        (
+            with_active_threat(),
+            SQUAD_FIELD.to_owned(),
+            Value::Entity(SQUAD),
+            COMBAT_ROUND_TICKS,
+        ),
+        (
+            with_active_threat(),
+            SQUAD_FIELD.to_owned(),
+            Value::Null,
+            COMBAT_ROUND_TICKS,
+        ),
+        (
+            with_active_threat(),
+            format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()),
+            Value::Bool(true),
+            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL,
+        ),
+        (
+            with_active_threat(),
+            format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()),
+            Value::Bool(false),
+            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL,
+        ),
     ] {
         for replacement in ineligible_reference_inputs(&known(value.clone(), original.tick)) {
             let mut snapshot = original.clone();
-            snapshot.graph.entities.get_mut(&UNIT_A).unwrap().fields.insert(field.clone(), replacement);
+            snapshot
+                .graph
+                .entities
+                .get_mut(&UNIT_A)
+                .unwrap()
+                .fields
+                .insert(field.clone(), replacement);
             let before = snapshot.graph.clone();
-            assert_eq!(advance(&mut snapshot, ticks).err().map(|error| error.code),
-                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(
+                advance(&mut snapshot, ticks).err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "{field}"
+            );
             assert_eq!(snapshot.graph, before, "{field}");
         }
     }
@@ -948,10 +1708,20 @@ fn incomplete_lifecycle_and_hostile_selectors_do_not_silently_remove_work() -> R
         } else {
             STATUS_FIELD
         };
-        original.graph.entities.get_mut(&id).unwrap().fields.remove(field);
+        original
+            .graph
+            .entities
+            .get_mut(&id)
+            .unwrap()
+            .fields
+            .remove(field);
         let before = original.graph.clone();
-        assert_eq!(advance(&mut original, BUILD_TICKS * 10).err().map(|error| error.code),
-            Some(ErrorCode::PreconditionsFailed));
+        assert_eq!(
+            advance(&mut original, BUILD_TICKS * 10)
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed)
+        );
         assert_eq!(original.graph, before);
     }
     let original = with_active_threat();
@@ -959,16 +1729,39 @@ fn incomplete_lifecycle_and_hostile_selectors_do_not_silently_remove_work() -> R
     for field in [HOSTILE_FIELD, THREAT_STATUS_FIELD] {
         let variants = std::iter::once(None).chain(
             ineligible_reference_inputs(&original.graph.entities[&hostile].fields[field])
-                .into_iter().map(Some));
+                .into_iter()
+                .map(Some),
+        );
         for replacement in variants {
             let mut snapshot = original.clone();
             match replacement {
-                Some(fact) => { snapshot.graph.entities.get_mut(&hostile).unwrap().fields.insert(field.to_owned(), fact); }
-                None => { snapshot.graph.entities.get_mut(&hostile).unwrap().fields.remove(field); }
+                Some(fact) => {
+                    snapshot
+                        .graph
+                        .entities
+                        .get_mut(&hostile)
+                        .unwrap()
+                        .fields
+                        .insert(field.to_owned(), fact);
+                }
+                None => {
+                    snapshot
+                        .graph
+                        .entities
+                        .get_mut(&hostile)
+                        .unwrap()
+                        .fields
+                        .remove(field);
+                }
             }
             let before = snapshot.graph.clone();
-            assert_eq!(advance(&mut snapshot, COMBAT_ROUND_TICKS * ROUNDS_PER_KILL)
-                .err().map(|error| error.code), Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(
+                advance(&mut snapshot, COMBAT_ROUND_TICKS * ROUNDS_PER_KILL)
+                    .err()
+                    .map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "{field}"
+            );
             assert_eq!(snapshot.graph, before);
         }
     }
@@ -980,31 +1773,67 @@ fn ineligible_resource_quantities_are_not_reissued_as_reference_stock() -> Resul
     for field in [METABOLISM_TICKS_FIELD, STOCK_DRINK_FIELD, STOCK_FOOD_FIELD] {
         let original = with_ledger(10, 10);
         let ledger = EntityId::new(91);
-        for replacement in ineligible_reference_inputs(&original.graph.entities[&ledger].fields[field]) {
+        for replacement in
+            ineligible_reference_inputs(&original.graph.entities[&ledger].fields[field])
+        {
             let mut snapshot = original.clone();
-            snapshot.graph.entities.get_mut(&ledger).unwrap().fields
+            snapshot
+                .graph
+                .entities
+                .get_mut(&ledger)
+                .unwrap()
+                .fields
                 .insert(field.to_owned(), replacement.clone());
-            assert_eq!(advance(&mut snapshot, FOOD_INTERVAL_TICKS).err().map(|error| error.code),
-                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(
+                advance(&mut snapshot, FOOD_INTERVAL_TICKS)
+                    .err()
+                    .map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "{field}"
+            );
             assert_eq!(snapshot.graph.entities[&ledger].fields[field], replacement);
         }
     }
     let mut original = with_ledger(0, 10);
     equip_brewery(&mut original);
     let action = Action::CreateWorkOrder {
-        name: "brew".to_owned(), job_token: "BREW_DRINK".to_owned(), amount: 1, conditions: Vec::new(),
+        name: "brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 1,
+        conditions: Vec::new(),
     };
     apply_effect(&mut original, &action, "untrusted-stock")?;
     let ledger = EntityId::new(91);
     let order = created_entity_id("untrusted-stock", 0);
-    for replacement in ineligible_reference_inputs(&original.graph.entities[&ledger].fields[STOCK_DRINK_FIELD]) {
+    for replacement in
+        ineligible_reference_inputs(&original.graph.entities[&ledger].fields[STOCK_DRINK_FIELD])
+    {
         let mut snapshot = original.clone();
-        snapshot.graph.entities.get_mut(&ledger).unwrap().fields
+        snapshot
+            .graph
+            .entities
+            .get_mut(&ledger)
+            .unwrap()
+            .fields
             .insert(STOCK_DRINK_FIELD.to_owned(), replacement.clone());
-        assert_eq!(advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT).err().map(|error| error.code),
-            Some(ErrorCode::PreconditionsFailed));
-        assert_eq!(snapshot.graph.entities[&ledger].fields[STOCK_DRINK_FIELD], replacement);
-        assert_eq!(field_u64(&snapshot.graph.entities[&order], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 1);
+        assert_eq!(
+            advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT)
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(
+            snapshot.graph.entities[&ledger].fields[STOCK_DRINK_FIELD],
+            replacement
+        );
+        assert_eq!(
+            field_u64(
+                &snapshot.graph.entities[&order],
+                AMOUNT_REMAINING_FIELD,
+                snapshot.tick
+            )?,
+            1
+        );
     }
     Ok(())
 }
@@ -1020,12 +1849,24 @@ fn cancellation_requires_an_eligible_observed_lifecycle() -> Result<()> {
         } else {
             STATUS_FIELD
         };
-        for replacement in ineligible_reference_inputs(&original.graph.entities[&id].fields[field]) {
+        for replacement in ineligible_reference_inputs(&original.graph.entities[&id].fields[field])
+        {
             let mut snapshot = original.clone();
-            snapshot.graph.entities.get_mut(&id).unwrap().fields.insert(field.to_owned(), replacement);
+            snapshot
+                .graph
+                .entities
+                .get_mut(&id)
+                .unwrap()
+                .fields
+                .insert(field.to_owned(), replacement);
             let before = snapshot.graph.clone();
-            assert_eq!(cancel_effect(&mut snapshot, &action, "cancel-source").err().map(|error| error.code),
-                Some(ErrorCode::PreconditionsFailed), "{action:?}");
+            assert_eq!(
+                cancel_effect(&mut snapshot, &action, "cancel-source")
+                    .err()
+                    .map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "{action:?}"
+            );
             assert_eq!(snapshot.graph, before);
         }
     }
@@ -1035,18 +1876,28 @@ fn cancellation_requires_an_eligible_observed_lifecycle() -> Result<()> {
 #[test]
 fn an_explicit_action_reestablishes_equal_untrusted_values_once() -> Result<()> {
     let action = Action::SetLabor {
-        units: vec![UNIT_A], labor: "MINE".to_owned(), enabled: true,
+        units: vec![UNIT_A],
+        labor: "MINE".to_owned(),
+        enabled: true,
     };
     let original = world();
     for replacement in ineligible_reference_inputs(&known(Value::Bool(true), original.tick)) {
         let mut snapshot = original.clone();
-        snapshot.graph.entities.get_mut(&UNIT_A).unwrap().fields
+        snapshot
+            .graph
+            .entities
+            .get_mut(&UNIT_A)
+            .unwrap()
+            .fields
             .insert("labor.MINE".to_owned(), replacement);
         let revision = snapshot.graph.entities[&UNIT_A].revision;
         assert!(apply_effect(&mut snapshot, &action, "establish-source")?);
         let fact = &snapshot.graph.entities[&UNIT_A].fields["labor.MINE"];
         assert_eq!(fact.source, FactSource::Derived(SOURCE.to_owned()));
-        assert_eq!(laboratory_fact_value(fact, snapshot.tick), Some(&Value::Bool(true)));
+        assert_eq!(
+            laboratory_fact_value(fact, snapshot.tick),
+            Some(&Value::Bool(true))
+        );
         assert_eq!(snapshot.graph.entities[&UNIT_A].revision, revision + 1);
         assert!(!apply_effect(&mut snapshot, &action, "establish-source")?);
         assert_eq!(snapshot.graph.entities[&UNIT_A].revision, revision + 1);
@@ -1058,17 +1909,36 @@ fn an_explicit_action_reestablishes_equal_untrusted_values_once() -> Result<()> 
 fn ineligible_threat_counters_never_create_a_combat_outcome() -> Result<()> {
     let mut original = with_active_threat();
     let hostile = EntityId::new(99);
-    original.graph.entities.get_mut(&hostile).unwrap().fields.insert(
-        THREAT_STATUS_FIELD.to_owned(),
-        known(Value::Text(THREAT_ATTACKING.to_owned()), original.tick),
-    );
+    original
+        .graph
+        .entities
+        .get_mut(&hostile)
+        .unwrap()
+        .fields
+        .insert(
+            THREAT_STATUS_FIELD.to_owned(),
+            known(Value::Text(THREAT_ATTACKING.to_owned()), original.tick),
+        );
     for field in [ARRIVES_AT_FIELD, HEALTH_FIELD, COMBAT_ROUNDS_FIELD] {
-        for replacement in ineligible_reference_inputs(&original.graph.entities[&hostile].fields[field]) {
+        for replacement in
+            ineligible_reference_inputs(&original.graph.entities[&hostile].fields[field])
+        {
             let mut snapshot = original.clone();
-            snapshot.graph.entities.get_mut(&hostile).unwrap().fields.insert(field.to_owned(), replacement);
+            snapshot
+                .graph
+                .entities
+                .get_mut(&hostile)
+                .unwrap()
+                .fields
+                .insert(field.to_owned(), replacement);
             let before = snapshot.graph.clone();
-            assert_eq!(advance(&mut snapshot, COMBAT_ROUND_TICKS).err().map(|error| error.code),
-                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(
+                advance(&mut snapshot, COMBAT_ROUND_TICKS)
+                    .err()
+                    .map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "{field}"
+            );
             assert_eq!(snapshot.graph, before);
         }
     }

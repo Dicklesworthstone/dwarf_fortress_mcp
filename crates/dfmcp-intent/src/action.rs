@@ -232,6 +232,7 @@ impl Action {
             } => {
                 let mut conditions = conditions.clone();
                 conditions.sort_by_key(condition_key);
+                conditions.dedup();
                 Self::CreateWorkOrder {
                     name: name.clone(),
                     job_token: job_token.clone(),

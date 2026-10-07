@@ -25,7 +25,7 @@ use dfmcp_world::{
     laboratory_fact_value,
 };
 
-use crate::action::{Action, BuildingKind, DigMode};
+use crate::action::{Action, BuildingKind, DigMode, WorkOrderCondition};
 use crate::plan::ObligationSpec;
 
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
@@ -55,6 +55,19 @@ pub const STAGE_CANCELLED: &str = "cancelled";
 /// Work-order and designation progress fields.
 pub const AMOUNT_REMAINING_FIELD: &str = "amount_remaining";
 pub const TILES_REMAINING_FIELD: &str = "tiles_remaining";
+/// Explicit semantic name used to resolve a unique work-order dependency.
+/// An entity's display label does not establish this identity.
+pub const WORK_ORDER_NAME_FIELD: &str = "order_name";
+/// Canonical typed condition list. An explicit empty list is unconditional;
+/// absence cannot recover conditions discarded by an older implementation.
+pub const WORK_ORDER_CONDITIONS_FIELD: &str = "conditions";
+/// Bound checked before allocating or evaluating a work-order condition list.
+pub const MAX_WORK_ORDER_CONDITIONS: usize = 64;
+/// Reference condition token/name bound, independent of a planner's policy.
+pub const MAX_WORK_ORDER_CONDITION_BYTES: usize = 256;
+/// Exact generic inventory token namespaces on the reference stock ledger.
+pub const STOCK_ITEM_FIELD_PREFIX: &str = "stock.item.";
+pub const STOCK_MATERIAL_FIELD_PREFIX: &str = "stock.material.";
 
 /// Entity kind of a created dig designation.
 pub const DIG_DESIGNATION_KIND: &str = "dig_designation";
@@ -139,7 +152,9 @@ pub fn work_order_blocker(snapshot: &WorldSnapshot, job_token: &str) -> Option<S
     match (has_workshop, has_worker) {
         (true, true) => None,
         (false, true) => Some(format!("completed {workshop} is not established")),
-        (true, false) => Some(format!("living unit with the {labor} labor enabled is not established")),
+        (true, false) => Some(format!(
+            "living unit with the {labor} labor enabled is not established"
+        )),
         (false, false) => Some(format!(
             "completed {workshop} and living unit with the {labor} labor enabled are not established"
         )),
@@ -238,6 +253,158 @@ fn accepts_value(accepts: &std::collections::BTreeSet<String>) -> Value {
     Value::List(accepts.iter().cloned().map(Value::Text).collect())
 }
 
+fn validate_condition_text(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > MAX_WORK_ORDER_CONDITION_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "work-order condition names and tokens require 1..=256 non-control bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn condition_key(condition: &WorkOrderCondition) -> (u8, &str, u32) {
+    match condition {
+        WorkOrderCondition::ItemCountBelow {
+            item_token,
+            threshold,
+        } => (0, item_token, *threshold),
+        WorkOrderCondition::MaterialAvailable {
+            material_token,
+            minimum,
+        } => (1, material_token, *minimum),
+        WorkOrderCondition::CompletedOrder { order_name } => (2, order_name, 0),
+    }
+}
+
+fn canonical_conditions(conditions: &[WorkOrderCondition]) -> Result<Vec<WorkOrderCondition>> {
+    if conditions.len() > MAX_WORK_ORDER_CONDITIONS {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "work order exceeds the 64-condition reference bound",
+        ));
+    }
+    for condition in conditions {
+        validate_condition_text(condition_key(condition).1)?;
+    }
+    let mut normalized = conditions.to_vec();
+    normalized.sort_by(|left, right| condition_key(left).cmp(&condition_key(right)));
+    normalized.dedup();
+    Ok(normalized)
+}
+
+fn condition_value(condition: &WorkOrderCondition) -> Value {
+    let fields = match condition {
+        WorkOrderCondition::ItemCountBelow {
+            item_token,
+            threshold,
+        } => vec![
+            ("kind", Value::Text("item_count_below".to_owned())),
+            ("item_token", Value::Text(item_token.clone())),
+            ("threshold", Value::U64(u64::from(*threshold))),
+        ],
+        WorkOrderCondition::MaterialAvailable {
+            material_token,
+            minimum,
+        } => vec![
+            ("kind", Value::Text("material_available".to_owned())),
+            ("material_token", Value::Text(material_token.clone())),
+            ("minimum", Value::U64(u64::from(*minimum))),
+        ],
+        WorkOrderCondition::CompletedOrder { order_name } => vec![
+            ("kind", Value::Text("completed_order".to_owned())),
+            ("order_name", Value::Text(order_name.clone())),
+        ],
+    };
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// Bounded canonical condition records used by persistence and sealed proof.
+/// Conditions are conjunctive; reordering and exact duplicates have no effect.
+pub fn work_order_conditions_value(conditions: &[WorkOrderCondition]) -> Result<Value> {
+    Ok(Value::List(
+        canonical_conditions(conditions)?
+            .iter()
+            .map(condition_value)
+            .collect(),
+    ))
+}
+
+fn decode_conditions(value: &Value) -> Result<Vec<WorkOrderCondition>> {
+    let invalid =
+        || precondition("work-order conditions require canonical typed condition records");
+    let Value::List(values) = value else {
+        return Err(invalid());
+    };
+    if values.len() > MAX_WORK_ORDER_CONDITIONS {
+        return Err(precondition(
+            "work-order condition record exceeds its 64-condition bound",
+        ));
+    }
+    let mut conditions = Vec::with_capacity(values.len());
+    for value in values {
+        let Value::Object(fields) = value else {
+            return Err(invalid());
+        };
+        let text = |key: &str| -> Result<String> {
+            let Some(Value::Text(value)) = fields.get(key) else {
+                return Err(invalid());
+            };
+            validate_condition_text(value).map_err(|_| invalid())?;
+            Ok(value.clone())
+        };
+        let amount = |key: &str| -> Result<u32> {
+            let Some(Value::U64(value)) = fields.get(key) else {
+                return Err(invalid());
+            };
+            u32::try_from(*value).map_err(|_| invalid())
+        };
+        let condition = match fields.get("kind") {
+            Some(Value::Text(kind)) if kind == "item_count_below" && fields.len() == 3 => {
+                WorkOrderCondition::ItemCountBelow {
+                    item_token: text("item_token")?,
+                    threshold: amount("threshold")?,
+                }
+            }
+            Some(Value::Text(kind)) if kind == "material_available" && fields.len() == 3 => {
+                WorkOrderCondition::MaterialAvailable {
+                    material_token: text("material_token")?,
+                    minimum: amount("minimum")?,
+                }
+            }
+            Some(Value::Text(kind)) if kind == "completed_order" && fields.len() == 2 => {
+                WorkOrderCondition::CompletedOrder {
+                    order_name: text("order_name")?,
+                }
+            }
+            _ => return Err(invalid()),
+        };
+        conditions.push(condition);
+    }
+    // Stored order and multiplicity are canonical semantic state, not a second
+    // accepted encoding that can change under an idempotent retry.
+    if work_order_conditions_value(&conditions)? != *value {
+        return Err(invalid());
+    }
+    Ok(conditions)
+}
+
+fn item_stock_field(token: &str) -> String {
+    match token {
+        "DRINK" => STOCK_DRINK_FIELD.to_owned(),
+        "FOOD" => STOCK_FOOD_FIELD.to_owned(),
+        _ => format!("{STOCK_ITEM_FIELD_PREFIX}{token}"),
+    }
+}
+
 /// Postconditions that prove `action` took effect, or empty when the action
 /// family has no reference semantics (extensions must state their own).
 #[must_use]
@@ -257,11 +424,30 @@ pub fn default_postconditions(
             CONSTRUCTION_STAGE_FIELD,
             Value::Text(STAGE_COMPLETE.to_owned()),
         )],
-        Action::CreateWorkOrder { .. } => vec![field_eq(
-            created_entity_id(idempotency_key, 0),
-            AMOUNT_REMAINING_FIELD,
-            Value::U64(0),
-        )],
+        Action::CreateWorkOrder {
+            name,
+            job_token,
+            conditions,
+            ..
+        } => {
+            if validate_condition_text(name).is_err() || validate_condition_text(job_token).is_err()
+            {
+                return vec![Predicate::False];
+            }
+            let Ok(conditions) = work_order_conditions_value(conditions) else {
+                // This infallible template must never turn a refused condition
+                // shape into an unconditional completion claim.
+                return vec![Predicate::False];
+            };
+            let id = created_entity_id(idempotency_key, 0);
+            vec![
+                field_eq(id, AMOUNT_REMAINING_FIELD, Value::U64(0)),
+                field_eq(id, STATUS_FIELD, Value::Text(STATUS_COMPLETE.to_owned())),
+                field_eq(id, WORK_ORDER_NAME_FIELD, Value::Text(name.clone())),
+                field_eq(id, "job_token", Value::Text(job_token.clone())),
+                field_eq(id, WORK_ORDER_CONDITIONS_FIELD, conditions),
+            ]
+        }
         Action::SetLabor {
             units,
             labor,
@@ -743,7 +929,7 @@ pub fn apply_effect(
             name,
             job_token,
             amount,
-            ..
+            conditions,
         } => {
             if *amount == 0 {
                 return Err(DfmcpError::new(
@@ -751,12 +937,17 @@ pub fn apply_effect(
                     "work order amount must be positive",
                 ));
             }
+            validate_condition_text(name)?;
+            validate_condition_text(job_token)?;
+            let conditions = work_order_conditions_value(conditions)?;
             create_entity(
                 snapshot,
                 created_entity_id(idempotency_key, 0),
                 EntityKind::WorkOrder,
                 name.clone(),
                 vec![
+                    (WORK_ORDER_NAME_FIELD.to_owned(), Value::Text(name.clone())),
+                    (WORK_ORDER_CONDITIONS_FIELD.to_owned(), conditions),
                     ("job_token".to_owned(), Value::Text(job_token.clone())),
                     ("amount_total".to_owned(), Value::U64(u64::from(*amount))),
                     (
@@ -901,7 +1092,9 @@ pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<boo
         .entities
         .values()
         .filter(|entity| match &entity.kind {
-            EntityKind::WorkOrder => field_text(entity, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE),
+            EntityKind::WorkOrder => {
+                field_text(entity, STATUS_FIELD, snapshot.tick) == Some(STATUS_ACTIVE)
+            }
             EntityKind::Building => matches!(
                 field_text(entity, CONSTRUCTION_STAGE_FIELD, snapshot.tick),
                 Some(STAGE_PLANNED | STAGE_UNDER_CONSTRUCTION)
@@ -945,7 +1138,10 @@ fn require_population_fields(snapshot: &WorldSnapshot, combat: bool) -> Result<(
         .filter(|unit| unit.kind == EntityKind::Unit)
     {
         if let Some(fact) = unit.fields.get("alive")
-            && !matches!(laboratory_fact_value(fact, snapshot.tick), Some(Value::Bool(_)))
+            && !matches!(
+                laboratory_fact_value(fact, snapshot.tick),
+                Some(Value::Bool(_))
+            )
         {
             return Err(precondition(format!(
                 "unit {} has unavailable life state; population progress requires a known census",
@@ -956,7 +1152,10 @@ fn require_population_fields(snapshot: &WorldSnapshot, combat: bool) -> Result<(
             continue;
         }
         if let Some(fact) = unit.fields.get(SQUAD_FIELD)
-            && !matches!(laboratory_fact_value(fact, snapshot.tick), Some(Value::Entity(_) | Value::Null))
+            && !matches!(
+                laboratory_fact_value(fact, snapshot.tick),
+                Some(Value::Entity(_) | Value::Null)
+            )
         {
             return Err(precondition(format!(
                 "unit {} has unavailable squad membership before combat progress",
@@ -965,7 +1164,10 @@ fn require_population_fields(snapshot: &WorldSnapshot, combat: bool) -> Result<(
         }
         if unit.fields.iter().any(|(name, fact)| {
             name.starts_with(BURROW_FIELD_PREFIX)
-                && !matches!(laboratory_fact_value(fact, snapshot.tick), Some(Value::Bool(_)))
+                && !matches!(
+                    laboratory_fact_value(fact, snapshot.tick),
+                    Some(Value::Bool(_))
+                )
         }) {
             return Err(precondition(format!(
                 "unit {} has unavailable burrow membership before combat progress",
@@ -1008,7 +1210,12 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
         if now < arrives {
             continue;
         }
-        if field_text(entity(snapshot, hostile)?, THREAT_STATUS_FIELD, snapshot.tick) != Some(THREAT_ATTACKING) {
+        if field_text(
+            entity(snapshot, hostile)?,
+            THREAT_STATUS_FIELD,
+            snapshot.tick,
+        ) != Some(THREAT_ATTACKING)
+        {
             changed |= write_fields(
                 snapshot,
                 hostile,
@@ -1029,7 +1236,10 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
                 .filter(|unit| {
                     unit.kind == EntityKind::Unit
                         && is_alive(unit, snapshot.tick)
-                        && matches!(field_value(unit, SQUAD_FIELD, snapshot.tick), Some(Value::Entity(_)))
+                        && matches!(
+                            field_value(unit, SQUAD_FIELD, snapshot.tick),
+                            Some(Value::Entity(_))
+                        )
                 })
                 .count() as u64;
             let creature = entity(snapshot, hostile)?;
@@ -1061,7 +1271,8 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
                             && is_alive(unit, snapshot.tick)
                             && unit.fields.iter().all(|(name, fact)| {
                                 !name.starts_with(BURROW_FIELD_PREFIX)
-                                    || laboratory_fact_value(fact, snapshot.tick) == Some(&Value::Bool(false))
+                                    || laboratory_fact_value(fact, snapshot.tick)
+                                        == Some(&Value::Bool(false))
                             })
                     })
                     .map(|unit| unit.id);
@@ -1105,7 +1316,11 @@ fn advance_metabolism(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool
         return Ok(false);
     };
     require_population_fields(snapshot, false)?;
-    let before = field_u64(entity(snapshot, ledger)?, METABOLISM_TICKS_FIELD, snapshot.tick)?;
+    let before = field_u64(
+        entity(snapshot, ledger)?,
+        METABOLISM_TICKS_FIELD,
+        snapshot.tick,
+    )?;
     let after = before.saturating_add(elapsed);
     let living: Vec<EntityId> = snapshot
         .graph
@@ -1174,6 +1389,148 @@ fn entity(snapshot: &WorldSnapshot, id: EntityId) -> Result<&EntityRecord> {
     })
 }
 
+enum ProductionGate {
+    Ready { unit_limit: u64 },
+    Blocked(String),
+}
+
+fn completed_order_blocker(
+    snapshot: &WorldSnapshot,
+    dependent: EntityId,
+    name: &str,
+) -> Option<String> {
+    let mut matching = None;
+    for order in snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|entity| entity.kind.as_str() == EntityKind::WorkOrder.as_str())
+    {
+        let Some(observed_name) = field_text(order, WORK_ORDER_NAME_FIELD, snapshot.tick) else {
+            return Some(format!(
+                "completed order {name:?} cannot be resolved uniquely: a work-order name is not established"
+            ));
+        };
+        if observed_name != name {
+            continue;
+        }
+        if matching.is_some() {
+            return Some(format!("completed order {name:?} is ambiguous"));
+        }
+        matching = Some(order);
+    }
+    let Some(order) = matching else {
+        return Some(format!("completed order {name:?} is not established"));
+    };
+    if order.id == dependent {
+        return Some(format!(
+            "completed order {name:?} refers to this work order itself"
+        ));
+    }
+    if field_text(order, STATUS_FIELD, snapshot.tick) != Some(STATUS_COMPLETE)
+        || field_value(order, AMOUNT_REMAINING_FIELD, snapshot.tick) != Some(&Value::U64(0))
+    {
+        return Some(format!(
+            "order {name:?} completion with zero remaining work is not established"
+        ));
+    }
+    None
+}
+
+fn production_gate(
+    snapshot: &WorldSnapshot,
+    id: EntityId,
+    conditions: &[WorkOrderCondition],
+    product: Option<(&str, u64)>,
+) -> ProductionGate {
+    if conditions.is_empty() {
+        return ProductionGate::Ready {
+            unit_limit: u64::MAX,
+        };
+    }
+    // Named dependency resolution needs a complete bounded domain, never a
+    // truncated first match. The empty conjunction performs no domain scan.
+    if snapshot.graph.entities.len() > 65_536 {
+        return ProductionGate::Blocked(
+            "work-order condition domain exceeds the 65536-entity reference bound".to_owned(),
+        );
+    }
+    let ledger = stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
+    let mut unit_limit = u64::MAX;
+    for condition in conditions {
+        match condition {
+            WorkOrderCondition::ItemCountBelow {
+                item_token,
+                threshold,
+            } => {
+                let field = item_stock_field(item_token);
+                let Some(Value::U64(held)) =
+                    ledger.and_then(|e| field_value(e, &field, snapshot.tick))
+                else {
+                    return ProductionGate::Blocked(format!(
+                        "item {item_token:?} count is not established in {field}"
+                    ));
+                };
+                let threshold = u64::from(*threshold);
+                if *held >= threshold {
+                    return ProductionGate::Blocked(format!(
+                        "item {item_token:?} count {held} is not below {threshold}"
+                    ));
+                }
+                if let Some((produced_field, per_unit)) = product
+                    && produced_field == field
+                {
+                    // Check before each indivisible production unit. At most
+                    // one unit may cross the threshold; no per-unit loop or
+                    // large elapsed interval can bypass the next check.
+                    unit_limit = unit_limit.min((threshold - held).div_ceil(per_unit));
+                }
+            }
+            WorkOrderCondition::MaterialAvailable {
+                material_token,
+                minimum,
+            } => {
+                let field = format!("{STOCK_MATERIAL_FIELD_PREFIX}{material_token}");
+                let Some(Value::U64(held)) =
+                    ledger.and_then(|e| field_value(e, &field, snapshot.tick))
+                else {
+                    return ProductionGate::Blocked(format!(
+                        "material {material_token:?} availability is not established in {field}"
+                    ));
+                };
+                if *held < u64::from(*minimum) {
+                    return ProductionGate::Blocked(format!(
+                        "material {material_token:?} count {held} is below required {minimum}"
+                    ));
+                }
+                // A condition is an availability gate, not an unstated recipe
+                // or reservation. No material is consumed by this predicate.
+            }
+            WorkOrderCondition::CompletedOrder { order_name } => {
+                if let Some(blocker) = completed_order_blocker(snapshot, id, order_name) {
+                    return ProductionGate::Blocked(blocker);
+                }
+            }
+        }
+    }
+    ProductionGate::Ready { unit_limit }
+}
+
+fn write_production_blocker(
+    snapshot: &mut WorldSnapshot,
+    id: EntityId,
+    blocker: Option<String>,
+) -> Result<bool> {
+    write_fields(
+        snapshot,
+        id,
+        vec![(
+            BLOCKED_BY_FIELD.to_owned(),
+            blocker.map_or(Value::Null, Value::Text),
+        )],
+    )
+}
+
 fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
     let order = entity(snapshot, id)?;
     let job = field_text(order, "job_token", snapshot.tick).ok_or_else(|| {
@@ -1185,27 +1542,36 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
     let work = field_u64(order, "work_ticks", snapshot.tick)?.saturating_add(elapsed);
     let remaining = field_u64(order, AMOUNT_REMAINING_FIELD, snapshot.tick)?;
     let product = work_order_product(job);
-    let blocker = work_order_blocker(snapshot, job);
-    // A stalled order accrues no work; it says what it is waiting for.
-    let blocked = write_fields(
-        snapshot,
-        id,
-        vec![(
-            BLOCKED_BY_FIELD.to_owned(),
-            blocker.clone().map_or(Value::Null, Value::Text),
-        )],
-    )?;
-    if blocker.is_some() {
-        return Ok(blocked);
+    let Some(stored) = field_value(order, WORK_ORDER_CONDITIONS_FIELD, snapshot.tick) else {
+        return write_production_blocker(snapshot, id, Some(
+            "work-order conditions are not established; legacy orders require an explicit condition record".to_owned(),
+        ));
+    };
+    let conditions = match decode_conditions(stored) {
+        Ok(conditions) => conditions,
+        Err(error) => return write_production_blocker(snapshot, id, Some(error.message)),
+    };
+    if let Some(blocker) = work_order_blocker(snapshot, job) {
+        return write_production_blocker(snapshot, id, Some(blocker));
     }
-    let produced = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
+    let unit_limit = match production_gate(snapshot, id, &conditions, product) {
+        ProductionGate::Ready { unit_limit } => unit_limit,
+        ProductionGate::Blocked(blocker) => {
+            // Previously earned partial work is retained; blocked elapsed
+            // ticks are discarded, not banked for a later favorable sample.
+            return write_production_blocker(snapshot, id, Some(blocker));
+        }
+    };
+    let possible = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
+    let produced = possible.min(unit_limit);
     let remaining = remaining - produced;
+    let mut changed = false;
     if produced > 0
         && let Some((stock_field, per_unit)) = product
         && let Some(ledger) = stock_ledger(snapshot)
     {
         let held = field_u64(entity(snapshot, ledger)?, stock_field, snapshot.tick)?;
-        write_fields(
+        changed |= write_fields(
             snapshot,
             ledger,
             vec![(
@@ -1214,11 +1580,21 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
             )],
         )?;
     }
+    let blocker = if remaining > 0 {
+        match production_gate(snapshot, id, &conditions, product) {
+            ProductionGate::Blocked(blocker) => Some(blocker),
+            ProductionGate::Ready { .. } => None,
+        }
+    } else {
+        None
+    };
+    let gated_after_progress = blocker.is_some();
+    changed |= write_production_blocker(snapshot, id, blocker)?;
     let mut fields = vec![
         (AMOUNT_REMAINING_FIELD.to_owned(), Value::U64(remaining)),
         (
             "work_ticks".to_owned(),
-            Value::U64(if remaining == 0 {
+            Value::U64(if remaining == 0 || gated_after_progress {
                 0
             } else {
                 work % WORK_ORDER_TICKS_PER_UNIT
@@ -1231,7 +1607,7 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
             Value::Text(STATUS_COMPLETE.to_owned()),
         ));
     }
-    Ok(write_fields(snapshot, id, fields)? | blocked)
+    Ok(write_fields(snapshot, id, fields)? | changed)
 }
 
 fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
@@ -1274,12 +1650,13 @@ fn advance_designation(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64)
         ));
     };
     let area = MapCuboid::new(min, max)?;
-    let target = u32::try_from(field_u64(designation, "target_tile_code", snapshot.tick)?).map_err(|_| {
-        DfmcpError::new(
-            ErrorCode::InternalInvariantViolation,
-            "dig designation target tile code is invalid",
-        )
-    })?;
+    let target = u32::try_from(field_u64(designation, "target_tile_code", snapshot.tick)?)
+        .map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "dig designation target tile code is invalid",
+            )
+        })?;
     let work = field_u64(designation, "work_ticks", snapshot.tick)?.saturating_add(elapsed);
     let budget = work / DIG_TICKS_PER_TILE;
     let mut changed = false;

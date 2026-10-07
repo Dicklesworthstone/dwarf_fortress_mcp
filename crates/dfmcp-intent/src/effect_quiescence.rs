@@ -124,11 +124,20 @@ pub fn inspect_effect_work(
                     == Some(&Value::Text(effects::building_kind_label(kind)))
         }
         Action::CreateWorkOrder {
-            job_token, amount, ..
+            name,
+            job_token,
+            amount,
+            conditions,
         } => {
-            field(entity, "job_token", snapshot.tick) == Some(&Value::Text(job_token.clone()))
+            let expected_conditions = effects::work_order_conditions_value(conditions)?;
+            field(entity, effects::WORK_ORDER_NAME_FIELD, snapshot.tick)
+                == Some(&Value::Text(name.clone()))
+                && field(entity, "job_token", snapshot.tick)
+                    == Some(&Value::Text(job_token.clone()))
                 && field(entity, "amount_total", snapshot.tick)
                     == Some(&Value::U64(u64::from(*amount)))
+                && field(entity, effects::WORK_ORDER_CONDITIONS_FIELD, snapshot.tick)
+                    == Some(&expected_conditions)
         }
         _ => false,
     };

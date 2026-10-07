@@ -290,6 +290,82 @@ fn missing_untrusted_or_replaced_dispatched_work_cannot_certify_or_mutate_a_drai
 }
 
 #[test]
+fn work_order_drain_requires_the_original_name_and_canonical_condition_evidence() -> Result<()> {
+    for mutation in 0..6 {
+        let (mut adapter, action_id, entity_id) = started(order(), false, None)?;
+        let proof = fail(&mut adapter, action_id)?;
+        let field = if mutation % 2 == 0 {
+            effects::WORK_ORDER_NAME_FIELD
+        } else {
+            effects::WORK_ORDER_CONDITIONS_FIELD
+        };
+        let entity = adapter
+            .snapshot
+            .graph
+            .entities
+            .get_mut(&entity_id)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "work order fixture missing",
+                )
+            })?;
+        if matches!(mutation, 2 | 3) {
+            entity.fields.remove(field);
+        } else {
+            let fact = entity.fields.get_mut(field).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "work order identity missing",
+                )
+            })?;
+            if mutation <= 1 {
+                let value = if mutation == 0 {
+                    Value::Text("a different order".to_owned())
+                } else {
+                    effects::work_order_conditions_value(&[
+                        dfmcp_intent::WorkOrderCondition::MaterialAvailable {
+                            material_token: "WOOD".to_owned(),
+                            minimum: 1,
+                        },
+                    ])?
+                };
+                // Keep the replacement well-formed and source-eligible: it
+                // must fail ownership, not merely presence or provenance.
+                *fact = dfmcp_world::Fact::known(
+                    value,
+                    fact.observed_at,
+                    fact.source.clone(),
+                    fact.source_digest,
+                );
+                assert!(dfmcp_world::laboratory_fact_value(fact, adapter.snapshot.tick).is_some());
+            } else {
+                fact.source = if mutation == 4 {
+                    FactSource::AgentAssertion("claimed order name".to_owned())
+                } else {
+                    FactSource::Replay
+                };
+            }
+        }
+        adapter.snapshot.refresh_hash();
+        let before = adapter.snapshot.clone();
+        let transcript = adapter.transcript.clone();
+        assert!(matches!(
+            adapter.action_work_state(action_id)?,
+            EffectWorkState::Unknown { .. }
+        ));
+        assert_eq!(
+            refusal(adapter.drain_action_work(action_id, &context(&adapter)))?.code,
+            ErrorCode::CancellationIncomplete
+        );
+        assert_eq!(adapter.snapshot, before);
+        assert_eq!(adapter.transcript, transcript);
+        assert_eq!(adapter.action_receipt(action_id), Some(&proof));
+    }
+    Ok(())
+}
+
+#[test]
 fn terminal_work_cleanup_rechecks_authority_expiry_scope_and_action_budget() -> Result<()> {
     let area = MapCuboid::new(MapCoord::new(1, 1, 10), MapCoord::new(2, 2, 10))?;
     for denial in 0..4 {

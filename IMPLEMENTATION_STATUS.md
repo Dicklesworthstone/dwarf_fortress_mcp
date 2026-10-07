@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Conditional production is part of actual reference effects (2026-10-07)
+
+Work orders now enforce their sealed `ItemCountBelow`, `MaterialAvailable` and
+`CompletedOrder` conjunctions. New orders persist source-qualified names and an
+explicit canonical condition list, including an empty list for unconditional
+work. Action normalization removes exact duplicate conditions. Completion proof
+and physical ownership inspection bind the original name, job and conditions.
+
+Eligible inventory counts release stock and material gates; unavailable,
+untrusted, inconsistent, future or malformed observations remain blockers.
+Named dependencies require one established order name, complete status and zero
+remaining work. Material gates do not imply consumption or reservation.
+Same-product thresholds bound production arithmetically at the first unit that
+crosses the threshold. Blocked elapsed time is not banked; earlier partial work
+is retained. Forecasts use this same reference transition logic. The existing
+entity ordering and metabolism phase still affect when a later advance sees
+newly released gates; wait-partition invariance is not claimed.
+
+The MCP action grammar and production quota compiler preserve conditions and
+show them in sealed step views. Legacy orders missing condition records cannot
+prove that their original conditions were empty and stay visibly blocked.
+Stronger default proofs can make an old durable plan's digest unreproducible;
+the existing indeterminate recovery path retains it rather than retrying it.
+The exact JSON shapes and namespaces are in `docs/LAB_SEMANTIC_ACTIONS.md`.
+
+**Evidence:** all 151 actual intent tests pass, including nine condition-effect
+regressions and duplicate-conjunction normalization. Source and focused tests
+were independently reviewed. Four new MCP parser/compiler tests and a six-case
+name/condition ownership-mutation regression are checked in but not yet executed:
+the isolated MCP build was stopped under shared cgroup memory pressure. This
+increment does not claim full workspace, native or live qualification.
+
 ### Physical reference work and immutable goal outcomes (2026-10-07)
 
 `inspect_effect_work` distinguishes never-dispatched, active, quiescent and

@@ -16,11 +16,12 @@ use dfmcp_core::{
 use dfmcp_intent::effects;
 use dfmcp_intent::{
     Action, BuildingKind, DigMode, MaterialSelector, PreparedPlan, RequestedAction,
+    WorkOrderCondition,
 };
 use dfmcp_world::terrain::{region_tiles, uniform_chunk, validate_region};
 use dfmcp_world::{
     ChunkCoord, CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value,
-    WorldGraph, WorldSnapshot, tile_codes,
+    WorldGraph, WorldSnapshot, laboratory_fact_value, tile_codes,
 };
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
@@ -275,6 +276,74 @@ struct StepSpec {
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum WorkOrderConditionSpec {
+    ItemCountBelow {
+        item_token: String,
+        threshold: u32,
+    },
+    MaterialAvailable {
+        material_token: String,
+        minimum: u32,
+    },
+    CompletedOrder {
+        order_name: String,
+    },
+}
+
+fn work_order_conditions(specs: Vec<WorkOrderConditionSpec>) -> Result<Vec<WorkOrderCondition>> {
+    if specs.len() > effects::MAX_WORK_ORDER_CONDITIONS {
+        return Err(invalid("work order exceeds the 64-condition bound"));
+    }
+    specs
+        .into_iter()
+        .map(|spec| {
+            Ok(match spec {
+                WorkOrderConditionSpec::ItemCountBelow {
+                    item_token,
+                    threshold,
+                } => WorkOrderCondition::ItemCountBelow {
+                    item_token: name(item_token, "item token")?,
+                    threshold,
+                },
+                WorkOrderConditionSpec::MaterialAvailable {
+                    material_token,
+                    minimum,
+                } => WorkOrderCondition::MaterialAvailable {
+                    material_token: name(material_token, "material token")?,
+                    minimum,
+                },
+                WorkOrderConditionSpec::CompletedOrder { order_name } => {
+                    WorkOrderCondition::CompletedOrder {
+                        order_name: name(order_name, "work order dependency")?,
+                    }
+                }
+            })
+        })
+        .collect()
+}
+
+fn work_order_condition_json(condition: &WorkOrderCondition) -> Json {
+    match condition {
+        WorkOrderCondition::ItemCountBelow {
+            item_token,
+            threshold,
+        } => json!({
+            "kind": "item_count_below", "item_token": item_token, "threshold": threshold,
+        }),
+        WorkOrderCondition::MaterialAvailable {
+            material_token,
+            minimum,
+        } => json!({
+            "kind": "material_available", "material_token": material_token, "minimum": minimum,
+        }),
+        WorkOrderCondition::CompletedOrder { order_name } => json!({
+            "kind": "completed_order", "order_name": order_name,
+        }),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ActionSpec {
     Pause {
         paused: bool,
@@ -301,6 +370,8 @@ enum ActionSpec {
         name: String,
         job_token: String,
         amount: u32,
+        #[serde(default)]
+        conditions: Vec<WorkOrderConditionSpec>,
     },
     ConfigureStockpile {
         stockpile: String,
@@ -443,11 +514,12 @@ fn action(spec: ActionSpec) -> Result<Action> {
             name: order,
             job_token,
             amount,
+            conditions,
         } => Action::CreateWorkOrder {
             name: name(order, "work order name")?,
             job_token: name(job_token, "job token")?,
             amount,
-            conditions: Vec::new(),
+            conditions: work_order_conditions(conditions)?,
         },
         ActionSpec::ConfigureStockpile {
             stockpile,
@@ -727,7 +799,7 @@ pub(crate) fn is_production_objective(raw: &str) -> bool {
 
 /// The laboratory recipe catalog, matching the reference effects exactly:
 /// a brewing batch yields 5 drink and a meal batch 5 food, from no modeled
-/// inputs. Lab work orders need no workshop.
+/// material inputs. Completed workshops and eligible workers are required.
 fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
     let mut compiler = dfmcp_intent::ProductionLogisticsCompiler::without_recipes();
     for (output, job, workshop) in [
@@ -771,18 +843,35 @@ pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<
             "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD\",\"minimum\":n}}]}}: {error}"
         ))
     })?;
+    let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
+    let snapshot = evidence.snapshot();
     let mut inventory = dfmcp_intent::InventoryStockpile::new();
-    if let Some(ledger) =
-        effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
-    {
-        for (token, field) in [
-            ("DRINK", effects::STOCK_DRINK_FIELD),
-            ("FOOD", effects::STOCK_FOOD_FIELD),
-        ] {
-            if let Some(Value::U64(held)) = ledger.fields.get(field).map(|f| &f.value) {
-                inventory.set_stock(token, u32::try_from(*held).unwrap_or(u32::MAX));
-            }
+    let ledger = effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
+    for (token, field) in [
+        ("DRINK", effects::STOCK_DRINK_FIELD),
+        ("FOOD", effects::STOCK_FOOD_FIELD),
+    ] {
+        if !objective.quotas.iter().any(|quota| quota.item == token) {
+            continue;
         }
+        let held = ledger
+            .and_then(|ledger| ledger.fields.get(field))
+            .and_then(|fact| laboratory_fact_value(fact, snapshot.tick));
+        let Some(Value::U64(held)) = held else {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!(
+                    "production quota for {token} requires an established laboratory stock count in {field}"
+                ),
+            ));
+        };
+        let count = u32::try_from(*held).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "observed production stock exceeds the compiler's exact u32 count bound",
+            )
+        })?;
+        inventory.set_stock(token, count);
     }
     let quotas: Vec<dfmcp_intent::ProductionQuota> = objective
         .quotas
@@ -848,6 +937,11 @@ pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<
                     "name": format!("{} for quota", step.output_token.to_lowercase()),
                     "job_token": step.job_token,
                     "amount": step.batches,
+                    "conditions": [{
+                        "kind": "item_count_below",
+                        "item_token": step.output_token,
+                        "threshold": step.inventory_threshold,
+                    }],
                 },
                 "depends_on": step.depends_on,
             })
@@ -1184,7 +1278,7 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                     Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
                 )
                 .then(|| effects::created_entity_id(&step.idempotency_key, 0).get().to_string());
-                json!({
+                let mut row = json!({
                     "step": step.id.get(),
                     "kind": action_kind(&step.action),
                     "capability": step.required_capability.as_str(),
@@ -1199,7 +1293,11 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                         "stable_observations": obligation.stable_for_observations,
                     })),
                     "compensable": step.compensation.is_some(),
-                })
+                });
+                if let Action::CreateWorkOrder { conditions, .. } = &step.action {
+                    row["conditions"] = Json::Array(conditions.iter().map(work_order_condition_json).collect());
+                }
+                row
             })
             .collect(),
     )
@@ -2027,6 +2125,168 @@ mod tests {
         ] {
             assert!(parse_steps(bad).is_err(), "{bad}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn conditional_work_orders_parse_and_render_every_typed_condition() -> Result<()> {
+        let conditions = json!([
+            {"kind":"item_count_below","item_token":"DRINK","threshold":50},
+            {"kind":"material_available","material_token":"PLANT","minimum":2},
+            {"kind":"completed_order","order_name":"first batch"},
+        ]);
+        let request = json!([{"action":{
+            "kind":"create_work_order","name":"conditional","job_token":"BREW_DRINK",
+            "amount":2,"conditions":conditions,
+        }}]);
+        let steps = parse_steps(&request.to_string())?;
+        let Action::CreateWorkOrder {
+            conditions: parsed, ..
+        } = &steps[0].action
+        else {
+            return Err(invalid("wrong parsed action"));
+        };
+        assert_eq!(
+            parsed
+                .iter()
+                .map(work_order_condition_json)
+                .collect::<Vec<_>>(),
+            conditions
+                .as_array()
+                .cloned()
+                .ok_or_else(|| invalid("missing test conditions"))?
+        );
+        let empty = parse_steps(
+            r#"[{"action":{"kind":"create_work_order","name":"legacy request","job_token":"MAKE_TEST","amount":1}}]"#,
+        )?;
+        assert!(
+            matches!(&empty[0].action, Action::CreateWorkOrder { conditions, .. } if conditions.is_empty())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn condition_requests_reject_unknown_shapes_and_excessive_bounds() {
+        let mut bad = vec![
+            json!([{"kind":"unknown","item_token":"DRINK","threshold":1}]),
+            json!([{"kind":"item_count_below","item_token":"DRINK","threshold":1,"extra":true}]),
+            json!([{"kind":"item_count_below","item_token":"DRINK","threshold":-1}]),
+            json!([{"kind":"material_available","material_token":"WOOD","minimum":u64::from(u32::MAX)+1}]),
+            json!([{"kind":"completed_order","order_name":""}]),
+            json!([{"kind":"completed_order","order_name":"x".repeat(MAX_NAME_BYTES+1)}]),
+        ];
+        bad.push(Json::Array(vec![
+            json!({"kind":"completed_order","order_name":"x"});
+            effects::MAX_WORK_ORDER_CONDITIONS + 1
+        ]));
+        for conditions in bad {
+            let request = json!([{"action":{
+                "kind":"create_work_order","name":"bad","job_token":"MAKE_TEST",
+                "amount":1,"conditions":conditions,
+            }}]);
+            assert!(parse_steps(&request.to_string()).is_err(), "{request}");
+        }
+    }
+
+    #[test]
+    fn production_objectives_preserve_stock_thresholds_in_executable_actions() -> Result<()> {
+        let snapshot = scenario_snapshot("starter_fortress", FortressId::new(3), false)?;
+        let (raw, analysis) = production_actions(
+            &snapshot,
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":46},{"item":"FOOD","minimum":66}]}"#,
+        )?;
+        assert_eq!(analysis["feasible"], true);
+        let steps = parse_steps(&raw)?;
+        assert_eq!(steps.len(), 2);
+        for step in &steps {
+            let Action::CreateWorkOrder {
+                job_token,
+                amount,
+                conditions,
+                ..
+            } = &step.action
+            else {
+                return Err(invalid("wrong production action"));
+            };
+            assert_eq!(*amount, 2);
+            let (item, threshold) = if job_token == "BREW_DRINK" {
+                ("DRINK", 46)
+            } else {
+                ("FOOD", 66)
+            };
+            assert_eq!(
+                conditions,
+                &vec![WorkOrderCondition::ItemCountBelow {
+                    item_token: item.to_owned(),
+                    threshold,
+                }]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn production_objectives_require_current_source_qualified_stock_counts() -> Result<()> {
+        let original = scenario_snapshot("starter_fortress", FortressId::new(3), false)?;
+        let request = r#"{"template":"production","quotas":[{"item":"DRINK","minimum":50}]}"#;
+        let fact = original.graph.entities[&starter::STOCK_LEDGER].fields
+            [effects::STOCK_DRINK_FIELD]
+            .clone();
+        let mut variants = vec![None];
+        for source in [
+            FactSource::Replay,
+            FactSource::AgentAssertion("unproved stock".to_owned()),
+            FactSource::Derived("unregistered forecast".to_owned()),
+        ] {
+            let mut changed = fact.clone();
+            changed.source = source;
+            variants.push(Some(changed));
+        }
+        for presence in [
+            dfmcp_world::FactPresence::Absent,
+            dfmcp_world::FactPresence::Unknown("not captured".to_owned()),
+            dfmcp_world::FactPresence::Omitted("not in profile".to_owned()),
+            dfmcp_world::FactPresence::Stale(original.anchor()),
+            dfmcp_world::FactPresence::Known(Value::U64(0)),
+        ] {
+            let mut changed = fact.clone();
+            changed.presence = Some(presence);
+            variants.push(Some(changed));
+        }
+        let mut future = fact.clone();
+        future.observed_at = GameTick(u64::MAX);
+        variants.push(Some(future));
+        for replacement in variants {
+            let mut snapshot = original.clone();
+            let ledger = snapshot
+                .graph
+                .entities
+                .get_mut(&starter::STOCK_LEDGER)
+                .ok_or_else(|| invalid("missing fixture ledger"))?;
+            match replacement {
+                Some(fact) => {
+                    ledger
+                        .fields
+                        .insert(effects::STOCK_DRINK_FIELD.to_owned(), fact);
+                }
+                None => {
+                    ledger.fields.remove(effects::STOCK_DRINK_FIELD);
+                }
+            }
+            snapshot.refresh_hash();
+            assert!(
+                production_actions(&snapshot, request)
+                    .is_err_and(|e| e.code == ErrorCode::PreconditionsFailed)
+            );
+        }
+        let mut no_ledger = original.clone();
+        no_ledger.graph.entities.remove(&starter::STOCK_LEDGER);
+        no_ledger.refresh_hash();
+        assert!(
+            production_actions(&no_ledger, request)
+                .is_err_and(|e| e.code == ErrorCode::PreconditionsFailed)
+        );
+        assert!(production_actions(&original, request).is_ok());
         Ok(())
     }
 
