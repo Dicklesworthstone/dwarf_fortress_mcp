@@ -284,11 +284,30 @@ pub(crate) fn session_anchor(session_id_hex: &str, uri: &str) -> McpResult<Vec<R
                 return Err(denial(operation, error));
             }
             let snapshot = guard.adapter.snapshot();
+            let v2 = dfmcp_core::StateAnchorV2::from_v1(
+                snapshot.anchor(),
+                dfmcp_core::AnchorEpochs::laboratory(snapshot.fortress_id),
+            )
+            .map_err(|error| denial(operation, error))?;
             let payload = json!({
                 "ok": true,
                 "resource": uri,
                 "fortress_id": snapshot.fortress_id.get().to_string(),
                 "anchor": anchor_json(&snapshot.anchor()),
+                "anchor_v2": {
+                    "fortress_lineage": v2.fortress_lineage.to_hex(),
+                    "observation_epoch": v2.observation_epoch,
+                    "snapshot_sequence": v2.snapshot_sequence,
+                    "game_tick": v2.game_tick.map(|tick| tick.0),
+                    "bridge_generation": v2.bridge_generation,
+                    "bridge_protocol": v2.bridge_protocol,
+                    "adapter_epoch": v2.adapter_epoch,
+                    "schema_epoch": v2.schema_epoch,
+                    "policy_epoch": v2.policy_epoch,
+                    "semantic_world_root": v2.semantic_world_root.to_hex(),
+                    "digest": v2.digest().to_hex(),
+                    "note": "complete version tuple; a changed observation_epoch invalidates every older handle",
+                },
                 "paused": snapshot.paused,
             });
             Ok(text_content(uri, payload.to_string()))

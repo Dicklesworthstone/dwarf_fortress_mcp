@@ -165,6 +165,45 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
         if let Some(work) = turn.get_mut("active_work").and_then(Value::as_object_mut) {
             work.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
         }
+        // Attention and recommendations keep what to act on, not boilerplate.
+        if let Some(items) = turn.get_mut("attention").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                if let Some(map) = item.as_object_mut() {
+                    map.retain(|key, _| {
+                        matches!(
+                            key.as_str(),
+                            "attention_id"
+                                | "category"
+                                | "severity"
+                                | "urgency"
+                                | "finding"
+                                | "remedy"
+                                | "surprise"
+                                | "subjects"
+                        )
+                    });
+                }
+            }
+        }
+        if let Some(items) = turn
+            .get_mut("recommendations")
+            .and_then(Value::as_array_mut)
+        {
+            for item in items.iter_mut() {
+                if let Some(map) = item.as_object_mut() {
+                    map.retain(|key, _| {
+                        matches!(
+                            key.as_str(),
+                            "recommendation_id"
+                                | "tool"
+                                | "arguments"
+                                | "reason"
+                                | "requires_confirmation"
+                        )
+                    });
+                }
+            }
+        }
         // Changes keep what changed; the anchors they span are in continuity.
         if let Some(changes) = turn.get_mut("changes").and_then(Value::as_array_mut) {
             for change in changes.iter_mut() {

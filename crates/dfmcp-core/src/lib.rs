@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod anchor_v2;
 pub mod clock;
 mod digest;
 mod error;
@@ -19,6 +20,7 @@ pub use agent::{
     Recommendation, RecommendationKind, RecoveryClass, RejectedDecision, SemanticInvocation,
     SurpriseKind, SurpriseRecord,
 };
+pub use anchor_v2::{AnchorContinuity, AnchorEpochs, StateAnchorV2};
 pub use clock::{ClockGovernor, ClockPolicy};
 pub use digest::{Digest32, sha256};
 pub use error::{DfmcpError, ErrorCode, Result};

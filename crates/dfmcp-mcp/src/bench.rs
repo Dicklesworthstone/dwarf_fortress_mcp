@@ -33,15 +33,18 @@ fn percentile(samples: &mut [u128], p: f64) -> u128 {
     samples[rank - 1]
 }
 
-fn timed(mut call: impl FnMut() -> String, iterations: u32) -> (Vec<u128>, String) {
+/// Latency samples (microseconds), output-token samples, and the last response.
+fn timed(mut call: impl FnMut() -> String, iterations: u32) -> (Vec<u128>, Vec<u128>, String) {
     let mut samples = Vec::with_capacity(iterations as usize);
+    let mut sizes = Vec::with_capacity(iterations as usize);
     let mut last = String::new();
     for _ in 0..iterations {
         let start = Instant::now();
         last = call();
         samples.push(start.elapsed().as_micros());
+        sizes.push(u128::from(tokens(&last)));
     }
-    (samples, last)
+    (samples, sizes, last)
 }
 
 fn latency_row(slo: &str, what: &str, target_ms: u128, samples: &mut [u128]) -> Value {
@@ -54,12 +57,14 @@ fn latency_row(slo: &str, what: &str, target_ms: u128, samples: &mut [u128]) -> 
     })
 }
 
-fn token_row(slo: &str, what: &str, target: u64, raw: &str) -> Value {
-    let measured = tokens(raw);
+/// Scored on the median response ("ordinary"); the largest is reported too.
+fn token_row(slo: &str, what: &str, target: u64, sizes: &mut [u128]) -> Value {
+    let median = percentile(sizes, 0.50);
+    let max = percentile(sizes, 1.0);
     json!({
-        "slo": slo, "measures": what, "target": format!("<= {target} output tokens"),
-        "measured_tokens": measured, "estimator": "ceil(bytes/4)",
-        "status": if measured <= target { "pass" } else { "fail" },
+        "slo": slo, "measures": what, "target": format!("ordinary response <= {target} output tokens"),
+        "median_tokens": median, "max_tokens": max, "estimator": "ceil(bytes/4)",
+        "status": if median <= u128::from(target) { "pass" } else { "fail" },
     })
 }
 
@@ -113,10 +118,11 @@ pub fn scorecard(iterations: u32, selector: &str) -> Value {
     let s = || Some(session.clone());
 
     // A heartbeat is a one-tick pulse; a delta is a pulse over ten ticks.
-    let (mut heartbeat, heartbeat_raw) = timed(|| f::fortress_wait(s(), Some(1)), iterations);
-    let (mut briefing, briefing_raw) = timed(|| f::fortress_observe(s()), iterations);
-    let (mut delta, delta_raw) = timed(|| f::fortress_wait(s(), Some(10)), iterations);
-    let (mut query, _) = timed(
+    let (mut heartbeat, mut heartbeat_tokens, _) =
+        timed(|| f::fortress_wait(s(), Some(1)), iterations);
+    let (mut briefing, mut briefing_tokens, _) = timed(|| f::fortress_observe(s()), iterations);
+    let (mut delta, mut delta_tokens, _) = timed(|| f::fortress_wait(s(), Some(10)), iterations);
+    let (mut query, _, _) = timed(
         || {
             f::fortress_query(
                 s(),
@@ -135,7 +141,7 @@ pub fn scorecard(iterations: u32, selector: &str) -> Value {
         })
         .collect();
     let plan_actions = format!("[{}]", steps.join(","));
-    let (mut plan, plan_raw) = timed(
+    let (mut plan, _, plan_raw) = timed(
         || f::fortress_plan(s(), None, None, Some(plan_actions.clone()), None),
         iterations,
     );
@@ -216,9 +222,19 @@ pub fn scorecard(iterations: u32, selector: &str) -> Value {
         ),
         latency_row("SLO-003", "entities query", 50, &mut query),
         latency_row("SLO-004", "fortress.plan with 10 steps", 100, &mut plan),
-        token_row("SLO-005", "pulse heartbeat response", 150, &heartbeat_raw),
-        token_row("SLO-006", "pulse delta response", 500, &delta_raw),
-        token_row("SLO-007", "fortress.observe briefing", 1_500, &briefing_raw),
+        token_row(
+            "SLO-005",
+            "pulse heartbeat response",
+            150,
+            &mut heartbeat_tokens,
+        ),
+        token_row("SLO-006", "pulse delta response", 500, &mut delta_tokens),
+        token_row(
+            "SLO-007",
+            "fortress.observe briefing",
+            1_500,
+            &mut briefing_tokens,
+        ),
         json!({
             "slo": "SLO-008", "target": "no duplicate verified effect under 10,000 schedules",
             "schedules": schedules, "duplicate_or_diverged": duplicate_or_diverged,

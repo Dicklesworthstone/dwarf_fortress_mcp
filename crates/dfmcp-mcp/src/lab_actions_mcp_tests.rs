@@ -2087,3 +2087,51 @@ fn observation_profiles_are_semantic_contracts() -> TestResult {
     assert!(turn["coverage"]["defaults_elided"].is_string());
     Ok(())
 }
+
+#[test]
+fn the_v2_anchor_is_one_complete_tuple_and_restore_opens_a_new_epoch() -> TestResult {
+    let session = open("72220", false, &[("restore", "guarded")])?;
+    let read = |session: &str| -> std::result::Result<Value, Box<dyn std::error::Error>> {
+        let uri = format!("df://session/{session}/anchor");
+        let contents =
+            crate::resources::session_anchor(session, &uri).map_err(|e| format!("{e:?}"))?;
+        let text = serde_json::to_value(&contents)?;
+        Ok(parsed(text[0]["text"].as_str().ok_or("text")?)?["anchor_v2"].clone())
+    };
+    let checkpoint = parsed(&fortress_checkpoint(Some(session.clone()), None))?;
+    let before = read(&session)?;
+    for key in [
+        "fortress_lineage",
+        "observation_epoch",
+        "snapshot_sequence",
+        "game_tick",
+        "bridge_generation",
+        "bridge_protocol",
+        "adapter_epoch",
+        "schema_epoch",
+        "policy_epoch",
+        "semantic_world_root",
+        "digest",
+    ] {
+        assert!(!before[key].is_null(), "{key} missing: {before}");
+    }
+    parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+    let advanced = read(&session)?;
+    assert_eq!(advanced["observation_epoch"], before["observation_epoch"]);
+    assert_ne!(advanced["digest"], before["digest"]);
+    let restored = parsed(&fortress_restore(
+        Some(session.clone()),
+        checkpoint["checkpoint_id"]
+            .as_str()
+            .ok_or("checkpoint")?
+            .to_owned(),
+    ))?;
+    assert_eq!(restored["ok"], true, "{restored}");
+    let after = read(&session)?;
+    assert!(
+        after["observation_epoch"].as_u64() > before["observation_epoch"].as_u64(),
+        "restore must open a new observation epoch: {before} -> {after}"
+    );
+    assert_eq!(after["fortress_lineage"], before["fortress_lineage"]);
+    Ok(())
+}
