@@ -251,6 +251,14 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.receipt)
     }
 
+    /// The immutable original commit that owns this action, without polling
+    /// or reconstructing a plan from its current proof state.
+    #[must_use]
+    pub fn action_plan_receipt(&self, action_id: ActionId) -> Option<&CommitReceipt> {
+        let action = self.actions.get(&action_id)?;
+        self.commits.get(&action.plan_id)
+    }
+
     /// The last receipt of a committed plan's step, if it was committed.
     #[must_use]
     pub fn step_receipt(&self, plan_id: PlanId, step_id: StepId) -> Option<&ActionReceipt> {
@@ -282,6 +290,22 @@ impl MemoryAdapter {
         )
     }
 
+    /// Exact physical identities still covered by retained dispatch records,
+    /// including records whose goal proof is already terminal. This iterator
+    /// only reads bookkeeping and never polls or dispatches a prepared step.
+    pub fn known_work_entity_ids(&self) -> impl Iterator<Item = dfmcp_core::EntityId> + '_ {
+        self.actions.values().filter_map(|action| {
+            (action.dispatched
+                && matches!(
+                    &action.step.action,
+                    Action::DesignateDig { .. }
+                        | Action::Build { .. }
+                        | Action::CreateWorkOrder { .. }
+                ))
+            .then(|| effects::created_entity_id(&action.step.idempotency_key, 0))
+        })
+    }
+
     /// Stop remaining physical work of an already terminal action under a fresh
     /// scoped grant. Its Failed/Verified/etc. proof receipt remains byte-for-byte
     /// unchanged. Nonterminal work must use request_cancel/finalize_cancel.
@@ -289,6 +313,17 @@ impl MemoryAdapter {
     pub fn drain_action_work(
         &mut self,
         action_id: ActionId,
+        context: &OperationContext,
+    ) -> Result<EffectDrainReceipt> {
+        self.drain_action_work_in_mode(action_id, CancelMode::StopFutureSteps, context)
+    }
+
+    /// Terminal cleanup never compensates history. Emergency mode additionally
+    /// pauses under current clock authority within the same atomic transaction.
+    pub fn drain_action_work_in_mode(
+        &mut self,
+        action_id: ActionId,
+        mode: CancelMode,
         context: &OperationContext,
     ) -> Result<EffectDrainReceipt> {
         self.check_anchor(context.anchor)?;
@@ -307,11 +342,48 @@ impl MemoryAdapter {
         }
         let prior = self.clone();
         let result = (|| {
-            let (before, after, stopped_work) =
-                drain_step_work(&mut self.snapshot, &action.step, action.dispatched, context)?;
+            let mut drain_context = context.clone();
+            let emergency_pause =
+                mode == CancelMode::EmergencyPauseAndDrain && !self.snapshot.paused;
+            if mode == CancelMode::EmergencyPauseAndDrain {
+                context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)?;
+            }
+            if emergency_pause {
+                drain_context.budget.max_actions = drain_context
+                    .budget
+                    .max_actions
+                    .checked_sub(1)
+                    .ok_or_else(|| {
+                        DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "emergency pause requires an available action budget",
+                        )
+                    })?;
+                apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
+            }
+            let (before, after, stopped_work) = drain_step_work(
+                &mut self.snapshot,
+                &action.step,
+                action.dispatched,
+                &drain_context,
+            )?;
             let observed_anchor = self.snapshot.anchor();
-            if stopped_work {
+            if stopped_work || emergency_pause {
                 self.record_event(LabEvent::EffectDrained(action_id, observed_anchor));
+            }
+            let mut drain_evidence = vec![evidence(
+                observed_anchor,
+                EvidenceKind::Postcondition,
+                &format!(
+                    "physical work for action {action_id} is quiescent; terminal proof retained"
+                ),
+            )];
+            if emergency_pause {
+                drain_evidence.push(evidence(
+                    observed_anchor,
+                    EvidenceKind::Postcondition,
+                    "emergency cleanup paused the fortress under current clock authority",
+                ));
             }
             Ok(EffectDrainReceipt {
                 action_id,
@@ -319,13 +391,7 @@ impl MemoryAdapter {
                 after,
                 observed_anchor,
                 stopped_work,
-                evidence: vec![evidence(
-                    observed_anchor,
-                    EvidenceKind::Postcondition,
-                    &format!(
-                        "physical work for action {action_id} is quiescent; terminal proof retained"
-                    ),
-                )],
+                evidence: drain_evidence,
             })
         })();
         if result.is_err() {
@@ -1225,10 +1291,15 @@ impl GameAdapter for MemoryAdapter {
                 if action.cancel_mode == Some(mode) {
                     return Ok(replayed_cancel_receipt(action_id, &action));
                 }
-                return Err(DfmcpError::new(
-                    ErrorCode::Conflict,
-                    "cancellation was already requested with a different mode",
-                ));
+                // A rejected or no-longer-authorized compensation must not
+                // trap running work forever. The caller may narrow an existing
+                // request to an explicitly authorized stop without compensation.
+                if mode != CancelMode::StopFutureSteps {
+                    return Err(DfmcpError::new(
+                        ErrorCode::Conflict,
+                        "cancellation was already requested with a different mode",
+                    ));
+                }
             }
             CommitState::Cancelled | CommitState::Compensated => {
                 return Ok(replayed_cancel_receipt(action_id, &action));

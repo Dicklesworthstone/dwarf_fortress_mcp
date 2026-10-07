@@ -195,6 +195,11 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     let restored = parsed(&fortress_restore(Some(second.clone()), checkpoint_id))?;
     assert_eq!(restored["ok"], true, "{restored}");
     assert_eq!(terrain(&second)?, at_checkpoint);
+    assert_eq!(restored["untracked_work"]["quiescent"], false, "{restored}");
+    assert_eq!(
+        restored["untracked_work"]["items"][0]["work_state"]["state"],
+        "active"
+    );
 
     // And the restore itself is durable.
     crate::server::simulate_durable_restart(Some(dir.0.clone()));
@@ -207,7 +212,36 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
         Some(0),
         "finished and abandoned commits are retired: {third}"
     );
-    assert_eq!(terrain(&id(&third, "session_id")?)?, at_checkpoint);
+    assert_eq!(third["untracked_work"]["quiescent"], false, "{third}");
+    assert_eq!(
+        third["untracked_work"]["items"][0]["work_state"]["state"],
+        "active"
+    );
+    let third_session = id(&third, "session_id")?;
+    assert_eq!(terrain(&third_session)?, at_checkpoint);
+
+    // Restoring invalidated the original handles and retired their journal,
+    // but the restored designation still owns its region in the real world.
+    let overlapping = plan_one_tile(&third_session)?;
+    let refused = parsed(&fortress_commit(
+        Some(third_session.clone()),
+        id(&overlapping, "plan_digest")?,
+    ))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+    let completed = parsed(&fortress_wait(Some(third_session.clone()), Some(250)))?;
+    assert_eq!(completed["ok"], true, "{completed}");
+    assert_eq!(
+        completed["untracked_work"]["quiescent"], true,
+        "{completed}"
+    );
+    assert_eq!(terrain(&third_session)?, finished);
+    let now_available = plan_one_tile(&third_session)?;
+    let committed = parsed(&fortress_commit(
+        Some(third_session),
+        id(&now_available, "plan_digest")?,
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
     Ok(())
 }
 
@@ -423,7 +457,6 @@ fn a_shared_durable_fortress_resumes_for_every_member() -> TestResult {
     Ok(())
 }
 
-
 fn open_shared_durable(
     selector: &str,
     scenario: Option<&str>,
@@ -472,7 +505,10 @@ fn recovered_proof_waits_for_fresh_cadence_after_the_world_completes() -> TestRe
     let first = id(&opened, "session_id")?;
     let planned = plan_one_tile(&first)?;
     assert_eq!(planned["steps"][0]["obligation"]["poll_interval_ticks"], 10);
-    let committed = parsed(&fortress_commit(Some(first.clone()), id(&planned, "plan_digest")?))?;
+    let committed = parsed(&fortress_commit(
+        Some(first.clone()),
+        id(&planned, "plan_digest")?,
+    ))?;
     assert_eq!(committed["ok"], true, "{committed}");
     let before = parsed(&fortress_wait(Some(first), Some(9)))?;
     assert_eq!(before["game_tick"], 10, "{before}");
@@ -483,7 +519,10 @@ fn recovered_proof_waits_for_fresh_cadence_after_the_world_completes() -> TestRe
     let early = parsed(&fortress_wait(Some(second.clone()), Some(1)))?;
     assert_eq!(early["ok"], true, "{early}");
     assert_eq!(early["game_tick"], 11, "{early}");
-    assert_eq!(early["carried_obligations"][0]["state"], "dispatched", "{early}");
+    assert_eq!(
+        early["carried_obligations"][0]["state"], "dispatched",
+        "{early}"
+    );
     assert_eq!(
         early["carried_obligations"][0]["stability"]["consecutive_observations"],
         0
@@ -498,15 +537,20 @@ fn recovered_proof_waits_for_fresh_cadence_after_the_world_completes() -> TestRe
     for _ in 0..3 {
         let doctor = parsed(&fortress_doctor(Some(second.clone())))?;
         assert_eq!(
-            doctor["durability"]["carried_obligations"][0]["state"],
-            "dispatched",
+            doctor["durability"]["carried_obligations"][0]["state"], "dispatched",
             "{doctor}"
         );
     }
     let eligible = parsed(&fortress_wait(Some(second), Some(9)))?;
     assert_eq!(eligible["game_tick"], 20, "{eligible}");
-    assert_eq!(eligible["carried_obligations"][0]["state"], "verified", "{eligible}");
-    assert_eq!(eligible["carried_obligations"][0]["proof_anchor"]["game_tick"], 20);
+    assert_eq!(
+        eligible["carried_obligations"][0]["state"], "verified",
+        "{eligible}"
+    );
+    assert_eq!(
+        eligible["carried_obligations"][0]["proof_anchor"]["game_tick"],
+        20
+    );
     Ok(())
 }
 
@@ -525,13 +569,16 @@ fn recovered_proof_keeps_its_original_deadline() -> TestResult {
         let first = id(&opened, "session_id")?;
         let planned = plan_one_tile(&first)?;
         let deadline = planned["steps"][0]["obligation"]["deadline_tick"]
-            .as_u64().ok_or("sealed deadline missing")?;
+            .as_u64()
+            .ok_or("sealed deadline missing")?;
         let committed = parsed(&fortress_commit(Some(first), id(&planned, "plan_digest")?))?;
         assert_eq!(committed["ok"], true, "{committed}");
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let resumed = open_durable(selector, None)?;
         let second = id(&resumed, "session_id")?;
-        let tick = resumed["anchor"]["game_tick"].as_u64().ok_or("resume tick missing")?;
+        let tick = resumed["anchor"]["game_tick"]
+            .as_u64()
+            .ok_or("resume tick missing")?;
         let waited = parsed(&fortress_wait(
             Some(second),
             Some(deadline - tick + u64::from(late)),
@@ -539,10 +586,16 @@ fn recovered_proof_keeps_its_original_deadline() -> TestResult {
         assert_eq!(waited["ok"], true, "{waited}");
         let proof = &waited["carried_obligations"][0];
         assert_eq!(proof["deadline_tick"], deadline, "{waited}");
-        assert_eq!(proof["state"], if late { "failed" } else { "verified" }, "{waited}");
+        assert_eq!(
+            proof["state"],
+            if late { "failed" } else { "verified" },
+            "{waited}"
+        );
         if late {
             assert!(
-                proof["failure_reason"].as_str().is_some_and(|reason| reason.contains("deadline")),
+                proof["failure_reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("deadline")),
                 "{waited}"
             );
         }
@@ -585,10 +638,12 @@ fn current_observe_authority_is_required_for_carried_proof() -> TestResult {
     // confer Observe authority when the common persistence hook runs.
     crate::server::with_session(
         &handle,
-        || Err(dfmcp_core::DfmcpError::new(
-            dfmcp_core::ErrorCode::InternalInvariantViolation,
-            "test session unavailable",
-        )),
+        || {
+            Err(dfmcp_core::DfmcpError::new(
+                dfmcp_core::ErrorCode::InternalInvariantViolation,
+                "test session unavailable",
+            ))
+        },
         |guard| guard.adapter.advance_ticks(20),
     )?;
     let doctor = parsed(&fortress_doctor(Some(second.clone())))?;
@@ -596,7 +651,9 @@ fn current_observe_authority_is_required_for_carried_proof() -> TestResult {
     let proof = &doctor["durability"]["carried_obligations"][0];
     assert_eq!(proof["state"], "dispatched", "{doctor}");
     assert!(
-        proof["observation_error"].as_str().is_some_and(|error| error.contains("capability_denied")),
+        proof["observation_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("capability_denied")),
         "{doctor}"
     );
     let denied = parsed(&fortress_wait(Some(second), Some(0)))?;
@@ -620,13 +677,22 @@ fn shared_members_cannot_bypass_an_unpublished_frontier_or_recover_twice() -> Te
     assert_eq!(b["ok"], true, "{b}");
     assert_eq!(b["durable"]["resumed"], false, "{b}");
     assert_eq!(b["durable"]["joined_existing"], true, "{b}");
-    assert_eq!(a["anchor"], b["anchor"], "a join must not create a recovery epoch");
+    assert_eq!(
+        a["anchor"], b["anchor"],
+        "a join must not create a recovery epoch"
+    );
     let (a, b) = (id(&a, "session_id")?, id(&b, "session_id")?);
     let planned = plan_one_tile(&a)?;
     crate::server::inject_durable_crash_after(1);
-    parsed(&fortress_commit(Some(a.clone()), id(&planned, "plan_digest")?))?;
+    parsed(&fortress_commit(
+        Some(a.clone()),
+        id(&planned, "plan_digest")?,
+    ))?;
     let blocked = parsed(&fortress_wait(Some(b.clone()), Some(1)))?;
-    assert_eq!(blocked["ok"], false, "a peer must see the same save fault: {blocked}");
+    assert_eq!(
+        blocked["ok"], false,
+        "a peer must see the same save fault: {blocked}"
+    );
     assert_eq!(blocked["error"]["code"], "adapter_unavailable", "{blocked}");
     let failed_join = open_shared_durable("881031", None)?;
     assert_eq!(failed_join["ok"], false, "{failed_join}");
@@ -638,16 +704,21 @@ fn shared_members_cannot_bypass_an_unpublished_frontier_or_recover_twice() -> Te
         "failed joins must not leave unreachable members: {c}"
     );
     assert_eq!(c["durable"]["resumed"], false, "{c}");
-    assert_eq!(c["anchor"]["game_tick"], 1, "the blocked peer did not advance time: {c}");
+    assert_eq!(
+        c["anchor"]["game_tick"], 1,
+        "the blocked peer did not advance time: {c}"
+    );
     let before = parsed(&fortress_doctor(Some(b)))?;
-    assert_eq!(before["durability"]["persisted_is_current"], true, "{before}");
+    assert_eq!(
+        before["durability"]["persisted_is_current"], true,
+        "{before}"
+    );
 
     crate::server::simulate_durable_restart(Some(dir.0.clone()));
     let resumed = open_shared_durable("881031", None)?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     assert_eq!(
-        resumed["durable"]["recovered_commits"][0]["steps"][0]["state"],
-        "dispatched",
+        resumed["durable"]["recovered_commits"][0]["steps"][0]["state"], "dispatched",
         "{resumed}"
     );
     let observed = parsed(&fortress_query(
@@ -667,10 +738,9 @@ fn shared_members_cannot_bypass_an_unpublished_frontier_or_recover_twice() -> Te
 #[test]
 fn durable_admission_fences_ownership_modes_and_already_resolved_sessions() -> TestResult {
     let _serial = serialized();
-    let dir = StateDir(std::env::temp_dir().join(format!(
-        "dfmcp-durable-ownership-{}",
-        std::process::id()
-    )));
+    let dir = StateDir(
+        std::env::temp_dir().join(format!("dfmcp-durable-ownership-{}", std::process::id())),
+    );
     let _ = std::fs::remove_dir_all(&dir.0);
     crate::server::simulate_durable_restart(Some(dir.0.clone()));
     let first = open_durable("881041", Some("starter_fortress"))?;
@@ -681,7 +751,10 @@ fn durable_admission_fences_ownership_modes_and_already_resolved_sessions() -> T
     let replacement = open_durable("881041", None)?;
     assert_eq!(replacement["ok"], true, "{replacement}");
     let entered = crate::server::with_session(&old_handle, || false, |_| true);
-    assert!(!entered, "a handle resolved before replacement must be fenced before its body runs");
+    assert!(
+        !entered,
+        "a handle resolved before replacement must be fenced before its body runs"
+    );
     let running_shared = open_shared_durable("881042", Some("starter_fortress"))?;
     assert_eq!(running_shared["ok"], true, "{running_shared}");
     let private = open_durable("881042", None)?;
@@ -709,10 +782,16 @@ fn restore_world_and_commit_retirement_share_one_crash_boundary() -> TestResult 
         ))?;
         assert_eq!(checkpoint["ok"], true, "{checkpoint}");
         let planned = plan_one_tile(&first)?;
-        let committed = parsed(&fortress_commit(Some(first.clone()), id(&planned, "plan_digest")?))?;
+        let committed = parsed(&fortress_commit(
+            Some(first.clone()),
+            id(&planned, "plan_digest")?,
+        ))?;
         assert_eq!(committed["ok"], true, "{committed}");
         crate::server::inject_durable_crash_after(budget);
-        parsed(&fortress_restore(Some(first), id(&checkpoint, "checkpoint_id")?))?;
+        parsed(&fortress_restore(
+            Some(first),
+            id(&checkpoint, "checkpoint_id")?,
+        ))?;
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let resumed = open_durable(&selector, None)?;
         assert_eq!(resumed["ok"], true, "{resumed}");
@@ -739,8 +818,14 @@ fn legacy_world_ahead_of_its_step_record_remains_indeterminate() -> TestResult {
         "dfmcp-durable-legacy-frontier-{}",
         std::process::id()
     )));
-    for (case, legacy_state) in [None, Some("not_dispatched"), Some("abandoned"), Some("verified")]
-        .into_iter().enumerate()
+    for (case, legacy_state) in [
+        None,
+        Some("not_dispatched"),
+        Some("abandoned"),
+        Some("verified"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let _ = std::fs::remove_dir_all(&dir.0);
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
@@ -754,8 +839,12 @@ fn legacy_world_ahead_of_its_step_record_remains_indeterminate() -> TestResult {
         crate::server::inject_durable_crash_after(1);
         parsed(&fortress_commit(Some(first.clone()), digest.to_hex()))?;
         let handle = crate::server::lookup_session_str(&first)?;
-        let changed_world = handle.lock().map_err(|_| "test session poisoned")?
-            .adapter.snapshot().clone();
+        let changed_world = handle
+            .lock()
+            .map_err(|_| "test session poisoned")?
+            .adapter
+            .snapshot()
+            .clone();
 
         // Reproduce the older peer-save API: the world contains the effect,
         // while its originating P has no anchored step frontier.
@@ -770,21 +859,257 @@ fn legacy_world_ahead_of_its_step_record_remains_indeterminate() -> TestResult {
         let resumed = open_durable(&selector, None)?;
         assert_eq!(resumed["ok"], true, "{resumed}");
         let recovered = &resumed["durable"]["recovered_commits"][0]["steps"][0];
-        assert_eq!(recovered["state"], "indeterminate", "legacy {legacy_state:?}: {resumed}");
+        assert_eq!(
+            recovered["state"], "indeterminate",
+            "legacy {legacy_state:?}: {resumed}"
+        );
         assert_eq!(recovered["blind_retry_allowed"], false, "{resumed}");
         assert!(recovered["recorded_anchor"].is_null(), "{resumed}");
-        let waited = parsed(&fortress_wait(Some(id(&resumed, "session_id")?), Some(1_000)))?;
-        assert_eq!(waited["carried_obligations"][0]["state"], "indeterminate", "{waited}");
+        let waited = parsed(&fortress_wait(
+            Some(id(&resumed, "session_id")?),
+            Some(1_000),
+        ))?;
+        assert_eq!(
+            waited["carried_obligations"][0]["state"], "indeterminate",
+            "{waited}"
+        );
 
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let again = open_durable(&selector, None)?;
         assert_eq!(again["ok"], true, "{again}");
         assert_eq!(
-            again["durable"]["recovered_commits"].as_array().map(Vec::len),
+            again["durable"]["recovered_commits"]
+                .as_array()
+                .map(Vec::len),
             Some(1),
             "unresolved legacy evidence must not be retired: {again}"
         );
-        assert_eq!(again["durable"]["carried_obligations"][0]["state"], "indeterminate", "{again}");
+        assert_eq!(
+            again["durable"]["carried_obligations"][0]["state"], "indeterminate",
+            "{again}"
+        );
     }
+    Ok(())
+}
+
+fn open_durable_production(
+    selector: &str,
+    scenario: Option<&str>,
+) -> std::result::Result<Value, Box<dyn std::error::Error>> {
+    let mut capabilities = caps();
+    capabilities.push(("configure_production".to_owned(), "reversible".to_owned()));
+    parsed(&fortress_open_session(
+        Some(false),
+        Some(selector.to_owned()),
+        Some(capabilities),
+        None,
+        Some(100_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        scenario.map(str::to_owned),
+        None,
+        Some(true),
+    ))
+}
+
+fn plan_durable_order(
+    session: &str,
+    name: &str,
+    amount: u32,
+    conditions: Value,
+) -> std::result::Result<Value, Box<dyn std::error::Error>> {
+    let planned = parsed(&fortress_plan(
+        Some(session.to_owned()),
+        None,
+        None,
+        Some(
+            json!([{"action": {
+                "kind": "create_work_order", "name": name,
+                "job_token": "MAKE_TEST_ITEM", "amount": amount,
+                "conditions": conditions,
+            }}])
+            .to_string(),
+        ),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    Ok(planned)
+}
+
+#[test]
+fn durable_failed_work_survives_two_restarts_until_real_completion() -> TestResult {
+    let _serial = serialized();
+    let dir = StateDir(std::env::temp_dir().join(format!(
+        "dfmcp-durable-failed-physical-work-{}",
+        std::process::id()
+    )));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let opened = open_durable_production("881071", Some("empty"))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let mut session = id(&opened, "session_id")?;
+    let planned = plan_durable_order(
+        &session,
+        "downstream",
+        1,
+        json!([{"kind": "completed_order", "order_name": "upstream"}]),
+    )?;
+    let digest = id(&planned, "plan_digest")?;
+    let deadline = planned["steps"][0]["obligation"]["deadline_tick"]
+        .as_u64()
+        .ok_or("sealed deadline missing")?;
+    let tick = opened["anchor"]["game_tick"]
+        .as_u64()
+        .ok_or("initial game tick missing")?;
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest.clone()))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+
+    // The prerequisite does not exist, so real work remains active even
+    // after the sealed goal's deadline makes its proof permanently Failed.
+    let failed = parsed(&fortress_wait(
+        Some(session.clone()),
+        Some(deadline - tick + 1),
+    ))?;
+    assert_eq!(failed["ok"], true, "{failed}");
+    assert_eq!(failed["commit_state"], "Failed", "{failed}");
+    assert_eq!(failed["work_state"]["state"], "active", "{failed}");
+    assert_eq!(failed["open_actions_remaining"], 1, "{failed}");
+    let original_proof = failed["observed_anchor"].clone();
+
+    for restart in 0..2 {
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let resumed = open_durable_production("881071", None)?;
+        assert_eq!(resumed["ok"], true, "restart {restart}: {resumed}");
+        let commits = &resumed["durable"]["recovered_commits"];
+        assert_eq!(commits.as_array().map(Vec::len), Some(1), "{resumed}");
+        assert_eq!(commits[0]["plan_digest"], digest, "{resumed}");
+        assert_eq!(commits[0]["status"], "carried", "{resumed}");
+        let retained = &resumed["durable"]["carried_obligations"][0];
+        assert_eq!(retained["state"], "failed", "{resumed}");
+        assert_eq!(retained["work_state"]["state"], "active", "{resumed}");
+        assert_eq!(retained["work_state"]["quiescent"], false, "{resumed}");
+        assert_eq!(retained["proof_anchor"], original_proof, "{resumed}");
+        session = id(&resumed, "session_id")?;
+        let still_blocked = parsed(&fortress_wait(Some(session.clone()), Some(10)))?;
+        assert_eq!(still_blocked["ok"], true, "{still_blocked}");
+        let retained = &still_blocked["carried_obligations"][0];
+        assert_eq!(retained["state"], "failed", "{still_blocked}");
+        assert_eq!(retained["work_state"]["state"], "active", "{still_blocked}");
+        assert_eq!(retained["proof_anchor"], original_proof, "{still_blocked}");
+    }
+
+    // Satisfy the real prerequisite through a new authorized action. A later
+    // physical completion may retire the journal, but cannot rewrite failure.
+    let upstream = plan_durable_order(&session, "upstream", 1, json!([]))?;
+    let committed = parsed(&fortress_commit(
+        Some(session.clone()),
+        id(&upstream, "plan_digest")?,
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let upstream_done = parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+    assert_eq!(upstream_done["ok"], true, "{upstream_done}");
+    let finished = parsed(&fortress_wait(Some(session), Some(50)))?;
+    assert_eq!(finished["ok"], true, "{finished}");
+    let retained = &finished["carried_obligations"][0];
+    assert_eq!(retained["state"], "failed", "{finished}");
+    assert_eq!(retained["work_state"]["state"], "quiescent", "{finished}");
+    assert_eq!(retained["work_state"]["quiescent"], true, "{finished}");
+    assert_eq!(retained["proof_anchor"], original_proof, "{finished}");
+
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let settled = open_durable_production("881071", None)?;
+    assert_eq!(settled["ok"], true, "{settled}");
+    assert_eq!(
+        settled["durable"]["recovered_commits"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
+        "only observed quiescence permits retirement: {settled}"
+    );
+    Ok(())
+}
+
+#[test]
+fn durable_recorded_verified_work_is_retained_until_observed_quiescent() -> TestResult {
+    let _serial = serialized();
+    let dir = StateDir(std::env::temp_dir().join(format!(
+        "dfmcp-durable-verified-physical-work-{}",
+        std::process::id()
+    )));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let opened = open_durable_production("881072", Some("empty"))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let mut session = id(&opened, "session_id")?;
+    let planned = plan_durable_order(&session, "recorded early proof", 2, json!([]))?;
+    let digest_text = id(&planned, "plan_digest")?;
+    let digest = dfmcp_core::Digest32::from_hex(&digest_text).ok_or("invalid plan digest")?;
+    let step = u32::try_from(planned["steps"][0]["step"].as_u64().ok_or("step missing")?)?;
+    let committed = parsed(&fortress_commit(Some(session.clone()), digest_text.clone()))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_eq!(committed["actions"][0]["work_state"]["state"], "active");
+    let handle = crate::server::lookup_session_str(&session)?;
+    let active_world = handle
+        .lock()
+        .map_err(|_| "test session poisoned")?
+        .adapter
+        .snapshot()
+        .clone();
+    let original_proof = crate::server::anchor_json(&active_world.anchor());
+
+    // The public JSON compiler gives orders completion goals. To exercise
+    // recovery of an already-recorded early Verified outcome, publish an
+    // explicit historical frontier through the real atomic store API. Its
+    // action and still-active effect came from an actual public-tool commit;
+    // this fixture tests recovery, not creation of a new proof.
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    {
+        let mut store = dfmcp_lab::durable::DurableLabStore::open(&dir.0)?;
+        store.persist_progress(
+            "empty",
+            &active_world,
+            &[dfmcp_lab::durable::DurableStepUpdate {
+                plan_digest: digest,
+                step,
+                state: "verified".to_owned(),
+            }],
+            &[],
+        )?;
+    }
+
+    for restart in 0..2 {
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let resumed = open_durable_production("881072", None)?;
+        assert_eq!(resumed["ok"], true, "restart {restart}: {resumed}");
+        let commits = &resumed["durable"]["recovered_commits"];
+        assert_eq!(commits.as_array().map(Vec::len), Some(1), "{resumed}");
+        assert_eq!(commits[0]["plan_digest"], digest_text, "{resumed}");
+        let retained = &resumed["durable"]["carried_obligations"][0];
+        assert_eq!(retained["state"], "verified", "{resumed}");
+        assert_eq!(retained["work_state"]["state"], "active", "{resumed}");
+        assert_eq!(retained["work_state"]["quiescent"], false, "{resumed}");
+        assert_eq!(retained["proof_anchor"], original_proof, "{resumed}");
+        session = id(&resumed, "session_id")?;
+    }
+
+    let finished = parsed(&fortress_wait(Some(session), Some(100)))?;
+    assert_eq!(finished["ok"], true, "{finished}");
+    let retained = &finished["carried_obligations"][0];
+    assert_eq!(retained["state"], "verified", "{finished}");
+    assert_eq!(retained["work_state"]["state"], "quiescent", "{finished}");
+    assert_eq!(retained["work_state"]["quiescent"], true, "{finished}");
+    assert_eq!(retained["proof_anchor"], original_proof, "{finished}");
+    crate::server::simulate_durable_restart(Some(dir.0.clone()));
+    let settled = open_durable_production("881072", None)?;
+    assert_eq!(settled["ok"], true, "{settled}");
+    assert_eq!(
+        settled["durable"]["recovered_commits"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
+        "verified physical work must finish before retirement: {settled}"
+    );
     Ok(())
 }

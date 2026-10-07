@@ -173,6 +173,9 @@ fn cancelling_eligible_deferred_task_keeps_its_effect_undispatched() -> Result<(
     let parent_id = committed.actions[0].action_id;
     let child_id = committed.actions[1].action_id;
     assert_eq!(committed.actions[1].state, CommitState::Prepared);
+    // Registration is not a temporal proof sample. Observe the parent's
+    // declared one-tick cadence before testing cancellation of its ready child.
+    adapter.advance_ticks(1)?;
     let ctx = sample_context(adapter.snapshot().anchor());
     assert_eq!(
         project_action_task(&mut adapter, parent_id, &ctx)?.status,

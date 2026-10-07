@@ -224,10 +224,32 @@ Polls or follows plans/actions/obligations under bounded wall/game time. Returns
 progress only and may provide continuation. Stable no-change progress becomes a compact
 heartbeat.
 
+In the reference laboratory, a positive `max_game_ticks` request requires
+current `ControlClock` authority. An unpaused advance must remain within both
+clock and observation grants through its final tick, and within the negotiated
+game-tick budget. Zero-tick polling requires observation authority only.
+Goal outcome and observed physical work are reported separately.
+
 ### `fortress.cancel`
 
 Starts or advances request/drain/compensate/finalize. It never means “delete the record.” Active
 work remains visible throughout the drain.
+
+The laboratory supports `scope: "last_action"` (default), `"plan"` (the latest
+committed plan), `"oldest_open_plan"` (the oldest retained plan with unfinished
+work), and `"session"` (retained open work across the session's plans).
+Use `oldest_open_plan` to drain individually bounded original plans when the
+whole session exceeds one call's budget; the response identifies that plan's
+original digest and certifies only its actions.
+Cancellation requires current observation and original scoped effect authority;
+emergency pause also requires clock authority and invalidates earlier shared
+unpause votes once authorized. Partial refusals report the resulting anchor,
+clock and work state in the Agent Turn. Stops, compensation and emergency
+pause share the call's aggregate action budget. Terminal Failed/Verified proof
+receipts remain immutable; their continuing physical work can be stopped with
+separate evidence. Finalize certificates require both terminal action states
+and observed physical quiescence. Active or unknown work retains ownership
+fences even after an obligation deadline or a spatial lease TTL expires.
 
 ### `fortress.checkpoint`
 
@@ -239,6 +261,13 @@ state.
 Guarded global operation. Drains work, restores a sealed checkpoint, creates a new observation
 epoch, and explicitly invalidates stale plans, actions, continuations, recommendations, and
 handoff anchors.
+
+The reference laboratory also inspects active or unknown entities restored
+without their original action handles. This untracked work remains visible,
+fences its spatial footprint, and blocks a session-wide quiescence certificate.
+The census is observation-only; it neither recreates historical proof nor
+restores cancellation authority. Snapshot persistence keeps that custody
+observable after another restart.
 
 ### `fortress.explain`
 

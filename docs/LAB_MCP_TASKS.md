@@ -86,7 +86,31 @@ explicit `fortress_wait` advances laboratory game time.** `tasks/get`, resource
 reads and supervisor wakeups neither advance time nor dispatch a deferred
 action. A paused fortress remains paused. Use bounded waits and inspect
 `open_actions_remaining`, each action's state, and the task result. All actions
-in the original plan must verify before its task becomes `completed`.
+in the original plan must verify and their physical work must become quiescent
+before its task becomes `completed`.
+
+Goal proof and physical work are separate. A deadline can produce an immutable
+`Failed` action receipt while its work order, designation or construction still
+progresses. An explicit early terminal predicate can likewise produce a
+`Verified` receipt before that physical work finishes. Neither proof outcome
+silently stops game work. The task detail exposes both:
+
+| Field | Meaning |
+|---|---|
+| `proof_status` | The original goal outcome: `working`, `completed`, `failed` or `cancelled`. A failure is reported as soon as a failed or indeterminate action is observed. |
+| `status` | The monitor's lifecycle. It remains `working` while an original action is nonterminal or its physical work is active or unknown. |
+| Each action's `work_state` | `never_dispatched`, `active`, `quiescent` or `unknown`, with the entity identity and current observed anchor. |
+| `drain_progress.remaining_nonterminal` | Original action receipts that have not reached a terminal state. |
+| `drain_progress.remaining_work` | Original actions whose physical work is active or cannot be proven quiescent. |
+| `drain_progress.quiescent` | True only when every original receipt is terminal and every physical effect is proven quiescent. |
+
+For a failed goal, `status: "working"` therefore means retained monitoring or
+cleanup, not that its failed proof is still pending. Terminal but active actions
+remain in `agent_turn.active_work.actions`, and `cleanup_required` identifies
+the need for an explicit stop. Use `tasks/cancel` with that task's opaque handle
+to drain its original plan, even after another plan has been committed.
+Observation and request-phase cancellation do not stop these effects. Cleanup
+requires the current original action capability and scope at finalization.
 
 Completion payloads retain the original plan digest, each action's exact
 receipt digest, observed anchor and evidence references. A later unrelated
@@ -109,7 +133,13 @@ descendants of failed, cancelled or compensated prerequisites are closed with
 evidence that they were never dispatched. Indeterminate effects remain
 explicitly `indeterminate` in the failed task's evidence, with
 `recovery_class: "reconciliation_required"` and `blind_retry_allowed: false`.
-A failed transport task does not erase unresolved engine work.
+A failed transport task does not erase unresolved engine work. If the original
+receipt can no longer be read after restore or monitor recovery, failure
+evidence explicitly reports unknown physical work and
+`physical_quiescent: false`; unavailable counts are `null`, never an invented
+zero. Bounded terminal
+summaries retain `proof_status`, drain progress and physical quiescence as well
+as the continuation to complete evidence.
 
 ## Cancel the original plan
 
@@ -120,13 +150,26 @@ committed plan.
 
 Cancellation processes dependents before prerequisites. It reads retained
 receipts without polling eligibility, records `CancelRequested`, reports
-measurable drain progress, and finalizes only after the original actions are
-terminal. The task detail retains both the request-phase progress and the
-finalization certificate. Already verified actions keep their proof; stopping
-future excavation or construction does not undo completed game progress.
+measurable drain progress, and finalizes only after the original action receipts
+are terminal and their physical work is quiescent. The task detail retains both
+the request-phase progress and the finalization certificate. A terminal action
+with active work receives a separate stop-only drain receipt; its original
+`Failed` or `Verified` proof, evidence and receipt digest stay unchanged. All
+work identities are inspected again at the final anchor before certification.
+Stopping future excavation or construction does not undo completed game
+progress. Missing work after a known dispatch, replacement identities and
+ineligible lifecycle facts remain unresolved and cannot certify a drain.
 
-Each drain phase rechecks current observation and action authority. A verified
-plan cannot be cancelled. The bounded laboratory drain completes before
+Each drain phase rechecks current observation and action authority. A fully
+verified and physically quiescent plan cannot be cancelled. A verified plan
+whose early proof leaves physical work active can be cleaned up without
+rewriting that proof. Explicit `tasks/cancel` finalizes the transport task as
+`cancelled`; if the goal had failed, both drain phases still retain
+`proof_status: "failed"` and the original failure evidence. Without explicit
+transport cancellation, a monitor becomes `failed` once failed work is quiet,
+or `completed` once verified work is quiet.
+
+The bounded laboratory drain completes before
 cancellation intent is forwarded to the upstream store. Both ordered phases
 are retained, but a separate client poll between request and finalization is
 not guaranteed. A failed drain refuses transport cancellation and retains the

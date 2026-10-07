@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-10-07 — MCP cleanup, retained ownership and recovery of running work
+
+- Keep Failed and early Verified actions visible until their physical work is
+  quiescent. Connect real terminal cleanup to single-action, plan and new
+  session-wide drains; preserve historical proof receipts and issue certificates
+  only for fully inspected, quiescent work. Retain unknown work in refusals.
+- Keep older plans individually drainable with `scope="oldest_open_plan"` when
+  a session exceeds one call's action budget. Reset shared unpause votes after
+  authorized emergency pause and report current work/clock on partial refusals.
+- Hold MCP Task monitors open for cleanup while exposing the original goal
+  outcome separately. Preserve physical progress and proof evidence in bounded
+  task summaries and both cancellation phases.
+- Require clock authority for positive waits through the entire requested tick
+  span. Ordinary stopping needs observation and original effect authority;
+  emergency pause additionally needs clock authority. Bound aggregate stops,
+  compensation and pause, and allow a failed compensation request to narrow
+  explicitly to stopping without compensation.
+- Acquire spatial reservations atomically and retain ownership beyond proof
+  deadlines/lease expiry until work is proven quiet. Preserve durable terminal
+  proof anchors while separately tracking continuing work across restart.
+- Observe and fence running or unknown snapshot work whose action handles were
+  lost during restore/recovery. Expose that custody in observations, Agent Turns,
+  handoffs and doctor; unavailable ownership never becomes implicit stop authority.
+- Add 25 focused MCP tests (clock/lease, complete tool flows, Tasks, snapshot
+  custody and durable terminal recovery), extend the real checkpoint/restart
+  scenario, and migrate the existing deferred Task cadence fixture. Source and
+  Rustfmt checks passed. The final frozen core passed all 79 lab tests,
+  including condition-identity and compensation-narrowing regressions. MCP
+  execution and full qualification remain pending after shared-memory
+  exhaustion; the final MCP check is being retried with recovered headroom.
+
 ## 2026-10-07 — Executable conditional production
 
 - Enforce typed stock thresholds, material-availability gates and uniquely
@@ -13,8 +44,8 @@
 - Document bounds, inventory namespaces, model timing and legacy compatibility.
   Existing orders without condition records stay blocked for reconciliation.
 - Actual intent suite: 151 passed, including ten new regressions. Four MCP
-  condition tests and the added identity-mutation drain regression are present;
-  their execution is pending while shared memory pressure blocks the MCP build.
+  condition tests are present and their execution is pending. The added
+  identity-mutation drain regression passed in the final 79-test lab run.
 
 ## 2026-10-07 — Physical work inspection and authorized terminal cleanup
 

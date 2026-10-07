@@ -619,6 +619,128 @@ fn dig(min: [i32; 3], max: [i32; 3]) -> String {
 }
 
 #[test]
+fn bounded_wait_requires_clock_authority_before_advancing_shared_work() -> TestResult {
+    let owner = open_shared("73401", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let owner = owner["session_id"].as_str().ok_or("owner")?.to_owned();
+    let committed = plan_and_commit(
+        &owner,
+        r#"[{"action":{"kind":"create_work_order","name":"clock-owned brew","job_token":"BREW_DRINK","amount":2}}]"#,
+    )?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let observer = parsed(&fortress_open_session(
+        Some(false),
+        Some("73401".to_owned()),
+        Some(vec![
+            ("observe".to_owned(), "read_only".to_owned()),
+            ("query".to_owned(), "read_only".to_owned()),
+        ]),
+        None,
+        Some(2_000),
+        None,
+        None,
+        Some(8_192),
+        None,
+        None,
+        Some(true),
+        None,
+    ))?;
+    assert_eq!(observer["ok"], true, "{observer}");
+    let observer = observer["session_id"]
+        .as_str()
+        .ok_or("observer")?
+        .to_owned();
+    let query = Some(r#"{"mode":"entities","kind":"work_order"}"#.to_owned());
+    let before = parsed(&fortress_query(Some(owner.clone()), query.clone()))?;
+    let refused = parsed(&fortress_wait(Some(observer), Some(50)))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "capability_denied");
+    let after = parsed(&fortress_query(Some(owner.clone()), query.clone()))?;
+    assert_eq!(after["rows"], before["rows"]);
+    assert_eq!(
+        after["agent_turn"]["anchor"],
+        before["agent_turn"]["anchor"]
+    );
+    let advanced = parsed(&fortress_wait(Some(owner.clone()), Some(50)))?;
+    assert_eq!(advanced["ok"], true, "{advanced}");
+    assert_eq!(advanced["advanced_game_ticks"], 50);
+    let progressed = parsed(&fortress_query(Some(owner), query))?;
+    assert_eq!(progressed["rows"][0]["fields"]["amount_remaining"], 1);
+    Ok(())
+}
+
+#[test]
+fn bounded_wait_cannot_outlive_clock_or_observation_authority() -> TestResult {
+    for (selector, capability) in [
+        ("73402", dfmcp_core::Capability::ControlClock),
+        ("73403", dfmcp_core::Capability::Observe),
+    ] {
+        let session = open(selector, false, &ALL_EFFECTS)?;
+        let state = crate::server::resolve_session(Some(session.clone()))?;
+        let before = {
+            let mut guard = state.lock().map_err(|_| "session poisoned")?;
+            let before = guard.adapter.snapshot().clone();
+            let grant = guard
+                .grants
+                .iter_mut()
+                .find(|grant| grant.capability == capability)
+                .ok_or("missing grant")?;
+            grant.expires_at_tick = Some(dfmcp_core::GameTick(before.tick.0 + 1));
+            before
+        };
+        let refused = parsed(&fortress_wait(Some(session.clone()), Some(2)))?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "capability_denied");
+        assert_eq!(
+            state
+                .lock()
+                .map_err(|_| "session poisoned")?
+                .adapter
+                .snapshot(),
+            &before
+        );
+        let boundary = parsed(&fortress_wait(Some(session), Some(1)))?;
+        assert_eq!(boundary["ok"], true, "{boundary}");
+        assert_eq!(boundary["advanced_game_ticks"], 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn refused_multistep_lease_acquisition_leaves_no_partial_reservation() -> TestResult {
+    let a = open_shared("73404", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73404", None, &ALL_EFFECTS)?;
+    let c = open_shared("73404", None, &ALL_EFFECTS)?;
+    let a = a["session_id"].as_str().ok_or("a")?.to_owned();
+    let b = b["session_id"].as_str().ok_or("b")?.to_owned();
+    let c = c["session_id"].as_str().ok_or("c")?.to_owned();
+    let occupied = plan_and_commit(&a, &dig([1, 3, 10], [2, 4, 10]))?;
+    assert_eq!(occupied["ok"], true, "{occupied}");
+    let refused = plan_and_commit(
+        &b,
+        r#"[
+        {"action":{"kind":"designate_dig","min":[6,3,10],"max":[7,4,10],"mode":"mine"}},
+        {"action":{"kind":"designate_dig","min":[1,3,10],"max":[2,4,10],"mode":"mine"}}
+    ]"#,
+    )?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "conflict");
+    let independent = plan_and_commit(&c, &dig([6, 3, 10], [7, 4, 10]))?;
+    assert_eq!(
+        independent["ok"], true,
+        "partial lease escaped refusal: {independent}"
+    );
+    let designations = parsed(&fortress_query(
+        Some(a),
+        Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
+    ))?;
+    assert_eq!(
+        designations["total"], 2,
+        "the rejected plan must dispatch nothing"
+    );
+    Ok(())
+}
+
+#[test]
 fn agents_sharing_a_fortress_lease_regions_and_see_one_world() -> TestResult {
     let mut caps_a = ALL_EFFECTS.to_vec();
     caps_a.push(("restore", "guarded"));

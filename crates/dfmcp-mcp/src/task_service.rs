@@ -21,6 +21,14 @@ use crate::tasks::McpTaskStatus;
 
 const WORK_SCHEMA: &str = "dfmcp.lab-plan-task-work/1";
 
+fn unresolved_drain_progress() -> Value {
+    json!({
+        "actions_total": null, "remaining_nonterminal": null,
+        "remaining_work": null, "unknown_work": null, "remaining_actions": null,
+        "drained": null, "physical_quiescent": false, "quiescent": false,
+    })
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TaskWork {
@@ -161,7 +169,16 @@ impl LabTaskService {
         let mut active = crate::empty_active_work();
         if failure.is_some() {
             active["mcp_tasks"] = json!([{"task_id": id.as_str(), "status": "failed",
+                "proof_status": payload["proof_status"],
+                "remaining_work": payload["remaining_work"],
+                "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
                 "blind_retry_allowed": false, "details": format!("df://session/{}/task-{}", work.session_id, id.as_str())}]);
+        }
+        if payload["physical_quiescent"].as_bool() != Some(true) {
+            active["indeterminate_effects"] = json!([{
+                "plan_digest": work.plan_digest, "state": "unknown", "quiescent": false,
+                "reason": "the retained terminal evidence does not prove physical quiescence",
+            }]);
         }
         let turn = crate::AgentTurnBuilder::new("fortress.commit", crate::AgentPhase::Verify)
             .session_id(work.session_id.clone())
@@ -171,6 +188,12 @@ impl LabTaskService {
         let compact = json!({"ok": failure.is_none(), "schema": "dfmcp.lab-task-summary/1",
             "session_id": work.session_id, "plan_digest": work.plan_digest,
             "status": if failure.is_some() { "failed" } else { "completed" },
+            "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
+            "remaining_work": payload["remaining_work"],
+            "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
+            "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or_else(|| json!(true)),
+            "drain_progress": payload.get("drain_progress").cloned().unwrap_or_else(unresolved_drain_progress),
+            "physical_work": payload["physical_work"],
             "observed_anchor": anchor, "action_counts": counts,
             "indeterminate": payload["indeterminate"], "recovery_class": payload["recovery_class"],
             "blind_retry_allowed": false, "agent_turn": turn, "scope": "laboratory_process_only",
@@ -363,7 +386,19 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 };
                 let payload = json!({"ok": false, "session_id": definition.session_id,
                     "plan_digest": definition.plan_digest, "status": "failed",
+                    "proof_status": if recovering { "unknown" } else { "failed" },
                     "original_plan_dispatched": if recovering { Value::Null } else { json!(false) },
+                    "remaining_work": if recovering { Value::Null } else { json!(0) },
+                    "physical_quiescent": !recovering, "cleanup_required": recovering,
+                    "physical_work": {
+                        "state": if recovering { "unknown" } else { "never_dispatched" },
+                        "quiescent": !recovering, "reason": failure,
+                    },
+                    "drain_progress": if recovering { unresolved_drain_progress() } else { json!({
+                        "actions_total": 0, "remaining_nonterminal": 0, "remaining_work": 0,
+                        "unknown_work": 0, "remaining_actions": 0, "drained": 0,
+                        "physical_quiescent": true, "quiescent": true,
+                    }) },
                     "indeterminate": recovering, "blind_retry_allowed": false,
                     "recovery_class": if recovering { "reconciliation_required" } else { "operator_action_required" },
                     "next_step": {"tool": "fortress.observe", "arguments": {"session_id": definition.session_id},
@@ -400,6 +435,11 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         Err(error) => {
                             let payload = json!({"ok": false, "session_id": definition.session_id,
                                 "plan_digest": definition.plan_digest, "error": error.to_string(),
+                                "status": "failed", "proof_status": "unknown", "indeterminate": true,
+                                "remaining_work": null, "physical_quiescent": false, "cleanup_required": true,
+                                "drain_progress": unresolved_drain_progress(),
+                                "physical_work": {"state": "unknown", "quiescent": false,
+                                    "reason": "the original plan's retained action evidence cannot be observed"},
                                 "blind_retry_allowed": false, "recovery_class": "reconciliation_required"});
                             self.store.record_progress(work.task_id(), json!({"stage": "unresolved", "evidence": payload}))?;
                             let failure = "original plan can no longer be observed; do not retry the effect";
@@ -413,7 +453,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         McpTaskStatus::Working | McpTaskStatus::InputRequired => Ok(None),
                         McpTaskStatus::Completed => {
                             let bounded = self.bounded_terminal_evidence(work.task_id(), &definition, &view.payload, None)?;
-                            work.complete_task(task_result(&bounded)?, Some("every original plan action has verified evidence".to_owned()))?;
+                            work.complete_task(task_result(&bounded)?, Some("every original plan action has verified evidence and quiescent physical work".to_owned()))?;
                             Ok(Some(()))
                         }
                         McpTaskStatus::Failed => {
@@ -437,6 +477,9 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     Err(error) => {
                         let _ = self.store.record_progress(work.task_id(), json!({
                             "stage": "reconciliation_required", "error": error.to_string(),
+                            "remaining_work": null, "physical_quiescent": false,
+                            "drain_progress": unresolved_drain_progress(),
+                            "physical_work": {"state": "unknown", "quiescent": false},
                             "blind_retry_allowed": false,
                             "note": "the engine has not proved quiescence; the task service retains its original work",
                         }));

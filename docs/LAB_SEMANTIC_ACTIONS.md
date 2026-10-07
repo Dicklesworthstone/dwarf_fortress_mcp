@@ -109,7 +109,10 @@ digest and evidence unchanged. Completion first observed after the obligation
 deadline is failed; sufficient proof at the deadline itself is accepted.
 
 `fortress_wait` lets time pass only while the fortress is unpaused and within
-the session's game-tick budget; a paused fortress reports `blocked`.
+the session's game-tick budget; a paused fortress reports `blocked`. Positive
+tick requests require `control_clock`, and an unpaused advance must fit within
+the clock and observation grants through the requested final tick. A zero-tick
+poll needs observation authority without clock control.
 
 On the modern stdio server, a client that negotiates Tasks can use
 `fortress_commit(as_task=true)` to retain and supervise the original plan under
@@ -120,14 +123,41 @@ Agent Turns and handoffs expose handles, with bounded discovery and detail at
 deferred work. See [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md) for negotiation,
 cancellation, retention and the one-active-monitor process bound.
 
-`fortress_cancel(mode="stop_future_steps", scope="plan")` drains every
-nonterminal action of the last committed plan, dependents before their
-prerequisites. Deferred steps are never dispatched, temporal work stops without
-undoing progress (excavated tiles stay excavated), and verified actions are
-history that is never rewritten. The response reports `drain_progress`
-(total, already terminal, drained, compensated, cancelled, remaining) and a
-`finalize_certificate` digest only once nothing nonterminal remains. Without
-`scope` the historical single-action behaviour is unchanged.
+`fortress_cancel(mode="stop_future_steps", scope="plan")` drains the last
+committed plan, dependents before prerequisites. `scope="session"` includes
+retained open work from earlier plans owned by this session. If that exceeds
+one call's budget, `scope="oldest_open_plan"` selects the oldest unfinished
+original plan and returns its digest; repeated calls can drain older plans
+after a later plan has finished. Each certificate covers only its selected
+actions. Deferred steps
+never dispatch during cancellation, and stopped work keeps completed progress
+(excavated tiles stay excavated). Current observation and original scoped
+effect grants authorize stopping; emergency pause additionally requires clock
+authority and resets shared unpause consent after an authorized pause. A
+partial drain refusal retains its actual clock, anchor and work progress in
+the Agent Turn. The aggregate budget covers every stop, compensation and pause.
+
+A Failed or early Verified goal can still own active physical work. Its
+`work_state` remains visible in waits, Agent Turns, Tasks and handoffs. Cleanup
+preserves that original proof receipt and emits separate `physical_drain`
+evidence. Progress includes `remaining_nonterminal`, `remaining_work` and
+`terminal_work_stopped`; a finalize certificate requires no unfinished proof
+or active/unknown physical work. Unresolved work keeps spatial ownership after
+its proof deadline and lease expiry. Without `scope`, cancellation addresses
+the most recent action.
+
+If compensation is refused, a pending cancellation may explicitly narrow to
+`stop_future_steps` under current original work authority. This abandons the
+compensation request and stops the remaining work without applying an inverse.
+
+After checkpoint restore or durable recovery, physical entities may remain even
+when their originating action handles are unavailable. `untracked_work` exposes
+that active or unknown snapshot work; waits, observations, Agent Turns, handoffs
+and doctor retain it. A complete eligible lifecycle observation is required to
+remove it from the census. Unknown spatial geometry fences new spatial work
+globally. Restoring or reading such a record grants no stop authority and creates
+no historical goal proof. It must be reconciled or become observably quiescent
+before the affected region is reused or a session-wide drain is certified.
 
 Commit authority is the plan's own capability set: a session that did not
 negotiate `designate` cannot commit an excavation, and an idempotent replay

@@ -44,6 +44,69 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### MCP physical-work cleanup, clock authority and recovery custody (2026-10-07)
+
+The MCP laboratory now uses actual physical-work inspection alongside immutable
+goal receipts. Failed and early Verified work remains in waits, handoffs and
+Agent Turns. Plan and single-action cancellation can stop that remaining work
+under current original scope authority; `scope="session"` also reaches retained
+open work from earlier committed plans. Finalize certificates require terminal
+receipts and established quiescence, and session certificates additionally
+refuse to hide carried or untracked snapshot work. Refused drains retain explicit
+unknown-work progress. Emergency pause resets shared unpause consent and is
+reflected in the returned Agent Turn, including partial drain refusals.
+`scope="oldest_open_plan"` selects and identifies the oldest unfinished original
+plan, so a session with more running work than one call's budget can still drain
+its plans individually without weakening aggregate admission.
+
+Tasks expose `proof_status` immediately while their monitor remains Working for
+unfinished physical cleanup. Staged cancellation still targets the original
+plan after a later commit, preserves original proof receipts and anchors, and
+returns separate physical-drain evidence. Bounded terminal summaries preserve
+work counts; lost observation is explicitly unknown. This does not add general
+asynchronous engine-region drains.
+
+Positive bounded waits require current clock authority, and an unpaused span
+must remain inside clock and observation grants through its final tick. Ordinary
+stop requires observation and original effect authority, not clock control.
+The whole drain shares an aggregate physical-action budget. A rejected or
+unauthorized compensation can be explicitly narrowed to `StopFutureSteps`,
+keeping actual work drainable without restoring compensation authority.
+
+Spatial reservations publish atomically. Retained action ownership outlives
+proof deadlines and lease TTLs while work is active or unknown. Durable commits
+also remain retained while terminal goals still own work, and unchanged terminal
+states keep their original proof anchors as later worlds are saved. Recovery
+observes physical work separately without restoring dispatch authority.
+
+Checkpoint restoration can bring back running entities after invalidating their
+action handles. A bounded source-qualified census now exposes those entities as
+untracked snapshot work and fences their observed regions. Missing lifecycle or
+geometry remains unknown; missing geometry fences spatial admission globally.
+The census runs again from the canonical snapshot across restart, including when
+the old commit journal has retired. It creates no synthetic goal receipt or
+actuator. Such work must be reconciled or observed to become quiescent before
+its region can be reused or session quiescence can be certified.
+
+**Evidence and current limits:** the final frozen core passed all 79 lab tests
+(50 unit, 11 deferred, 13 durable-progress and five full-action tests), with
+zero failures or ignored tests and unchanged exact source hashes across all
+five exercised crates. This includes condition-identity and cancellation-mode
+narrowing. The frozen production implementation passed all 151 intent tests.
+The prior source passed world 180, intent 141, lab 68 and adapter 1,033 tests after
+the four deferred fixture corrections. This integration adds 25 MCP tests
+(three clock/lease, ten full tool flows, three Tasks, seven census and two
+durable terminal-work cases), extends the checkpoint/restart scenario and two
+compensation regressions, and corrects one preexisting deferred Task cadence
+fixture. All changed Rust files parse under Rustfmt and received independent
+source review. **The final MCP source has not compiled or executed.** Protected
+local build attempts were stopped or SIGKILLed before tests under the shared
+8 GiB memory limit while unrelated compilers consumed the available memory;
+a final-source check is being retried after that headroom recovered.
+There are no GitHub Actions runs to substitute. Full workspace formatting,
+Clippy, debug/release tests, rustdoc, `verify.sh` and `qualify_local.sh` remain
+pending; no Rust-qualified, native, live or registry admission claim is made.
+
 ### Conditional production is part of actual reference effects (2026-10-07)
 
 Work orders now enforce their sealed `ItemCountBelow`, `MaterialAvailable` and
@@ -71,10 +134,11 @@ The exact JSON shapes and namespaces are in `docs/LAB_SEMANTIC_ACTIONS.md`.
 
 **Evidence:** all 151 actual intent tests pass, including nine condition-effect
 regressions and duplicate-conjunction normalization. Source and focused tests
-were independently reviewed. Four new MCP parser/compiler tests and a six-case
-name/condition ownership-mutation regression are checked in but not yet executed:
-the isolated MCP build was stopped under shared cgroup memory pressure. This
-increment does not claim full workspace, native or live qualification.
+were independently reviewed. The six-case name/condition ownership-mutation
+regression passed in the final 79-test lab run. Four new MCP parser/compiler
+tests remain unexecuted after the isolated MCP build was stopped under shared
+cgroup memory pressure. This increment does not claim full workspace, native
+or live qualification.
 
 ### Physical reference work and immutable goal outcomes (2026-10-07)
 

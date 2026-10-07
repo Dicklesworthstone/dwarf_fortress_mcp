@@ -27,12 +27,12 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, CommitState, DfmcpError,
-    Digest32, EntityId, ErrorCode, FortressId, IntentId, OperationContext, RequestId, Result,
-    RiskTier, SessionId, StateAnchor, WorkBudget,
+    Digest32, EntityId, ErrorCode, FortressId, GameTick, IntentId, OperationContext, RequestId,
+    Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_intent::{
-    Action, Constraint, Intent, ObligationStatus, PreparedPlan, RecoveredObligation,
-    RequestedAction, StaticPlanner,
+    Action, Constraint, EffectWorkState, Intent, ObligationStatus, PreparedPlan,
+    RecoveredObligation, RequestedAction, StaticPlanner,
 };
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
@@ -43,6 +43,13 @@ use serde_json::json;
 
 #[path = "task_session.rs"]
 pub(crate) mod task_session;
+
+#[path = "restore_work.rs"]
+mod restore_work;
+
+#[cfg(test)]
+#[path = "physical_work_mcp_tests.rs"]
+mod physical_work_mcp_tests;
 
 /// One granted capability record returned to the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,9 +82,8 @@ pub(crate) struct LabSession {
     last_action: Option<ActionId>,
     /// Every action of the most recent committed plan, in step order.
     last_plan_actions: Vec<ActionId>,
-    /// Every committed action, across plans, that was not terminal when last
-    /// polled. `fortress.wait` polls all of them, which is also what
-    /// dispatches deferred steps once their dependencies verify.
+    /// Every committed action with unfinished proof or physical work when last
+    /// inspected. `fortress.wait` also dispatches eligible deferred steps.
     open_actions: Vec<ActionId>,
     /// Bounded plan-digest to payload map for idempotent re-commit (ADR-006).
     commit_receipts: BTreeMap<String, String>,
@@ -139,7 +145,8 @@ pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
                     Ok(evidence) => evidence.evaluate(&objective.terminal),
                     Err(error) => Err(error.clone()),
                 };
-                let mut result = crate::observation_projection::laboratory_objective_evidence(truth);
+                let mut result =
+                    crate::observation_projection::laboratory_objective_evidence(truth);
                 result["plan_digest"] = json!(objective.plan_digest);
                 result["summary"] = json!(objective.summary);
                 result["terminal_condition"] =
@@ -233,12 +240,23 @@ pub(crate) struct CarriedStep {
     proof_anchor: Option<StateAnchor>,
     observation_error: Option<String>,
     failure_reason: Option<String>,
+    /// A reproducible effect identity, retained independently of goal proof.
+    /// Recovery observes it but never restores authority to dispatch it.
+    work_step: Option<dfmcp_intent::PlanStep>,
+    work_state: EffectWorkState,
+    work_anchor: Option<StateAnchor>,
     /// Durable state, or indeterminate when recovery cannot certify it.
     state: String,
 }
 
 impl CarriedStep {
     fn to_json(&self) -> serde_json::Value {
+        let mut work = effect_work_json(&self.work_state);
+        work["observed_anchor"] = self
+            .work_anchor
+            .as_ref()
+            .map(anchor_json)
+            .unwrap_or(serde_json::Value::Null);
         json!({
             "plan_digest": self.plan_digest.to_hex(),
             "step": self.step.map(|step| step.get()),
@@ -250,6 +268,7 @@ impl CarriedStep {
             "proof_anchor": self.proof_anchor.as_ref().map(anchor_json),
             "observation_error": self.observation_error,
             "failure_reason": self.failure_reason,
+            "work_state": work,
             "recovery_class": if self.state == "indeterminate" { "reconciliation_required" } else { "never_unchanged" },
             "blind_retry_allowed": false,
             "stability": self.monitor.as_ref().and_then(|monitor| match monitor.status() {
@@ -264,27 +283,34 @@ impl CarriedStep {
     }
 
     fn is_final(&self) -> bool {
-        matches!(
-            self.state.as_str(),
-            "verified" | "failed" | "cancelled" | "compensated" | "not_dispatched" | "abandoned"
-        )
+        self.work_state.is_quiescent()
+            && matches!(
+                self.state.as_str(),
+                "verified"
+                    | "failed"
+                    | "cancelled"
+                    | "compensated"
+                    | "not_dispatched"
+                    | "abandoned"
+            )
     }
 }
 
 /// Current Observe authority gates every resumed proof. Advance on a shadow
 /// so an invalid observation cannot partially certify the recovery frontier.
 fn observe_carried(session: &mut LabSession) -> Result<()> {
-    if !session.carried.iter().any(|step| step.state == "dispatched") {
+    if !session.carried.iter().any(|step| !step.is_final()) {
         return Ok(());
     }
     let ctx = context_for(session, session.next_request_id);
     if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
         for step in &mut session.carried {
-            if step.state == "dispatched" {
+            if !step.is_final() {
                 if let Some(monitor) = &mut step.monitor {
                     monitor.observation_interrupted()?;
                 }
-                step.observation_error = Some(format!("{}: {}", error.code.as_str(), error.message));
+                step.observation_error =
+                    Some(format!("{}: {}", error.code.as_str(), error.message));
             }
         }
         return Err(error);
@@ -294,10 +320,25 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
         let evidence = PredicateEvidence::laboratory(snapshot)?;
         let mut next = session.carried.clone();
         for step in &mut next {
-            if step.state != "dispatched" {
+            if step.is_final() {
                 continue;
             }
             step.observation_error = None;
+            if let Some(work) = &step.work_step {
+                // An anchored failure may have preceded dispatch; the legacy
+                // journal does not distinguish that case. Never infer absence
+                // from a missing work entity: retain Unknown for reconciliation.
+                step.work_state = dfmcp_intent::inspect_effect_work(
+                    snapshot,
+                    &work.action,
+                    &work.idempotency_key,
+                    true,
+                )?;
+                step.work_anchor = Some(snapshot.anchor());
+            }
+            if step.state != "dispatched" {
+                continue;
+            }
             if let Some(monitor) = &mut step.monitor {
                 monitor.observe_with_evidence(&evidence)?;
                 match monitor.status() {
@@ -326,7 +367,7 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
         }
         Err(error) => {
             for retained in &mut session.carried {
-                if retained.state == "dispatched" {
+                if !retained.is_final() {
                     if let Some(monitor) = &mut retained.monitor {
                         monitor.observation_interrupted()?;
                     }
@@ -413,7 +454,10 @@ fn join_shared_world(
     })?;
     if let Some(world) = registry.get(&fortress_id).cloned() {
         let mut guard = world.lock().map_err(|_| {
-            DfmcpError::new(ErrorCode::InternalInvariantViolation, "shared world poisoned")
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "shared world poisoned",
+            )
         })?;
         if scenario_requested && guard.scenario != *scenario {
             return Err(DfmcpError::new(
@@ -429,7 +473,11 @@ fn join_shared_world(
                 ErrorCode::InvalidRequest,
                 format!(
                     "shared fortress {fortress_id} is {}; open it with durable={}",
-                    if guard.durable { "crash-durable" } else { "process-local" },
+                    if guard.durable {
+                        "crash-durable"
+                    } else {
+                        "process-local"
+                    },
                     guard.durable
                 ),
             ));
@@ -451,7 +499,12 @@ fn join_shared_world(
             scenario: guard.scenario.clone(),
         };
         drop(guard);
-        return Ok(SharedAdmission { world, view, adapter, recovery: None });
+        return Ok(SharedAdmission {
+            world,
+            view,
+            adapter,
+            recovery: None,
+        });
     }
     if registry.len() >= MAX_SHARED_WORLDS {
         return Err(DfmcpError::new(
@@ -474,7 +527,9 @@ fn join_shared_world(
         durable,
         durable_plans: BTreeMap::new(),
         durable_restore: BTreeMap::new(),
-        carried: recovery.as_ref().map_or_else(Vec::new, |recovery| recovery.carried.clone()),
+        carried: recovery
+            .as_ref()
+            .map_or_else(Vec::new, |recovery| recovery.carried.clone()),
         durability_fault: None,
     };
     let view = SharedView {
@@ -486,7 +541,12 @@ fn join_shared_world(
     };
     let world = Arc::new(Mutex::new(world));
     registry.insert(fortress_id, world.clone());
-    Ok(SharedAdmission { world, view, adapter, recovery })
+    Ok(SharedAdmission {
+        world,
+        view,
+        adapter,
+        recovery,
+    })
 }
 
 /// Admission precedes world and session locks and lasts through publication.
@@ -675,6 +735,13 @@ fn persist_durable_head(session: &mut LabSession) {
             match token {
                 Some(token) => {
                     all_final &= token != "dispatched";
+                    all_final &=
+                        session
+                            .adapter
+                            .step_receipt(plan.id, step.id)
+                            .is_some_and(|receipt| {
+                                action_fully_drained(&session.adapter, receipt.action_id)
+                            });
                     updates.push((*digest, step.id.get(), token));
                 }
                 None => {
@@ -722,6 +789,19 @@ fn persist_durable_head(session: &mut LabSession) {
                 frontier.insert((*digest, *step), token.clone());
             }
         }
+        // A later physical-work observation must not re-anchor a historic
+        // terminal proof. Publish the new world while retaining the first
+        // atomic terminal frontier for an unchanged outcome.
+        frontier.retain(|(digest, step), state| {
+            let terminal = matches!(
+                state.as_str(),
+                "verified" | "failed" | "cancelled" | "compensated"
+            );
+            !terminal
+                || !store.commit(fortress, *digest).is_some_and(|commit| {
+                    commit.steps.get(step) == Some(state) && commit.step_anchors.contains_key(step)
+                })
+        });
         for (digest, steps) in &session.durable_restore {
             for step in steps {
                 frontier.insert((*digest, *step), "abandoned".to_owned());
@@ -805,7 +885,10 @@ fn ensure_durable_owner(session: &Arc<Mutex<LabSession>>) -> Result<()> {
                 "shared world registry poisoned",
             )
         })?;
-        return if registry.get(&fortress_id).is_some_and(|current| Arc::ptr_eq(current, &shared)) {
+        return if registry
+            .get(&fortress_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &shared))
+        {
             Ok(())
         } else {
             Err(DfmcpError::new(
@@ -854,7 +937,9 @@ fn recover_commit(
     let fortress = commit.fortress_id;
     let sealed = store.load_snapshot(commit.sealed_state_hash)?;
     let original_head = store.head(fortress).cloned();
-    let head_diverged = original_head.as_ref().is_none_or(|head| head.anchor != sealed.anchor());
+    let head_diverged = original_head
+        .as_ref()
+        .is_none_or(|head| head.anchor != sealed.anchor());
     let source = PlanSource::from_durable(&commit.source);
     // This internal pure planning grant verifies the sealed request. It
     // confers no authority on a session, action, or recovery monitor.
@@ -900,6 +985,12 @@ fn recover_commit(
                 proof_anchor: None,
                 observation_error: Some(reason.clone()),
                 failure_reason: None,
+                work_step: None,
+                work_state: EffectWorkState::Unknown {
+                    entity_id: None,
+                    reason: "sealed effect identity could not be reproduced".to_owned(),
+                },
+                work_anchor: None,
                 state: "indeterminate".to_owned(),
             });
             return Ok(json!({
@@ -944,8 +1035,24 @@ fn recover_commit(
             Some(state) => state.to_owned(),
         };
         let unanchored_terminal = recorded_anchor.is_none()
-            && matches!(state.as_str(), "verified" | "failed" | "cancelled" | "compensated");
-        if state == "dispatched" || unanchored_terminal || unanchored_absence {
+            && matches!(
+                state.as_str(),
+                "verified" | "failed" | "cancelled" | "compensated"
+            );
+        let work_state = if state == "not_dispatched" && !unanchored_absence {
+            EffectWorkState::NeverDispatched
+        } else {
+            dfmcp_intent::inspect_effect_work(recovered, &step.action, &step.idempotency_key, true)
+                .unwrap_or_else(|error| EffectWorkState::Unknown {
+                    entity_id: None,
+                    reason: format!("{}: {}", error.code.as_str(), error.message),
+                })
+        };
+        if state == "dispatched"
+            || unanchored_terminal
+            || unanchored_absence
+            || !work_state.is_quiescent()
+        {
             open += 1;
             let mut predicates = step.postconditions.clone();
             if let Some(obligation) = &step.obligation {
@@ -956,30 +1063,36 @@ fn recover_commit(
             identity.extend_from_slice(commit.plan_digest.as_bytes());
             identity.extend_from_slice(&step.id.get().to_be_bytes());
             let proof_id = ActionId::new(Digest32::of_bytes(&identity).first_u128().max(1));
-            let monitor_result = if unanchored_terminal || unanchored_absence {
-                Ok(None)
-            } else if let Some(obligation) = &step.obligation {
-                let mut spec = obligation.clone();
-                spec.terminal = proof.clone();
-                RecoveredObligation::new_laboratory(proof_id, spec, sealed.tick, recovered).map(Some)
-            } else {
-                proof.validate_shape().and_then(|()| {
-                    if matches!(proof, Predicate::True | Predicate::False) {
-                        Err(DfmcpError::new(
-                            ErrorCode::InvalidPlan,
-                            "recovered effect has no nontrivial proof predicate",
-                        ))
-                    } else {
-                        Ok(None)
-                    }
-                })
-            };
+            let monitor_result =
+                if state != "dispatched" || unanchored_terminal || unanchored_absence {
+                    Ok(None)
+                } else if let Some(obligation) = &step.obligation {
+                    let mut spec = obligation.clone();
+                    spec.terminal = proof.clone();
+                    RecoveredObligation::new_laboratory(proof_id, spec, sealed.tick, recovered)
+                        .map(Some)
+                } else {
+                    proof.validate_shape().and_then(|()| {
+                        if matches!(proof, Predicate::True | Predicate::False) {
+                            Err(DfmcpError::new(
+                                ErrorCode::InvalidPlan,
+                                "recovered effect has no nontrivial proof predicate",
+                            ))
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                };
             let (monitor, monitor_error) = match monitor_result {
                 Ok(monitor) => (monitor, None),
-                Err(error) => (None, Some(format!(
-                    "recovered proof specification is inadmissible: {}: {}",
-                    error.code.as_str(), error.message,
-                ))),
+                Err(error) => (
+                    None,
+                    Some(format!(
+                        "recovered proof specification is inadmissible: {}: {}",
+                        error.code.as_str(),
+                        error.message,
+                    )),
+                ),
             };
             let unresolved = unanchored_terminal || unanchored_absence || monitor_error.is_some();
             carried.push(CarriedStep {
@@ -991,7 +1104,7 @@ fn recover_commit(
                 deadline: step.obligation.as_ref().map(|o| o.deadline_tick),
                 monitor,
                 recorded_state: state.clone(),
-                proof_anchor: None,
+                proof_anchor: if unresolved { None } else { recorded_anchor },
                 observation_error: if unanchored_terminal {
                     Some("legacy terminal state has no atomic world frontier; its effects require reconciliation".to_owned())
                 } else if unanchored_absence {
@@ -1000,16 +1113,23 @@ fn recover_commit(
                     monitor_error
                 },
                 failure_reason: None,
+                work_step: Some(step.clone()),
+                work_state: work_state.clone(),
+                work_anchor: Some(recovered.anchor()),
                 state: if unresolved { "indeterminate".to_owned() } else { state.clone() },
             });
         }
-        let recovered_state = carried.last()
-            .filter(|carried| carried.plan_digest == commit.plan_digest && carried.step == Some(step.id))
+        let recovered_state = carried
+            .last()
+            .filter(|carried| {
+                carried.plan_digest == commit.plan_digest && carried.step == Some(step.id)
+            })
             .map_or(state.as_str(), |carried| carried.state.as_str());
         steps.push(json!({
             "step": step.id.get(), "action": kind, "state": recovered_state,
             "recorded_state": recorded,
             "recorded_anchor": recorded_anchor.as_ref().map(anchor_json),
+            "work_state": effect_work_json(&work_state),
             "blind_retry_allowed": false,
             "proof_class": if unanchored_terminal || unanchored_absence { "unanchored_legacy_record" }
                 else if recorded_anchor.is_some() { "atomic_world_frontier" } else { "not_proven" },
@@ -1078,7 +1198,12 @@ fn load_durable_fortress(
         let mut carried = Vec::new();
         let mut commits = Vec::new();
         for commit in store.commits(fortress_id).cloned().collect::<Vec<_>>() {
-            commits.push(recover_commit(store, &commit, &mut carried, adapter.snapshot())?);
+            commits.push(recover_commit(
+                store,
+                &commit,
+                &mut carried,
+                adapter.snapshot(),
+            )?);
         }
         Ok((
             adapter,
@@ -1504,6 +1629,41 @@ pub(crate) fn authorize_entry(
     ctx.authorize(capability, risk, &[], None)
 }
 
+/// A bounded wait that moves the simulation is a clock effect. Its clock
+/// authority and ability to observe the result must cover the complete span.
+fn authorize_wait_advance(
+    ctx: &OperationContext,
+    requested_ticks: u64,
+    paused: bool,
+) -> Result<()> {
+    if requested_ticks == 0 {
+        return Ok(());
+    }
+    authorize_entry(ctx, Capability::ControlClock, RiskTier::Reversible)?;
+    if !paused {
+        let mut final_context = ctx.clone();
+        final_context.anchor.tick = GameTick(
+            ctx.anchor
+                .tick
+                .0
+                .checked_add(requested_ticks)
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "wait exceeds the game-time horizon",
+                    )
+                })?,
+        );
+        authorize_entry(
+            &final_context,
+            Capability::ControlClock,
+            RiskTier::Reversible,
+        )?;
+        authorize_entry(&final_context, Capability::Observe, RiskTier::ReadOnly)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn anchor_json(anchor: &StateAnchor) -> serde_json::Value {
     json!({
         "fortress_id": format!("{}", anchor.fortress_id),
@@ -1863,7 +2023,9 @@ pub(crate) fn open_session_in_scenario(
                     return coded_error_payload(
                         "fortress.open_session",
                         ErrorCode::AdapterUnavailable,
-                        &format!("the current owner has unpublished durable state: {fault}; recover persistence before replacing it"),
+                        &format!(
+                            "the current owner has unpublished durable state: {fault}; recover persistence before replacing it"
+                        ),
                     );
                 }
             }
@@ -1942,7 +2104,9 @@ pub(crate) fn open_session_in_scenario(
         carried: if shared {
             Vec::new()
         } else {
-            recovery.as_ref().map_or_else(Vec::new, |recovery| recovery.carried.clone())
+            recovery
+                .as_ref()
+                .map_or_else(Vec::new, |recovery| recovery.carried.clone())
         },
         replay: {
             let mut log = crate::replay::ReplayLog::default();
@@ -2018,6 +2182,14 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
+    let untracked = with_session_admitted(
+        &session,
+        || {
+            json!({"state": "unknown", "quiescent": false, "items": null,
+            "reason": "session observation unavailable"})
+        },
+        |guard| untracked_work_json(guard),
+    );
     json!({
         "ok": true,
         "session_id": format!("{session_id}"),
@@ -2026,6 +2198,7 @@ pub(crate) fn open_session_in_scenario(
         "fortress_loaded": true,
         "fortress_id": format!("{fortress_id}"),
         "granted_capabilities": granted_strings,
+        "untracked_work": untracked,
         "negotiation": negotiation.to_json(),
         "budget": {
             "max_wall_millis": budget.max_wall_millis,
@@ -2107,6 +2280,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["session_id"] = json!(format!("{}", guard.session_id));
                         payload["evidence_count"] = json!(frame.evidence.len());
                         payload["world"] = crate::lab_world::briefing(&snapshot);
+                        payload["untracked_work"] = untracked_work_json(guard);
                         payload["world_alerts"] = json!(crate::lab_world::world_alerts(&snapshot));
                         payload["objectives"] = objectives_json(guard);
                         payload.to_string()
@@ -2468,6 +2642,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
             "action_id": format!("{action_id}"),
             "step": receipt.map(|r| r.step_id.get()),
             "state": receipt.map(|r| format!("{:?}", r.state)),
+            "work_state": action_work_json(&session.adapter, action_id),
             "risk": step.map(|s| s.risk.as_str()),
             "capability": step.map(|s| s.required_capability.as_str()),
             "obligation": step.and_then(|s| s.obligation.as_ref()).map(|o| json!({
@@ -2501,7 +2676,20 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         }));
     }
     if !session.open_actions.is_empty() {
-        resume.push(if snapshot.paused {
+        let terminal_work = session.open_actions.iter().any(|id| {
+            session
+                .adapter
+                .action_receipt(*id)
+                .is_some_and(|receipt| receipt.state.is_terminal())
+                && !action_fully_drained(&session.adapter, *id)
+        });
+        resume.push(if terminal_work {
+            json!({
+                "tool": "fortress.cancel",
+                "arguments": {"session_id": session.session_id.to_string(), "scope": "session", "mode": "stop_future_steps"},
+                "why": "a terminal goal still owns active or unresolved physical work; cleanup requires current original effect authority",
+            })
+        } else if snapshot.paused {
             json!({
                 "tool": "fortress.plan",
                 "arguments": {"session_id": format!("{}", session.session_id), "paused_target": false},
@@ -2516,16 +2704,11 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         });
     }
     let alerts = crate::lab_world::world_alerts(snapshot);
-    if session
-        .carried
-        .iter()
-        .any(|carried| carried.state == "dispatched")
-        && !snapshot.paused
-    {
+    if session.carried.iter().any(|carried| !carried.is_final()) && !snapshot.paused {
         resume.push(json!({
             "tool": "fortress.wait",
             "arguments": {"session_id": format!("{}", session.session_id), "max_game_ticks": 100},
-            "why": "obligations carried across a durable restart are re-proven by later observations",
+            "why": "recovered goals and physical work require current observation; terminal proof receipts remain unchanged while work progresses",
         }));
     }
     for alert in &alerts {
@@ -2576,6 +2759,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         },
         "pending_plan": pending,
         "open_actions": session.open_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
+        "untracked_work": untracked_work_json(session),
         "last_plan_actions": session.last_plan_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
         "mcp_tasks": crate::task_service::session_handles(&session.session_id.to_string()),
         "mcp_task_coverage": crate::task_service::session_handle_coverage(&session.session_id.to_string()),
@@ -2586,29 +2770,91 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
     })
 }
 
-/// Exclusive spatial leases for every step that excavates or builds, held
-/// until the step's obligation deadline. A region another member is working
-/// on is refused before any effect; a session never conflicts with itself.
+/// Exclusive spatial leases for every step that excavates or builds. Retained
+/// action ownership fences unresolved work even after a lease's TTL expires.
+/// A session never conflicts with itself.
 /// The caller restores the prior lease book if the commit then fails.
 fn acquire_plan_leases(
     session: &mut LabSession,
     plan: &PreparedPlan,
 ) -> Result<Vec<(dfmcp_core::StepId, Vec<dfmcp_core::LeaseId>)>> {
     let now = session.adapter.snapshot().tick;
-    session.leases.manager.cleanup_expired_leases(now);
+    // A failed later reservation must not publish earlier reservations or
+    // consume their identifiers. Publish the complete lease set together.
+    let mut manager = session.leases.manager.clone();
+    manager.cleanup_expired_leases(now);
     let mut acquired = Vec::new();
+    let untracked = if plan.steps.iter().any(|step| {
+        matches!(
+            step.action,
+            Action::DesignateDig { .. } | Action::Build { .. }
+        )
+    }) {
+        untracked_work(session)?
+    } else {
+        Vec::new()
+    };
     for step in &plan.steps {
         let area = match &step.action {
             Action::DesignateDig { area, .. } => *area,
             Action::Build { footprint, .. } => *footprint,
             _ => continue,
         };
+        if untracked.iter().any(|work| work.conflicts_with(&area)) {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "untracked reference work has an active or unresolved footprint in this region; reconcile or observe quiescence first",
+            ));
+        }
+        for carried in &session.carried {
+            if carried.work_state.is_quiescent() {
+                continue;
+            }
+            let work = carried.work_step.as_ref().ok_or_else(|| DfmcpError::new(
+                ErrorCode::Conflict,
+                "a recovered effect has unresolved identity; reconcile or restore before reserving a region",
+            ))?;
+            let owned_area = match &work.action {
+                Action::DesignateDig { area, .. } => area,
+                Action::Build { footprint, .. } => footprint,
+                _ => continue,
+            };
+            if dfmcp_core::lease::cuboids_intersect(&area, owned_area) {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "the requested region overlaps unresolved physical work carried across recovery",
+                ));
+            }
+        }
+        for (action_id, (holder, _)) in &session.leases.by_action {
+            if *holder == session.session_id || action_fully_drained(&session.adapter, *action_id) {
+                continue;
+            }
+            let owned = session.adapter.action_step(*action_id).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "another member's retained work cannot be resolved; its region remains fenced",
+                )
+            })?;
+            let owned_area = match &owned.action {
+                Action::DesignateDig { area, .. } => area,
+                Action::Build { footprint, .. } => footprint,
+                _ => continue,
+            };
+            if dfmcp_core::lease::cuboids_intersect(&area, owned_area) {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    format!(
+                        "step {} overlaps unresolved work owned by session {holder}; proof expiry does not release physical work",
+                        step.id.get(),
+                    ),
+                ));
+            }
+        }
         let ttl = step.obligation.as_ref().map_or(1, |obligation| {
             obligation.deadline_tick.0.saturating_sub(now.0).max(1)
         });
-        let lease = session
-            .leases
-            .manager
+        let lease = manager
             .acquire_spatial_lease(session.session_id, area, true, now, ttl)
             .map_err(|error| {
                 DfmcpError::new(
@@ -2622,17 +2868,214 @@ fn acquire_plan_leases(
             })?;
         acquired.push((step.id, vec![lease]));
     }
+    session.leases.manager = manager;
     Ok(acquired)
 }
 
-/// Release the spatial leases an action held once it is terminal.
+/// A terminal goal receipt cannot release work that still exists in the world.
 fn release_action_leases(session: &mut LabSession, action_id: ActionId) {
+    if !action_fully_drained(&session.adapter, action_id) {
+        return;
+    }
     if let Some((holder, leases)) = session.leases.by_action.remove(&action_id) {
         for lease in leases {
             // An expired lease may already have been cleaned up.
             let _ = session.leases.manager.release_lease(lease, holder);
         }
     }
+}
+
+fn effect_work_json(state: &EffectWorkState) -> serde_json::Value {
+    let (kind, entity_id, reason) = match state {
+        EffectWorkState::NeverDispatched => ("never_dispatched", None, None),
+        EffectWorkState::Active { entity_id } => ("active", Some(*entity_id), None),
+        EffectWorkState::Quiescent { entity_id } => ("quiescent", *entity_id, None),
+        EffectWorkState::Unknown { entity_id, reason } => {
+            ("unknown", *entity_id, Some(reason.as_str()))
+        }
+    };
+    json!({
+        "state": kind,
+        "quiescent": state.is_quiescent(),
+        "entity_id": entity_id.map(|id| id.to_string()),
+        "reason": reason,
+    })
+}
+
+fn action_work_json(adapter: &MemoryAdapter, action_id: ActionId) -> serde_json::Value {
+    let mut view = match adapter.action_work_state(action_id) {
+        Ok(state) => effect_work_json(&state),
+        Err(error) => effect_work_json(&EffectWorkState::Unknown {
+            entity_id: None,
+            reason: format!("{}: {}", error.code.as_str(), error.message),
+        }),
+    };
+    view["observed_anchor"] = anchor_json(&adapter.snapshot().anchor());
+    view
+}
+
+fn action_fully_drained(adapter: &MemoryAdapter, action_id: ActionId) -> bool {
+    adapter
+        .action_receipt(action_id)
+        .is_some_and(|receipt| receipt.state.is_terminal())
+        && adapter
+            .action_work_state(action_id)
+            .is_ok_and(|state| state.is_quiescent())
+}
+
+fn effect_drain_json(receipt: &dfmcp_lab::EffectDrainReceipt) -> serde_json::Value {
+    json!({
+        "action_id": receipt.action_id.to_string(),
+        "before": effect_work_json(&receipt.before),
+        "after": effect_work_json(&receipt.after),
+        "observed_anchor": anchor_json(&receipt.observed_anchor),
+        "stopped_work": receipt.stopped_work,
+        "proof_receipt_preserved": true,
+        "evidence": receipt.evidence.iter().map(|evidence| json!({
+            "evidence_id": evidence.id.to_string(),
+            "digest": evidence.digest.to_hex(),
+            "kind": format!("{:?}", evidence.kind),
+            "summary": evidence.summary,
+            "anchor": anchor_json(&evidence.anchor),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn retain_open_actions(session: &mut LabSession) {
+    session
+        .open_actions
+        .retain(|id| !action_fully_drained(&session.adapter, *id));
+}
+
+/// An authorized emergency pause starts a new shared-clock decision. Call
+/// immediately after the successful pause phase, even if later cleanup fails.
+fn reset_emergency_unpause_consent(session: &mut LabSession, mode: CancelMode) {
+    if mode == CancelMode::EmergencyPauseAndDrain && session.adapter.snapshot().paused {
+        session.leases.unpause_consent.clear();
+    }
+}
+
+/// Cancellation can publish a request or emergency pause before finalization
+/// refuses. Expose the current world and work on those errors as well.
+fn cancel_action_error_payload(
+    session: &LabSession,
+    action_id: ActionId,
+    error: &DfmcpError,
+) -> String {
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&dfmcp_error_payload("fortress.cancel", error))
+            .unwrap_or_else(|_| json!({"ok": false}));
+    let receipt = session.adapter.action_receipt(action_id);
+    let work = action_work_json(&session.adapter, action_id);
+    let remaining_nonterminal = usize::from(!receipt.is_some_and(|row| row.state.is_terminal()));
+    let remaining_work = usize::from(work["quiescent"] != true);
+    payload["scope"] = json!("last_action");
+    payload["action_id"] = json!(action_id.to_string());
+    payload["final_state"] = json!(receipt.map(|row| format!("{:?}", row.state)));
+    payload["work_state"] = work;
+    payload["paused"] = json!(session.adapter.snapshot().paused);
+    payload["untracked_work"] = untracked_work_json(session);
+    payload["observed_anchor"] = anchor_json(&session.adapter.snapshot().anchor());
+    payload["drain_progress"] = json!({
+        "actions_total": 1, "drained": 0,
+        "remaining_nonterminal": remaining_nonterminal,
+        "remaining_work": remaining_work, "quiescent": false,
+    });
+    payload["finalize_certificate"] = serde_json::Value::Null;
+    payload.to_string()
+}
+
+fn untracked_work(session: &LabSession) -> Result<Vec<restore_work::UntrackedWork>> {
+    let mut known: BTreeSet<EntityId> = session.adapter.known_work_entity_ids().collect();
+    for carried in &session.carried {
+        if let Some(step) = &carried.work_step
+            && matches!(
+                step.action,
+                Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
+            )
+        {
+            known.insert(dfmcp_intent::effects::created_entity_id(
+                &step.idempotency_key,
+                0,
+            ));
+        }
+    }
+    restore_work::inspect_untracked_work(
+        session.adapter.snapshot(),
+        &known,
+        session.budget.max_entities,
+    )
+}
+
+fn untracked_work_json(session: &LabSession) -> serde_json::Value {
+    let anchor = anchor_json(&session.adapter.snapshot().anchor());
+    let ctx = context_for(session, session.next_request_id);
+    let observed = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+        .and_then(|()| untracked_work(session));
+    match observed {
+        Ok(work) => json!({
+            "state": "observed", "quiescent": work.is_empty(),
+            "items": work.iter().map(restore_work::UntrackedWork::to_json).collect::<Vec<_>>(),
+            "observed_anchor": anchor,
+            "note": "reference work without a retained action handle remains visible; reading it grants no cancellation authority",
+        }),
+        Err(error) => json!({
+            "state": "unknown", "quiescent": false, "items": null,
+            "observed_anchor": anchor,
+            "reason": format!("{}: {}", error.code.as_str(), error.message),
+        }),
+    }
+}
+
+/// Bound the aggregate physical effects before starting a multi-action drain.
+/// Fresh contexts for individual steps must not reset the call's action budget.
+fn authorize_drain_budget(
+    session: &LabSession,
+    actions: &[ActionId],
+    mode: CancelMode,
+) -> Result<()> {
+    if actions.len() > session.budget.max_actions as usize {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "the selected drain exceeds the session action budget; use scope=oldest_open_plan to drain retained plans individually",
+        ));
+    }
+    let mut effects = 0u64;
+    let mut needs_drain = false;
+    for id in actions {
+        let receipt = session.adapter.action_receipt(*id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "retained action missing; drain budget and quiescence are unresolved",
+            )
+        })?;
+        let work = session.adapter.action_work_state(*id)?;
+        let terminal = receipt.state.is_terminal();
+        needs_drain |= !terminal || !work.is_quiescent();
+        effects += u64::from(matches!(work, EffectWorkState::Active { .. }));
+        if !terminal
+            && mode == CancelMode::CompensateReversible
+            && work != EffectWorkState::NeverDispatched
+            && session
+                .adapter
+                .action_step(*id)
+                .is_some_and(|step| step.compensation.is_some())
+        {
+            effects += 1;
+        }
+    }
+    effects += u64::from(
+        needs_drain
+            && mode == CancelMode::EmergencyPauseAndDrain
+            && !session.adapter.snapshot().paused,
+    );
+    if effects > u64::from(session.budget.max_actions) {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "physical stops, emergency pause and compensation exceed the aggregate action budget",
+        ));
+    }
+    Ok(())
 }
 
 /// A sealed plan whose anchor moved (another member acted, or game time
@@ -3163,7 +3606,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                 .map(|action| action.action_id)
                                 .collect();
                             for action in &receipt.actions {
-                                if !action.state.is_terminal()
+                                if !action_fully_drained(&guard.adapter, action.action_id)
                                     && !guard.open_actions.contains(&action.action_id)
                                 {
                                     guard.open_actions.push(action.action_id);
@@ -3176,9 +3619,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                         .leases
                                         .by_action
                                         .insert(action.action_id, (holder, ids.clone()));
-                                    if action.state.is_terminal() {
-                                        release_action_leases(guard, action.action_id);
-                                    }
+                                    release_action_leases(guard, action.action_id);
                                 }
                             }
                             if plan_sets_pause(&pending.plan, true)
@@ -3202,10 +3643,12 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                     "action_id": format!("{}", action.action_id),
                                     "step": action.step_id.get(),
                                     "state": format!("{:?}", action.state),
+                                    "work_state": action_work_json(&guard.adapter, action.action_id),
                                     "message": action.message,
                                 })).collect::<Vec<_>>(),
                                 "observed_anchor": anchor_json(&receipt.observed_anchor),
                                 "paused": paused,
+                                "untracked_work": untracked_work_json(guard),
                                 "witness_rebase": witness_rebase,
                             });
                             let payload_text = payload.to_string();
@@ -3272,16 +3715,13 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             if let Err(error) = durability_gate(guard) {
                 return dfmcp_error_payload("fortress.wait", &error);
             }
+            let (_, entry_ctx) = match next_context(guard) {
+                Ok(value) => value,
+                Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+            };
+            if let Err(error) = authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly)
             {
-                let (_, entry_ctx) = match next_context(guard) {
-                    Ok(value) => value,
-                    Err(error) => return dfmcp_error_payload("fortress.wait", &error),
-                };
-                if let Err(error) =
-                    authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly)
-                {
-                    return dfmcp_error_payload("fortress.wait", &error);
-                }
+                return dfmcp_error_payload("fortress.wait", &error);
             }
             let action_id = guard.last_action;
             // Without any committed action, a bounded wait still lets game
@@ -3303,6 +3743,9 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 );
             }
             let paused = guard.adapter.snapshot().paused;
+            if let Err(error) = authorize_wait_advance(&entry_ctx, requested_ticks, paused) {
+                return dfmcp_error_payload("fortress.wait", &error);
+            }
             let advanced = if requested_ticks > 0 && !paused {
                 if let Err(error) = guard.adapter.advance_ticks(requested_ticks) {
                     return dfmcp_error_payload("fortress.wait", &error);
@@ -3325,7 +3768,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
             // Poll every open action in commit order (prerequisites before their
-            // dependents) and retire the ones that reached a terminal state.
+            // dependents). Retire only terminal proofs with quiescent work.
             let mut polled_actions = Vec::new();
             let mut still_open = Vec::new();
             for open in guard.open_actions.clone() {
@@ -3335,7 +3778,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 };
                 match guard.adapter.poll_action(open, &poll_ctx) {
                     Ok(receipt) => {
-                        if receipt.state.is_terminal() {
+                        if action_fully_drained(&guard.adapter, open) {
                             release_action_leases(guard, open);
                         } else {
                             still_open.push(open);
@@ -3345,6 +3788,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                             "step": receipt.step_id.get(),
                             "state": format!("{:?}", receipt.state),
                             "message": receipt.message,
+                            "work_state": action_work_json(&guard.adapter, open),
                         }));
                     }
                     Err(error) => return dfmcp_error_payload("fortress.wait", &error),
@@ -3366,6 +3810,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     "status": task.status.as_str(),
                     "commit_state": format!("{:?}", task.commit_state),
                     "summary": task.summary,
+                    "work_state": action_work_json(&guard.adapter, action_id),
                     "observed_anchor": anchor_json(&snapshot.anchor()),
                 }),
                 _ => json!({
@@ -3377,11 +3822,13 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     "observed_anchor": anchor_json(&snapshot.anchor()),
                 }),
             };
+            payload["paused"] = json!(guard.adapter.snapshot().paused);
+            payload["untracked_work"] = untracked_work_json(guard);
+            payload["polled_actions"] = json!(polled_actions);
+            payload["open_actions_remaining"] = json!(guard.open_actions.len());
             if max_game_ticks.is_some() {
                 payload["advanced_game_ticks"] = json!(advanced);
                 payload["game_tick"] = json!(snapshot.tick.0);
-                payload["polled_actions"] = json!(polled_actions);
-                payload["open_actions_remaining"] = json!(guard.open_actions.len());
                 payload["world_alerts"] =
                     json!(crate::lab_world::world_alerts(guard.adapter.snapshot()));
                 payload["objectives"] = objectives_json(guard);
@@ -3389,7 +3836,11 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     // The bounded evaluation above owns proof status; a raw
                     // predicate match cannot substitute for cadence/stability.
                     payload["carried_obligations"] = json!(
-                        guard.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+                        guard
+                            .carried
+                            .iter()
+                            .map(CarriedStep::to_json)
+                            .collect::<Vec<_>>()
                     );
                 }
                 if requested_ticks > 0 && paused {
@@ -3417,23 +3868,27 @@ pub fn fortress_cancel(session_id: Option<String>, mode: Option<String>) -> Stri
 }
 
 /// Cancel either the most recent action (`scope` omitted or `last_action`,
-/// the historical behaviour) or every nonterminal action of the most recent
-/// committed plan (`scope="plan"`), draining dependents before their
-/// prerequisites and reporting measurable drain progress. A finalize
-/// certificate is issued only once the plan is quiescent.
+/// the historical behaviour), the most recent plan (`scope="plan"`), or all
+/// retained open work owned by this session (`scope="session"`). Drain
+/// the oldest retained plan with `scope="oldest_open_plan"` when the whole
+/// session exceeds a call budget. Dependents drain before prerequisites.
 pub(crate) fn cancel_in_scope(
     session_id: Option<String>,
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
-    let plan_scope = match scope.as_deref() {
-        None | Some("last_action") => false,
-        Some("plan") => true,
+    let drain_scope = match scope.as_deref() {
+        None | Some("last_action") => None,
+        Some("plan") => Some("plan"),
+        Some("session") => Some("session"),
+        Some("oldest_open_plan") => Some("oldest_open_plan"),
         Some(other) => {
             return coded_error_payload(
                 "fortress.cancel",
                 ErrorCode::InvalidRequest,
-                &format!("unsupported cancellation scope {other:?}; use last_action or plan"),
+                &format!(
+                    "unsupported cancellation scope {other:?}; use last_action, plan, oldest_open_plan or session"
+                ),
             );
         }
     };
@@ -3464,18 +3919,11 @@ pub(crate) fn cancel_in_scope(
                     Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
                 };
                 if let Err(error) =
-                    authorize_entry(&entry_ctx, Capability::ControlClock, RiskTier::Reversible)
+                    authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly)
                 {
                     return dfmcp_error_payload("fortress.cancel", &error);
                 }
             }
-            let Some(action_id) = guard.last_action else {
-                return coded_error_payload(
-                    "fortress.cancel",
-                    ErrorCode::Conflict,
-                    "no committed action to cancel; call fortress_commit first",
-                );
-            };
             let cancel_mode = match mode.as_deref() {
                 Some("emergency_pause_and_drain") => CancelMode::EmergencyPauseAndDrain,
                 Some("stop_future_steps") => CancelMode::StopFutureSteps,
@@ -3487,150 +3935,315 @@ pub(crate) fn cancel_in_scope(
                     );
                 }
             };
-            if plan_scope {
-                return drain_plan(guard, cancel_mode);
+            if let Some(scope) = drain_scope {
+                if scope == "oldest_open_plan" {
+                    let Some(oldest) = guard
+                        .open_actions
+                        .iter()
+                        .copied()
+                        .find(|id| !action_fully_drained(&guard.adapter, *id))
+                    else {
+                        return coded_error_payload(
+                            "fortress.cancel",
+                            ErrorCode::Conflict,
+                            "no retained open plan remains in this session",
+                        );
+                    };
+                    let Some(original) = guard.adapter.action_plan_receipt(oldest) else {
+                        return cancel_action_error_payload(
+                            guard,
+                            oldest,
+                            &DfmcpError::new(
+                                ErrorCode::Conflict,
+                                "the oldest open action has no retained original commit; reconciliation is required",
+                            ),
+                        );
+                    };
+                    let digest = original.plan_digest.to_string();
+                    let actions = original.actions.iter().map(|row| row.action_id).collect();
+                    let mut payload: serde_json::Value =
+                        serde_json::from_str(&drain_actions(guard, cancel_mode, scope, actions))
+                            .unwrap_or_else(|_| json!({"ok": false}));
+                    payload["plan_digest"] = json!(digest);
+                    return payload.to_string();
+                }
+                let actions = if scope == "plan" {
+                    guard.last_plan_actions.clone()
+                } else {
+                    guard.open_actions.clone()
+                };
+                return drain_actions(guard, cancel_mode, scope, actions);
+            }
+            let Some(action_id) = guard.last_action else {
+                return coded_error_payload(
+                    "fortress.cancel",
+                    ErrorCode::Conflict,
+                    "no committed action to cancel; call fortress_commit first",
+                );
+            };
+            if let Err(error) = authorize_drain_budget(guard, &[action_id], cancel_mode) {
+                return cancel_action_error_payload(guard, action_id, &error);
             }
             let (_, ctx) = match next_context(guard) {
                 Ok(value) => value,
-                Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+                Err(error) => return cancel_action_error_payload(guard, action_id, &error),
             };
+            if let Some(receipt) = guard.adapter.action_receipt(action_id).cloned()
+                && receipt.state.is_terminal()
+                && !action_fully_drained(&guard.adapter, action_id)
+            {
+                return match guard
+                    .adapter
+                    .drain_action_work_in_mode(action_id, cancel_mode, &ctx)
+                {
+                    Ok(drain) => {
+                        reset_emergency_unpause_consent(guard, cancel_mode);
+                        release_action_leases(guard, action_id);
+                        retain_open_actions(guard);
+                        json!({
+                            "ok": true,
+                            "session_id": guard.session_id.to_string(),
+                            "action_id": action_id.to_string(),
+                            "requested_state": format!("{:?}", receipt.state),
+                            "final_state": format!("{:?}", receipt.state),
+                            "physical_drain": effect_drain_json(&drain),
+                            "work_state": action_work_json(&guard.adapter, action_id),
+                            "paused": guard.adapter.snapshot().paused,
+                            "observed_anchor": anchor_json(&guard.adapter.snapshot().anchor()),
+                        })
+                        .to_string()
+                    }
+                    Err(error) => cancel_action_error_payload(guard, action_id, &error),
+                };
+            }
             match guard.adapter.request_cancel(action_id, cancel_mode, &ctx) {
                 Ok(request) => {
+                    reset_emergency_unpause_consent(guard, cancel_mode);
                     let (_, finalize_ctx) = match next_context(guard) {
                         Ok(value) => value,
-                        Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+                        Err(error) => return cancel_action_error_payload(guard, action_id, &error),
                     };
                     match guard.adapter.finalize_cancel(action_id, &finalize_ctx) {
-                Ok(finalized) => json!({
+                        Ok(finalized) => {
+                            release_action_leases(guard, action_id);
+                            retain_open_actions(guard);
+                            json!({
                     "ok": true,
                     "session_id": format!("{}", guard.session_id),
                     "action_id": format!("{}", finalized.action_id),
                     "requested_state": format!("{:?}", request.state),
                     "final_state": format!("{:?}", finalized.state),
+                    "work_state": action_work_json(&guard.adapter, action_id),
+                    "paused": guard.adapter.snapshot().paused,
                     "note": "cancellation is request/drain/compensate/finalize; records are never deleted",
                 })
-                .to_string(),
-                Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+                .to_string()
+                        }
+                        Err(error) => cancel_action_error_payload(guard, action_id, &error),
+                    }
                 }
-                }
-                Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+                Err(error) => cancel_action_error_payload(guard, action_id, &error),
             }
         },
     )
 }
 
-fn drain_plan(guard: &mut LabSession, cancel_mode: CancelMode) -> String {
-    let actions = guard.last_plan_actions.clone();
+fn drain_actions(
+    guard: &mut LabSession,
+    cancel_mode: CancelMode,
+    scope: &str,
+    actions: Vec<ActionId>,
+) -> String {
+    if let Err(error) = authorize_drain_budget(guard, &actions, cancel_mode) {
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&dfmcp_error_payload("fortress.cancel", &error))
+                .unwrap_or_else(|_| json!({"ok": false}));
+        let unknown = actions
+            .iter()
+            .filter(|id| {
+                !guard
+                    .adapter
+                    .action_work_state(**id)
+                    .is_ok_and(|state| state.is_quiescent())
+            })
+            .count();
+        let pending = actions
+            .iter()
+            .filter(|id| {
+                !guard
+                    .adapter
+                    .action_receipt(**id)
+                    .is_some_and(|receipt| receipt.state.is_terminal())
+            })
+            .count();
+        payload["scope"] = json!(scope);
+        payload["drain_progress"] = json!({
+            "actions_total": actions.len(), "drained": 0,
+            "remaining_nonterminal": pending, "remaining_work": unknown,
+            "quiescent": false, "stage": "admission_refused",
+        });
+        payload["untracked_work"] = untracked_work_json(guard);
+        payload["finalize_certificate"] = serde_json::Value::Null;
+        payload["observed_anchor"] = anchor_json(&guard.adapter.snapshot().anchor());
+        return payload.to_string();
+    }
     let mut steps = Vec::with_capacity(actions.len());
     let mut already_terminal = 0usize;
     let mut compensated = 0usize;
     let mut cancelled = 0usize;
+    let mut terminal_work_stopped = 0usize;
     let mut failure = None;
-    // Dependents are later steps; drain them first so no prerequisite is
-    // withdrawn underneath work that still depends on it.
+    // Never poll eligibility during cancellation: prepared successors must not
+    // dispatch. Stop dependents before withdrawing their prerequisites.
     for action_id in actions.iter().rev().copied() {
-        // Read the retained receipt without advancing the action: an
-        // eligibility poll can dispatch a ready deferred step during cancel.
         let before = match guard.adapter.action_receipt(action_id).cloned() {
             Some(receipt) => receipt,
             None => {
                 failure = Some(DfmcpError::new(
                     ErrorCode::Conflict,
-                    "the original plan action is no longer retained",
+                    "the original plan action is no longer retained; quiescence is unresolved",
                 ));
                 break;
             }
         };
-        if before.state.is_terminal() {
+        let work_before = action_work_json(&guard.adapter, action_id);
+        let mut cleanup = None;
+        let mut drained = false;
+        let outcome = if before.state.is_terminal() {
             already_terminal += 1;
-            steps.push(json!({
-                "action_id": format!("{action_id}"),
-                "step": before.step_id.get(),
-                "before": format!("{:?}", before.state),
-                "after": format!("{:?}", before.state),
-                "drained": false,
-            }));
-            continue;
-        }
-        let outcome = next_context(guard)
-            .and_then(|(_, ctx)| guard.adapter.request_cancel(action_id, cancel_mode, &ctx))
-            .and_then(|_| next_context(guard))
-            .and_then(|(_, ctx)| guard.adapter.finalize_cancel(action_id, &ctx));
-        match outcome {
-            Ok(finalized) => {
-                match finalized.state {
-                    CommitState::Compensated => compensated += 1,
-                    _ => cancelled += 1,
-                }
-                steps.push(json!({
-                    "action_id": format!("{action_id}"),
-                    "step": before.step_id.get(),
-                    "before": format!("{:?}", before.state),
-                    "after": format!("{:?}", finalized.state),
-                    "drained": true,
-                }));
+            if action_fully_drained(&guard.adapter, action_id) {
+                Ok(())
+            } else {
+                next_context(guard)
+                    .and_then(|(_, ctx)| {
+                        guard
+                            .adapter
+                            .drain_action_work_in_mode(action_id, cancel_mode, &ctx)
+                    })
+                    .map(|receipt| {
+                        reset_emergency_unpause_consent(guard, cancel_mode);
+                        drained = receipt.stopped_work;
+                        terminal_work_stopped += usize::from(receipt.stopped_work);
+                        cleanup = Some(effect_drain_json(&receipt));
+                    })
             }
-            Err(error) => {
-                failure = Some(error);
-                break;
-            }
+        } else {
+            next_context(guard)
+                .and_then(|(_, ctx)| guard.adapter.request_cancel(action_id, cancel_mode, &ctx))
+                .inspect(|_| {
+                    reset_emergency_unpause_consent(guard, cancel_mode);
+                })
+                .and_then(|_| next_context(guard))
+                .and_then(|(_, ctx)| guard.adapter.finalize_cancel(action_id, &ctx))
+                .map(|receipt| {
+                    drained = true;
+                    if receipt.state == CommitState::Compensated {
+                        compensated += 1;
+                    } else {
+                        cancelled += 1;
+                    }
+                })
+        };
+        let after = guard.adapter.action_receipt(action_id);
+        steps.push(json!({
+            "action_id": action_id.to_string(),
+            "step": before.step_id.get(),
+            "before": format!("{:?}", before.state),
+            "after": after.map(|receipt| format!("{:?}", receipt.state)),
+            "proof_receipt_digest": after.map(|receipt| receipt.adapter_receipt_digest.to_hex()),
+            "proof_anchor": after.map(|receipt| anchor_json(&receipt.observed_anchor)),
+            "work_before": work_before,
+            "work_after": action_work_json(&guard.adapter, action_id),
+            "physical_drain": cleanup,
+            "drained": drained,
+        }));
+        if let Err(error) = outcome {
+            failure = Some(error);
+            break;
         }
     }
+    let mut remaining_nonterminal = 0usize;
+    let mut remaining_work = 0usize;
     for action_id in &actions {
-        let terminal = guard
-            .adapter
-            .action_receipt(*action_id)
-            .is_some_and(|receipt| receipt.state.is_terminal());
-        if terminal {
-            release_action_leases(guard, *action_id);
+        remaining_nonterminal += usize::from(
+            !guard
+                .adapter
+                .action_receipt(*action_id)
+                .is_some_and(|receipt| receipt.state.is_terminal()),
+        );
+        remaining_work += usize::from(
+            !guard
+                .adapter
+                .action_work_state(*action_id)
+                .is_ok_and(|state| state.is_quiescent()),
+        );
+        release_action_leases(guard, *action_id);
+        if !action_fully_drained(&guard.adapter, *action_id)
+            && !guard.open_actions.contains(action_id)
+        {
+            guard.open_actions.push(*action_id);
         }
     }
+    retain_open_actions(guard);
     steps.reverse();
-    let total = actions.len();
-    let drained = compensated + cancelled;
-    let remaining = total.saturating_sub(already_terminal + drained);
-    let quiescent = failure.is_none() && remaining == 0;
-    let anchor = guard.adapter.snapshot().anchor();
+    let untracked = untracked_work_json(guard);
+    let untracked_quiet = untracked["quiescent"] == true;
+    let remaining_carried = guard.carried.iter().filter(|step| !step.is_final()).count();
+    let session_quiet = scope != "session" || (untracked_quiet && remaining_carried == 0);
+    let quiescent =
+        failure.is_none() && remaining_nonterminal == 0 && remaining_work == 0 && session_quiet;
+    let anchor = anchor_json(&guard.adapter.snapshot().anchor());
     let finalize_certificate = quiescent.then(|| {
-        let mut bytes = b"dfmcp-lab-plan-drain-certificate-v1".to_vec();
-        for step in &steps {
-            bytes.extend_from_slice(step.to_string().as_bytes());
-        }
-        bytes.extend_from_slice(anchor.state_hash.as_bytes());
+        let canonical = json!({
+            "schema": "dfmcp-lab-plan-drain-certificate-v2",
+            "scope": scope,
+            "actions": actions.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "steps": steps,
+            "anchor": anchor,
+        });
         json!({
-            "digest": Digest32::of_bytes(&bytes).to_string(),
-            "anchor": anchor_json(&anchor),
-            "statement": "every action of the plan is terminal; no dispatched work remains",
+            "digest": Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
+            "anchor": anchor,
+            "statement": "every original action is terminal and its physical work is proven quiescent",
         })
     });
     let progress = json!({
-        "actions_total": total,
+        "actions_total": actions.len(),
         "already_terminal": already_terminal,
-        "drained": drained,
+        "drained": compensated + cancelled + terminal_work_stopped,
         "compensated": compensated,
         "cancelled": cancelled,
-        "remaining_nonterminal": remaining,
+        "terminal_work_stopped": terminal_work_stopped,
+        "remaining_nonterminal": remaining_nonterminal,
+        "remaining_work": remaining_work,
+        "untracked_work_quiescent": untracked_quiet,
+        "remaining_carried": remaining_carried,
         "quiescent": quiescent,
     });
     match failure {
         None => json!({
             "ok": true,
-            "session_id": format!("{}", guard.session_id),
-            "scope": "plan",
+            "session_id": guard.session_id.to_string(),
+            "scope": scope,
             "drain_progress": progress,
+            "paused": guard.adapter.snapshot().paused,
+            "untracked_work": untracked,
             "steps": steps,
             "finalize_certificate": finalize_certificate,
-            "observed_anchor": anchor_json(&anchor),
-            "note": "verified actions are history and are not rewritten; plan an inverse to undo them",
-        })
-        .to_string(),
+            "observed_anchor": anchor,
+            "note": "terminal goal receipts remain history; remaining physical work is stopped under fresh authority with separate evidence",
+        }).to_string(),
         Some(error) => {
             let mut payload: serde_json::Value =
                 serde_json::from_str(&dfmcp_error_payload("fortress.cancel", &error))
                     .unwrap_or_else(|_| json!({"ok": false}));
-            payload["scope"] = json!("plan");
+            payload["scope"] = json!(scope);
+            payload["paused"] = json!(guard.adapter.snapshot().paused);
+            payload["untracked_work"] = untracked;
             payload["drain_progress"] = progress;
             payload["steps"] = json!(steps);
+            payload["finalize_certificate"] = serde_json::Value::Null;
+            payload["observed_anchor"] = anchor;
             payload.to_string()
         }
     }
@@ -3778,15 +4391,20 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
             // dispatches are abandoned; earlier terminal proof stays intact.
             let restored_commits = if guard.durable_scenario.is_some() {
                 match with_durable_store(|store| {
-                    Ok(store.commits(guard.fortress_id).map(|commit| {
-                        (
-                            commit.plan_digest,
-                            commit.steps.iter()
-                                .filter(|(_, state)| state.as_str() == "dispatched")
-                                .map(|(step, _)| *step)
-                                .collect(),
-                        )
-                    }).collect::<BTreeMap<Digest32, Vec<u32>>>())
+                    Ok(store
+                        .commits(guard.fortress_id)
+                        .map(|commit| {
+                            (
+                                commit.plan_digest,
+                                commit
+                                    .steps
+                                    .iter()
+                                    .filter(|(_, state)| state.as_str() == "dispatched")
+                                    .map(|(step, _)| *step)
+                                    .collect(),
+                            )
+                        })
+                        .collect::<BTreeMap<Digest32, Vec<u32>>>())
                 }) {
                     Ok(commits) => commits,
                     Err(error) => return dfmcp_error_payload("fortress.restore", &error),
@@ -3823,6 +4441,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     "restored_anchor": anchor_json(&receipt.restored_anchor),
                     "content_digest": receipt.content_digest.to_string(),
                     "note": "new observation epoch; pending plans and action handles were invalidated",
+                    "untracked_work": untracked_work_json(guard),
                 })
                 .to_string()
                 }
@@ -3971,12 +4590,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                 health_opt,
                 None,
                 guard.leases.manager.active_lease_count(),
-                guard.open_actions.len()
-                    + guard
-                        .carried
-                        .iter()
-                        .filter(|c| c.state == "dispatched")
-                        .count(),
+                guard.open_actions.len() + guard.carried.iter().filter(|c| !c.is_final()).count(),
             );
 
             match health_res {
@@ -3986,6 +4600,8 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                     "status": if report.is_healthy { "healthy" } else { "degraded" },
                     "active_sessions_count": report.active_sessions_count,
                     "active_leases_count": report.active_leases_count,
+                    "retained_action_fences": guard.leases.by_action.keys()
+                        .filter(|id| !action_fully_drained(&guard.adapter, **id)).count(),
                     "active_obligations_count": report.active_obligations_count,
                     "adapter": health.identity.name,
                     "compatibility": format!("{:?}", health.identity.compatibility),
@@ -3994,6 +4610,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
                     "warnings": health.warnings,
                     "current_anchor": health.current_anchor.as_ref().map(anchor_json),
                     "durability": durability_json(guard),
+                    "untracked_work": untracked_work_json(guard),
                 })
                 .to_string(),
                 Err(error) => dfmcp_error_payload("fortress.doctor", &error),

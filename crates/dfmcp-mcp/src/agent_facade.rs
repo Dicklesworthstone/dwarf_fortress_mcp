@@ -27,6 +27,8 @@ struct PlanActionView {
     action_id: String,
     step: u64,
     state: String,
+    /// Physical work is observed independently of the goal's terminal proof.
+    work_state: Value,
     /// The sealed step summary from `fortress.plan` (kind, obligation, ...).
     sealed: Value,
     /// The plan forecast for this step: predicted terminal state and tick.
@@ -63,6 +65,8 @@ struct SessionOrientation {
     plan_actions: Vec<PlanActionView>,
     last_action_id: Option<String>,
     last_action_state: Option<String>,
+    /// Snapshot work whose originating action handle is no longer retained.
+    untracked_work: Value,
     last_checkpoint_id: Option<String>,
     turn_sequence: u64,
 }
@@ -95,6 +99,7 @@ impl SessionOrientation {
             plan_actions: Vec::new(),
             last_action_id: None,
             last_action_state: None,
+            untracked_work: value_or_null(payload.get("untracked_work")),
             last_checkpoint_id: None,
             turn_sequence: 0,
         }
@@ -208,6 +213,9 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
     if let Some(paused) = payload.get("paused").and_then(Value::as_bool) {
         state.paused = Some(paused);
     }
+    if let Some(work) = payload.get("untracked_work") {
+        state.untracked_work = work.clone();
+    }
     if let Some(adapter) = payload.get("adapter").and_then(Value::as_str) {
         state.adapter = Some(adapter.to_owned());
     }
@@ -247,9 +255,10 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                 .and_then(Value::as_u64);
             if let Some(actions) = payload.get("actions").and_then(Value::as_array) {
                 // Earlier plans' unfinished actions remain active work.
-                state
-                    .plan_actions
-                    .retain(|view| action_is_nonterminal(Some(&view.state)));
+                state.plan_actions.retain(|view| {
+                    action_is_nonterminal(Some(&view.state))
+                        || view.work_state.get("quiescent").and_then(Value::as_bool) != Some(true)
+                });
                 let committed: Vec<PlanActionView> = actions
                     .iter()
                     .enumerate()
@@ -262,6 +271,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                             action_id: text_or_unknown(action.get("action_id")),
                             step,
                             state: text_or_unknown(action.get("state")),
+                            work_state: value_or_null(action.get("work_state")),
                             sealed: sealed_steps
                                 .iter()
                                 .find(|sealed| {
@@ -322,6 +332,8 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                     };
                     let was_open = action_is_nonterminal(Some(&state.plan_actions[index].state));
                     state.plan_actions[index].state = new_state.clone();
+                    state.plan_actions[index].work_state =
+                        value_or_null(observed.get("work_state"));
                     if was_open && !action_is_nonterminal(Some(&new_state)) {
                         let view = state.plan_actions[index].clone();
                         compare_with_forecast(state, &view, &new_state, observed_tick);
@@ -347,6 +359,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                         .find(|view| Some(view.action_id.as_str()) == id)
                     {
                         view.state = text_or_unknown(step.get("after"));
+                        view.work_state = value_or_null(step.get("work_after"));
                     }
                 }
             }
@@ -355,6 +368,15 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .or_else(|| state.last_action_state.clone());
+            if let Some(id) = payload.get("action_id").and_then(Value::as_str)
+                && let Some(view) = state
+                    .plan_actions
+                    .iter_mut()
+                    .find(|view| view.action_id == id)
+            {
+                view.state = text_or_unknown(payload.get("final_state"));
+                view.work_state = value_or_null(payload.get("work_state"));
+            }
         }
         "fortress.checkpoint" => {
             state.last_checkpoint_id = payload
@@ -479,6 +501,17 @@ fn plan_work_pending(state: &SessionOrientation) -> bool {
         .any(|view| action_is_nonterminal(Some(&view.state)))
 }
 
+fn terminal_physical_work(state: &SessionOrientation) -> Vec<&PlanActionView> {
+    state
+        .plan_actions
+        .iter()
+        .filter(|view| {
+            !action_is_nonterminal(Some(&view.state))
+                && view.work_state.get("quiescent").and_then(Value::as_bool) == Some(false)
+        })
+        .collect()
+}
+
 fn failed_plan_actions(state: &SessionOrientation) -> Vec<&PlanActionView> {
     state
         .plan_actions
@@ -541,6 +574,7 @@ fn active_work(state: &SessionOrientation) -> Value {
                     "step": view.step,
                     "kind": value_or_null(view.sealed.get("kind")),
                     "state": view.state,
+                    "work_state": view.work_state,
                     "creates_entity_id": value_or_null(view.sealed.get("creates_entity_id")),
                 })
             })
@@ -569,6 +603,7 @@ fn active_work(state: &SessionOrientation) -> Value {
         "pending_plans": pending_plans,
         "actions": actions,
         "obligations": obligations,
+        "untracked_work": state.untracked_work,
         "cancellation_drains": [],
         "indeterminate_effects": [],
         "publications": [],
@@ -863,6 +898,19 @@ fn routine_recommendations(
             json!({"plan_digest": digest}),
         )];
     }
+    if !terminal_physical_work(state).is_empty() {
+        return vec![recommendation(
+            "drain-remaining-physical-work",
+            "fortress.cancel",
+            "a terminal goal still has active or unresolved physical work; stop it under current authority",
+            "high",
+            "high",
+            "reversible",
+            "not_applicable",
+            false,
+            json!({"scope": "session", "mode": "stop_future_steps"}),
+        )];
+    }
     if plan_work_pending(state) {
         if state.paused == Some(true) {
             return vec![recommendation(
@@ -1022,6 +1070,22 @@ fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientat
         }));
     }
     items.extend(base_attention(operation, ok, payload, state));
+    if state
+        .untracked_work
+        .get("quiescent")
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        items.push(json!({
+            "attention_id": "untracked-reference-work",
+            "category": "active_work", "severity": "high", "urgency": "before_new_effects",
+            "confidence": {"epistemic_state": "unknown", "value": null},
+            "finding": "reference work has no retained action handle, or its complete coverage is unavailable",
+            "work": state.untracked_work,
+            "likely_consequence_if_ignored": "restored or unreconciled work can keep running without a monitor or a safe cancellation identity",
+            "evidence": [],
+        }));
+    }
     items
 }
 
@@ -1130,6 +1194,22 @@ fn base_attention(
             "confidence": {"epistemic_state": "observed", "value": 1.0},
             "finding": "a sealed plan is awaiting commit, replacement, or explicit abandonment",
             "likely_consequence_if_ignored": "the agent may lose track of unfinished protocol state",
+            "evidence": [],
+        }));
+    }
+    let physical = terminal_physical_work(state);
+    if !physical.is_empty() {
+        items.push(json!({
+            "attention_id": "terminal-goal-work-remains",
+            "category": "active_work",
+            "severity": "high",
+            "urgency": "now",
+            "confidence": {"epistemic_state": "observed", "value": 1.0},
+            "finding": "a terminal goal outcome has not established physical quiescence",
+            "subjects": physical.iter().map(|view| json!({
+                "action_id": view.action_id, "step": view.step, "work_state": view.work_state,
+            })).collect::<Vec<_>>(),
+            "likely_consequence_if_ignored": "production, digging or construction may continue after the goal has finished",
             "evidence": [],
         }));
     }
@@ -1332,6 +1412,12 @@ fn malformed_payload(operation: &str) -> Value {
     })
 }
 
+fn has_drain_observation(operation: &str, payload: &Value) -> bool {
+    operation == "fortress.cancel"
+        && payload.get("observed_anchor").is_some_and(Value::is_object)
+        && payload.get("drain_progress").is_some_and(Value::is_object)
+}
+
 fn presentation_state(
     operation: &str,
     payload: &mut Value,
@@ -1365,7 +1451,11 @@ fn presentation_state(
         Some(existing) => {
             let prior = existing.anchor.clone();
             existing.fresh_surprises.clear();
-            if is_ok(payload) {
+            // A later drain step may refuse after earlier stops or an
+            // emergency pause succeeded. Its anchored observation is current
+            // even though the requested drain is incomplete. Keep that work
+            // and clock state visible without treating the refusal as success.
+            if is_ok(payload) || has_drain_observation(operation, payload) {
                 update_orientation(operation, payload, existing);
             } else if let Some(rebased) = payload.get("rebased_plan") {
                 record_surprise(
@@ -1468,6 +1558,16 @@ fn project_response(
         .attention(ranked)
         .active_work({
             let mut work = active_work(&state);
+            if has_drain_observation(operation, &payload)
+                && payload["drain_progress"]["quiescent"] != true
+            {
+                work["cancellation_drains"] = json!([{
+                    "scope": payload["scope"],
+                    "drain_progress": payload["drain_progress"],
+                    "observed_anchor": payload["observed_anchor"],
+                    "finalize_certificate": payload["finalize_certificate"],
+                }]);
+            }
             if has_grant(&state, "observe") {
                 if let Some(id) = session_id.as_deref()
                     && crate::server::task_session::read_authority(id).is_ok()
@@ -1662,7 +1762,7 @@ pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) ->
 }
 
 #[tool(
-    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default) or plan, which drains every nonterminal action of the last committed plan (dependents first) and returns drain_progress plus a finalize_certificate once quiescent. Verified actions are history and are never rewritten."
+    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."
 )]
 pub fn fortress_cancel(
     session_id: Option<String>,

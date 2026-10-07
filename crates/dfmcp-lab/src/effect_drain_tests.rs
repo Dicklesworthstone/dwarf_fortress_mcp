@@ -464,6 +464,17 @@ fn a_failed_compensation_rolls_back_the_stop_and_keeps_cancellation_pending() ->
         adapter.action_work_state(action_id)?,
         EffectWorkState::Active { entity_id }
     );
+    // The caller can explicitly give up compensation without needing its now
+    // unavailable capability. Original work authority still gates the stop.
+    let mut stop_context = context(&adapter);
+    stop_context
+        .grants
+        .retain(|grant| grant.capability != Capability::ConfigureLabor);
+    adapter.request_cancel(action_id, CancelMode::StopFutureSteps, &stop_context)?;
+    let stopped = adapter.finalize_cancel(action_id, &stop_context)?;
+    assert_eq!(stopped.state, CommitState::Cancelled);
+    assert!(stopped.compensation_action.is_none());
+    assert!(adapter.action_work_state(action_id)?.is_quiescent());
     Ok(())
 }
 
@@ -491,6 +502,13 @@ fn finalization_cannot_claim_a_missing_dispatch_was_drained_or_spawn_temporal_co
         assert_eq!(adapter.snapshot, before);
         assert_eq!(adapter.action_receipt(action_id), request.as_ref());
         assert_eq!(adapter.transcript, transcript);
+        if !missing {
+            let count = adapter.snapshot.graph.entities.len();
+            adapter.request_cancel(action_id, CancelMode::StopFutureSteps, &context(&adapter))?;
+            adapter.finalize_cancel(action_id, &context(&adapter))?;
+            assert_eq!(adapter.snapshot.graph.entities.len(), count);
+            assert!(adapter.action_work_state(action_id)?.is_quiescent());
+        }
     }
     Ok(())
 }
