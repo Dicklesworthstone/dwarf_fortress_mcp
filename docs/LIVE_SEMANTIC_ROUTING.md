@@ -71,6 +71,14 @@ while mining remains enabled also fails. Unknown and other non-Applied phases
 cannot prove a labor change. This immediate readback check does not establish
 current state at a later anchor or complete any original temporal obligation.
 
+`SemanticWorkforceSession` now provides a bounded execution handoff for one
+original SetLabor step through the existing workforce coordinator. It durably
+binds both plans before preparation, requires fresh independently issued evidence
+at native effect boundaries, and requires the exact original plan after restart.
+It preserves original goals and obligations as pending even after historical
+single-labor readback verifies. Its supported subset and callable recovery flow
+are documented in `docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
+
 ## Furniture constraints remain explicit
 
 Both `LiveRequest::Furniture` and `LiveResolution::FurnitureItem` retain the full

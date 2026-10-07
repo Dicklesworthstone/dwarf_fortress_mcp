@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-07 — Durable semantic-to-native workforce execution
+
+- Hand an original sealed single-step SetLabor plan to the actual workforce
+  coordinator with one review seal binding semantic and native plans, source
+  evidence and native journal identity. Sync their immutable association before
+  native preparation; repeat evidence and scoped authority guards immediately
+  before native prepare and commit.
+- Preserve exact original-plan custody across restart and reject changed
+  predicates or obligations under an existing native key. Recover lost responses
+  through original-key queries; Unknown never permits another dispatch.
+- Add a bounded hash-chained association store and an operator-owned durable
+  opener using the existing private-file custody implementation. Fence ambiguous
+  writes and altered bytes, refuse orphan native-key adoption, and permit
+  read-only association recovery without file creation or sync.
+- Report verified historical single-labor readback separately from broader
+  native Applied and the still-pending original goal/obligation. Keep expired
+  plans cancellable under current original-unit authority and reserve native,
+  evidence and journal work under one shrinking call budget.
+- Add twenty end-to-end coordinator, restart, lost-acknowledgement, scope,
+  deadline and durable-store regressions. Final production adapter Cargo check
+  passed with no diagnostics and 386 unchanged scoped file hashes. The unit
+  build was OOM-killed before any test ran; all twenty remain unexecuted. Scoped
+  Rustfmt passes. This adds no evidence issuer, generic live MCP writes or admission.
+
 ## 2026-10-07 — Evidence-bound native routing and truthful forecast refusal
 
 - Preserve canonical workforce IDs, exact labor and all furniture material

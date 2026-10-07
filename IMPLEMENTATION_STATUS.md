@@ -44,6 +44,57 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable semantic workforce handoff (2026-10-07)
+
+`SemanticWorkforceSession` now connects an original sealed, single-step `SetLabor`
+plan to the existing workforce session and native effect journal. Observation
+returns a review seal covering both plans, exact source identity and the native
+journal incarnation. Preparation first syncs an immutable semantic/native
+association. The native journal still owns Intent, DispatchStarted, receipts and
+at-most-once dispatch. Independent canonical evidence and current original-unit
+authority are rechecked after the native capture and immediately before native
+prepare or commit, including after durable dispatch intent.
+
+The new private association store binds the full original semantic digest rather
+than only the native idempotency key. Recovery requires exact original-plan
+reattachment; changed predicates or obligations under the same key refuse.
+Missing associations cannot adopt old native records. A lost acknowledgement
+continues through original-key reconciliation, and Unknown never grants another
+dispatch. Operator-owned durable storage uses the existing descriptor-pinned,
+exclusively locked private-file implementation and strict bounded hash chaining.
+Ambiguous writes or changed custody fence the owner. Read-only association
+recovery does not create or sync that file.
+
+Results retain the original plan, postconditions and optional obligation. A
+separate historical action result verifies the requested labor value and unchanged
+other columns; a broader native Applied receipt remains explicitly outside the
+single-labor semantics. Original goal proof stays pending. Cancellation retains
+current canonical unit scope and remains possible after the original plan expires.
+The whole call reserves native connection/RPC work, evidence refreshes, journal
+work and output before effect I/O under one shrinking wall deadline.
+
+This is a callable Rust coordinator with an injected independently trusted evidence
+owner. It adds no evidence issuer, generic dispatcher, live MCP write path or
+admission. The existing native owner requires whole-fortress Query, Plan and
+ConfigureLabor grants for control; selected-only canonical grants are never widened.
+It refuses multi-step plans, cross-family preconditions, compensation
+and mandatory checkpoints it cannot satisfy. Other native families and original
+postcondition/obligation verification remain unfinished. See
+`docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
+
+**Evidence:** the final production source passed
+`cargo check -p dfmcp-adapter --lib --offline --locked` with no diagnostics and
+unchanged hashes across all 386 scoped files. Twenty new coordinator, recovery,
+deadline, scope and durable-store tests are present, including real private-file
+append/reopen and every partial or corrupted association publication. Their
+focused unit build was OOM-killed before any test ran under the shared 8 GiB
+memory limit; the unchanged source snapshot and the cgroup OOM counter confirm
+the failure. The sole unused-import warning was removed afterward, and all three
+new Rust files pass scoped Rustfmt. The 262 earlier passing intent, lab and
+routing tests remain evidence for their own recorded source generations; they
+do not qualify this new handoff. Full workspace, native and live qualification
+remain pending; the compatibility registry and production protocol map are unchanged.
+
 ### Evidence-bound live routing and honest forecasts (2026-10-07)
 
 Advisory live routes now preserve canonical unit IDs, the exact requested labor,
@@ -69,7 +120,8 @@ unresolved, includes the retained material selector and explicitly reports
 `execution_ready: false`. The new Rust resolvers produce source-bound native
 plan candidates with the original step key; they do not execute, preserve full
 semantic custody through a native journal, complete original obligations or add
-admission. The remaining semantic-to-native execution handoff is separate work.
+admission. The single-labor coordinator above now supplies that custody handoff
+for its explicitly bounded subset; other families remain separate work.
 
 Forecast advancement and poll errors now return `available: false` with their
 actual reason instead of an available partial prediction. The final simulated
