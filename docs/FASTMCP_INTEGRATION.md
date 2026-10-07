@@ -80,10 +80,10 @@ and all registries use the logical names.
 |---|---|---|
 | `fortress.open_session` | `fortress_open_session` | implemented over `MemoryAdapter` |
 | `fortress.observe` | `fortress_observe` | implemented (summary projection) |
-| `fortress.query` | `fortress_query` | `summary` mode only; DfQL is WP-04 |
-| `fortress.plan` | `fortress_plan` | implemented (pause/resume registry family) |
-| `fortress.commit` | `fortress_commit` | implemented (digest-matched prepare→commit) |
-| `fortress.wait` | `fortress_wait` | implemented (`poll_action`) |
+| `fortress.query` | `fortress_query` | structured queries, retained versions and observed changes |
+| `fortress.plan` | `fortress_plan` | all non-extension semantic action families and furnished blueprints |
+| `fortress.commit` | `fortress_commit` | digest-matched prepare→commit; optional modern `as_task` projection |
+| `fortress.wait` | `fortress_wait` | bounded foreground game time and all open action proofs |
 | `fortress.cancel` | `fortress_cancel` | implemented (request/drain/finalize) |
 | `fortress.checkpoint` | `fortress_checkpoint` | implemented |
 | `fortress.restore` | `fortress_restore` | implemented (epoch invalidation) |
@@ -116,18 +116,11 @@ modern-only. Every request must supply modern era markers in `params._meta`:
 }
 ```
 
-> **Note (v0.8.0 pin):** The `clientInfo` field is required. On the current fastmcp_rust
-> v0.8.0 pin, omitting `clientInfo` from `_meta` causes `server/discover` to silently fail
-> (no JSON-RPC response is emitted). This finding is recorded in `docs/DOGFOODING_FASTMCP.md`
-> and pending upstream filing.
-
-> **Known limitation (v0.8.0 pin):** After a successful `server/discover`, follow-up
-> `tools/list` and subsequent requests are not dispatched by the current fastmcp_rust v0.8.0
-> stdio pump. The golden lifecycle test
-> (`test_modern_handshake_full_lifecycle_and_plan_commit`) is `#[ignore]`d until a pin bump
-> resolves this. Negative era-refusal tests pass. The in-process tool-level coverage in
-> `crates/dfmcp-mcp/tests/fastmcp_wired_tools_tests.rs` exercises the full session lifecycle
-> without the stdio transport.
+These examples target the exact `180a7c8` pin. The real subprocess lifecycle test
+now covers discovery followed by all eleven tools, plan/commit and idempotent
+replay; it is no longer ignored. Historical v0.8.0 findings, including omitted
+`clientInfo`, remain recorded in `docs/DOGFOODING_FASTMCP.md` with their exact
+revision and re-execution status.
 
 #### Step 1: Discover Server
 
@@ -187,15 +180,42 @@ NOT emitted in modern-only mode; the era is conveyed through `supportedVersions`
 {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"tools":{"listChanged":true}},"io.modelcontextprotocol/clientInfo":{"name":"your-client","version":"0.0.1"}},"name":"fortress_commit","arguments":{"session_id":"<SESSION_ID_FROM_STEP_3>","plan_digest":"<DIGEST_FROM_STEP_4>"}}}
 ```
 
+### 4.2 Retain an original plan as a modern Task
+
+Negotiate `clientCapabilities.extensions["io.modelcontextprotocol/tasks"] = {}`
+and add `as_task: true` to the commit arguments. The laboratory registers an
+application-owned `FinalTaskRuntime` and runs its sanctioned task-service
+runner alongside stdio under the same explicit Asupersync owner. The task binds
+the exact session and plan digest and re-enters the normal authorized commit
+path. It follows foreground action proofs; it never advances game time.
+
+`tasks/get` returns the task, including completed results or failed evidence;
+`tasks/cancel` drains the original plan. The pinned modern `tasks/update` method
+accepts typed requested input, which laboratory plan tasks do not request. It
+cannot overwrite obligation state. Modern Tasks on this pin have no
+`tasks/list` or `tasks/result`: session handoffs and bounded
+`df://session/{id}/tasks` resources supply discovery.
+
+The initial implementation admits one active monitor per process and retains
+at most 256 task records until process exit. Cancellation proves the bounded
+laboratory drain before forwarding cancellation intent to the upstream store,
+retaining ordered request and finalization evidence. Separate client polls
+between those phases are not guaranteed. Full wire examples and the remaining
+scope are in [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md).
+
 ## 5. Gates
 
 1. **Gate 1 (done): stdio laboratory slice.** All eleven tools over `MemoryAdapter`; process-local
    session state; digest-checked plan commit; epoch-safe restore.
 2. **Gate 2: session-scoped authority.** Per-session state and capability grants replace the
    process-local lab; `open_session` arguments negotiate budgets and grants; multi-client safety.
-3. **Gate 3: obligations as MCP Tasks.** The bounded-obligation engine backs an
-   application-owned Tasks store (`ServerBuilder::final_tasks`); `tasks/get|update|cancel`
-   project obligation state; cancellation stays request/drain/compensate/finalize.
+3. **Gate 3: obligations as MCP Tasks.** The laboratory now has a bounded
+   application-owned Tasks store (`ServerBuilder::final_tasks`) and sanctioned
+   supervisor. `tasks/get|update|cancel` use the pinned modern protocol, while
+   original-plan evidence and cancellation remain engine-owned. One active
+   monitor, process-local history, and synchronous bounded cancellation are
+   the implemented scope; concurrent durable supervision and independently
+   observable asynchronous drain stages remain future work.
 4. **Gate 4: Streamable HTTP.** Same dfmcp semantics over the facade's HTTP transport, still
    modern-only, localhost-first.
 5. **Gate 5 (WP-21): conformance evidence.** The MCP 2026-07-28 conformance suite runs in CI on

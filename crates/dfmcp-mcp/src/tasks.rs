@@ -1,10 +1,7 @@
 #![forbid(unsafe_code)]
 
 use dfmcp_adapter::{CancelMode, GameAdapter};
-use dfmcp_core::{
-    ActionId, CommitState, DfmcpError, ErrorCode, EvidenceId, GameTick, OperationContext, PlanId,
-    Result,
-};
+use dfmcp_core::{ActionId, CommitState, EvidenceId, GameTick, OperationContext, PlanId, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpTaskStatus {
@@ -108,14 +105,9 @@ pub fn cancel_action_task(
     mode: CancelMode,
     context: &OperationContext,
 ) -> Result<McpTaskProjection> {
-    let receipt = adapter.poll_action(action_id, context)?;
-    if receipt.state == CommitState::Verified {
-        return Err(DfmcpError::new(
-            ErrorCode::Conflict,
-            "cannot cancel a verified or completed obligation task",
-        ));
-    }
-
+    // Eligibility is checked by request_cancel itself. Polling first can
+    // dispatch a deferred action whose prerequisites just became true --
+    // cancellation must never be the call that starts the work.
     let cancel_receipt = adapter.request_cancel(action_id, mode, context)?;
     let evidence_id = cancel_receipt.evidence.first().map(|e| e.id);
     let summary = match cancel_receipt.evidence.first() {

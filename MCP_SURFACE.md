@@ -188,7 +188,8 @@ can establish.
 Compiles an objective/intent without effects. Returns immutable candidate plan(s), digest, action
 DAG, affected scopes, assumptions, witnessed preconditions, postconditions, obligations, risks,
 capabilities, checkpoint policy, predicted diff, cost, invalidators, alternatives, and
-explanation. The executable laboratory currently supports one pause/resume candidate.
+explanation. The executable laboratory supports every non-extension semantic
+action family and furnished blueprint objectives; see `docs/LAB_SEMANTIC_ACTIONS.md`.
 
 ### `fortress.commit`
 
@@ -196,6 +197,13 @@ Requires exact plan ID/digest, expected anchor, and confirmation seal when polic
 Revalidates before effects. Returns per-step action states, checkpoint receipt, obligations,
 evidence, observed delta, and prediction-versus-observation comparison. Timeout may produce
 `indeterminate`.
+
+The laboratory modern stdio registration accepts optional `as_task: true` with
+an explicit session ID and sealed plan digest. A client must negotiate the
+Tasks extension. This returns a real modern task handle whose original plan is
+supervised through completion or cancellation. It is an opt-in transport
+projection; the ordinary commit response and semantic plan identity remain the
+same. See `docs/LAB_MCP_TASKS.md` for the exact bounded implementation.
 
 ### `fortress.wait`
 
@@ -254,6 +262,8 @@ Only `verified`, `compensated`, `cancelled`, and `failed` are ordinary terminal 
 df://session/{id}/summary
 df://session/{id}/capabilities
 df://session/{id}/handoff
+df://session/{id}/tasks
+df://session/{id}/task-{task_id}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
 df://fortress/{id}/map/chunk/{x}/{y}/{z}

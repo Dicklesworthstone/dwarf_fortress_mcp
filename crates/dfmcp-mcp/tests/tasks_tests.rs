@@ -9,7 +9,7 @@ use dfmcp_core::{
     IntentId, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, StateAnchor,
     StepId, WorkBudget,
 };
-use dfmcp_intent::{Action, PlanStep, PreparedPlan, derive_step_idempotency_key};
+use dfmcp_intent::{Action, ObligationSpec, PlanStep, PreparedPlan, derive_step_idempotency_key};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_mcp::tasks::{McpTaskStatus, cancel_action_task, project_action_task};
 use dfmcp_world::{Predicate, WorldGraph, WorldSnapshot};
@@ -125,5 +125,76 @@ fn test_tasks_projection_and_lifecycle_mapping() -> Result<(), Box<dyn Error>> {
     };
     assert_eq!(cancel_err.code, ErrorCode::Conflict);
 
+    Ok(())
+}
+
+/// Cancelling a ready successor must never become the call that dispatches it.
+/// The old read-before-cancel path paused the world and then refused cancellation
+/// because that newly dispatched action had already verified.
+#[test]
+fn cancelling_eligible_deferred_task_keeps_its_effect_undispatched() -> Result<(), Box<dyn Error>> {
+    let snapshot = sample_snapshot(true);
+    let ctx = sample_context(snapshot.anchor());
+    let mut adapter = MemoryAdapter::new(snapshot.clone());
+    let mut parent = sample_plan(snapshot.anchor(), false).steps[0].clone();
+    parent.obligation = Some(ObligationSpec {
+        terminal: Predicate::Paused(false),
+        failure: None,
+        deadline_tick: GameTick(500),
+        poll_interval_ticks: 1,
+        stable_for_observations: 1,
+    });
+    parent.idempotency_key = derive_step_idempotency_key(
+        IntentId::new(2),
+        snapshot.anchor(),
+        parent.id,
+        &parent.action,
+    );
+    let mut child = sample_plan(snapshot.anchor(), true).steps[0].clone();
+    child.id = StepId::new(1);
+    child.preconditions.clear();
+    child.depends_on = vec![parent.id];
+    child.idempotency_key =
+        derive_step_idempotency_key(IntentId::new(2), snapshot.anchor(), child.id, &child.action);
+    let plan = PreparedPlan::builder(
+        IntentId::new(2),
+        snapshot.anchor(),
+        "unpause, verify, then pause",
+        Predicate::Paused(true),
+    )
+    .steps(vec![parent, child])
+    .max_risk(RiskTier::Reversible)
+    .required_capabilities(BTreeSet::from([Capability::ControlClock]))
+    .requires_checkpoint(false)
+    .expires_at_tick(GameTick(500))
+    .build();
+    let prepared = adapter.prepare(&plan, &ctx)?;
+    let committed = adapter.commit(&plan, &prepared, &ctx)?;
+    let parent_id = committed.actions[0].action_id;
+    let child_id = committed.actions[1].action_id;
+    assert_eq!(committed.actions[1].state, CommitState::Prepared);
+    let ctx = sample_context(adapter.snapshot().anchor());
+    assert_eq!(
+        project_action_task(&mut adapter, parent_id, &ctx)?.status,
+        McpTaskStatus::Completed
+    );
+    let before = adapter.snapshot().clone();
+    assert!(!before.paused);
+    let requested = cancel_action_task(&mut adapter, child_id, CancelMode::StopFutureSteps, &ctx)?;
+    assert_eq!(requested.status, McpTaskStatus::Working);
+    assert_eq!(requested.commit_state, CommitState::CancelRequested);
+    assert!(requested.evidence_id.is_some());
+    assert_eq!(adapter.snapshot(), &before);
+    assert_eq!(
+        adapter.finalize_cancel(child_id, &ctx)?.state,
+        CommitState::Cancelled
+    );
+    assert_eq!(adapter.snapshot(), &before);
+    assert_eq!(
+        adapter
+            .action_receipt(parent_id)
+            .map(|receipt| receipt.state),
+        Some(CommitState::Verified)
+    );
     Ok(())
 }

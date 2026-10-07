@@ -111,6 +111,15 @@ deadline is failed; sufficient proof at the deadline itself is accepted.
 `fortress_wait` lets time pass only while the fortress is unpaused and within
 the session's game-tick budget; a paused fortress reports `blocked`.
 
+On the modern stdio server, a client that negotiates Tasks can use
+`fortress_commit(as_task=true)` to retain and supervise the original plan under
+an opaque MCP task handle. `tasks/get` returns its status and terminal evidence;
+`tasks/cancel` drains that original plan even after a later plan is committed.
+Agent Turns and handoffs expose handles, with bounded discovery and detail at
+`df://session/{id}/tasks`. Task reads do not advance game time or dispatch
+deferred work. See [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md) for negotiation,
+cancellation, retention and the one-active-monitor process bound.
+
 `fortress_cancel(mode="stop_future_steps", scope="plan")` drains every
 nonterminal action of the last committed plan, dependents before their
 prerequisites. Deferred steps are never dispatched, temporal work stops without

@@ -44,6 +44,52 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Real modern MCP Tasks for original laboratory plans (2026-10-07)
+
+**Evidence for this increment: source/API review and formatting only for the
+MCP integration. The seven-case stdio test harness was independently
+metadata-type-checked, but the server was not compiled or executed in this
+session.** Every full and metadata-only MCP build attempt was killed while
+compiling the unchanged pinned Asupersync dependency, before reaching this
+crate, as other workloads' shared-memory files exhausted the shared 8-GiB
+cgroup. Low-memory compiler settings and cleanup of this run's disposable
+artifacts did not resolve that environment limit. The process tests remain
+enabled and must be run on a host with sufficient headroom. This paragraph is
+not a Rust-qualification or passing-process-test claim.
+
+The default laboratory `serve` entry now registers an application-owned
+`FinalTaskRuntime` with `ServerBuilder::final_tasks` and runs its sanctioned
+`AuthorizedTaskServiceRunner` beside stdio in the caller-owned Asupersync
+lifetime. `fortress_commit(as_task=true)` retains the exact originating session
+and sealed plan digest before dispatch; the supervisor enters the ordinary
+authorized, idempotent commit path. The eleven tool names and the modern-only
+2026-07-28 dependency profile stay unchanged.
+
+`tasks/get` exposes the real task and its terminal result or failure evidence.
+Session Agent Turns, handoffs and bounded Tasks resources discover opaque task
+handles. Foreground `fortress_wait` calls advance and verify the laboratory;
+task reads never advance game time or dispatch deferred actions. Completion
+requires all original plan actions to verify, even after later plans are
+committed. Current observation authority is checked on task reads, and current
+action authority is checked again at commit and cancellation boundaries.
+
+`tasks/cancel` drains the original plan, retaining request-phase progress and a
+finalization certificate. Cancellation inspects retained receipts without an
+eligibility poll, so cancelling a prepared successor cannot start its effect.
+The bounded laboratory drain is proved before cancellation intent reaches the
+upstream store; a separate client poll between its retained request and final
+phases is not guaranteed.
+Verified plans refuse cancellation; failed deadlines retain proof; unresolved
+effects remain explicit and block blind retry. A transport-owned drain marks
+the exported call log non-replayable until that event has a replay representation.
+
+This first integration is limited to one active task monitor and 256 retained
+task records per process. Task identities are not restart-persistent, and this
+does not add live or production qualification. The implementation and focused
+regressions are tracked by `df-fastmcp-conformance-5pj.3` and
+`df-tasks-projection-tests-yy4`; see `docs/LAB_MCP_TASKS.md` for the wire workflow
+and explicit remaining scope.
+
 ### Bounded deferred execution and immutable terminal evidence (2026-10-07)
 
 The laboratory and in-memory dispatcher now share the same deferred-step
@@ -63,7 +109,10 @@ bounded lifecycle required by `df-fastmcp-conformance-5pj.3`.
 
 Focused deterministic Rust tests cover authority expiry/scope, changed
 preconditions, prerequisite failure and cancellation, dependency chains,
-deadline endpoints and terminal receipt stability. This is laboratory
+deadline endpoints and terminal receipt stability. All 17 added regressions
+passed. The lab/adapter/intent all-targets, all-features suite passed 1,172 tests;
+the final additional lifecycle test passed in an 11-test rerun, for 1,173
+distinct passing cases across those three crates. This is laboratory
 development functionality; no native bridge or production admission changes.
 
 ### Every semantic action family in the deterministic laboratory (2026-10-06)

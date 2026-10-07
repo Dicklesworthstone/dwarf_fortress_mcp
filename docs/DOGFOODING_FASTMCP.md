@@ -80,6 +80,32 @@ premature; this row supersedes it.
 
 ## Findings under the `180a7c8` pin
 
+### Tasks integration boundary (2026-10-07)
+
+The laboratory now uses the sanctioned `ApplicationTaskSupervisor`,
+`FinalTaskRuntime::install_task_service` and
+`AuthorizedTaskServiceRunner::run_service` APIs. It does not call test-only
+terminal transition methods, replace modern request dispatch, or change the
+dependency pin/features. Real-process regressions are in
+`crates/dwarf-fortress-mcp/tests/modern_tasks_golden.rs`; execution results must
+be stated separately from source/API review.
+
+The pinned `InMemoryFinalTaskStore` may terminalize accepted cancellation when
+an elected handoff's recovery lease expires. That protocol-store behavior
+cannot establish quiescence of external fortress work. The laboratory therefore
+checks the expected task snapshot and proves its bounded engine drain before
+forwarding cancellation intent to the upstream store. Both ordered drain
+phases are retained for inspection. No lease clock is frozen and no terminal
+protocol transition is overridden. A drain that cannot prove quiescence refuses
+transport cancellation with the original work still visible.
+
+This is a deliberately limited application integration: one active supervisor
+monitor, process-local retained history, synchronous bounded laboratory drain.
+An independently observable asynchronous drain for a live adapter needs a
+store/lifetime design that can preserve unresolved work through lease recovery;
+the current laboratory implementation does not claim that stronger boundary.
+See `docs/LAB_MCP_TASKS.md`.
+
 | Draft | Finding | Reproduction | Expected | Actual | Classification / disposition |
 |---|---|---|---|---|---|
 | DRAFT-E | Resource templates whose leading literal prefixes are compatible are rejected as possibly overlapping, and `ServerBuilder::resource` only logs the rejection (`log::warn!`), so the server starts with templates silently missing. | Register `df://session/{session_id}/summary` then `df://session/{session_id}/capabilities`; `resources/templates/list` shows only the first, and reads of the second return `-32602 Resource not found`. | Either admit literal-suffix-disjoint templates or fail the build/startup loudly. | Second template dropped; only a log line records it. | *ergonomics* (the conservative overlap rule is documented in the router; the silent drop is the obstructive part). Not worked around: dfmcp now serves the documented URIs from one `df://session/{session_id}/{view}` template, which is a design choice, not a mask. Regression: `test_session_resources_resolve_over_stdio`. Unfiled. |

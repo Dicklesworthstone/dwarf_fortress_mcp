@@ -383,13 +383,27 @@ def check_facade(failures: list[Failure]) -> None:
             f"facade is missing wrapper {rust_name}",
             failures,
         )
-    registrations = re.findall(r"\.tool\((Fortress[A-Za-z]+)\)", source)
+    registrations = re.findall(
+        r"\.tool\((Fortress[A-Za-z]+|crate::task_service::TaskAwareCommit)\)", source
+    )
+    registrations = [
+        "FortressCommit" if name == "crate::task_service::TaskAwareCommit" else name
+        for name in registrations
+    ]
     require(
         len(registrations) == 11 and len(set(registrations)) == 11,
         path,
         "run_stdio must register exactly eleven unique facade tools",
         failures,
     )
+    if "crate::task_service::TaskAwareCommit" in source:
+        task_source = read_text("crates/dfmcp-mcp/src/task_service.rs")
+        require(
+            "crate::agent_facade::FortressCommit.definition()" in task_source,
+            path,
+            "task-aware commit must preserve the existing fortress.commit wire definition",
+            failures,
+        )
     require(
         "crate::server::fortress_" in source,
         path,

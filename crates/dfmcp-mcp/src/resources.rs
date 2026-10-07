@@ -22,7 +22,7 @@ use fastmcp_rust::ResourceTemplate;
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::server::{
     active_session_count, anchor_json, authorize_entry, lookup_session, next_context,
@@ -36,7 +36,14 @@ use dfmcp_core::{Capability, RiskTier};
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 5] = ["summary", "capabilities", "handoff", "replay", "anchor"];
+pub const SESSION_VIEWS: [&str; 6] = [
+    "summary",
+    "capabilities",
+    "handoff",
+    "replay",
+    "anchor",
+    "tasks",
+];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
 fn template_definition(uri_template: &str, name: &str, description: &str) -> Resource {
@@ -333,6 +340,166 @@ pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<R
     Ok(text_content(uri, payload.to_string()))
 }
 
+/// Modern Tasks have no tasks/list method. Discovery stays in the existing
+/// capability-checked session resource waist.
+fn task_resource_bytes(uri: &str, serialized: &str) -> usize {
+    // Resource text is JSON inside a JSON-RPC result. Count its escaping and
+    // the resource wrapper, with room for the bounded outer request envelope.
+    json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serialized}]})
+        .to_string()
+        .len()
+        .saturating_add(128)
+}
+
+fn session_tasks(
+    session_id_hex: &str,
+    uri: &str,
+    offset: usize,
+) -> McpResult<Vec<ResourceContent>> {
+    let operation = "df://session/tasks";
+    // This enters with_session so a shared world's current clock and grants
+    // govern the read. Reading a task must not consume a semantic request ID.
+    let budget = crate::server::task_session::read_budget(session_id_hex)
+        .map_err(|error| denial(operation, error))?;
+    let mut payload = crate::task_service::session_tasks(session_id_hex, offset);
+    payload["ok"] = json!(payload.get("unavailable").is_none());
+    payload["schema"] = json!("dfmcp.lab-tasks/1");
+    payload["session_id"] = json!(session_id_hex);
+    payload["resource"] = json!(uri);
+    payload["max_active"] = json!(1);
+    payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
+    payload["retention"] = json!("process_lifetime");
+    payload["scope"] = json!("laboratory_process_only");
+    let max_bytes = budget.max_bytes.min(
+        u64::from(budget.max_output_tokens)
+            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+    );
+    loop {
+        let serialized = payload.to_string();
+        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+            return Ok(text_content(uri, serialized));
+        }
+        let Some(tasks) = payload.get_mut("tasks").and_then(Value::as_array_mut) else {
+            return Err(McpError::invalid_params(
+                "task diagnostics exceed the negotiated output budget",
+            ));
+        };
+        if tasks.len() <= 1 {
+            return Err(McpError::invalid_params(format!(
+                "task discovery requires {} bytes, exceeding the negotiated {max_bytes}-byte output bound; no active handle or drain evidence was silently omitted",
+                task_resource_bytes(uri, &serialized)
+            )));
+        }
+        // Active work sorts first. Trimming only the last history handle
+        // preserves the sole active monitor, with an explicit continuation.
+        tasks.pop();
+        let end = offset + tasks.len();
+        payload["complete"] = json!(false);
+        payload["next"] = json!(format!("df://session/{session_id_hex}/tasks-{end}"));
+        payload["output_budget"] = json!({"max_bytes": max_bytes,
+            "max_output_tokens": budget.max_output_tokens, "clipped": true,
+            "reason": "terminal history continues in the next resource page"});
+    }
+}
+
+fn session_task_detail(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+) -> McpResult<Vec<ResourceContent>> {
+    let operation = "df://session/task-detail";
+    let budget = crate::server::task_session::read_budget(session_id_hex)
+        .map_err(|error| denial(operation, error))?;
+    let mut payload = crate::task_service::task_detail(session_id_hex, task_id)?;
+    payload["ok"] = json!(true);
+    payload["schema"] = json!("dfmcp.lab-task-detail/1");
+    payload["session_id"] = json!(session_id_hex);
+    payload["resource"] = json!(uri);
+    let mut serialized = payload.to_string();
+    let max_bytes = budget.max_bytes.min(
+        u64::from(budget.max_output_tokens)
+            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+    );
+    if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+        let (source, evidence) = task_evidence_document(&payload);
+        let progress = &payload["progress"];
+        payload = json!({"ok": true, "schema": "dfmcp.lab-task-detail/1",
+            "session_id": session_id_hex, "resource": uri, "task_id": task_id,
+            "plan_digest": payload["plan_digest"], "scope": "laboratory_process_only",
+            "task": {"taskId": task_id, "status": payload["task"]["status"]},
+            "progress": {"stage": progress["stage"],
+                "request": {"drain_progress": progress["request"]["drain_progress"]},
+                "finalization": {"drain_progress": progress["finalization"]["drain_progress"],
+                    "finalize_certificate": progress["finalization"]["finalize_certificate"]}},
+            "service_error": payload["service_error"],
+            "evidence": {"coverage": "summary_with_complete_evidence_retained", "source": source,
+                "digest": dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex(), "bytes": evidence.len(),
+                "next": format!("df://session/{session_id_hex}/task-{task_id}~evidence-0")},
+            "output_budget": {"max_bytes": max_bytes, "max_output_tokens": budget.max_output_tokens,
+                "clipped": true, "omitted": "full proof continues in digest-checked evidence pages"}});
+        serialized = payload.to_string();
+        if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+            return Err(McpError::invalid_params(
+                "task detail summary exceeds the negotiated output budget; no proof was silently omitted",
+            ));
+        }
+    }
+    Ok(text_content(uri, serialized))
+}
+
+fn task_evidence_document(detail: &Value) -> (&'static str, String) {
+    if !detail["final_evidence"].is_null() {
+        ("final_evidence", detail["final_evidence"].to_string())
+    } else {
+        ("progress", detail["progress"].to_string())
+    }
+}
+
+fn session_task_evidence(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+    offset: usize,
+) -> McpResult<Vec<ResourceContent>> {
+    let budget = crate::server::task_session::read_budget(session_id_hex)
+        .map_err(|error| denial("df://session/task-evidence", error))?;
+    let detail = crate::task_service::task_detail(session_id_hex, task_id)?;
+    let (source, evidence) = task_evidence_document(&detail);
+    if offset > evidence.len() || !evidence.is_char_boundary(offset) {
+        return Err(McpError::invalid_params(
+            "task evidence offset must be a valid UTF-8 boundary inside the retained document",
+        ));
+    }
+    let digest = dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex();
+    let max_bytes = budget.max_bytes.min(
+        u64::from(budget.max_output_tokens)
+            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+    );
+    let mut end = offset.saturating_add(16 * 1024).min(evidence.len());
+    loop {
+        while !evidence.is_char_boundary(end) {
+            end -= 1;
+        }
+        let payload = json!({"ok": true, "schema": "dfmcp.lab-task-evidence-page/1",
+            "session_id": session_id_hex, "resource": uri, "task_id": task_id, "source": source,
+            "encoding": "json_utf8", "digest": digest, "total_bytes": evidence.len(), "offset": offset,
+            "part": &evidence[offset..end], "complete": end == evidence.len(),
+            "next": (end < evidence.len()).then(|| format!("df://session/{session_id_hex}/task-{task_id}~evidence-{end}")),
+            "reassembly": "concatenate part strings in offset order, require one unchanged digest, then parse the complete JSON document",
+            "scope": "laboratory_process_only"});
+        let serialized = payload.to_string();
+        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+            return Ok(text_content(uri, serialized));
+        }
+        if end <= offset + 4 {
+            return Err(McpError::invalid_params(
+                "task evidence page metadata exceeds the negotiated output budget",
+            ));
+        }
+        end = offset + (end - offset) / 2;
+    }
+}
+
 fn read_param_or_refuse(
     params: &HashMap<String, String>,
     read: impl FnOnce(&str) -> McpResult<Vec<ResourceContent>>,
@@ -391,7 +558,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      capabilities (negotiated grants and version record), handoff (resumable packet with anchor, \
      grants, pending plan, open actions, obligations and an ordered resume protocol), replay \
      (dfmcp.replay.bundle/1 of every recorded call for deterministic re-execution), anchor \
-     (the session fortress's current canonical anchor)";
+     (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
+     MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
+     and final evidence; laboratory process only)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -427,6 +596,25 @@ impl ResourceHandler for SessionViewResource {
             "handoff" => session_handoff(raw, uri),
             "replay" => session_replay(raw, uri),
             "anchor" => session_anchor(raw, uri),
+            "tasks" => session_tasks(raw, uri, 0),
+            page if page.starts_with("tasks-") => {
+                let offset = page[6..].parse::<usize>().map_err(|_| {
+                    McpError::invalid_params("task page offset must be a nonnegative integer")
+                })?;
+                session_tasks(raw, uri, offset)
+            }
+            detail if detail.starts_with("task-") => {
+                if let Some((task_id, offset)) = detail[5..].split_once("~evidence-") {
+                    let offset = offset.parse::<usize>().map_err(|_| {
+                        McpError::invalid_params(
+                            "task evidence offset must be a nonnegative integer",
+                        )
+                    })?;
+                    session_task_evidence(raw, uri, task_id, offset)
+                } else {
+                    session_task_detail(raw, uri, &detail[5..])
+                }
+            }
             _ => Err(McpError::invalid_params(format!(
                 "invalid_params: unknown session view {view:?}; expected one of {SESSION_VIEWS:?}"
             ))),
@@ -713,7 +901,14 @@ mod tests {
         assert_eq!(views.uri_template, "df://session/{session_id}/{view}");
         assert_eq!(
             SESSION_VIEWS,
-            ["summary", "capabilities", "handoff", "replay", "anchor"]
+            [
+                "summary",
+                "capabilities",
+                "handoff",
+                "replay",
+                "anchor",
+                "tasks"
+            ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");

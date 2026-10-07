@@ -46,6 +46,8 @@ mod output_budget;
 pub mod replay;
 pub mod resources;
 pub mod server;
+mod task_service;
+mod task_store;
 pub mod tasks;
 mod witness;
 mod world_changes;

@@ -1477,7 +1477,22 @@ fn project_response(
             listed
         })
         .attention(ranked)
-        .active_work(active_work(&state))
+        .active_work({
+            let mut work = active_work(&state);
+            if has_grant(&state, "observe") {
+                if let Some(id) = session_id.as_deref()
+                    && crate::server::task_session::read_authority(id).is_ok()
+                {
+                    let tasks = crate::task_service::session_handles(id);
+                    if tasks.as_array().is_none_or(|tasks| !tasks.is_empty()) {
+                        work["mcp_tasks"] = tasks;
+                        work["mcp_task_coverage"] =
+                            crate::task_service::session_handle_coverage(id);
+                    }
+                }
+            }
+            work
+        })
         .affordances(affordances(&state))
         .recommendations(recommendations(
             operation,
@@ -1506,7 +1521,9 @@ fn project_response(
         .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
     let shaped =
         crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
-    crate::output_budget::fit(&shaped, max_output_tokens)
+    let output = crate::output_budget::fit(&shaped, max_output_tokens);
+    crate::task_service::notify_progress();
+    output
 }
 
 #[tool(
@@ -1766,12 +1783,23 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
 
 /// Run the modern-only MCP 2026-07-28 server with the agent-oriented facade.
 pub fn run_stdio() {
+    let (tasks, runner) = match crate::task_service::LabTaskService::new() {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("laboratory Tasks startup failed: {error}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = crate::task_service::LabTaskService::install_global(tasks.clone()) {
+        eprintln!("laboratory Tasks startup failed: {error}");
+        std::process::exit(1);
+    }
     let server = ServerBuilder::new("dwarf-fortress-mcp", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession)
         .tool(FortressObserve)
         .tool(FortressQuery)
         .tool(FortressPlan)
-        .tool(FortressCommit)
+        .tool(crate::task_service::TaskAwareCommit)
         .tool(FortressWait)
         .tool(FortressCancel)
         .tool(FortressCheckpoint)
@@ -1789,10 +1817,34 @@ pub fn run_stdio() {
              what active work exists, which semantic affordances are legal, what the safest next \
              protocol steps are, and what remains uncertain. Dispatch success is not goal \
              success; only authoritative observation and postcondition proof count. The current \
-             adapter is process-local and does not claim live Dwarf Fortress or DFHack control.",
-        )
-        .build();
-    crate::run_modern_stdio(server);
+             adapter is process-local and does not claim live Dwarf Fortress or DFHack control. \
+             fortress_commit(as_task=true) retains one original plan as a modern MCP Task. \
+             Only one task monitor may be active in this process; up to 256 task records are \
+             retained until process exit. tasks/get includes completed results and failed \
+             evidence; tasks/cancel drains the original plan. Explicit fortress_wait calls \
+             advance laboratory game time. Discover session tasks through the handoff or \
+             df://session/{session_id}/tasks resource.",
+        );
+    let server = match server.final_tasks(tasks.runtime.clone()) {
+        Ok(builder) => builder.build(),
+        Err(error) => {
+            eprintln!("laboratory Tasks registration failed: {error}");
+            std::process::exit(1);
+        }
+    };
+    match crate::run_with_runtime_cx(|cx| async move {
+        crate::task_service::serve_with_tasks(server, runner, tasks, &cx).await
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("laboratory Tasks service stopped: {error}");
+            std::process::exit(1);
+        }
+        Err(error) => {
+            eprintln!("laboratory Tasks runtime failed: {error}");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]

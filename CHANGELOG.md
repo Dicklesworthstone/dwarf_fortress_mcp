@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-07 — Real modern MCP Tasks for laboratory plans
+
+- Add opt-in `fortress_commit(as_task=true)` through the pinned modern Tasks
+  runtime and an application-owned Asupersync supervisor. Each task retains its
+  originating session and sealed plan, with normal authority and idempotency.
+- Expose actual task handles through Agent Turns, handoffs and bounded session
+  resources; `tasks/get` returns terminal results or failure evidence. Only
+  explicit foreground waits advance laboratory game time.
+- Route task cancellation to the original plan's request/drain/finalize path,
+  preserving progress and proof after later commits. Remove effectful polling
+  before cancellation and mark replay logs incomplete after transport-owned drains.
+- Bound supervision to one active monitor and 256 retained process-local task
+  records, refusing capacity overflow before effects. Add real stdio lifecycle
+  regressions and document the laboratory-only scope in `docs/LAB_MCP_TASKS.md`.
+
 ## 2026-10-07 — Bounded deferred plan execution
 
 - Revalidate current mutation authority, action budget and sealed preconditions

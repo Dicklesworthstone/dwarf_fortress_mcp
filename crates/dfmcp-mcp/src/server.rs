@@ -38,6 +38,9 @@ use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
 
+#[path = "task_session.rs"]
+pub(crate) mod task_session;
+
 /// One granted capability record returned to the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NegotiatedCapability {
@@ -2280,6 +2283,8 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         "pending_plan": pending,
         "open_actions": session.open_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
         "last_plan_actions": session.last_plan_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
+        "mcp_tasks": crate::task_service::session_handles(&session.session_id.to_string()),
+        "mcp_task_coverage": crate::task_service::session_handle_coverage(&session.session_id.to_string()),
         "committed_plan_digests": session.commit_receipts.keys().collect::<Vec<_>>(),
         "resume_protocol": resume,
         "authority": "reading this packet grants nothing; every commit and cancel re-checks the session's negotiated grants",
@@ -3059,6 +3064,8 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     "session_id": format!("{}", guard.session_id),
                     "action_id": format!("{}", action_id),
                     "task_id": task.task_id,
+                    "handle_kind": "action_projection_only",
+                    "modern_task_discovery": format!("df://session/{}/tasks", guard.session_id),
                     "status": task.status.as_str(),
                     "commit_state": format!("{:?}", task.commit_state),
                     "summary": task.summary,
@@ -3238,12 +3245,15 @@ fn drain_plan(guard: &mut LabSession, cancel_mode: CancelMode) -> String {
     // Dependents are later steps; drain them first so no prerequisite is
     // withdrawn underneath work that still depends on it.
     for action_id in actions.iter().rev().copied() {
-        let before = match next_context(guard)
-            .and_then(|(_, ctx)| guard.adapter.poll_action(action_id, &ctx))
-        {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                failure = Some(error);
+        // Read the retained receipt without advancing the action: an
+        // eligibility poll can dispatch a ready deferred step during cancel.
+        let before = match guard.adapter.action_receipt(action_id).cloned() {
+            Some(receipt) => receipt,
+            None => {
+                failure = Some(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "the original plan action is no longer retained",
+                ));
                 break;
             }
         };
