@@ -44,6 +44,36 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Typed completeness profiles and observation capsules (2026-10-07)
+
+The world now implements all five typed completeness profiles through immutable
+`ProfiledSnapshot` and `ProfiledObservationCapsule` envelopes. A projection binds
+its original source anchor separately from its recomputed projected hash, with
+the profile, source schema, nonzero manifest digest and opaque optional
+extensions covered by the envelope identity. Excluded entity and relation
+fields retain explicit `Omitted(profile)` presence; included facts retain their
+presence and provenance. Research-full preserves the source canonical bytes.
+
+Profiled capsule construction, decoding and application require the exact base,
+unchanged profile/provenance/extensions, contiguous same-epoch observations and
+the reconstructed target envelope identity. A strict canonical delta reader
+covers all seven existing change types. Existing unprofiled snapshot and delta
+v1 bytes remain unchanged. Profile envelopes are bounded to 16 MiB before
+encoding and during decoding, with bounded extensions, schema names and value
+nesting. Independent source verification remains distinct from envelope
+integrity, observed-domain completeness and action authority.
+
+**Evidence: the actual locked, offline Cargo world/intent suites passed 290
+distinct tests, with zero failures and zero ignored tests**, including eight new
+profile/codec tests. These cover all profiles and presence states, exact-base
+and provenance mismatch refusal, optional-field/extension preservation, all
+delta variants, malformed frames, identity forgery and encoding/decoding
+bounds. The focused eight-test rerun is included in that total. The recorded
+compiler is `rustc 1.100.0-nightly (908501772 2026-08-30)`; tested source hashes
+were unchanged. This is targeted Rust test evidence, not full workspace,
+native, live, or registry qualification. MCP presentation integration is being
+completed as a separate increment.
+
 ### Presence-safe temporal execution (2026-10-07)
 
 The world exposes a shared `Fact::known_value()` read boundary and public

@@ -5,6 +5,7 @@ mod attention;
 mod canonical;
 pub mod canonical_decode;
 mod checkpoint;
+mod completeness;
 mod delta;
 pub mod franken_fs;
 pub mod graph_query;
@@ -50,6 +51,10 @@ pub use attention::{
     CompletenessStatus, SelectionCertificate, select_top_k,
 };
 pub use checkpoint::{CheckpointManifest, CheckpointStore, RestoreCertificate};
+pub use completeness::{
+    CompletenessProfile, MAX_PROFILE_BYTES, ProfiledObservationCapsule, ProfiledSnapshot,
+    ProjectionProvenance,
+};
 pub use delta::{
     ContinuationToken, StateDelta, WorldChange, apply_delta, build_delta, compute_snapshot_diff,
     diff_snapshots,

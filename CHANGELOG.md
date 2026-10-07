@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-07 — Typed completeness profiles and exact-base capsules
+
+- Implement all five typed observation profiles with explicit field omission,
+  separate canonical source/projected anchors, and identity-bound source schema,
+  manifest and optional extensions.
+- Add immutable profiled snapshot/capsule codecs and exact-base delta
+  construction/application, rejecting profile, provenance, cursor, epoch and
+  reconstructed-target mismatches. Preserve unknown optional payloads.
+- Add strict canonical decoding for all seven existing state-delta variants;
+  keep existing unprofiled v1 bytes unchanged. Bound profile encoding and
+  decoding to 16 MiB with schema, extension and nesting limits.
+- Pass all 290 actual world/intent Cargo tests, including eight new profile and
+  codec regressions. Keep source authenticity, completeness and action
+  authority separate from envelope integrity.
+
 ## 2026-10-07 — Presence-safe temporal execution
 
 - Add a shared consistent-known-value accessor and expose three-valued predicate

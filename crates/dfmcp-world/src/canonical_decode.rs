@@ -25,6 +25,8 @@ use crate::model::{
     MapChunk, TerrainRun, Value, WorldEvent, WorldEventKind, WorldGraph, WorldSnapshot,
 };
 
+mod delta;
+
 /// Largest canonical snapshot the decoder accepts.
 pub const MAX_CANONICAL_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
 /// Deepest `Value` nesting the decoder accepts.
