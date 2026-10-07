@@ -2044,3 +2044,46 @@ fn a_supply_alert_remedies_the_actual_production_blocker() -> TestResult {
     }
     Ok(())
 }
+
+#[test]
+fn observation_profiles_are_semantic_contracts() -> TestResult {
+    let session = open("72210", false, &ALL_EFFECTS)?;
+    let pulse = parsed(&fortress_wait(Some(session.clone()), Some(5)))?;
+    let turn = &pulse["agent_turn"];
+    assert_eq!(turn["profile"], "pulse");
+    // A pulse names what it leaves out and keeps what it verifies.
+    assert_eq!(
+        turn["coverage"]["omitted_by_profile"],
+        json!(["briefing", "affordances", "references"])
+    );
+    assert_eq!(turn["affordances"], json!([]));
+    assert!(turn["anchor"]["state_hash"].is_string());
+    assert!(turn["coverage"]["attention_selection"]["certified"].is_boolean());
+    assert!(
+        turn["changes"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|x| x["kind"] == "game_time_passed")),
+        "{turn}"
+    );
+    let briefing = parsed(&fortress_observe(Some(session)))?;
+    let turn = &briefing["agent_turn"];
+    assert_eq!(turn["profile"], "briefing");
+    let affordances = turn["affordances"].as_array().ok_or("affordances")?;
+    assert!(!affordances.is_empty());
+    // Every affordance keeps its identity, tool and enablement; defaults are elided.
+    assert!(affordances.iter().all(|a| {
+        a["affordance_id"].is_string()
+            && a["tool"].is_string()
+            && a["enabled"].is_boolean()
+            && a.get("confirmation_policy")
+                .is_none_or(|p| p != "registered_policy")
+    }));
+    assert!(
+        affordances
+            .iter()
+            .filter(|a| a["enabled"] == false)
+            .all(|a| a["disabled_reason"].is_string())
+    );
+    assert!(turn["coverage"]["defaults_elided"].is_string());
+    Ok(())
+}

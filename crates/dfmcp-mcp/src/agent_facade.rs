@@ -1504,7 +1504,9 @@ fn project_response(
         .get("max_output_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
-    crate::output_budget::fit(&builder.attach(payload), max_output_tokens)
+    let shaped =
+        crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
+    crate::output_budget::fit(&shaped, max_output_tokens)
 }
 
 #[tool(

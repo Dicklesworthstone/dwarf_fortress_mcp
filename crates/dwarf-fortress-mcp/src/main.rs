@@ -45,6 +45,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "serve-live" => dfmcp_mcp::run_live_stdio(),
         "replay" => return replay(env::args().nth(2)),
         "evaluate" => return evaluate(env::args().skip(2).collect()),
+        "bench" => return bench(env::args().nth(2)),
         other => {
             return Err(format!("unknown command {other:?}; run with --help").into());
         }
@@ -72,6 +73,23 @@ fn replay(path: Option<String>) -> Result<(), Box<dyn Error>> {
         Ok(())
     } else {
         Err("replay diverged or was refused; see the report".into())
+    }
+}
+
+/// Laboratory SLO scorecard: `bench [iterations]` (default 200).
+fn bench(iterations: Option<String>) -> Result<(), Box<dyn Error>> {
+    let iterations = match iterations {
+        Some(raw) => raw
+            .parse()
+            .map_err(|_| "iterations must be a positive integer")?,
+        None => 200,
+    };
+    let card = dfmcp_mcp::bench::scorecard(iterations, "79000");
+    println!("{card}");
+    if card["ok"] == true {
+        Ok(())
+    } else {
+        Err("at least one SLO row failed; see the scorecard".into())
     }
 }
 
@@ -114,6 +132,7 @@ COMMANDS:
     serve-live  Run the authenticated read-only live MCP server
     replay      Re-execute a laboratory replay bundle and report the first divergence
     evaluate    Score a policy on a laboratory scenario: evaluate <scenario> <policy> <ticks>
+    bench       Laboratory SLO-001..015 scorecard: bench [iterations]
     version     Print version information
     help        Print this help
 

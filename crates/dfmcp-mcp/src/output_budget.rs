@@ -103,6 +103,91 @@ fn compact_turn(turn: &mut Value) {
     strip_nulls(turn);
 }
 
+/// Agent Turn sections a profile does not carry, per
+/// `architecture/agent_turn_contract.json` (`required_sections`).
+const PULSE_OMITS: [&str; 3] = ["briefing", "affordances", "references"];
+
+/// Shape a response to its observation profile before budgeting. Profiles are
+/// semantic contracts: a pulse is the cheapest safe heartbeat, so it carries
+/// identity, continuity, changes, attention, active work, recommendations and
+/// compact uncertainty/coverage/budget, and names what it left out. Every
+/// Agent Turn key stays present so the contract's field order holds.
+pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
+    if profile != "pulse" && profile != "briefing" {
+        return response.to_owned();
+    }
+    let Ok(mut shaped) = serde_json::from_str::<Value>(response) else {
+        return response.to_owned();
+    };
+    if profile == "briefing" {
+        // A briefing keeps every affordance but elides default-valued fields:
+        // registered confirmation/checkpoint policy, an all-unknown cost
+        // estimate, empty precondition lists and a null disabled reason.
+        if let Some(turn) = shaped.get_mut("agent_turn").filter(|t| t.is_object()) {
+            if let Some(affordances) = turn.get_mut("affordances").and_then(Value::as_array_mut) {
+                for affordance in affordances.iter_mut() {
+                    if let Some(map) = affordance.as_object_mut() {
+                        map.retain(|key, value| match key.as_str() {
+                            "checkpoint_policy" | "confirmation_policy" => {
+                                value != "registered_policy"
+                            }
+                            "estimated_cost" => value
+                                .as_object()
+                                .is_none_or(|cost| cost.values().any(|v| !v.is_null())),
+                            _ => !value.is_null() && !value.as_array().is_some_and(Vec::is_empty),
+                        });
+                    }
+                }
+            }
+            turn["coverage"]["defaults_elided"] =
+                json!("affordance fields at their registered defaults are omitted");
+        }
+        return shaped.to_string();
+    }
+    if let Some(turn) = shaped.get_mut("agent_turn").filter(|t| t.is_object()) {
+        // Verification state stays: objective status is what a pulse verifies.
+        turn["briefing"] = json!({"objective_status": turn["briefing"]["objective_status"]});
+        turn["affordances"] = json!([]);
+        turn["references"] = json!([]);
+        if let Some(items) = turn.get_mut("uncertainty").and_then(Value::as_array_mut) {
+            for item in items.iter_mut() {
+                *item = json!({"uncertainty_id": item["uncertainty_id"]});
+            }
+        }
+        turn["budget"] = json!({"admitted": turn["budget"]["admitted"]});
+        // Unbroken continuity needs no basis: it is the agent's previous anchor.
+        if turn["continuity"]["status"] == "continuous"
+            && let Some(continuity) = turn.get_mut("continuity").and_then(Value::as_object_mut)
+        {
+            continuity.remove("basis");
+        }
+        // Only active work that exists is listed.
+        if let Some(work) = turn.get_mut("active_work").and_then(Value::as_object_mut) {
+            work.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
+        }
+        // Changes keep what changed; the anchors they span are in continuity.
+        if let Some(changes) = turn.get_mut("changes").and_then(Value::as_array_mut) {
+            for change in changes.iter_mut() {
+                if let Some(map) = change.as_object_mut() {
+                    map.remove("basis");
+                    map.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
+                }
+            }
+        }
+        turn["coverage"] = json!({
+            "status": turn["coverage"]["status"],
+            "attention_selection": {
+                "certified": turn["coverage"]["attention_selection"]["certified"],
+                "excluded": turn["coverage"]["attention_selection"]["excluded"],
+                "selected": turn["coverage"]["attention_selection"]["selected"],
+            },
+            "omitted_by_profile": PULSE_OMITS,
+        });
+        strip_nulls(turn);
+    }
+    shaped.to_string()
+}
+
 /// Payload sections that can be re-requested or recomputed, least essential
 /// first. The outcome, identifiers and Agent Turn are never in this list.
 const OPTIONAL_SECTIONS: [&str; 10] = [
