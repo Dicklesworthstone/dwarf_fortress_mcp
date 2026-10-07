@@ -185,7 +185,7 @@ fn test_end_to_end_fortress_control_pipeline() -> Result<()> {
         require_checkpoint_at_or_above: RiskTier::Irreversible,
         ..PlanPolicy::default()
     });
-    let plan = planner.prepare(&snapshot, &blueprint_intent, &ctx)?;
+    let plan = planner.prepare_laboratory(&snapshot, &blueprint_intent, &ctx)?;
     assert_eq!(plan.steps.len(), 1);
     assert!(plan.steps[0].obligation.is_some());
 

@@ -414,7 +414,7 @@ fn demo() -> Result<(), Box<dyn Error>> {
         }],
     };
     let plan_context = context(&snapshot, 1);
-    let plan = StaticPlanner::default().prepare(&snapshot, &intent, &plan_context)?;
+    let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &plan_context)?;
     let mut adapter = MemoryAdapter::new(snapshot);
     let prepare_context = context(adapter.snapshot(), 2);
     let prepared = adapter.prepare(&plan, &prepare_context)?;

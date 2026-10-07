@@ -62,7 +62,7 @@ fn test_static_planner_risk_and_capability_authorization() -> Result<(), Box<dyn
 
     // 1. Context with no grants -> CapabilityDenied (missing Plan)
     let ctx_no_grants = make_context(&snapshot, Vec::new());
-    let res = planner.prepare(&snapshot, &intent, &ctx_no_grants);
+    let res = planner.prepare_laboratory(&snapshot, &intent, &ctx_no_grants);
     let Err(err) = res else {
         return Err("expected CapabilityDenied error".into());
     };
@@ -82,14 +82,14 @@ fn test_static_planner_risk_and_capability_authorization() -> Result<(), Box<dyn
         &snapshot,
         vec![plan_grant.clone(), valid_clock_grant.clone()],
     );
-    let res = planner.prepare(&snapshot, &intent_restricted, &ctx_valid);
+    let res = planner.prepare_laboratory(&snapshot, &intent_restricted, &ctx_valid);
     let Err(err) = res else {
         return Err("expected RiskCeilingExceeded error".into());
     };
     assert_eq!(err.code, ErrorCode::RiskCeilingExceeded);
 
     // 4. Authorized context & matching intent -> Success
-    let plan = planner.prepare(&snapshot, &intent, &ctx_valid)?;
+    let plan = planner.prepare_laboratory(&snapshot, &intent, &ctx_valid)?;
     assert_eq!(plan.max_risk, RiskTier::Reversible);
     assert!(
         plan.required_capabilities

@@ -8,7 +8,7 @@
 use super::{ObligationRuntime, ObligationStatus};
 use crate::ObligationSpec;
 use dfmcp_core::{ActionId, DfmcpError, ErrorCode, GameTick, Result, StateAnchor};
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{PredicateEvidence, WorldSnapshot};
 
 #[derive(Clone, Debug)]
 pub struct RecoveredObligation {
@@ -29,6 +29,29 @@ impl RecoveredObligation {
         registered_tick: GameTick,
         frontier: &WorldSnapshot,
     ) -> Result<Self> {
+        Self::new_with_evidence(action_id, spec, registered_tick,
+            &PredicateEvidence::untrusted(frontier)?)
+    }
+
+    /// Explicit reference-model recovery; never a live source or effect grant.
+    pub fn new_laboratory(
+        action_id: ActionId,
+        spec: ObligationSpec,
+        registered_tick: GameTick,
+        frontier: &WorldSnapshot,
+    ) -> Result<Self> {
+        Self::new_with_evidence(action_id, spec, registered_tick,
+            &PredicateEvidence::laboratory(frontier)?)
+    }
+
+    /// Recover against the exact evidence scope chosen by the observing shell.
+    pub fn new_with_evidence(
+        action_id: ActionId,
+        spec: ObligationSpec,
+        registered_tick: GameTick,
+        evidence: &PredicateEvidence<'_>,
+    ) -> Result<Self> {
+        let frontier = evidence.snapshot();
         if !frontier.hash_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::ChecksumMismatch,
@@ -55,7 +78,7 @@ impl RecoveredObligation {
         }
         // Negative evidence and expired deadlines apply immediately. Because
         // the frontier is the cadence floor it cannot count toward stability.
-        runtime.step_tick(frontier)?;
+        runtime.step_tick_with_evidence(evidence)?;
         Ok(Self {
             runtime,
             action_id,
@@ -68,6 +91,14 @@ impl RecoveredObligation {
     /// rejects forks, epoch changes and regressions before any transition.
     pub fn observe(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
         self.runtime.step_tick(snapshot)
+    }
+
+    pub fn observe_laboratory(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        self.runtime.step_tick_laboratory(snapshot)
+    }
+
+    pub fn observe_with_evidence(&mut self, evidence: &PredicateEvidence<'_>) -> Result<()> {
+        self.runtime.step_tick_with_evidence(evidence)
     }
 
     /// A failed authorized read is a gap in the unfinished stability proof.
@@ -95,6 +126,15 @@ impl RecoveredObligation {
     /// A second restart preserves terminal proof and discards unfinished
     /// stability. The absolute deadline and original registration survive.
     pub fn after_restart(&self, frontier: &WorldSnapshot) -> Result<Self> {
+        self.after_restart_with_evidence(&PredicateEvidence::untrusted(frontier)?)
+    }
+
+    pub fn after_restart_laboratory(&self, frontier: &WorldSnapshot) -> Result<Self> {
+        self.after_restart_with_evidence(&PredicateEvidence::laboratory(frontier)?)
+    }
+
+    pub fn after_restart_with_evidence(&self, evidence: &PredicateEvidence<'_>) -> Result<Self> {
+        let frontier = evidence.snapshot();
         if !frontier.hash_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::ChecksumMismatch,
@@ -135,11 +175,11 @@ impl RecoveredObligation {
                 "recovery cannot move an obligation to another fortress",
             ));
         }
-        Self::new(
+        Self::new_with_evidence(
             self.action_id,
             obligation.spec.clone(),
             obligation.registered_tick,
-            frontier,
+            evidence,
         )
     }
 }
@@ -174,9 +214,9 @@ mod tests {
     fn frontier_and_repeated_reads_do_not_create_stability_samples() -> Result<()> {
         let frontier = snapshot(20, 2, 1, false);
         let mut monitor =
-            RecoveredObligation::new(ActionId::new(1), spec(100, 10, 2), GameTick(0), &frontier)?;
-        monitor.observe(&frontier)?;
-        monitor.observe(&snapshot(29, 2, 2, false))?;
+            RecoveredObligation::new_laboratory(ActionId::new(1), spec(100, 10, 2), GameTick(0), &frontier)?;
+        monitor.observe_laboratory(&frontier)?;
+        monitor.observe_laboratory(&snapshot(29, 2, 2, false))?;
         assert!(matches!(
             monitor.status(),
             Some(ObligationStatus::Active {
@@ -184,8 +224,8 @@ mod tests {
                 ..
             })
         ));
-        monitor.observe(&snapshot(30, 2, 3, false))?;
-        monitor.observe(&snapshot(30, 2, 4, false))?;
+        monitor.observe_laboratory(&snapshot(30, 2, 3, false))?;
+        monitor.observe_laboratory(&snapshot(30, 2, 4, false))?;
         assert!(matches!(
             monitor.status(),
             Some(ObligationStatus::Active {
@@ -193,7 +233,7 @@ mod tests {
                 ..
             })
         ));
-        monitor.observe(&snapshot(40, 2, 5, false))?;
+        monitor.observe_laboratory(&snapshot(40, 2, 5, false))?;
         assert!(matches!(
             monitor.status(),
             Some(ObligationStatus::Fulfilled {
@@ -208,10 +248,10 @@ mod tests {
     fn exact_deadline_can_supply_final_sample_but_late_first_proof_fails() -> Result<()> {
         let frontier = snapshot(10, 2, 1, true);
         let mut exact =
-            RecoveredObligation::new(ActionId::new(2), spec(15, 100, 1), GameTick(0), &frontier)?;
+            RecoveredObligation::new_laboratory(ActionId::new(2), spec(15, 100, 1), GameTick(0), &frontier)?;
         let mut late = exact.clone();
-        exact.observe(&snapshot(15, 2, 2, false))?;
-        late.observe(&snapshot(16, 2, 2, false))?;
+        exact.observe_laboratory(&snapshot(15, 2, 2, false))?;
+        late.observe_laboratory(&snapshot(16, 2, 2, false))?;
         assert!(matches!(
             exact.status(),
             Some(ObligationStatus::Fulfilled {
@@ -231,7 +271,7 @@ mod tests {
 
     #[test]
     fn already_expired_frontier_never_extends_the_deadline() -> Result<()> {
-        let monitor = RecoveredObligation::new(
+        let monitor = RecoveredObligation::new_laboratory(
             ActionId::new(3),
             spec(15, 1, 1),
             GameTick(0),
@@ -254,13 +294,13 @@ mod tests {
             Predicate::Paused(false),
             Predicate::EntityExists(dfmcp_core::EntityId::new(99)),
         ]));
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(4),
             obligation,
             GameTick(0),
             &snapshot(10, 2, 1, true),
         )?;
-        monitor.observe(&snapshot(11, 2, 2, false))?;
+        monitor.observe_laboratory(&snapshot(11, 2, 2, false))?;
         assert!(
             matches!(monitor.status(), Some(ObligationStatus::Failed { reason, .. }) if reason.contains("failure predicate"))
         );
@@ -269,15 +309,15 @@ mod tests {
 
     #[test]
     fn off_cadence_contradiction_breaks_the_stability_streak() -> Result<()> {
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(5),
             spec(100, 10, 2),
             GameTick(0),
             &snapshot(10, 2, 1, false),
         )?;
-        monitor.observe(&snapshot(20, 2, 2, false))?;
-        monitor.observe(&snapshot(21, 2, 3, true))?;
-        monitor.observe(&snapshot(30, 2, 4, false))?;
+        monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
+        monitor.observe_laboratory(&snapshot(21, 2, 3, true))?;
+        monitor.observe_laboratory(&snapshot(30, 2, 4, false))?;
         assert!(matches!(
             monitor.status(),
             Some(ObligationStatus::Active {
@@ -290,15 +330,15 @@ mod tests {
 
     #[test]
     fn restart_discards_unproven_stability_but_retains_absolute_deadline() -> Result<()> {
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(6),
             spec(40, 10, 2),
             GameTick(0),
             &snapshot(10, 2, 1, false),
         )?;
-        monitor.observe(&snapshot(20, 2, 2, false))?;
-        let mut restarted = monitor.after_restart(&snapshot(25, 3, 1, false))?;
-        restarted.observe(&snapshot(30, 3, 2, false))?;
+        monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
+        let mut restarted = monitor.after_restart_laboratory(&snapshot(25, 3, 1, false))?;
+        restarted.observe_laboratory(&snapshot(30, 3, 2, false))?;
         assert!(matches!(
             restarted.status(),
             Some(ObligationStatus::Active {
@@ -306,8 +346,8 @@ mod tests {
                 ..
             })
         ));
-        restarted.observe(&snapshot(35, 3, 3, false))?;
-        restarted.observe(&snapshot(40, 3, 4, false))?;
+        restarted.observe_laboratory(&snapshot(35, 3, 3, false))?;
+        restarted.observe_laboratory(&snapshot(40, 3, 4, false))?;
         assert!(matches!(
             restarted.status(),
             Some(ObligationStatus::Fulfilled {
@@ -320,17 +360,17 @@ mod tests {
 
     #[test]
     fn terminal_proof_is_immutable_after_later_contradictions_and_restart() -> Result<()> {
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(7),
             spec(30, 10, 1),
             GameTick(0),
             &snapshot(10, 2, 1, true),
         )?;
-        monitor.observe(&snapshot(20, 2, 2, false))?;
+        monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
         let terminal = monitor.status().cloned();
         let anchor = monitor.last_observation_anchor();
-        monitor.observe(&snapshot(40, 2, 3, true))?;
-        let restarted = monitor.after_restart(&snapshot(50, 3, 1, true))?;
+        monitor.observe_laboratory(&snapshot(40, 2, 3, true))?;
+        let restarted = monitor.after_restart_laboratory(&snapshot(50, 3, 1, true))?;
         assert_eq!(monitor.status(), terminal.as_ref());
         assert_eq!(monitor.last_observation_anchor(), anchor);
         assert_eq!(restarted.status(), terminal.as_ref());
@@ -340,34 +380,34 @@ mod tests {
 
     #[test]
     fn regressed_or_forked_observation_refuses_without_partial_progress() -> Result<()> {
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(8),
             spec(100, 10, 2),
             GameTick(0),
             &snapshot(10, 2, 1, true),
         )?;
-        monitor.observe(&snapshot(20, 2, 2, false))?;
+        monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
         let prior = monitor.status().cloned();
-        assert!(monitor.observe(&snapshot(21, 3, 3, false)).is_err());
-        assert!(monitor.observe(&snapshot(19, 2, 3, false)).is_err());
-        assert!(monitor.observe(&snapshot(20, 2, 2, true)).is_err());
-        assert!(monitor.after_restart(&snapshot(19, 3, 1, false)).is_err());
-        assert!(monitor.after_restart(&snapshot(21, 1, 99, false)).is_err());
+        assert!(monitor.observe_laboratory(&snapshot(21, 3, 3, false)).is_err());
+        assert!(monitor.observe_laboratory(&snapshot(19, 2, 3, false)).is_err());
+        assert!(monitor.observe_laboratory(&snapshot(20, 2, 2, true)).is_err());
+        assert!(monitor.after_restart_laboratory(&snapshot(19, 3, 1, false)).is_err());
+        assert!(monitor.after_restart_laboratory(&snapshot(21, 1, 99, false)).is_err());
         assert_eq!(monitor.status(), prior.as_ref());
         Ok(())
     }
 
     #[test]
     fn interrupted_observation_resets_streak_without_extending_deadline() -> Result<()> {
-        let mut monitor = RecoveredObligation::new(
+        let mut monitor = RecoveredObligation::new_laboratory(
             ActionId::new(9),
             spec(30, 10, 2),
             GameTick(0),
             &snapshot(10, 2, 1, true),
         )?;
-        monitor.observe(&snapshot(20, 2, 2, false))?;
+        monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
         monitor.observation_interrupted()?;
-        monitor.observe(&snapshot(30, 2, 3, false))?;
+        monitor.observe_laboratory(&snapshot(30, 2, 3, false))?;
         assert!(matches!(
             monitor.status(),
             Some(ObligationStatus::Failed {

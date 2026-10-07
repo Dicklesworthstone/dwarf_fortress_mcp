@@ -62,7 +62,7 @@ fn plan(
     child_precondition: bool,
     child_deadline: Option<u64>,
 ) -> Result<PreparedPlan> {
-    StaticPlanner::default().prepare(
+    StaticPlanner::default().prepare_laboratory(
         snapshot,
         &Intent {
             id: IntentId::new(1),

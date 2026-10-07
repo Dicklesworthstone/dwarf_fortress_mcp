@@ -14,9 +14,9 @@ use dfmcp_core::{
     ActionId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence, EvidenceId, EvidenceKind,
     GameTick, OperationContext, PlanId, Result, StateAnchor,
 };
-use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision};
+use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision_with_evidence};
 use dfmcp_intent::{PlanStep, PreparedPlan, effects};
-use dfmcp_world::{WorldSnapshot, evaluate};
+use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
 
 use crate::{ActionReceipt, CommitReceipt, PrepareReceipt};
 
@@ -341,12 +341,7 @@ impl MutationDispatcher {
     ) -> Result<PrepareReceipt> {
         plan.validate_structure()?;
         validate_dispatch_support(plan, context)?;
-        if !snapshot.hash_is_valid() {
-            return Err(DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "cannot prepare against a snapshot with an invalid state hash",
-            ));
-        }
+        let observation = PredicateEvidence::laboratory(snapshot)?;
         if plan.anchor != snapshot.anchor() {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
@@ -373,11 +368,7 @@ impl MutationDispatcher {
                 &scope.entity_ids,
                 scope.map_area,
             )?;
-            if !step
-                .preconditions
-                .iter()
-                .all(|predicate| evaluate(snapshot, predicate))
-            {
+            if !predicates_established(&observation, &step.preconditions)? {
                 return Err(DfmcpError::new(
                     ErrorCode::PreconditionsFailed,
                     format!(
@@ -576,21 +567,31 @@ impl MutationDispatcher {
         let prior_snapshot = snapshot.clone();
         let prior_stability = self.stability.clone();
         let result = (|| {
+            // Reuse one sealed observation while proving pending work. A newly
+            // dispatched effect ends that borrow and obtains fresh evidence.
+            let mut observation = PredicateEvidence::laboratory(snapshot)?;
             let mut receipts: Vec<ActionReceipt> = Vec::with_capacity(plan.steps.len());
             for (step, old) in plan.steps.iter().zip(&prior.actions) {
                 let receipt = match old.state {
                     CommitState::AppliedAwaitingVerification => {
-                        self.evaluate_obligation(plan, step, old.action_id, snapshot)?
+                        self.evaluate_obligation(plan, step, old.action_id, &observation)?
                     }
                     CommitState::Prepared => {
-                        match deferred_step_decision(step, snapshot, |dependency| {
-                            receipts
-                                .iter()
-                                .find(|receipt| receipt.step_id == dependency)
-                                .map(|receipt| receipt.state)
-                        }) {
+                        match deferred_step_decision_with_evidence(
+                            step,
+                            &observation,
+                            |dependency| {
+                                receipts
+                                    .iter()
+                                    .find(|receipt| receipt.step_id == dependency)
+                                    .map(|receipt| receipt.state)
+                            },
+                        )? {
                             DeferredStepDecision::Ready => {
-                                self.dispatch_step(plan, step, old.action_id, snapshot)?
+                                let receipt =
+                                    self.dispatch_step(plan, step, old.action_id, snapshot)?;
+                                observation = PredicateEvidence::laboratory(snapshot)?;
+                                receipt
                             }
                             DeferredStepDecision::Waiting => old.clone(),
                             DeferredStepDecision::Failed(message) => action_receipt(
@@ -634,11 +635,8 @@ impl MutationDispatcher {
         action_id: ActionId,
         snapshot: &mut WorldSnapshot,
     ) -> Result<ActionReceipt> {
-        if !step
-            .preconditions
-            .iter()
-            .all(|predicate| evaluate(snapshot, predicate))
-        {
+        let observation = PredicateEvidence::laboratory(snapshot)?;
+        if !predicates_established(&observation, &step.preconditions)? {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!(
@@ -657,14 +655,11 @@ impl MutationDispatcher {
             snapshot.cursor = next_cursor;
             snapshot.refresh_hash();
         }
+        let observation = PredicateEvidence::laboratory(snapshot)?;
         if step.obligation.is_some() {
-            return self.evaluate_obligation(plan, step, action_id, snapshot);
+            return self.evaluate_obligation(plan, step, action_id, &observation);
         }
-        if !step
-            .postconditions
-            .iter()
-            .all(|predicate| evaluate(snapshot, predicate))
-        {
+        if !predicates_established(&observation, &step.postconditions)? {
             return Err(DfmcpError::new(
                 ErrorCode::AdapterRejected,
                 format!(
@@ -689,8 +684,9 @@ impl MutationDispatcher {
         plan: &PreparedPlan,
         step: &PlanStep,
         action_id: ActionId,
-        snapshot: &WorldSnapshot,
+        observation: &PredicateEvidence<'_>,
     ) -> Result<ActionReceipt> {
+        let snapshot = observation.snapshot();
         let Some(obligation) = &step.obligation else {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -700,12 +696,9 @@ impl MutationDispatcher {
         let failed = obligation
             .failure
             .as_ref()
-            .is_some_and(|predicate| evaluate(snapshot, predicate));
-        let holds = evaluate(snapshot, &obligation.terminal)
-            && step
-                .postconditions
-                .iter()
-                .all(|predicate| evaluate(snapshot, predicate));
+            .map_or(Ok(false), |predicate| observation.establishes(predicate))?;
+        let holds = observation.establishes(&obligation.terminal)?
+            && predicates_established(observation, &step.postconditions)?;
         let (stable, last) = self.stability.get(&action_id).copied().unwrap_or((0, None));
         let anchor = snapshot.anchor();
         let stable = if failed || !holds {
@@ -794,6 +787,19 @@ impl MutationDispatcher {
     pub fn journal_mut(&mut self) -> &mut EffectJournal {
         &mut self.journal
     }
+}
+
+/// Require authoritative predicate evidence without treating unavailable facts as false.
+fn predicates_established(
+    observation: &PredicateEvidence<'_>,
+    predicates: &[Predicate],
+) -> Result<bool> {
+    for predicate in predicates {
+        if !observation.establishes(predicate)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn derived_action_id(plan_id: PlanId, step_id: dfmcp_core::StepId) -> ActionId {
@@ -957,7 +963,243 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        StaticPlanner::default().prepare(snapshot, &intent, &sample_context(snapshot))
+        StaticPlanner::default().prepare_laboratory(snapshot, &intent, &sample_context(snapshot))
+    }
+
+
+    fn authority_fact(value: bool, tick: GameTick) -> dfmcp_world::Fact {
+        dfmcp_world::Fact::known(
+            dfmcp_world::Value::Bool(value),
+            tick,
+            dfmcp_world::FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+            dfmcp_core::Digest32::ZERO,
+        )
+    }
+
+    fn ineligible_facts(tick: GameTick) -> Vec<dfmcp_world::Fact> {
+        use dfmcp_core::Digest32;
+        use dfmcp_world::{Fact, FactSource, Value};
+        let mut facts: Vec<_> = [
+            FactSource::AgentAssertion("agent-memory".to_owned()),
+            FactSource::Replay,
+            FactSource::Derived("unregistered-model/1".to_owned()),
+            FactSource::DfhackField("unit.ready".to_owned()),
+        ]
+        .into_iter()
+        .map(|source| Fact::known(Value::Bool(true), tick, source, Digest32::ZERO))
+        .collect();
+        let mut wrong_digest = authority_fact(true, tick);
+        wrong_digest.source_digest = Digest32::of_bytes(b"not-the-laboratory-source-seal");
+        facts.push(wrong_digest);
+        facts.push(authority_fact(true, GameTick(tick.0 + 1_000)));
+        facts
+    }
+
+    fn authority_predicate(field: &str) -> Predicate {
+        Predicate::FieldCompare {
+            entity_id: dfmcp_core::EntityId::new(9),
+            field: field.to_owned(),
+            op: dfmcp_world::CompareOp::Eq,
+            value: dfmcp_world::Value::Bool(true),
+        }
+    }
+
+    fn add_authority_fields(snapshot: &mut WorldSnapshot, fact: dfmcp_world::Fact) {
+        use dfmcp_core::EntityId;
+        use dfmcp_world::{EntityKind, EntityRecord};
+        snapshot.graph.entities.insert(
+            EntityId::new(9),
+            EntityRecord {
+                id: EntityId::new(9),
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Unit,
+                label: "evidence subject".to_owned(),
+                fields: std::collections::BTreeMap::from([
+                    ("ready".to_owned(), fact.clone()),
+                    ("done".to_owned(), fact.clone()),
+                    ("failed".to_owned(), fact),
+                ]),
+            },
+        );
+        snapshot.refresh_hash();
+    }
+
+    fn set_authority_field(
+        snapshot: &mut WorldSnapshot,
+        field: &str,
+        fact: dfmcp_world::Fact,
+    ) -> dfmcp_core::Result<()> {
+        let entity = snapshot
+            .graph
+            .entities
+            .get_mut(&dfmcp_core::EntityId::new(9))
+            .ok_or_else(|| {
+                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing evidence subject")
+            })?;
+        entity.fields.insert(field.to_owned(), fact);
+        entity.revision += 1;
+        snapshot.refresh_hash();
+        Ok(())
+    }
+
+    fn reseal_authority_plan(plan: &mut dfmcp_intent::PreparedPlan) -> dfmcp_core::Result<()> {
+        plan.digest = plan.compute_digest();
+        plan.id = plan.expected_id();
+        plan.validate_structure()
+    }
+
+    #[test]
+    fn preparation_rejects_ineligible_fact_sources_without_journaling() -> Result<()> {
+        for fact in ineligible_facts(GameTick(100)) {
+            let mut snapshot = sample_snapshot();
+            add_authority_fields(&mut snapshot, fact);
+            assert!(dfmcp_world::evaluate(&snapshot, &authority_predicate("ready")));
+            let mut plan = unpause_plan(&snapshot)?;
+            plan.steps[0].preconditions = vec![authority_predicate("ready")];
+            reseal_authority_plan(&mut plan)?;
+            let mut dispatcher = MutationDispatcher::new();
+            let result = dispatcher.prepare_mutation(&plan, &snapshot, &sample_context(&snapshot));
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::PreconditionsFailed));
+            assert!(dispatcher.journal().is_empty());
+        }
+        let mut snapshot = sample_snapshot();
+        add_authority_fields(&mut snapshot, authority_fact(true, GameTick(100)));
+        let mut plan = unpause_plan(&snapshot)?;
+        plan.steps[0].preconditions = vec![authority_predicate("ready")];
+        reseal_authority_plan(&mut plan)?;
+        let context = sample_context(&snapshot);
+        let mut dispatcher = MutationDispatcher::new();
+        let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+        let receipt = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+        assert_eq!(receipt.actions[0].state, CommitState::Verified);
+        Ok(())
+    }
+
+    #[test]
+    fn immediate_postconditions_cannot_be_proved_by_ineligible_facts() -> Result<()> {
+        for fact in ineligible_facts(GameTick(100)) {
+            let mut snapshot = sample_snapshot();
+            add_authority_fields(&mut snapshot, fact);
+            let mut plan = unpause_plan(&snapshot)?;
+            plan.steps[0].postconditions = vec![authority_predicate("done")];
+            reseal_authority_plan(&mut plan)?;
+            let context = sample_context(&snapshot);
+            let mut dispatcher = MutationDispatcher::new();
+            let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+            let prior = snapshot.clone();
+            let result = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context);
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::AdapterRejected));
+            assert_eq!(snapshot, prior);
+            let key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
+            assert_eq!(dispatcher.journal().lookup(&key).map(|entry| entry.state), Some(CommitState::Prepared));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn reconciliation_uses_authority_for_both_terminal_and_failure_predicates() -> Result<()> {
+        use dfmcp_intent::ObligationSpec;
+        for fact in ineligible_facts(GameTick(100)) {
+            let mut snapshot = sample_snapshot();
+            add_authority_fields(&mut snapshot, fact);
+            let mut plan = unpause_plan(&snapshot)?;
+            plan.steps[0].obligation = Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: Some(authority_predicate("failed")),
+                deadline_tick: GameTick(110),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            });
+            reseal_authority_plan(&mut plan)?;
+            let context = sample_context(&snapshot);
+            let mut dispatcher = MutationDispatcher::new();
+            let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+            let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+            assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+            let context = sample_context(&snapshot);
+            let pending = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
+            assert_eq!(pending.actions[0].state, CommitState::AppliedAwaitingVerification);
+
+            let mut failed_dispatcher = dispatcher.clone();
+            let mut failed_snapshot = snapshot.clone();
+            failed_snapshot.tick = GameTick(101);
+            failed_snapshot.cursor.sequence += 1;
+            set_authority_field(&mut failed_snapshot, "failed", authority_fact(true, GameTick(101)))?;
+            let context = sample_context(&failed_snapshot);
+            let failed = failed_dispatcher.reconcile(&plan, &mut failed_snapshot, &context)?;
+            assert_eq!(failed.actions[0].state, CommitState::Failed);
+
+            snapshot.tick = GameTick(101);
+            snapshot.cursor.sequence += 1;
+            set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(101)))?;
+            let context = sample_context(&snapshot);
+            let verified = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
+            assert_eq!(verified.actions[0].state, CommitState::Verified);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn deferred_reconciliation_refuses_agent_supplied_dispatch_evidence() -> Result<()> {
+        use dfmcp_intent::ObligationSpec;
+        use dfmcp_world::{Fact, FactSource, Value};
+        let mut snapshot = sample_snapshot();
+        add_authority_fields(&mut snapshot, authority_fact(true, GameTick(100)));
+        set_authority_field(&mut snapshot, "done", authority_fact(false, GameTick(100)))?;
+        let intent = Intent {
+            id: IntentId::new(41),
+            anchor: snapshot.anchor(),
+            summary: "observe completion before pausing again".to_owned(),
+            terminal_condition: Predicate::All(vec![
+                authority_predicate("done"),
+                Predicate::Paused(true),
+            ]).normalized(),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+            requested_actions: vec![
+                RequestedAction {
+                    action: Action::Pause { paused: false },
+                    preconditions: vec![Predicate::Paused(true)],
+                    postconditions: vec![Predicate::Paused(false)],
+                    compensation: None,
+                    obligation: Some(ObligationSpec {
+                        terminal: authority_predicate("done"),
+                        failure: None,
+                        deadline_tick: GameTick(110),
+                        poll_interval_ticks: 1,
+                        stable_for_observations: 1,
+                    }),
+                    depends_on: Vec::new(),
+                },
+                RequestedAction {
+                    action: Action::Pause { paused: true },
+                    preconditions: vec![authority_predicate("ready")],
+                    postconditions: vec![Predicate::Paused(true)],
+                    compensation: None,
+                    obligation: None,
+                    depends_on: vec![0],
+                },
+            ],
+        };
+        let context = sample_context(&snapshot);
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context)?;
+        let mut dispatcher = MutationDispatcher::new();
+        let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
+        let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+        assert_eq!(committed.actions[1].state, CommitState::Prepared);
+        snapshot.tick = GameTick(101);
+        snapshot.cursor.sequence += 1;
+        set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(101)))?;
+        set_authority_field(&mut snapshot, "ready", Fact::known(
+            Value::Bool(true), GameTick(101), FactSource::AgentAssertion("still ready".to_owned()), Digest32::ZERO
+        ))?;
+        let context = sample_context(&snapshot);
+        let reconciled = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
+        assert_eq!(reconciled.actions[0].state, CommitState::Verified);
+        assert_eq!(reconciled.actions[1].state, CommitState::Failed);
+        assert!(reconciled.actions[1].message.contains("not dispatched"));
+        assert!(!snapshot.paused);
+        Ok(())
     }
 
     #[test]
@@ -1133,7 +1375,7 @@ mod tests {
             require_checkpoint_at_or_above: RiskTier::Irreversible,
             ..PlanPolicy::default()
         })
-        .prepare(&snapshot, &intent, &context)?;
+        .prepare_laboratory(&snapshot, &intent, &context)?;
         let mut dispatcher = MutationDispatcher::new();
         let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
         let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;

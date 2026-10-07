@@ -36,7 +36,7 @@ use dfmcp_intent::{
 };
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{EdgeKind, Predicate, QueryOrder, WorldQuery, WorldSnapshot};
+use dfmcp_world::{EdgeKind, Predicate, PredicateEvidence, QueryOrder, WorldQuery, WorldSnapshot};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -129,20 +129,23 @@ const MAX_OBJECTIVES: usize = 64;
 /// Every tracked objective with whether the current world satisfies it.
 pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
     let snapshot = session.adapter.snapshot();
+    let evidence = PredicateEvidence::laboratory(snapshot);
     json!(
         session
             .objectives
             .iter()
             .map(|objective| {
-                let satisfied = dfmcp_world::evaluate(snapshot, &objective.terminal);
-                json!({
-                    "plan_digest": objective.plan_digest,
-                    "summary": objective.summary,
-                    "status": if satisfied { "achieved" } else { "not_yet_observed" },
-                    "epistemic_state": "observed",
-                    "terminal_condition": crate::lab_world::predicate_json(&objective.terminal),
-                    "committed_tick": objective.committed_tick,
-                })
+                let truth = match &evidence {
+                    Ok(evidence) => evidence.evaluate(&objective.terminal),
+                    Err(error) => Err(error.clone()),
+                };
+                let mut result = crate::observation_projection::laboratory_objective_evidence(truth);
+                result["plan_digest"] = json!(objective.plan_digest);
+                result["summary"] = json!(objective.summary);
+                result["terminal_condition"] =
+                    crate::lab_world::predicate_json(&objective.terminal);
+                result["committed_tick"] = json!(objective.committed_tick);
+                result
             })
             .collect::<Vec<_>>()
     )
@@ -286,45 +289,54 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
         }
         return Err(error);
     }
-    let snapshot = session.adapter.snapshot();
-    let mut next = session.carried.clone();
-    for step in &mut next {
-        if step.state != "dispatched" {
-            continue;
-        }
-        step.observation_error = None;
-        if let Some(monitor) = &mut step.monitor {
-            if let Err(error) = monitor.observe(snapshot) {
-                for retained in &mut session.carried {
-                    if retained.state == "dispatched" {
-                        if let Some(monitor) = &mut retained.monitor {
-                            monitor.observation_interrupted()?;
-                        }
-                        retained.observation_error =
-                            Some(format!("{}: {}", error.code.as_str(), error.message));
+    let observed = (|| -> Result<Vec<CarriedStep>> {
+        let snapshot = session.adapter.snapshot();
+        let evidence = PredicateEvidence::laboratory(snapshot)?;
+        let mut next = session.carried.clone();
+        for step in &mut next {
+            if step.state != "dispatched" {
+                continue;
+            }
+            step.observation_error = None;
+            if let Some(monitor) = &mut step.monitor {
+                monitor.observe_with_evidence(&evidence)?;
+                match monitor.status() {
+                    Some(ObligationStatus::Fulfilled { .. }) => {
+                        step.state = "verified".to_owned();
+                        step.proof_anchor = monitor.last_observation_anchor();
                     }
+                    Some(ObligationStatus::Failed { reason, .. }) => {
+                        step.state = "failed".to_owned();
+                        step.failure_reason = Some(reason.clone());
+                        step.proof_anchor = monitor.last_observation_anchor();
+                    }
+                    _ => {}
                 }
-                return Err(error);
+            } else if evidence.establishes(&step.proof)? {
+                step.state = "verified".to_owned();
+                step.proof_anchor = Some(snapshot.anchor());
             }
-            match monitor.status() {
-                Some(ObligationStatus::Fulfilled { .. }) => {
-                    step.state = "verified".to_owned();
-                    step.proof_anchor = monitor.last_observation_anchor();
+        }
+        Ok(next)
+    })();
+    match observed {
+        Ok(next) => {
+            session.carried = next;
+            Ok(())
+        }
+        Err(error) => {
+            for retained in &mut session.carried {
+                if retained.state == "dispatched" {
+                    if let Some(monitor) = &mut retained.monitor {
+                        monitor.observation_interrupted()?;
+                    }
+                    retained.observation_error =
+                        Some(format!("{}: {}", error.code.as_str(), error.message));
                 }
-                Some(ObligationStatus::Failed { reason, .. }) => {
-                    step.state = "failed".to_owned();
-                    step.failure_reason = Some(reason.clone());
-                    step.proof_anchor = monitor.last_observation_anchor();
-                }
-                _ => {}
             }
-        } else if dfmcp_world::evaluate(snapshot, &step.proof) {
-            step.state = "verified".to_owned();
-            step.proof_anchor = Some(snapshot.anchor());
+            Err(error)
         }
     }
-    session.carried = next;
-    Ok(())
 }
 
 /// Spatial leases plus the actions that hold them.
@@ -865,7 +877,7 @@ fn recover_commit(
     };
     let recompiled = source
         .intent(IntentId::new(commit.intent_id), &sealed)
-        .and_then(|intent| StaticPlanner::default().prepare(&sealed, &intent, &context));
+        .and_then(|intent| StaticPlanner::default().prepare_laboratory(&sealed, &intent, &context));
     let plan = match recompiled {
         Ok(plan) if plan.digest == commit.plan_digest => plan,
         outcome => {
@@ -949,7 +961,7 @@ fn recover_commit(
             } else if let Some(obligation) = &step.obligation {
                 let mut spec = obligation.clone();
                 spec.terminal = proof.clone();
-                RecoveredObligation::new(proof_id, spec, sealed.tick, recovered).map(Some)
+                RecoveredObligation::new_laboratory(proof_id, spec, sealed.tick, recovered).map(Some)
             } else {
                 proof.validate_shape().and_then(|()| {
                     if matches!(proof, Predicate::True | Predicate::False) {
@@ -2376,7 +2388,7 @@ pub(crate) fn plan_request(
                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
             };
 
-            match StaticPlanner::default().prepare(snapshot, &intent, &ctx) {
+            match StaticPlanner::default().prepare_laboratory(snapshot, &intent, &ctx) {
                 Ok(plan) => {
                     let digest = plan.digest.to_string();
                     let pending_digest = digest.clone();
@@ -2656,7 +2668,7 @@ fn rebase_by_witness(
     let plan = stale
         .source
         .intent(IntentId::new(rid), &now)
-        .and_then(|intent| StaticPlanner::default().prepare(&now, &intent, &ctx))
+        .and_then(|intent| StaticPlanner::default().prepare_laboratory(&now, &intent, &ctx))
         .map_err(refused)?;
     if !crate::witness::same_actions(&stale.plan, &plan) {
         return Err(
@@ -2687,7 +2699,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
     let replayed = stale
         .source
         .intent(IntentId::new(rid), snapshot)
-        .and_then(|intent| StaticPlanner::default().prepare(snapshot, &intent, &ctx));
+        .and_then(|intent| StaticPlanner::default().prepare_laboratory(snapshot, &intent, &ctx));
     match replayed {
         Ok(plan) => {
             let digest = plan.digest.to_string();

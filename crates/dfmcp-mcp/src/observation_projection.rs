@@ -5,8 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::StateAnchor;
-use dfmcp_world::{EntityRecord, Fact, FactPresence, Value};
+use dfmcp_core::{Result, StateAnchor};
+use dfmcp_world::{EntityRecord, Fact, FactPresence, PredicateTruth, Value};
 use serde_json::{Value as Json, json};
 
 pub(crate) fn anchor_json(anchor: &StateAnchor) -> Json {
@@ -17,6 +17,33 @@ pub(crate) fn anchor_json(anchor: &StateAnchor) -> Json {
         "game_tick": anchor.tick.0,
         "state_hash": anchor.state_hash.to_hex(),
     })
+}
+
+/// Goal success is a derived claim about the authorized reference model.
+/// A readable compatibility value is insufficient; unknown and invalid
+/// evidence never produce an achieved goal or an observed truth claim.
+pub(crate) fn laboratory_objective_evidence(truth: Result<PredicateTruth>) -> Json {
+    let (truth, error) = match truth {
+        Ok(truth) => (truth, None),
+        Err(error) => (PredicateTruth::Unknown, Some(error)),
+    };
+    let mut result = json!({
+        "status": if truth == PredicateTruth::True { "achieved" } else { "not_yet_observed" },
+        "epistemic_state": if truth == PredicateTruth::Unknown { "unknown" } else { "certified_derived" },
+        "predicate_truth": match truth {
+            PredicateTruth::True => "true",
+            PredicateTruth::False => "false",
+            PredicateTruth::Unknown => "unknown",
+        },
+        "evidence_scope": "laboratory_reference_world",
+    });
+    if let Some(error) = error {
+        result["observation_error"] = json!({
+            "code": error.code.as_str(),
+            "message": error.message,
+        });
+    }
+    result
 }
 
 const JSON_SAFE_INTEGER: u64 = (1 << 53) - 1;
@@ -273,4 +300,60 @@ mod tests {
             "binary_payload_summarized"
         );
     }
+    #[test]
+    fn objective_projection_distinguishes_established_false_unknown_and_invalid() {
+        for (truth, status, epistemic, predicate_truth) in [
+            (PredicateTruth::True, "achieved", "certified_derived", "true"),
+            (PredicateTruth::False, "not_yet_observed", "certified_derived", "false"),
+            (PredicateTruth::Unknown, "not_yet_observed", "unknown", "unknown"),
+        ] {
+            let shown = laboratory_objective_evidence(Ok(truth));
+            assert_eq!(shown["status"], status);
+            assert_eq!(shown["epistemic_state"], epistemic);
+            assert_eq!(shown["predicate_truth"], predicate_truth);
+            assert_eq!(shown["evidence_scope"], "laboratory_reference_world");
+            assert!(shown.get("observation_error").is_none());
+        }
+        let shown = laboratory_objective_evidence(Err(dfmcp_core::DfmcpError::new(
+            dfmcp_core::ErrorCode::ChecksumMismatch,
+            "goal observation hash mismatch",
+        )));
+        assert_eq!(shown["status"], "not_yet_observed");
+        assert_eq!(shown["epistemic_state"], "unknown");
+        assert_eq!(shown["predicate_truth"], "unknown");
+        assert_eq!(shown["observation_error"]["code"], dfmcp_core::ErrorCode::ChecksumMismatch.as_str());
+    }
+
+    #[test]
+    fn an_asserted_goal_never_becomes_achieved_through_projection() -> Result<()> {
+        use dfmcp_world::{CompareOp, Predicate, PredicateEvidence, WorldGraph, WorldSnapshot};
+        let id = EntityId::new(1);
+        let make = |source| {
+            let entity = EntityRecord {
+                id, generation: 1, revision: 1, kind: EntityKind::Unit,
+                label: "goal subject".to_owned(),
+                fields: BTreeMap::from([("ready".to_owned(), Fact::known(
+                    Value::Bool(true), GameTick(20), source, Digest32::ZERO,
+                ))]),
+            };
+            WorldSnapshot::new(FortressId::new(7), GameTick(20), ObservationCursor::ORIGIN,
+                true, WorldGraph { entities: BTreeMap::from([(id, entity)]), ..WorldGraph::default() })
+        };
+        let predicate = Predicate::FieldCompare { entity_id: id, field: "ready".to_owned(),
+            op: CompareOp::Eq, value: Value::Bool(true) };
+        for source in [FactSource::AgentAssertion("claimed ready".to_owned()),
+            FactSource::Replay, FactSource::Derived("unregistered".to_owned())] {
+            let snapshot = make(source);
+            assert!(dfmcp_world::evaluate(&snapshot, &predicate));
+            let evidence = PredicateEvidence::laboratory(&snapshot)?;
+            let shown = laboratory_objective_evidence(evidence.evaluate(&predicate));
+            assert_eq!(shown["status"], "not_yet_observed");
+            assert_eq!(shown["epistemic_state"], "unknown");
+        }
+        let snapshot = make(FactSource::Derived("dfmcp.lab-scenario/1".to_owned()));
+        let evidence = PredicateEvidence::laboratory(&snapshot)?;
+        assert_eq!(laboratory_objective_evidence(evidence.evaluate(&predicate))["status"], "achieved");
+        Ok(())
+    }
+
 }

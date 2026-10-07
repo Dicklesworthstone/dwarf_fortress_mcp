@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use dfmcp_core::{
     ActionId, DfmcpError, ErrorCode, Evidence, EvidenceKind, GameTick, Result, StateAnchor,
 };
-use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
+use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
 
 use crate::plan::ObligationSpec;
 
@@ -213,6 +213,17 @@ impl ObligationRuntime {
     /// a caller has already supplied. An off-cadence contradiction resets the
     /// streak without moving the next eligible poll. Terminal records are immutable.
     pub fn step_tick(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        self.step_tick_with_evidence(&PredicateEvidence::untrusted(snapshot)?)
+    }
+
+    /// Evaluate an explicitly declared complete laboratory observation.
+    pub fn step_tick_laboratory(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
+        self.step_tick_with_evidence(&PredicateEvidence::laboratory(snapshot)?)
+    }
+
+    /// Evaluate only predicates established by the supplied source/coverage scope.
+    pub fn step_tick_with_evidence(&mut self, evidence: &PredicateEvidence<'_>) -> Result<()> {
+        let snapshot = evidence.snapshot();
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
                 ErrorCode::ChecksumMismatch,
@@ -224,6 +235,7 @@ impl ObligationRuntime {
         // later action's stale tick could leave earlier actions falsely fulfilled
         // even though this call returned an error (df-action-coordinator-exec-ero.4).
         let incoming = snapshot.anchor();
+        let mut predicates = BTreeMap::new();
         for obligation in self.obligations.values() {
             if !matches!(obligation.status, ObligationStatus::Active { .. }) {
                 continue;
@@ -250,6 +262,10 @@ impl ObligationRuntime {
                     "obligation observation changed lineage, regressed, or forked a cursor",
                 ));
             }
+            let failure = obligation.spec.failure.as_ref()
+                .map(|predicate| evidence.establishes(predicate)).transpose()?.unwrap_or(false);
+            let satisfied = evidence.establishes(&obligation.spec.terminal)?;
+            predicates.insert(obligation.action_id, (failure, satisfied));
         }
 
         for obligation in self.obligations.values_mut() {
@@ -269,12 +285,9 @@ impl ObligationRuntime {
 
             // Failure evidence takes precedence even between scheduled polls or
             // when a second observation at the same game tick changes the facts.
-            if obligation
-                .spec
-                .failure
-                .as_ref()
-                .is_some_and(|predicate| evaluate(snapshot, predicate))
-            {
+            let (failure, satisfied) = predicates.get(&obligation.action_id).copied()
+                .unwrap_or((false, false));
+            if failure {
                 obligation.status = ObligationStatus::Failed {
                     failed_at_tick: snapshot.tick,
                     reason: "obligation failure predicate triggered".to_owned(),
@@ -300,7 +313,6 @@ impl ObligationRuntime {
                 && (snapshot.tick.0.saturating_sub(cadence_basis.0)
                     >= obligation.spec.poll_interval_ticks
                     || snapshot.tick == obligation.spec.deadline_tick);
-            let satisfied = evaluate(snapshot, &obligation.spec.terminal);
             let next_stable = if !satisfied {
                 0
             } else if sample_due {
@@ -398,7 +410,7 @@ mod tests {
         runtime.register_obligation(action_id, spec, GameTick(10))?;
 
         let snap1 = sample_snapshot(11, false);
-        runtime.step_tick(&snap1)?;
+        runtime.step_tick_laboratory(&snap1)?;
         assert!(matches!(
             runtime.get_status(action_id),
             Some(ObligationStatus::Active {
@@ -408,7 +420,7 @@ mod tests {
         ));
 
         let snap2 = sample_snapshot(12, false);
-        runtime.step_tick(&snap2)?;
+        runtime.step_tick_laboratory(&snap2)?;
         assert!(matches!(
             runtime.get_status(action_id),
             Some(ObligationStatus::Fulfilled { .. })
@@ -433,7 +445,7 @@ mod tests {
         runtime.register_obligation(action_id, spec, GameTick(10))?;
 
         let snap = sample_snapshot(51, true);
-        runtime.step_tick(&snap)?;
+        runtime.step_tick_laboratory(&snap)?;
         assert!(matches!(
             runtime.get_status(action_id),
             Some(ObligationStatus::Failed { .. })
@@ -458,7 +470,7 @@ mod tests {
             GameTick(10),
         )?;
 
-        runtime.step_tick(&sample_snapshot(15, true))?;
+        runtime.step_tick_laboratory(&sample_snapshot(15, true))?;
         assert!(matches!(
             runtime.get_status(action_id),
             Some(ObligationStatus::Failed {
@@ -485,7 +497,7 @@ mod tests {
             GameTick(10),
         )?;
 
-        runtime.step_tick(&sample_snapshot(16, false))?;
+        runtime.step_tick_laboratory(&sample_snapshot(16, false))?;
         assert!(matches!(
             runtime.get_status(action_id),
             Some(ObligationStatus::Failed {

@@ -122,7 +122,7 @@ fn test_dispatcher_rejects_actions_it_cannot_execute() -> Result<()> {
         requested_actions,
     };
 
-    let plan = StaticPlanner::default().prepare(&snapshot, &intent, &ctx)?;
+    let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &ctx)?;
     let mut dispatcher = MutationDispatcher::new();
 
     let result = dispatcher.prepare_mutation(&plan, &snapshot, &ctx);
@@ -154,7 +154,7 @@ fn test_indeterminate_state_blocks_blind_retry() -> Result<()> {
         }],
     };
 
-    let plan = StaticPlanner::default().prepare(&snapshot, &intent, &ctx)?;
+    let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &ctx)?;
     let mut dispatcher = MutationDispatcher::new();
 
     let prepare_receipt = dispatcher.prepare_mutation(&plan, &snapshot, &ctx)?;

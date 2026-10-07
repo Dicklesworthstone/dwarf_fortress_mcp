@@ -13,14 +13,14 @@ use dfmcp_core::{
     EvidenceId, EvidenceKind, FortressId, GameTick, ObservationCursor, OperationContext, PlanId,
     Result, RiskTier, StateAnchor, StepId,
 };
-use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision};
+use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision_with_evidence};
 use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
 pub mod durable;
 pub mod faults;
 
 pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
 
-use dfmcp_world::{WorldGraph, WorldSnapshot, evaluate, execute_bounded_query};
+use dfmcp_world::{Predicate, PredicateEvidence, WorldGraph, WorldSnapshot, execute_bounded_query};
 
 const MAX_LAB_PREPARED_PLANS: usize = 4_096;
 const MAX_LAB_ACTIONS: usize = 16_384;
@@ -482,21 +482,16 @@ impl MemoryAdapter {
             ));
         }
         let state = if self.dependencies_verified(plan_id, step) {
-            if !step
-                .preconditions
-                .iter()
-                .all(|predicate| evaluate(&self.snapshot, predicate))
-            {
+            let observation = PredicateEvidence::laboratory(&self.snapshot)?;
+            if !predicates_established(&observation, &step.preconditions)? {
                 return Err(DfmcpError::new(
                     ErrorCode::PreconditionsFailed,
                     format!("step {} failed dispatch-time revalidation", step.id),
                 ));
             }
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
-            if step
-                .postconditions
-                .iter()
-                .all(|predicate| evaluate(&self.snapshot, predicate))
+            let observation = PredicateEvidence::laboratory(&self.snapshot)?;
+            if predicates_established(&observation, &step.postconditions)?
                 && step.obligation.is_none()
             {
                 CommitState::Verified
@@ -572,10 +567,11 @@ impl MemoryAdapter {
         }
 
         let dependencies_verified = if prior_state == CommitState::Prepared {
-            match deferred_step_decision(&step, &self.snapshot, |dependency| {
+            let observation = PredicateEvidence::laboratory(&self.snapshot)?;
+            match deferred_step_decision_with_evidence(&step, &observation, |dependency| {
                 self.step_receipt(plan_id, dependency)
                     .map(|receipt| receipt.state)
-            }) {
+            })? {
                 DeferredStepDecision::Ready => true,
                 DeferredStepDecision::Waiting => false,
                 DeferredStepDecision::Failed(message) => {
@@ -616,16 +612,14 @@ impl MemoryAdapter {
             CommitState::Prepared | CommitState::AppliedAwaitingVerification
         ) && dependencies_verified
         {
+            let observation = PredicateEvidence::laboratory(&self.snapshot)?;
             if let Some(obligation) = &step.obligation {
                 let failure_triggered = obligation
                     .failure
                     .as_ref()
-                    .is_some_and(|predicate| evaluate(&self.snapshot, predicate));
-                let completed = evaluate(&self.snapshot, &obligation.terminal)
-                    && step
-                        .postconditions
-                        .iter()
-                        .all(|predicate| evaluate(&self.snapshot, predicate));
+                    .map_or(Ok(false), |predicate| observation.establishes(predicate))?;
+                let completed = observation.establishes(&obligation.terminal)?
+                    && predicates_established(&observation, &step.postconditions)?;
                 if failure_triggered || self.snapshot.tick > obligation.deadline_tick {
                     stable_observations = 0;
                     last_stable_anchor = None;
@@ -652,11 +646,7 @@ impl MemoryAdapter {
                         CommitState::AppliedAwaitingVerification
                     };
                 }
-            } else if step
-                .postconditions
-                .iter()
-                .all(|predicate| evaluate(&self.snapshot, predicate))
-            {
+            } else if predicates_established(&observation, &step.postconditions)? {
                 state = CommitState::Verified;
             } else {
                 state = CommitState::AppliedAwaitingVerification;
@@ -891,13 +881,10 @@ impl GameAdapter for MemoryAdapter {
                 "plan exceeds the adapter operation action budget",
             ));
         }
+        let observation = PredicateEvidence::laboratory(&self.snapshot)?;
         for step in &plan.steps {
             self.authorize_step(step, context)?;
-            if !step
-                .preconditions
-                .iter()
-                .all(|predicate| evaluate(&self.snapshot, predicate))
-            {
+            if !predicates_established(&observation, &step.preconditions)? {
                 return Err(DfmcpError::new(
                     ErrorCode::PreconditionsFailed,
                     format!("step {} failed preparation revalidation", step.id),
@@ -1023,12 +1010,9 @@ impl GameAdapter for MemoryAdapter {
                 "prepared plan expired before commit",
             ));
         }
+        let observation = PredicateEvidence::laboratory(&self.snapshot)?;
         for step in &plan.steps {
-            if !step
-                .preconditions
-                .iter()
-                .all(|predicate| evaluate(&self.snapshot, predicate))
-            {
+            if !predicates_established(&observation, &step.preconditions)? {
                 return Err(DfmcpError::new(
                     ErrorCode::PreconditionsFailed,
                     format!("step {} failed commit-time revalidation", step.id),
@@ -1348,6 +1332,19 @@ impl GameAdapter for MemoryAdapter {
     }
 }
 
+/// Require authoritative predicate evidence without treating unavailable facts as false.
+fn predicates_established(
+    observation: &PredicateEvidence<'_>,
+    predicates: &[Predicate],
+) -> Result<bool> {
+    for predicate in predicates {
+        if !observation.establishes(predicate)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn action_is_supported(action: &Action) -> bool {
     !matches!(action, Action::Extension { .. })
 }
@@ -1556,6 +1553,245 @@ mod tests {
         }
     }
 
+
+    fn authority_fact(value: bool, tick: GameTick) -> dfmcp_world::Fact {
+        dfmcp_world::Fact::known(
+            dfmcp_world::Value::Bool(value),
+            tick,
+            dfmcp_world::FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+            dfmcp_core::Digest32::ZERO,
+        )
+    }
+
+    fn ineligible_facts(tick: GameTick) -> Vec<dfmcp_world::Fact> {
+        use dfmcp_core::Digest32;
+        use dfmcp_world::{Fact, FactSource, Value};
+        let mut facts: Vec<_> = [
+            FactSource::AgentAssertion("agent-memory".to_owned()),
+            FactSource::Replay,
+            FactSource::Derived("unregistered-model/1".to_owned()),
+            FactSource::DfhackField("unit.ready".to_owned()),
+        ]
+        .into_iter()
+        .map(|source| Fact::known(Value::Bool(true), tick, source, Digest32::ZERO))
+        .collect();
+        let mut wrong_digest = authority_fact(true, tick);
+        wrong_digest.source_digest = Digest32::of_bytes(b"not-the-laboratory-source-seal");
+        facts.push(wrong_digest);
+        facts.push(authority_fact(true, GameTick(tick.0 + 1_000)));
+        facts
+    }
+
+    fn authority_predicate(field: &str) -> Predicate {
+        Predicate::FieldCompare {
+            entity_id: dfmcp_core::EntityId::new(9),
+            field: field.to_owned(),
+            op: dfmcp_world::CompareOp::Eq,
+            value: dfmcp_world::Value::Bool(true),
+        }
+    }
+
+    fn add_authority_fields(snapshot: &mut WorldSnapshot, fact: dfmcp_world::Fact) {
+        use dfmcp_core::EntityId;
+        use dfmcp_world::{EntityKind, EntityRecord};
+        snapshot.graph.entities.insert(
+            EntityId::new(9),
+            EntityRecord {
+                id: EntityId::new(9),
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Unit,
+                label: "evidence subject".to_owned(),
+                fields: std::collections::BTreeMap::from([
+                    ("ready".to_owned(), fact.clone()),
+                    ("done".to_owned(), fact.clone()),
+                    ("failed".to_owned(), fact),
+                ]),
+            },
+        );
+        snapshot.refresh_hash();
+    }
+
+    fn set_authority_field(
+        snapshot: &mut WorldSnapshot,
+        field: &str,
+        fact: dfmcp_world::Fact,
+    ) -> dfmcp_core::Result<()> {
+        let entity = snapshot
+            .graph
+            .entities
+            .get_mut(&dfmcp_core::EntityId::new(9))
+            .ok_or_else(|| {
+                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing evidence subject")
+            })?;
+        entity.fields.insert(field.to_owned(), fact);
+        entity.revision += 1;
+        snapshot.refresh_hash();
+        Ok(())
+    }
+
+    fn reseal_authority_plan(plan: &mut dfmcp_intent::PreparedPlan) -> dfmcp_core::Result<()> {
+        plan.digest = plan.compute_digest();
+        plan.id = plan.expected_id();
+        plan.validate_structure()
+    }
+
+    #[test]
+    fn preparation_requires_exact_laboratory_fact_authority() -> Result<(), DfmcpError> {
+        use dfmcp_world::FactSource;
+        let snapshot = || WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+        );
+        for fact in ineligible_facts(GameTick(1)) {
+            let mut source = snapshot();
+            add_authority_fields(&mut source, fact);
+            assert!(dfmcp_world::evaluate(&source, &authority_predicate("ready")));
+            // An otherwise sealed plan can arrive from another planner. The
+            // adapter must enforce evidence authority independently.
+            let intent = unpause_intent(&source, 31, None);
+            let mut plan = StaticPlanner::default()
+                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            plan.steps[0].preconditions = vec![authority_predicate("ready")];
+            reseal_authority_plan(&mut plan)?;
+            let mut adapter = MemoryAdapter::new(source.clone());
+            let result = adapter.prepare(&plan, &context(&source, 2));
+            assert!(matches!(result, Err(error) if error.code == ErrorCode::PreconditionsFailed));
+            assert_eq!(adapter.snapshot(), &source);
+            assert!(adapter.prepared.is_empty());
+        }
+        for producer in ["dfmcp.lab-scenario/1", "dfmcp.reference-effects/1"] {
+            let mut source = snapshot();
+            let mut fact = authority_fact(true, source.tick);
+            fact.source = FactSource::Derived(producer.to_owned());
+            add_authority_fields(&mut source, fact);
+            let mut intent = unpause_intent(&source, 32, None);
+            intent.requested_actions[0].preconditions = vec![authority_predicate("ready")];
+            let plan = StaticPlanner::default()
+                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let mut adapter = MemoryAdapter::new(source);
+            let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+            let receipt = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+            assert_eq!(receipt.actions[0].state, CommitState::Verified);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn polling_ignores_ineligible_terminal_and_failure_claims() -> Result<(), DfmcpError> {
+        for fact in ineligible_facts(GameTick(1)) {
+            let mut source = WorldSnapshot::new(
+                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            );
+            add_authority_fields(&mut source, fact);
+            let intent = unpause_intent(&source, 33, Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: Some(authority_predicate("failed")),
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            }));
+            let plan = StaticPlanner::default()
+                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let mut adapter = MemoryAdapter::new(source);
+            let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+            let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+            let action_id = committed.actions[0].action_id;
+            let pending = adapter.poll_action(action_id, &context(adapter.snapshot(), 4))?;
+            assert_eq!(pending.state, CommitState::AppliedAwaitingVerification);
+
+            adapter.advance_ticks(1)?;
+            let fact = authority_fact(true, adapter.snapshot.tick);
+            set_authority_field(&mut adapter.snapshot, "done", fact)?;
+            let verified = adapter.poll_action(action_id, &context(adapter.snapshot(), 5))?;
+            assert_eq!(verified.state, CommitState::Verified);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn polling_uses_authoritative_failure_evidence() -> Result<(), DfmcpError> {
+        use dfmcp_world::{Fact, FactSource, Value};
+        let mut source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+        );
+        add_authority_fields(&mut source, Fact::known(
+            Value::Bool(true), GameTick(1),
+            FactSource::AgentAssertion("unverified report".to_owned()), dfmcp_core::Digest32::ZERO
+        ));
+        let intent = unpause_intent(&source, 34, Some(ObligationSpec {
+            terminal: authority_predicate("done"),
+            failure: Some(authority_predicate("failed")),
+            deadline_tick: GameTick(10),
+            poll_interval_ticks: 1,
+            stable_for_observations: 1,
+        }));
+        let plan = StaticPlanner::default()
+            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let mut adapter = MemoryAdapter::new(source);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+        let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+        let action_id = committed.actions[0].action_id;
+        assert_eq!(
+            adapter.poll_action(action_id, &context(adapter.snapshot(), 4))?.state,
+            CommitState::AppliedAwaitingVerification
+        );
+        adapter.advance_ticks(1)?;
+        let fact = authority_fact(true, adapter.snapshot.tick);
+        set_authority_field(&mut adapter.snapshot, "failed", fact)?;
+        assert_eq!(
+            adapter.poll_action(action_id, &context(adapter.snapshot(), 5))?.state,
+            CommitState::Failed
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deferred_effect_cannot_use_a_new_agent_assertion_as_its_precondition() -> Result<(), DfmcpError> {
+        use dfmcp_world::{Fact, FactSource, Value};
+        let mut source = WorldSnapshot::new(
+            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+        );
+        add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
+        set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
+        let mut intent = unpause_intent(&source, 35, Some(ObligationSpec {
+            terminal: authority_predicate("done"),
+            failure: None,
+            deadline_tick: GameTick(10),
+            poll_interval_ticks: 1,
+            stable_for_observations: 1,
+        }));
+        intent.requested_actions.push(RequestedAction {
+            action: Action::Pause { paused: true },
+            preconditions: vec![authority_predicate("ready")],
+            postconditions: vec![Predicate::Paused(true)],
+            compensation: None,
+            obligation: None,
+            depends_on: vec![0],
+        });
+        let plan = StaticPlanner::default()
+            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let mut adapter = MemoryAdapter::new(source);
+        let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
+        let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
+        assert_eq!(committed.actions[1].state, CommitState::Prepared);
+        adapter.advance_ticks(1)?;
+        let tick = adapter.snapshot.tick;
+        set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
+        set_authority_field(&mut adapter.snapshot, "ready", Fact::known(
+            Value::Bool(true), tick,
+            FactSource::AgentAssertion("still ready".to_owned()), dfmcp_core::Digest32::ZERO
+        ))?;
+        assert_eq!(
+            adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+            CommitState::Verified
+        );
+        let refused = adapter.poll_action(committed.actions[1].action_id, &context(adapter.snapshot(), 5))?;
+        assert_eq!(refused.state, CommitState::Failed);
+        assert!(!adapter.snapshot.paused);
+        assert!(refused.message.contains("not dispatched"));
+        Ok(())
+    }
+
     #[test]
     fn duplicate_commit_does_not_duplicate_effect() -> Result<(), DfmcpError> {
         let snapshot = WorldSnapshot::new(
@@ -1567,7 +1803,7 @@ mod tests {
         );
         let intent = unpause_intent(&snapshot, 1, None);
         let planner = StaticPlanner::default();
-        let plan = planner.prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = planner.prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
@@ -1696,7 +1932,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
         let failure = adapter
@@ -1732,7 +1968,7 @@ mod tests {
                 stable_for_observations: 2,
             }),
         );
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -1759,7 +1995,7 @@ mod tests {
             WorldGraph::default(),
         );
         let intent = unpause_intent(&snapshot, 11, None);
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
 
@@ -1812,7 +2048,7 @@ mod tests {
             WorldGraph::default(),
         );
         let intent = unpause_intent(&snapshot, 3, None);
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
@@ -1846,7 +2082,7 @@ mod tests {
         let checkpoint_context = context(adapter.snapshot(), 1);
         let checkpoint = adapter.checkpoint("before-unpause", &checkpoint_context)?;
         let intent = unpause_intent(&snapshot, 4, None);
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot, 2))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 2))?;
         let prepare_context = context(adapter.snapshot(), 3);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
         let commit_context = context(adapter.snapshot(), 4);

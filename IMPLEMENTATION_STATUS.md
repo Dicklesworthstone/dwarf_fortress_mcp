@@ -44,6 +44,49 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Source-authorized execution and recovery (2026-10-07)
+
+Static planning, deferred-step admission and the canonical obligation/recovery
+APIs now accept explicit `PredicateEvidence`. Their raw-snapshot defaults grant
+no observation authority; known laboratory callers select the registered
+reference scope. Preconditions, already-satisfied goals, terminal predicates and
+failure predicates use the same three-valued source/coverage boundary.
+Obligation batches validate and evaluate all active predicates before publishing
+any transition, preserving atomic refusal and existing cadence/deadline rules.
+
+Reference effects consume only eligible registered laboratory facts for work
+counters, lifecycle and hostile selectors, worker/workshop eligibility, resource
+quantities, population membership, construction, excavation and combat.
+Assertions, replay, arbitrary derivations, changed digests and future or
+unavailable inputs cannot be converted into reference-derived progress at the
+consumption boundary. Unknown modeled lifecycle cannot silently remove work.
+An explicit authorized same-value write re-establishes reference provenance
+once; a repeated already-established write remains a no-op.
+
+Both reference adapters apply the evidence boundary during preparation, actual
+dispatch, postconditions, deferred admission and polling. MCP carried recovery
+uses one evidence context and publishes its cloned frontier only after every
+proof succeeds; errors interrupt unfinished stability. Objectives report
+established true, established false and unknown separately. Only established
+true is achieved; invalid or untrusted evidence remains unknown with its reason.
+The demo and legitimate reference fixtures explicitly select laboratory scope.
+
+The increment adds eight simulator, eight intent integration, eight adapter
+authority and two objective-projection regressions. **Validation is limited: the
+actual intent, adapter and laboratory production libraries compiled before the
+large adapter unit-test target was killed by shared-memory pressure.** No
+successful execution-suite result was received. The execution service then
+disconnected. Recovered source was reapplied from checked replacement bodies
+and independently reviewed through GitHub; some formatting differs from the
+unavailable workspace, so compilation evidence is not asserted for these exact
+final bytes. New tests remain enabled for execution on a functioning host.
+
+The shared world primitive's earlier 178-test result is recorded separately
+below. Full final-source tests, formatting and workspace qualification remain
+pending. The separate adapter cadence increment will replace its duplicate
+stability counters with the canonical runtime. This source work is tracked by
+`df-predicate-evidence-authority-r7m` and grants no live/native admission.
+
 ### Source-qualified world predicate evidence (2026-10-07)
 
 The pure world layer now separates readable predicate values from evidence that

@@ -48,7 +48,7 @@ fn world(paused: bool) -> WorldSnapshot {
                 dfmcp_world::Fact::known(
                     Value::Bool(true),
                     GameTick(1),
-                    dfmcp_world::FactSource::Derived("test".to_owned()),
+                    dfmcp_world::FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
                     dfmcp_core::Digest32::ZERO,
                 ),
             )]),
@@ -69,7 +69,7 @@ fn with_still(mut snapshot: WorldSnapshot) -> WorldSnapshot {
         dfmcp_world::Fact::known(
             value,
             GameTick(1),
-            dfmcp_world::FactSource::Derived("test".to_owned()),
+            dfmcp_world::FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
             dfmcp_core::Digest32::ZERO,
         )
     };
@@ -217,7 +217,7 @@ fn run_workshop() -> Result<(dfmcp_core::Digest32, Vec<u64>, PreparedPlan)> {
     let mut adapter = MemoryAdapter::new(world(true));
     let intent = workshop_intent(adapter.snapshot())?;
     let plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
     // Planner defaults are sealed: dig proves its region, build and brew prove
     // the entities their idempotency keys will create.
     assert_eq!(
@@ -253,7 +253,7 @@ fn run_workshop() -> Result<(dfmcp_core::Digest32, Vec<u64>, PreparedPlan)> {
         requested_actions: vec![request(Action::Pause { paused: false }, Vec::new())],
     };
     let unpause_plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &unpause, &context(&adapter, 4))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &unpause, &context(&adapter, 4))?;
     commit(&mut adapter, &unpause_plan, 5)?;
 
     let mut verified_at = vec![0u64; 3];
@@ -330,7 +330,7 @@ fn immediate_labor_change_verifies_at_commit_and_compensates_on_cancel() -> Resu
         )],
     };
     let plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
     assert!(plan.steps[0].compensation.is_some());
     let prepared = adapter.prepare(&plan, &context(&adapter, 2))?;
     let receipt = adapter.commit(&plan, &prepared, &context(&adapter, 3))?;
@@ -370,7 +370,7 @@ fn cancelled_work_order_stops_producing_but_keeps_its_record() -> Result<()> {
         )],
     };
     let plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
     let action = commit(&mut adapter, &plan, 2)?[0];
     let order = effects::created_entity_id(&plan.steps[0].idempotency_key, 0);
     adapter.advance_ticks(effects::WORK_ORDER_TICKS_PER_UNIT * 3)?;
@@ -426,7 +426,7 @@ fn excavation_that_misses_its_explicit_deadline_fails() -> Result<()> {
         requested_actions: vec![dig],
     };
     let plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
     let action = commit(&mut adapter, &plan, 2)?[0];
     let mut last = CommitState::Prepared;
     for request_id in 3..10u128 {
@@ -463,7 +463,7 @@ fn excavation_over_unobserved_terrain_is_rejected_without_partial_state() -> Res
         )],
     };
     let plan =
-        StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter, 1))?;
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter, 1))?;
     let before = adapter.snapshot().clone();
     let failure = commit(&mut adapter, &plan, 2)
         .err()

@@ -4,7 +4,7 @@ use dfmcp_core::{
     Capability, DfmcpError, EntityId, ErrorCode, GameTick, MapCuboid, OperationContext, Result,
     RiskTier, StepId,
 };
-use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
+use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
 
 use crate::{
     Action, BuildingKind, Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan,
@@ -55,6 +55,27 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.prepare_with_evidence(&PredicateEvidence::untrusted(snapshot)?, intent, context)
+    }
+
+    /// Explicit reference-model preparation; this grants no native game authority.
+    pub fn prepare_laboratory(
+        &self,
+        snapshot: &WorldSnapshot,
+        intent: &Intent,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.prepare_with_evidence(&PredicateEvidence::laboratory(snapshot)?, intent, context)
+    }
+
+    /// Prepare only from the source and completeness scope supplied by the shell.
+    pub fn prepare_with_evidence(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        intent: &Intent,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        let snapshot = evidence.snapshot();
         validate_policy(&self.policy)?;
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
@@ -87,7 +108,7 @@ impl StaticPlanner {
             ));
         }
         validate_intent_shape(intent, &self.policy, context)?;
-        if evaluate(snapshot, &intent.terminal_condition) {
+        if evidence.establishes(&intent.terminal_condition)? {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
                 "intent terminal condition is already satisfied",
@@ -172,7 +193,7 @@ impl StaticPlanner {
                 }
             }
             for precondition in &normalized.preconditions {
-                if !evaluate(snapshot, precondition) {
+                if !evidence.establishes(precondition)? {
                     return Err(DfmcpError::new(
                         ErrorCode::PreconditionsFailed,
                         format!(
@@ -835,7 +856,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
         assert!(plan.digest_is_valid());
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(
@@ -867,7 +888,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot))?;
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
         let step = &plan.steps[0];
         assert_eq!(
             step.postconditions,
@@ -904,7 +925,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
+        let result = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(result.is_err());
     }
 
@@ -933,7 +954,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::default().prepare(&snapshot, &intent, &context(&snapshot));
+        let result = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
     }
 
@@ -959,7 +980,7 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::new(policy).prepare(&snapshot, &intent, &context(&snapshot));
+        let result = StaticPlanner::new(policy).prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 }

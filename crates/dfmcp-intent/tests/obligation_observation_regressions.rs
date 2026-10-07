@@ -44,7 +44,7 @@ fn rejected_observation_does_not_partially_publish_in_either_action_order() -> R
         runtime.register_obligation(future, spec(100, 1, 1), GameTick(20))?;
         let before_eligible = runtime.get_status(eligible).cloned();
         let before_future = runtime.get_status(future).cloned();
-        let error = runtime.step_tick(&snapshot(10, 10, false));
+        let error = runtime.step_tick_laboratory(&snapshot(10, 10, false));
         assert!(matches!(error, Err(error) if error.code == ErrorCode::StaleAnchor));
         assert_eq!(runtime.get_status(eligible).cloned(), before_eligible);
         assert_eq!(runtime.get_status(future).cloned(), before_future);
@@ -59,7 +59,7 @@ fn failure_evidence_is_not_hidden_by_poll_cadence() -> Result<()> {
     let mut goal = spec(100, 10, 2);
     goal.failure = Some(Predicate::Paused(true));
     runtime.register_obligation(action, goal, GameTick(0))?;
-    runtime.step_tick(&snapshot(1, 1, true))?;
+    runtime.step_tick_laboratory(&snapshot(1, 1, true))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Failed {
@@ -75,13 +75,13 @@ fn off_cadence_contradiction_resets_without_postponing_the_next_sample() -> Resu
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(100, 10, 2), GameTick(0))?;
-    runtime.step_tick(&snapshot(10, 10, false))?;
+    runtime.step_tick_laboratory(&snapshot(10, 10, false))?;
     assert_streak(&runtime, action, 1);
-    runtime.step_tick(&snapshot(11, 11, true))?;
+    runtime.step_tick_laboratory(&snapshot(11, 11, true))?;
     assert_streak(&runtime, action, 0);
-    runtime.step_tick(&snapshot(20, 20, false))?;
+    runtime.step_tick_laboratory(&snapshot(20, 20, false))?;
     assert_streak(&runtime, action, 1);
-    runtime.step_tick(&snapshot(30, 30, false))?;
+    runtime.step_tick_laboratory(&snapshot(30, 30, false))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Fulfilled { .. })
@@ -94,12 +94,12 @@ fn same_tick_changed_evidence_resets_but_cannot_add_a_sample() -> Result<()> {
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(100, 10, 2), GameTick(0))?;
-    runtime.step_tick(&snapshot(10, 10, false))?;
-    runtime.step_tick(&snapshot(10, 11, true))?;
+    runtime.step_tick_laboratory(&snapshot(10, 10, false))?;
+    runtime.step_tick_laboratory(&snapshot(10, 11, true))?;
     assert_streak(&runtime, action, 0);
-    runtime.step_tick(&snapshot(10, 12, false))?;
+    runtime.step_tick_laboratory(&snapshot(10, 12, false))?;
     assert_streak(&runtime, action, 0);
-    runtime.step_tick(&snapshot(20, 20, false))?;
+    runtime.step_tick_laboratory(&snapshot(20, 20, false))?;
     assert_streak(&runtime, action, 1);
     Ok(())
 }
@@ -110,10 +110,10 @@ fn exact_replay_does_not_add_stability() -> Result<()> {
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(100, 10, 2), GameTick(0))?;
     let evidence = snapshot(10, 10, false);
-    runtime.step_tick(&evidence)?;
+    runtime.step_tick_laboratory(&evidence)?;
     let before = runtime.get_status(action).cloned();
     for _ in 0..16 {
-        runtime.step_tick(&evidence)?;
+        runtime.step_tick_laboratory(&evidence)?;
         assert_eq!(runtime.get_status(action).cloned(), before);
     }
     Ok(())
@@ -124,8 +124,8 @@ fn matching_deadline_with_insufficient_samples_is_immediately_terminal() -> Resu
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(15, 10, 3), GameTick(0))?;
-    runtime.step_tick(&snapshot(10, 10, false))?;
-    runtime.step_tick(&snapshot(15, 15, false))?;
+    runtime.step_tick_laboratory(&snapshot(10, 10, false))?;
+    runtime.step_tick_laboratory(&snapshot(15, 15, false))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Failed {
@@ -141,9 +141,9 @@ fn final_eligible_sample_at_deadline_can_complete_outside_poll_cadence() -> Resu
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(15, 10, 2), GameTick(0))?;
-    runtime.step_tick(&snapshot(10, 10, false))?;
+    runtime.step_tick_laboratory(&snapshot(10, 10, false))?;
     let final_sample = snapshot(15, 15, false);
-    runtime.step_tick(&final_sample)?;
+    runtime.step_tick_laboratory(&final_sample)?;
     match runtime.get_status(action) {
         Some(ObligationStatus::Fulfilled {
             fulfilled_at_tick,
@@ -164,7 +164,7 @@ fn cancellation_cannot_precede_last_evaluation() -> Result<()> {
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(100, 10, 3), GameTick(0))?;
-    runtime.step_tick(&snapshot(20, 20, false))?;
+    runtime.step_tick_laboratory(&snapshot(20, 20, false))?;
     let before = runtime.get_status(action).cloned();
     let result = runtime.request_cancel(action, GameTick(15));
     assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
@@ -177,9 +177,9 @@ fn terminal_evidence_is_not_rewritten_by_later_contradictions() -> Result<()> {
     let mut runtime = ObligationRuntime::new();
     let action = ActionId::new(1);
     runtime.register_obligation(action, spec(100, 1, 1), GameTick(0))?;
-    runtime.step_tick(&snapshot(1, 1, false))?;
+    runtime.step_tick_laboratory(&snapshot(1, 1, false))?;
     let terminal = runtime.get_status(action).cloned();
-    runtime.step_tick(&snapshot(2, 2, true))?;
+    runtime.step_tick_laboratory(&snapshot(2, 2, true))?;
     assert_eq!(runtime.get_status(action).cloned(), terminal);
     Ok(())
 }
@@ -192,7 +192,7 @@ fn invalid_hash_never_changes_obligations() -> Result<()> {
     let before = runtime.get_status(action).cloned();
     let mut invalid = snapshot(1, 1, false);
     invalid.state_hash = Digest32::ZERO;
-    let result = runtime.step_tick(&invalid);
+    let result = runtime.step_tick_laboratory(&invalid);
     assert!(matches!(result, Err(error) if error.code == ErrorCode::ChecksumMismatch));
     assert_eq!(runtime.get_status(action).cloned(), before);
     Ok(())

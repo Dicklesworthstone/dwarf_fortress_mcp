@@ -45,7 +45,7 @@ fn world(paused: bool) -> WorldSnapshot {
                         Fact::known(
                             Value::Bool(false),
                             GameTick(100),
-                            FactSource::Replay,
+                            FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
                             Digest32::ZERO,
                         ),
                     )
@@ -141,7 +141,7 @@ fn commit_actions(
         constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
         requested_actions: actions,
     };
-    let plan = StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(adapter))?;
+    let plan = StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(adapter))?;
     let prepared = adapter.prepare(&plan, &context(adapter))?;
     let receipt = adapter.commit(&plan, &prepared, &context(adapter))?;
     Ok(receipt.actions.into_iter().map(|a| a.action_id).collect())
@@ -295,7 +295,7 @@ fn same_commit_revalidates_each_dispatch_and_rolls_back_prior_effects() -> Resul
         constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
         requested_actions: vec![unpause.clone(), unpause],
     };
-    let plan = StaticPlanner::default().prepare(adapter.snapshot(), &intent, &context(&adapter))?;
+    let plan = StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &context(&adapter))?;
     let prepared = adapter.prepare(&plan, &context(&adapter))?;
     let before = adapter.snapshot().clone();
     let prior_transcript = adapter.transcript().clone();

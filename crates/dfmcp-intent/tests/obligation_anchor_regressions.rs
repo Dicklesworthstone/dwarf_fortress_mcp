@@ -46,7 +46,7 @@ fn creation_anchor_fences_the_first_observation() -> Result<()> {
     for (fortress, epoch) in [(2, 0), (1, 1)] {
         let (mut runtime, action) = anchored()?;
         let before = runtime.last_observation_anchor(action);
-        let result = runtime.step_tick(&sample(fortress, epoch, 10, 10, false));
+        let result = runtime.step_tick_laboratory(&sample(fortress, epoch, 10, 10, false));
         assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
         assert_eq!(runtime.last_observation_anchor(action), before);
         assert_streak(&runtime, action, 0);
@@ -61,12 +61,12 @@ fn legacy_registration_binds_on_first_accepted_sample() -> Result<()> {
     runtime.register_obligation(action, goal(), GameTick(0))?;
     assert_eq!(runtime.last_observation_anchor(action), None);
     let first = sample(1, 7, 10, 10, false);
-    runtime.step_tick(&first)?;
+    runtime.step_tick_laboratory(&first)?;
     assert_eq!(
         runtime.last_observation_anchor(action),
         Some(first.anchor())
     );
-    let result = runtime.step_tick(&sample(2, 7, 20, 20, false));
+    let result = runtime.step_tick_laboratory(&sample(2, 7, 20, 20, false));
     assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
     assert_streak(&runtime, action, 1);
     Ok(())
@@ -76,7 +76,7 @@ fn legacy_registration_binds_on_first_accepted_sample() -> Result<()> {
 fn cursor_forks_and_sequence_regressions_cannot_supply_evidence() -> Result<()> {
     let (mut runtime, action) = anchored()?;
     let first = sample(1, 0, 10, 10, false);
-    runtime.step_tick(&first)?;
+    runtime.step_tick_laboratory(&first)?;
     let before = runtime.get_status(action).cloned();
     for invalid in [
         sample(1, 0, 10, 10, true),
@@ -85,7 +85,7 @@ fn cursor_forks_and_sequence_regressions_cannot_supply_evidence() -> Result<()> 
         sample(1, 0, 11, 9, false),
         sample(1, 1, 20, 20, false),
     ] {
-        let result = runtime.step_tick(&invalid);
+        let result = runtime.step_tick_laboratory(&invalid);
         assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
         assert_eq!(
             runtime.last_observation_anchor(action),
@@ -99,18 +99,18 @@ fn cursor_forks_and_sequence_regressions_cannot_supply_evidence() -> Result<()> 
 #[test]
 fn off_cadence_reads_advance_the_observation_fence_not_the_poll_clock() -> Result<()> {
     let (mut runtime, action) = anchored()?;
-    runtime.step_tick(&sample(1, 0, 10, 10, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 10, 10, false))?;
     let off_cadence = sample(1, 0, 18, 18, false);
-    runtime.step_tick(&off_cadence)?;
+    runtime.step_tick_laboratory(&off_cadence)?;
     assert_eq!(
         runtime.last_observation_anchor(action),
         Some(off_cadence.anchor())
     );
     let before = runtime.get_status(action).cloned();
-    let result = runtime.step_tick(&sample(1, 0, 19, 17, true));
+    let result = runtime.step_tick_laboratory(&sample(1, 0, 19, 17, true));
     assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
     assert_eq!(runtime.get_status(action).cloned(), before);
-    runtime.step_tick(&sample(1, 0, 20, 20, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 20, 20, false))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Fulfilled { .. })
@@ -121,7 +121,7 @@ fn off_cadence_reads_advance_the_observation_fence_not_the_poll_clock() -> Resul
 #[test]
 fn cancellation_cannot_be_backdated_before_an_off_cadence_read() -> Result<()> {
     let (mut runtime, action) = anchored()?;
-    runtime.step_tick(&sample(1, 0, 8, 8, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 8, 8, false))?;
     let result = runtime.request_cancel(action, GameTick(7));
     assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
     assert_streak(&runtime, action, 0);
@@ -143,7 +143,7 @@ fn one_incompatible_action_cannot_publish_another_actions_anchor() -> Result<()>
         let other = sample(2, 0, 0, 0, false);
         runtime.register_obligation_at(eligible, goal(), &first)?;
         runtime.register_obligation_at(incompatible, goal(), &other)?;
-        let result = runtime.step_tick(&sample(1, 0, 10, 10, false));
+        let result = runtime.step_tick_laboratory(&sample(1, 0, 10, 10, false));
         assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
         assert_eq!(
             runtime.last_observation_anchor(eligible),
@@ -188,19 +188,19 @@ fn invalid_creation_snapshot_does_not_reserve_an_identity() -> Result<()> {
 fn interrupted_read_resets_stability_without_recounting_old_evidence() -> Result<()> {
     let (mut runtime, action) = anchored()?;
     let first = sample(1, 0, 10, 10, false);
-    runtime.step_tick(&first)?;
+    runtime.step_tick_laboratory(&first)?;
     assert_streak(&runtime, action, 1);
     runtime.observation_interrupted(action)?;
     runtime.observation_interrupted(action)?;
-    runtime.step_tick(&first)?;
+    runtime.step_tick_laboratory(&first)?;
     assert_streak(&runtime, action, 0);
     assert_eq!(
         runtime.last_observation_anchor(action),
         Some(first.anchor())
     );
-    runtime.step_tick(&sample(1, 0, 20, 20, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 20, 20, false))?;
     assert_streak(&runtime, action, 1);
-    runtime.step_tick(&sample(1, 0, 30, 30, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 30, 30, false))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Fulfilled { .. })
@@ -211,9 +211,9 @@ fn interrupted_read_resets_stability_without_recounting_old_evidence() -> Result
 #[test]
 fn interruption_does_not_extend_a_fixed_deadline_or_rewrite_terminal_evidence() -> Result<()> {
     let (mut runtime, action) = anchored()?;
-    runtime.step_tick(&sample(1, 0, 90, 90, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 90, 90, false))?;
     runtime.observation_interrupted(action)?;
-    runtime.step_tick(&sample(1, 0, 100, 100, false))?;
+    runtime.step_tick_laboratory(&sample(1, 0, 100, 100, false))?;
     assert!(matches!(
         runtime.get_status(action),
         Some(ObligationStatus::Failed { .. })
@@ -221,7 +221,7 @@ fn interruption_does_not_extend_a_fixed_deadline_or_rewrite_terminal_evidence() 
     let before = runtime.get_status(action).cloned();
     let anchor = runtime.last_observation_anchor(action);
     runtime.observation_interrupted(action)?;
-    runtime.step_tick(&sample(2, 1, 200, 200, false))?;
+    runtime.step_tick_laboratory(&sample(2, 1, 200, 200, false))?;
     assert_eq!(runtime.get_status(action).cloned(), before);
     assert_eq!(runtime.last_observation_anchor(action), anchor);
     let unknown = runtime.observation_interrupted(ActionId::new(99));

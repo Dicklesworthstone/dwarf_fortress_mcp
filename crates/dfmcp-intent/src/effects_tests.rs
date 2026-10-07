@@ -427,11 +427,11 @@ fn with_ledger(drink: u64, food: u64) -> WorldSnapshot {
 }
 
 fn ledger_u64(snapshot: &WorldSnapshot, field: &str) -> Result<u64> {
-    field_u64(&snapshot.graph.entities[&EntityId::new(91)], field)
+    field_u64(&snapshot.graph.entities[&EntityId::new(91)], field, snapshot.tick)
 }
 
 fn need(snapshot: &WorldSnapshot, unit: EntityId, field: &str) -> Option<String> {
-    field_text(&snapshot.graph.entities[&unit], field).map(str::to_owned)
+    field_text(&snapshot.graph.entities[&unit], field, snapshot.tick).map(str::to_owned)
 }
 
 #[test]
@@ -519,7 +519,7 @@ fn work_orders_stall_without_their_workshop_or_worker_and_say_why() -> Result<()
     assert_eq!(
         order_fields[BLOCKED_BY_FIELD].value,
         Value::Text(
-            "no completed workshop:Still and no living unit with the BREW labor enabled".to_owned()
+            "completed workshop:Still and living unit with the BREW labor enabled are not established".to_owned()
         )
     );
     // Equipping the brewery unblocks it; only time after that counts.
@@ -684,11 +684,11 @@ fn unavailable_workshop_worker_and_life_facts_cannot_release_production() -> Res
         advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
         let id = created_entity_id("blocked", 0);
         assert_eq!(
-            field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD)?,
+            field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?,
             1
         );
-        assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD).is_some());
-        assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks")?, 0);
+        assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD, snapshot.tick).is_some());
+        assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?, 0);
         snapshot
             .graph
             .entities
@@ -815,6 +815,262 @@ fn unavailable_military_selectors_cannot_determine_combat_outcomes() -> Result<(
             Some(ErrorCode::PreconditionsFailed)
         );
         assert_eq!(snapshot.graph, before);
+    }
+    Ok(())
+}
+
+
+// These records deliberately keep the same, apparently useful values. Only
+// their provenance or observation horizon changes, so a value-only consumer
+// would launder them into registered reference-effect results.
+fn ineligible_reference_inputs(original: &Fact) -> Vec<Fact> {
+    let mut variants = Vec::new();
+    for source in [
+        FactSource::AgentAssertion("agent premise".to_owned()),
+        FactSource::Replay,
+        FactSource::Derived("unregistered forecast".to_owned()),
+        FactSource::DfhackField("native observation is not this laboratory".to_owned()),
+    ] {
+        let mut fact = original.clone();
+        fact.source = source;
+        variants.push(fact);
+    }
+    let mut wrong_manifest = original.clone();
+    wrong_manifest.source_digest = Digest32::of_bytes(b"not the reference source manifest");
+    variants.push(wrong_manifest);
+    let mut future = original.clone();
+    future.observed_at = GameTick(u64::MAX);
+    variants.push(future);
+    variants
+}
+
+#[test]
+fn ineligible_progress_and_lifecycle_inputs_cannot_become_reference_completion() -> Result<()> {
+    for (action, mut fields) in temporal_cases()? {
+        fields.push(match action {
+            Action::Build { .. } => CONSTRUCTION_STAGE_FIELD,
+            _ => STATUS_FIELD,
+        });
+        if matches!(action, Action::DesignateDig { .. }) {
+            fields.extend(["area_min", "area_max"]);
+        }
+        let mut original = world();
+        apply_effect(&mut original, &action, "provenance")?;
+        let id = created_entity_id("provenance", 0);
+        for field in fields {
+            for replacement in ineligible_reference_inputs(&original.graph.entities[&id].fields[field]) {
+                let mut snapshot = original.clone();
+                snapshot.graph.entities.get_mut(&id).unwrap().fields
+                    .insert(field.to_owned(), replacement);
+                let before = snapshot.graph.clone();
+                let error = advance(&mut snapshot, BUILD_TICKS * 10).err().map(|error| error.code);
+                assert_eq!(error, Some(ErrorCode::PreconditionsFailed), "{action:?}: {field}");
+                assert_eq!(snapshot.graph, before, "{action:?}: {field}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn untrusted_worker_and_workshop_claims_stall_instead_of_producing_trusted_stock() -> Result<()> {
+    let action = Action::CreateWorkOrder {
+        name: "brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 1,
+        conditions: Vec::new(),
+    };
+    for (subject, field) in [
+        (EntityId::new(51), "building_kind"),
+        (EntityId::new(51), CONSTRUCTION_STAGE_FIELD),
+        (UNIT_A, "labor.BREW"),
+        (UNIT_A, "alive"),
+    ] {
+        let mut original = world();
+        equip_brewery(&mut original);
+        original.graph.entities.get_mut(&UNIT_A).unwrap().fields
+            .insert("alive".to_owned(), known(Value::Bool(true), original.tick));
+        apply_effect(&mut original, &action, "source-blocked")?;
+        let id = created_entity_id("source-blocked", 0);
+        for replacement in ineligible_reference_inputs(&original.graph.entities[&subject].fields[field]) {
+            let mut snapshot = original.clone();
+            snapshot.graph.entities.get_mut(&subject).unwrap().fields
+                .insert(field.to_owned(), replacement);
+            advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
+            assert_eq!(field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 1);
+            assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks", snapshot.tick)?, 0);
+            assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD, snapshot.tick)
+                .is_some_and(|reason| reason.contains("not established")));
+            // Restoring the registered input permits work again; uncertain
+            // candidates do not poison future authoritative observations.
+            snapshot.graph.entities.get_mut(&subject).unwrap().fields
+                .insert(field.to_owned(), original.graph.entities[&subject].fields[field].clone());
+            advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT)?;
+            assert_eq!(field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 0);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn untrusted_population_inputs_cannot_omit_units_from_consumption_or_combat() -> Result<()> {
+    for (original, field, value, ticks) in [
+        (with_ledger(10, 10), "alive".to_owned(), Value::Bool(true), DRINK_INTERVAL_TICKS),
+        (with_ledger(10, 10), "alive".to_owned(), Value::Bool(false), DRINK_INTERVAL_TICKS),
+        (with_active_threat(), "alive".to_owned(), Value::Bool(false), COMBAT_ROUND_TICKS),
+        (with_active_threat(), SQUAD_FIELD.to_owned(), Value::Entity(SQUAD), COMBAT_ROUND_TICKS),
+        (with_active_threat(), SQUAD_FIELD.to_owned(), Value::Null, COMBAT_ROUND_TICKS),
+        (with_active_threat(), format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()), Value::Bool(true),
+            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL),
+        (with_active_threat(), format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()), Value::Bool(false),
+            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL),
+    ] {
+        for replacement in ineligible_reference_inputs(&known(value.clone(), original.tick)) {
+            let mut snapshot = original.clone();
+            snapshot.graph.entities.get_mut(&UNIT_A).unwrap().fields.insert(field.clone(), replacement);
+            let before = snapshot.graph.clone();
+            assert_eq!(advance(&mut snapshot, ticks).err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(snapshot.graph, before, "{field}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn incomplete_lifecycle_and_hostile_selectors_do_not_silently_remove_work() -> Result<()> {
+    for (action, _) in temporal_cases()? {
+        let mut original = world();
+        apply_effect(&mut original, &action, "missing-lifecycle")?;
+        let id = created_entity_id("missing-lifecycle", 0);
+        let field = if matches!(action, Action::Build { .. }) {
+            CONSTRUCTION_STAGE_FIELD
+        } else {
+            STATUS_FIELD
+        };
+        original.graph.entities.get_mut(&id).unwrap().fields.remove(field);
+        let before = original.graph.clone();
+        assert_eq!(advance(&mut original, BUILD_TICKS * 10).err().map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed));
+        assert_eq!(original.graph, before);
+    }
+    let original = with_active_threat();
+    let hostile = EntityId::new(99);
+    for field in [HOSTILE_FIELD, THREAT_STATUS_FIELD] {
+        let variants = std::iter::once(None).chain(
+            ineligible_reference_inputs(&original.graph.entities[&hostile].fields[field])
+                .into_iter().map(Some));
+        for replacement in variants {
+            let mut snapshot = original.clone();
+            match replacement {
+                Some(fact) => { snapshot.graph.entities.get_mut(&hostile).unwrap().fields.insert(field.to_owned(), fact); }
+                None => { snapshot.graph.entities.get_mut(&hostile).unwrap().fields.remove(field); }
+            }
+            let before = snapshot.graph.clone();
+            assert_eq!(advance(&mut snapshot, COMBAT_ROUND_TICKS * ROUNDS_PER_KILL)
+                .err().map(|error| error.code), Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(snapshot.graph, before);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn ineligible_resource_quantities_are_not_reissued_as_reference_stock() -> Result<()> {
+    for field in [METABOLISM_TICKS_FIELD, STOCK_DRINK_FIELD, STOCK_FOOD_FIELD] {
+        let original = with_ledger(10, 10);
+        let ledger = EntityId::new(91);
+        for replacement in ineligible_reference_inputs(&original.graph.entities[&ledger].fields[field]) {
+            let mut snapshot = original.clone();
+            snapshot.graph.entities.get_mut(&ledger).unwrap().fields
+                .insert(field.to_owned(), replacement.clone());
+            assert_eq!(advance(&mut snapshot, FOOD_INTERVAL_TICKS).err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(snapshot.graph.entities[&ledger].fields[field], replacement);
+        }
+    }
+    let mut original = with_ledger(0, 10);
+    equip_brewery(&mut original);
+    let action = Action::CreateWorkOrder {
+        name: "brew".to_owned(), job_token: "BREW_DRINK".to_owned(), amount: 1, conditions: Vec::new(),
+    };
+    apply_effect(&mut original, &action, "untrusted-stock")?;
+    let ledger = EntityId::new(91);
+    let order = created_entity_id("untrusted-stock", 0);
+    for replacement in ineligible_reference_inputs(&original.graph.entities[&ledger].fields[STOCK_DRINK_FIELD]) {
+        let mut snapshot = original.clone();
+        snapshot.graph.entities.get_mut(&ledger).unwrap().fields
+            .insert(STOCK_DRINK_FIELD.to_owned(), replacement.clone());
+        assert_eq!(advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT).err().map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed));
+        assert_eq!(snapshot.graph.entities[&ledger].fields[STOCK_DRINK_FIELD], replacement);
+        assert_eq!(field_u64(&snapshot.graph.entities[&order], AMOUNT_REMAINING_FIELD, snapshot.tick)?, 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn cancellation_requires_an_eligible_observed_lifecycle() -> Result<()> {
+    for (action, _) in temporal_cases()? {
+        let mut original = world();
+        apply_effect(&mut original, &action, "cancel-source")?;
+        let id = created_entity_id("cancel-source", 0);
+        let field = if matches!(action, Action::Build { .. }) {
+            CONSTRUCTION_STAGE_FIELD
+        } else {
+            STATUS_FIELD
+        };
+        for replacement in ineligible_reference_inputs(&original.graph.entities[&id].fields[field]) {
+            let mut snapshot = original.clone();
+            snapshot.graph.entities.get_mut(&id).unwrap().fields.insert(field.to_owned(), replacement);
+            let before = snapshot.graph.clone();
+            assert_eq!(cancel_effect(&mut snapshot, &action, "cancel-source").err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed), "{action:?}");
+            assert_eq!(snapshot.graph, before);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn an_explicit_action_reestablishes_equal_untrusted_values_once() -> Result<()> {
+    let action = Action::SetLabor {
+        units: vec![UNIT_A], labor: "MINE".to_owned(), enabled: true,
+    };
+    let original = world();
+    for replacement in ineligible_reference_inputs(&known(Value::Bool(true), original.tick)) {
+        let mut snapshot = original.clone();
+        snapshot.graph.entities.get_mut(&UNIT_A).unwrap().fields
+            .insert("labor.MINE".to_owned(), replacement);
+        let revision = snapshot.graph.entities[&UNIT_A].revision;
+        assert!(apply_effect(&mut snapshot, &action, "establish-source")?);
+        let fact = &snapshot.graph.entities[&UNIT_A].fields["labor.MINE"];
+        assert_eq!(fact.source, FactSource::Derived(SOURCE.to_owned()));
+        assert_eq!(laboratory_fact_value(fact, snapshot.tick), Some(&Value::Bool(true)));
+        assert_eq!(snapshot.graph.entities[&UNIT_A].revision, revision + 1);
+        assert!(!apply_effect(&mut snapshot, &action, "establish-source")?);
+        assert_eq!(snapshot.graph.entities[&UNIT_A].revision, revision + 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn ineligible_threat_counters_never_create_a_combat_outcome() -> Result<()> {
+    let mut original = with_active_threat();
+    let hostile = EntityId::new(99);
+    original.graph.entities.get_mut(&hostile).unwrap().fields.insert(
+        THREAT_STATUS_FIELD.to_owned(),
+        known(Value::Text(THREAT_ATTACKING.to_owned()), original.tick),
+    );
+    for field in [ARRIVES_AT_FIELD, HEALTH_FIELD, COMBAT_ROUNDS_FIELD] {
+        for replacement in ineligible_reference_inputs(&original.graph.entities[&hostile].fields[field]) {
+            let mut snapshot = original.clone();
+            snapshot.graph.entities.get_mut(&hostile).unwrap().fields.insert(field.to_owned(), replacement);
+            let before = snapshot.graph.clone();
+            assert_eq!(advance(&mut snapshot, COMBAT_ROUND_TICKS).err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed), "{field}");
+            assert_eq!(snapshot.graph, before);
+        }
     }
     Ok(())
 }

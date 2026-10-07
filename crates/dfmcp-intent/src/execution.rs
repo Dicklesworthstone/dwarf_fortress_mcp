@@ -4,8 +4,8 @@
 //! Failed prerequisites and expired obligations close undispatched work with
 //! evidence; unresolved prerequisites never grant permission to perform it.
 
-use dfmcp_core::{CommitState, StepId};
-use dfmcp_world::{WorldSnapshot, evaluate};
+use dfmcp_core::{CommitState, Result, StepId};
+use dfmcp_world::{PredicateEvidence, WorldSnapshot};
 
 use crate::PlanStep;
 
@@ -26,52 +26,63 @@ pub enum DeferredStepDecision {
 pub fn deferred_step_decision(
     step: &PlanStep,
     snapshot: &WorldSnapshot,
-    mut dependency_state: impl FnMut(StepId) -> Option<CommitState>,
+    dependency_state: impl FnMut(StepId) -> Option<CommitState>,
 ) -> DeferredStepDecision {
+    PredicateEvidence::untrusted(snapshot)
+        .and_then(|evidence| deferred_step_decision_with_evidence(step, &evidence, dependency_state))
+        .unwrap_or_else(|error| DeferredStepDecision::Failed(format!(
+            "observation evidence is invalid; this step was not dispatched: {error}"
+        )))
+}
+
+/// Decide with source and completeness rights supplied by the observing shell.
+/// Unknown evidence is not a satisfied precondition, including under negation.
+pub fn deferred_step_decision_with_evidence(
+    step: &PlanStep,
+    evidence: &PredicateEvidence<'_>,
+    mut dependency_state: impl FnMut(StepId) -> Option<CommitState>,
+) -> Result<DeferredStepDecision> {
+    let snapshot = evidence.snapshot();
     let mut ready = true;
     for dependency in &step.depends_on {
         match dependency_state(*dependency) {
             Some(CommitState::Verified) => {}
             Some(state) if state.is_terminal() => {
-                return DeferredStepDecision::Failed(format!(
+                return Ok(DeferredStepDecision::Failed(format!(
                     "dependency step {} ended {state:?}; this step was not dispatched",
                     dependency.get()
-                ));
+                )));
             }
             _ => ready = false,
         }
     }
     if let Some(obligation) = &step.obligation {
-        if obligation
-            .failure
-            .as_ref()
-            .is_some_and(|predicate| evaluate(snapshot, predicate))
+        if obligation.failure.as_ref()
+            .map(|predicate| evidence.establishes(predicate)).transpose()?.unwrap_or(false)
         {
-            return DeferredStepDecision::Failed(
+            return Ok(DeferredStepDecision::Failed(
                 "obligation failure predicate observed before dispatch; this step was not dispatched"
                     .to_owned(),
-            );
+            ));
         }
         if snapshot.tick >= obligation.deadline_tick {
-            return DeferredStepDecision::Failed(format!(
+            return Ok(DeferredStepDecision::Failed(format!(
                 "obligation deadline tick {} reached before dispatch; this step was not dispatched",
                 obligation.deadline_tick.0
-            ));
+            )));
         }
     }
     if !ready {
-        return DeferredStepDecision::Waiting;
+        return Ok(DeferredStepDecision::Waiting);
     }
-    if !step
-        .preconditions
-        .iter()
-        .all(|predicate| evaluate(snapshot, predicate))
-    {
-        return DeferredStepDecision::Failed(
-            "preconditions are no longer established true; this step was not dispatched".to_owned(),
-        );
+    for predicate in &step.preconditions {
+        if !evidence.establishes(predicate)? {
+            return Ok(DeferredStepDecision::Failed(
+                "preconditions are no longer established true; this step was not dispatched".to_owned(),
+            ));
+        }
     }
-    DeferredStepDecision::Ready
+    Ok(DeferredStepDecision::Ready)
 }
 
 #[cfg(test)]
@@ -80,6 +91,16 @@ mod tests {
     use crate::{Action, ObligationSpec};
     use dfmcp_core::{Capability, FortressId, GameTick, ObservationCursor, RiskTier};
     use dfmcp_world::{Predicate, WorldGraph};
+
+    fn laboratory_decision(
+        step: &PlanStep,
+        snapshot: &WorldSnapshot,
+        dependency_state: impl FnMut(StepId) -> Option<CommitState>,
+    ) -> DeferredStepDecision {
+        PredicateEvidence::laboratory(snapshot)
+            .and_then(|evidence| deferred_step_decision_with_evidence(step, &evidence, dependency_state))
+            .unwrap_or_else(|error| DeferredStepDecision::Failed(error.to_string()))
+    }
 
     fn step() -> PlanStep {
         PlanStep {
@@ -119,16 +140,16 @@ mod tests {
             CommitState::Indeterminate,
         ] {
             assert_eq!(
-                deferred_step_decision(&step, &snapshot, |_| Some(state)),
+                laboratory_decision(&step, &snapshot, |_| Some(state)),
                 DeferredStepDecision::Waiting
             );
         }
         assert_eq!(
-            deferred_step_decision(&step, &snapshot, |_| None),
+            laboratory_decision(&step, &snapshot, |_| None),
             DeferredStepDecision::Waiting
         );
         assert_eq!(
-            deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
+            laboratory_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
             DeferredStepDecision::Ready
         );
         for state in [
@@ -136,7 +157,7 @@ mod tests {
             CommitState::Cancelled,
             CommitState::Compensated,
         ] {
-            let result = deferred_step_decision(&step, &snapshot, |_| Some(state));
+            let result = laboratory_decision(&step, &snapshot, |_| Some(state));
             assert!(
                 matches!(result, DeferredStepDecision::Failed(ref message) if message.contains("not dispatched"))
             );
@@ -155,7 +176,7 @@ mod tests {
             stable_for_observations: 1,
         });
         assert!(
-            matches!(deferred_step_decision(&step, &snapshot, |_| None), DeferredStepDecision::Failed(message) if message.contains("failure predicate"))
+            matches!(laboratory_decision(&step, &snapshot, |_| None), DeferredStepDecision::Failed(message) if message.contains("failure predicate"))
         );
         step.obligation = Some(ObligationSpec {
             terminal: Predicate::Paused(false),
@@ -165,7 +186,7 @@ mod tests {
             stable_for_observations: 1,
         });
         assert!(
-            matches!(deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Indeterminate)), DeferredStepDecision::Failed(message) if message.contains("deadline"))
+            matches!(laboratory_decision(&step, &snapshot, |_| Some(CommitState::Indeterminate)), DeferredStepDecision::Failed(message) if message.contains("deadline"))
         );
     }
 
@@ -192,7 +213,7 @@ mod tests {
                     Fact::known(
                         Value::U64(1),
                         snapshot.tick,
-                        FactSource::DfhackField("unit.ready".to_owned()),
+                        FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
                         Digest32::ZERO,
                     ),
                 )]),
@@ -208,7 +229,7 @@ mod tests {
         let mut step = step();
         step.preconditions = vec![predicate.clone()];
         assert!(matches!(
-            deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
+            laboratory_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
             DeferredStepDecision::Failed(_),
         ));
 
@@ -232,7 +253,7 @@ mod tests {
         snapshot.tick = GameTick(101);
         snapshot.cursor.sequence = 1;
         snapshot.refresh_hash();
-        runtime.step_tick(&snapshot)?;
+        runtime.step_tick_laboratory(&snapshot)?;
         for id in [ActionId::new(1), ActionId::new(2)] {
             assert!(matches!(
                 runtime.get_status(id),
@@ -256,7 +277,7 @@ mod tests {
                 Fact::known(
                     Value::Text("z".to_owned()),
                     GameTick(102),
-                    FactSource::DfhackField("unit.ready".to_owned()),
+                    FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
                     Digest32::ZERO,
                 ),
             );
@@ -264,10 +285,10 @@ mod tests {
         snapshot.cursor.sequence = 2;
         snapshot.refresh_hash();
         assert_eq!(
-            deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
+            laboratory_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
             DeferredStepDecision::Ready
         );
-        runtime.step_tick(&snapshot)?;
+        runtime.step_tick_laboratory(&snapshot)?;
         assert!(matches!(
             runtime.get_status(ActionId::new(1)),
             Some(ObligationStatus::Fulfilled { .. })

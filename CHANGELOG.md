@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-07 — Source-authorized planning, simulation and recovered goals
+
+- Require explicit admitted evidence for planning, deferred admission, obligation
+  and recovery proofs; default raw-snapshot APIs remain conservative. Validate
+  all obligation evidence before publishing any member of a batch.
+- Prevent reference simulation from consuming untrusted counters, lifecycle,
+  population, workforce, stock or combat inputs and producing trusted progress.
+  An explicit same-value effect can establish reference provenance once.
+- Thread the same evidence through both adapters and MCP carried recovery.
+  Display true, false and unknown goal truth without claiming untrusted goals
+  are achieved; keep proof-frontier publication atomic on errors.
+- Add 26 focused regressions and migrate legitimate reference callers/fixtures.
+  Production libraries compiled before resource exhaustion; final reconstructed
+  source and the new tests await executable verification after executor loss.
+
 ## 2026-10-07 — Source-qualified predicate evidence
 
 - Bind execution evidence to one immutable canonical snapshot, exact admitted
