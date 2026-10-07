@@ -13,6 +13,7 @@ use dfmcp_core::{
     EvidenceId, EvidenceKind, FortressId, GameTick, ObservationCursor, OperationContext, PlanId,
     Result, RiskTier, StateAnchor, StepId,
 };
+use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision};
 use dfmcp_intent::{Action, PlanStep, PreparedPlan, effects};
 pub mod durable;
 pub mod faults;
@@ -481,6 +482,16 @@ impl MemoryAdapter {
             ));
         }
         let state = if self.dependencies_verified(plan_id, step) {
+            if !step
+                .preconditions
+                .iter()
+                .all(|predicate| evaluate(&self.snapshot, predicate))
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!("step {} failed dispatch-time revalidation", step.id),
+                ));
+            }
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
             if step
                 .postconditions
@@ -524,15 +535,19 @@ impl MemoryAdapter {
         Ok(receipt)
     }
 
-    fn refresh_action(&mut self, action_id: ActionId) -> Result<ActionReceipt> {
-        let (plan_id, step, prior_state, stable, prior_stable_anchor) = self
+    fn refresh_action(
+        &mut self,
+        action_id: ActionId,
+        context: &OperationContext,
+    ) -> Result<ActionReceipt> {
+        let (plan_id, step, prior_receipt, stable, prior_stable_anchor) = self
             .actions
             .get(&action_id)
             .map(|action| {
                 (
                     action.plan_id,
                     action.step.clone(),
-                    action.receipt.state,
+                    action.receipt.clone(),
                     action.stable_observations,
                     action.last_stable_anchor,
                 )
@@ -543,9 +558,50 @@ impl MemoryAdapter {
                     format!("unknown action {action_id}"),
                 )
             })?;
+        let prior_state = prior_receipt.state;
 
-        let dependencies_verified = self.dependencies_verified(plan_id, &step);
+        // Terminal proof belongs to the observation that established it.
+        // Polling later must not rewrite its anchor, evidence or receipt. Nor
+        // may an ordinary poll disguise a cancellation drain or uncertainty.
+        if !matches!(
+            prior_state,
+            CommitState::Prepared | CommitState::AppliedAwaitingVerification
+        ) {
+            self.record_event(LabEvent::ActionPolled(action_id, prior_state));
+            return Ok(prior_receipt);
+        }
+
+        let dependencies_verified = if prior_state == CommitState::Prepared {
+            match deferred_step_decision(&step, &self.snapshot, |dependency| {
+                self.step_receipt(plan_id, dependency)
+                    .map(|receipt| receipt.state)
+            }) {
+                DeferredStepDecision::Ready => true,
+                DeferredStepDecision::Waiting => false,
+                DeferredStepDecision::Failed(message) => {
+                    let receipt = self.stored_action_receipt(
+                        action_id,
+                        CommitState::Failed,
+                        EvidenceKind::Postcondition,
+                        &message,
+                    )?;
+                    self.record_event(LabEvent::ActionPolled(action_id, CommitState::Failed));
+                    return Ok(receipt);
+                }
+            }
+        } else {
+            true
+        };
         if prior_state == CommitState::Prepared && dependencies_verified {
+            // Observing a running effect is read-only; starting its deferred
+            // successor is a new effect boundary with current scoped authority.
+            self.authorize_step(&step, context)?;
+            if context.budget.max_actions == 0 {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "polling a deferred step requires an available action budget",
+                ));
+            }
             apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
             if let Some(stored) = self.actions.get_mut(&action_id) {
                 stored.dispatched = true;
@@ -570,7 +626,7 @@ impl MemoryAdapter {
                         .postconditions
                         .iter()
                         .all(|predicate| evaluate(&self.snapshot, predicate));
-                if failure_triggered {
+                if failure_triggered || self.snapshot.tick > obligation.deadline_tick {
                     stable_observations = 0;
                     last_stable_anchor = None;
                     state = CommitState::Failed;
@@ -1041,7 +1097,7 @@ impl GameAdapter for MemoryAdapter {
     ) -> Result<ActionReceipt> {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-        self.refresh_action(action_id)
+        self.refresh_action(action_id, context)
     }
 
     fn request_cancel(

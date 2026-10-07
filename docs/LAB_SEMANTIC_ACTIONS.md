@@ -92,6 +92,22 @@ not yet verified stay `Prepared` and are dispatched by a later `fortress_wait`,
 which polls every open action of every committed plan in commit order (so a
 later plan never strands an earlier plan's deferred steps) and reports them in
 `polled_actions` with `open_actions_remaining`.
+Before that first deferred effect, the laboratory rechecks the current action
+grant (including entity/region scope and expiry), action budget and sealed
+preconditions. Observe-only polling can verify an already dispatched action,
+but cannot dispatch its successor. A missing grant refuses the poll without
+changing the world or the prepared receipt.
+
+Failed, cancelled or compensated prerequisites fail their undispatched
+descendants with evidence that those steps were never dispatched. An
+undispatched step's own obligation deadline and failure predicate apply even
+while dependencies are unresolved. Missing or indeterminate prerequisite
+evidence blocks dispatch; it never proves a predecessor had no effect. Plan
+preparation expiry is not substituted for a committed obligation's longer
+deadline. Once a receipt is terminal, later polls return its original anchor,
+digest and evidence unchanged. Completion first observed after the obligation
+deadline is failed; sufficient proof at the deadline itself is accepted.
+
 `fortress_wait` lets time pass only while the fortress is unpaused and within
 the session's game-tick budget; a paused fortress reports `blocked`.
 
@@ -305,4 +321,3 @@ commit). On `besieged_fortress` over 20,000 ticks `idle` loses all seven
 dwarves while `follow_recommendations` musters the squad, slays the raider,
 keeps everyone supplied and achieves every objective it commits. The same
 scenario, policy and horizon always produce the same report and final anchor.
-

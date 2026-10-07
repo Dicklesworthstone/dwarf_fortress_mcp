@@ -14,6 +14,7 @@ use dfmcp_core::{
     ActionId, CommitState, DfmcpError, Digest32, ErrorCode, Evidence, EvidenceId, EvidenceKind,
     GameTick, OperationContext, PlanId, Result, StateAnchor,
 };
+use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision};
 use dfmcp_intent::{PlanStep, PreparedPlan, effects};
 use dfmcp_world::{WorldSnapshot, evaluate};
 
@@ -581,8 +582,26 @@ impl MutationDispatcher {
                     CommitState::AppliedAwaitingVerification => {
                         self.evaluate_obligation(plan, step, old.action_id, snapshot)?
                     }
-                    CommitState::Prepared if dependencies_verified(step, &receipts) => {
-                        self.dispatch_step(plan, step, old.action_id, snapshot)?
+                    CommitState::Prepared => {
+                        match deferred_step_decision(step, snapshot, |dependency| {
+                            receipts
+                                .iter()
+                                .find(|receipt| receipt.step_id == dependency)
+                                .map(|receipt| receipt.state)
+                        }) {
+                            DeferredStepDecision::Ready => {
+                                self.dispatch_step(plan, step, old.action_id, snapshot)?
+                            }
+                            DeferredStepDecision::Waiting => old.clone(),
+                            DeferredStepDecision::Failed(message) => action_receipt(
+                                plan,
+                                step,
+                                old.action_id,
+                                CommitState::Failed,
+                                snapshot,
+                                message,
+                            ),
+                        }
                     }
                     _ => old.clone(),
                 };
@@ -701,6 +720,11 @@ impl MutationDispatcher {
         };
         let (state, message) = if failed {
             (CommitState::Failed, "obligation failure predicate observed")
+        } else if snapshot.tick > obligation.deadline_tick {
+            (
+                CommitState::Failed,
+                "obligation deadline passed before stable completion was observed",
+            )
         } else if holds && stable >= obligation.stable_for_observations {
             (
                 CommitState::Verified,

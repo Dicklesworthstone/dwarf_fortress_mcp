@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-07 — Bounded deferred plan execution
+
+- Revalidate current mutation authority, action budget and sealed preconditions
+  before laboratory polling can dispatch a deferred step.
+- Share deferred-step decisions between the laboratory and in-memory dispatcher:
+  failed/cancelled/compensated prerequisites close their undispatched descendants,
+  and a waiting step's own obligation deadline cannot be bypassed.
+- Preserve terminal receipt anchors and evidence across later polls; refuse
+  completion first observed after its deadline while retaining exact-deadline proof.
+- Add deterministic lifecycle and dispatcher regressions for these boundaries.
+  Scope is laboratory development execution, with no native or admission change.
+
 All notable changes will be documented in this file. Until the first stable protocol release,
 versions describe design, implementation, and compatibility milestones rather than production
 readiness.

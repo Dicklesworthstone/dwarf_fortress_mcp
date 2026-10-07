@@ -44,6 +44,28 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Bounded deferred execution and immutable terminal evidence (2026-10-07)
+
+The laboratory and in-memory dispatcher now share the same deferred-step
+decision: failed, cancelled or compensated prerequisites prevent new dispatch;
+an undispatched obligation fails at its own deadline even while prerequisites
+are pending; a newly ready step rechecks its sealed preconditions. Missing or
+indeterminate prerequisite evidence never unlocks an effect. The laboratory
+also checks current scoped action authority and the action budget immediately
+before a poll dispatches a deferred step. Observe authority alone can continue
+verifying work already dispatched, but cannot start its successor.
+
+Terminal laboratory receipts keep their original anchor and evidence on later
+polls. Both execution paths reject completion first observed after an
+obligation's deadline; a sufficient proof at the exact deadline remains eligible.
+These changes implement part of `df-cx-authority-budget-threading-lmu` and the
+bounded lifecycle required by `df-fastmcp-conformance-5pj.3`.
+
+Focused deterministic Rust tests cover authority expiry/scope, changed
+preconditions, prerequisite failure and cancellation, dependency chains,
+deadline endpoints and terminal receipt stability. This is laboratory
+development functionality; no native bridge or production admission changes.
+
 ### Every semantic action family in the deterministic laboratory (2026-10-06)
 
 `dfmcp_intent::effects` now defines the reference meaning of every non-extension
