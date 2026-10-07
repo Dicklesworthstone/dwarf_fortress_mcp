@@ -3,6 +3,7 @@
 mod action;
 pub mod alert_fsm;
 pub mod blueprint;
+pub mod effect_quiescence;
 pub mod effects;
 pub mod execution;
 pub mod labor;
@@ -16,6 +17,7 @@ pub use action::{
 };
 pub use alert_fsm::{CivilianAlertFsm, ThreatLevel};
 pub use blueprint::{BlueprintPlanner, BlueprintTemplate, HazardAssessment};
+pub use effect_quiescence::{EffectWorkState, inspect_effect_work};
 pub use labor::{DwarfLaborProfile, HIGH_STRESS_THRESHOLD, LaborAllocator};
 pub use logistics::{
     InventoryStockpile, ProductionLogisticsCompiler, ProductionPlan, ProductionPlanningLimits,

@@ -44,6 +44,34 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Physical reference work and immutable goal outcomes (2026-10-07)
+
+`inspect_effect_work` distinguishes never-dispatched, active, quiescent and
+unknown physical work independently of an action's proof state. Dig,
+construction and work-order ownership requires the original derived entity,
+generation, immutable parameters and eligible lifecycle observations. Missing
+or mismatched state after dispatch cannot establish quiescence. Immediate
+reference effects own no continuing action work.
+
+`MemoryAdapter::drain_action_work` stops the remaining physical work of an
+already terminal action with fresh scoped authority, separate evidence and
+transactional rollback. A `Failed` or early `Verified` receipt remains exactly
+unchanged. Ordinary cancellation still requests and finalizes nonterminal work;
+finalization now proves physical quiescence, rechecks cached cancellation against
+current work, and refuses compensation that would launch an unmonitored temporal
+effect. Never-dispatched steps do not compensate effects that never happened.
+
+**Evidence:** the isolated core increment passes 78 actual lab tests, including
+ten new physical-work regressions, and all four deferred adapter tests. The
+deferred fixtures now count later eligible observations rather than registration
+as a positive sample. The prior source also passed world 180, intent 141 and
+adapter 1,033 tests after that fixture correction. These are executable targeted
+results, not full workspace Rust qualification: MCP compilation, formatting,
+warning-denied Clippy and the repository qualification scripts remain pending.
+MCP cancellation certificates, task views and retained spatial ownership still
+need the new physical-work API in the next increment. Asynchronous region
+drains and native/live admission are not established by this reference change.
+
 ### Immediate laboratory postconditions and transactional refusal (2026-10-07)
 
 Non-temporal laboratory actions must establish every sealed postcondition at

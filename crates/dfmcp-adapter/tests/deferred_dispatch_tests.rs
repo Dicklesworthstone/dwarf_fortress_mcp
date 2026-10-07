@@ -137,12 +137,20 @@ fn failed_parent_closes_deferred_child_without_effect_and_replay_stays_exact() -
 #[test]
 fn expired_waiting_child_fails_before_a_new_effect_even_when_parent_just_verified() -> Result<()> {
     let mut snapshot = world();
-    let plan = plan(&snapshot, false, Some(101))?;
+    let plan = plan(&snapshot, false, Some(102))?;
     let mut dispatcher = MutationDispatcher::new();
     let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context(&snapshot))?;
     let ctx = context(&snapshot);
     dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &ctx)?;
     at_tick(&mut snapshot, 101);
+    let ctx = context(&snapshot);
+    let waiting = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;
+    assert_eq!(
+        waiting.actions[0].state,
+        CommitState::AppliedAwaitingVerification
+    );
+    assert_eq!(waiting.actions[1].state, CommitState::Prepared);
+    at_tick(&mut snapshot, 102);
     let before = snapshot.clone();
     let ctx = context(&snapshot);
     let result = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;
@@ -162,6 +170,14 @@ fn changed_child_precondition_records_failure_without_rolling_back_parent_proof(
     let ctx = context(&snapshot);
     dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &ctx)?;
     at_tick(&mut snapshot, 101);
+    let ctx = context(&snapshot);
+    let waiting = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;
+    assert_eq!(
+        waiting.actions[0].state,
+        CommitState::AppliedAwaitingVerification
+    );
+    assert_eq!(waiting.actions[1].state, CommitState::Prepared);
+    at_tick(&mut snapshot, 102);
     let before = snapshot.clone();
     let ctx = context(&snapshot);
     let result = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;
@@ -180,6 +196,14 @@ fn exact_deadline_can_prove_a_dispatched_obligation() -> Result<()> {
     let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context(&snapshot))?;
     let ctx = context(&snapshot);
     dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &ctx)?;
+    at_tick(&mut snapshot, 109);
+    let ctx = context(&snapshot);
+    let waiting = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;
+    assert_eq!(
+        waiting.actions[0].state,
+        CommitState::AppliedAwaitingVerification
+    );
+    assert_eq!(waiting.actions[1].state, CommitState::Prepared);
     at_tick(&mut snapshot, 110);
     let ctx = context(&snapshot);
     let result = dispatcher.reconcile(&plan, &mut snapshot, &ctx)?;

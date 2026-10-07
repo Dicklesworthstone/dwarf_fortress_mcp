@@ -14,11 +14,17 @@ use dfmcp_core::{
     Result, RiskTier, StateAnchor, StepId,
 };
 use dfmcp_intent::execution::{DeferredStepDecision, deferred_step_decision_with_evidence};
-use dfmcp_intent::{Action, ObligationRuntime, ObligationStatus, PlanStep, PreparedPlan, effects};
+use dfmcp_intent::{
+    Action, EffectWorkState, ObligationRuntime, ObligationStatus, PlanStep, PreparedPlan, effects,
+    inspect_effect_work,
+};
 pub mod durable;
 pub mod faults;
 
 pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
+
+#[cfg(test)]
+mod effect_drain_tests;
 
 use dfmcp_world::{Predicate, PredicateEvidence, WorldGraph, WorldSnapshot, execute_bounded_query};
 
@@ -73,12 +79,26 @@ pub enum LabEvent {
     ActionPolled(ActionId, CommitState),
     CancelRequested(ActionId, CancelMode),
     CancelFinalized(ActionId, CommitState),
+    /// Independently authorized cleanup of work whose goal proof is terminal.
+    EffectDrained(ActionId, StateAnchor),
     Checkpointed(CheckpointId),
     Restored(CheckpointId),
     SnapshotInjected(StateAnchor),
     TickAdvanced(GameTick),
     /// The world was recovered from durable storage into a new epoch.
     Recovered(StateAnchor),
+}
+
+/// Evidence that an action's physical reference work was inspected and drained.
+/// This does not replace or reinterpret its immutable semantic proof receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectDrainReceipt {
+    pub action_id: ActionId,
+    pub before: EffectWorkState,
+    pub after: EffectWorkState,
+    pub observed_anchor: StateAnchor,
+    pub stopped_work: bool,
+    pub evidence: Vec<Evidence>,
 }
 
 #[derive(Clone, Debug)]
@@ -243,6 +263,75 @@ impl MemoryAdapter {
     #[must_use]
     pub fn action_step(&self, action_id: ActionId) -> Option<&PlanStep> {
         self.actions.get(&action_id).map(|action| &action.step)
+    }
+
+    /// Inspect physical work without polling or dispatching a prepared action.
+    /// A terminal goal proof does not, by itself, prove physical quiescence.
+    pub fn action_work_state(&self, action_id: ActionId) -> Result<EffectWorkState> {
+        let action = self.actions.get(&action_id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("unknown action {action_id}"),
+            )
+        })?;
+        inspect_effect_work(
+            &self.snapshot,
+            &action.step.action,
+            &action.step.idempotency_key,
+            action.dispatched,
+        )
+    }
+
+    /// Stop remaining physical work of an already terminal action under a fresh
+    /// scoped grant. Its Failed/Verified/etc. proof receipt remains byte-for-byte
+    /// unchanged. Nonterminal work must use request_cancel/finalize_cancel.
+    /// Unknown ownership or lifecycle evidence refuses before any mutation.
+    pub fn drain_action_work(
+        &mut self,
+        action_id: ActionId,
+        context: &OperationContext,
+    ) -> Result<EffectDrainReceipt> {
+        self.check_anchor(context.anchor)?;
+        let action = self.actions.get(&action_id).cloned().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("unknown action {action_id}"),
+            )
+        })?;
+        self.authorize_step(&action.step, context)?;
+        if !action.receipt.state.is_terminal() {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "nonterminal work requires cancellation request and finalize",
+            ));
+        }
+        let prior = self.clone();
+        let result = (|| {
+            let (before, after, stopped_work) =
+                drain_step_work(&mut self.snapshot, &action.step, action.dispatched, context)?;
+            let observed_anchor = self.snapshot.anchor();
+            if stopped_work {
+                self.record_event(LabEvent::EffectDrained(action_id, observed_anchor));
+            }
+            Ok(EffectDrainReceipt {
+                action_id,
+                before,
+                after,
+                observed_anchor,
+                stopped_work,
+                evidence: vec![evidence(
+                    observed_anchor,
+                    EvidenceKind::Postcondition,
+                    &format!(
+                        "physical work for action {action_id} is quiescent; terminal proof retained"
+                    ),
+                )],
+            })
+        })();
+        if result.is_err() {
+            *self = prior;
+        }
+        result
     }
 
     #[must_use]
@@ -502,7 +591,10 @@ impl MemoryAdapter {
             } else {
                 return Err(DfmcpError::new(
                     ErrorCode::AdapterRejected,
-                    format!("immediate postconditions for step {} are not established true", step.id),
+                    format!(
+                        "immediate postconditions for step {} are not established true",
+                        step.id
+                    ),
                 ));
             }
         } else {
@@ -630,7 +722,10 @@ impl MemoryAdapter {
             } else {
                 return Err(DfmcpError::new(
                     ErrorCode::AdapterRejected,
-                    format!("immediate postconditions for step {} are not established true", step.id),
+                    format!(
+                        "immediate postconditions for step {} are not established true",
+                        step.id
+                    ),
                 ));
             }
         }
@@ -1062,9 +1157,11 @@ impl GameAdapter for MemoryAdapter {
     ) -> Result<ActionReceipt> {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-        if !self.actions.get(&action_id).is_some_and(|action| {
-            action.receipt.state == CommitState::Prepared
-        }) {
+        if !self
+            .actions
+            .get(&action_id)
+            .is_some_and(|action| action.receipt.state == CommitState::Prepared)
+        {
             return self.refresh_action(action_id, context);
         }
         // A poll can dispatch deferred work. Its effect, proof monitor, receipt
@@ -1174,93 +1271,129 @@ impl GameAdapter for MemoryAdapter {
         action_id: ActionId,
         context: &OperationContext,
     ) -> Result<CancelReceipt> {
-        self.check_anchor(context.anchor)?;
-        let action = self.actions.get(&action_id).cloned().ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                format!("unknown action {action_id}"),
-            )
-        })?;
-        let scope = action.step.action.scope();
-        context.authorize(
-            action.step.required_capability,
-            action.step.risk,
-            &scope.entity_ids,
-            scope.map_area,
-        )?;
+        let prior = self.clone();
+        let result = (|| {
+            self.check_anchor(context.anchor)?;
+            let action = self.actions.get(&action_id).cloned().ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("unknown action {action_id}"),
+                )
+            })?;
+            let scope = action.step.action.scope();
+            context.authorize(
+                action.step.required_capability,
+                action.step.risk,
+                &scope.entity_ids,
+                scope.map_area,
+            )?;
 
-        let mut state = action.receipt.state;
-        if matches!(state, CommitState::Cancelled | CommitState::Compensated) {
-            return Ok(replayed_cancel_receipt(action_id, &action));
-        }
-        if state.is_terminal() {
-            return Err(DfmcpError::new(
-                ErrorCode::Conflict,
-                "cannot finalize cancellation for an action that completed independently",
-            ));
-        }
-        if state != CommitState::CancelRequested {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidRequest,
-                "cancellation must be requested before it can be finalized",
-            ));
-        }
-        let mut compensation_action = None;
-        if action.cancel_mode == Some(CancelMode::CompensateReversible) && action.dispatched {
-            if let Some(compensation) = &action.step.compensation {
-                if !action_is_supported(compensation)
-                    || !self
-                        .identity
-                        .capabilities
-                        .contains(&compensation.capability())
-                {
+            let mut state = action.receipt.state;
+            if matches!(state, CommitState::Cancelled | CommitState::Compensated) {
+                if !self.action_work_state(action_id)?.is_quiescent() {
                     return Err(DfmcpError::new(
-                        ErrorCode::AdapterRejected,
-                        "laboratory adapter cannot execute the compensation action",
+                        ErrorCode::CancellationIncomplete,
+                        "prior cancellation no longer establishes physical quiescence",
                     ));
                 }
-                let compensation_scope = compensation.scope();
-                context.authorize(
-                    compensation.capability(),
-                    compensation.risk(),
-                    &compensation_scope.entity_ids,
-                    compensation_scope.map_area,
-                )?;
-                stop_action_work(&mut self.snapshot, &action.step)?;
-                let compensation_key = format!("{}:compensation", action.step.idempotency_key);
-                apply_action(&mut self.snapshot, compensation, &compensation_key)?;
-                compensation_action = Some(derived_compensation_id(action_id));
-                state = CommitState::Compensated;
+                return Ok(replayed_cancel_receipt(action_id, &action));
+            }
+            if state.is_terminal() {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "cannot finalize cancellation for an action that completed independently",
+                ));
+            }
+            if state != CommitState::CancelRequested {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "cancellation must be requested before it can be finalized",
+                ));
+            }
+            let mut compensation_action = None;
+            let (_, _, stopped_work) =
+                drain_step_work(&mut self.snapshot, &action.step, action.dispatched, context)?;
+            if action.cancel_mode == Some(CancelMode::CompensateReversible) && action.dispatched {
+                if let Some(compensation) = &action.step.compensation {
+                    if compensation.naturally_temporal() {
+                        return Err(DfmcpError::new(
+                            ErrorCode::CancellationIncomplete,
+                            "temporal compensation requires a separate bounded plan and proof",
+                        ));
+                    }
+                    if !action_is_supported(compensation)
+                        || !self
+                            .identity
+                            .capabilities
+                            .contains(&compensation.capability())
+                    {
+                        return Err(DfmcpError::new(
+                            ErrorCode::AdapterRejected,
+                            "laboratory adapter cannot execute the compensation action",
+                        ));
+                    }
+                    let compensation_scope = compensation.scope();
+                    context.authorize(
+                        compensation.capability(),
+                        compensation.risk(),
+                        &compensation_scope.entity_ids,
+                        compensation_scope.map_area,
+                    )?;
+                    if context.budget.max_actions < 1 + u32::from(stopped_work) {
+                        return Err(DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "cancellation stop and compensation exceed the available action budget",
+                        ));
+                    }
+                    let compensation_key = format!("{}:compensation", action.step.idempotency_key);
+                    apply_action(&mut self.snapshot, compensation, &compensation_key)?;
+                    let observation = PredicateEvidence::laboratory(&self.snapshot)?;
+                    let postconditions = effects::default_postconditions(
+                        compensation,
+                        &compensation_key,
+                        self.snapshot.fortress_id,
+                    );
+                    if !predicates_established(&observation, &postconditions)? {
+                        return Err(DfmcpError::new(
+                            ErrorCode::CancellationIncomplete,
+                            "compensation postconditions are not established true",
+                        ));
+                    }
+                    compensation_action = Some(derived_compensation_id(action_id));
+                    state = CommitState::Compensated;
+                } else {
+                    state = CommitState::Cancelled;
+                }
             } else {
-                stop_action_work(&mut self.snapshot, &action.step)?;
                 state = CommitState::Cancelled;
             }
-        } else {
-            stop_action_work(&mut self.snapshot, &action.step)?;
-            state = CommitState::Cancelled;
+            let message = match state {
+                CommitState::Compensated => "cancellation drained and compensation applied",
+                CommitState::Cancelled => "cancellation drained without compensation",
+                _ => "action was already terminal before cancellation finalization",
+            };
+            if let Some(stored) = self.actions.get_mut(&action_id) {
+                stored.cancel_mode = None;
+            }
+            self.stored_action_receipt(action_id, state, EvidenceKind::Postcondition, message)?;
+            self.record_event(LabEvent::CancelFinalized(action_id, state));
+            Ok(CancelReceipt {
+                action_id,
+                state,
+                observed_anchor: self.snapshot.anchor(),
+                compensation_action,
+                evidence: vec![evidence(
+                    self.snapshot.anchor(),
+                    EvidenceKind::Postcondition,
+                    message,
+                )],
+                message: message.to_owned(),
+            })
+        })();
+        if result.is_err() {
+            *self = prior;
         }
-        let message = match state {
-            CommitState::Compensated => "cancellation drained and compensation applied",
-            CommitState::Cancelled => "cancellation drained without compensation",
-            _ => "action was already terminal before cancellation finalization",
-        };
-        if let Some(stored) = self.actions.get_mut(&action_id) {
-            stored.cancel_mode = None;
-        }
-        self.stored_action_receipt(action_id, state, EvidenceKind::Postcondition, message)?;
-        self.record_event(LabEvent::CancelFinalized(action_id, state));
-        Ok(CancelReceipt {
-            action_id,
-            state,
-            observed_anchor: self.snapshot.anchor(),
-            compensation_action,
-            evidence: vec![evidence(
-                self.snapshot.anchor(),
-                EvidenceKind::Postcondition,
-                message,
-            )],
-            message: message.to_owned(),
-        })
+        result
     }
 
     fn checkpoint(&mut self, label: &str, context: &OperationContext) -> Result<CheckpointReceipt> {
@@ -1330,8 +1463,18 @@ impl GameAdapter for MemoryAdapter {
 fn validate_tick_advance_source(snapshot: &WorldSnapshot) -> Result<()> {
     let observation = PredicateEvidence::laboratory(snapshot)?;
     let source = observation.snapshot();
-    let fields = source.graph.entities.values().flat_map(|entity| entity.fields.values())
-        .chain(source.graph.edges.values().flat_map(|edge| edge.fields.values()));
+    let fields = source
+        .graph
+        .entities
+        .values()
+        .flat_map(|entity| entity.fields.values())
+        .chain(
+            source
+                .graph
+                .edges
+                .values()
+                .flat_map(|edge| edge.fields.values()),
+        );
     for fact in fields {
         if fact.observed_at > source.tick
             && dfmcp_world::laboratory_fact_value(fact, fact.observed_at).is_some()
@@ -1420,6 +1563,42 @@ fn stop_action_work(snapshot: &mut WorldSnapshot, step: &PlanStep) -> Result<()>
         *snapshot = next;
     }
     Ok(())
+}
+
+/// The caller owns a transaction covering stop, any compensation, and evidence.
+/// An undispatched step has nothing to stop, even if a colliding world entity
+/// exists; a missing entity after dispatch cannot be mistaken for this case.
+fn drain_step_work(
+    snapshot: &mut WorldSnapshot,
+    step: &PlanStep,
+    dispatched: bool,
+    context: &OperationContext,
+) -> Result<(EffectWorkState, EffectWorkState, bool)> {
+    let before = inspect_effect_work(snapshot, &step.action, &step.idempotency_key, dispatched)?;
+    if let EffectWorkState::Unknown { reason, .. } = &before {
+        return Err(DfmcpError::new(
+            ErrorCode::CancellationIncomplete,
+            reason.clone(),
+        ));
+    }
+    let stopped_work = matches!(before, EffectWorkState::Active { .. });
+    if stopped_work {
+        if context.budget.max_actions == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "stopping physical work requires an available action budget",
+            ));
+        }
+        stop_action_work(snapshot, step)?;
+    }
+    let after = inspect_effect_work(snapshot, &step.action, &step.idempotency_key, dispatched)?;
+    if !after.is_quiescent() {
+        return Err(DfmcpError::new(
+            ErrorCode::CancellationIncomplete,
+            "reference work is not proved quiescent after stopping it",
+        ));
+    }
+    Ok((before, after, stopped_work))
 }
 
 fn replayed_cancel_receipt(action_id: ActionId, action: &LabAction) -> CancelReceipt {
@@ -1604,7 +1783,6 @@ mod tests {
         }
     }
 
-
     fn authority_fact(value: bool, tick: GameTick) -> dfmcp_world::Fact {
         dfmcp_world::Fact::known(
             dfmcp_world::Value::Bool(value),
@@ -1673,7 +1851,10 @@ mod tests {
             .entities
             .get_mut(&dfmcp_core::EntityId::new(9))
             .ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing evidence subject")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "missing evidence subject",
+                )
             })?;
         entity.fields.insert(field.to_owned(), fact);
         entity.revision += 1;
@@ -1690,18 +1871,30 @@ mod tests {
     #[test]
     fn preparation_requires_exact_laboratory_fact_authority() -> Result<(), DfmcpError> {
         use dfmcp_world::FactSource;
-        let snapshot = || WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
-        );
+        let snapshot = || {
+            WorldSnapshot::new(
+                FortressId::new(1),
+                GameTick(1),
+                ObservationCursor::ORIGIN,
+                true,
+                WorldGraph::default(),
+            )
+        };
         for fact in ineligible_facts(GameTick(1)) {
             let mut source = snapshot();
             add_authority_fields(&mut source, fact);
-            assert!(dfmcp_world::evaluate(&source, &authority_predicate("ready")));
+            assert!(dfmcp_world::evaluate(
+                &source,
+                &authority_predicate("ready")
+            ));
             // An otherwise sealed plan can arrive from another planner. The
             // adapter must enforce evidence authority independently.
             let intent = unpause_intent(&source, 31, None);
-            let mut plan = StaticPlanner::default()
-                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let mut plan = StaticPlanner::default().prepare_laboratory(
+                &source,
+                &intent,
+                &context(&source, 1),
+            )?;
             plan.steps[0].preconditions = vec![authority_predicate("ready")];
             reseal_authority_plan(&mut plan)?;
             let mut adapter = MemoryAdapter::new(source.clone());
@@ -1717,8 +1910,11 @@ mod tests {
             add_authority_fields(&mut source, fact);
             let mut intent = unpause_intent(&source, 32, None);
             intent.requested_actions[0].preconditions = vec![authority_predicate("ready")];
-            let plan = StaticPlanner::default()
-                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let plan = StaticPlanner::default().prepare_laboratory(
+                &source,
+                &intent,
+                &context(&source, 1),
+            )?;
             let mut adapter = MemoryAdapter::new(source);
             let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
             let receipt = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -1731,18 +1927,29 @@ mod tests {
     fn polling_ignores_ineligible_terminal_and_failure_claims() -> Result<(), DfmcpError> {
         for fact in ineligible_facts(GameTick(1)) {
             let mut source = WorldSnapshot::new(
-                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+                FortressId::new(1),
+                GameTick(1),
+                ObservationCursor::ORIGIN,
+                true,
+                WorldGraph::default(),
             );
             add_authority_fields(&mut source, fact);
-            let intent = unpause_intent(&source, 33, Some(ObligationSpec {
-                terminal: authority_predicate("done"),
-                failure: Some(authority_predicate("failed")),
-                deadline_tick: GameTick(10),
-                poll_interval_ticks: 1,
-                stable_for_observations: 1,
-            }));
-            let plan = StaticPlanner::default()
-                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let intent = unpause_intent(
+                &source,
+                33,
+                Some(ObligationSpec {
+                    terminal: authority_predicate("done"),
+                    failure: Some(authority_predicate("failed")),
+                    deadline_tick: GameTick(10),
+                    poll_interval_ticks: 1,
+                    stable_for_observations: 1,
+                }),
+            );
+            let plan = StaticPlanner::default().prepare_laboratory(
+                &source,
+                &intent,
+                &context(&source, 1),
+            )?;
             let mut adapter = MemoryAdapter::new(source);
             let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
             let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -1756,9 +1963,11 @@ mod tests {
             set_authority_field(&mut adapter.snapshot, "ready", authority_fact(true, tick))?;
             set_authority_field(&mut adapter.snapshot, "done", authority_fact(false, tick))?;
             set_authority_field(&mut adapter.snapshot, "failed", authority_fact(false, tick))?;
-            adapter.snapshot.cursor = adapter.snapshot.cursor.checked_next().ok_or_else(|| {
-                DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
-            })?;
+            adapter.snapshot.cursor = adapter
+                .snapshot
+                .cursor
+                .checked_next()
+                .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow"))?;
             adapter.snapshot.refresh_hash();
             adapter.advance_ticks(1)?;
             let fact = authority_fact(true, adapter.snapshot.tick);
@@ -1773,54 +1982,80 @@ mod tests {
     fn polling_uses_authoritative_failure_evidence() -> Result<(), DfmcpError> {
         use dfmcp_world::{Fact, FactSource, Value};
         let mut source = WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
         );
-        add_authority_fields(&mut source, Fact::known(
-            Value::Bool(true), GameTick(1),
-            FactSource::AgentAssertion("unverified report".to_owned()), dfmcp_core::Digest32::ZERO
-        ));
-        let intent = unpause_intent(&source, 34, Some(ObligationSpec {
-            terminal: authority_predicate("done"),
-            failure: Some(authority_predicate("failed")),
-            deadline_tick: GameTick(10),
-            poll_interval_ticks: 1,
-            stable_for_observations: 1,
-        }));
-        let plan = StaticPlanner::default()
-            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        add_authority_fields(
+            &mut source,
+            Fact::known(
+                Value::Bool(true),
+                GameTick(1),
+                FactSource::AgentAssertion("unverified report".to_owned()),
+                dfmcp_core::Digest32::ZERO,
+            ),
+        );
+        let intent = unpause_intent(
+            &source,
+            34,
+            Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: Some(authority_predicate("failed")),
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            }),
+        );
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&source, &intent, &context(&source, 1))?;
         let mut adapter = MemoryAdapter::new(source);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
         let action_id = committed.actions[0].action_id;
         assert_eq!(
-            adapter.poll_action(action_id, &context(adapter.snapshot(), 4))?.state,
+            adapter
+                .poll_action(action_id, &context(adapter.snapshot(), 4))?
+                .state,
             CommitState::AppliedAwaitingVerification
         );
         adapter.advance_ticks(1)?;
         let fact = authority_fact(true, adapter.snapshot.tick);
         set_authority_field(&mut adapter.snapshot, "failed", fact)?;
         assert_eq!(
-            adapter.poll_action(action_id, &context(adapter.snapshot(), 5))?.state,
+            adapter
+                .poll_action(action_id, &context(adapter.snapshot(), 5))?
+                .state,
             CommitState::Failed
         );
         Ok(())
     }
 
     #[test]
-    fn deferred_effect_cannot_use_a_new_agent_assertion_as_its_precondition() -> Result<(), DfmcpError> {
+    fn deferred_effect_cannot_use_a_new_agent_assertion_as_its_precondition()
+    -> Result<(), DfmcpError> {
         use dfmcp_world::{Fact, FactSource, Value};
         let mut source = WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
         );
         add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
         set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
-        let mut intent = unpause_intent(&source, 35, Some(ObligationSpec {
-            terminal: authority_predicate("done"),
-            failure: None,
-            deadline_tick: GameTick(10),
-            poll_interval_ticks: 1,
-            stable_for_observations: 1,
-        }));
+        let mut intent = unpause_intent(
+            &source,
+            35,
+            Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: None,
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            }),
+        );
         intent.requested_actions.push(RequestedAction {
             action: Action::Pause { paused: true },
             preconditions: vec![authority_predicate("ready")],
@@ -1829,8 +2064,8 @@ mod tests {
             obligation: None,
             depends_on: vec![0],
         });
-        let plan = StaticPlanner::default()
-            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&source, &intent, &context(&source, 1))?;
         let mut adapter = MemoryAdapter::new(source);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -1838,21 +2073,34 @@ mod tests {
         adapter.advance_ticks(1)?;
         let tick = adapter.snapshot.tick;
         set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
-        set_authority_field(&mut adapter.snapshot, "ready", Fact::known(
-            Value::Bool(true), tick,
-            FactSource::AgentAssertion("still ready".to_owned()), dfmcp_core::Digest32::ZERO
-        ))?;
+        set_authority_field(
+            &mut adapter.snapshot,
+            "ready",
+            Fact::known(
+                Value::Bool(true),
+                tick,
+                FactSource::AgentAssertion("still ready".to_owned()),
+                dfmcp_core::Digest32::ZERO,
+            ),
+        )?;
         assert_eq!(
-            adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+            adapter
+                .poll_action(
+                    committed.actions[0].action_id,
+                    &context(adapter.snapshot(), 4)
+                )?
+                .state,
             CommitState::Verified
         );
-        let refused = adapter.poll_action(committed.actions[1].action_id, &context(adapter.snapshot(), 5))?;
+        let refused = adapter.poll_action(
+            committed.actions[1].action_id,
+            &context(adapter.snapshot(), 5),
+        )?;
         assert_eq!(refused.state, CommitState::Failed);
         assert!(!adapter.snapshot.paused);
         assert!(refused.message.contains("not dispatched"));
         Ok(())
     }
-
 
     fn cadence_adapter(
         interval: u64,
@@ -1860,28 +2108,40 @@ mod tests {
         deadline: u64,
     ) -> Result<(MemoryAdapter, dfmcp_core::ActionId), DfmcpError> {
         let mut source = WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
         );
         add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
         set_authority_field(&mut source, "failed", authority_fact(false, GameTick(1)))?;
-        let intent = unpause_intent(&source, 51, Some(ObligationSpec {
-            terminal: authority_predicate("done"),
-            failure: Some(authority_predicate("failed")),
-            deadline_tick: GameTick(deadline),
-            poll_interval_ticks: interval,
-            stable_for_observations: stable,
-        }));
-        let plan = StaticPlanner::default()
-            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let intent = unpause_intent(
+            &source,
+            51,
+            Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: Some(authority_predicate("failed")),
+                deadline_tick: GameTick(deadline),
+                poll_interval_ticks: interval,
+                stable_for_observations: stable,
+            }),
+        );
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&source, &intent, &context(&source, 1))?;
         let mut adapter = MemoryAdapter::new(source);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
-        assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+        assert_eq!(
+            committed.actions[0].state,
+            CommitState::AppliedAwaitingVerification
+        );
         Ok((adapter, committed.actions[0].action_id))
     }
 
     #[test]
-    fn temporal_proof_requires_scheduled_samples_at_distinct_game_ticks() -> Result<(), DfmcpError> {
+    fn temporal_proof_requires_scheduled_samples_at_distinct_game_ticks() -> Result<(), DfmcpError>
+    {
         let (mut adapter, action_id) = cadence_adapter(5, 2, 30)?;
         let pending = |adapter: &mut MemoryAdapter| -> Result<(), DfmcpError> {
             let receipt = adapter.poll_action(action_id, &context(adapter.snapshot(), 9))?;
@@ -1896,9 +2156,11 @@ mod tests {
 
         // A genuinely new canonical observation at the same game tick cannot
         // manufacture a second sample, even when its cursor/hash changed.
-        adapter.snapshot.cursor = adapter.snapshot.cursor.checked_next().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
-        })?;
+        adapter.snapshot.cursor = adapter
+            .snapshot
+            .cursor
+            .checked_next()
+            .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow"))?;
         adapter.snapshot.refresh_hash();
         pending(&mut adapter)?;
         adapter.advance_ticks(4)?;
@@ -1911,28 +2173,40 @@ mod tests {
         adapter.advance_ticks(1)?;
         let fact = authority_fact(false, adapter.snapshot.tick);
         set_authority_field(&mut adapter.snapshot, "done", fact)?;
-        assert_eq!(adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?, terminal);
+        assert_eq!(
+            adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?,
+            terminal
+        );
         Ok(())
     }
 
     #[test]
-    fn off_cadence_contradiction_resets_stability_without_moving_the_poll_floor() -> Result<(), DfmcpError> {
+    fn off_cadence_contradiction_resets_stability_without_moving_the_poll_floor()
+    -> Result<(), DfmcpError> {
         use dfmcp_world::{Fact, FactSource, Value};
         for ineligible in [
             authority_fact(false, GameTick(7)),
-            Fact::known(Value::Bool(true), GameTick(7),
-                FactSource::AgentAssertion("predicted complete".to_owned()), dfmcp_core::Digest32::ZERO),
+            Fact::known(
+                Value::Bool(true),
+                GameTick(7),
+                FactSource::AgentAssertion("predicted complete".to_owned()),
+                dfmcp_core::Digest32::ZERO,
+            ),
         ] {
             let (mut adapter, action_id) = cadence_adapter(5, 2, 30)?;
             adapter.advance_ticks(5)?;
             assert_eq!(
-                adapter.poll_action(action_id, &context(adapter.snapshot(), 10))?.state,
+                adapter
+                    .poll_action(action_id, &context(adapter.snapshot(), 10))?
+                    .state,
                 CommitState::AppliedAwaitingVerification
             );
             adapter.advance_ticks(1)?;
             set_authority_field(&mut adapter.snapshot, "done", ineligible)?;
             assert_eq!(
-                adapter.poll_action(action_id, &context(adapter.snapshot(), 11))?.state,
+                adapter
+                    .poll_action(action_id, &context(adapter.snapshot(), 11))?
+                    .state,
                 CommitState::AppliedAwaitingVerification
             );
             adapter.advance_ticks(1)?;
@@ -1941,7 +2215,9 @@ mod tests {
             adapter.poll_action(action_id, &context(adapter.snapshot(), 12))?;
             adapter.advance_ticks(3)?;
             assert_eq!(
-                adapter.poll_action(action_id, &context(adapter.snapshot(), 13))?.state,
+                adapter
+                    .poll_action(action_id, &context(adapter.snapshot(), 13))?
+                    .state,
                 CommitState::AppliedAwaitingVerification
             ); // Tick 11 is the replacement first sample, not completion.
             adapter.advance_ticks(5)?;
@@ -1953,23 +2229,29 @@ mod tests {
     }
 
     #[test]
-    fn temporal_deadline_and_failure_precedence_apply_between_scheduled_polls() -> Result<(), DfmcpError> {
+    fn temporal_deadline_and_failure_precedence_apply_between_scheduled_polls()
+    -> Result<(), DfmcpError> {
         let (mut exact, action_id) = cadence_adapter(100, 1, 5)?;
         let mut late = exact.clone();
         exact.advance_ticks(4)?;
         assert_eq!(
-            exact.poll_action(action_id, &context(exact.snapshot(), 10))?.state,
+            exact
+                .poll_action(action_id, &context(exact.snapshot(), 10))?
+                .state,
             CommitState::Verified
         ); // A sufficient final sample is eligible at the exact deadline.
         late.advance_ticks(5)?;
         assert_eq!(
-            late.poll_action(action_id, &context(late.snapshot(), 11))?.state,
+            late.poll_action(action_id, &context(late.snapshot(), 11))?
+                .state,
             CommitState::Failed
         );
         let (mut insufficient, action_id) = cadence_adapter(100, 2, 5)?;
         insufficient.advance_ticks(4)?;
         assert_eq!(
-            insufficient.poll_action(action_id, &context(insufficient.snapshot(), 12))?.state,
+            insufficient
+                .poll_action(action_id, &context(insufficient.snapshot(), 12))?
+                .state,
             CommitState::Failed
         );
         for elapsed in [1, 4] {
@@ -1978,46 +2260,68 @@ mod tests {
             let fact = authority_fact(true, failed.snapshot.tick);
             set_authority_field(&mut failed.snapshot, "failed", fact)?;
             assert_eq!(
-                failed.poll_action(action_id, &context(failed.snapshot(), 13))?.state,
+                failed
+                    .poll_action(action_id, &context(failed.snapshot(), 13))?
+                    .state,
                 CommitState::Failed
             ); // Failure beats a positive terminal even off cadence or at deadline.
         }
         Ok(())
     }
 
-
     fn time_guard_order(paused: bool) -> Result<(WorldSnapshot, dfmcp_core::EntityId), DfmcpError> {
         let mut source = WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, paused, WorldGraph::default()
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            paused,
+            WorldGraph::default(),
         );
         let key = "clock-source-authority";
-        super::apply_action(&mut source, &Action::CreateWorkOrder {
-            name: "one unit of reference work".to_owned(),
-            job_token: "MAKE_TEST".to_owned(),
-            amount: 1,
-            conditions: Vec::new(),
-        }, key)?;
+        super::apply_action(
+            &mut source,
+            &Action::CreateWorkOrder {
+                name: "one unit of reference work".to_owned(),
+                job_token: "MAKE_TEST".to_owned(),
+                amount: 1,
+                conditions: Vec::new(),
+            },
+            key,
+        )?;
         Ok((source, dfmcp_intent::effects::created_entity_id(key, 0)))
     }
 
     #[test]
-    fn advancing_time_cannot_promote_a_preexisting_future_dated_work_counter() -> Result<(), DfmcpError> {
+    fn advancing_time_cannot_promote_a_preexisting_future_dated_work_counter()
+    -> Result<(), DfmcpError> {
         use dfmcp_intent::effects;
         use dfmcp_world::Value;
         for paused in [false, true] {
             let (mut source, order_id) = time_guard_order(paused)?;
             let order = source.graph.entities.get_mut(&order_id).ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "missing test work order",
+                )
             })?;
-            let counter = order.fields.get_mut(effects::AMOUNT_REMAINING_FIELD).ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test remaining count")
-            })?;
+            let counter = order
+                .fields
+                .get_mut(effects::AMOUNT_REMAINING_FIELD)
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "missing test remaining count",
+                    )
+                })?;
             counter.observed_at = GameTick(2);
             source.refresh_hash();
-            assert!(dfmcp_world::laboratory_fact_value(
-                &source.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD],
-                source.tick
-            ).is_none());
+            assert!(
+                dfmcp_world::laboratory_fact_value(
+                    &source.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD],
+                    source.tick
+                )
+                .is_none()
+            );
 
             if !paused {
                 // The low-level model expects its caller to validate the source
@@ -2027,7 +2331,8 @@ mod tests {
                 promoted.tick = GameTick(51);
                 effects::advance_effects(&mut promoted, 50)?;
                 assert_eq!(
-                    promoted.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD].value,
+                    promoted.graph.entities[&order_id].fields[effects::AMOUNT_REMAINING_FIELD]
+                        .value,
                     Value::U64(0)
                 );
             }
@@ -2045,7 +2350,10 @@ mod tests {
             let (mut source, order_id) = time_guard_order(false)?;
             if aliased_entity {
                 let record = source.graph.entities.remove(&order_id).ok_or_else(|| {
-                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "missing test work order",
+                    )
                 })?;
                 let alias = if order_id == dfmcp_core::EntityId::new(1) {
                     dfmcp_core::EntityId::new(2)
@@ -2068,20 +2376,36 @@ mod tests {
     }
 
     #[test]
-    fn clock_guard_preserves_untrusted_metadata_and_new_owned_model_observations() -> Result<(), DfmcpError> {
+    fn clock_guard_preserves_untrusted_metadata_and_new_owned_model_observations()
+    -> Result<(), DfmcpError> {
         use dfmcp_intent::effects;
         use dfmcp_world::{Fact, FactSource, Value};
         let (mut source, order_id) = time_guard_order(false)?;
         let order = source.graph.entities.get_mut(&order_id).ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test work order")
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "missing test work order",
+            )
         })?;
         for (field, producer) in [
-            ("prediction", FactSource::AgentAssertion("agent model".to_owned())),
-            ("imported_forecast", FactSource::Derived("unregistered-forecast/1".to_owned())),
+            (
+                "prediction",
+                FactSource::AgentAssertion("agent model".to_owned()),
+            ),
+            (
+                "imported_forecast",
+                FactSource::Derived("unregistered-forecast/1".to_owned()),
+            ),
         ] {
-            order.fields.insert(field.to_owned(), Fact::known(
-                Value::Bool(true), GameTick(2), producer, dfmcp_core::Digest32::ZERO
-            ));
+            order.fields.insert(
+                field.to_owned(),
+                Fact::known(
+                    Value::Bool(true),
+                    GameTick(2),
+                    producer,
+                    dfmcp_core::Digest32::ZERO,
+                ),
+            );
         }
         source.refresh_hash();
         let mut adapter = MemoryAdapter::new(source);
@@ -2093,28 +2417,41 @@ mod tests {
         assert_eq!(counter.observed_at, current.tick);
         assert!(dfmcp_world::laboratory_fact_value(counter, current.tick).is_some());
         for field in ["prediction", "imported_forecast"] {
-            assert!(dfmcp_world::laboratory_fact_value(
-                &current.graph.entities[&order_id].fields[field], current.tick
-            ).is_none());
+            assert!(
+                dfmcp_world::laboratory_fact_value(
+                    &current.graph.entities[&order_id].fields[field],
+                    current.tick
+                )
+                .is_none()
+            );
         }
         Ok(())
     }
 
     #[test]
-    fn deferred_poll_rolls_back_world_dispatch_flag_receipt_and_transcript_on_error() -> Result<(), DfmcpError> {
+    fn deferred_poll_rolls_back_world_dispatch_flag_receipt_and_transcript_on_error()
+    -> Result<(), DfmcpError> {
         use dfmcp_world::{CompareOp, Value};
         let mut source = WorldSnapshot::new(
-            FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+            FortressId::new(1),
+            GameTick(1),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
         );
         add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
         set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
-        let mut intent = unpause_intent(&source, 61, Some(ObligationSpec {
-            terminal: authority_predicate("done"),
-            failure: None,
-            deadline_tick: GameTick(10),
-            poll_interval_ticks: 1,
-            stable_for_observations: 1,
-        }));
+        let mut intent = unpause_intent(
+            &source,
+            61,
+            Some(ObligationSpec {
+                terminal: authority_predicate("done"),
+                failure: None,
+                deadline_tick: GameTick(10),
+                poll_interval_ticks: 1,
+                stable_for_observations: 1,
+            }),
+        );
         intent.requested_actions.push(RequestedAction {
             action: Action::Pause { paused: true },
             preconditions: vec![authority_predicate("ready")],
@@ -2123,8 +2460,8 @@ mod tests {
             obligation: None,
             depends_on: vec![0],
         });
-        let plan = StaticPlanner::default()
-            .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&source, &intent, &context(&source, 1))?;
         let mut adapter = MemoryAdapter::new(source);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -2132,7 +2469,12 @@ mod tests {
         let tick = adapter.snapshot.tick;
         set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
         assert_eq!(
-            adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+            adapter
+                .poll_action(
+                    committed.actions[0].action_id,
+                    &context(adapter.snapshot(), 4)
+                )?
+                .state,
             CommitState::Verified
         );
         let deferred = committed.actions[1].action_id;
@@ -2146,7 +2488,10 @@ mod tests {
                 // deferred pause effect runs before this malformed predicate
                 // is evaluated, so an error must undo that effect and all flags.
                 let action = attempted.actions.get_mut(&deferred).ok_or_else(|| {
-                    DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing deferred action")
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "missing deferred action",
+                    )
                 })?;
                 action.step.postconditions = vec![Predicate::FieldCompare {
                     entity_id: dfmcp_core::EntityId::new(9),
@@ -2171,7 +2516,6 @@ mod tests {
         Ok(())
     }
 
-
     fn unproved_immediate_facts(tick: GameTick) -> [Option<dfmcp_world::Fact>; 3] {
         use dfmcp_world::{Fact, FactSource, Value};
         [
@@ -2187,10 +2531,15 @@ mod tests {
     }
 
     #[test]
-    fn immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal() -> Result<(), DfmcpError> {
+    fn immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal()
+    -> Result<(), DfmcpError> {
         for fact in unproved_immediate_facts(GameTick(1)) {
             let mut source = WorldSnapshot::new(
-                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+                FortressId::new(1),
+                GameTick(1),
+                ObservationCursor::ORIGIN,
+                true,
+                WorldGraph::default(),
             );
             add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
             if let Some(fact) = fact {
@@ -2201,8 +2550,11 @@ mod tests {
                 Predicate::Paused(false),
                 authority_predicate("immediate_done"),
             ];
-            let plan = StaticPlanner::default()
-                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let plan = StaticPlanner::default().prepare_laboratory(
+                &source,
+                &intent,
+                &context(&source, 1),
+            )?;
             let mut adapter = MemoryAdapter::new(source);
             let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
             let before = adapter.clone();
@@ -2223,28 +2575,38 @@ mod tests {
     }
 
     #[test]
-    fn deferred_immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal() -> Result<(), DfmcpError> {
+    fn deferred_immediate_dispatch_requires_postcondition_proof_and_rolls_back_on_refusal()
+    -> Result<(), DfmcpError> {
         for fact in unproved_immediate_facts(GameTick(1)) {
             let mut source = WorldSnapshot::new(
-                FortressId::new(1), GameTick(1), ObservationCursor::ORIGIN, true, WorldGraph::default()
+                FortressId::new(1),
+                GameTick(1),
+                ObservationCursor::ORIGIN,
+                true,
+                WorldGraph::default(),
             );
             add_authority_fields(&mut source, authority_fact(true, GameTick(1)));
             set_authority_field(&mut source, "done", authority_fact(false, GameTick(1)))?;
             if let Some(fact) = fact {
                 set_authority_field(&mut source, "immediate_done", fact)?;
             }
-            let mut intent = unpause_intent(&source, 72, Some(ObligationSpec {
-                terminal: authority_predicate("done"),
-                failure: None,
-                deadline_tick: GameTick(10),
-                poll_interval_ticks: 1,
-                stable_for_observations: 1,
-            }));
+            let mut intent = unpause_intent(
+                &source,
+                72,
+                Some(ObligationSpec {
+                    terminal: authority_predicate("done"),
+                    failure: None,
+                    deadline_tick: GameTick(10),
+                    poll_interval_ticks: 1,
+                    stable_for_observations: 1,
+                }),
+            );
             intent.terminal_condition = Predicate::All(vec![
                 Predicate::Paused(true),
                 authority_predicate("done"),
                 authority_predicate("immediate_done"),
-            ]).normalized();
+            ])
+            .normalized();
             intent.requested_actions.push(RequestedAction {
                 action: Action::Pause { paused: true },
                 preconditions: vec![authority_predicate("ready")],
@@ -2256,18 +2618,29 @@ mod tests {
                 obligation: None,
                 depends_on: vec![0],
             });
-            let plan = StaticPlanner::default()
-                .prepare_laboratory(&source, &intent, &context(&source, 1))?;
+            let plan = StaticPlanner::default().prepare_laboratory(
+                &source,
+                &intent,
+                &context(&source, 1),
+            )?;
             let mut adapter = MemoryAdapter::new(source);
             let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
             let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
-            assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(
+                committed.actions[0].state,
+                CommitState::AppliedAwaitingVerification
+            );
             assert_eq!(committed.actions[1].state, CommitState::Prepared);
             adapter.advance_ticks(1)?;
             let tick = adapter.snapshot.tick;
             set_authority_field(&mut adapter.snapshot, "done", authority_fact(true, tick))?;
             assert_eq!(
-                adapter.poll_action(committed.actions[0].action_id, &context(adapter.snapshot(), 4))?.state,
+                adapter
+                    .poll_action(
+                        committed.actions[0].action_id,
+                        &context(adapter.snapshot(), 4)
+                    )?
+                    .state,
                 CommitState::Verified
             );
             let deferred = committed.actions[1].action_id;
@@ -2282,7 +2655,10 @@ mod tests {
                 let current = &adapter.actions[action_id];
                 assert_eq!(current.receipt, prior.receipt);
                 assert_eq!(current.dispatched, prior.dispatched);
-                assert_eq!(current.obligation_runtime.is_some(), prior.obligation_runtime.is_some());
+                assert_eq!(
+                    current.obligation_runtime.is_some(),
+                    prior.obligation_runtime.is_some()
+                );
             }
             assert!(!adapter.actions[&deferred].dispatched);
             assert!(adapter.actions[&deferred].obligation_runtime.is_none());
@@ -2436,7 +2812,11 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(
+            &snapshot,
+            &intent,
+            &context(&snapshot, 1),
+        )?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
         let failure = adapter
@@ -2472,7 +2852,11 @@ mod tests {
                 stable_for_observations: 2,
             }),
         );
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(
+            &snapshot,
+            &intent,
+            &context(&snapshot, 1),
+        )?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
         let committed = adapter.commit(&plan, &prepared, &context(adapter.snapshot(), 3))?;
@@ -2502,7 +2886,11 @@ mod tests {
             WorldGraph::default(),
         );
         let intent = unpause_intent(&snapshot, 11, None);
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(
+            &snapshot,
+            &intent,
+            &context(&snapshot, 1),
+        )?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepared = adapter.prepare(&plan, &context(adapter.snapshot(), 2))?;
 
@@ -2555,7 +2943,11 @@ mod tests {
             WorldGraph::default(),
         );
         let intent = unpause_intent(&snapshot, 3, None);
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 1))?;
+        let plan = StaticPlanner::default().prepare_laboratory(
+            &snapshot,
+            &intent,
+            &context(&snapshot, 1),
+        )?;
         let mut adapter = MemoryAdapter::new(snapshot);
         let prepare_context = context(adapter.snapshot(), 2);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
@@ -2589,7 +2981,11 @@ mod tests {
         let checkpoint_context = context(adapter.snapshot(), 1);
         let checkpoint = adapter.checkpoint("before-unpause", &checkpoint_context)?;
         let intent = unpause_intent(&snapshot, 4, None);
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot, 2))?;
+        let plan = StaticPlanner::default().prepare_laboratory(
+            &snapshot,
+            &intent,
+            &context(&snapshot, 2),
+        )?;
         let prepare_context = context(adapter.snapshot(), 3);
         let prepared = adapter.prepare(&plan, &prepare_context)?;
         let commit_context = context(adapter.snapshot(), 4);

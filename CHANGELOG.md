@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-07 — Physical work inspection and authorized terminal cleanup
+
+- Distinguish immutable goal outcomes from running reference work. Inspect the
+  exact dispatched dig, construction or work-order entity using eligible
+  observations; missing, changed or untrusted ownership remains unresolved.
+- Add a separately authorized, transactional stop for physical work whose goal
+  has already failed or verified. Preserve the original proof receipt and emit
+  independent drain evidence. Cancellation finalization now requires physical
+  quiescence and refuses compensation that would start fresh temporal work.
+- Add ten lab regressions and migrate four deferred adapter fixtures to the
+  canonical later-observation cadence. The isolated core increment passes all
+  78 lab tests and the four deferred tests against the prior effects source.
+  MCP drain/lease integration and complete workspace qualification remain next.
+
 ## 2026-10-07 — Atomic refusal of unverified immediate laboratory effects
 
 - Require established postconditions for non-temporal laboratory actions at
