@@ -168,4 +168,114 @@ mod tests {
             matches!(deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Indeterminate)), DeferredStepDecision::Failed(message) if message.contains("deadline"))
         );
     }
+
+    #[test]
+    fn incomparable_fields_cannot_authorize_dispatch_or_terminal_obligation_evidence()
+    -> dfmcp_core::Result<()> {
+        use crate::{ObligationRuntime, ObligationStatus};
+        use dfmcp_core::{ActionId, Digest32, EntityId};
+        use dfmcp_world::{CompareOp, EntityKind, EntityRecord, Fact, FactSource, Value};
+        use std::collections::BTreeMap;
+
+        let mut snapshot = snapshot();
+        let subject = EntityId::new(1);
+        snapshot.graph.entities.insert(
+            subject,
+            EntityRecord {
+                id: subject,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Unit,
+                label: "worker".to_owned(),
+                fields: BTreeMap::from([(
+                    "ready".to_owned(),
+                    Fact::known(
+                        Value::U64(1),
+                        snapshot.tick,
+                        FactSource::DfhackField("unit.ready".to_owned()),
+                        Digest32::ZERO,
+                    ),
+                )]),
+            },
+        );
+        snapshot.refresh_hash();
+        let predicate = Predicate::Not(Box::new(Predicate::FieldCompare {
+            entity_id: subject,
+            field: "ready".to_owned(),
+            op: CompareOp::Lt,
+            value: Value::Text("m".to_owned()),
+        }));
+        let mut step = step();
+        step.preconditions = vec![predicate.clone()];
+        assert!(matches!(
+            deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
+            DeferredStepDecision::Failed(_),
+        ));
+
+        let mut runtime = ObligationRuntime::new();
+        for (id, terminal, failure) in [
+            (ActionId::new(1), predicate.clone(), None),
+            (ActionId::new(2), Predicate::Paused(false), Some(predicate)),
+        ] {
+            runtime.register_obligation_at(
+                id,
+                ObligationSpec {
+                    terminal,
+                    failure,
+                    deadline_tick: GameTick(200),
+                    poll_interval_ticks: 1,
+                    stable_for_observations: 1,
+                },
+                &snapshot,
+            )?;
+        }
+        snapshot.tick = GameTick(101);
+        snapshot.cursor.sequence = 1;
+        snapshot.refresh_hash();
+        runtime.step_tick(&snapshot)?;
+        for id in [ActionId::new(1), ActionId::new(2)] {
+            assert!(matches!(
+                runtime.get_status(id),
+                Some(ObligationStatus::Active {
+                    consecutive_stable_observations: 0,
+                    ..
+                })
+            ));
+        }
+
+        // A subsequent, genuinely comparable observation can establish either
+        // outcome; uncertainty does not permanently disable the obligation.
+        snapshot
+            .graph
+            .entities
+            .get_mut(&subject)
+            .unwrap()
+            .fields
+            .insert(
+                "ready".to_owned(),
+                Fact::known(
+                    Value::Text("z".to_owned()),
+                    GameTick(102),
+                    FactSource::DfhackField("unit.ready".to_owned()),
+                    Digest32::ZERO,
+                ),
+            );
+        snapshot.tick = GameTick(102);
+        snapshot.cursor.sequence = 2;
+        snapshot.refresh_hash();
+        assert_eq!(
+            deferred_step_decision(&step, &snapshot, |_| Some(CommitState::Verified)),
+            DeferredStepDecision::Ready
+        );
+        runtime.step_tick(&snapshot)?;
+        assert!(matches!(
+            runtime.get_status(ActionId::new(1)),
+            Some(ObligationStatus::Fulfilled { .. })
+        ));
+        assert!(matches!(
+            runtime.get_status(ActionId::new(2)),
+            Some(ObligationStatus::Failed { .. })
+        ));
+        Ok(())
+    }
 }

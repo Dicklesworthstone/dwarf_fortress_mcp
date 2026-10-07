@@ -400,13 +400,16 @@ fn known(value: Value, tick: GameTick) -> Fact {
 }
 
 fn field_value<'a>(entity: &'a EntityRecord, field: &str) -> Option<&'a Value> {
-    entity.fields.get(field).map(|fact| &fact.value)
+    entity.fields.get(field).and_then(Fact::known_value)
 }
 
-fn field_u64(entity: &EntityRecord, field: &str) -> u64 {
+fn field_u64(entity: &EntityRecord, field: &str) -> Result<u64> {
     match field_value(entity, field) {
-        Some(Value::U64(value)) => *value,
-        _ => 0,
+        Some(Value::U64(value)) => Ok(*value),
+        _ => Err(precondition(format!(
+            "entity {} field {field} requires a known unsigned value before reference progress",
+            entity.id.get()
+        ))),
     }
 }
 
@@ -816,6 +819,9 @@ fn coord_field(entity: &EntityRecord, field: &str) -> Option<MapCoord> {
 /// Progress all active temporal work by `elapsed` game ticks, deterministically
 /// in ascending entity order. Call after advancing `snapshot.tick`. Returns
 /// whether canonical state changed; the caller owns the cursor and hash.
+/// Unavailable progress inputs refuse advancement; they are never zero work
+/// or completed work. As with [`apply_effect`], use a transaction shadow so a
+/// later refusal does not publish earlier effects from the same advancement.
 pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
     if elapsed == 0 {
         return Ok(false);
@@ -852,7 +858,53 @@ pub fn advance_effects(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<boo
 }
 
 fn is_alive(entity: &EntityRecord) -> bool {
-    field_value(entity, "alive") != Some(&Value::Bool(false))
+    // Older reference fixtures omit this optional field for living units.
+    // An explicit unavailable value must not inherit that legacy default.
+    entity
+        .fields
+        .get("alive")
+        .is_none_or(|fact| fact.known_value() == Some(&Value::Bool(true)))
+}
+
+// Legacy reference worlds omit optional defaults, but an explicit unavailable
+// selector cannot establish a population count or deterministic victim order.
+fn require_population_fields(snapshot: &WorldSnapshot, combat: bool) -> Result<()> {
+    for unit in snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|unit| unit.kind == EntityKind::Unit)
+    {
+        if let Some(fact) = unit.fields.get("alive")
+            && !matches!(fact.known_value(), Some(Value::Bool(_)))
+        {
+            return Err(precondition(format!(
+                "unit {} has unavailable life state; population progress requires a known census",
+                unit.id.get()
+            )));
+        }
+        if !combat || !is_alive(unit) {
+            continue;
+        }
+        if let Some(fact) = unit.fields.get(SQUAD_FIELD)
+            && !matches!(fact.known_value(), Some(Value::Entity(_) | Value::Null))
+        {
+            return Err(precondition(format!(
+                "unit {} has unavailable squad membership before combat progress",
+                unit.id.get()
+            )));
+        }
+        if unit.fields.iter().any(|(name, fact)| {
+            name.starts_with(BURROW_FIELD_PREFIX)
+                && !matches!(fact.known_value(), Some(Value::Bool(_)))
+        }) {
+            return Err(precondition(format!(
+                "unit {} has unavailable burrow membership before combat progress",
+                unit.id.get()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Hostile creatures arrive at their scheduled tick and then fight in
@@ -869,15 +921,21 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
         .filter(|entity| {
             entity.kind == EntityKind::Creature
                 && field_value(entity, HOSTILE_FIELD) == Some(&Value::Bool(true))
-                && field_text(entity, THREAT_STATUS_FIELD) != Some(THREAT_SLAIN)
+                && matches!(
+                    field_text(entity, THREAT_STATUS_FIELD),
+                    Some(THREAT_APPROACHING | THREAT_ATTACKING)
+                )
         })
         .map(|entity| entity.id)
         .collect();
+    if !hostiles.is_empty() {
+        require_population_fields(snapshot, true)?;
+    }
     let now = snapshot.tick.0;
     let start = now.saturating_sub(elapsed);
     let mut changed = false;
     for hostile in hostiles {
-        let arrives = field_u64(entity(snapshot, hostile)?, ARRIVES_AT_FIELD);
+        let arrives = field_u64(entity(snapshot, hostile)?, ARRIVES_AT_FIELD)?;
         if now < arrives {
             continue;
         }
@@ -906,8 +964,8 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
                 })
                 .count() as u64;
             let creature = entity(snapshot, hostile)?;
-            let fought = field_u64(creature, COMBAT_ROUNDS_FIELD) + 1;
-            let health = field_u64(creature, HEALTH_FIELD)
+            let fought = field_u64(creature, COMBAT_ROUNDS_FIELD)?.saturating_add(1);
+            let health = field_u64(creature, HEALTH_FIELD)?
                 .saturating_sub(soldiers * SOLDIER_DAMAGE_PER_ROUND);
             let mut fields = vec![
                 (COMBAT_ROUNDS_FIELD.to_owned(), Value::U64(fought)),
@@ -932,9 +990,9 @@ fn advance_threats(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool> {
                     .find(|unit| {
                         unit.kind == EntityKind::Unit
                             && is_alive(unit)
-                            && !unit.fields.iter().any(|(name, fact)| {
-                                name.starts_with(BURROW_FIELD_PREFIX)
-                                    && fact.value == Value::Bool(true)
+                            && unit.fields.iter().all(|(name, fact)| {
+                                !name.starts_with(BURROW_FIELD_PREFIX)
+                                    || fact.known_value() == Some(&Value::Bool(false))
                             })
                     })
                     .map(|unit| unit.id);
@@ -977,16 +1035,14 @@ fn advance_metabolism(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool
     let Some(ledger) = stock_ledger(snapshot) else {
         return Ok(false);
     };
-    let before = field_u64(entity(snapshot, ledger)?, METABOLISM_TICKS_FIELD);
+    require_population_fields(snapshot, false)?;
+    let before = field_u64(entity(snapshot, ledger)?, METABOLISM_TICKS_FIELD)?;
     let after = before.saturating_add(elapsed);
     let living: Vec<EntityId> = snapshot
         .graph
         .entities
         .values()
-        .filter(|entity| {
-            entity.kind == EntityKind::Unit
-                && field_value(entity, "alive") != Some(&Value::Bool(false))
-        })
+        .filter(|entity| entity.kind == EntityKind::Unit && is_alive(entity))
         .map(|entity| entity.id)
         .collect();
     let mut changed = write_fields(
@@ -1012,7 +1068,7 @@ fn advance_metabolism(snapshot: &mut WorldSnapshot, elapsed: u64) -> Result<bool
         if meals == 0 || living.is_empty() {
             continue;
         }
-        let mut held = field_u64(entity(snapshot, ledger)?, stock_field);
+        let mut held = field_u64(entity(snapshot, ledger)?, stock_field)?;
         let mut served = living.len();
         for _ in 0..meals {
             let wanted = living.len() as u64;
@@ -1050,10 +1106,17 @@ fn entity(snapshot: &WorldSnapshot, id: EntityId) -> Result<&EntityRecord> {
 }
 
 fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
-    let job = field_text(entity(snapshot, id)?, "job_token").map(str::to_owned);
-    let blocker = job
-        .as_deref()
-        .and_then(|job| work_order_blocker(snapshot, job));
+    let order = entity(snapshot, id)?;
+    let job = field_text(order, "job_token").ok_or_else(|| {
+        precondition(format!(
+            "work order {} requires a known job token before reference progress",
+            id.get()
+        ))
+    })?;
+    let work = field_u64(order, "work_ticks")?.saturating_add(elapsed);
+    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD)?;
+    let product = work_order_product(job);
+    let blocker = work_order_blocker(snapshot, job);
     // A stalled order accrues no work; it says what it is waiting for.
     let blocked = write_fields(
         snapshot,
@@ -1066,17 +1129,13 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
     if blocker.is_some() {
         return Ok(blocked);
     }
-    let order = entity(snapshot, id)?;
-    let work = field_u64(order, "work_ticks").saturating_add(elapsed);
-    let remaining = field_u64(order, AMOUNT_REMAINING_FIELD);
     let produced = (work / WORK_ORDER_TICKS_PER_UNIT).min(remaining);
-    let product = field_text(order, "job_token").and_then(work_order_product);
     let remaining = remaining - produced;
     if produced > 0
         && let Some((stock_field, per_unit)) = product
         && let Some(ledger) = stock_ledger(snapshot)
     {
-        let held = field_u64(entity(snapshot, ledger)?, stock_field);
+        let held = field_u64(entity(snapshot, ledger)?, stock_field)?;
         write_fields(
             snapshot,
             ledger,
@@ -1108,8 +1167,13 @@ fn advance_work_order(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) 
 
 fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
     let building = entity(snapshot, id)?;
-    let required = field_u64(building, "required_ticks").max(1);
-    let progress = field_u64(building, "progress_ticks")
+    let required = field_u64(building, "required_ticks")?;
+    if required == 0 {
+        return Err(precondition(
+            "building duration must be positive before reference progress",
+        ));
+    }
+    let progress = field_u64(building, "progress_ticks")?
         .saturating_add(elapsed)
         .min(required);
     let stage = if progress >= required {
@@ -1142,13 +1206,13 @@ fn advance_designation(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64)
         ));
     };
     let area = MapCuboid::new(min, max)?;
-    let target = u32::try_from(field_u64(designation, "target_tile_code")).map_err(|_| {
+    let target = u32::try_from(field_u64(designation, "target_tile_code")?).map_err(|_| {
         DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
             "dig designation target tile code is invalid",
         )
     })?;
-    let work = field_u64(designation, "work_ticks").saturating_add(elapsed);
+    let work = field_u64(designation, "work_ticks")?.saturating_add(elapsed);
     let budget = work / DIG_TICKS_PER_TILE;
     let mut changed = false;
     if budget > 0 {

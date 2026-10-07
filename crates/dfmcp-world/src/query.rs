@@ -2,7 +2,7 @@
 
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCuboid, Result};
 
-use crate::{EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, Value, WorldSnapshot};
+use crate::{EdgeKind, EntityKind, EntityRecord, Fact, Value, WorldSnapshot};
 
 const MAX_QUERY_KINDS: usize = 64;
 const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
@@ -229,8 +229,10 @@ fn normalize_variadic(predicates: &[Predicate], all: bool) -> Predicate {
     }
 }
 
+/// Truth within a supplied snapshot. Unavailable fields and unsupported ordered
+/// comparisons remain unknown through boolean composition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PredicateTruth {
+pub enum PredicateTruth {
     True,
     False,
     Unknown,
@@ -254,20 +256,6 @@ impl PredicateTruth {
             Self::False => Self::True,
             Self::Unknown => Self::Unknown,
         }
-    }
-}
-
-fn comparable_fact_value(fact: &Fact) -> Option<&Value> {
-    match fact.presence.as_ref() {
-        None => Some(&fact.value),
-        Some(FactPresence::Known(value)) if value == &fact.value => Some(value),
-        Some(FactPresence::Known(_))
-        | Some(FactPresence::Absent)
-        | Some(FactPresence::Unknown(_))
-        | Some(FactPresence::Unsupported(_))
-        | Some(FactPresence::Omitted(_))
-        | Some(FactPresence::Redacted(_))
-        | Some(FactPresence::Stale(_)) => None,
     }
 }
 
@@ -310,10 +298,8 @@ fn evaluate_truth(
             .entities
             .get(&target_entity(*entity_id, candidate))
             .and_then(|entity| entity.fields.get(field))
-            .and_then(comparable_fact_value)
-            .map_or(PredicateTruth::Unknown, |known| {
-                PredicateTruth::from_bool(compare(known, *op, value))
-            }),
+            .and_then(Fact::known_value)
+            .map_or(PredicateTruth::Unknown, |known| compare(known, *op, value)),
         Predicate::EdgeExists { edge_id, kind } => {
             PredicateTruth::from_bool(snapshot.graph.edges.get(edge_id).is_some_and(|edge| {
                 match kind.as_ref() {
@@ -366,10 +352,23 @@ pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
 /// facts are not matches.
 #[must_use]
 pub fn evaluate_for(snapshot: &WorldSnapshot, candidate: EntityId, predicate: &Predicate) -> bool {
-    evaluate_truth(snapshot, Some(candidate), predicate).is_true()
+    evaluate_truth_for(snapshot, candidate, predicate).is_true()
 }
 
-fn compare(left: &Value, op: CompareOp, right: &Value) -> bool {
+/// Evaluate a row predicate without erasing unavailable-field uncertainty.
+/// Callers can distinguish an excluded row from an unresolved row when
+/// reporting coverage. This establishes predicate truth within the supplied
+/// snapshot; it does not certify its source or domain completeness.
+#[must_use]
+pub fn evaluate_truth_for(
+    snapshot: &WorldSnapshot,
+    candidate: EntityId,
+    predicate: &Predicate,
+) -> PredicateTruth {
+    evaluate_truth(snapshot, Some(candidate), predicate)
+}
+
+fn compare(left: &Value, op: CompareOp, right: &Value) -> PredicateTruth {
     let ordering = match (left, right) {
         (Value::I64(left), Value::I64(right)) => left.partial_cmp(right),
         (Value::U64(left), Value::U64(right)) => left.partial_cmp(right),
@@ -390,12 +389,20 @@ fn compare(left: &Value, op: CompareOp, right: &Value) -> bool {
         _ => None,
     };
     match op {
-        CompareOp::Eq => left == right,
-        CompareOp::Ne => left != right,
-        CompareOp::Lt => ordering.is_some_and(|value| value.is_lt()),
-        CompareOp::Le => ordering.is_some_and(|value| value.is_le()),
-        CompareOp::Gt => ordering.is_some_and(|value| value.is_gt()),
-        CompareOp::Ge => ordering.is_some_and(|value| value.is_ge()),
+        CompareOp::Eq => PredicateTruth::from_bool(left == right),
+        CompareOp::Ne => PredicateTruth::from_bool(left != right),
+        CompareOp::Lt => ordering.map_or(PredicateTruth::Unknown, |value| {
+            PredicateTruth::from_bool(value.is_lt())
+        }),
+        CompareOp::Le => ordering.map_or(PredicateTruth::Unknown, |value| {
+            PredicateTruth::from_bool(value.is_le())
+        }),
+        CompareOp::Gt => ordering.map_or(PredicateTruth::Unknown, |value| {
+            PredicateTruth::from_bool(value.is_gt())
+        }),
+        CompareOp::Ge => ordering.map_or(PredicateTruth::Unknown, |value| {
+            PredicateTruth::from_bool(value.is_ge())
+        }),
     }
 }
 

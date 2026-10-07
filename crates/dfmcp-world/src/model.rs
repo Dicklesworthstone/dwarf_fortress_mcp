@@ -240,6 +240,19 @@ pub struct Fact {
 }
 
 impl Fact {
+    /// The value established by this record's presence state. Legacy records
+    /// without an explicit presence marker retain their known-value meaning.
+    /// Unavailable or internally inconsistent presence never exposes the
+    /// compatibility value as evidence. This does not certify the source.
+    #[must_use]
+    pub fn known_value(&self) -> Option<&Value> {
+        match self.presence.as_ref() {
+            None => Some(&self.value),
+            Some(FactPresence::Known(value)) if value == &self.value => Some(value),
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn known(
         value: Value,

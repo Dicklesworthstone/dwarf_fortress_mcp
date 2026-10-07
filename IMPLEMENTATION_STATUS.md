@@ -44,6 +44,36 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Presence-safe temporal execution (2026-10-07)
+
+The world exposes a shared `Fact::known_value()` read boundary and public
+three-valued predicate results. Unavailable or internally inconsistent presence
+does not expose a compatibility value as evidence. Ordered comparisons between
+incomparable types remain unknown through negation and boolean composition,
+including deferred-step admission and obligation terminal/failure evaluation.
+
+The reference simulator now requires known, correctly typed work counters and
+job tokens, plus positive building durations. Unknown remaining work cannot
+become zero or completed construction. Unavailable workshop/worker evidence
+keeps production blocked. Population-dependent consumption and combat reject
+explicit unavailable life, squad or burrow inputs before deriving outcomes.
+Older reference fixtures retain their documented missing optional defaults.
+These checks apply to laboratory reference semantics; they grant no live effect
+or compatibility authority.
+
+**Evidence: the actual locked, offline Cargo suites for `dfmcp-world` and
+`dfmcp-intent` passed 282 distinct tests, zero failures and zero ignored tests**,
+including ten new regressions and 70 unavailable temporal-input vectors. The
+available compiler was `rustc 1.100.0-nightly (908501772 2026-08-30)`; source
+hashes were stable throughout the run. Focused reruns are included in that
+distinct total. Relevant changed source also passed the same toolchain's
+formatter. This is executable test evidence for these crates, not a full
+workspace/latest-nightly qualification or native/live admission.
+
+Source-authority certification and complete-domain witnesses remain separate
+from presence and predicate truth. The canonical completeness-profile and MCP
+projection work is tracked by `df-capsule-completeness-profiles-k8p`.
+
 ### Faithful restart monitoring and shared durable ownership (2026-10-07)
 
 `RecoveredObligation` is an observation-only wrapper around the canonical

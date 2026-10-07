@@ -5,12 +5,162 @@ use std::error::Error;
 
 use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, MapCoord, ObservationCursor};
 use dfmcp_world::{
-    CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, QueryOrder, Value,
-    WorldGraph, WorldQuery, WorldSnapshot, execute_bounded_query, execute_query,
+    CompareOp, EntityKind, EntityRecord, Fact, FactPresence, FactSource, Predicate, PredicateTruth,
+    QueryOrder, Value, WorldGraph, WorldQuery, WorldSnapshot, evaluate, evaluate_for,
+    evaluate_truth_for, execute_bounded_query, execute_query,
 };
 
 fn make_fact(val: Value) -> Fact {
     Fact::known(val, GameTick(1), FactSource::Replay, Digest32::ZERO)
+}
+
+#[test]
+fn unavailable_presence_is_unknown_in_every_boolean_context() {
+    let mut snapshot = make_test_snapshot();
+    let anchor = snapshot.anchor();
+    let candidate = EntityId::new(1);
+    let leaf = Predicate::FieldCompare {
+        entity_id: EntityId::NIL,
+        field: "subject".to_owned(),
+        op: CompareOp::Eq,
+        value: Value::U64(0),
+    };
+    for presence in [
+        FactPresence::Absent,
+        FactPresence::Unknown("not observed".to_owned()),
+        FactPresence::Unsupported("not supported".to_owned()),
+        FactPresence::Omitted("outside projection".to_owned()),
+        FactPresence::Redacted("withheld".to_owned()),
+        FactPresence::Stale(anchor),
+        FactPresence::Known(Value::U64(9)),
+    ] {
+        // Even a populated compatibility value cannot override its presence.
+        let mut fact = make_fact(Value::U64(0));
+        fact.presence = Some(presence);
+        assert!(fact.known_value().is_none());
+        snapshot
+            .graph
+            .entities
+            .get_mut(&candidate)
+            .unwrap()
+            .fields
+            .insert("subject".to_owned(), fact);
+        for predicate in [
+            leaf.clone(),
+            Predicate::Not(Box::new(leaf.clone())),
+            Predicate::All(vec![Predicate::True, leaf.clone()]),
+            Predicate::Any(vec![Predicate::False, leaf.clone()]),
+        ] {
+            assert_eq!(
+                evaluate_truth_for(&snapshot, candidate, &predicate),
+                PredicateTruth::Unknown
+            );
+            assert!(!evaluate_for(&snapshot, candidate, &predicate));
+        }
+    }
+    snapshot
+        .graph
+        .entities
+        .get_mut(&candidate)
+        .unwrap()
+        .fields
+        .remove("subject");
+    assert_eq!(
+        evaluate_truth_for(&snapshot, candidate, &leaf),
+        PredicateTruth::Unknown
+    );
+    assert_eq!(
+        evaluate_truth_for(
+            &snapshot,
+            candidate,
+            &Predicate::Any(vec![Predicate::True, leaf.clone()])
+        ),
+        PredicateTruth::True,
+    );
+    assert_eq!(
+        evaluate_truth_for(
+            &snapshot,
+            candidate,
+            &Predicate::All(vec![Predicate::False, leaf])
+        ),
+        PredicateTruth::False,
+    );
+}
+
+#[test]
+fn incomparable_ordered_values_remain_unknown_under_negation() {
+    let mut snapshot = make_test_snapshot();
+    let candidate = EntityId::new(1);
+    for (left, right) in [
+        (Value::U64(1), Value::I64(1)),
+        (Value::U64(1), Value::Text("1".to_owned())),
+        (Value::Bool(true), Value::Null),
+        (Value::Null, Value::Null),
+        (Value::List(Vec::new()), Value::List(Vec::new())),
+        (
+            Value::Object(BTreeMap::new()),
+            Value::Object(BTreeMap::new()),
+        ),
+        (Value::Bytes(vec![1]), Value::Bytes(vec![2])),
+        (
+            Value::Fixed {
+                units: 1,
+                scale: 10,
+            },
+            Value::Fixed {
+                units: 1,
+                scale: 100,
+            },
+        ),
+    ] {
+        snapshot
+            .graph
+            .entities
+            .get_mut(&candidate)
+            .unwrap()
+            .fields
+            .insert("subject".to_owned(), make_fact(left));
+        for op in [CompareOp::Lt, CompareOp::Le, CompareOp::Gt, CompareOp::Ge] {
+            let leaf = Predicate::FieldCompare {
+                entity_id: candidate,
+                field: "subject".to_owned(),
+                op,
+                value: right.clone(),
+            };
+            for predicate in [
+                leaf.clone(),
+                Predicate::Not(Box::new(leaf.clone())),
+                Predicate::Not(Box::new(Predicate::Not(Box::new(leaf.clone())))),
+                Predicate::All(vec![Predicate::True, leaf.clone()]),
+                Predicate::Any(vec![Predicate::False, leaf]),
+            ] {
+                assert_eq!(
+                    evaluate_truth_for(&snapshot, candidate, &predicate),
+                    PredicateTruth::Unknown
+                );
+                assert!(!evaluate(&snapshot, &predicate));
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_known_null_is_distinct_from_unavailable_presence() {
+    let known_null = Fact::with_presence(
+        FactPresence::Known(Value::Null),
+        GameTick(1),
+        FactSource::Replay,
+        Digest32::ZERO,
+    );
+    assert_eq!(known_null.known_value(), Some(&Value::Null));
+    let absent = Fact::with_presence(
+        FactPresence::Absent,
+        GameTick(1),
+        FactSource::Replay,
+        Digest32::ZERO,
+    );
+    assert_eq!(absent.value, Value::Null);
+    assert_eq!(absent.known_value(), None);
 }
 
 fn make_test_snapshot() -> WorldSnapshot {

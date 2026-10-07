@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-07 — Presence-safe temporal execution
+
+- Add a shared consistent-known-value accessor and expose three-valued predicate
+  results. Incomparable ordered values stay unknown through negation instead of
+  becoming satisfied mutation preconditions or obligation predicates.
+- Require known, correctly typed work counters, job tokens and positive building
+  durations before reference progress. Unavailable work can no longer turn into
+  zero remaining work or manufactured completion.
+- Refuse population-dependent stock and combat updates when explicit life, squad
+  or burrow inputs are unavailable. Preserve documented missing optional defaults
+  for older reference worlds and keep unknown worker eligibility blocked.
+- Add ten regressions across world and intent, including 70 unavailable temporal
+  input cases and real deferred-admission/obligation checks. The actual locked,
+  offline Cargo world and intent suites passed 282 distinct tests, with no
+  failures or ignored tests, on the recorded available nightly.
+
 ## 2026-10-07 — Shared durable execution and conservative recovery
 
 - Wire carried obligations to the canonical recovery monitor under current

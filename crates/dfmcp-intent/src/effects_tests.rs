@@ -1,7 +1,7 @@
 use super::*;
 use dfmcp_core::ObservationCursor;
 use dfmcp_world::terrain::uniform_chunk;
-use dfmcp_world::{ChunkCoord, WorldGraph, evaluate};
+use dfmcp_world::{ChunkCoord, FactPresence, WorldGraph, evaluate};
 use std::collections::BTreeSet;
 
 const UNIT_A: EntityId = EntityId::new(11);
@@ -426,7 +426,7 @@ fn with_ledger(drink: u64, food: u64) -> WorldSnapshot {
     snapshot
 }
 
-fn ledger_u64(snapshot: &WorldSnapshot, field: &str) -> u64 {
+fn ledger_u64(snapshot: &WorldSnapshot, field: &str) -> Result<u64> {
     field_u64(&snapshot.graph.entities[&EntityId::new(91)], field)
 }
 
@@ -439,18 +439,18 @@ fn dwarves_drink_and_eat_on_schedule_and_shortages_are_explicit() -> Result<()> 
     let mut snapshot = with_ledger(3, 10);
     // Less than one interval: nothing is consumed, only time is accounted.
     advance(&mut snapshot, DRINK_INTERVAL_TICKS - 1)?;
-    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 3);
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD)?, 3);
     assert_eq!(need(&snapshot, UNIT_A, NEED_DRINK_FIELD), None);
     // One drinking round for two dwarves.
     advance(&mut snapshot, 1)?;
-    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 1);
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD)?, 1);
     assert_eq!(
         need(&snapshot, UNIT_B, NEED_DRINK_FIELD).as_deref(),
         Some("satisfied")
     );
     // The next round has one unit for two dwarves: the later one goes without.
     advance(&mut snapshot, DRINK_INTERVAL_TICKS)?;
-    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD), 0);
+    assert_eq!(ledger_u64(&snapshot, STOCK_DRINK_FIELD)?, 0);
     assert_eq!(
         need(&snapshot, UNIT_A, NEED_DRINK_FIELD).as_deref(),
         Some("satisfied")
@@ -460,7 +460,7 @@ fn dwarves_drink_and_eat_on_schedule_and_shortages_are_explicit() -> Result<()> 
         Some("thirsty")
     );
     // Food every second drinking round: 10 - 2 = 8.
-    assert_eq!(ledger_u64(&snapshot, STOCK_FOOD_FIELD), 8);
+    assert_eq!(ledger_u64(&snapshot, STOCK_FOOD_FIELD)?, 8);
     Ok(())
 }
 
@@ -482,7 +482,7 @@ fn completed_brewing_restocks_and_one_long_wait_equals_many_short_ones() -> Resu
         advance(&mut b, 100)?;
     }
     // Four units of five drinks, minus two rounds for two dwarves.
-    assert_eq!(ledger_u64(&a, STOCK_DRINK_FIELD), 20 - 4);
+    assert_eq!(ledger_u64(&a, STOCK_DRINK_FIELD)?, 20 - 4);
     // Fact stamps record when each value was written; the values agree.
     let values = |s: &WorldSnapshot| -> Vec<(EntityId, String, Value)> {
         s.graph
@@ -528,5 +528,293 @@ fn work_orders_stall_without_their_workshop_or_worker_and_say_why() -> Result<()
     let order_fields = &s.graph.entities[&id].fields;
     assert_eq!(order_fields[AMOUNT_REMAINING_FIELD].value, Value::U64(0));
     assert_eq!(order_fields[BLOCKED_BY_FIELD].value, Value::Null);
+    Ok(())
+}
+
+fn unavailable_variants(original: &Fact, anchor: dfmcp_core::StateAnchor) -> Vec<Option<Fact>> {
+    let mut variants = vec![
+        None,
+        Some(known(Value::Null, original.observed_at)),
+        Some(known(Value::Bool(true), original.observed_at)),
+    ];
+    for presence in [
+        FactPresence::Absent,
+        FactPresence::Unknown("not observed".to_owned()),
+        FactPresence::Unsupported("not supported".to_owned()),
+        FactPresence::Omitted("outside projection".to_owned()),
+        FactPresence::Redacted("withheld".to_owned()),
+        FactPresence::Stale(anchor),
+        FactPresence::Known(Value::Text("inconsistent compatibility value".to_owned())),
+    ] {
+        // Keep the old compatibility value populated to catch consumers that
+        // bypass presence and read it directly.
+        let mut fact = original.clone();
+        fact.presence = Some(presence);
+        variants.push(Some(fact));
+    }
+    variants
+}
+
+fn temporal_cases() -> Result<Vec<(Action, Vec<&'static str>)>> {
+    Ok(vec![
+        (
+            Action::CreateWorkOrder {
+                name: "reference work".to_owned(),
+                job_token: "MAKE_TEST_ITEM".to_owned(),
+                amount: 1,
+                conditions: Vec::new(),
+            },
+            vec![AMOUNT_REMAINING_FIELD, "work_ticks", "job_token"],
+        ),
+        (
+            Action::Build {
+                kind: BuildingKind::Workshop("Carpenters".to_owned()),
+                location: MapCoord::new(17, 1, 10),
+                footprint: cuboid((16, 0, 10), (18, 2, 10))?,
+                material: crate::MaterialSelector::default(),
+            },
+            vec!["required_ticks", "progress_ticks"],
+        ),
+        (
+            Action::DesignateDig {
+                area: cuboid((1, 1, 10), (1, 1, 10))?,
+                mode: DigMode::Mine,
+            },
+            vec!["target_tile_code", "work_ticks"],
+        ),
+    ])
+}
+
+#[test]
+fn unavailable_progress_inputs_never_create_completion() -> Result<()> {
+    for (action, fields) in temporal_cases()? {
+        let mut original = world();
+        apply_effect(&mut original, &action, "uncertain")?;
+        original.refresh_hash();
+        let id = created_entity_id("uncertain", 0);
+        let postconditions = default_postconditions(&action, "uncertain", original.fortress_id);
+        for field in fields {
+            for replacement in unavailable_variants(
+                &original.graph.entities[&id].fields[field],
+                original.anchor(),
+            ) {
+                let mut shadow = original.clone();
+                let record = shadow.graph.entities.get_mut(&id).unwrap();
+                match replacement {
+                    Some(fact) => {
+                        record.fields.insert(field.to_owned(), fact);
+                    }
+                    None => {
+                        record.fields.remove(field);
+                    }
+                }
+                let before = shadow.graph.clone();
+                assert_eq!(
+                    advance(&mut shadow, BUILD_TICKS * 10)
+                        .err()
+                        .map(|error| error.code),
+                    Some(ErrorCode::PreconditionsFailed),
+                    "{action:?}: {field}",
+                );
+                assert_eq!(shadow.graph, before, "{action:?}: {field}");
+                assert!(!all_hold(&shadow, &postconditions), "{action:?}: {field}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_known_progress_inputs_still_complete() -> Result<()> {
+    for (action, _) in temporal_cases()? {
+        let mut snapshot = world();
+        apply_effect(&mut snapshot, &action, "known")?;
+        let id = created_entity_id("known", 0);
+        for fact in snapshot
+            .graph
+            .entities
+            .get_mut(&id)
+            .unwrap()
+            .fields
+            .values_mut()
+        {
+            fact.presence = Some(FactPresence::Known(fact.value.clone()));
+        }
+        let postconditions = default_postconditions(&action, "known", snapshot.fortress_id);
+        advance(&mut snapshot, BUILD_TICKS * 10)?;
+        assert!(all_hold(&snapshot, &postconditions), "{action:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn unavailable_workshop_worker_and_life_facts_cannot_release_production() -> Result<()> {
+    let action = Action::CreateWorkOrder {
+        name: "brew".to_owned(),
+        job_token: "BREW_DRINK".to_owned(),
+        amount: 1,
+        conditions: Vec::new(),
+    };
+    for (subject, field) in [
+        (EntityId::new(51), "building_kind"),
+        (EntityId::new(51), CONSTRUCTION_STAGE_FIELD),
+        (UNIT_A, "labor.BREW"),
+        (UNIT_A, "alive"),
+    ] {
+        let mut snapshot = world();
+        equip_brewery(&mut snapshot);
+        snapshot
+            .graph
+            .entities
+            .get_mut(&UNIT_A)
+            .unwrap()
+            .fields
+            .insert("alive".to_owned(), known(Value::Bool(true), snapshot.tick));
+        apply_effect(&mut snapshot, &action, "blocked")?;
+        let original = snapshot.graph.entities[&subject].fields[field].clone();
+        let mut unavailable = original.clone();
+        unavailable.presence = Some(FactPresence::Omitted("outside projection".to_owned()));
+        snapshot
+            .graph
+            .entities
+            .get_mut(&subject)
+            .unwrap()
+            .fields
+            .insert(field.to_owned(), unavailable);
+        advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT * 10)?;
+        let id = created_entity_id("blocked", 0);
+        assert_eq!(
+            field_u64(&snapshot.graph.entities[&id], AMOUNT_REMAINING_FIELD)?,
+            1
+        );
+        assert!(field_text(&snapshot.graph.entities[&id], BLOCKED_BY_FIELD).is_some());
+        assert_eq!(field_u64(&snapshot.graph.entities[&id], "work_ticks")?, 0);
+        snapshot
+            .graph
+            .entities
+            .get_mut(&subject)
+            .unwrap()
+            .fields
+            .insert(field.to_owned(), original);
+        advance(&mut snapshot, WORK_ORDER_TICKS_PER_UNIT)?;
+        assert!(all_hold(
+            &snapshot,
+            &default_postconditions(&action, "blocked", snapshot.fortress_id)
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_building_duration_is_invalid_instead_of_one_tick_completion() -> Result<()> {
+    let (action, _) = temporal_cases()?.remove(1);
+    let mut snapshot = world();
+    apply_effect(&mut snapshot, &action, "zero")?;
+    let id = created_entity_id("zero", 0);
+    snapshot.graph.entities.get_mut(&id).unwrap().fields.insert(
+        "required_ticks".to_owned(),
+        known(Value::U64(0), snapshot.tick),
+    );
+    assert_eq!(
+        advance(&mut snapshot, 1).err().map(|error| error.code),
+        Some(ErrorCode::PreconditionsFailed)
+    );
+    assert!(!all_hold(
+        &snapshot,
+        &default_postconditions(&action, "zero", snapshot.fortress_id)
+    ));
+    Ok(())
+}
+
+fn with_active_threat() -> WorldSnapshot {
+    let mut snapshot = world();
+    let mut creature = entity(EntityId::new(99), EntityKind::Creature, "raider");
+    for (field, value) in [
+        (HOSTILE_FIELD, Value::Bool(true)),
+        (HEALTH_FIELD, Value::U64(100)),
+        (ARRIVES_AT_FIELD, Value::U64(snapshot.tick.0)),
+        (
+            THREAT_STATUS_FIELD,
+            Value::Text(THREAT_APPROACHING.to_owned()),
+        ),
+        (COMBAT_ROUNDS_FIELD, Value::U64(0)),
+    ] {
+        creature
+            .fields
+            .insert(field.to_owned(), known(value, snapshot.tick));
+    }
+    snapshot.graph.entities.insert(creature.id, creature);
+    snapshot.refresh_hash();
+    snapshot
+}
+
+#[test]
+fn unavailable_life_census_refuses_stock_and_combat_progress() -> Result<()> {
+    for (original, ticks) in [
+        (with_ledger(10, 10), DRINK_INTERVAL_TICKS),
+        (with_active_threat(), COMBAT_ROUND_TICKS),
+    ] {
+        let alive = known(Value::Bool(true), original.tick);
+        for unavailable in unavailable_variants(&alive, original.anchor())
+            .into_iter()
+            .flatten()
+            .filter(|fact| !matches!(fact.known_value(), Some(Value::Bool(_))))
+        {
+            let mut shadow = original.clone();
+            shadow
+                .graph
+                .entities
+                .get_mut(&UNIT_A)
+                .unwrap()
+                .fields
+                .insert("alive".to_owned(), unavailable);
+            let before = shadow.graph.clone();
+            assert_eq!(
+                advance(&mut shadow, ticks).err().map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed)
+            );
+            assert_eq!(shadow.graph, before);
+        }
+        // The documented missing-field default for older reference fixtures
+        // remains valid, so a fully available world still advances.
+        let mut legacy = original;
+        assert!(advance(&mut legacy, ticks)?);
+    }
+    Ok(())
+}
+
+#[test]
+fn unavailable_military_selectors_cannot_determine_combat_outcomes() -> Result<()> {
+    for (subject, field, value, ticks) in [
+        (
+            UNIT_A,
+            SQUAD_FIELD.to_owned(),
+            Value::Entity(SQUAD),
+            COMBAT_ROUND_TICKS,
+        ),
+        (
+            UNIT_B,
+            format!("{BURROW_FIELD_PREFIX}{}", BURROW.get()),
+            Value::Bool(false),
+            COMBAT_ROUND_TICKS * ROUNDS_PER_KILL,
+        ),
+    ] {
+        let mut snapshot = with_active_threat();
+        let mut unavailable = known(value, snapshot.tick);
+        unavailable.presence = Some(FactPresence::Omitted("outside projection".to_owned()));
+        snapshot
+            .graph
+            .entities
+            .get_mut(&subject)
+            .unwrap()
+            .fields
+            .insert(field, unavailable);
+        let before = snapshot.graph.clone();
+        assert_eq!(
+            advance(&mut snapshot, ticks).err().map(|error| error.code),
+            Some(ErrorCode::PreconditionsFailed)
+        );
+        assert_eq!(snapshot.graph, before);
+    }
     Ok(())
 }
