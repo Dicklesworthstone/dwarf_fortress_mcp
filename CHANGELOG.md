@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-07 — Atomic laboratory recovery frontiers
+
+- Publish world state, step progress and completed-plan retirement in one durable
+  record, eliminating crash windows between execution evidence and its world.
+- Retain exact step-proof anchors and their snapshot objects through compaction;
+  keep legacy unanchored records distinguishable. Validate and canonicalize the
+  complete frontier before writing, with bounded records and idempotent retries.
+- Compact before journal byte limits are exceeded and preserve objects awaiting
+  publication. Fence uncertain writes and sync failures until store reopen.
+- Add every-byte crash-cut, compaction, corruption, capacity and I/O-failure
+  regressions. The actual store module and real core/world dependencies passed
+  26 tests; full Cargo and MCP integration validation remain environment-blocked.
+
 ## 2026-10-07 — Real modern MCP Tasks for laboratory plans
 
 - Add opt-in `fortress_commit(as_task=true)` through the pinned modern Tasks

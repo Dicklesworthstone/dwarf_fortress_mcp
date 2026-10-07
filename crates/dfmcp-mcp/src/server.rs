@@ -507,9 +507,9 @@ fn persist_durable_head(session: &mut LabSession) {
     };
     let snapshot = session.adapter.snapshot().clone();
     let fortress = session.fortress_id;
-    // Step states first, then the head: a step is never recorded final or
-    // dispatched by a world that lacks it, and a crash between the two can
-    // only make a dispatched step fail its deadline, never verify falsely.
+    // Publish step states and their world together. Separate state-before-head
+    // writes can leave an immediately verified effect ahead of the recovered
+    // world; reversing those writes can lose the dispatch record instead.
     let mut finished: Vec<Digest32> = Vec::new();
     let mut updates: Vec<(Digest32, u32, &'static str)> = Vec::new();
     for (digest, plan) in &session.durable_plans {
@@ -574,21 +574,35 @@ fn persist_durable_head(session: &mut LabSession) {
         })
         .collect();
     let result = with_durable_store(|store| {
+        let mut frontier = BTreeMap::new();
         for (digest, step, token) in &updates {
-            store.persist_step(fortress, *digest, *step, token)?;
+            frontier.insert((*digest, *step), (*token).to_owned());
         }
         for (digest, step, token) in &carried_updates {
             // A carried commit stays visible after it is retired; only an
             // unfinished one still takes step records.
             if store.commit(fortress, *digest).is_some() {
-                store.persist_step(fortress, *digest, *step, token)?;
+                frontier.insert((*digest, *step), token.clone());
             }
         }
-        store.persist_head(&scenario, &snapshot)?;
-        for digest in finished.iter().chain(carried_done.iter()) {
-            store.retire_commit(fortress, *digest)?;
-        }
-        Ok(())
+        let frontier: Vec<_> = frontier
+            .into_iter()
+            .map(
+                |((plan_digest, step), state)| dfmcp_lab::durable::DurableStepUpdate {
+                    plan_digest,
+                    step,
+                    state,
+                },
+            )
+            .collect();
+        let retired: Vec<_> = finished
+            .iter()
+            .chain(carried_done.iter())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        store.persist_progress(&scenario, &snapshot, &frontier, &retired)
     });
     if result.is_ok() {
         for digest in &finished {

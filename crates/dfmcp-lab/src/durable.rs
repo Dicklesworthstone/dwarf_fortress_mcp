@@ -45,6 +45,9 @@ const JOURNAL_DOMAIN: &[u8] = b"dfmcp-lab-journal/1\0";
 pub const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 /// Largest single journal record line.
 pub const MAX_RECORD_BYTES: usize = 64 * 1024;
+/// A progress record can cover every admitted commit in one atomic publication.
+/// Ordinary journal records retain their smaller limit.
+pub const MAX_PROGRESS_RECORD_BYTES: usize = 8 * 1024 * 1024;
 /// Largest stored snapshot object.
 pub const MAX_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 /// Records after which the journal is compacted to live heads + checkpoints.
@@ -63,6 +66,8 @@ pub const MAX_PLAN_REQUEST_BYTES: usize = 16 * 1024;
 pub const MAX_COMMITS_PER_FORTRESS: usize = 256;
 /// Most step records per durable commit.
 pub const MAX_STEPS_PER_COMMIT: usize = 256;
+/// Largest atomic step frontier, including all unfinished plans of a fortress.
+pub const MAX_PROGRESS_UPDATES: usize = MAX_COMMITS_PER_FORTRESS * MAX_STEPS_PER_COMMIT;
 /// Step states a durable commit may record. Every state but `dispatched` is
 /// final for recovery purposes.
 pub const STEP_STATES: [&str; 7] = [
@@ -122,13 +127,30 @@ pub struct DurableCommit {
     pub sealed_state_hash: Digest32,
     pub intent_id: u128,
     pub source: DurablePlanSource,
-    /// Last recorded state per step id; absent means never dispatched.
+    /// Last recorded state per step id. An absent state proves no recovered
+    /// laboratory effect only after an atomic progress publication.
     pub steps: BTreeMap<u32, String>,
+    /// The exact world published with each step transition. Legacy independent
+    /// S records lack this binding and cannot certify historical completion.
+    pub step_anchors: BTreeMap<u32, StateAnchor>,
+}
+
+/// One step transition published with the exact world that supports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableStepUpdate {
+    pub plan_digest: Digest32,
+    pub step: u32,
+    pub state: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Record {
     Head(DurableHead),
+    Progress {
+        head: DurableHead,
+        updates: Vec<DurableStepUpdate>,
+        retired: Vec<Digest32>,
+    },
     Checkpoint(DurableCheckpoint),
     Commit(DurableCommit),
     Step {
@@ -136,6 +158,13 @@ enum Record {
         plan_digest: Digest32,
         step: u32,
         state: String,
+    },
+    StepAt {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        step: u32,
+        state: String,
+        anchor: StateAnchor,
     },
     Done {
         fortress_id: FortressId,
@@ -169,6 +198,9 @@ pub struct DurableLabStore {
     /// Fault injection: appends still allowed before the store behaves as if
     /// the process died (nothing further reaches disk). `None` is unlimited.
     append_budget: Option<usize>,
+    /// An uncertain write must be reconciled by reopening and replaying the
+    /// journal. Retrying against the old in-memory chain could corrupt it.
+    write_fault: Option<String>,
 }
 
 fn hex_text(text: &str) -> String {
@@ -238,6 +270,36 @@ impl Record {
                 head.anchor.cursor.epoch,
                 head.anchor.cursor.sequence,
             ),
+            Self::Progress {
+                head,
+                updates,
+                retired,
+            } => {
+                let mut payload = format!(
+                    "F {} {} {} {} {} {} {} {}",
+                    head.fortress_id.get(),
+                    hex_text(&head.scenario),
+                    head.anchor.state_hash.to_hex(),
+                    head.anchor.tick.0,
+                    head.anchor.cursor.epoch,
+                    head.anchor.cursor.sequence,
+                    updates.len(),
+                    retired.len(),
+                );
+                for update in updates {
+                    payload.push_str(&format!(
+                        " {} {} {}",
+                        update.plan_digest.to_hex(),
+                        update.step,
+                        update.state,
+                    ));
+                }
+                for digest in retired {
+                    payload.push(' ');
+                    payload.push_str(&digest.to_hex());
+                }
+                payload
+            }
             Self::Checkpoint(checkpoint) => format!(
                 "C {} {:032x} {} {}",
                 checkpoint.fortress_id.get(),
@@ -277,6 +339,21 @@ impl Record {
                 fortress_id.get(),
                 plan_digest.to_hex()
             ),
+            Self::StepAt {
+                fortress_id,
+                plan_digest,
+                step,
+                state,
+                anchor,
+            } => format!(
+                "A {} {} {step} {state} {} {} {} {}",
+                fortress_id.get(),
+                plan_digest.to_hex(),
+                anchor.state_hash.to_hex(),
+                anchor.tick.0,
+                anchor.cursor.epoch,
+                anchor.cursor.sequence,
+            ),
             Self::Done {
                 fortress_id,
                 plan_digest,
@@ -285,6 +362,12 @@ impl Record {
     }
 
     fn parse(payload: &str) -> Result<Self> {
+        if payload.starts_with("F ") {
+            return Self::parse_progress(payload);
+        }
+        if payload.len() > MAX_RECORD_BYTES {
+            return Err(corrupt("journal record exceeds its bound"));
+        }
         let fields: Vec<&str> = payload.split(' ').collect();
         match fields.as_slice() {
             ["H", fortress, scenario, hash, tick, epoch, sequence] => {
@@ -368,6 +451,7 @@ impl Record {
                     intent_id,
                     source,
                     steps: BTreeMap::new(),
+                    step_anchors: BTreeMap::new(),
                 }))
             }
             ["S", fortress, digest, step, state] => {
@@ -383,12 +467,118 @@ impl Record {
                     state: (*state).to_owned(),
                 })
             }
+            [
+                "A",
+                fortress,
+                digest,
+                step,
+                state,
+                hash,
+                tick,
+                epoch,
+                sequence,
+            ] => {
+                if !STEP_STATES.contains(state) {
+                    return Err(corrupt("journal anchored step state is not recognized"));
+                }
+                let fortress_id = FortressId::new(parse_u64(fortress)?);
+                Ok(Self::StepAt {
+                    fortress_id,
+                    plan_digest: parse_digest(digest)?,
+                    step: u32::try_from(parse_u64(step)?)
+                        .map_err(|_| corrupt("journal anchored step id is malformed"))?,
+                    state: (*state).to_owned(),
+                    anchor: StateAnchor {
+                        fortress_id,
+                        cursor: ObservationCursor {
+                            epoch: parse_u64(epoch)?,
+                            sequence: parse_u64(sequence)?,
+                        },
+                        tick: GameTick(parse_u64(tick)?),
+                        state_hash: parse_digest(hash)?,
+                    },
+                })
+            }
             ["D", fortress, digest] => Ok(Self::Done {
                 fortress_id: FortressId::new(parse_u64(fortress)?),
                 plan_digest: parse_digest(digest)?,
             }),
             _ => Err(corrupt("journal record kind or arity is not recognized")),
         }
+    }
+
+    fn parse_progress(payload: &str) -> Result<Self> {
+        if payload.len() > MAX_PROGRESS_RECORD_BYTES {
+            return Err(corrupt("journal progress record exceeds its bound"));
+        }
+        // Iterate instead of allocating a field array from an untrusted record.
+        let mut fields = payload.split(' ');
+        let mut next = || {
+            fields
+                .next()
+                .ok_or_else(|| corrupt("journal progress record is truncated"))
+        };
+        if next()? != "F" {
+            return Err(corrupt("journal progress record kind is invalid"));
+        }
+        let fortress_id = FortressId::new(parse_u64(next()?)?);
+        let scenario = unhex_text(next()?, MAX_SCENARIO_BYTES)?;
+        let state_hash = parse_digest(next()?)?;
+        let tick = GameTick(parse_u64(next()?)?);
+        let epoch = parse_u64(next()?)?;
+        let sequence = parse_u64(next()?)?;
+        let update_count = parse_u64(next()?)?;
+        let retired_count = parse_u64(next()?)?;
+        if update_count > MAX_PROGRESS_UPDATES as u64
+            || retired_count > MAX_COMMITS_PER_FORTRESS as u64
+        {
+            return Err(corrupt("journal progress frontier exceeds its bound"));
+        }
+        let mut updates: Vec<DurableStepUpdate> = Vec::new();
+        for _ in 0..update_count {
+            let plan_digest = parse_digest(next()?)?;
+            let step = u32::try_from(parse_u64(next()?)?)
+                .map_err(|_| corrupt("journal progress step id is malformed"))?;
+            let state = next()?;
+            if !STEP_STATES.contains(&state) {
+                return Err(corrupt("journal progress step state is not recognized"));
+            }
+            if updates.last().is_some_and(|previous| {
+                (previous.plan_digest, previous.step) >= (plan_digest, step)
+            }) {
+                return Err(corrupt("journal progress steps are not strictly ordered"));
+            }
+            updates.push(DurableStepUpdate {
+                plan_digest,
+                step,
+                state: state.to_owned(),
+            });
+        }
+        let mut retired = Vec::new();
+        for _ in 0..retired_count {
+            let digest = parse_digest(next()?)?;
+            if retired.last().is_some_and(|previous| *previous >= digest) {
+                return Err(corrupt("journal retired plans are not strictly ordered"));
+            }
+            retired.push(digest);
+        }
+        if fields.next().is_some() {
+            return Err(corrupt("journal progress record has trailing fields"));
+        }
+        Ok(Self::Progress {
+            head: DurableHead {
+                fortress_id,
+                scenario,
+                anchor: StateAnchor {
+                    fortress_id,
+                    cursor: ObservationCursor { epoch, sequence },
+                    tick,
+                    state_hash,
+                },
+            },
+            updates,
+            retired,
+        })
     }
 }
 
@@ -526,6 +716,7 @@ impl DurableLabStore {
             torn_tail_bytes: 0,
             compactions: 0,
             append_budget: None,
+            write_fault: None,
         };
         let complete = bytes
             .iter()
@@ -546,8 +737,27 @@ impl DurableLabStore {
                 .map_err(|e| io("cannot discard a torn journal tail", &e))?;
             store.torn_tail_bytes = torn;
         }
+        let mut verified_anchors = BTreeMap::new();
         for hash in store.referenced_objects() {
-            store.load_snapshot(hash)?;
+            verified_anchors.insert(hash, store.load_snapshot(hash)?.anchor());
+        }
+        for head in store.index.heads.values() {
+            if verified_anchors.get(&head.anchor.state_hash) != Some(&head.anchor) {
+                return Err(corrupt("durable head anchor does not match its snapshot"));
+            }
+        }
+        for commit in store.index.commits.values().flat_map(BTreeMap::values) {
+            if verified_anchors
+                .get(&commit.sealed_state_hash)
+                .is_none_or(|anchor| anchor.fortress_id != commit.fortress_id)
+            {
+                return Err(corrupt("durable plan names a different fortress snapshot"));
+            }
+            for anchor in commit.step_anchors.values() {
+                if verified_anchors.get(&anchor.state_hash) != Some(anchor) {
+                    return Err(corrupt("durable step anchor does not match its snapshot"));
+                }
+            }
         }
         store.remove_crash_leftovers();
         Ok(store)
@@ -571,7 +781,7 @@ impl DurableLabStore {
     }
 
     fn replay_line(&mut self, line: &[u8]) -> Result<()> {
-        if line.len() > MAX_RECORD_BYTES + 65 {
+        if line.len() > MAX_PROGRESS_RECORD_BYTES + 65 {
             return Err(corrupt("journal record exceeds its bound"));
         }
         let text = std::str::from_utf8(line).map_err(|_| corrupt("journal record is not UTF-8"))?;
@@ -610,6 +820,14 @@ impl DurableLabStore {
                     .values()
                     .flat_map(BTreeMap::values)
                     .map(|commit| commit.sealed_state_hash),
+            )
+            .chain(
+                self.index
+                    .commits
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|commit| commit.step_anchors.values())
+                    .map(|anchor| anchor.state_hash),
             )
             .collect()
     }
@@ -652,6 +870,11 @@ impl DurableLabStore {
         }
         let path = self.object_path(snapshot.state_hash);
         if regular_file(&path)?.is_some() {
+            if self.load_snapshot(snapshot.state_hash)? != *snapshot {
+                return Err(corrupt(
+                    "stored snapshot differs from the requested publication",
+                ));
+            }
             return Ok(());
         }
         let bytes = snapshot.canonical_bytes();
@@ -684,7 +907,17 @@ impl DurableLabStore {
         self.append_budget = budget;
     }
 
-    fn append(&mut self, record: Record) -> Result<()> {
+    fn append(&mut self, record: Record, snapshot: Option<&WorldSnapshot>) -> Result<()> {
+        self.append_with_limit(record, snapshot, MAX_JOURNAL_BYTES)
+    }
+
+    fn append_with_limit(
+        &mut self,
+        record: Record,
+        snapshot: Option<&WorldSnapshot>,
+        journal_limit: u64,
+    ) -> Result<()> {
+        self.ensure_writable()?;
         match self.append_budget.as_mut() {
             Some(0) => {
                 return Err(DfmcpError::new(
@@ -696,17 +929,47 @@ impl DurableLabStore {
             None => {}
         }
         let payload = record.payload();
-        if payload.len() > MAX_RECORD_BYTES {
+        let record_bound = if matches!(&record, Record::Progress { .. }) {
+            MAX_PROGRESS_RECORD_BYTES
+        } else {
+            MAX_RECORD_BYTES
+        };
+        if payload.len() > record_bound {
             return Err(invalid("durable journal record exceeds its bound"));
         }
         let mut next = self.index.clone();
         next.apply(record)?;
+        let line_bytes = payload.len() as u64 + 66;
+        let journal_bytes = self
+            .journal
+            .metadata()
+            .map_err(|error| io("cannot inspect durable journal length", &error))?
+            .len();
+        if journal_bytes.saturating_add(line_bytes) > journal_limit {
+            self.compact()?;
+            let compacted_bytes = self
+                .journal
+                .metadata()
+                .map_err(|error| io("cannot inspect compacted journal length", &error))?
+                .len();
+            if compacted_bytes.saturating_add(line_bytes) > journal_limit {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "durable journal cannot fit another atomic record within its reopen bound",
+                ));
+            }
+        }
+        // Capacity compaction precedes object materialization. Otherwise its
+        // old-root garbage collection could delete this record's new object
+        // before the record naming it becomes visible.
+        if let Some(snapshot) = snapshot {
+            self.write_object(snapshot)?;
+        }
         let chain = chain_next(self.chain, &payload);
         let line = format!("{} {payload}\n", chain.to_hex());
-        self.journal
-            .write_all(line.as_bytes())
-            .and_then(|()| self.journal.sync_data())
-            .map_err(|e| io("cannot append to the durable laboratory journal", &e))?;
+        self.write_record_with(line.as_bytes(), |journal, bytes| {
+            journal.write_all(bytes).and_then(|()| journal.sync_data())
+        })?;
         self.index = next;
         self.chain = chain;
         self.records += 1;
@@ -716,8 +979,37 @@ impl DurableLabStore {
         Ok(())
     }
 
+    fn ensure_writable(&self) -> Result<()> {
+        match &self.write_fault {
+            None => Ok(()),
+            Some(fault) => Err(DfmcpError::new(
+                ErrorCode::AdapterUnavailable,
+                format!(
+                    "durable journal requires reopen and reconciliation after an uncertain write: {fault}"
+                ),
+            )
+            .retryable(false)),
+        }
+    }
+
+    fn write_record_with(
+        &mut self,
+        bytes: &[u8],
+        write: impl FnOnce(&mut File, &[u8]) -> std::io::Result<()>,
+    ) -> Result<()> {
+        self.ensure_writable()?;
+        if let Err(error) = write(&mut self.journal, bytes) {
+            self.write_fault = Some(error.to_string());
+            return Err(
+                io("cannot append to the durable laboratory journal", &error).retryable(false),
+            );
+        }
+        Ok(())
+    }
+
     /// Persist `snapshot` as the latest state of its fortress.
     pub fn persist_head(&mut self, scenario: &str, snapshot: &WorldSnapshot) -> Result<()> {
+        self.ensure_writable()?;
         if scenario.len() > MAX_SCENARIO_BYTES || scenario.chars().any(char::is_control) {
             return Err(invalid("scenario name is not storable"));
         }
@@ -729,12 +1021,97 @@ impl DurableLabStore {
         {
             return Ok(());
         }
-        self.write_object(snapshot)?;
-        self.append(Record::Head(DurableHead {
-            fortress_id: snapshot.fortress_id,
+        self.append(
+            Record::Head(DurableHead {
+                fortress_id: snapshot.fortress_id,
+                scenario: scenario.to_owned(),
+                anchor: snapshot.anchor(),
+            }),
+            Some(snapshot),
+        )
+    }
+
+    /// Publish the world, its step frontier, and completed-plan retirement in
+    /// one hash-chained record. A crash exposes either the previous generation
+    /// or all of this one; verified steps cannot get ahead of their world.
+    ///
+    /// The snapshot object is validated and synced before publication. All
+    /// updates are checked before any journal write, sorted canonically, and
+    /// repetitions of the existing frontier are a no-op. Legacy H/S records
+    /// remain readable, but do not establish this atomic-publication guarantee.
+    pub fn persist_progress(
+        &mut self,
+        scenario: &str,
+        snapshot: &WorldSnapshot,
+        updates: &[DurableStepUpdate],
+        retired: &[Digest32],
+    ) -> Result<()> {
+        self.ensure_writable()?;
+        if !snapshot.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "refusing to publish progress against an invalid world snapshot",
+            ));
+        }
+        if scenario.len() > MAX_SCENARIO_BYTES || scenario.chars().any(char::is_control) {
+            return Err(invalid("scenario name is not storable"));
+        }
+        if updates.len() > MAX_PROGRESS_UPDATES || retired.len() > MAX_COMMITS_PER_FORTRESS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "durable progress frontier exceeds its explicit bound",
+            ));
+        }
+        let fortress = snapshot.fortress_id;
+        let mut ordered = BTreeMap::new();
+        for update in updates {
+            if !STEP_STATES.contains(&update.state.as_str()) {
+                return Err(invalid("unknown durable progress step state"));
+            }
+            if ordered
+                .insert((update.plan_digest, update.step), update.clone())
+                .is_some()
+            {
+                return Err(invalid("duplicate step in durable progress frontier"));
+            }
+        }
+        let retired_set: BTreeSet<_> = retired.iter().copied().collect();
+        if retired_set.len() != retired.len() {
+            return Err(invalid(
+                "duplicate retired plan in durable progress frontier",
+            ));
+        }
+        let updates: Vec<_> = ordered
+            .into_values()
+            .filter(|update| {
+                self.commit(fortress, update.plan_digest)
+                    .and_then(|commit| commit.steps.get(&update.step))
+                    != Some(&update.state)
+            })
+            .collect();
+        let retired: Vec<_> = retired_set
+            .into_iter()
+            .filter(|digest| self.commit(fortress, *digest).is_some())
+            .collect();
+        let head = DurableHead {
+            fortress_id: fortress,
             scenario: scenario.to_owned(),
             anchor: snapshot.anchor(),
-        }))
+        };
+        if self.index.heads.get(&fortress) == Some(&head)
+            && updates.is_empty()
+            && retired.is_empty()
+        {
+            return Ok(());
+        }
+        let record = Record::Progress {
+            head,
+            updates,
+            retired,
+        };
+        let mut candidate = self.index.clone();
+        candidate.apply(record.clone())?;
+        self.append(record, Some(snapshot))
     }
 
     /// Persist a checkpoint of `snapshot`.
@@ -750,13 +1127,15 @@ impl DurableLabStore {
         if checkpoint_id == CheckpointId::NIL {
             return Err(invalid("checkpoint id zero is reserved"));
         }
-        self.write_object(snapshot)?;
-        self.append(Record::Checkpoint(DurableCheckpoint {
-            fortress_id: snapshot.fortress_id,
-            checkpoint_id,
-            label: label.to_owned(),
-            state_hash: snapshot.state_hash,
-        }))
+        self.append(
+            Record::Checkpoint(DurableCheckpoint {
+                fortress_id: snapshot.fortress_id,
+                checkpoint_id,
+                label: label.to_owned(),
+                state_hash: snapshot.state_hash,
+            }),
+            Some(snapshot),
+        )
     }
 
     /// Record a committed plan, persisting the world it was sealed against.
@@ -775,15 +1154,18 @@ impl DurableLabStore {
         if summary.len() > MAX_PLAN_SUMMARY_BYTES || payload_len > MAX_PLAN_REQUEST_BYTES {
             return Err(invalid("plan request exceeds the durable record bound"));
         }
-        self.write_object(sealed)?;
-        self.append(Record::Commit(DurableCommit {
-            fortress_id: sealed.fortress_id,
-            plan_digest,
-            sealed_state_hash: sealed.state_hash,
-            intent_id,
-            source,
-            steps: BTreeMap::new(),
-        }))
+        self.append(
+            Record::Commit(DurableCommit {
+                fortress_id: sealed.fortress_id,
+                plan_digest,
+                sealed_state_hash: sealed.state_hash,
+                intent_id,
+                source,
+                steps: BTreeMap::new(),
+                step_anchors: BTreeMap::new(),
+            }),
+            Some(sealed),
+        )
     }
 
     /// Record a step's state; repeating the current state is a no-op.
@@ -794,6 +1176,7 @@ impl DurableLabStore {
         step: u32,
         state: &str,
     ) -> Result<()> {
+        self.ensure_writable()?;
         if !STEP_STATES.contains(&state) {
             return Err(invalid("unknown durable step state"));
         }
@@ -803,23 +1186,30 @@ impl DurableLabStore {
         {
             return Ok(());
         }
-        self.append(Record::Step {
-            fortress_id,
-            plan_digest,
-            step,
-            state: state.to_owned(),
-        })
+        self.append(
+            Record::Step {
+                fortress_id,
+                plan_digest,
+                step,
+                state: state.to_owned(),
+            },
+            None,
+        )
     }
 
     /// Retire a commit whose steps are all final.
     pub fn retire_commit(&mut self, fortress_id: FortressId, plan_digest: Digest32) -> Result<()> {
+        self.ensure_writable()?;
         if self.commit(fortress_id, plan_digest).is_none() {
             return Ok(());
         }
-        self.append(Record::Done {
-            fortress_id,
-            plan_digest,
-        })
+        self.append(
+            Record::Done {
+                fortress_id,
+                plan_digest,
+            },
+            None,
+        )
     }
 
     /// One unfinished durable commit.
@@ -872,6 +1262,14 @@ impl DurableLabStore {
     /// objects nothing references. The replacement is synced and renamed over
     /// the old journal, so a crash leaves one complete journal or the other.
     pub fn compact(&mut self) -> Result<()> {
+        self.compact_with_directory_sync(sync_dir)
+    }
+
+    fn compact_with_directory_sync(
+        &mut self,
+        sync_parent: impl FnOnce(&Path) -> Result<()>,
+    ) -> Result<()> {
+        self.ensure_writable()?;
         let mut chain = Digest32::ZERO;
         let mut text = String::new();
         let mut records = 0usize;
@@ -897,12 +1295,22 @@ impl DurableLabStore {
                     .flat_map(|commit| {
                         let mut opening = commit.clone();
                         opening.steps.clear();
+                        opening.step_anchors.clear();
                         std::iter::once(Record::Commit(opening)).chain(commit.steps.iter().map(
-                            |(step, state)| Record::Step {
-                                fortress_id: commit.fortress_id,
-                                plan_digest: commit.plan_digest,
-                                step: *step,
-                                state: state.clone(),
+                            |(step, state)| match commit.step_anchors.get(step) {
+                                Some(anchor) => Record::StepAt {
+                                    fortress_id: commit.fortress_id,
+                                    plan_digest: commit.plan_digest,
+                                    step: *step,
+                                    state: state.clone(),
+                                    anchor: *anchor,
+                                },
+                                None => Record::Step {
+                                    fortress_id: commit.fortress_id,
+                                    plan_digest: commit.plan_digest,
+                                    step: *step,
+                                    state: state.clone(),
+                                },
                             },
                         ))
                     }),
@@ -910,6 +1318,12 @@ impl DurableLabStore {
             .collect();
         for record in live {
             let payload = record.payload();
+            if text.len() as u64 + payload.len() as u64 + 66 > MAX_JOURNAL_BYTES {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "compacted durable journal exceeds its explicit bound",
+                ));
+            }
             chain = chain_next(chain, &payload);
             text.push_str(&chain.to_hex());
             text.push(' ');
@@ -933,11 +1347,17 @@ impl DurableLabStore {
         })?;
         fs::rename(&temporary, self.root.join("journal"))
             .map_err(|e| io("cannot publish compacted journal", &e))?;
-        sync_dir(&self.root)?;
+        // Rename has already changed the public inode. Install its matching
+        // handle and chain even if the directory barrier subsequently fails;
+        // never keep appending through the old now-unlinked journal handle.
         self.journal = file;
         self.chain = chain;
         self.records = records;
         self.compactions += 1;
+        if let Err(error) = sync_parent(&self.root) {
+            self.write_fault = Some(error.message.clone());
+            return Err(error.retryable(false));
+        }
 
         let live = self.referenced_objects();
         if let Ok(entries) = fs::read_dir(self.root.join("objects")) {
@@ -976,6 +1396,40 @@ impl Index {
                     ));
                 }
                 self.heads.insert(head.fortress_id, head);
+            }
+            Record::Progress {
+                head,
+                updates,
+                retired,
+            } => {
+                let fortress_id = head.fortress_id;
+                let anchor = head.anchor;
+                self.apply(Record::Head(head))?;
+                for update in updates {
+                    self.apply(Record::StepAt {
+                        fortress_id,
+                        plan_digest: update.plan_digest,
+                        step: update.step,
+                        state: update.state,
+                        anchor,
+                    })?;
+                }
+                for plan_digest in retired {
+                    if self
+                        .commits
+                        .get(&fortress_id)
+                        .and_then(|book| book.get(&plan_digest))
+                        .is_some_and(|commit| {
+                            commit.steps.values().any(|state| state == "dispatched")
+                        })
+                    {
+                        return Err(corrupt("progress retired a plan with dispatched work"));
+                    }
+                    self.apply(Record::Done {
+                        fortress_id,
+                        plan_digest,
+                    })?;
+                }
             }
             Record::Checkpoint(checkpoint) => {
                 let book = self.checkpoints.entry(checkpoint.fortress_id).or_default();
@@ -1017,6 +1471,30 @@ impl Index {
                     return Err(corrupt("durable commit exceeds its step bound"));
                 }
                 commit.steps.insert(step, state);
+                commit.step_anchors.remove(&step);
+            }
+            Record::StepAt {
+                fortress_id,
+                plan_digest,
+                step,
+                state,
+                anchor,
+            } => {
+                if anchor.fortress_id != fortress_id {
+                    return Err(corrupt("step evidence belongs to another fortress"));
+                }
+                self.apply(Record::Step {
+                    fortress_id,
+                    plan_digest,
+                    step,
+                    state,
+                })?;
+                let commit = self
+                    .commits
+                    .get_mut(&fortress_id)
+                    .and_then(|book| book.get_mut(&plan_digest))
+                    .ok_or_else(|| corrupt("anchored step names an unknown durable commit"))?;
+                commit.step_anchors.insert(step, anchor);
             }
             Record::Done {
                 fortress_id,
@@ -1098,6 +1576,147 @@ mod tests {
         assert_eq!(checkpoints[0].label, "before dig");
         assert_eq!(store.load_snapshot(checkpoints[0].state_hash)?, checkpoint);
         assert_eq!(store.report().records, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn capacity_compaction_cannot_collect_the_next_publications_snapshot() -> Result<()> {
+        let dir = TempDir::new("capacity-publication");
+        let incoming = snapshot(7, 99);
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for tick in 1..=10 {
+                store.persist_head("empty", &snapshot(7, tick))?;
+            }
+            let record = Record::Head(DurableHead {
+                fortress_id: incoming.fortress_id,
+                scenario: "empty".to_owned(),
+                anchor: incoming.anchor(),
+            });
+            // Exercise the real append path with a small byte budget, avoiding
+            // a 64-MiB fixture. A compacted head plus the new record fits.
+            let capacity = 2 * (record.payload().len() as u64 + 66);
+            store.append_with_limit(record, Some(&incoming), capacity)?;
+            assert_eq!(store.report().compactions, 1);
+            assert_eq!(store.load_snapshot(incoming.state_hash)?, incoming);
+        }
+        let store = DurableLabStore::open(&dir.0)?;
+        assert_eq!(
+            store.head(incoming.fortress_id).map(|head| head.anchor),
+            Some(incoming.anchor())
+        );
+        assert_eq!(store.load_snapshot(incoming.state_hash)?, incoming);
+        Ok(())
+    }
+
+    #[test]
+    fn unfit_publication_refuses_before_materializing_its_snapshot() -> Result<()> {
+        let dir = TempDir::new("capacity-refusal");
+        let before = snapshot(7, 10);
+        let incoming = snapshot(7, 99);
+        let mut store = DurableLabStore::open(&dir.0)?;
+        store.persist_head("empty", &before)?;
+        let result = store.append_with_limit(
+            Record::Head(DurableHead {
+                fortress_id: incoming.fortress_id,
+                scenario: "empty".to_owned(),
+                anchor: incoming.anchor(),
+            }),
+            Some(&incoming),
+            1,
+        );
+        assert!(matches!(result, Err(error) if error.code == ErrorCode::BudgetExceeded));
+        assert_eq!(
+            store.head(before.fortress_id).map(|head| head.anchor),
+            Some(before.anchor())
+        );
+        assert!(!store.object_path(incoming.state_hash).exists());
+        drop(store);
+        let store = DurableLabStore::open(&dir.0)?;
+        assert_eq!(store.load_snapshot(before.state_hash)?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn uncertain_partial_or_complete_append_fences_retries_until_reopen() -> Result<()> {
+        for complete in [false, true] {
+            let dir = TempDir::new(if complete {
+                "lost-ack"
+            } else {
+                "partial-write"
+            });
+            let before = snapshot(7, 10);
+            let incoming = snapshot(7, 11);
+            let mut store = DurableLabStore::open(&dir.0)?;
+            store.persist_head("empty", &before)?;
+            store.write_object(&incoming)?;
+            let payload = Record::Head(DurableHead {
+                fortress_id: incoming.fortress_id,
+                scenario: "empty".to_owned(),
+                anchor: incoming.anchor(),
+            })
+            .payload();
+            let line = format!("{} {payload}\n", chain_next(store.chain, &payload).to_hex());
+            let result = store.write_record_with(line.as_bytes(), |journal, bytes| {
+                let end = if complete {
+                    bytes.len()
+                } else {
+                    bytes.len() / 2
+                };
+                journal.write_all(&bytes[..end])?;
+                Err(std::io::Error::other("injected uncertain journal write"))
+            });
+            assert!(result.is_err());
+            // Even an apparent no-op cannot clear an unresolved durable fault.
+            assert!(store.persist_head("empty", &before).is_err());
+            assert!(store.persist_progress("empty", &before, &[], &[]).is_err());
+            assert!(store.persist_head("empty", &incoming).is_err());
+            assert!(store.compact().is_err());
+            drop(store);
+            let mut store = DurableLabStore::open(&dir.0)?;
+            let expected = if complete { &incoming } else { &before };
+            assert_eq!(
+                store.head(expected.fortress_id).map(|head| head.anchor),
+                Some(expected.anchor())
+            );
+            store.persist_head("empty", &incoming)?;
+            drop(store);
+            let store = DurableLabStore::open(&dir.0)?;
+            assert_eq!(store.load_snapshot(incoming.state_hash)?, incoming);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn failed_directory_sync_after_compaction_rename_fences_the_new_journal() -> Result<()> {
+        let dir = TempDir::new("compaction-sync-fault");
+        let current = snapshot(7, 2);
+        let mut store = DurableLabStore::open(&dir.0)?;
+        store.persist_head("empty", &snapshot(7, 1))?;
+        store.persist_head("empty", &current)?;
+        let result = store.compact_with_directory_sync(|_| {
+            Err(DfmcpError::new(
+                ErrorCode::AdapterUnavailable,
+                "injected compaction directory sync failure",
+            ))
+        });
+        assert!(result.is_err());
+        assert_eq!(store.report().records, 1);
+        assert_eq!(store.report().compactions, 1);
+        assert!(store.persist_head("empty", &snapshot(7, 3)).is_err());
+        drop(store);
+        let mut store = DurableLabStore::open(&dir.0)?;
+        assert_eq!(
+            store.head(current.fortress_id).map(|head| head.anchor),
+            Some(current.anchor())
+        );
+        store.persist_head("empty", &snapshot(7, 3))?;
+        drop(store);
+        let store = DurableLabStore::open(&dir.0)?;
+        assert_eq!(
+            store.head(current.fortress_id).map(|head| head.anchor.tick),
+            Some(GameTick(3))
+        );
         Ok(())
     }
 

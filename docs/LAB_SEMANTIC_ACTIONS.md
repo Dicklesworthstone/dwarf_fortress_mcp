@@ -205,8 +205,12 @@ When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
   committed action); action handles, plans and obligations from before the
   restart are not carried and must be re-established from observation;
 - **commits survive too.** Before a durable commit dispatches anything, its
-  agent request and the exact world it was sealed against are journaled; step
-  states are journaled after every call, before the world head. On resume each
+  agent request and the exact world it was sealed against are journaled. After
+  each call, submitted step transitions, the world head and completed-plan
+  retirement are published in one atomic progress record. A crash exposes
+  either the preceding complete frontier or the new complete frontier. New
+  transitions retain their exact snapshot anchors through compaction; older
+  step records remain distinguishable by their missing anchors. On resume each
   unfinished commit is deterministically recompiled from that request and world
   and must reproduce its sealed digest (otherwise it is reported `unverifiable`
   and abandoned, never trusted). Dispatched steps come back as
@@ -222,12 +226,18 @@ When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
 - `fortress_doctor` reports `durability` (persisted anchor, whether it is
   current, journal records, chain head, torn tail discarded at open).
 
-Storage: `journal` (one `<chain> <record>` line per head/checkpoint, SHA-256
+Storage: `journal` (one `<chain> <record>` line per atomic progress frontier,
+head, checkpoint or retained commit record, SHA-256
 chained) plus `objects/<sha256>.snap` holding exact canonical snapshot bytes.
 Objects are synced and renamed before the record naming them is appended and
 synced. On open only an incomplete final record is discarded; a broken chain,
-malformed record or corrupt object refuses the store. The journal is compacted
-to live records (and unreferenced objects removed) every 1,024 records.
+malformed record or corrupt object refuses the store. Progress records are
+bounded at 8 MiB (at most 256 commits with 256 steps each); other records retain
+their 64-KiB limit, and the journal is bounded at 64 MiB. The journal is compacted
+to live records (and unreferenced objects removed) every 1,024 records or before
+its byte limit would be exceeded. Sealed-plan and retained step-proof snapshots
+remain pinned. An uncertain write or sync failure refuses further publication
+until the store is reopened and its complete journal prefix is recovered.
 `scripts/lab_durable_restart.py` demonstrates it across a SIGKILL.
 
 ## Live routing of sealed plans

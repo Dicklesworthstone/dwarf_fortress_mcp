@@ -211,8 +211,8 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     Ok(())
 }
 
-/// One durable commit is three journal boundaries: the commit record (before
-/// any effect), the step state, then the world head. Crashing after each
+/// One durable commit has two journal boundaries: the commit record (before
+/// any effect), then the atomic world and progress frontier. Crashing after each
 /// must recover honestly: never a verified step without its effect.
 #[test]
 fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult {
@@ -222,11 +222,7 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
     let dig =
         r#"[{"action":{"kind":"designate_dig","min":[2,3,10],"max":[3,3,10],"mode":"mine"}}]"#;
     let mut outcomes = Vec::new();
-    for (case, budget) in [
-        ("after_commit_record", 1),
-        ("after_step_record", 2),
-        ("after_head", 3),
-    ] {
+    for (case, budget) in [("after_commit_record", 1), ("after_atomic_frontier", 2)] {
         let _ = std::fs::remove_dir_all(&dir.0);
         crate::server::simulate_durable_restart(Some(dir.0.clone()));
         let selector = format!("8803{budget}");
@@ -260,7 +256,11 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
             digest.as_str(),
             "{case}: {resumed}"
         );
-        // Let time pass well beyond the obligation deadline, then look.
+        // Observe completion on its declared cadence before the deadline,
+        // then advance beyond it to check that terminal proof remains stable.
+        for _ in 0..20 {
+            parsed(&fortress_wait(Some(second.clone()), Some(5)))?;
+        }
         for _ in 0..10 {
             parsed(&fortress_wait(Some(second.clone()), Some(100)))?;
         }
@@ -283,23 +283,68 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
                 Some("not_dispatched".to_owned()),
                 None
             ),
-            // The step was recorded dispatched but the world head was lost:
-            // the obligation is carried and fails, never verifies.
+            // The step and its world reached disk together.
             (
-                "after_step_record",
-                false,
-                Some("dispatched".to_owned()),
-                Some("failed".to_owned())
-            ),
-            // Everything reached disk: carried and proven by observation.
-            (
-                "after_head",
+                "after_atomic_frontier",
                 true,
                 Some("dispatched".to_owned()),
                 Some("verified".to_owned())
             ),
         ]
     );
+    Ok(())
+}
+
+#[test]
+fn immediate_verified_step_and_temporal_effect_recover_together() -> TestResult {
+    let _serial = serialized();
+    let dir = StateDir(std::env::temp_dir().join(format!(
+        "dfmcp-durable-mixed-frontier-{}",
+        std::process::id()
+    )));
+    for budget in [1, 2] {
+        let _ = std::fs::remove_dir_all(&dir.0);
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let selector = format!("8898{budget}");
+        let opened = open_durable(&selector, Some("starter_fortress"))?;
+        let first = id(&opened, "session_id")?;
+        let planned = parsed(&fortress_plan(
+            Some(first.clone()),
+            None,
+            None,
+            Some(
+                r#"[{"action":{"kind":"pause","paused":true}},
+                    {"action":{"kind":"designate_dig","min":[2,3,10],"max":[3,3,10],"mode":"mine"}}]"#
+                    .to_owned(),
+            ),
+            None,
+        ))?;
+        assert_eq!(planned["ok"], true, "{planned}");
+        crate::server::inject_durable_crash_after(budget);
+        parsed(&fortress_commit(Some(first), id(&planned, "plan_digest")?))?;
+
+        crate::server::simulate_durable_restart(Some(dir.0.clone()));
+        let resumed = open_durable(&selector, None)?;
+        assert_eq!(resumed["ok"], true, "{resumed}");
+        let second = id(&resumed, "session_id")?;
+        let observed = parsed(&fortress_observe(Some(second.clone())))?;
+        let designations = parsed(&fortress_query(
+            Some(second),
+            Some(r#"{"mode":"entities","kind":"dig_designation"}"#.to_owned()),
+        ))?;
+        let steps = &resumed["durable"]["recovered_commits"][0]["steps"];
+        if budget == 1 {
+            assert_eq!(observed["paused"], false, "{observed}");
+            assert_eq!(designations["total"], 0, "{designations}");
+            assert_eq!(steps[0]["state"], "not_dispatched", "{resumed}");
+            assert_eq!(steps[1]["state"], "not_dispatched", "{resumed}");
+        } else {
+            assert_eq!(observed["paused"], true, "{observed}");
+            assert_eq!(designations["total"], 1, "{designations}");
+            assert_eq!(steps[0]["state"], "verified", "{resumed}");
+            assert_eq!(steps[1]["state"], "dispatched", "{resumed}");
+        }
+    }
     Ok(())
 }
 

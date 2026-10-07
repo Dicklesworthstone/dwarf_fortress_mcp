@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Atomic laboratory world and execution recovery (2026-10-07)
+
+The durable laboratory store now publishes the world snapshot, all submitted
+step-state transitions and completed-plan retirement in one bounded, hash-chained
+progress record. A torn write exposes the preceding complete frontier, rather
+than a verified step paired with the world before its effect. The MCP persistence
+source calls this atomic API instead of writing steps and the world separately.
+
+Each new step transition retains the exact snapshot anchor that established it.
+Compaction preserves those anchors and their snapshot objects together with the
+original sealed-plan basis. Legacy step records remain readable without being
+silently assigned proof anchors. Progress input is validated and canonicalized
+before publication; unchanged progress is idempotent. Journal capacity is checked
+before append, and compaction cannot collect an object awaiting publication.
+Uncertain writes, file-sync failures and post-rename directory-sync failures fence
+the open store until it is reopened, preventing an unsafe retry on an uncertain
+journal or an obsolete file handle.
+
+**Evidence: 26 passing tests against the exact durable-store source** (13 module
+unit tests and 13 integration tests), compiled with real cached `dfmcp_core` and
+`dfmcp_world` dependencies on nightly 1.100.0 (`908501772`). Coverage includes every
+byte prefix of mixed world/progress/retirement publication, pause effects, large
+frontiers, invalid input, proof-anchor preservation, corrupt objects, byte limits
+and injected write/sync failures. Resource pressure killed the ordinary Cargo
+test build in the unchanged adapter, so the exact module was compiled and run
+in isolation. This is not a full laboratory or MCP qualification claim. The MCP
+crash regressions are source present and remain unexecuted; shared-session durable
+ownership and faithful carried-obligation monitoring are separate follow-up work.
+
+Tracked as laboratory progress under `df-franken-storage-mvcc-54h.1` and
+`df-franken-storage-mvcc-54h.2`; this does not complete the owned FrankenSQLite or
+FrankenFS integrations, or change native, live or production admission.
+
 ### Real modern MCP Tasks for original laboratory plans (2026-10-07)
 
 **Evidence for this increment: source/API review and formatting only for the
