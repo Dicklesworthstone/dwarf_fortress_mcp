@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-07 — Canonical observation-only obligation recovery
+
+- Add `RecoveredObligation` around the canonical runtime, retaining original
+  deadlines and cadence while discarding unfinished stability across restart.
+- Reject stale/forked observations, keep exact-deadline proof and immutable
+  terminal anchors, and reset unfinished stability on observation interruption.
+- Pass all 118 ordinary Cargo intent tests, including nine new recovery cases.
+  This pure primitive grants no authority and never dispatches or advances time;
+  its MCP integration is a separate increment.
+
 ## 2026-10-07 — Atomic laboratory recovery frontiers
 
 - Publish world state, step progress and completed-plan retirement in one durable

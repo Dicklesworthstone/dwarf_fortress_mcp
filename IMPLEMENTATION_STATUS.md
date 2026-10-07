@@ -44,6 +44,31 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Canonical observation-only recovery primitive (2026-10-07)
+
+`RecoveredObligation` now exposes restart-safe proof monitoring through the
+canonical obligation runtime. It keeps the original sealed specification,
+absolute deadline and registration tick; resets unfinished stability at restart
+or observation interruption; and treats the archived frontier as a cadence floor,
+not a new positive sample. Exact-deadline evidence remains eligible, late first
+proof fails, failure predicates retain precedence, stale or forked observations
+are rejected, and terminal evidence anchors remain immutable. This pure primitive
+cannot dispatch an action, advance the clock or grant observation authority.
+
+**Evidence: all 118 tests in the ordinary locked/offline Cargo `dfmcp-intent`
+suite passed, including nine new recovery cases, with 0 failures or ignored
+tests.** The focused nine-case run is included in that total, not counted twice.
+The unchanged recovery module was fully recorded before the execution service
+went offline and was preserved from those observed contents through GitHub.
+The separate durable-store validation below adds 26 different passing cases.
+
+The MCP integration with shared ownership, current observation authority,
+conservative legacy recovery and atomic restore is a separate increment still
+pending publication. This primitive alone does not establish MCP process
+execution, full-workspace Rust qualification, native/live qualification or
+production admission. Tracked under `df-franken-storage-mvcc-54h.1`; the broader
+owned storage integrations remain open.
+
 ### Atomic laboratory world and execution recovery (2026-10-07)
 
 The durable laboratory store now publishes the world snapshot, all submitted

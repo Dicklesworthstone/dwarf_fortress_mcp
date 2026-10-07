@@ -15,6 +15,9 @@ use dfmcp_world::{Predicate, WorldSnapshot, evaluate};
 use crate::plan::ObligationSpec;
 
 mod drain;
+mod recovery;
+
+pub use recovery::RecoveredObligation;
 
 const MAX_TRACKED_OBLIGATIONS: usize = 65_536;
 

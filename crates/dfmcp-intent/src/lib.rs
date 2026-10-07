@@ -23,6 +23,7 @@ pub use logistics::{
 };
 pub use obligation::{
     BoundedObligation, DrainProgressCertificate, ObligationRuntime, ObligationStatus,
+    RecoveredObligation,
 };
 pub use plan::derive_step_idempotency_key;
 pub use plan::{Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan, RequestedAction};
