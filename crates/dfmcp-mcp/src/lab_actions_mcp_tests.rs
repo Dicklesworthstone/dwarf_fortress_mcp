@@ -2257,3 +2257,28 @@ fn the_v2_anchor_is_one_complete_tuple_and_restore_opens_a_new_epoch() -> TestRe
     assert_eq!(after["fortress_lineage"], before["fortress_lineage"]);
     Ok(())
 }
+
+#[test]
+fn objectives_say_what_they_are_for_and_when_they_stopped_holding() -> TestResult {
+    let session = open("72230", false, &ALL_EFFECTS)?;
+    let off = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":false}}]"#,
+    )?;
+    assert_eq!(off["ok"], true, "{off}");
+    let on = plan_and_commit(
+        &session,
+        r#"[{"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true}}]"#,
+    )?;
+    assert_eq!(on["ok"], true, "{on}");
+    let observed = parsed(&fortress_observe(Some(session)))?;
+    let objectives = observed["objectives"].as_array().ok_or("objectives")?;
+    assert_eq!(objectives.len(), 2, "{observed}");
+    assert_eq!(objectives[0]["summary"], "set_labor BREW off for 1003");
+    assert_eq!(objectives[1]["summary"], "set_labor BREW on for 1003");
+    // The first goal held, then the second plan deliberately undid it.
+    assert_eq!(objectives[0]["status"], "no_longer_holds", "{observed}");
+    assert!(objectives[0]["achieved_tick"].is_u64());
+    assert_eq!(objectives[1]["status"], "achieved");
+    Ok(())
+}

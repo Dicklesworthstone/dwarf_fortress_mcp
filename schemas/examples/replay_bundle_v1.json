@@ -84,7 +84,7 @@
         "state_hash": "40009c0049eba4f7fc56855b652fbd9b9f2fd71aad00496126af51a9bd51c08f"
       },
       "arguments": {
-        "plan_digest": "a1e468965e5d6745e1626ba64a791099d44f76cf8dbf530ad446e7c81cda2104"
+        "plan_digest": "92d0c931b565a1edc7fdea88ab18af6ad149ccfef206297c0899bc46dd91faac"
       },
       "error_code": null,
       "ok": true,
@@ -170,7 +170,7 @@
       "tool": "fortress.observe"
     }
   ],
-  "calls_digest": "45b4b70ab51b1a57ab577fb852d620540acd35fa5e05b8a401fddbd93ebd7693",
+  "calls_digest": "5b3dfd4c26a77fcf805dfd4bebfdb6831dbef2907882472303560d098bdb9da0",
   "not_replayable_reason": null,
   "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor",
   "replayable": true,

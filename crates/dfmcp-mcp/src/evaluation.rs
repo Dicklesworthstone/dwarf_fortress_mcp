@@ -203,7 +203,14 @@ pub fn evaluate(scenario: &str, policy: &str, horizon_ticks: u64) -> Value {
             "hostiles_total": hostiles.len(),
             "objectives_achieved": achieved,
             "objectives_total": objectives.len(),
+            "objectives_achieved_then_undone": objectives
+                .iter()
+                .filter(|o| o["status"] == "no_longer_holds")
+                .count(),
         },
+        "objectives": objectives.iter().map(|o| json!({
+            "summary": o["summary"], "status": o["status"],
+        })).collect::<Vec<_>>(),
         "cost": {
             "tool_calls": tally.calls,
             "plans_committed": tally.plans_committed,

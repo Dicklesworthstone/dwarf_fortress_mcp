@@ -36,7 +36,9 @@ use dfmcp_intent::{
 };
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::topology::get_transitive_dependencies;
-use dfmcp_world::{EdgeKind, Predicate, PredicateEvidence, QueryOrder, WorldQuery, WorldSnapshot};
+use dfmcp_world::{
+    EdgeKind, Predicate, PredicateEvidence, PredicateTruth, QueryOrder, WorldQuery, WorldSnapshot,
+};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::json;
@@ -128,6 +130,9 @@ struct Objective {
     summary: String,
     terminal: Predicate,
     committed_tick: u64,
+    /// First observed tick at which the terminal condition held. A goal that
+    /// held and later stopped holding is not the same as one never reached.
+    achieved_tick: Option<u64>,
 }
 
 const MAX_OBJECTIVES: usize = 64;
@@ -152,6 +157,12 @@ pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
                 result["terminal_condition"] =
                     crate::lab_world::predicate_json(&objective.terminal);
                 result["committed_tick"] = json!(objective.committed_tick);
+                if let Some(tick) = objective.achieved_tick {
+                    result["achieved_tick"] = json!(tick);
+                    if result["predicate_truth"] == "false" {
+                        result["status"] = json!("no_longer_holds");
+                    }
+                }
                 result
             })
             .collect::<Vec<_>>()
@@ -172,6 +183,22 @@ fn new_history() -> dfmcp_world::retention::VersionRetention {
 /// sealed anchor, durable in-flight plans' anchors, and every checkpoint.
 fn remember_version(session: &mut LabSession) {
     let current = session.adapter.snapshot().clone();
+    if session.objectives.iter().any(|o| o.achieved_tick.is_none())
+        && let Ok(evidence) = PredicateEvidence::laboratory(&current)
+    {
+        for objective in session
+            .objectives
+            .iter_mut()
+            .filter(|o| o.achieved_tick.is_none())
+        {
+            if matches!(
+                evidence.evaluate(&objective.terminal),
+                Ok(PredicateTruth::True)
+            ) {
+                objective.achieved_tick = Some(current.tick.0);
+            }
+        }
+    }
     session.history.record(&current);
     let mut roots: std::collections::BTreeSet<Digest32> =
         session.adapter.checkpoint_state_hashes().collect();
@@ -692,6 +719,78 @@ pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
     if let Ok(mut registry) = SHARED_WORLDS.lock() {
         registry.retain(|_, world| world.lock().is_ok_and(|world| !world.durable));
     }
+}
+
+/// A readable default summary for an action plan: each step's kind and its
+/// identifying arguments, e.g. `set_labor BREW=true for 1003; designate_dig
+/// mine [1,3,10]..[4,5,10]`. Objectives carry it, so it must say what the
+/// plan is for rather than that it is a plan.
+fn describe_actions(raw: &str) -> String {
+    const MAX_DESCRIBED_BYTES: usize = 240;
+    let Ok(serde_json::Value::Array(steps)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return "execute semantic actions".to_owned();
+    };
+    let text = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|i| i.as_str().map_or_else(|| i.to_string(), str::to_owned))
+            .collect::<Vec<_>>()
+            .join(","),
+        other => other.to_string(),
+    };
+    let parts: Vec<String> = steps
+        .iter()
+        .map(|step| {
+            let action = &step["action"];
+            let kind = action["kind"].as_str().unwrap_or("action");
+            let mut words = vec![kind.to_owned()];
+            for key in [
+                "mode",
+                "building",
+                "job_token",
+                "labor",
+                "name",
+                "key",
+                "value",
+            ] {
+                if let Some(value) = action.get(key).filter(|v| !v.is_null()) {
+                    words.push(text(value));
+                }
+            }
+            if let Some(enabled) = action.get("enabled").and_then(serde_json::Value::as_bool) {
+                words.push(if enabled { "on" } else { "off" }.to_owned());
+            }
+            if let Some(assigned) = action.get("assigned").and_then(serde_json::Value::as_bool) {
+                words.push(if assigned { "join" } else { "leave" }.to_owned());
+            }
+            if let Some(amount) = action.get("amount").and_then(serde_json::Value::as_u64) {
+                words.push(format!("x{amount}"));
+            }
+            for (key, label) in [("units", "for"), ("squad", "into"), ("burrow", "in")] {
+                if let Some(value) = action.get(key).filter(|v| !v.is_null()) {
+                    words.push(format!("{label} {}", text(value)));
+                }
+            }
+            if let (Some(min), Some(max)) = (action.get("min"), action.get("max")) {
+                words.push(format!("{min}..{max}"));
+            }
+            words.join(" ")
+        })
+        .collect();
+    let mut summary = parts.join("; ");
+    if summary.is_empty() {
+        return "execute semantic actions".to_owned();
+    }
+    if summary.len() > MAX_DESCRIBED_BYTES {
+        let mut cut = MAX_DESCRIBED_BYTES;
+        while !summary.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        summary.truncate(cut);
+        summary.push_str("...");
+    }
+    summary
 }
 
 /// Test hook: forget a process-local shared fortress and its member
@@ -2523,15 +2622,15 @@ pub(crate) fn plan_request(
         );
     }
     let default_summary = if production.is_some() {
-        "meet production quotas"
+        "meet production quotas".to_owned()
     } else if blueprint.is_some() {
-        ""
-    } else if actions.is_some() {
-        "execute semantic actions"
+        String::new()
+    } else if let Some(raw) = actions.as_deref() {
+        describe_actions(raw)
     } else {
-        "unpause the simulation"
+        "unpause the simulation".to_owned()
     };
-    let summary = summary.map_or_else(|| default_summary.to_owned(), |value| value);
+    let summary = summary.map_or(default_summary, |value| value);
     if summary.len() > MAX_SUMMARY_BYTES {
         return coded_error_payload(
             "fortress.plan",
@@ -3628,6 +3727,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                 summary: pending.plan.summary.clone(),
                                 terminal: pending.plan.terminal_condition.clone(),
                                 committed_tick,
+                                achieved_tick: None,
                             });
                             guard.last_action =
                                 receipt.actions.first().map(|action| action.action_id);
