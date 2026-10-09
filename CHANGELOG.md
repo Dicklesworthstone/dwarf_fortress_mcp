@@ -402,6 +402,10 @@ readiness.
   briefing observation profiles are now semantic shapings with named omissions.
 - `dfmcp_core::StateAnchorV2`: the complete anchor tuple with strict canonical bytes and a total
   continuity classification, exposed on the session anchor resource.
+- Trace-class exploration of two-agent shared-fortress interleavings (`dpor_tests`): lease
+  exclusivity, independence-relation soundness, per-trace determinism and absence of write skew.
+- Objectives carry readable action summaries and a `no_longer_holds` status; the evaluation
+  report lists every objective.
 - Renamed capability-implying names: `table_ledger` (was `sqlite_ledger`),
   `http_resumption_lab` (was `http_transport`), `e2e_lab_fortress_tests`, and
   `DelegationToken.delegation_digest`.
@@ -411,6 +415,9 @@ readiness.
   complete. Laboratory only.
 
 ### Fixed
+
+- `fortress.cancel` refuses sessions whose every grant is read-only before disclosing session
+  state (its entry gate had been lowered to `observe`); warning-denied Clippy is clean again.
 
 - Plan-scope `compensate_reversible` no longer applies the inverse of deferred steps that never
   dispatched (it could flip a dwarf's labor nobody asked to change).

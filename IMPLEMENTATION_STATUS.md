@@ -816,6 +816,18 @@ native, live-game, registry or production evidence.
 - **Anchor v2.** `dfmcp_core::StateAnchorV2` is the complete version tuple with
   strict canonical bytes and a total continuity classification, exposed on
   `df://session/{id}/anchor`; v1 remains the wire anchor.
+- **Concurrency exploration.** `dpor_tests` enumerates every interleaving of
+  two agents on one shared fortress, groups them into Mazurkiewicz trace
+  classes (Foata normal form; cross-agent plans/queries commute, commits and
+  waits do not), re-runs each class representative identically and checks a
+  second linearization agrees. Overlapping digs never both commit (20
+  interleavings, 14 classes); disjoint digs always do (70/24); adjacent digs
+  that read each other through the hazard halo are refused as stale rather
+  than committed on an outdated read, so commit-time revalidation is
+  serializable and no separate SSI gate is needed while commits are serialized.
+- **Objectives.** Default plan summaries name each step and its arguments;
+  objectives record when they were first achieved and report
+  `no_longer_holds` when a later plan undoes them.
 - **Fixes found by these tests.** Path endpoints overflowed `i32` arithmetic;
   plan-scope `compensate_reversible` applied the inverse of deferred steps that
   never dispatched.
