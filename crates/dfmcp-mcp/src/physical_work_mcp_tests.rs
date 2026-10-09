@@ -36,6 +36,17 @@ fn open_session(
     scenario: Option<&str>,
     clock: bool,
 ) -> TestResult<String> {
+    open_session_paused(selector, shared, scenario, clock, false)
+}
+
+/// A shared fortress whose clock starts paused, so members can vote to unpause.
+fn open_session_paused(
+    selector: &str,
+    shared: bool,
+    scenario: Option<&str>,
+    clock: bool,
+    paused: bool,
+) -> TestResult<String> {
     let mut capabilities = vec![
         ("observe", "read_only"),
         ("query", "read_only"),
@@ -50,7 +61,7 @@ fn open_session(
         capabilities.push(("control_clock", "reversible"));
     }
     let opened = parsed(&facade::fortress_open_session(
-        Some(false),
+        Some(paused),
         Some(selector.to_owned()),
         Some(
             capabilities
@@ -629,7 +640,7 @@ fn emergency_cleanup_of_terminal_work_pauses_without_rewriting_goal_proof() -> T
 #[test]
 fn partial_emergency_drain_refreshes_agent_work_and_revokes_previous_clock_consent() -> TestResult {
     let _serial = crate::test_serial();
-    let session = open_session("73619", true, Some("starter_fortress"), true)?;
+    let session = open_session_paused("73619", true, Some("starter_fortress"), true, true)?;
     let other = open_session("73619", true, None, true)?;
     plan_and_commit(
         &session,

@@ -236,7 +236,19 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
         "{completed}"
     );
     assert_eq!(terrain(&third_session)?, finished);
-    let now_available = plan_one_tile(&third_session)?;
+    // The finished hall is already floor; the released lease no longer blocks
+    // work beside it whose hazard halo reaches into the hall.
+    let now_available = parsed(&fortress_plan(
+        Some(third_session.clone()),
+        None,
+        None,
+        Some(
+            r#"[{"action":{"kind":"designate_dig","min":[3,6,10],"max":[3,6,10],"mode":"mine"}}]"#
+                .to_owned(),
+        ),
+        None,
+    ))?;
+    assert_eq!(now_available["ok"], true, "{now_available}");
     let committed = parsed(&fortress_commit(
         Some(third_session),
         id(&now_available, "plan_digest")?,
