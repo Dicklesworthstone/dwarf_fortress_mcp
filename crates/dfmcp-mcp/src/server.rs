@@ -2164,11 +2164,11 @@ pub(crate) fn open_session_in_scenario(
                 // leave an unreachable member blocking unanimous unpause.
                 sessions().remove(&session_id);
                 let world = session.lock().ok().and_then(|guard| guard.shared.clone());
-                if let Some(world) = world {
-                    if let Ok(mut guard) = world.lock() {
-                        guard.members.remove(&session_id);
-                        guard.leases.unpause_consent.remove(&session_id);
-                    }
+                if let Some(world) = world
+                    && let Ok(mut guard) = world.lock()
+                {
+                    guard.members.remove(&session_id);
+                    guard.leases.unpause_consent.remove(&session_id);
                 }
             }
             return coded_error_payload(
@@ -3937,6 +3937,20 @@ pub(crate) fn cancel_in_scope(
                     authorize_entry(&entry_ctx, Capability::Observe, RiskTier::ReadOnly)
                 {
                     return dfmcp_error_payload("fortress.cancel", &error);
+                }
+                // Cancellation changes the world; a read-only session is
+                // refused before any session state is disclosed. Each drained
+                // action is still authorized against its own capability.
+                if guard
+                    .grants
+                    .iter()
+                    .all(|grant| grant.max_risk == RiskTier::ReadOnly)
+                {
+                    return coded_error_payload(
+                        "fortress.cancel",
+                        ErrorCode::CapabilityDenied,
+                        "cancellation requires a capability above read_only",
+                    );
                 }
             }
             let cancel_mode = match mode.as_deref() {

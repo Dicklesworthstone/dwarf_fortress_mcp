@@ -191,7 +191,7 @@ impl LabTaskService {
             "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
             "remaining_work": payload["remaining_work"],
             "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
-            "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or_else(|| json!(true)),
+            "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or(Value::Bool(true)),
             "drain_progress": payload.get("drain_progress").cloned().unwrap_or_else(unresolved_drain_progress),
             "physical_work": payload["physical_work"],
             "observed_anchor": anchor, "action_counts": counts,
@@ -535,10 +535,10 @@ impl ToolHandler for TaskAwareCommit {
         ctx: &McpContext,
         mut arguments: Value,
     ) -> McpResult<FinalToolOutcome> {
-        if let Some(value) = arguments.get("as_task") {
-            if !value.is_boolean() {
-                return Err(McpError::invalid_params("as_task must be a boolean"));
-            }
+        if let Some(value) = arguments.get("as_task")
+            && !value.is_boolean()
+        {
+            return Err(McpError::invalid_params("as_task must be a boolean"));
         }
         if arguments.get("as_task") != Some(&Value::Bool(true)) {
             if let Some(arguments) = arguments.as_object_mut() {

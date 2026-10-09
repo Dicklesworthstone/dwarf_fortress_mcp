@@ -113,7 +113,7 @@
         "fortress_id": "660123",
         "game_tick": 101,
         "sequence": 2,
-        "state_hash": "fe29668596ac904b6544eb1aaf6b4975d3dd4da9bd9a646634751cf7f2c6edfe"
+        "state_hash": "1bc28f92ff8f008df57e89f755e926bdb2f3fb6ec12644042a13fdc179d26613"
       },
       "arguments": {
         "max_game_ticks": 100
@@ -129,7 +129,7 @@
         "fortress_id": "660123",
         "game_tick": 101,
         "sequence": 2,
-        "state_hash": "fe29668596ac904b6544eb1aaf6b4975d3dd4da9bd9a646634751cf7f2c6edfe"
+        "state_hash": "1bc28f92ff8f008df57e89f755e926bdb2f3fb6ec12644042a13fdc179d26613"
       },
       "arguments": {
         "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
@@ -170,7 +170,7 @@
       "tool": "fortress.observe"
     }
   ],
-  "calls_digest": "2653e43d58e64f6d25935012bfb6e26b7f2c37988caed908971dc230c6d0cede",
+  "calls_digest": "45b4b70ab51b1a57ab577fb852d620540acd35fa5e05b8a401fddbd93ebd7693",
   "not_replayable_reason": null,
   "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor",
   "replayable": true,

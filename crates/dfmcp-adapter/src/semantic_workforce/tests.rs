@@ -414,12 +414,12 @@ impl WorkforceEvidenceOwner for Observer {
         if self.fail_at == Some(self.refreshes) {
             self.deny = true;
         }
-        if let Some((at, storage)) = &self.corrupt_at {
-            if *at == self.refreshes {
-                let mut memory = storage.0.borrow_mut();
-                if let Some(last) = memory.file.get_mut().last_mut() {
-                    *last ^= 1;
-                }
+        if let Some((at, storage)) = &self.corrupt_at
+            && *at == self.refreshes
+        {
+            let mut memory = storage.0.borrow_mut();
+            if let Some(last) = memory.file.get_mut().last_mut() {
+                *last ^= 1;
             }
         }
         Ok(())

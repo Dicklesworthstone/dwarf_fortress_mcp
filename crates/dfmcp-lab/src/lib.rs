@@ -294,16 +294,18 @@ impl MemoryAdapter {
     /// including records whose goal proof is already terminal. This iterator
     /// only reads bookkeeping and never polls or dispatches a prepared step.
     pub fn known_work_entity_ids(&self) -> impl Iterator<Item = dfmcp_core::EntityId> + '_ {
-        self.actions.values().filter_map(|action| {
-            (action.dispatched
-                && matches!(
-                    &action.step.action,
-                    Action::DesignateDig { .. }
-                        | Action::Build { .. }
-                        | Action::CreateWorkOrder { .. }
-                ))
-            .then(|| effects::created_entity_id(&action.step.idempotency_key, 0))
-        })
+        self.actions
+            .values()
+            .filter(|action| {
+                action.dispatched
+                    && matches!(
+                        &action.step.action,
+                        Action::DesignateDig { .. }
+                            | Action::Build { .. }
+                            | Action::CreateWorkOrder { .. }
+                    )
+            })
+            .map(|action| effects::created_entity_id(&action.step.idempotency_key, 0))
     }
 
     /// Stop remaining physical work of an already terminal action under a fresh
@@ -2366,7 +2368,6 @@ mod tests {
     fn advancing_time_cannot_promote_a_preexisting_future_dated_work_counter()
     -> Result<(), DfmcpError> {
         use dfmcp_intent::effects;
-        use dfmcp_world::Value;
         for paused in [false, true] {
             let (mut source, order_id) = time_guard_order(paused)?;
             let order = source.graph.entities.get_mut(&order_id).ok_or_else(|| {

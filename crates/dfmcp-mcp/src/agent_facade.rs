@@ -1568,16 +1568,14 @@ fn project_response(
                     "finalize_certificate": payload["finalize_certificate"],
                 }]);
             }
-            if has_grant(&state, "observe") {
-                if let Some(id) = session_id.as_deref()
-                    && crate::server::task_session::read_authority(id).is_ok()
-                {
-                    let tasks = crate::task_service::session_handles(id);
-                    if tasks.as_array().is_none_or(|tasks| !tasks.is_empty()) {
-                        work["mcp_tasks"] = tasks;
-                        work["mcp_task_coverage"] =
-                            crate::task_service::session_handle_coverage(id);
-                    }
+            if has_grant(&state, "observe")
+                && let Some(id) = session_id.as_deref()
+                && crate::server::task_session::read_authority(id).is_ok()
+            {
+                let tasks = crate::task_service::session_handles(id);
+                if tasks.as_array().is_none_or(|tasks| !tasks.is_empty()) {
+                    work["mcp_tasks"] = tasks;
+                    work["mcp_task_coverage"] = crate::task_service::session_handle_coverage(id);
                 }
             }
             work
