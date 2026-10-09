@@ -694,6 +694,22 @@ pub(crate) fn simulate_durable_restart(dir: Option<std::path::PathBuf>) {
     }
 }
 
+/// Test hook: forget a process-local shared fortress and its member
+/// sessions, so exploration campaigns stay inside the shared-world bound.
+#[cfg(test)]
+pub(crate) fn release_shared_world(fortress_id: FortressId) {
+    let world = SHARED_WORLDS
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.remove(&fortress_id));
+    if let Some(members) = world.and_then(|w| w.lock().ok().map(|w| w.members.clone())) {
+        let mut registry = sessions();
+        for member in members {
+            registry.remove(&member);
+        }
+    }
+}
+
 /// Test hook: let the open durable store accept `budget` more journal
 /// appends before behaving as if the process died.
 #[cfg(test)]

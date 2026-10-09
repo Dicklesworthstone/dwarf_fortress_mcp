@@ -2069,3 +2069,7 @@ mod durable_lab_tests;
 #[cfg(test)]
 #[path = "threat_corpus_tests.rs"]
 mod threat_corpus_tests;
+
+#[cfg(test)]
+#[path = "dpor_tests.rs"]
+mod dpor_tests;
