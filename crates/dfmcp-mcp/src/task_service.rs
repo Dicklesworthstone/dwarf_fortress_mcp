@@ -80,6 +80,14 @@ fn compact_original_goal(work: &TaskWork, task_id: &str, payload: &Value) -> Val
         "epistemic_state": original_goal.get("epistemic_state").cloned().unwrap_or_else(|| json!("unknown")),
         "evidence_scope": original_goal["evidence_scope"],
         "observed_anchor": original_goal["observed_anchor"],
+        "historical_achievement": original_goal.get("historical_achievement").cloned().unwrap_or_else(|| json!("unknown")),
+        "first_satisfied_anchor": original_goal["first_satisfied_anchor"],
+        "recorded_first_satisfied_anchor": if original_goal["recorded_first_satisfied_anchor"]
+            != original_goal["first_satisfied_anchor"] {
+            original_goal["recorded_first_satisfied_anchor"].clone()
+        } else { Value::Null },
+        "restore_abandoned_anchor": original_goal["restore_abandoned_anchor"],
+        "abandonment_publication_pending": original_goal["abandonment_publication_pending"].as_bool().unwrap_or(false),
         "condition_digest": condition_digest,
         "completion_inferred_from_action_states": false,
         "details": format!("df://session/{}/task-{task_id}~evidence-0", work.session_id),
@@ -696,7 +704,7 @@ mod tests {
             assert_eq!(compact["completion_inferred_from_action_states"], false);
             assert_eq!(compact["condition_digest"].as_str().map(str::len), Some(64));
             assert!(compact.get("terminal_condition").is_none());
-            assert!(compact.to_string().len() < 1_100, "{compact}");
+            assert!(compact.to_string().len() < 1_400, "{compact}");
             let mut changed = payload.clone();
             changed["original_goal"]["terminal_condition"]["all"][0]["value"] = json!(61);
             assert_ne!(
@@ -723,5 +731,49 @@ mod tests {
         assert!(compact["condition_digest"].is_null());
         assert!(compact["observed_anchor"].is_null());
         assert_eq!(compact["completion_inferred_from_action_states"], false);
+    }
+
+    #[test]
+    fn bounded_original_goal_keeps_historical_achievement_separate_from_current_truth() {
+        let work = TaskWork {
+            schema: WORK_SCHEMA.to_owned(),
+            session_id: "1".repeat(32),
+            plan_digest: "2".repeat(64),
+        };
+        let anchor = |sequence: u64| {
+            json!({
+                "fortress_id": "3".repeat(32), "epoch": 1, "sequence": sequence,
+                "game_tick": sequence, "state_hash": "4".repeat(64),
+            })
+        };
+        let first = anchor(200);
+        let now = anchor(1200);
+        for abandoned in [false, true] {
+            let payload = json!({"original_goal": {
+                "plan_digest": work.plan_digest, "requested_plan_digest": work.plan_digest,
+                "predicate_truth": if abandoned { "unknown" } else { "false" },
+                "epistemic_state": if abandoned { "unknown" } else { "certified_derived" },
+                "evidence_scope": "laboratory_reference_world", "observed_anchor": now,
+                "terminal_condition": {"paused": false},
+                "historical_achievement": "verified", "first_satisfied_anchor": first,
+                "recorded_first_satisfied_anchor": first,
+                "restore_abandoned_anchor": if abandoned { now.clone() } else { Value::Null },
+                "abandonment_publication_pending": false,
+            }});
+            let compact = compact_original_goal(&work, &"5".repeat(32), &payload);
+            assert_eq!(
+                compact["predicate_truth"],
+                if abandoned { "unknown" } else { "false" }
+            );
+            assert_eq!(compact["historical_achievement"], "verified");
+            assert_eq!(compact["first_satisfied_anchor"], first);
+            assert_eq!(compact["observed_anchor"], now);
+            assert_eq!(
+                compact["restore_abandoned_anchor"],
+                payload["original_goal"]["restore_abandoned_anchor"]
+            );
+            assert!(compact["recorded_first_satisfied_anchor"].is_null());
+            assert!(compact.to_string().len() < 1_800, "{compact}");
+        }
     }
 }

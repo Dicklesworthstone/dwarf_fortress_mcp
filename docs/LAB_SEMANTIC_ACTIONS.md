@@ -261,15 +261,24 @@ When the operator starts the server with `DFMCP_LAB_STATE_DIR=/absolute/dir`,
   A current Observe grant is required, and an interrupted observation resets an
   unfinished stability streak. `recovered_commits` lists recovered states and
   original evidence anchors. Recovery never redispatches actions;
+- **original goals survive completed commits.** Goal admission stores the exact
+  original source, sealed snapshot and originating session with the action
+  commit before effects. A separate goal record remains after all its action
+  records retire. Reopening recompiles the original source against its archived
+  sealing snapshot and verifies the sealed digest. It independently checks any
+  first-achievement predicate against that exact archived proof snapshot;
 - a restore publishes its restored world and abandonment of every old carried
-  or in-flight commit in one atomic frontier. Pending abandonment survives a
-  failed save in memory for retry; a crash before publication recovers the
-  preceding world together with its original work records;
+  or in-flight commit and retained goal pursuit in one atomic frontier. First
+  achievement remains historical evidence, and a restored world cannot newly
+  complete an abandoned goal. Pending abandonment survives a failed save in
+  memory for retry; a crash before publication recovers the preceding world
+  together with its original work and goal records;
 - reopening a private durable fortress fences its older sessions. The ownership
   check remains locked through each call and its save, including calls that
   resolved a session before the replacement opened. Shared durable sessions
-  hold their unfinished plans, carried monitors and persistence fault in the
-  common world. A peer cannot bypass another member's failed save. Joining an
+  hold their unfinished plans, carried monitors, original goals and persistence
+  fault in the common world. A peer cannot bypass another member's failed save.
+  Joining an
   already running shared fortress does not reload the journal, bump its epoch
   or reconstruct its work again (`durable.joined_existing: true`,
   `durable.resumed: false`). Failed joins remove their new membership without
@@ -288,10 +297,48 @@ malformed record or corrupt object refuses the store. Progress records are
 bounded at 8 MiB (at most 256 commits with 256 steps each); other records retain
 their 64-KiB limit, and the journal is bounded at 64 MiB. The journal is compacted
 to live records (and unreferenced objects removed) every 1,024 records or before
-its byte limit would be exceeded. Sealed-plan and retained step-proof snapshots
-remain pinned. An uncertain write or sync failure refuses further publication
-until the store is reopened and its complete journal prefix is recovered.
+its byte limit would be exceeded. Sealed-plan, retained step-proof, first-goal-proof
+and goal-abandonment snapshots remain pinned. An uncertain write, sync failure
+or automatic compaction failure after publication refuses further writes,
+including apparent no-ops, until the store is reopened and its complete journal
+prefix is recovered.
 `scripts/lab_durable_restart.py` demonstrates it across a SIGKILL.
+
+### Original-goal history and current truth
+
+The `objectives` projection on session open and subsequent observations requires
+current Observe authority, including for historical metadata. Without it the
+response contains an unavailable/unknown coverage entry and discloses no goal
+source, owner, predicate, anchor or actual goal count. Recovery grants no
+observation or dispatch authority.
+
+| Field | Meaning |
+|---|---|
+| `original_source` | Exact retained request kind and request, used to reconstruct the original sealed goal. |
+| `predicate_truth` and `observed_anchor` | Current authorized goal evidence, independent of historical achievement and action completion. |
+| `historical_achievement` | Whether the retained first-achievement anchor has been verified against the original predicate; unverified recorded history cannot establish success. |
+| `first_satisfied_anchor` | Immutable exact snapshot that first proved the goal. Consumption or later observations never move it. |
+| `restore_abandoned_anchor` | Exact restored world at which the original pursuit was abandoned. Earlier achievement remains historical. |
+| `owner_session_id` | Originating-session metadata. Numeric IDs can repeat across processes; recovered goals do not become owned by a new session with the same number. |
+| `owned_by_current_session` | True only for the actual originating session in the same live process. Shared peers observe the same goal without acquiring its ownership. |
+| `physical_quiescent` | Current inspection of every original effect identity; missing bookkeeping cannot stand in for completed work. |
+| `needs_replan` | Original work is quiet and the original goal is currently false. No replacement work is dispatched automatically. |
+
+A goal that first reached 60 drinks and later falls to 53 reports current false
+truth and `no_longer_holds`, while preserving its original verified achievement
+anchor. A never-achieved goal retains no invented historical success. Neither
+the original preparation expiry nor a new session renews the goal into a
+replacement plan.
+
+At most 64 original goals are retained per fortress. Admission checks capacity
+before consent, reservations, adapter preparation or effects. Ordinary eviction
+requires verified historical achievement, a currently proven true original goal,
+quiescent original effects and no unfinished durable commit. Unmet, unknown,
+abandoned or unverifiable goals cannot silently yield capacity. Some recovered
+never-dispatched work can remain conservatively unknown after its old action
+bookkeeping retires; this can retain history longer, but cannot authorize
+replacement work or unsafe eviction. Legacy action-only records gain no inferred
+goal history.
 
 ## Live routing of sealed plans
 

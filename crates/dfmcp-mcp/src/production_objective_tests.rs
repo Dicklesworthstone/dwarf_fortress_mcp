@@ -96,7 +96,7 @@ fn stock(session: &str, field: &str) -> TestResult<u64> {
 #[test]
 fn finished_production_work_does_not_prove_stock_consumed_during_the_plan() -> TestResult {
     let session = open("743001")?;
-    wait(&session, 1099)?; // Source tick 1100, before the drink meal at 1200.
+    wait(&session, 1099)?; // Source tick 1100; metabolism starts at tick 1.
     let planned = plan(&session, json!([{"item":"DRINK","minimum":60}]))?;
     let committed = commit(&session, &planned)?;
     assert_eq!(committed["ok"], true, "{committed}");
@@ -122,7 +122,7 @@ fn finished_production_work_does_not_prove_stock_consumed_during_the_plan() -> T
 #[test]
 fn joint_production_goal_keeps_a_quota_that_needed_no_order() -> TestResult {
     let session = open("743002")?;
-    wait(&session, 1149)?;
+    wait(&session, 1150)?; // The first drink meal occurs at game tick 1201.
     let planned = plan(
         &session,
         json!([
@@ -152,7 +152,7 @@ fn stale_production_plan_replays_the_original_quota_at_changed_stock() -> TestRe
     let session = open("743003")?;
     wait(&session, 1099)?;
     let original = plan(&session, json!([{"item":"DRINK","minimum":60}]))?;
-    wait(&session, 100)?;
+    wait(&session, 101)?;
     assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 33);
     let stale = commit(&session, &original)?;
     assert_eq!(stale["ok"], false, "{stale}");

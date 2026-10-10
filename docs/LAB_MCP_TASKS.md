@@ -11,6 +11,13 @@ tuple, add a production protocol, or qualify native game behavior. Task handles
 and task history last until the server process exits, including when the
 underlying laboratory fortress uses a durable archive.
 
+The original goal has a separate durable lifetime. For a durable fortress,
+session open and observations retain its exact source, current truth, immutable
+first achievement and restore abandonment even after its action commit retires
+or the process restarts. Current Observe authority gates that history. Recovery
+does not recreate a Task handle or grant another session ownership of the old
+task; it exposes the retained goal for observation and explicit follow-up.
+
 ## Negotiate and create a task
 
 Every request carries the modern metadata already described in
@@ -100,7 +107,7 @@ silently stops game work. The task detail exposes both:
 |---|---|
 | `proof_status` | The original goal outcome: `working`, `completed`, `failed` or `cancelled`. A failure is reported for failed/indeterminate actions or finished quiet work whose original goal is false or unknown. |
 | `action_proof_status` | The separate aggregate action-receipt outcome; verified work does not by itself establish the original goal. |
-| `original_goal` | Current source-qualified truth, original predicate, actual committed digest and observation anchor, separate from historical achievement. |
+| `original_goal` | Current source-qualified truth, original predicate, actual committed digest and observation anchor, together with separately labeled immutable first achievement and restore abandonment. |
 | `needs_replan` | The original work has finished below its original goal. Review a new plan explicitly; the monitor dispatches no replacement. |
 | `status` | The monitor's lifecycle. It remains `working` while an original action is nonterminal or its physical work is active or unknown. |
 | Each action's `work_state` | `never_dispatched`, `active`, `quiescent` or `unknown`, with the entity identity and current observed anchor. |

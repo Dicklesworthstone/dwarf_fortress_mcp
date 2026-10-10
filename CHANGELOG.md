@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-10 — Recover and share original goals through MCP
+
+- Connect the durable objective store to actual laboratory commit, progress,
+  restart, shared-session and restore paths. Recover goals independently of
+  unfinished commits by reconstructing the exact original sealed plan and
+  verifying historical proof against its archived snapshot.
+- Keep current goal truth, immutable first achievement and restore abandonment
+  separate. Current Observe authority gates both new proof and historical
+  source/owner/anchor disclosure; persistence alone cannot certify a goal.
+- Retain the common fortress goal book across shared-session calls. Preserve
+  historical owner metadata without assigning ownership to a new process whose
+  numeric session ID happens to repeat. Restore retains first achievement and
+  atomically abandons the original pursuit with the restored world.
+- Check the 64-goal bound before reservations or effects. Eviction requires a
+  currently true, historically verified goal and proven quiet original work;
+  consumption, unknown evidence or missing work identities cannot free capacity.
+- Preserve historical achievement and abandonment in compact Task results.
+  Add restart, compaction, shared-world, authority, owner-collision, capacity,
+  restore-crash and invalid-proof regressions. The full MCP build remains blocked
+  in unchanged pinned Asupersync under the environment memory limit; their MCP
+  runtime execution is not claimed.
+- Pass 28 actual production/observation module tests, including the physical
+  timeline where four completed brewing batches leave only 53 drinks against
+  the original 60-drink goal, and the joint quota initially needing no work.
+  Correct elapsed-tick fixtures to include consumption at game tick 1201.
+
 ## 2026-10-10 — Fresh evidence for semantic workforce execution
 
 - Add a concrete citizen evidence owner for the existing semantic workforce

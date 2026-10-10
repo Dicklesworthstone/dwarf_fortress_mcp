@@ -49,6 +49,10 @@ pub(crate) mod task_session;
 #[path = "restore_work.rs"]
 mod restore_work;
 
+#[path = "objectives.rs"]
+mod objectives;
+use objectives::{Objective, objective_history_roots};
+
 #[cfg(test)]
 #[path = "physical_work_mcp_tests.rs"]
 mod physical_work_mcp_tests;
@@ -56,6 +60,10 @@ mod physical_work_mcp_tests;
 #[cfg(test)]
 #[path = "production_objective_tests.rs"]
 mod production_objective_tests;
+
+#[cfg(test)]
+#[path = "objective_lifecycle_tests.rs"]
+mod objective_lifecycle_tests;
 
 /// One granted capability record returned to the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -125,21 +133,9 @@ pub(crate) struct LabSession {
     /// The intent behind every committed plan, re-evaluated against each
     /// observation: dispatch success is not goal success.
     objectives: Vec<Objective>,
+    /// Goal abandonment staged by restore, published with that exact world.
+    objective_restore: BTreeSet<Digest32>,
 }
-
-/// A committed intent whose terminal condition is the goal.
-#[derive(Clone, Debug)]
-struct Objective {
-    plan_digest: String,
-    summary: String,
-    terminal: Predicate,
-    committed_tick: u64,
-    /// First observed tick at which the terminal condition held. A goal that
-    /// held and later stopped holding is not the same as one never reached.
-    achieved_tick: Option<u64>,
-}
-
-const MAX_OBJECTIVES: usize = 64;
 
 /// Observe the exact original goal separately from its actions and physical
 /// work. The caller resolves any witnessed rebase to the receipt's actual
@@ -148,65 +144,12 @@ pub(crate) fn original_goal_observation(
     session: &LabSession,
     actual_plan_digest: &str,
 ) -> Result<(PredicateTruth, serde_json::Value)> {
-    let ctx = context_for(session, session.next_request_id);
-    authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
-    let objective = session
-        .objectives
-        .iter()
-        .find(|objective| objective.plan_digest == actual_plan_digest)
-        .ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::PreconditionsFailed,
-                "the original goal for this committed plan is not retained; action completion cannot establish it",
-            )
-        })?;
-    let snapshot = session.adapter.snapshot();
-    let truth = PredicateEvidence::laboratory(snapshot)?.evaluate(&objective.terminal)?;
-    let mut result = crate::observation_projection::laboratory_objective_evidence(Ok(truth));
-    result["plan_digest"] = json!(objective.plan_digest);
-    result["summary"] = json!(objective.summary);
-    result["terminal_condition"] = crate::lab_world::predicate_json(&objective.terminal);
-    result["committed_tick"] = json!(objective.committed_tick);
-    result["observed_anchor"] = anchor_json(&snapshot.anchor());
-    if let Some(tick) = objective.achieved_tick {
-        result["achieved_tick"] = json!(tick);
-        if truth == PredicateTruth::False {
-            result["status"] = json!("no_longer_holds");
-        }
-    }
-    Ok((truth, result))
+    objectives::original_goal_observation(session, actual_plan_digest)
 }
 
 /// Every tracked objective with whether the current world satisfies it.
 pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
-    let snapshot = session.adapter.snapshot();
-    let evidence = PredicateEvidence::laboratory(snapshot);
-    json!(
-        session
-            .objectives
-            .iter()
-            .map(|objective| {
-                let truth = match &evidence {
-                    Ok(evidence) => evidence.evaluate(&objective.terminal),
-                    Err(error) => Err(error.clone()),
-                };
-                let mut result =
-                    crate::observation_projection::laboratory_objective_evidence(truth);
-                result["plan_digest"] = json!(objective.plan_digest);
-                result["summary"] = json!(objective.summary);
-                result["terminal_condition"] =
-                    crate::lab_world::predicate_json(&objective.terminal);
-                result["committed_tick"] = json!(objective.committed_tick);
-                if let Some(tick) = objective.achieved_tick {
-                    result["achieved_tick"] = json!(tick);
-                    if result["predicate_truth"] == "false" {
-                        result["status"] = json!("no_longer_holds");
-                    }
-                }
-                result
-            })
-            .collect::<Vec<_>>()
-    )
+    objectives::objectives_json(session)
 }
 
 /// Most recent world versions each session retains for change reporting.
@@ -223,27 +166,12 @@ fn new_history() -> dfmcp_world::retention::VersionRetention {
 /// sealed anchor, durable in-flight plans' anchors, and every checkpoint.
 fn remember_version(session: &mut LabSession) {
     let current = session.adapter.snapshot().clone();
-    if session.objectives.iter().any(|o| o.achieved_tick.is_none())
-        && let Ok(evidence) = PredicateEvidence::laboratory(&current)
-    {
-        for objective in session
-            .objectives
-            .iter_mut()
-            .filter(|o| o.achieved_tick.is_none())
-        {
-            if matches!(
-                evidence.evaluate(&objective.terminal),
-                Ok(PredicateTruth::True)
-            ) {
-                objective.achieved_tick = Some(current.tick.0);
-            }
-        }
-    }
     session.history.record(&current);
     let mut roots: std::collections::BTreeSet<Digest32> =
         session.adapter.checkpoint_state_hashes().collect();
     roots.extend(session.pending.iter().map(|p| p.plan.anchor.state_hash));
     roots.extend(session.durable_plans.values().map(|p| p.anchor.state_hash));
+    roots.extend(objective_history_roots(session));
     session.history.collect(&roots);
 }
 
@@ -478,6 +406,8 @@ pub(crate) struct SharedWorld {
     durable_restore: BTreeMap<Digest32, Vec<u32>>,
     carried: Vec<CarriedStep>,
     durability_fault: Option<String>,
+    objectives: Vec<Objective>,
+    objective_restore: BTreeSet<Digest32>,
 }
 
 /// Admission drains existing calls before changing durable ownership. Calls
@@ -598,6 +528,10 @@ fn join_shared_world(
             .as_ref()
             .map_or_else(Vec::new, |recovery| recovery.carried.clone()),
         durability_fault: None,
+        objectives: recovery
+            .as_ref()
+            .map_or_else(Vec::new, |recovery| recovery.objectives.clone()),
+        objective_restore: BTreeSet::new(),
     };
     let view = SharedView {
         anchor: world.adapter.snapshot().anchor(),
@@ -660,6 +594,8 @@ fn with_session_admitted<T>(
         std::mem::swap(&mut guard.durable_restore, &mut world.durable_restore);
         std::mem::swap(&mut guard.carried, &mut world.carried);
         std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
+        std::mem::swap(&mut guard.objectives, &mut world.objectives);
+        std::mem::swap(&mut guard.objective_restore, &mut world.objective_restore);
         guard.shared_members = world.members.len();
     }
     let output = body(&mut guard);
@@ -672,6 +608,8 @@ fn with_session_admitted<T>(
         std::mem::swap(&mut guard.durable_restore, &mut world.durable_restore);
         std::mem::swap(&mut guard.carried, &mut world.carried);
         std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
+        std::mem::swap(&mut guard.objectives, &mut world.objectives);
+        std::mem::swap(&mut guard.objective_restore, &mut world.objective_restore);
     }
     output
 }
@@ -738,6 +676,17 @@ fn with_durable_store<T>(
 
 #[cfg(test)]
 static TEST_STATE_DIR: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+#[cfg(test)]
+static DURABLE_TEST_SERIAL: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn serialized_durable_tests() -> MutexGuard<'static, ()> {
+    match DURABLE_TEST_SERIAL.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
 
 /// Test hook: drop the durable store (releasing its lock) and forget owners,
 /// exactly what a process exit does, then use `dir` as the configured root.
@@ -862,7 +811,11 @@ pub(crate) fn inject_durable_crash_after(budget: usize) {
 /// kept on the session (and surfaced by the Agent Turn and doctor) rather
 /// than silently ignored; the response that caused it is already computed.
 fn persist_durable_head(session: &mut LabSession) {
+    let satisfied = objectives::newly_satisfied_objectives(session);
+    let abandoned: Vec<_> = session.objective_restore.iter().copied().collect();
     let Some(scenario) = session.durable_scenario.clone() else {
+        let anchor = session.adapter.snapshot().anchor();
+        objectives::record_objective_progress(session, anchor, &satisfied, &abandoned);
         return;
     };
     let snapshot = session.adapter.snapshot().clone();
@@ -980,13 +933,16 @@ fn persist_durable_head(session: &mut LabSession) {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        store.persist_progress(&scenario, &snapshot, &frontier, &retired)
+        store.persist_progress_with_objectives(
+            &scenario, &snapshot, &frontier, &retired, &satisfied, &abandoned,
+        )
     });
     if result.is_ok() {
         for digest in &finished {
             session.durable_plans.remove(digest);
         }
         session.durable_restore.clear();
+        objectives::record_objective_progress(session, snapshot.anchor(), &satisfied, &abandoned);
     }
     match result {
         Ok(()) => session.durability_fault = None,
@@ -1077,6 +1033,8 @@ struct DurableRecovery {
     carried: Vec<CarriedStep>,
     /// What happened to every earlier unfinished commit.
     commits: Vec<serde_json::Value>,
+    /// Goals are retained independently of unfinished action commits.
+    objectives: Vec<Objective>,
 }
 
 /// Rebuild the steps of a commit made before a restart. The plan is
@@ -1321,6 +1279,7 @@ fn load_durable_fortress(
                     torn_tail_bytes: report.torn_tail_bytes,
                     carried: Vec::new(),
                     commits: Vec::new(),
+                    objectives: Vec::new(),
                 },
             ));
         };
@@ -1352,6 +1311,10 @@ fn load_durable_fortress(
         }
         let mut carried = Vec::new();
         let mut commits = Vec::new();
+        let objectives = store
+            .objectives(fortress_id)
+            .map(|retained| objectives::recover_objective(store, retained))
+            .collect();
         for commit in store.commits(fortress_id).cloned().collect::<Vec<_>>() {
             commits.push(recover_commit(
                 store,
@@ -1369,6 +1332,7 @@ fn load_durable_fortress(
                 torn_tail_bytes: report.torn_tail_bytes,
                 carried,
                 commits,
+                objectives,
             },
         ))
     })
@@ -1391,12 +1355,20 @@ fn durability_json(session: &LabSession) -> serde_json::Value {
         .store
         .as_ref()
         .and_then(|store| store.head(session.fortress_id).cloned());
+    let goals_observable = authorize_entry(
+        &context_for(session, session.next_request_id),
+        Capability::Observe,
+        RiskTier::ReadOnly,
+    )
+    .is_ok();
     json!({
         "durable": true,
         "scenario": scenario,
         "fault": session.durability_fault,
         "persisted_anchor": head.as_ref().map(|head| anchor_json(&head.anchor)),
         "carried_obligations": session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>(),
+        "retained_objectives": goals_observable.then_some(session.objectives.len()),
+        "objective_history": "original sources and first verified achievement anchors survive retired action commits; legacy records without objectives have no invented goal history",
         "persisted_is_current": head.as_ref().is_some_and(|head| head.anchor == session.adapter.snapshot().anchor()),
         "store": report.map(|report| json!({
             "records": report.records,
@@ -2315,7 +2287,14 @@ pub(crate) fn open_session_in_scenario(
             log
         },
         history: new_history(),
-        objectives: Vec::new(),
+        objectives: if shared {
+            Vec::new()
+        } else {
+            recovery
+                .as_ref()
+                .map_or_else(Vec::new, |recovery| recovery.objectives.clone())
+        },
+        objective_restore: BTreeSet::new(),
     }));
     {
         let mut registry = sessions();
@@ -2376,13 +2355,16 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
-    let untracked = with_session_admitted(
+    let (untracked, goal_status) = with_session_admitted(
         &session,
         || {
-            json!({"state": "unknown", "quiescent": false, "items": null,
-            "reason": "session observation unavailable"})
+            (
+                json!({"state": "unknown", "quiescent": false, "items": null,
+            "reason": "session observation unavailable"}),
+                serde_json::Value::Null,
+            )
         },
-        |guard| untracked_work_json(guard),
+        |guard| (untracked_work_json(guard), objectives_json(guard)),
     );
     json!({
         "ok": true,
@@ -2393,6 +2375,7 @@ pub(crate) fn open_session_in_scenario(
         "fortress_id": format!("{fortress_id}"),
         "granted_capabilities": granted_strings,
         "untracked_work": untracked,
+        "objectives": goal_status,
         "negotiation": negotiation.to_json(),
         "budget": {
             "max_wall_millis": budget.max_wall_millis,
@@ -2411,6 +2394,9 @@ pub(crate) fn open_session_in_scenario(
             "restorable_checkpoints": recovery.checkpoints,
             "recovered_commits": recovery.commits,
             "carried_obligations": recovery.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>(),
+            "retained_objectives": if goal_status[0]["status"] == "unavailable" {
+                None
+            } else { Some(recovery.objectives.len()) },
             "torn_tail_bytes_discarded_at_store_open": recovery.torn_tail_bytes,
             "note": if recovery.resumed {
                 "resumed the last persisted world in a new observation epoch: existing world work continues on wait; prior action handles and dispatch authority are gone. Recovered proof monitors keep sealed deadlines and require current authorized observations. Older sessions are fenced."
@@ -3739,6 +3725,14 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     }
                 }
             }
+            let evicted_objectives =
+                match objectives::objective_evictions(guard, pending.plan.digest) {
+                    Ok(evicted) => evicted,
+                    Err(error) => {
+                        guard.pending = Some(pending);
+                        return dfmcp_error_payload("fortress.commit", &error);
+                    }
+                };
             if guard.shared_members > 1 && plan_sets_pause(&pending.plan, false) {
                 let me = guard.session_id;
                 guard.leases.unpause_consent.insert(me);
@@ -3794,18 +3788,33 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                         .is_some()
                         .then(|| guard.adapter.snapshot().clone());
                     if let Some(sealed) = sealed.as_ref() {
-                        // The commit record precedes the effect: after a crash a
-                        // recorded plan with no step state was never dispatched.
+                        // Original goal and commit are admitted together before
+                        // the effect. Neither can disappear after action Done.
                         let source = pending.source.durable();
                         let digest = pending.plan.digest;
                         let intent = pending.plan.intent_id.get();
                         if let Err(error) = with_durable_store(|store| {
-                            store.persist_commit(sealed, digest, intent, source)
+                            store.persist_objective_commit(
+                                sealed,
+                                digest,
+                                intent,
+                                source,
+                                guard.session_id,
+                                &evicted_objectives,
+                            )
                         }) {
                             guard.leases = leases_before;
                             guard.pending = Some(pending);
                             return dfmcp_error_payload("fortress.commit", &error);
                         }
+                        // A subsequent adapter refusal cannot erase the durable
+                        // admission. Keep it visible for reconciliation and retry.
+                        objectives::install_objective(
+                            guard,
+                            &pending.plan,
+                            pending.source.clone(),
+                            &evicted_objectives,
+                        );
                     }
                     match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
                         Ok(receipt) => {
@@ -3814,17 +3823,14 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                     .durable_plans
                                     .insert(pending.plan.digest, pending.plan.clone());
                             }
-                            if guard.objectives.len() == MAX_OBJECTIVES {
-                                guard.objectives.remove(0);
+                            if sealed.is_none() {
+                                objectives::install_objective(
+                                    guard,
+                                    &pending.plan,
+                                    pending.source.clone(),
+                                    &evicted_objectives,
+                                );
                             }
-                            let committed_tick = guard.adapter.snapshot().tick.0;
-                            guard.objectives.push(Objective {
-                                plan_digest: plan_digest.clone(),
-                                summary: pending.plan.summary.clone(),
-                                terminal: pending.plan.terminal_condition.clone(),
-                                committed_tick,
-                                achieved_tick: None,
-                            });
                             guard.last_action =
                                 receipt.actions.first().map(|action| action.action_id);
                             guard.last_plan_actions = receipt
@@ -4666,7 +4672,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     guard.last_plan_actions.clear();
                     guard.open_actions.clear();
                     guard.commit_receipts.clear();
-                    guard.objectives.clear();
+                    objectives::stage_objective_abandonment(guard);
                     if guard.durable_scenario.is_some() {
                         // Retain the retirement set after an unsuccessful save
                         // so another call can retry the same atomic frontier.
@@ -4682,6 +4688,7 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
                     "restored_anchor": anchor_json(&receipt.restored_anchor),
                     "content_digest": receipt.content_digest.to_string(),
                     "note": "new observation epoch; pending plans and action handles were invalidated",
+                    "objectives": objectives_json(guard),
                     "untracked_work": untracked_work_json(guard),
                 })
                 .to_string()

@@ -2469,6 +2469,67 @@ mod tests {
     }
 
     #[test]
+    fn production_goal_and_order_proof_diverge_on_actual_consumption_timeline() -> Result<()> {
+        for (start, elapsed, quotas, expected_drink, expected_food) in [
+            (1100, 200, json!([{"item":"DRINK","minimum":60}]), 53, 60),
+            (
+                1151,
+                50,
+                json!([{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]),
+                33,
+                65,
+            ),
+        ] {
+            let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(316), false)?;
+            let to_start = start - snapshot.tick.0;
+            snapshot.tick = GameTick(start);
+            effects::advance_effects(&mut snapshot, to_start)?;
+            snapshot.refresh_hash();
+            let request = ProductionRequest::parse(
+                &json!({"template":"production","quotas":quotas}).to_string(),
+            )?;
+            let compiled = request.compile(&snapshot)?;
+            let steps = parse_steps(&compiled.actions)?;
+            assert_eq!(steps.len(), 1);
+            let key = "original-production-timeline";
+            let action_proof = Predicate::All(effects::default_postconditions(
+                &steps[0].action,
+                key,
+                snapshot.fortress_id,
+            ))
+            .normalized();
+            effects::apply_effect(&mut snapshot, &steps[0].action, key)?;
+            snapshot.tick = GameTick(start + elapsed);
+            effects::advance_effects(&mut snapshot, elapsed)?;
+            snapshot.refresh_hash();
+            let evidence = dfmcp_world::PredicateEvidence::laboratory(&snapshot)?;
+            assert_eq!(
+                evidence.evaluate(&action_proof)?,
+                dfmcp_world::PredicateTruth::True
+            );
+            assert_eq!(
+                evidence.evaluate(&compiled.terminal)?,
+                dfmcp_world::PredicateTruth::False
+            );
+            let ledger = snapshot
+                .graph
+                .entities
+                .get(&starter::STOCK_LEDGER)
+                .ok_or_else(|| invalid("fixture ledger missing"))?;
+            for (field, expected) in [
+                (effects::STOCK_DRINK_FIELD, expected_drink),
+                (effects::STOCK_FOOD_FIELD, expected_food),
+            ] {
+                assert_eq!(
+                    ledger.fields.get(field).and_then(Fact::known_value),
+                    Some(&Value::U64(expected))
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn briefing_counts_everything_and_lists_active_work_and_dwarves() -> Result<()> {
         let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(3), false)?;
         let dig = Action::DesignateDig {

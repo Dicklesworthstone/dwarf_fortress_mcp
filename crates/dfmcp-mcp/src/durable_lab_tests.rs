@@ -61,14 +61,8 @@ fn id(value: &Value, field: &str) -> std::result::Result<String, Box<dyn std::er
         .to_owned())
 }
 
-/// Durable tests share the process-wide store; run them one at a time.
-static DURABLE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn serialized() -> std::sync::MutexGuard<'static, ()> {
-    match DURABLE_TESTS.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    crate::server::serialized_durable_tests()
 }
 
 struct StateDir(std::path::PathBuf);

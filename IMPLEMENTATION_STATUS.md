@@ -44,6 +44,49 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original-goal lifecycle in the MCP laboratory (2026-10-10)
+
+The laboratory commit, progress, restart, shared-session and restore paths now
+use the durable original-goal store. Source and action admission are saved
+together before effects. Current-authorized predicate evaluation precedes the
+atomic world/progress publication; in-memory first achievement changes only
+after that publication succeeds. Goals remain discoverable after action Done
+and compaction, independently of recovered unfinished action monitors.
+
+Recovery reconstructs each exact original plan at its archived sealing snapshot,
+checks the full plan digest, and re-evaluates historical achievement against its
+original predicate at the pinned proof anchor. Unreproducible or unverified
+history remains indeterminate and supplies no dispatch authority. Current truth
+may be false even with a verified immutable first achievement. Restore keeps
+that historical fact while publishing abandonment with the restored world.
+It does not erase the original goal or let the restored world newly satisfy it.
+
+Goals follow the canonical shared fortress while grants, budgets and dispatch
+receipts remain session-specific. Current Observe authority gates source,
+owner, predicate, anchors and counts as well as truth. A denied view is an
+explicit unavailable/unknown coverage entry. Numeric session IDs can repeat
+across processes; recovered goals retain historical origin metadata and never
+claim ownership by a new process solely from matching numbers. Compact Task
+results preserve immutable history separately from current truth.
+
+Admission checks the 64-goal bound before consent, reservations, preparation
+or effects. Removing ordinary history requires a currently proven true goal,
+verified historical achievement, all original physical effects proven quiet
+and no unfinished durable commit. A once-achieved quota that consumption makes
+false, unknown predicates, abandoned pursuits and missing work identities do
+not yield capacity. Some recovered never-dispatched work stays conservatively
+unknown after its old dispatch bookkeeping retires; there is no fabricated
+quietness or automatic replacement plan.
+
+**Evidence:** all 95 laboratory tests passed for the underlying durable and
+effect implementation. All 28 actual `lab_world.rs`/`observation_projection.rs`
+module tests passed through the direct-source harness, including actual
+consumption timelines where completed order proof and original quota truth
+diverge. MCP lifecycle and compact Task regressions are checked in and reviewed,
+but their runtime execution is not claimed: full MCP compilation is blocked by
+SIGKILL in unchanged pinned Asupersync before this crate under the shared memory
+limit. This does not establish full Rust, native or live qualification.
+
 ### Fresh canonical evidence for semantic workforce execution (2026-10-10)
 
 `CitizenWorkforceEvidenceOwner` now implements the observation owner required
@@ -105,8 +148,8 @@ readable without inferred objectives or reconstructed historical success.
 
 This is the storage boundary. The caller remains responsible for current
 Observe authority, evaluating the original predicate, and verifying its sealed
-source when reconstructing history. MCP recovery and shared-session wiring are
-a subsequent increment. The format and crash tests use actual snapshots,
+source when reconstructing history. The MCP lifecycle above supplies that
+integration. The format and crash tests use actual snapshots,
 journal files and compaction; they establish no native/live admission.
 
 **Evidence:** all 95 `dfmcp-lab` tests passed: 63 library tests (including all
@@ -136,8 +179,8 @@ require current Observe authority, and expose current original-goal evidence,
 action proof and physical work separately. A quiescent finished plan cannot
 complete its task with a false or unknown original goal. It instead requires
 explicit replanning or reconciliation, with no replacement dispatch or blind
-retry. Historical objective custody beyond completed-plan retirement remains a
-separate gap at this increment.
+retry. The original-goal lifecycle above now retains historical objective
+custody beyond completed-plan retirement.
 
 A distinct bounded `production` journal source preserves original quota JSON
 for exact sealed-world reconstruction and later replay. Legacy action records

@@ -684,13 +684,14 @@ mod tests {
                 json!({"plan_digest": digest, "actions": [{"action_id": id.to_string()}]})
                     .to_string(),
             );
-            session.objectives.push(Objective {
-                plan_digest: digest.clone(),
-                summary: plan.summary.clone(),
-                terminal: plan.terminal_condition.clone(),
-                committed_tick: anchor.tick.0,
-                achieved_tick: None,
-            });
+            session.objectives.push(Objective::committed(
+                &plan,
+                PlanSource::Actions {
+                    summary: plan.summary.clone(),
+                    raw: "[]".to_owned(),
+                },
+                session.session_id,
+            ));
             session.last_action = Some(id);
             session.last_plan_actions = vec![id];
             session.open_actions.push(id);
@@ -868,7 +869,7 @@ mod tests {
             ("7824201", 1099, 200, json!([{"item":"DRINK","minimum":60}])),
             (
                 "7824202",
-                1149,
+                1150,
                 50,
                 json!([{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]),
             ),
