@@ -123,9 +123,10 @@ original room floors and required bedroom walls as well as installed furniture.
 Its separate query-only environment combines two identical paused map reads,
 one complete operations capture, and every original receipt in a single durable
 sample. The entire original room shares one advancing-tick stability window;
-a lost wall or an incomplete furnishing resets it. `start`, `sample`, `inspect`
-and `cancel` retain the full room intention and original placement custody across
-process restarts. See [room readiness](ROOM_READINESS.md) for the exact commands.
+a lost wall or an incomplete furnishing resets it. `start`, `sample`, `wait`,
+`inspect` and `cancel` retain the full room intention and original placement
+custody across process restarts. `wait` supervises several samples within one
+fixed foreground budget. See [room readiness](ROOM_READINESS.md) for the commands.
 
 ## Executed development tests
 

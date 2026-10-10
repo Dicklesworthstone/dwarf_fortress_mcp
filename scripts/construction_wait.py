@@ -84,6 +84,7 @@ def _idle() -> None:
 
 def run(owner: Any, authority: Any, acquire: Callable, render: Callable,
         limits: Limits, *, source_guard: Callable[[], None] = _idle,
+        additional_rpc_calls: int = 0,
         sleeper: Callable[[float], None] | None = None) -> Result:
     """Drive an already opened monitor; never create, replace or close its owner.
 
@@ -97,9 +98,13 @@ def run(owner: Any, authority: Any, acquire: Callable, render: Callable,
     The caller retains normal final rendering, authority/custody checks, and
     error disclosure. A terminal monitor is offline and requires no authority.
     Inject ``sleeper`` in deterministic tests; it must not create background work.
+    ``additional_rpc_calls`` reserves a fixed profile's extra per-sample work
+    before read intent. It can increase, never reduce, the receipt-monitor floor.
     """
     _require(type(limits) is Limits, 'closed foreground wait limits required')
     limits.__post_init__()
+    _require(type(additional_rpc_calls) is int and 0 <= additional_rpc_calls <= 32,
+             'additional foreground RPC reservation must be an integer in 0..32')
     pause = time.sleep if sleeper is None else sleeper
     budget = owner.budget
     original_goal = owner.state.goal.digest
@@ -128,8 +133,9 @@ def run(owner: Any, authority: Any, acquire: Callable, render: Callable,
         custody()
 
     # Four bindings + two handshakes + one page + release + both receipt
-    # brackets. More pages remain charged by the existing transport itself.
-    minimum_calls = 8 + 2 * len(owner.state.goal.receipts)
+    # brackets, plus any fixed-profile read bindings/handshakes/acquisitions.
+    # More pages remain charged by the existing transport itself.
+    minimum_calls = 8 + 2 * len(owner.state.goal.receipts) + additional_rpc_calls
     _require(1 <= len(owner.state.goal.receipts) <= 32,
              'foreground wait requires a complete bounded receipt selection')
     while samples < limits.max_samples:

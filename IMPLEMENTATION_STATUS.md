@@ -47,7 +47,7 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 ### Durable original-room readiness workflow (2026-10-10)
 
 `scripts/track_room_readiness.py` now makes the existing joint room condition
-usable through `start`, `sample`, `inspect` and `cancel`. Its separate private
+usable through `start`, `sample`, `wait`, `inspect` and `cancel`. Its separate private
 journal retains the complete original room-backed batch, geometry, furnishing
 DAG, allocation evidence, every original placement receipt and file identity,
 endpoint and fixed game-time policy. Reopening cannot substitute a successful
@@ -75,12 +75,26 @@ terrain and furnishing evidence; present usability, continuous preservation and
 an atomic cross-profile snapshot remain unproven. See `docs/ROOM_READINESS.md`
 and `architecture/room_readiness_monitor_v1.json`.
 
+Foreground `wait` reuses the exact original journal for 1–32 new samples under
+one shrinking call budget. It retains original source custody through bounded
+delays, reserves the five additional map RPCs before each read intent, and
+reserves the full original-room response plus wait envelope before publication.
+Terminal goals replay offline. Sample limits, stalled game ticks and insufficient
+RPC or wall allowance return bounded partial progress. Failed acquisitions stop
+without retry; subsequent explicit calls retain the original deadline and total
+observation count. The workflow creates no background worker and does not
+advance or unpause the game.
+
 **Evidence:** the existing joint-condition and synthetic TCP acquisition suites
 passed all 27 tests. New private-file and CLI subprocess tests exercise full
 original-plan custody, restart, interrupted acquisition, source loss, immutable
 deadlines, map drift, bounds and complete-result publication. Their recorded
 execution is described in `docs/ROOM_READINESS.md`. These are Python/POSIX and
 synthetic-peer tests, not native SDK, live-fortress or full-repository qualification.
+The durable increment passed 60 focused methods. Foreground waiting then passed
+ten additional room tests, all 20 shared-scheduler regressions and two existing
+CLI regressions, including the maximum 32-target paged construction monitor.
+Both late-publication revocation scenarios also passed through the new wait path.
 
 ### Durable semantic workforce handoff (2026-10-07)
 

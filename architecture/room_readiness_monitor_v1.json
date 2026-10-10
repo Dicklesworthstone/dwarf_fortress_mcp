@@ -5,7 +5,7 @@
   "entrypoint": "scripts/track_room_readiness.py",
   "result_schema": "dfmcp.room-readiness-monitor-result/1",
   "condition_policy": "dfmcp.original-room-terrain-and-furnishings/1",
-  "operations": ["start", "sample", "inspect", "cancel"],
+  "operations": ["start", "sample", "wait", "inspect", "cancel"],
   "original_batch": {
     "requires": "complete_original_room_backed_batch_with_every_step_registered_and_placed",
     "retains": ["full_room_plan", "full_furniture_plan", "allocation_evidence", "all_original_receipts", "original_file_bytes_and_inode_identities", "original_native_source_and_endpoint"],
@@ -34,6 +34,23 @@
     "complete_result_reserved_before_publication": true,
     "original_custody_rechecked_before_and_after_publication": true,
     "journal_outside_original_batch": true
+  },
+  "foreground_wait": {
+    "result_schema": "dfmcp.construction-wait/1",
+    "requires_existing_goal": true,
+    "samples_per_call": [1, 32],
+    "default_samples": 8,
+    "poll_ms": [10, 5000],
+    "default_poll_ms": 100,
+    "delay_guard_quantum_ms": 50,
+    "consecutive_nonadvancing_samples": 2,
+    "additional_map_rpc_calls_reserved_per_sample": 5,
+    "same_budget_across_all_samples": true,
+    "stop_reasons": ["terminal", "sample_limit", "game_tick_not_advanced", "rpc_allowance", "wall_allowance"],
+    "goal_policy_changed": false,
+    "background_work": false,
+    "game_time_control": false,
+    "failed_acquisition_retried": false
   },
   "bounds": {
     "furnishings": [1, 32],

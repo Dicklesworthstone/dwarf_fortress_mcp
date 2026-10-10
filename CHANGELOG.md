@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-10 — Bounded foreground room supervision
+
+- Add `track_room_readiness.py wait` to supervise several complete joint samples
+  under one original goal, held source custody and shrinking operation budget.
+  Preserve original deadlines and lifetime observation counts across wait calls.
+- Reserve the complete response and all five additional map RPCs before read
+  intent. Continue checking query authority and original files throughout short
+  foreground delays and before each sample publication.
+- Return explicit terminal, sample-limit, stalled-tick, RPC-allowance and
+  wall-allowance outcomes. Keep terminal waits offline and failed acquisitions
+  unretried; no background work or game-time control is introduced.
+- Extend the shared scheduler with a bounded nonnegative extra-RPC reservation
+  while retaining its existing default behavior for selected-receipt and
+  furnishing monitors. Add actual custody/TCP/process room-wait regressions.
+- Pass ten new room-wait methods, all 20 shared-scheduler tests and two legacy
+  process regressions, plus both final-publication revocation scenarios through
+  the wait path. Tests use synthetic peers and actual private files.
+
 ## 2026-10-10 — Durable whole-room readiness
 
 - Connect the existing joint terrain/furnishing condition to an executable

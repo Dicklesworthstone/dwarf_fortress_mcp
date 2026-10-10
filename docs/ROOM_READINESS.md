@@ -56,6 +56,48 @@ the journal path; it cannot replace the original batch, receipt set, deadline,
 cadence or observation allowance. `inspect` and terminal sampling are offline.
 Successful original-room reports still recheck the original batch custody.
 
+## Supervise several samples in one foreground call
+
+`wait` opens the existing journal and publishes bounded consecutive samples
+under the same original goal:
+
+```sh
+python3 scripts/track_room_readiness.py wait \
+  --journal /private/room-monitor/readiness \
+  --wait-samples 8 --poll-ms 100 --timeout-ms 10000
+```
+
+The default is at most eight new samples, with a 100 ms delay between them.
+`--wait-samples` accepts 1–32 and `--poll-ms` accepts 10–5,000. These options
+belong only to `wait`. It cannot create a journal, change the original plan or
+deadline, or reset the lifetime observation count. Further explicit waits can
+continue the same nonterminal goal.
+
+`result.wait` reports `samples_published` and one of these stop reasons:
+
+| Stop reason | Meaning |
+|---|---|
+| `terminal` | The fixed goal is satisfied, failed, invalidated, expired or cancelled. |
+| `sample_limit` | This call published its requested number of samples. |
+| `game_tick_not_advanced` | Two consecutive samples did not advance from the preceding observed tick. |
+| `rpc_allowance` | Too few calls remain to begin another complete joint sample. |
+| `wall_allowance` | Too little cooperative wall time remains for the next step and final response. |
+
+RPC, wire, decode, disk and wall allowances shrink across the entire call.
+Before another read intent, the scheduler reserves both receipt brackets and
+at least one operations page/release, plus two map bindings, a map handshake and
+both map reads. Additional pages consume the same transport allowance. The
+complete original-room response, including the wait result, must fit before
+each read intent and sample publication.
+
+Every delay retains the original owners and checks source custody and authority
+at intervals of at most 50 ms. A failed acquisition ends the call with its
+durable unresolved intent; it is never automatically retried. No background
+worker or game-time control is started. Each capture still requires a paused
+game. If another authorized controller does not advance the game between
+captures, `wait` stops with `game_tick_not_advanced` and preserves partial progress.
+A terminal `wait` replays offline and publishes zero new samples.
+
 ## What one sample establishes
 
 One connection performs a fixed sequence:
@@ -151,10 +193,11 @@ the prior journal and leaves offline inspection and cancellation available.
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts:tests python3 -m unittest \
   test_room_readiness test_room_readiness_rpc \
   test_room_readiness_store test_track_room_readiness \
-  test_room_readiness_cli_authority -v
+  test_room_readiness_cli_authority test_room_readiness_wait -v
 ```
 
-The suites passed all 60 methods in scoped runs: 27 existing condition/TCP
+The initial durable-monitor suites passed all 60 methods in scoped runs:
+27 existing condition/TCP
 tests, 15 new private-file/codec tests, 16 new CLI process tests and two final
 publication-authority regressions. The maximum
 case retains all 32 furnishings and 646 exclusions, reads a paged roster with
@@ -166,6 +209,24 @@ loss during acquisition, full original receipt identity, walls lost while
 furnishings finish, immutable deadlines, corruption and publication failures.
 Revocation during final source verification or owner close withholds the response,
 while the already synchronized historical sample remains inspectable offline.
+
+The foreground increment passed ten additional room-wait tests, all 20 existing
+shared-scheduler tests, and two legacy process regressions covering the complete
+32-target selected-receipt monitor and original furnishing-goal preservation.
+Room-wait tests exercise actual TCP and private-file custody, one-call readiness,
+wall loss during the wait, stalled ticks, lost-read recovery, source and authority
+loss during delays, insufficient map RPC allowance before read intent, immutable
+deadlines and full-output reservation. The two final-authorization scenarios also
+passed when their final acquisition was performed through `wait`.
+
+The shared-scheduler regression command is:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts:tests python3 -m unittest \
+  test_construction_wait \
+  test_construction_wait_process.ProcessTests.test_complete_32_target_plan_waits_through_real_paging_and_replays_offline \
+  test_furniture_completion_wait.CompletionWaitTests.test_legacy_batch_wait_preserves_original_goal_generation -v
+```
 
 These tests use actual private files, Python clients and CLI subprocesses with
 synthetic TCP peers. They do not establish native DFHack SDK/ABI, live-game,
