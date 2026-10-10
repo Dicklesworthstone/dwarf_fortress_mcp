@@ -966,13 +966,13 @@ fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skil
                 for slot in 0..count {
                     production_workshop(
                         &mut source,
-                        EntityId::new(50 + family as u128 * 10 + slot as u128),
+                        EntityId::new(50 + family as u64 * 10 + slot as u64),
                         if family == 0 { "workshop:Still" } else { "workshop:Kitchen" },
                     )?;
                 }
             }
             for (index, family) in families.into_iter().enumerate() {
-                let id = EntityId::new(100 + index as u128);
+                let id = EntityId::new(100 + index as u64);
                 order(
                     &mut source,
                     id,

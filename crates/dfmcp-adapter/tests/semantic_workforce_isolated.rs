@@ -12,4 +12,8 @@ mod semantic_workforce_acquisition {
     mod evidence_owner {
         include!("../src/semantic_workforce/tests/evidence_owner.rs");
     }
+
+    mod goal_monitor {
+        include!("../src/semantic_workforce/tests/goal_monitor.rs");
+    }
 }

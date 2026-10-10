@@ -75,9 +75,14 @@ current state at a later anchor or complete any original temporal obligation.
 original SetLabor step through the existing workforce coordinator. It durably
 binds both plans before preparation, requires fresh independently issued evidence
 at native effect boundaries, and requires the exact original plan after restart.
-It preserves original goals and obligations as pending even after historical
-single-labor readback verifies. Its supported subset and callable recovery flow
-are documented in `docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
+Historical single-labor readback leaves original goals and obligations pending.
+A separate foreground `poll_original_goal` path now acquires fresh workforce
+labor evidence, preserves original canonical identities and evaluates the
+complete original goal under independently issued source policy. It retains
+fixed deadlines and sampled stability, and never converts an Unknown native
+receipt into verified action completion. Its supported subset, current-truth
+projection and read-only recovery flow are documented in
+`docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
 
 ## Furniture constraints remain explicit
 

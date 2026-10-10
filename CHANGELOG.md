@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-10 — Prove original workforce goals from fresh observations
+
+- Add a foreground goal monitor to the existing semantic workforce handoff.
+  Preserve original canonical/native/historical citizen identity while projecting
+  current labor facts from fresh workforce/1.17 captures, never receipt payloads.
+- Require independently issued source policy, close acquisition before both
+  policy checks, and refuse unsupported completeness or unrelated domain grants.
+  Preserve canonical/source clock floors and check Observe authority at fresh
+  game ticks.
+- Evaluate every original goal component together under its fixed deadline,
+  cadence and stability count. Preserve first achievement separately from
+  current truth; reset unfinished streaks after gaps or failed publication.
+  Keep Unknown native effects unresolved even when the current goal is true.
+- Support Query/Observe-only recovery with exact original-plan reattachment and
+  a new process-local monitor. Reserve read-only work and output before contact;
+  provide no automatic clock advancement, dispatch, retry or imported proof.
+- Add seventeen integration tests to the ordinary production-adapter target and
+  correct two fixture ID casts in the finite-capacity tests. Rust compilation,
+  tests and rustfmt remain unverified during the execution-service outage.
+  No new protocol, generic MCP dispatch or native/live admission is claimed.
+
 ## 2026-10-10 — Make production compete for finite workers and workshops
 
 - Allocate one eligible living worker and one completed matching workshop to

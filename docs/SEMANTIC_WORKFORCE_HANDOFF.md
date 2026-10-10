@@ -26,9 +26,11 @@ refused. The wrapper supplies no cross-family lease or checkpoint workflow.
 
 Original postconditions, the plan terminal condition, and the optional
 `ObligationSpec` are retained unchanged. Their deadlines and stability windows
-are not reset. `original_goal_proven()` always returns false: this owner does not
-run the original goal monitor. `pending_obligation()` exposes the original
-obligation for a separately authorized monitor.
+are not reset. Immediate prepare/commit/reconcile results keep
+`original_goal_proven() == false`; historical native readback cannot prove a
+current goal. The separate foreground goal monitor below can establish the
+original predicates from fresh, independently authorized observations.
+`pending_obligation()` continues to expose the exact original obligation.
 
 ## Acquisition and review
 
@@ -136,6 +138,86 @@ labor columns. Applied receipts with additional labor changes are exposed as
 `Unverified`; native status and receipts remain available separately. None of
 these results proves the original goal or current game state.
 
+## Fresh original-goal monitoring
+
+After preparation or exact reattachment, call
+`begin_goal_monitor(seal, original_identity, context)` with the original typed
+`LiveRoutingEvidence`. The monitor verifies the immutable association and
+matching native record, and retains the original canonical unit IDs,
+generations, native IDs and historical figure IDs. Starting a monitor does not
+prepare, dispatch, reconcile or cancel work.
+
+Call `poll_original_goal(monitor, cursor, context, native_factory, policy)` for
+each explicit sample. It acquires one fresh selected-citizen capture through
+the existing workforce/1.17 `ObserveWorkforce` source and closes that source
+before calling the independently trusted policy authorizer twice. The result
+uses actual capture labor columns; it never projects
+`AssignmentEffect::post_citizens` as a fresh observation.
+
+The observing shell allocates a later canonical cursor in the original restore
+epoch. Native assignment sequence numbers are monotonic source fences, not
+canonical observation cursors. A restarted monitor retains the current caller's
+cursor floor; neither an older caller context nor a new monitor can reuse that
+floor as a new first observation. A different fortress, source generation,
+historical identity or labor schema cannot silently replace the original
+selection. An identity/source replacement fences the monitor.
+
+`WorkforceGoalProjection` normalizes the captured selected units into a
+canonical snapshot with these source-qualified fields:
+
+| Canonical field | Existing capture source |
+| --- | --- |
+| `raw_unit_id` (V1) or `native_unit_id` (spatial/1.8) | Selected native unit ID |
+| `historical_figure_id` | Captured historical figure ID |
+| `workforce_eligible` | Current workforce eligibility |
+| `labor.<key>` | Each captured labor bit |
+
+Projection is not an evidence issuer. The policy callback must independently
+authorize the exact source digest, canonical anchor and observed domain.
+Missing grants produce `Unknown`. Whole-roster completeness, absent-citizen
+proof, edges, terrain, other entity kinds and unrelated source grants are
+refused. The callback is operator-owned Rust code, not client-supplied MCP JSON.
+
+Every credited sample evaluates all original step postconditions, the original
+plan terminal condition, and the optional original obligation terminal together.
+The existing obligation runtime retains the original absolute deadline, cadence
+and required stability count. A gap, failed read, denied final policy or
+explicit `observation_interrupted()` clears unfinished stability. Duplicate
+ticks or identical cursors cannot add stability; regressing or forked anchors
+are refused. Preparation expiry alone is not a new goal deadline.
+
+`WorkforceGoalResult` keeps three results distinct:
+
+- `action_result()` reports historical single-labor native readback.
+- `original_goal_proven()` requires currently eligible original goal facts and
+  any original temporal fulfillment; a currently true failure predicate blocks
+  proof even after historical fulfillment.
+- `semantic_completion_proven()` requires both the current goal proof and
+  `SingleLaborResult::Verified`. A true goal cannot turn an Unknown native
+  action into an Applied result.
+
+Progress exposes each original predicate's current truth, historical obligation
+status, continuity and the immutable first satisfaction anchor separately.
+Later false or unknown facts remain visible after earlier fulfillment. Failed
+polls clear `latest()`; retained output is always anchored historical output,
+not an implicit fresh read.
+
+The monitor is process-local and cannot be cloned or imported. Restart requires
+exact original-plan reattachment and begins a new stability streak without
+renewing the original deadline or restoring first-achievement history.
+Query-only native Recover sessions can use the monitor with current Query and
+Observe grants and an independently authorized source policy. Observe authority
+is rechecked at the fresh capture's tick, so an old caller tick cannot bypass
+grant expiry. The read path supplies no mutation grant or dispatch retry.
+
+Each call has one shrinking wall/byte allowance. Projection reserves 64 MiB
+for at most 32 citizens and 128 labor columns; each policy callback receives
+1 MiB, and bounded output is reserved before source contact. Native observation
+and journal work have a dedicated read reservation. The default 4 MiB allowance
+cannot run this path; an explicit 128 MiB fixture regression is present. There
+is no background polling, automatic clock advancement, new wire generation,
+generic MCP route, compatibility issuer or live admission.
+
 ## Restart and bounded recovery
 
 After reopening, `inventory` exposes historical native records without granting
@@ -158,8 +240,8 @@ original preparation or requiring fresh semantic predicates. Existing native
 rules still decide whether cancellation is local, requires a native retirement
 request, or must preserve permanent Unknown. Read-only association stores deny
 prepare, commit and cancel even if paired with a native Control session. They
-permit history and Query reconciliation only, including when a failed sync left
-a complete readable frame.
+permit history, Query reconciliation and separately authorized foreground goal
+observation, including when a failed sync left a complete readable frame.
 
 Association replay is strict: at most 64 immutable keys, canonical hash-chained
 frames, native journal and fortress binding, and no tail repair. Append or
@@ -180,15 +262,17 @@ and no call performs more than twelve additional full store verification reads.
 Native journal views and final readback consume the same outer allowance.
 The conservative default 4 MiB byte allowance is insufficient for a native
 handoff call; callers must explicitly budget the connection, RPC and evidence
-work. The development fixtures supply 128 MiB, with all nested reservations
-charged against that one allowance.
+work. The shared development fixture supplies 256 MiB, with all nested
+reservations charged against that one allowance. The goal-monitor target also
+contains an explicit 128 MiB read-path case.
 
 The module's regressions use the actual Rust workforce coordinator and strict
 native codecs, injected canonical evidence, memory crash boundaries, and the
 existing real private-file backing. They verify adapter handoff semantics;
 they do not qualify a real Dwarf Fortress/DFHack build or admit a live profile.
 
-All fifteen citizen-acquisition tests pass with
+At the preceding recorded source generation, all fifteen citizen-acquisition
+tests passed with
 `cargo test -p dfmcp-adapter --test semantic_workforce_isolated --offline --locked`.
 That public-API target compiles the ordinary production adapter and uses the
 same injected protocol/storage fixtures as the unit suite. It exercises actual
@@ -197,7 +281,14 @@ synchronization, complete repagination, independent authority, invalidation,
 deadline and byte bounds, source closure and the V1 wire codec. It substitutes
 no private production implementation or filesystem helper.
 
-The earlier twenty handoff/store unit regressions remain unexecuted: the
+Seventeen additional original-goal integration tests are now present in the same
+target (32 tests total). They cover fresh-versus-receipt truth, complete original
+goal conjunction, temporal interruptions and exact deadlines, canonical/native
+identity, independent source policy, current authority, source closure, read-only
+recovery and byte bounds. Current Rust compilation, tests and rustfmt could not
+run because the execution service disconnected even for read-only commands.
+The earlier passing acquisition generation does not qualify these changed bytes.
+
+The earlier twenty handoff/store unit regressions also remain unexecuted: the
 monolithic adapter unit build was killed by shared-memory exhaustion before
-tests ran. Scoped formatting checks pass. These checks do not establish full
-workspace, native or live qualification.
+tests ran. No current full-workspace, native or live qualification is claimed.

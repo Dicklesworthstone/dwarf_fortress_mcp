@@ -1,8 +1,9 @@
 //! One sealed SetLabor step handed to the existing workforce coordinator.
 //!
 //! This owner issues no evidence, capability or compatibility grant. It preserves
-//! the original plan while reporting only historical single-labor readback. Its
-//! predicates and optional obligation remain pending after a native effect.
+//! the original plan and reports historical single-labor readback separately from
+//! explicit fresh goal observations. Native operation results alone never prove
+//! the original predicates or optional obligation; poll_original_goal does.
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -26,7 +27,11 @@ use crate::workforce_control::{
 use crate::workforce_session::{WorkforceSession, view_cost};
 
 pub mod evidence_owner;
+pub mod goal_monitor;
+pub mod projection;
 pub mod store;
+pub use goal_monitor::{WorkforceGoalMonitor, WorkforceGoalProgress, WorkforceGoalResult};
+pub use projection::WorkforceGoalProjection;
 use store::{Association, AssociationStore};
 pub use store::{PrivateAssociationStore, open_private_association_store};
 

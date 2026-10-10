@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Fresh original-goal proof for semantic workforce actions (2026-10-10)
+
+The single-step semantic workforce handoff now has a foreground original-goal
+monitor backed by fresh workforce/1.17 observations. It retains the original
+canonical/native/historical citizen identities and projects current labor bits
+from a newly acquired capture after closing its source. An independently trusted
+policy callback must authorize the exact source, anchor and selected domain;
+normalization and historical Applied receipts grant no observation authority.
+
+Each sample evaluates all original postconditions, the plan terminal condition
+and the original obligation terminal together. The existing temporal runtime
+keeps the original deadline, cadence and stability requirement. Gaps, failed
+reads and denied publication erase unfinished stability; duplicate ticks cannot
+earn extra samples. The immutable first satisfaction anchor and historical
+fulfillment stay separate from current false/unknown facts. A current true
+failure predicate blocks current proof even after historical fulfillment.
+
+Native action history is a separate result. Fresh true goal predicates cannot
+resolve an Unknown action; semantic completion requires both current goal proof
+and verified historical single-labor readback. Query/Observe-only recovery can
+start a new process-local monitor after exact original-plan reattachment,
+without renewing the deadline, importing a stability streak or dispatching work.
+Canonical cursor, source-clock and grant-expiry floors survive failed reads.
+The monitor cannot be publicly cloned to branch an unfinished proof streak.
+
+**Evidence:** seventeen new public-API integration tests are present, bringing
+the isolated target to 32 tests. Source/API review includes the actual native
+coordinator, evidence scope, obligation runtime and bounded read reservation.
+Current compilation, Rust tests and rustfmt could not execute because the
+execution service disconnected. The preceding fifteen passing acquisition
+tests apply to their earlier generation, not this changed source.
+
+This is an adapter API over an existing development workforce source. Independent
+source authority, broader semantic MCP dispatch, durable native goal history,
+real native evidence and live admission remain separate work. No wire method,
+production runner or compatibility registry entry is added.
+
 ### Finite laboratory production capacity (2026-10-10)
 
 Registered brewing and cooking orders now compete for actual reference-model
