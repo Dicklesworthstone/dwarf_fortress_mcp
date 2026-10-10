@@ -44,6 +44,44 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable original-goal storage (2026-10-10)
+
+`DurableLabStore` now retains original objectives independently of unfinished
+action commits. `persist_objective_commit` saves the original source, sealed
+snapshot, plan and intent identities, owner session and action admission in one
+record before effects. Retiring the action commit does not retire its goal.
+`persist_progress_with_objectives` publishes the world, action frontier, first
+satisfaction and restore abandonment atomically. First proof and abandonment
+anchors remain immutable through subsequent progress, compaction and reopen.
+Their exact snapshots and the original sealing snapshot remain retained roots.
+
+The store caps history at 64 goals per fortress. New work cannot evict an
+unresolved goal or a goal with an unfinished durable commit. Removal additionally
+requires the caller to prove current physical quiescence of every original
+effect; the storage layer does not infer that evidence from a missing commit.
+Identical admission retries cannot recreate retired action work or move history.
+Unknown, duplicate and conflicting goal updates are refused before publication;
+uncertain writes fence the store until verified reopen. Legacy records remain
+readable without inferred objectives or reconstructed historical success.
+
+This is the storage boundary. The caller remains responsible for current
+Observe authority, evaluating the original predicate, and verifying its sealed
+source when reconstructing history. MCP recovery and shared-session wiring are
+a subsequent increment. The format and crash tests use actual snapshots,
+journal files and compaction; they establish no native/live admission.
+
+**Evidence:** all 95 `dfmcp-lab` tests passed: 63 library tests (including all
+26 durable cases, eleven new), 11 deferred-lifecycle tests, 13 atomic-progress
+tests and eight full-action laboratory tests. The new format tests also refuse
+30 malformed admission, compacted-goal and progress payloads. There were no
+failures or ignored tests. This is focused laboratory execution; full workspace
+and MCP runtime qualification remain pending.
+
+An additional regression covers automatic compaction failing after admission was
+already synchronized: every later write and apparent no-op is fenced until
+verified reopen reconciles the published goal. The caller cannot silently
+continue with a goal book that differs from durable storage.
+
 ### Original production goal preservation (2026-10-10)
 
 Production plans retain normalized original quota requests instead of replacing

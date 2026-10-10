@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-10 — Durable original-goal storage
+
+- Admit the exact original goal source, sealing snapshot, owner and action
+  commit atomically before effects. Retain the goal after action retirement and
+  journal compaction; legacy action records gain no invented goal history.
+- Publish first satisfaction and restore abandonment with the exact world and
+  action frontier. Keep both historical anchors immutable and pin their
+  snapshots independently of unfinished work. A later world cannot create a
+  first achievement for an abandoned goal.
+- Bound retained goals to 64 per fortress. Refuse capacity exhaustion before
+  admission and allow only achieved, retired history to be removed; the caller
+  must also establish current quiescence of the original effects. Identical
+  admissions preserve history without recreating retired action commits.
+- Validate source and evidence objects on reopen, keep uncertain writes fenced,
+  and exercise every byte boundary of admission and goal-progress publication.
+  Fence post-publication automatic compaction failures too, so an error cannot
+  leave an admitted goal invisible to its caller while further writes continue.
+  All 95 laboratory tests pass, including 26 durable unit cases and the existing
+  progress/deferred/full-action suites. This increment provides the durable store
+  APIs; MCP lifecycle wiring follows separately and no additional live behavior
+  or admission is claimed.
+
 ## 2026-10-10 — Preserve original production goals
 
 - Keep normalized original DRINK/FOOD quotas through planning, stale-plan replay

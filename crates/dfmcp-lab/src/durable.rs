@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 use dfmcp_core::{
     CheckpointId, DfmcpError, Digest32, ErrorCode, FortressId, GameTick, ObservationCursor, Result,
-    StateAnchor,
+    SessionId, StateAnchor,
 };
 use dfmcp_world::WorldSnapshot;
 
@@ -64,6 +64,9 @@ pub const MAX_PLAN_SUMMARY_BYTES: usize = 4 * 1024;
 pub const MAX_PLAN_REQUEST_BYTES: usize = 16 * 1024;
 /// Most unfinished durable commits per fortress.
 pub const MAX_COMMITS_PER_FORTRESS: usize = 256;
+/// Most retained original objectives per fortress. Unresolved objectives are
+/// never evicted to admit new work.
+pub const MAX_OBJECTIVES_PER_FORTRESS: usize = 64;
 /// Most step records per durable commit.
 pub const MAX_STEPS_PER_COMMIT: usize = 256;
 /// Largest atomic step frontier, including all unfinished plans of a fortress.
@@ -132,6 +135,77 @@ pub enum DurablePlanSource {
     },
 }
 
+impl DurablePlanSource {
+    fn fields(&self) -> (&str, &str, &str) {
+        match self {
+            Self::Pause { summary, paused } => {
+                ("pause", summary, if *paused { "true" } else { "false" })
+            }
+            Self::Actions { summary, raw } => ("actions", summary, raw),
+            Self::Blueprint { summary, raw } => ("blueprint", summary, raw),
+            Self::Production { summary, raw } => ("production", summary, raw),
+        }
+    }
+
+    fn validate_bound(&self) -> Result<()> {
+        let (_, summary, raw) = self.fields();
+        if summary.len() > MAX_PLAN_SUMMARY_BYTES || raw.len() > MAX_PLAN_REQUEST_BYTES {
+            return Err(invalid("plan request exceeds the durable record bound"));
+        }
+        Ok(())
+    }
+}
+
+/// An original committed objective, retained independently of its action work.
+///
+/// The source and sealed world reconstruct the exact original predicate. The
+/// first satisfaction anchor records immutable history, not current truth.
+/// Restore abandonment prevents later worlds from newly satisfying this goal.
+/// Neither anchor grants dispatch or observation authority to the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableObjective {
+    pub fortress_id: FortressId,
+    pub plan_digest: Digest32,
+    pub sealed_state_hash: Digest32,
+    pub intent_id: u128,
+    pub source: DurablePlanSource,
+    pub owner_session_id: SessionId,
+    pub first_satisfied_anchor: Option<StateAnchor>,
+    pub restore_abandoned_anchor: Option<StateAnchor>,
+}
+
+impl DurableObjective {
+    fn validate(&self) -> Result<()> {
+        if self.owner_session_id == SessionId::NIL || self.intent_id == 0 {
+            return Err(corrupt(
+                "durable objective owner and intent must be nonzero",
+            ));
+        }
+        self.source.validate_bound()?;
+        if self
+            .first_satisfied_anchor
+            .iter()
+            .chain(self.restore_abandoned_anchor.iter())
+            .any(|anchor| anchor.fortress_id != self.fortress_id)
+        {
+            return Err(corrupt("objective evidence belongs to another fortress"));
+        }
+        Ok(())
+    }
+
+    fn opening_commit(&self) -> DurableCommit {
+        DurableCommit {
+            fortress_id: self.fortress_id,
+            plan_digest: self.plan_digest,
+            sealed_state_hash: self.sealed_state_hash,
+            intent_id: self.intent_id,
+            source: self.source.clone(),
+            steps: BTreeMap::new(),
+            step_anchors: BTreeMap::new(),
+        }
+    }
+}
+
 /// A committed plan whose steps are not all final.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableCommit {
@@ -165,8 +239,21 @@ enum Record {
         updates: Vec<DurableStepUpdate>,
         retired: Vec<Digest32>,
     },
+    ProgressWithObjectives {
+        head: DurableHead,
+        updates: Vec<DurableStepUpdate>,
+        retired: Vec<Digest32>,
+        satisfied: Vec<Digest32>,
+        abandoned: Vec<Digest32>,
+    },
     Checkpoint(DurableCheckpoint),
     Commit(DurableCommit),
+    ObjectiveCommit {
+        objective: DurableObjective,
+        evicted_history: Vec<Digest32>,
+    },
+    /// Compaction representation; action commits are retained separately.
+    Objective(DurableObjective),
     Step {
         fortress_id: FortressId,
         plan_digest: Digest32,
@@ -272,6 +359,173 @@ fn parse_digest(raw: &str) -> Result<Digest32> {
     Digest32::from_hex(raw).ok_or_else(|| corrupt("journal digest is malformed"))
 }
 
+fn parse_identifier(raw: &str) -> Result<u128> {
+    if raw.len() != 32 || !raw.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return Err(corrupt("journal identifier is malformed"));
+    }
+    u128::from_str_radix(raw, 16).map_err(|_| corrupt("journal identifier is malformed"))
+}
+
+fn plan_payload(
+    fortress: FortressId,
+    digest: Digest32,
+    sealed: Digest32,
+    intent: u128,
+    source: &DurablePlanSource,
+) -> String {
+    let (kind, summary, raw) = source.fields();
+    format!(
+        "{} {} {} {intent:032x} {kind} {} {}",
+        fortress.get(),
+        digest.to_hex(),
+        sealed.to_hex(),
+        hex_text(summary),
+        hex_text(raw),
+    )
+}
+
+fn parse_plan(
+    fortress: &str,
+    digest: &str,
+    sealed: &str,
+    intent: &str,
+    kind: &str,
+    summary: &str,
+    payload: &str,
+) -> Result<DurableCommit> {
+    let intent_id = parse_identifier(intent)?;
+    let summary = unhex_payload(summary, MAX_PLAN_SUMMARY_BYTES)?;
+    let source = match kind {
+        "pause" => match unhex_text(payload, 5)?.as_str() {
+            "true" => DurablePlanSource::Pause {
+                summary,
+                paused: true,
+            },
+            "false" => DurablePlanSource::Pause {
+                summary,
+                paused: false,
+            },
+            _ => return Err(corrupt("journal pause target is malformed")),
+        },
+        "actions" => DurablePlanSource::Actions {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "blueprint" => DurablePlanSource::Blueprint {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "production" => DurablePlanSource::Production {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        _ => return Err(corrupt("journal plan source kind is not recognized")),
+    };
+    Ok(DurableCommit {
+        fortress_id: FortressId::new(parse_u64(fortress)?),
+        plan_digest: parse_digest(digest)?,
+        sealed_state_hash: parse_digest(sealed)?,
+        intent_id,
+        source,
+        steps: BTreeMap::new(),
+        step_anchors: BTreeMap::new(),
+    })
+}
+
+fn optional_anchor_payload(anchor: Option<StateAnchor>) -> String {
+    match anchor {
+        None => "- 0 0 0".to_owned(),
+        Some(anchor) => format!(
+            "{} {} {} {}",
+            anchor.state_hash.to_hex(),
+            anchor.tick.0,
+            anchor.cursor.epoch,
+            anchor.cursor.sequence,
+        ),
+    }
+}
+
+fn parse_optional_anchor(
+    fortress_id: FortressId,
+    hash: &str,
+    tick: &str,
+    epoch: &str,
+    sequence: &str,
+) -> Result<Option<StateAnchor>> {
+    if hash == "-" {
+        if (tick, epoch, sequence) != ("0", "0", "0") {
+            return Err(corrupt(
+                "absent objective evidence has nonzero anchor fields",
+            ));
+        }
+        return Ok(None);
+    }
+    Ok(Some(StateAnchor {
+        fortress_id,
+        state_hash: parse_digest(hash)?,
+        tick: GameTick(parse_u64(tick)?),
+        cursor: ObservationCursor {
+            epoch: parse_u64(epoch)?,
+            sequence: parse_u64(sequence)?,
+        },
+    }))
+}
+
+fn progress_payload(
+    head: &DurableHead,
+    updates: &[DurableStepUpdate],
+    retired: &[Digest32],
+    objectives: Option<(&[Digest32], &[Digest32])>,
+) -> String {
+    let tag = if objectives.is_some() { "V" } else { "F" };
+    let mut payload = format!(
+        "{tag} {} {} {} {} {} {} {} {}",
+        head.fortress_id.get(),
+        hex_text(&head.scenario),
+        head.anchor.state_hash.to_hex(),
+        head.anchor.tick.0,
+        head.anchor.cursor.epoch,
+        head.anchor.cursor.sequence,
+        updates.len(),
+        retired.len(),
+    );
+    if let Some((satisfied, abandoned)) = objectives {
+        payload.push_str(&format!(" {} {}", satisfied.len(), abandoned.len()));
+    }
+    for update in updates {
+        payload.push_str(&format!(
+            " {} {} {}",
+            update.plan_digest.to_hex(),
+            update.step,
+            update.state,
+        ));
+    }
+    let (satisfied, abandoned) = match objectives {
+        Some(lists) => lists,
+        None => (&[][..], &[][..]),
+    };
+    for digest in retired.iter().chain(satisfied).chain(abandoned) {
+        payload.push(' ');
+        payload.push_str(&digest.to_hex());
+    }
+    payload
+}
+
+fn parse_ordered_digests<'a>(
+    next: &mut impl FnMut() -> Result<&'a str>,
+    count: u64,
+) -> Result<Vec<Digest32>> {
+    let mut digests = Vec::new();
+    for _ in 0..count {
+        let digest = parse_digest(next()?)?;
+        if digests.last().is_some_and(|previous| *previous >= digest) {
+            return Err(corrupt("journal plan digests are not strictly ordered"));
+        }
+        digests.push(digest);
+    }
+    Ok(digests)
+}
+
 impl Record {
     fn payload(&self) -> String {
         match self {
@@ -288,32 +542,14 @@ impl Record {
                 head,
                 updates,
                 retired,
-            } => {
-                let mut payload = format!(
-                    "F {} {} {} {} {} {} {} {}",
-                    head.fortress_id.get(),
-                    hex_text(&head.scenario),
-                    head.anchor.state_hash.to_hex(),
-                    head.anchor.tick.0,
-                    head.anchor.cursor.epoch,
-                    head.anchor.cursor.sequence,
-                    updates.len(),
-                    retired.len(),
-                );
-                for update in updates {
-                    payload.push_str(&format!(
-                        " {} {} {}",
-                        update.plan_digest.to_hex(),
-                        update.step,
-                        update.state,
-                    ));
-                }
-                for digest in retired {
-                    payload.push(' ');
-                    payload.push_str(&digest.to_hex());
-                }
-                payload
-            }
+            } => progress_payload(head, updates, retired, None),
+            Self::ProgressWithObjectives {
+                head,
+                updates,
+                retired,
+                satisfied,
+                abandoned,
+            } => progress_payload(head, updates, retired, Some((satisfied, abandoned))),
             Self::Checkpoint(checkpoint) => format!(
                 "C {} {:032x} {} {}",
                 checkpoint.fortress_id.get(),
@@ -321,31 +557,51 @@ impl Record {
                 hex_text(&checkpoint.label),
                 checkpoint.state_hash.to_hex(),
             ),
-            Self::Commit(commit) => {
-                let (kind, summary, payload) = match &commit.source {
-                    DurablePlanSource::Pause { summary, paused } => {
-                        ("pause", summary, if *paused { "true" } else { "false" })
-                    }
-                    DurablePlanSource::Actions { summary, raw } => {
-                        ("actions", summary, raw.as_str())
-                    }
-                    DurablePlanSource::Blueprint { summary, raw } => {
-                        ("blueprint", summary, raw.as_str())
-                    }
-                    DurablePlanSource::Production { summary, raw } => {
-                        ("production", summary, raw.as_str())
-                    }
-                };
-                format!(
-                    "P {} {} {} {:032x} {kind} {} {}",
-                    commit.fortress_id.get(),
-                    commit.plan_digest.to_hex(),
-                    commit.sealed_state_hash.to_hex(),
+            Self::Commit(commit) => format!(
+                "P {}",
+                plan_payload(
+                    commit.fortress_id,
+                    commit.plan_digest,
+                    commit.sealed_state_hash,
                     commit.intent_id,
-                    hex_text(summary),
-                    hex_text(payload),
-                )
+                    &commit.source,
+                ),
+            ),
+            Self::ObjectiveCommit {
+                objective,
+                evicted_history,
+            } => {
+                let mut payload = format!(
+                    "G {} {:032x} {}",
+                    plan_payload(
+                        objective.fortress_id,
+                        objective.plan_digest,
+                        objective.sealed_state_hash,
+                        objective.intent_id,
+                        &objective.source,
+                    ),
+                    objective.owner_session_id.get(),
+                    evicted_history.len(),
+                );
+                for digest in evicted_history {
+                    payload.push(' ');
+                    payload.push_str(&digest.to_hex());
+                }
+                payload
             }
+            Self::Objective(objective) => format!(
+                "O {} {:032x} {} {}",
+                plan_payload(
+                    objective.fortress_id,
+                    objective.plan_digest,
+                    objective.sealed_state_hash,
+                    objective.intent_id,
+                    &objective.source,
+                ),
+                objective.owner_session_id.get(),
+                optional_anchor_payload(objective.first_satisfied_anchor),
+                optional_anchor_payload(objective.restore_abandoned_anchor),
+            ),
             Self::Step {
                 fortress_id,
                 plan_digest,
@@ -379,11 +635,14 @@ impl Record {
     }
 
     fn parse(payload: &str) -> Result<Self> {
-        if payload.starts_with("F ") {
+        if payload.starts_with("F ") || payload.starts_with("V ") {
             return Self::parse_progress(payload);
         }
         if payload.len() > MAX_RECORD_BYTES {
             return Err(corrupt("journal record exceeds its bound"));
+        }
+        if payload.starts_with("G ") {
+            return Self::parse_objective_commit(payload);
         }
         let fields: Vec<&str> = payload.split(' ').collect();
         match fields.as_slice() {
@@ -428,52 +687,53 @@ impl Record {
                 kind,
                 summary,
                 payload,
+            ] => Ok(Self::Commit(parse_plan(
+                fortress, digest, sealed, intent, kind, summary, payload,
+            )?)),
+            [
+                "O",
+                fortress,
+                digest,
+                sealed,
+                intent,
+                kind,
+                summary,
+                payload,
+                owner,
+                proof_hash,
+                proof_tick,
+                proof_epoch,
+                proof_sequence,
+                abandoned_hash,
+                abandoned_tick,
+                abandoned_epoch,
+                abandoned_sequence,
             ] => {
-                if intent.len() != 32
-                    || !intent
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-                {
-                    return Err(corrupt("journal intent id is malformed"));
-                }
-                let intent_id = u128::from_str_radix(intent, 16)
-                    .map_err(|_| corrupt("journal intent id is malformed"))?;
-                let summary = unhex_payload(summary, MAX_PLAN_SUMMARY_BYTES)?;
-                let source = match *kind {
-                    "pause" => match unhex_text(payload, 5)?.as_str() {
-                        "true" => DurablePlanSource::Pause {
-                            summary,
-                            paused: true,
-                        },
-                        "false" => DurablePlanSource::Pause {
-                            summary,
-                            paused: false,
-                        },
-                        _ => return Err(corrupt("journal pause target is malformed")),
-                    },
-                    "actions" => DurablePlanSource::Actions {
-                        summary,
-                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
-                    },
-                    "blueprint" => DurablePlanSource::Blueprint {
-                        summary,
-                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
-                    },
-                    "production" => DurablePlanSource::Production {
-                        summary,
-                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
-                    },
-                    _ => return Err(corrupt("journal plan source kind is not recognized")),
+                let commit = parse_plan(fortress, digest, sealed, intent, kind, summary, payload)?;
+                let objective = DurableObjective {
+                    fortress_id: commit.fortress_id,
+                    plan_digest: commit.plan_digest,
+                    sealed_state_hash: commit.sealed_state_hash,
+                    intent_id: commit.intent_id,
+                    source: commit.source,
+                    owner_session_id: SessionId::new(parse_identifier(owner)?),
+                    first_satisfied_anchor: parse_optional_anchor(
+                        commit.fortress_id,
+                        proof_hash,
+                        proof_tick,
+                        proof_epoch,
+                        proof_sequence,
+                    )?,
+                    restore_abandoned_anchor: parse_optional_anchor(
+                        commit.fortress_id,
+                        abandoned_hash,
+                        abandoned_tick,
+                        abandoned_epoch,
+                        abandoned_sequence,
+                    )?,
                 };
-                Ok(Self::Commit(DurableCommit {
-                    fortress_id: FortressId::new(parse_u64(fortress)?),
-                    plan_digest: parse_digest(digest)?,
-                    sealed_state_hash: parse_digest(sealed)?,
-                    intent_id,
-                    source,
-                    steps: BTreeMap::new(),
-                    step_anchors: BTreeMap::new(),
-                }))
+                objective.validate()?;
+                Ok(Self::Objective(objective))
             }
             ["S", fortress, digest, step, state] => {
                 if !STEP_STATES.contains(state) {
@@ -528,6 +788,56 @@ impl Record {
         }
     }
 
+    fn parse_objective_commit(payload: &str) -> Result<Self> {
+        if payload.len() > MAX_RECORD_BYTES {
+            return Err(corrupt("journal objective admission exceeds its bound"));
+        }
+        let mut fields = payload.split(' ');
+        let mut next = || {
+            fields
+                .next()
+                .ok_or_else(|| corrupt("journal objective admission is truncated"))
+        };
+        if next()? != "G" {
+            return Err(corrupt("journal objective admission kind is invalid"));
+        }
+        let commit = parse_plan(
+            next()?,
+            next()?,
+            next()?,
+            next()?,
+            next()?,
+            next()?,
+            next()?,
+        )?;
+        let owner_session_id = SessionId::new(parse_identifier(next()?)?);
+        let evicted_count = parse_u64(next()?)?;
+        if evicted_count > MAX_OBJECTIVES_PER_FORTRESS as u64 {
+            return Err(corrupt(
+                "journal objective history eviction exceeds its bound",
+            ));
+        }
+        let evicted_history = parse_ordered_digests(&mut next, evicted_count)?;
+        if fields.next().is_some() {
+            return Err(corrupt("journal objective admission has trailing fields"));
+        }
+        let objective = DurableObjective {
+            fortress_id: commit.fortress_id,
+            plan_digest: commit.plan_digest,
+            sealed_state_hash: commit.sealed_state_hash,
+            intent_id: commit.intent_id,
+            source: commit.source,
+            owner_session_id,
+            first_satisfied_anchor: None,
+            restore_abandoned_anchor: None,
+        };
+        objective.validate()?;
+        Ok(Self::ObjectiveCommit {
+            objective,
+            evicted_history,
+        })
+    }
+
     fn parse_progress(payload: &str) -> Result<Self> {
         if payload.len() > MAX_PROGRESS_RECORD_BYTES {
             return Err(corrupt("journal progress record exceeds its bound"));
@@ -539,7 +849,8 @@ impl Record {
                 .next()
                 .ok_or_else(|| corrupt("journal progress record is truncated"))
         };
-        if next()? != "F" {
+        let tag = next()?;
+        if !matches!(tag, "F" | "V") {
             return Err(corrupt("journal progress record kind is invalid"));
         }
         let fortress_id = FortressId::new(parse_u64(next()?)?);
@@ -550,8 +861,15 @@ impl Record {
         let sequence = parse_u64(next()?)?;
         let update_count = parse_u64(next()?)?;
         let retired_count = parse_u64(next()?)?;
+        let (satisfied_count, abandoned_count) = if tag == "V" {
+            (parse_u64(next()?)?, parse_u64(next()?)?)
+        } else {
+            (0, 0)
+        };
         if update_count > MAX_PROGRESS_UPDATES as u64
             || retired_count > MAX_COMMITS_PER_FORTRESS as u64
+            || satisfied_count > MAX_OBJECTIVES_PER_FORTRESS as u64
+            || abandoned_count > MAX_OBJECTIVES_PER_FORTRESS as u64
         {
             return Err(corrupt("journal progress frontier exceeds its bound"));
         }
@@ -575,30 +893,42 @@ impl Record {
                 state: state.to_owned(),
             });
         }
-        let mut retired = Vec::new();
-        for _ in 0..retired_count {
-            let digest = parse_digest(next()?)?;
-            if retired.last().is_some_and(|previous| *previous >= digest) {
-                return Err(corrupt("journal retired plans are not strictly ordered"));
-            }
-            retired.push(digest);
+        let retired = parse_ordered_digests(&mut next, retired_count)?;
+        let satisfied = parse_ordered_digests(&mut next, satisfied_count)?;
+        let abandoned = parse_ordered_digests(&mut next, abandoned_count)?;
+        if satisfied
+            .iter()
+            .any(|digest| abandoned.binary_search(digest).is_ok())
+        {
+            return Err(corrupt("journal objective is both satisfied and abandoned"));
         }
         if fields.next().is_some() {
             return Err(corrupt("journal progress record has trailing fields"));
         }
-        Ok(Self::Progress {
-            head: DurableHead {
+        let head = DurableHead {
+            fortress_id,
+            scenario,
+            anchor: StateAnchor {
                 fortress_id,
-                scenario,
-                anchor: StateAnchor {
-                    fortress_id,
-                    cursor: ObservationCursor { epoch, sequence },
-                    tick,
-                    state_hash,
-                },
+                cursor: ObservationCursor { epoch, sequence },
+                tick,
+                state_hash,
             },
-            updates,
-            retired,
+        };
+        Ok(if tag == "V" {
+            Self::ProgressWithObjectives {
+                head,
+                updates,
+                retired,
+                satisfied,
+                abandoned,
+            }
+        } else {
+            Self::Progress {
+                head,
+                updates,
+                retired,
+            }
         })
     }
 }
@@ -780,6 +1110,27 @@ impl DurableLabStore {
                 }
             }
         }
+        for objective in store.index.objectives.values().flat_map(BTreeMap::values) {
+            if verified_anchors
+                .get(&objective.sealed_state_hash)
+                .is_none_or(|anchor| anchor.fortress_id != objective.fortress_id)
+            {
+                return Err(corrupt(
+                    "durable objective names a different fortress snapshot",
+                ));
+            }
+            for anchor in objective
+                .first_satisfied_anchor
+                .iter()
+                .chain(objective.restore_abandoned_anchor.iter())
+            {
+                if verified_anchors.get(&anchor.state_hash) != Some(anchor) {
+                    return Err(corrupt(
+                        "durable objective anchor does not match its snapshot",
+                    ));
+                }
+            }
+        }
         store.remove_crash_leftovers();
         Ok(store)
     }
@@ -849,6 +1200,21 @@ impl DurableLabStore {
                     .flat_map(BTreeMap::values)
                     .flat_map(|commit| commit.step_anchors.values())
                     .map(|anchor| anchor.state_hash),
+            )
+            .chain(
+                self.index
+                    .objectives
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|objective| {
+                        std::iter::once(objective.sealed_state_hash).chain(
+                            objective
+                                .first_satisfied_anchor
+                                .iter()
+                                .chain(objective.restore_abandoned_anchor.iter())
+                                .map(|anchor| anchor.state_hash),
+                        )
+                    }),
             )
             .collect()
     }
@@ -950,7 +1316,10 @@ impl DurableLabStore {
             None => {}
         }
         let payload = record.payload();
-        let record_bound = if matches!(&record, Record::Progress { .. }) {
+        let record_bound = if matches!(
+            &record,
+            Record::Progress { .. } | Record::ProgressWithObjectives { .. }
+        ) {
             MAX_PROGRESS_RECORD_BYTES
         } else {
             MAX_RECORD_BYTES
@@ -994,8 +1363,15 @@ impl DurableLabStore {
         self.index = next;
         self.chain = chain;
         self.records += 1;
-        if self.records >= COMPACT_AFTER_RECORDS {
-            self.compact()?;
+        if self.records >= COMPACT_AFTER_RECORDS
+            && let Err(error) = self.compact()
+        {
+            // This append is already published, even when compaction fails
+            // before its own rename. The caller received an error and may not
+            // have installed the admitted goal or effects in memory. Fence
+            // even apparent no-ops until replay reconciles the published root.
+            self.write_fault = Some(error.message.clone());
+            return Err(error.retryable(false));
         }
         Ok(())
     }
@@ -1067,6 +1443,25 @@ impl DurableLabStore {
         updates: &[DurableStepUpdate],
         retired: &[Digest32],
     ) -> Result<()> {
+        self.persist_progress_with_objectives(scenario, snapshot, updates, retired, &[], &[])
+    }
+
+    /// Atomically publish action progress and original-goal history with one
+    /// exact world. The caller must establish Observe authority and evaluate
+    /// the original predicate before naming a satisfied objective.
+    ///
+    /// The first satisfaction and restore-abandonment anchors never move.
+    /// Unknown, duplicate, or overlapping objective lists are refused before
+    /// publication. An abandoned objective cannot acquire its first proof.
+    pub fn persist_progress_with_objectives(
+        &mut self,
+        scenario: &str,
+        snapshot: &WorldSnapshot,
+        updates: &[DurableStepUpdate],
+        retired: &[Digest32],
+        satisfied: &[Digest32],
+        abandoned: &[Digest32],
+    ) -> Result<()> {
         self.ensure_writable()?;
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
@@ -1077,7 +1472,11 @@ impl DurableLabStore {
         if scenario.len() > MAX_SCENARIO_BYTES || scenario.chars().any(char::is_control) {
             return Err(invalid("scenario name is not storable"));
         }
-        if updates.len() > MAX_PROGRESS_UPDATES || retired.len() > MAX_COMMITS_PER_FORTRESS {
+        if updates.len() > MAX_PROGRESS_UPDATES
+            || retired.len() > MAX_COMMITS_PER_FORTRESS
+            || satisfied.len() > MAX_OBJECTIVES_PER_FORTRESS
+            || abandoned.len() > MAX_OBJECTIVES_PER_FORTRESS
+        {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
                 "durable progress frontier exceeds its explicit bound",
@@ -1102,6 +1501,37 @@ impl DurableLabStore {
                 "duplicate retired plan in durable progress frontier",
             ));
         }
+        let satisfied_set: BTreeSet<_> = satisfied.iter().copied().collect();
+        let abandoned_set: BTreeSet<_> = abandoned.iter().copied().collect();
+        if satisfied_set.len() != satisfied.len() || abandoned_set.len() != abandoned.len() {
+            return Err(invalid("duplicate objective in durable progress frontier"));
+        }
+        if !satisfied_set.is_disjoint(&abandoned_set) {
+            return Err(invalid("objective cannot be both satisfied and abandoned"));
+        }
+        let mut satisfied = Vec::new();
+        for digest in satisfied_set {
+            let objective = self
+                .objective(fortress, digest)
+                .ok_or_else(|| invalid("satisfaction names an unknown durable objective"))?;
+            if objective.first_satisfied_anchor.is_none() {
+                if objective.restore_abandoned_anchor.is_some() {
+                    return Err(invalid(
+                        "abandoned objective cannot acquire satisfaction proof",
+                    ));
+                }
+                satisfied.push(digest);
+            }
+        }
+        let mut abandoned = Vec::new();
+        for digest in abandoned_set {
+            let objective = self
+                .objective(fortress, digest)
+                .ok_or_else(|| invalid("abandonment names an unknown durable objective"))?;
+            if objective.restore_abandoned_anchor.is_none() {
+                abandoned.push(digest);
+            }
+        }
         let updates: Vec<_> = ordered
             .into_values()
             .filter(|update| {
@@ -1122,13 +1552,25 @@ impl DurableLabStore {
         if self.index.heads.get(&fortress) == Some(&head)
             && updates.is_empty()
             && retired.is_empty()
+            && satisfied.is_empty()
+            && abandoned.is_empty()
         {
             return Ok(());
         }
-        let record = Record::Progress {
-            head,
-            updates,
-            retired,
+        let record = if satisfied.is_empty() && abandoned.is_empty() {
+            Record::Progress {
+                head,
+                updates,
+                retired,
+            }
+        } else {
+            Record::ProgressWithObjectives {
+                head,
+                updates,
+                retired,
+                satisfied,
+                abandoned,
+            }
         };
         let mut candidate = self.index.clone();
         candidate.apply(record.clone())?;
@@ -1167,15 +1609,7 @@ impl DurableLabStore {
         intent_id: u128,
         source: DurablePlanSource,
     ) -> Result<()> {
-        let (summary, payload_len) = match &source {
-            DurablePlanSource::Pause { summary, .. } => (summary, 0),
-            DurablePlanSource::Actions { summary, raw }
-            | DurablePlanSource::Blueprint { summary, raw }
-            | DurablePlanSource::Production { summary, raw } => (summary, raw.len()),
-        };
-        if summary.len() > MAX_PLAN_SUMMARY_BYTES || payload_len > MAX_PLAN_REQUEST_BYTES {
-            return Err(invalid("plan request exceeds the durable record bound"));
-        }
+        source.validate_bound()?;
         self.append(
             Record::Commit(DurableCommit {
                 fortress_id: sealed.fortress_id,
@@ -1186,6 +1620,83 @@ impl DurableLabStore {
                 steps: BTreeMap::new(),
                 step_anchors: BTreeMap::new(),
             }),
+            Some(sealed),
+        )
+    }
+
+    /// Admit original intent and its action commit together, before effects.
+    /// The sealed snapshot is durably published before the single admission
+    /// record. Legacy action commits are never upgraded into inferred goals.
+    ///
+    /// History may be evicted only when it already has a satisfaction anchor
+    /// and no unfinished durable commit. The caller must additionally inspect
+    /// exact effect identities and prove current physical quiescence.
+    ///
+    /// An identical request is a no-op even after action retirement. It cannot
+    /// resurrect work, move proof anchors, or apply additional history evictions.
+    pub fn persist_objective_commit(
+        &mut self,
+        sealed: &WorldSnapshot,
+        plan_digest: Digest32,
+        intent_id: u128,
+        source: DurablePlanSource,
+        owner_session_id: SessionId,
+        evicted_history: &[Digest32],
+    ) -> Result<()> {
+        self.ensure_writable()?;
+        source.validate_bound()?;
+        if !sealed.hash_is_valid() {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "refusing objective admission against an invalid sealed snapshot",
+            ));
+        }
+        if owner_session_id == SessionId::NIL || intent_id == 0 {
+            return Err(invalid("objective owner and intent must be nonzero"));
+        }
+        if evicted_history.len() > MAX_OBJECTIVES_PER_FORTRESS {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "objective history eviction exceeds its explicit bound",
+            ));
+        }
+        let evicted: BTreeSet<_> = evicted_history.iter().copied().collect();
+        if evicted.len() != evicted_history.len() || evicted.contains(&plan_digest) {
+            return Err(invalid(
+                "objective admission has duplicate or self history eviction",
+            ));
+        }
+        if let Some(previous) = self.objective(sealed.fortress_id, plan_digest) {
+            if previous.sealed_state_hash != sealed.state_hash
+                || previous.intent_id != intent_id
+                || previous.source != source
+                || previous.owner_session_id != owner_session_id
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "objective admission conflicts with the retained original request",
+                ));
+            }
+            return Ok(());
+        }
+        let objective = DurableObjective {
+            fortress_id: sealed.fortress_id,
+            plan_digest,
+            sealed_state_hash: sealed.state_hash,
+            intent_id,
+            source,
+            owner_session_id,
+            first_satisfied_anchor: None,
+            restore_abandoned_anchor: None,
+        };
+        let evicted_history: Vec<_> = evicted.into_iter().collect();
+        self.index
+            .validate_objective_admission(&objective, &evicted_history)?;
+        self.append(
+            Record::ObjectiveCommit {
+                objective,
+                evicted_history,
+            },
             Some(sealed),
         )
     }
@@ -1252,6 +1763,28 @@ impl DurableLabStore {
             .flat_map(BTreeMap::values)
     }
 
+    /// One retained original objective, including achieved or abandoned history.
+    #[must_use]
+    pub fn objective(
+        &self,
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+    ) -> Option<&DurableObjective> {
+        self.index
+            .objectives
+            .get(&fortress_id)
+            .and_then(|book| book.get(&plan_digest))
+    }
+
+    /// Every retained original objective of a fortress, in digest order.
+    pub fn objectives(&self, fortress_id: FortressId) -> impl Iterator<Item = &DurableObjective> {
+        self.index
+            .objectives
+            .get(&fortress_id)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+    }
+
     /// The latest durable state of a fortress, if it has one.
     #[must_use]
     pub fn head(&self, fortress_id: FortressId) -> Option<&DurableHead> {
@@ -1280,9 +1813,10 @@ impl DurableLabStore {
         }
     }
 
-    /// Rewrite the journal as the live heads and checkpoints only, then drop
-    /// objects nothing references. The replacement is synced and renamed over
-    /// the old journal, so a crash leaves one complete journal or the other.
+    /// Rewrite the journal as live heads, checkpoints, unfinished commits, and
+    /// retained original objectives, then drop objects nothing references.
+    /// The replacement is synced and renamed over the old journal, so a crash
+    /// leaves one complete journal or the other.
     pub fn compact(&mut self) -> Result<()> {
         self.compact_with_directory_sync(sync_dir)
     }
@@ -1336,6 +1870,14 @@ impl DurableLabStore {
                             },
                         ))
                     }),
+            )
+            .chain(
+                self.index
+                    .objectives
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .cloned()
+                    .map(Record::Objective),
             )
             .collect();
         for record in live {
@@ -1404,12 +1946,79 @@ struct Index {
     heads: BTreeMap<FortressId, DurableHead>,
     checkpoints: BTreeMap<FortressId, BTreeMap<CheckpointId, DurableCheckpoint>>,
     commits: BTreeMap<FortressId, BTreeMap<Digest32, DurableCommit>>,
+    objectives: BTreeMap<FortressId, BTreeMap<Digest32, DurableObjective>>,
 }
 
 impl Index {
+    fn validate_objective_admission(
+        &self,
+        objective: &DurableObjective,
+        evicted_history: &[Digest32],
+    ) -> Result<()> {
+        objective.validate()?;
+        if objective.first_satisfied_anchor.is_some()
+            || objective.restore_abandoned_anchor.is_some()
+        {
+            return Err(corrupt(
+                "objective admission cannot invent historical evidence",
+            ));
+        }
+        let book = self.objectives.get(&objective.fortress_id);
+        if book.is_some_and(|book| book.contains_key(&objective.plan_digest)) {
+            return Err(corrupt("durable objective recorded twice"));
+        }
+        if evicted_history.len() > MAX_OBJECTIVES_PER_FORTRESS
+            || evicted_history.windows(2).any(|pair| pair[0] >= pair[1])
+            || evicted_history.contains(&objective.plan_digest)
+        {
+            return Err(corrupt(
+                "objective history eviction is not a bounded ordered set",
+            ));
+        }
+        let commits = self.commits.get(&objective.fortress_id);
+        for digest in evicted_history {
+            let previous = book
+                .and_then(|book| book.get(digest))
+                .ok_or_else(|| corrupt("history eviction names an unknown durable objective"))?;
+            if previous.first_satisfied_anchor.is_none()
+                || commits.is_some_and(|book| book.contains_key(digest))
+            {
+                return Err(corrupt(
+                    "history eviction would discard an unfinished objective",
+                ));
+            }
+        }
+        let remaining = book
+            .map_or(0, BTreeMap::len)
+            .saturating_sub(evicted_history.len());
+        if remaining >= MAX_OBJECTIVES_PER_FORTRESS
+            || (book.is_none() && self.objectives.len() >= MAX_FORTRESSES)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "durable objective capacity is full; unresolved goals must be retained",
+            ));
+        }
+        if commits.is_some_and(|book| book.contains_key(&objective.plan_digest)) {
+            return Err(corrupt(
+                "objective admission conflicts with an existing action commit",
+            ));
+        }
+        if commits.is_some_and(|book| book.len() >= MAX_COMMITS_PER_FORTRESS) {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "durable laboratory fortress reached its unfinished-commit bound",
+            ));
+        }
+        Ok(())
+    }
+
     fn apply(&mut self, record: Record) -> Result<()> {
         match record {
             Record::Head(head) => {
+                if head.anchor.fortress_id != head.fortress_id {
+                    return Err(corrupt("durable head evidence belongs to another fortress"));
+                }
                 if !self.heads.contains_key(&head.fortress_id) && self.heads.len() >= MAX_FORTRESSES
                 {
                     return Err(DfmcpError::new(
@@ -1453,6 +2062,66 @@ impl Index {
                     })?;
                 }
             }
+            Record::ProgressWithObjectives {
+                head,
+                updates,
+                retired,
+                satisfied,
+                abandoned,
+            } => {
+                if satisfied.len() > MAX_OBJECTIVES_PER_FORTRESS
+                    || abandoned.len() > MAX_OBJECTIVES_PER_FORTRESS
+                    || satisfied.windows(2).any(|pair| pair[0] >= pair[1])
+                    || abandoned.windows(2).any(|pair| pair[0] >= pair[1])
+                    || satisfied
+                        .iter()
+                        .any(|digest| abandoned.binary_search(digest).is_ok())
+                {
+                    return Err(corrupt(
+                        "objective progress is not a pair of disjoint bounded sets",
+                    ));
+                }
+                let fortress_id = head.fortress_id;
+                let anchor = head.anchor;
+                for digest in satisfied.iter().chain(&abandoned) {
+                    let objective = self
+                        .objectives
+                        .get(&fortress_id)
+                        .and_then(|book| book.get(digest))
+                        .ok_or_else(|| corrupt("progress names an unknown durable objective"))?;
+                    if satisfied.binary_search(digest).is_ok()
+                        && objective.first_satisfied_anchor.is_none()
+                        && objective.restore_abandoned_anchor.is_some()
+                    {
+                        return Err(corrupt(
+                            "abandoned objective acquired new satisfaction proof",
+                        ));
+                    }
+                }
+                self.apply(Record::Progress {
+                    head,
+                    updates,
+                    retired,
+                })?;
+                for digest in satisfied {
+                    let objective = self
+                        .objectives
+                        .get_mut(&fortress_id)
+                        .and_then(|book| book.get_mut(&digest))
+                        .ok_or_else(|| {
+                            corrupt("satisfaction names an unknown durable objective")
+                        })?;
+                    objective.first_satisfied_anchor.get_or_insert(anchor);
+                }
+                for digest in abandoned {
+                    let objective = self
+                        .objectives
+                        .get_mut(&fortress_id)
+                        .and_then(|book| book.get_mut(&digest))
+                        .ok_or_else(|| corrupt("abandonment names an unknown durable objective"))?;
+                    objective.restore_abandoned_anchor.get_or_insert(anchor);
+                }
+            }
             Record::Checkpoint(checkpoint) => {
                 let book = self.checkpoints.entry(checkpoint.fortress_id).or_default();
                 if !book.contains_key(&checkpoint.checkpoint_id)
@@ -1466,6 +2135,15 @@ impl Index {
                 book.insert(checkpoint.checkpoint_id, checkpoint);
             }
             Record::Commit(commit) => {
+                if self
+                    .objectives
+                    .get(&commit.fortress_id)
+                    .is_some_and(|book| book.contains_key(&commit.plan_digest))
+                {
+                    return Err(corrupt(
+                        "retained objective cannot resurrect an action commit",
+                    ));
+                }
                 let book = self.commits.entry(commit.fortress_id).or_default();
                 if book.contains_key(&commit.plan_digest) {
                     return Err(corrupt("durable commit recorded twice"));
@@ -1477,6 +2155,53 @@ impl Index {
                     ));
                 }
                 book.insert(commit.plan_digest, commit);
+            }
+            Record::ObjectiveCommit {
+                objective,
+                evicted_history,
+            } => {
+                self.validate_objective_admission(&objective, &evicted_history)?;
+                self.apply(Record::Commit(objective.opening_commit()))?;
+                if let Some(book) = self.objectives.get_mut(&objective.fortress_id) {
+                    for digest in evicted_history {
+                        book.remove(&digest);
+                    }
+                }
+                self.apply(Record::Objective(objective))?;
+            }
+            Record::Objective(objective) => {
+                objective.validate()?;
+                if let Some(commit) = self
+                    .commits
+                    .get(&objective.fortress_id)
+                    .and_then(|book| book.get(&objective.plan_digest))
+                    && (commit.sealed_state_hash != objective.sealed_state_hash
+                        || commit.intent_id != objective.intent_id
+                        || commit.source != objective.source)
+                {
+                    return Err(corrupt(
+                        "durable objective conflicts with its action commit",
+                    ));
+                }
+                if !self.objectives.contains_key(&objective.fortress_id)
+                    && self.objectives.len() >= MAX_FORTRESSES
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "durable objective book reached its fortress bound",
+                    ));
+                }
+                let book = self.objectives.entry(objective.fortress_id).or_default();
+                if book.contains_key(&objective.plan_digest) {
+                    return Err(corrupt("durable objective recorded twice"));
+                }
+                if book.len() >= MAX_OBJECTIVES_PER_FORTRESS {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "durable objective book reached its retained-goal bound",
+                    ));
+                }
+                book.insert(objective.plan_digest, objective);
             }
             Record::Step {
                 fortress_id,
@@ -1537,6 +2262,10 @@ impl Index {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "durable_objective_tests.rs"]
+mod objective_tests;
 
 #[cfg(test)]
 mod tests {
