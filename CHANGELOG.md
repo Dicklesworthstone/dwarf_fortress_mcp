@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-10 — Fresh evidence for semantic workforce execution
+
+- Add a concrete citizen evidence owner for the existing semantic workforce
+  coordinator. Reacquire the complete original paused roster after native
+  capture, invalidate prior evidence before every refresh, and require an
+  independently supplied source policy before publishing routing evidence.
+- Preserve the exact original capsule, canonical anchor, fortress, generation,
+  software identity and citizen IDs. Changed or partial evidence cannot justify
+  the original plan; failed refreshes and revoked authority leave no old scope.
+- Connect through the authenticated V1 codec with one absolute connect/handshake
+  deadline, bounded page work, configured read/write timeout caps and a shrinking
+  byte allowance. Close acquisition sources before both policy checks; permit
+  only two prepaid borrowed routing views before another refresh is required.
+- Pass all 15 public-API integration tests, including actual semantic/native
+  prepare and commit, evidence loss after synchronized DispatchStarted, strict
+  repagination, source/authority failures and real wire-codec timeout handling.
+  The target compiles the ordinary production adapter and shares only test
+  fixtures with the existing unit suite. The earlier twenty handoff/store unit
+  tests remain unexecuted under the monolithic test-build memory limit.
+- This supplies an adapter evidence owner. Independent compatibility authority,
+  original labor-goal proof, broader semantic MCP dispatch and live qualification
+  remain separate work; no native protocol or admission is added.
+
 ## 2026-10-10 — Durable original-goal storage
 
 - Admit the exact original goal source, sealing snapshot, owner and action

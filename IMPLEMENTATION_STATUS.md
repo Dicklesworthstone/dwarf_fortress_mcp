@@ -44,6 +44,45 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Fresh canonical evidence for semantic workforce execution (2026-10-10)
+
+`CitizenWorkforceEvidenceOwner` now implements the observation owner required
+by `SemanticWorkforceSession`. Construction independently reacquires the entire
+original citizen roster, and every refresh after native capture invalidates
+the preceding publication before any validation or I/O. The owner checks the
+native capture against the exact original canonical source, then uses a fresh
+source to assemble the complete paused V1 capsule. Any changed fortress, bridge
+generation, software identity, tick, pause state, roster or source bytes requires
+a new original plan instead of refreshing authority for the old plan.
+
+The owner receives an operator-supplied source factory and independently trusted
+policy callback. It issues no compatibility or predicate authority itself. The
+actual TCP implementation uses the existing authenticated V1 codec, preserves
+one absolute connection/handshake deadline, narrows every I/O timeout to the
+remaining allowance and configured read/write cap, and fences failed sources.
+Acquisition sources close before publication policy is checked twice. Local
+validation, pages and policy calls consume the original shrinking byte budget;
+only two prepaid routing views may be borrowed before another refresh.
+
+The configured roster ceiling is 1–4,096 citizens (default 256), but each read is
+bounded to the exact original roster. The audited local reservation is 64 KiB
+per citizen plus fixed work, so the parent coordinator's 16 MiB refresh allowance
+can conservatively refuse larger rosters. The V1 source proves citizen identity
+and pause state within independently authorized scope; it supplies no labor
+state and cannot complete the original labor goal. See
+`docs/SEMANTIC_WORKFORCE_HANDOFF.md` for the integration contract.
+
+**Evidence:** all 15 new public-API integration tests passed through the ordinary
+compiled production adapter. They exercise actual semantic/native coordinator
+handoff, loss of evidence after DispatchStarted synchronization, complete
+repagination, canonical identity boundaries, invalidation, independent policy
+refusal, deadlines, source closure and the actual V1 wire codec. No private
+production implementation is substituted by the test target. The earlier twenty
+handoff/store unit tests remain unexecuted after the monolithic adapter test
+build exceeded memory; the new passing tests do not stand in for that suite.
+Full workspace, native DFHack and live qualification remain unestablished.
+No new protocol, MCP mutation route, issuer or production admission is added.
+
 ### Durable original-goal storage (2026-10-10)
 
 `DurableLabStore` now retains original objectives independently of unfinished

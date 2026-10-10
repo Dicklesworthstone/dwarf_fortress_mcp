@@ -54,6 +54,53 @@ obligation for a separately authorized monitor.
    step and key, and the exact native journal incarnation. A native plan digest
    alone is not this review seal.
 
+## Fresh citizen evidence acquisition
+
+`semantic_workforce::evidence_owner::CitizenWorkforceEvidenceOwner` supplies the
+concrete V1 acquisition side of `WorkforceEvidenceOwner`. Its constructor takes
+the exact original citizen capsule, its existing canonical context anchor,
+bounded `CitizenEvidenceLimits`, a source factory, and a separately trusted
+policy authorizer. Construction reacquires the complete original roster before
+making routing evidence available. Supplying a capsule does not grant its facts
+authority.
+
+Every refresh clears usable evidence before any validation or I/O. It opens one
+fresh source, assembles the complete bounded roster through the existing strict
+V1 decoder, drops that source, and requires exact unchanged canonical source
+bytes, manifest, fortress, generation, paused tick and projection anchor. A
+refresh after native workforce capture first checks that capture against the
+original source and selected native identities. Changed observations require a
+new original plan and owner; the acquisition owner cannot advance or invent a
+cursor to make an old seal valid.
+
+The authorizer independently checks compatibility and returns the exact
+`EvidencePolicy` for the fresh capsule and projection. The owner verifies that
+the policy establishes paused state and canonical/native unit identities, then
+checks the authorizer again immediately before publication. The callback is
+operator-supplied Rust code, not an MCP argument or a grant inferred from field
+names. An authority failure invalidates routing evidence and cannot become
+permission to retry a native mutation.
+
+`CitizenRpcSource::connect` uses the existing authenticated `DfHackRpcClient`.
+Connection, per-page wire work, local projection/verification work and both
+policy checks receive reservations from one shrinking operation budget. Every
+actual socket operation is bounded by the remaining absolute deadline and the
+configured read/write timeout. A failed page fences that source. No source or
+socket is retained across refreshes, and no failed page is retried.
+
+Limits admit 1–4,096 citizens as an operator ceiling, with a default ceiling of
+256. Actual acquisition is bounded by the exact original roster count, and the
+caller must budget the complete original domain rather than a selected subset.
+Conservative local byte-work is reserved for canonicalization, hashing and
+scope revalidation. Each successful refresh prepays two borrowed routing views;
+exhaustion requires another explicit bounded refresh. The semantic session's
+existing 16 MiB per-refresh reservation can refuse a large complete roster.
+
+This component acquires identity evidence. The V1 citizen projection does not
+establish labor permissions, so it adds no original labor-goal proof. Independent
+evidence issuance, compatibility admission, and a generic live MCP handoff remain
+separate requirements.
+
 ## Preparation and execution
 
 `prepare(seal, evidence_owner, context, native_factory)` first durably appends
@@ -141,8 +188,16 @@ native codecs, injected canonical evidence, memory crash boundaries, and the
 existing real private-file backing. They verify adapter handoff semantics;
 they do not qualify a real Dwarf Fortress/DFHack build or admit a live profile.
 
-The final production adapter source passes
-`cargo check -p dfmcp-adapter --lib --offline --locked`. The twenty new regressions
-remain unexecuted: the focused unit build was killed by shared-memory exhaustion
-before tests ran. Scoped formatting checks pass. These checks do not establish
-full workspace, native or live qualification.
+All fifteen citizen-acquisition tests pass with
+`cargo test -p dfmcp-adapter --test semantic_workforce_isolated --offline --locked`.
+That public-API target compiles the ordinary production adapter and uses the
+same injected protocol/storage fixtures as the unit suite. It exercises actual
+semantic/native preparation and commit, evidence loss after DispatchStarted
+synchronization, complete repagination, independent authority, invalidation,
+deadline and byte bounds, source closure and the V1 wire codec. It substitutes
+no private production implementation or filesystem helper.
+
+The earlier twenty handoff/store unit regressions remain unexecuted: the
+monolithic adapter unit build was killed by shared-memory exhaustion before
+tests ran. Scoped formatting checks pass. These checks do not establish full
+workspace, native or live qualification.

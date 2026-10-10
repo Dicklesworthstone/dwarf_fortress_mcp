@@ -25,6 +25,7 @@ use crate::workforce_control::{
 };
 use crate::workforce_session::{WorkforceSession, view_cost};
 
+pub mod evidence_owner;
 pub mod store;
 use store::{Association, AssociationStore};
 pub use store::{PrivateAssociationStore, open_private_association_store};
