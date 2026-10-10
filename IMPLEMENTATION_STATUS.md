@@ -44,6 +44,41 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original production goal preservation (2026-10-10)
+
+Production plans retain normalized original quota requests instead of replacing
+those requests with the work orders calculated at the first anchor. Explicit
+replay recompiles the quantity still needed from current eligible inventory and
+returns its fresh analysis. The sealed plan goal includes every requested stock
+minimum; individual work-order postconditions still prove their own completion.
+Finishing four brewing batches does not prove a 60-drink goal when consumption
+has left only 53. A quota already satisfied at planning remains part of the goal.
+
+Task views resolve witnessed rebase aliases to the actual committed objective,
+require current Observe authority, and expose current original-goal evidence,
+action proof and physical work separately. A quiescent finished plan cannot
+complete its task with a false or unknown original goal. It instead requires
+explicit replanning or reconciliation, with no replacement dispatch or blind
+retry. Historical objective custody beyond completed-plan retirement remains a
+separate gap at this increment.
+
+A distinct bounded `production` journal source preserves original quota JSON
+for exact sealed-world reconstruction and later replay. Legacy action records
+retain their original action semantics and gain no inferred stock goal. The
+parser validates the closed template and tokens, bounds 1–64 submitted quotas
+before canonicalization, and refuses duplicate explicit/alias input channels.
+
+**Evidence:** all 15 actual `dfmcp-lab` durable unit tests passed, including two
+new source-codec/reopen cases. All 27 tests in the actual `lab_world.rs` and
+`observation_projection.rs` modules passed in a temporary harness importing those
+files directly with the current workspace crates and pinned serde dependencies.
+This validates the production/compiler and projection boundary, not the MCP
+transport. Five new MCP facade/replay tests and additional Task regressions are
+checked in. Full MCP `cargo check` was SIGKILLed while compiling unchanged
+Asupersync 0.5.0 under the shared memory limit, before reaching `dfmcp-mcp`;
+MCP runtime execution, full workspace qualification and live admission are not
+claimed.
+
 ### Durable original-room readiness workflow (2026-10-10)
 
 `scripts/track_room_readiness.py` now makes the existing joint room condition

@@ -60,6 +60,32 @@ impl TaskWork {
     }
 }
 
+/// The predicate itself is retained in the complete evidence pages. Its
+/// domain-qualified JSON digest lets a bounded result identify that exact
+/// projection without dropping the decisive truth and source anchor.
+fn compact_original_goal(work: &TaskWork, task_id: &str, payload: &Value) -> Value {
+    let original_goal = &payload["original_goal"];
+    let condition_digest = original_goal
+        .get("terminal_condition")
+        .filter(|condition| !condition.is_null())
+        .map(|condition| {
+            let mut bytes = b"dfmcp-original-goal-condition/1\0".to_vec();
+            bytes.extend_from_slice(condition.to_string().as_bytes());
+            dfmcp_core::Digest32::of_bytes(&bytes).to_hex()
+        });
+    json!({
+        "plan_digest": original_goal["plan_digest"],
+        "requested_plan_digest": original_goal["requested_plan_digest"],
+        "predicate_truth": original_goal.get("predicate_truth").cloned().unwrap_or_else(|| json!("unknown")),
+        "epistemic_state": original_goal.get("epistemic_state").cloned().unwrap_or_else(|| json!("unknown")),
+        "evidence_scope": original_goal["evidence_scope"],
+        "observed_anchor": original_goal["observed_anchor"],
+        "condition_digest": condition_digest,
+        "completion_inferred_from_action_states": false,
+        "details": format!("df://session/{}/task-{task_id}~evidence-0", work.session_id),
+    })
+}
+
 #[derive(Default)]
 struct ProgressSignal {
     waker: Mutex<Option<Waker>>,
@@ -170,6 +196,9 @@ impl LabTaskService {
         if failure.is_some() {
             active["mcp_tasks"] = json!([{"task_id": id.as_str(), "status": "failed",
                 "proof_status": payload["proof_status"],
+                "action_proof_status": payload["action_proof_status"],
+                "original_goal_satisfied": payload["original_goal_satisfied"].as_bool().unwrap_or(false),
+                "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
                 "remaining_work": payload["remaining_work"],
                 "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
                 "blind_retry_allowed": false, "details": format!("df://session/{}/task-{}", work.session_id, id.as_str())}]);
@@ -185,10 +214,17 @@ impl LabTaskService {
             .anchor(anchor.clone())
             .active_work(active)
             .build();
+        let original_goal = compact_original_goal(work, id.as_str(), payload);
         let compact = json!({"ok": failure.is_none(), "schema": "dfmcp.lab-task-summary/1",
             "session_id": work.session_id, "plan_digest": work.plan_digest,
             "status": if failure.is_some() { "failed" } else { "completed" },
             "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
+            "action_proof_status": payload.get("action_proof_status").cloned().unwrap_or_else(|| json!("unknown")),
+            "original_goal_satisfied": payload["original_goal_satisfied"].as_bool().unwrap_or(false),
+            "goal_unconfirmed_after_work": payload["goal_unconfirmed_after_work"],
+            "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
+            "replacement_work_dispatched": false,
+            "original_goal": original_goal,
             "remaining_work": payload["remaining_work"],
             "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
             "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or(Value::Bool(true)),
@@ -453,11 +489,17 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         McpTaskStatus::Working | McpTaskStatus::InputRequired => Ok(None),
                         McpTaskStatus::Completed => {
                             let bounded = self.bounded_terminal_evidence(work.task_id(), &definition, &view.payload, None)?;
-                            work.complete_task(task_result(&bounded)?, Some("every original plan action has verified evidence and quiescent physical work".to_owned()))?;
+                            work.complete_task(task_result(&bounded)?, Some("the original goal holds and every original plan action has verified evidence and quiescent physical work".to_owned()))?;
                             Ok(Some(()))
                         }
                         McpTaskStatus::Failed => {
-                            let failure = "the original plan failed verification or needs reconciliation";
+                            let failure = if view.payload["needs_replan"] == true {
+                                "the original work finished but its original goal is unmet; a new plan requires an explicit decision"
+                            } else if view.payload["goal_unconfirmed_after_work"] == true {
+                                "the original work finished but its original goal evidence is unavailable; reconciliation is required"
+                            } else {
+                                "the original plan failed verification or needs reconciliation"
+                            };
                             let bounded = self.bounded_terminal_evidence(work.task_id(), &definition, &view.payload, Some(failure))?;
                             work.fail_task(task_error(failure, bounded)?, Some("failure evidence retained; blind retry is forbidden".to_owned()))?;
                             Ok(Some(()))
@@ -614,5 +656,72 @@ pub(crate) async fn serve_with_tasks(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_original_goal_keeps_truth_and_identity_for_large_predicates() {
+        let work = TaskWork {
+            schema: WORK_SCHEMA.to_owned(),
+            session_id: "1".repeat(32),
+            plan_digest: "2".repeat(64),
+        };
+        let task_id = "3".repeat(32);
+        let anchor = json!({
+            "fortress_id": "4".repeat(32), "epoch": 7, "sequence": 9,
+            "game_tick": 1200, "state_hash": "5".repeat(64),
+        });
+        let condition = json!({"all": (0..64).map(|index| json!({
+            "entity_id": index, "field": "x".repeat(256),
+            "op": "ge", "value": 60,
+        })).collect::<Vec<_>>()});
+        for truth in ["true", "false", "unknown"] {
+            let payload = json!({"action_proof_status": "completed", "original_goal": {
+                "plan_digest": "6".repeat(64), "requested_plan_digest": work.plan_digest,
+                "predicate_truth": truth,
+                "epistemic_state": if truth == "unknown" { "unknown" } else { "certified_derived" },
+                "evidence_scope": "laboratory_reference_world", "observed_anchor": anchor,
+                "terminal_condition": condition, "summary": "large original goal ".repeat(1024),
+            }});
+            let compact = compact_original_goal(&work, &task_id, &payload);
+            assert_eq!(compact["predicate_truth"], truth);
+            assert_eq!(compact["plan_digest"], "6".repeat(64));
+            assert_eq!(compact["requested_plan_digest"], work.plan_digest);
+            assert_eq!(compact["observed_anchor"], anchor);
+            assert_eq!(compact["evidence_scope"], "laboratory_reference_world");
+            assert_eq!(compact["completion_inferred_from_action_states"], false);
+            assert_eq!(compact["condition_digest"].as_str().map(str::len), Some(64));
+            assert!(compact.get("terminal_condition").is_none());
+            assert!(compact.to_string().len() < 1_100, "{compact}");
+            let mut changed = payload.clone();
+            changed["original_goal"]["terminal_condition"]["all"][0]["value"] = json!(61);
+            assert_ne!(
+                compact["condition_digest"],
+                compact_original_goal(&work, &task_id, &changed)["condition_digest"]
+            );
+        }
+    }
+
+    #[test]
+    fn missing_original_goal_does_not_inherit_completed_action_proofs() {
+        let work = TaskWork {
+            schema: WORK_SCHEMA.to_owned(),
+            session_id: "1".repeat(32),
+            plan_digest: "2".repeat(64),
+        };
+        let compact = compact_original_goal(
+            &work,
+            "3",
+            &json!({"action_proof_status": "completed", "physical_quiescent": true}),
+        );
+        assert_eq!(compact["predicate_truth"], "unknown");
+        assert_eq!(compact["epistemic_state"], "unknown");
+        assert!(compact["condition_digest"].is_null());
+        assert!(compact["observed_anchor"].is_null());
+        assert_eq!(compact["completion_inferred_from_action_states"], false);
     }
 }

@@ -60,7 +60,7 @@ const MAX_SCENARIO_BYTES: usize = 64;
 const MAX_LABEL_BYTES: usize = 256;
 /// Largest stored plan summary.
 pub const MAX_PLAN_SUMMARY_BYTES: usize = 4 * 1024;
-/// Largest stored plan request (actions or blueprint JSON).
+/// Largest stored plan request (actions, blueprint or production JSON).
 pub const MAX_PLAN_REQUEST_BYTES: usize = 16 * 1024;
 /// Most unfinished durable commits per fortress.
 pub const MAX_COMMITS_PER_FORTRESS: usize = 256;
@@ -113,9 +113,23 @@ pub struct DurableCheckpoint {
 /// can be deterministically recompiled from the world it was sealed against.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DurablePlanSource {
-    Pause { summary: String, paused: bool },
-    Actions { summary: String, raw: String },
-    Blueprint { summary: String, raw: String },
+    Pause {
+        summary: String,
+        paused: bool,
+    },
+    Actions {
+        summary: String,
+        raw: String,
+    },
+    Blueprint {
+        summary: String,
+        raw: String,
+    },
+    /// Original quota request; never inferred from a legacy action list.
+    Production {
+        summary: String,
+        raw: String,
+    },
 }
 
 /// A committed plan whose steps are not all final.
@@ -318,6 +332,9 @@ impl Record {
                     DurablePlanSource::Blueprint { summary, raw } => {
                         ("blueprint", summary, raw.as_str())
                     }
+                    DurablePlanSource::Production { summary, raw } => {
+                        ("production", summary, raw.as_str())
+                    }
                 };
                 format!(
                     "P {} {} {} {:032x} {kind} {} {}",
@@ -439,6 +456,10 @@ impl Record {
                         raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
                     },
                     "blueprint" => DurablePlanSource::Blueprint {
+                        summary,
+                        raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+                    },
+                    "production" => DurablePlanSource::Production {
                         summary,
                         raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
                     },
@@ -1149,7 +1170,8 @@ impl DurableLabStore {
         let (summary, payload_len) = match &source {
             DurablePlanSource::Pause { summary, .. } => (summary, 0),
             DurablePlanSource::Actions { summary, raw }
-            | DurablePlanSource::Blueprint { summary, raw } => (summary, raw.len()),
+            | DurablePlanSource::Blueprint { summary, raw }
+            | DurablePlanSource::Production { summary, raw } => (summary, raw.len()),
         };
         if summary.len() > MAX_PLAN_SUMMARY_BYTES || payload_len > MAX_PLAN_REQUEST_BYTES {
             return Err(invalid("plan request exceeds the durable record bound"));
@@ -1755,6 +1777,92 @@ mod tests {
         drop(store);
         let store = DurableLabStore::open(&dir.0)?;
         assert_eq!(store.commits(FortressId::new(5)).count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn original_production_sources_survive_reopen_without_upgrading_legacy_actions() -> Result<()> {
+        let dir = TempDir::new("production-source");
+        let sealed = snapshot(51, 1100);
+        let original = r#"{"quotas":[{"item":"DRINK","minimum":60},{"item":"FOOD","minimum":50}],"template":"production"}"#;
+        let sources = [
+            DurablePlanSource::Production {
+                summary: "original quotas".to_owned(),
+                raw: original.to_owned(),
+            },
+            DurablePlanSource::Actions {
+                summary: "legacy action record".to_owned(),
+                raw: original.to_owned(),
+            },
+            DurablePlanSource::Blueprint {
+                summary: "legacy blueprint record".to_owned(),
+                raw: original.to_owned(),
+            },
+        ];
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for (index, source) in sources.iter().enumerate() {
+                store.persist_commit(
+                    &sealed,
+                    Digest32::of_bytes(&[index as u8]),
+                    77,
+                    source.clone(),
+                )?;
+            }
+            store.compact()?;
+        }
+        let store = DurableLabStore::open(&dir.0)?;
+        for (index, expected) in sources.iter().enumerate() {
+            let commit = store
+                .commit(sealed.fortress_id, Digest32::of_bytes(&[index as u8]))
+                .ok_or_else(|| corrupt("source lost during compaction"))?;
+            assert_eq!(&commit.source, expected);
+            assert_eq!(store.load_snapshot(commit.sealed_state_hash)?, sealed);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn production_source_codec_refuses_unknown_tags_malformed_text_and_excess_bytes() -> Result<()>
+    {
+        let dir = TempDir::new("production-source-bounds");
+        let sealed = snapshot(52, 1);
+        let digest = Digest32::of_bytes(b"production-source-bounds");
+        let mut store = DurableLabStore::open(&dir.0)?;
+        for (summary, raw) in [
+            ("s".repeat(MAX_PLAN_SUMMARY_BYTES + 1), "{}".to_owned()),
+            ("quota".to_owned(), "x".repeat(MAX_PLAN_REQUEST_BYTES + 1)),
+        ] {
+            assert!(
+                store
+                    .persist_commit(
+                        &sealed,
+                        digest,
+                        1,
+                        DurablePlanSource::Production { summary, raw }
+                    )
+                    .is_err()
+            );
+            assert_eq!(store.report().records, 0);
+        }
+        let prefix = format!(
+            "P 52 {} {} {:032x}",
+            digest.to_hex(),
+            sealed.state_hash.to_hex(),
+            1
+        );
+        for bad in [
+            format!("{prefix} production_v2 71 7b7d"),
+            format!("{prefix} production 71 f"),
+            format!("{prefix} production 71 ff"),
+            format!(
+                "{prefix} production 71 {}",
+                "78".repeat(MAX_PLAN_REQUEST_BYTES + 1)
+            ),
+            format!("{prefix} production 71 7b7d trailing"),
+        ] {
+            assert!(Record::parse(&bad).is_err_and(|error| error.code == ErrorCode::CorruptLedger));
+        }
         Ok(())
     }
 

@@ -101,17 +101,21 @@ pub(crate) fn validate(session_id: &str, digest: &str) -> Result<()> {
     })
 }
 
-fn original_actions(session: &LabSession, digest: &str) -> Result<Vec<ActionId>> {
+fn original_receipt(session: &LabSession, digest: &str) -> Result<Value> {
     let raw = session.commit_receipts.get(digest).ok_or_else(|| DfmcpError::new(
         ErrorCode::Conflict,
         "original task plan receipt is unavailable; a restore or session replacement invalidated it; do not retry the effect",
     ))?;
-    let receipt: Value = serde_json::from_str(raw).map_err(|_| {
+    serde_json::from_str(raw).map_err(|_| {
         DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
             "retained task plan receipt is invalid",
         )
-    })?;
+    })
+}
+
+fn original_actions(session: &LabSession, digest: &str) -> Result<Vec<ActionId>> {
+    let receipt = original_receipt(session, digest)?;
     let actions = receipt
         .get("actions")
         .and_then(Value::as_array)
@@ -151,6 +155,42 @@ fn original_actions(session: &LabSession, digest: &str) -> Result<Vec<ActionId>>
         .collect()
 }
 
+/// A witness rebase keeps the requested digest as an idempotent receipt alias.
+/// The original objective belongs to the actual sealed plan in that receipt,
+/// never to whichever unrelated plan the session prepared or committed later.
+fn original_goal(session: &LabSession, requested_digest: &str) -> (PredicateTruth, Value) {
+    let actual = original_receipt(session, requested_digest).and_then(|receipt| {
+        receipt
+            .get("plan_digest")
+            .and_then(Value::as_str)
+            .and_then(Digest32::from_hex)
+            .map(|digest| digest.to_hex())
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "the original task receipt has no exact sealed plan identity for goal verification",
+                )
+            })
+    });
+    let observed = actual
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|digest| original_goal_observation(session, digest));
+    let (truth, mut payload) = match observed {
+        Ok(observed) => observed,
+        Err(error) => (
+            PredicateTruth::Unknown,
+            crate::observation_projection::laboratory_objective_evidence(Err(error)),
+        ),
+    };
+    payload["requested_plan_digest"] = json!(requested_digest);
+    payload["plan_digest"] = json!(actual.ok());
+    payload["observed_anchor"] = anchor_json(&session.adapter.snapshot().anchor());
+    payload["satisfied_at_current_anchor"] = json!(truth == PredicateTruth::True);
+    payload["completion_inferred_from_action_states"] = json!(false);
+    (truth, payload)
+}
+
 #[derive(Default)]
 struct TaskProgress {
     total: usize,
@@ -177,7 +217,7 @@ impl TaskProgress {
         self.remaining_actions += usize::from(!terminal || !quiet);
     }
 
-    fn proof_status(&self) -> McpTaskStatus {
+    fn action_proof_status(&self) -> McpTaskStatus {
         if self.failed > 0 || self.indeterminate > 0 {
             McpTaskStatus::Failed
         } else if self.verified == self.total {
@@ -189,11 +229,27 @@ impl TaskProgress {
         }
     }
 
-    fn monitor_status(&self) -> McpTaskStatus {
+    fn proof_status(&self, original_goal: PredicateTruth) -> McpTaskStatus {
+        match self.action_proof_status() {
+            McpTaskStatus::Completed if original_goal != PredicateTruth::True => {
+                if self.remaining_actions == 0 {
+                    // The finite original work is finished. An unmet or
+                    // unavailable objective requires a new decision, not a
+                    // manufactured completion or an automatic replacement.
+                    McpTaskStatus::Failed
+                } else {
+                    McpTaskStatus::Working
+                }
+            }
+            state => state,
+        }
+    }
+
+    fn monitor_status(&self, original_goal: PredicateTruth) -> McpTaskStatus {
         if self.remaining_actions > 0 {
             McpTaskStatus::Working
         } else {
-            self.proof_status()
+            self.proof_status(original_goal)
         }
     }
 
@@ -263,9 +319,16 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
     // The transport monitor owns cleanup as well as observation. A final goal
     // proof cannot close its original task while physical work can still run.
     // Keep the proof outcome explicit; no terminal action receipt is rewritten.
-    let proof_status = progress.proof_status();
-    let status = progress.monitor_status();
-    let cleanup_required = progress.remaining_work > 0 && proof_status != McpTaskStatus::Working;
+    let (goal_truth, goal) = original_goal(session, digest);
+    let action_proof_status = progress.action_proof_status();
+    let proof_status = progress.proof_status(goal_truth);
+    let status = progress.monitor_status(goal_truth);
+    let goal_unconfirmed_after_work = progress.remaining_actions == 0
+        && action_proof_status == McpTaskStatus::Completed
+        && goal_truth != PredicateTruth::True;
+    let needs_replan = goal_unconfirmed_after_work && goal_truth == PredicateTruth::False;
+    let cleanup_required =
+        progress.remaining_work > 0 && action_proof_status != McpTaskStatus::Working;
     let anchor = anchor_json(&session.adapter.snapshot().anchor());
     let active = actions
         .iter()
@@ -293,6 +356,7 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
     let packet = crate::AgentTurnBuilder::new("fortress.commit", crate::AgentPhase::Verify)
         .session_id(session.session_id.to_string())
         .anchor(anchor.clone())
+        .briefing(json!({"objective_status": [goal.clone()]}))
         .active_work(work)
         .build();
     Ok(PlanTaskView {
@@ -302,22 +366,38 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
             "schema": "dfmcp.lab-plan-task/1", "session_id": session.session_id.to_string(),
             "plan_digest": digest, "status": status.as_str(), "actions": actions,
             "proof_status": proof_status.as_str(),
+            "action_proof_status": action_proof_status.as_str(),
+            "original_goal": goal,
+            "original_goal_satisfied": goal_truth == PredicateTruth::True,
+            "goal_unconfirmed_after_work": goal_unconfirmed_after_work,
+            "needs_replan": needs_replan,
+            "replacement_work_dispatched": false,
             "cleanup_required": cleanup_required,
             "remaining_work": progress.remaining_work,
             "physical_quiescent": progress.remaining_work == 0,
             "drain_progress": progress.json(),
             "observed_anchor": anchor, "game_tick": session.adapter.snapshot().tick.0,
             "paused": session.adapter.snapshot().paused,
-            "indeterminate": progress.indeterminate > 0,
-            "recovery_class": if progress.indeterminate > 0 || progress.unknown_work > 0 {
+            "indeterminate": progress.indeterminate > 0 || goal_truth == PredicateTruth::Unknown,
+            "recovery_class": if progress.indeterminate > 0 || progress.unknown_work > 0
+                || goal_truth == PredicateTruth::Unknown {
                 "reconciliation_required"
-            } else if cleanup_required {
+            } else if cleanup_required || needs_replan {
                 "operator_action_required"
             } else { "never_unchanged" },
             "blind_retry_allowed": false,
             "agent_turn": packet,
             "scope": "laboratory_process_only",
-            "next_step": if status == McpTaskStatus::Working
+            "next_step": if goal_unconfirmed_after_work {
+                json!({
+                    "tool": "fortress.observe", "arguments": {"session_id": session.session_id.to_string()},
+                    "note": if needs_replan {
+                        "the original work finished but the original goal is unmet; inspect current evidence and explicitly review a new plan; no replacement work was dispatched"
+                    } else {
+                        "the original work finished but its original goal cannot be established; reconcile the missing goal evidence before deciding on any new work"
+                    },
+                })
+            } else if status == McpTaskStatus::Working
                 && (proof_status == McpTaskStatus::Failed || progress.unknown_work > 0) {
                 json!({
                     "tool": "fortress.observe", "arguments": {"session_id": session.session_id.to_string()},
@@ -368,10 +448,10 @@ pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<b
                 authorize_original_action(session, id, &ctx)?;
             }
         }
-        if all_verified && all_drained {
+        if all_verified && all_drained && original_goal(session, digest).0 == PredicateTruth::True {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
-                "cannot cancel a verified plan task whose physical work is already quiescent",
+                "cannot cancel a verified plan task whose original goal holds and physical work is already quiescent",
             ));
         }
         Ok(true)
@@ -462,13 +542,17 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
                 "original task actions are not all terminal with proven physical quiescence",
             ));
         }
+        let (goal_truth, goal) = original_goal(session, digest);
+        let proof_status = progress.proof_status(goal_truth);
         let certificate = if finalize && progress.remaining_actions == 0 {
             let canonical = json!({"plan_digest": digest, "steps": steps, "anchor": anchor,
-                "proof_status": progress.proof_status().as_str(), "drain_progress": progress.json()});
+                "proof_status": proof_status.as_str(), "original_goal": goal,
+                "action_proof_status": progress.action_proof_status().as_str(),
+                "drain_progress": progress.json()});
             Some(
                 json!({"digest": Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
                 "statement": "every original action receipt is terminal and its registered physical work is quiescent at this anchor; terminal proof receipts are preserved",
-                "proof_status": progress.proof_status().as_str(), "anchor": anchor}),
+                "proof_status": proof_status.as_str(), "anchor": anchor}),
             )
         } else {
             None
@@ -476,7 +560,10 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
         Ok(
             json!({"stage": if finalize { "finalized" } else { "cancel_requested" },
             "plan_digest": digest, "steps": steps, "drain_progress": progress.json(),
-            "proof_status": progress.proof_status().as_str(),
+            "proof_status": proof_status.as_str(),
+            "action_proof_status": progress.action_proof_status().as_str(),
+            "original_goal": goal,
+            "original_goal_satisfied": goal_truth == PredicateTruth::True,
             "remaining_work": progress.remaining_work,
             "physical_quiescent": progress.remaining_work == 0,
             "active_work": {"actions": steps.iter().filter(|row| row["quiescent"] != true).collect::<Vec<_>>()},
@@ -517,6 +604,14 @@ mod tests {
     }
 
     fn add_order(session_id: &str, early_proof: bool) -> Result<(String, ActionId, EntityId)> {
+        add_order_with_goal(session_id, early_proof, PredicateTruth::True)
+    }
+
+    fn add_order_with_goal(
+        session_id: &str,
+        early_proof: bool,
+        goal: PredicateTruth,
+    ) -> Result<(String, ActionId, EntityId)> {
         with_task_session(session_id, |session| {
             let anchor = session.adapter.snapshot().anchor();
             let action = Action::CreateWorkOrder {
@@ -534,11 +629,26 @@ mod tests {
                 effects::default_postconditions(&action, &key, session.fortress_id)
             };
             let terminal = Predicate::All(postconditions.clone()).normalized();
+            let original_goal = match goal {
+                PredicateTruth::True => terminal.clone(),
+                PredicateTruth::False => Predicate::FieldCompare {
+                    entity_id,
+                    field: "amount_total".to_owned(),
+                    op: dfmcp_world::CompareOp::Ge,
+                    value: dfmcp_world::Value::U64(101),
+                },
+                PredicateTruth::Unknown => Predicate::FieldCompare {
+                    entity_id,
+                    field: "unobserved_original_requirement".to_owned(),
+                    op: dfmcp_world::CompareOp::Ge,
+                    value: dfmcp_world::Value::U64(0),
+                },
+            };
             let intent = Intent {
                 id: intent_id,
                 anchor,
                 summary: "retain physical work after a terminal proof".to_owned(),
-                terminal_condition: terminal.clone(),
+                terminal_condition: original_goal,
                 constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
                 requested_actions: vec![RequestedAction {
                     action,
@@ -571,8 +681,16 @@ mod tests {
             let digest = plan.digest.to_hex();
             session.commit_receipts.insert(
                 digest.clone(),
-                json!({"actions": [{"action_id": id.to_string()}]}).to_string(),
+                json!({"plan_digest": digest, "actions": [{"action_id": id.to_string()}]})
+                    .to_string(),
             );
+            session.objectives.push(Objective {
+                plan_digest: digest.clone(),
+                summary: plan.summary.clone(),
+                terminal: plan.terminal_condition.clone(),
+                committed_tick: anchor.tick.0,
+                achieved_tick: None,
+            });
             session.last_action = Some(id);
             session.last_plan_actions = vec![id];
             session.open_actions.push(id);
@@ -586,6 +704,238 @@ mod tests {
             let context = context_for(session, session.next_request_id);
             session.adapter.poll_action(id, &context)
         })
+    }
+
+    #[test]
+    fn original_goal_truth_is_independent_of_verified_actions_and_physical_drain() -> TestResult {
+        for (truth, label) in [
+            (PredicateTruth::True, "true"),
+            (PredicateTruth::False, "false"),
+            (PredicateTruth::Unknown, "unknown"),
+        ] {
+            let session_id = new_session()?;
+            let (digest, action, _) = add_order_with_goal(&session_id, true, truth)?;
+            let receipt = prove(&session_id, action, true)?;
+            assert_eq!(receipt.state, CommitState::Verified);
+            let active = view(&session_id, &digest)?;
+            assert_eq!(active.status, McpTaskStatus::Working);
+            assert_eq!(active.payload["action_proof_status"], "completed");
+            assert_eq!(active.payload["original_goal"]["predicate_truth"], label);
+            assert_eq!(active.payload["physical_quiescent"], false);
+            assert_eq!(active.payload["cleanup_required"], true);
+            assert_eq!(active.payload["replacement_work_dispatched"], false);
+
+            drain(&session_id, &digest, false)?;
+            let finalized = drain(&session_id, &digest, true)?;
+            assert_eq!(finalized["original_goal"]["predicate_truth"], label);
+            assert_eq!(finalized["drain_progress"]["quiescent"], true);
+            let final_view = view(&session_id, &digest)?;
+            assert_eq!(
+                final_view.status,
+                if truth == PredicateTruth::True {
+                    McpTaskStatus::Completed
+                } else {
+                    McpTaskStatus::Failed
+                },
+                "{}",
+                final_view.payload
+            );
+            assert_eq!(final_view.payload["action_proof_status"], "completed");
+            assert_eq!(final_view.payload["physical_quiescent"], true);
+            assert_eq!(
+                final_view.payload["needs_replan"],
+                truth == PredicateTruth::False
+            );
+            assert_eq!(
+                final_view.payload["goal_unconfirmed_after_work"],
+                truth != PredicateTruth::True
+            );
+            assert_eq!(final_view.payload["blind_retry_allowed"], false);
+            assert_eq!(
+                final_view.payload["agent_turn"]["briefing"]["objective_status"][0],
+                final_view.payload["original_goal"]
+            );
+            if truth == PredicateTruth::Unknown {
+                assert_eq!(
+                    final_view.payload["recovery_class"],
+                    "reconciliation_required"
+                );
+                assert_eq!(
+                    final_view.payload["original_goal"]["epistemic_state"],
+                    "unknown"
+                );
+            }
+            with_task_session(&session_id, |session| {
+                assert_eq!(session.adapter.action_receipt(action), Some(&receipt));
+                assert_eq!(session.commit_receipts.len(), 1);
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn original_goal_uses_rebased_receipt_identity_after_a_later_plan() -> TestResult {
+        let session_id = new_session()?;
+        let (actual, action, _) = add_order(&session_id, true)?;
+        prove(&session_id, action, true)?;
+        let requested = Digest32::of_bytes(b"requested digest before witness rebase").to_hex();
+        with_task_session(&session_id, |session| {
+            let receipt = session
+                .commit_receipts
+                .get(&actual)
+                .cloned()
+                .ok_or_else(session_error)?;
+            session.commit_receipts.insert(requested.clone(), receipt);
+            Ok(())
+        })?;
+        let (later, later_action, _) = add_order(&session_id, false)?;
+        drain(&session_id, &requested, false)?;
+        drain(&session_id, &requested, true)?;
+        let original = view(&session_id, &requested)?;
+        assert_eq!(original.status, McpTaskStatus::Completed);
+        assert_eq!(original.payload["original_goal"]["plan_digest"], actual);
+        assert_eq!(
+            original.payload["original_goal"]["requested_plan_digest"],
+            requested
+        );
+        assert_ne!(actual, later);
+        assert_eq!(view(&session_id, &later)?.status, McpTaskStatus::Working);
+        with_task_session(&session_id, |session| {
+            assert!(matches!(
+                session.adapter.action_work_state(later_action)?,
+                EffectWorkState::Active { .. }
+            ));
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn missing_original_goal_is_unknown_after_all_original_work_is_quiet() -> TestResult {
+        let session_id = new_session()?;
+        let (digest, action, _) = add_order(&session_id, true)?;
+        prove(&session_id, action, true)?;
+        drain(&session_id, &digest, false)?;
+        drain(&session_id, &digest, true)?;
+        with_task_session(&session_id, |session| {
+            session.objectives.clear();
+            Ok(())
+        })?;
+        let failed = view(&session_id, &digest)?;
+        assert_eq!(failed.status, McpTaskStatus::Failed);
+        assert_eq!(failed.payload["physical_quiescent"], true);
+        assert_eq!(
+            failed.payload["original_goal"]["predicate_truth"],
+            "unknown"
+        );
+        assert_eq!(failed.payload["needs_replan"], false);
+        assert_eq!(failed.payload["recovery_class"], "reconciliation_required");
+        assert_eq!(failed.payload["replacement_work_dispatched"], false);
+        Ok(())
+    }
+
+    #[test]
+    fn expired_observe_cannot_establish_task_goal_or_change_original_work() -> TestResult {
+        let session_id = new_session()?;
+        let (digest, action, _) = add_order(&session_id, true)?;
+        let proof = prove(&session_id, action, true)?;
+        let before = with_task_session(&session_id, |session| {
+            let expired = GameTick(session.adapter.snapshot().tick.0.saturating_sub(1));
+            for grant in &mut session.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = Some(expired);
+                }
+            }
+            Ok(session.adapter.snapshot().clone())
+        })?;
+        let Err(error) = view(&session_id, &digest) else {
+            return Err("expired Observe must refuse task goal verification".into());
+        };
+        assert_eq!(error.code, ErrorCode::CapabilityDenied);
+        with_task_session(&session_id, |session| {
+            assert_eq!(original_goal(session, &digest).0, PredicateTruth::Unknown);
+            assert_eq!(session.adapter.snapshot(), &before);
+            assert_eq!(session.adapter.action_receipt(action), Some(&proof));
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn completed_production_tasks_fail_unmet_consumed_and_joint_original_quotas() -> TestResult {
+        for (selector, before_ticks, work_ticks, quotas) in [
+            ("7824201", 1099, 200, json!([{"item":"DRINK","minimum":60}])),
+            (
+                "7824202",
+                1149,
+                50,
+                json!([{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]),
+            ),
+        ] {
+            let opened: Value = serde_json::from_str(&open_session_in_scenario(
+                Some(false),
+                Some(selector.to_owned()),
+                Some(vec![
+                    ("observe".to_owned(), "read_only".to_owned()),
+                    ("plan".to_owned(), "read_only".to_owned()),
+                    ("control_clock".to_owned(), "reversible".to_owned()),
+                    ("configure_production".to_owned(), "reversible".to_owned()),
+                ]),
+                None,
+                Some(2000),
+                None,
+                None,
+                Some(8192),
+                Some(16),
+                Some("starter_fortress".to_owned()),
+                None,
+                None,
+            ))?;
+            assert_eq!(opened["ok"], true, "{opened}");
+            let session = opened["session_id"].as_str().ok_or("session missing")?;
+            let advanced: Value = serde_json::from_str(&wait_with_ticks(
+                Some(session.to_owned()),
+                Some(before_ticks),
+            ))?;
+            assert_eq!(advanced["ok"], true, "{advanced}");
+            let planned: Value = serde_json::from_str(&plan_request(
+                Some(session.to_owned()),
+                None,
+                None,
+                None,
+                Some(json!({"template":"production","quotas":quotas}).to_string()),
+                None,
+            ))?;
+            assert_eq!(planned["ok"], true, "{planned}");
+            let digest = planned["plan_digest"].as_str().ok_or("plan missing")?;
+            let committed: Value = serde_json::from_str(&fortress_commit(
+                Some(session.to_owned()),
+                digest.to_owned(),
+            ))?;
+            assert_eq!(committed["ok"], true, "{committed}");
+            let settled: Value =
+                serde_json::from_str(&wait_with_ticks(Some(session.to_owned()), Some(work_ticks)))?;
+            assert_eq!(settled["ok"], true, "{settled}");
+            let observed = view(session, digest)?;
+            assert_eq!(
+                observed.status,
+                McpTaskStatus::Failed,
+                "{}",
+                observed.payload
+            );
+            assert_eq!(observed.payload["action_proof_status"], "completed");
+            assert_eq!(observed.payload["physical_quiescent"], true);
+            assert_eq!(
+                observed.payload["original_goal"]["predicate_truth"],
+                "false"
+            );
+            assert_eq!(observed.payload["needs_replan"], true);
+            assert_eq!(observed.payload["replacement_work_dispatched"], false);
+            assert_eq!(observed.payload["blind_retry_allowed"], false);
+            assert_eq!(view(session, digest)?.payload, observed.payload);
+        }
+        Ok(())
     }
 
     #[test]

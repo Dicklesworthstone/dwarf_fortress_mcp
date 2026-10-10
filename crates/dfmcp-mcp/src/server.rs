@@ -53,6 +53,10 @@ mod restore_work;
 #[path = "physical_work_mcp_tests.rs"]
 mod physical_work_mcp_tests;
 
+#[cfg(test)]
+#[path = "production_objective_tests.rs"]
+mod production_objective_tests;
+
 /// One granted capability record returned to the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NegotiatedCapability {
@@ -136,6 +140,42 @@ struct Objective {
 }
 
 const MAX_OBJECTIVES: usize = 64;
+
+/// Observe the exact original goal separately from its actions and physical
+/// work. The caller resolves any witnessed rebase to the receipt's actual
+/// plan digest; a missing original goal never proves completion.
+pub(crate) fn original_goal_observation(
+    session: &LabSession,
+    actual_plan_digest: &str,
+) -> Result<(PredicateTruth, serde_json::Value)> {
+    let ctx = context_for(session, session.next_request_id);
+    authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+    let objective = session
+        .objectives
+        .iter()
+        .find(|objective| objective.plan_digest == actual_plan_digest)
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "the original goal for this committed plan is not retained; action completion cannot establish it",
+            )
+        })?;
+    let snapshot = session.adapter.snapshot();
+    let truth = PredicateEvidence::laboratory(snapshot)?.evaluate(&objective.terminal)?;
+    let mut result = crate::observation_projection::laboratory_objective_evidence(Ok(truth));
+    result["plan_digest"] = json!(objective.plan_digest);
+    result["summary"] = json!(objective.summary);
+    result["terminal_condition"] = crate::lab_world::predicate_json(&objective.terminal);
+    result["committed_tick"] = json!(objective.committed_tick);
+    result["observed_anchor"] = anchor_json(&snapshot.anchor());
+    if let Some(tick) = objective.achieved_tick {
+        result["achieved_tick"] = json!(tick);
+        if truth == PredicateTruth::False {
+            result["status"] = json!("no_longer_holds");
+        }
+    }
+    Ok((truth, result))
+}
 
 /// Every tracked objective with whether the current world satisfies it.
 pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
@@ -1395,6 +1435,12 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// Original normalized quotas, retained across stock-dependent lowering,
+    /// stale-plan replay and exact sealed-world recovery.
+    Production {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl PlanSource {
@@ -1416,6 +1462,10 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::Production { summary, raw } => D::Production {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1434,12 +1484,38 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            D::Production { summary, raw } => Self::Production {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
     fn intent(&self, id: IntentId, snapshot: &WorldSnapshot) -> Result<Intent> {
+        self.compile(id, snapshot).map(|(intent, _)| intent)
+    }
+
+    /// Compile the original request and its optional production analysis from
+    /// the same snapshot. Every replay takes this path; stored actions are not
+    /// substituted for a production objective.
+    fn compile(
+        &self,
+        id: IntentId,
+        snapshot: &WorldSnapshot,
+    ) -> Result<(Intent, Option<serde_json::Value>)> {
         match self {
-            Self::Actions { summary, raw } => semantic_intent(id, snapshot, summary.clone(), raw),
+            Self::Actions { summary, raw } => {
+                Ok((semantic_intent(id, snapshot, summary.clone(), raw)?, None))
+            }
+            Self::Production { summary, raw } => {
+                let request = crate::lab_world::ProductionRequest::parse(raw)?;
+                let compiled = request.compile(snapshot)?;
+                let mut intent = semantic_intent(id, snapshot, summary.clone(), &compiled.actions)?;
+                // The original minimum stocks are the goal. The individual
+                // work orders retain their own exact completion postconditions.
+                intent.terminal_condition = compiled.terminal;
+                Ok((intent, Some(compiled.analysis)))
+            }
             Self::Blueprint { summary, raw } => {
                 let (origin, template) = crate::lab_world::parse_blueprint(raw)?;
                 let index = crate::lab_world::spatial_index(snapshot)?;
@@ -1454,28 +1530,31 @@ impl PlanSource {
                 if !summary.is_empty() {
                     intent.summary = summary.clone();
                 }
-                Ok(intent)
+                Ok((intent, None))
             }
             Self::Pause {
                 summary,
                 paused_target,
-            } => Ok(Intent {
-                id,
-                anchor: snapshot.anchor(),
-                summary: summary.clone(),
-                terminal_condition: Predicate::Paused(*paused_target),
-                constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
-                requested_actions: vec![RequestedAction {
-                    action: Action::Pause {
-                        paused: *paused_target,
-                    },
-                    preconditions: vec![Predicate::Paused(!*paused_target)],
-                    postconditions: vec![Predicate::Paused(*paused_target)],
-                    compensation: None,
-                    obligation: None,
-                    depends_on: Vec::new(),
-                }],
-            }),
+            } => Ok((
+                Intent {
+                    id,
+                    anchor: snapshot.anchor(),
+                    summary: summary.clone(),
+                    terminal_condition: Predicate::Paused(*paused_target),
+                    constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+                    requested_actions: vec![RequestedAction {
+                        action: Action::Pause {
+                            paused: *paused_target,
+                        },
+                        preconditions: vec![Predicate::Paused(!*paused_target)],
+                        postconditions: vec![Predicate::Paused(*paused_target)],
+                        compensation: None,
+                        obligation: None,
+                        depends_on: Vec::new(),
+                    }],
+                },
+                None,
+            )),
         }
     }
 }
@@ -2605,6 +2684,17 @@ pub(crate) fn plan_request(
     production: Option<String>,
 ) -> String {
     // A production objective arrives as a blueprint template.
+    if production.is_some()
+        && blueprint
+            .as_deref()
+            .is_some_and(crate::lab_world::is_production_objective)
+    {
+        return coded_error_payload(
+            "fortress.plan",
+            ErrorCode::InvalidRequest,
+            "production and its blueprint alias cannot both be supplied",
+        );
+    }
     let (blueprint, production) = match blueprint {
         Some(raw) if crate::lab_world::is_production_objective(&raw) => (None, Some(raw)),
         other => (other, production),
@@ -2654,26 +2744,26 @@ pub(crate) fn plan_request(
                 return dfmcp_error_payload("fortress.plan", &error);
             }
             let snapshot = guard.adapter.snapshot();
-            // Production quotas compile, against observed stock, into ordinary
-            // semantic work-order steps; the plan is then sealed like any other.
-            let (actions, production_analysis) = match production {
-                Some(raw) => match crate::lab_world::production_actions(snapshot, &raw) {
-                    Ok((compiled, analysis)) => (Some(compiled), Some(analysis)),
-                    Err(error) => return dfmcp_error_payload("fortress.plan", &error),
-                },
-                None => (actions, None),
-            };
-
-            let source = match (actions, blueprint) {
-                (_, Some(raw)) => PlanSource::Blueprint { summary, raw },
-                (Some(raw), None) => PlanSource::Actions { summary, raw },
-                (None, None) => PlanSource::Pause {
+            let source = match (production, actions, blueprint) {
+                (Some(raw), _, _) => {
+                    let request = match crate::lab_world::ProductionRequest::parse(&raw) {
+                        Ok(request) => request,
+                        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                    };
+                    PlanSource::Production {
+                        summary,
+                        raw: request.canonical_json(),
+                    }
+                }
+                (_, _, Some(raw)) => PlanSource::Blueprint { summary, raw },
+                (_, Some(raw), None) => PlanSource::Actions { summary, raw },
+                (None, None, None) => PlanSource::Pause {
                     summary,
                     paused_target: paused_target.is_some_and(|value| value),
                 },
             };
-            let intent = match source.intent(IntentId::new(rid), snapshot) {
-                Ok(intent) => intent,
+            let (intent, production_analysis) = match source.compile(IntentId::new(rid), snapshot) {
+                Ok(compiled) => compiled,
                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
             };
 
@@ -3254,12 +3344,17 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
     let mut payload: serde_json::Value =
         serde_json::from_str(&dfmcp_error_payload("fortress.commit", &stale_error))
             .unwrap_or_else(|_| json!({"ok": false}));
-    let replayed = stale
-        .source
-        .intent(IntentId::new(rid), snapshot)
-        .and_then(|intent| StaticPlanner::default().prepare_laboratory(snapshot, &intent, &ctx));
+    let replayed =
+        stale
+            .source
+            .compile(IntentId::new(rid), snapshot)
+            .and_then(|(intent, analysis)| {
+                StaticPlanner::default()
+                    .prepare_laboratory(snapshot, &intent, &ctx)
+                    .map(|plan| (plan, analysis))
+            });
     match replayed {
-        Ok(plan) => {
+        Ok((plan, production_analysis)) => {
             let digest = plan.digest.to_string();
             payload["rebased_plan"] = json!({
                 "forecast": forecast_plan(&session.adapter, &plan, &ctx),
@@ -3268,6 +3363,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
                 "expires_at_tick": plan.expires_at_tick.0,
                 "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
                 "steps": crate::lab_world::plan_steps_json(&plan),
+                "production": production_analysis,
             });
             payload["rebase"] = json!({
                 "method": "intent_replay",

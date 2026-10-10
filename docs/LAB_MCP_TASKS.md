@@ -86,8 +86,9 @@ explicit `fortress_wait` advances laboratory game time.** `tasks/get`, resource
 reads and supervisor wakeups neither advance time nor dispatch a deferred
 action. A paused fortress remains paused. Use bounded waits and inspect
 `open_actions_remaining`, each action's state, and the task result. All actions
-in the original plan must verify and their physical work must become quiescent
-before its task becomes `completed`.
+in the original plan must verify, their physical work must become quiescent, and
+current eligible evidence must establish the original plan-level goal before its
+task becomes `completed`.
 
 Goal proof and physical work are separate. A deadline can produce an immutable
 `Failed` action receipt while its work order, designation or construction still
@@ -97,12 +98,22 @@ silently stops game work. The task detail exposes both:
 
 | Field | Meaning |
 |---|---|
-| `proof_status` | The original goal outcome: `working`, `completed`, `failed` or `cancelled`. A failure is reported as soon as a failed or indeterminate action is observed. |
+| `proof_status` | The original goal outcome: `working`, `completed`, `failed` or `cancelled`. A failure is reported for failed/indeterminate actions or finished quiet work whose original goal is false or unknown. |
+| `action_proof_status` | The separate aggregate action-receipt outcome; verified work does not by itself establish the original goal. |
+| `original_goal` | Current source-qualified truth, original predicate, actual committed digest and observation anchor, separate from historical achievement. |
+| `needs_replan` | The original work has finished below its original goal. Review a new plan explicitly; the monitor dispatches no replacement. |
 | `status` | The monitor's lifecycle. It remains `working` while an original action is nonterminal or its physical work is active or unknown. |
 | Each action's `work_state` | `never_dispatched`, `active`, `quiescent` or `unknown`, with the entity identity and current observed anchor. |
 | `drain_progress.remaining_nonterminal` | Original action receipts that have not reached a terminal state. |
 | `drain_progress.remaining_work` | Original actions whose physical work is active or cannot be proven quiescent. |
 | `drain_progress.quiescent` | True only when every original receipt is terminal and every physical effect is proven quiescent. |
+
+Production goals retain all requested stock minima. Consumption can leave a
+quota unmet even after every requested batch verifies. Such a finished task
+reports `failed`, `needs_replan: true` and the current goal evidence. Missing or
+ineligible goal evidence stays `unknown` and requires reconciliation. An
+idempotent witness-rebase alias resolves to the actual original committed goal;
+a later unrelated plan cannot replace it.
 
 For a failed goal, `status: "working"` therefore means retained monitoring or
 cleanup, not that its failed proof is still pending. Terminal but active actions
@@ -138,8 +149,9 @@ receipt can no longer be read after restore or monitor recovery, failure
 evidence explicitly reports unknown physical work and
 `physical_quiescent: false`; unavailable counts are `null`, never an invented
 zero. Bounded terminal
-summaries retain `proof_status`, drain progress and physical quiescence as well
-as the continuation to complete evidence.
+summaries retain `proof_status`, `action_proof_status`, compact original-goal
+evidence, replanning status, drain progress and physical quiescence as well as
+the continuation to complete evidence.
 
 ## Cancel the original plan
 
@@ -161,13 +173,14 @@ progress. Missing work after a known dispatch, replacement identities and
 ineligible lifecycle facts remain unresolved and cannot certify a drain.
 
 Each drain phase rechecks current observation and action authority. A fully
-verified and physically quiescent plan cannot be cancelled. A verified plan
+verified and physically quiescent plan whose original goal currently holds
+cannot be cancelled. A verified plan
 whose early proof leaves physical work active can be cleaned up without
 rewriting that proof. Explicit `tasks/cancel` finalizes the transport task as
 `cancelled`; if the goal had failed, both drain phases still retain
 `proof_status: "failed"` and the original failure evidence. Without explicit
 transport cancellation, a monitor becomes `failed` once failed work is quiet,
-or `completed` once verified work is quiet.
+or `completed` once verified work is quiet and the original goal holds.
 
 The bounded laboratory drain completes before
 cancellation intent is forwarded to the upstream store. Both ordered phases

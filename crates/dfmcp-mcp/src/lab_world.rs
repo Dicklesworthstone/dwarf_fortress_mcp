@@ -817,137 +817,202 @@ fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
     compiler
 }
 
-/// Compile `{"template":"production","quotas":[{"item":"DRINK","minimum":40}]}`
-/// against observed stock (the stock ledger) into semantic work-order steps,
-/// plus the complete material analysis. Infeasible models are refused with
-/// every shortage named; nothing is guessed.
-pub(crate) fn production_actions(snapshot: &WorldSnapshot, raw: &str) -> Result<(String, Json)> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Quota {
-        item: String,
-        minimum: u32,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Objective {
-        #[allow(dead_code)]
-        template: String,
-        quotas: Vec<Quota>,
-    }
-    if raw.len() > MAX_ACTIONS_JSON_BYTES {
-        return Err(invalid("production objective exceeds its byte bound"));
-    }
-    let objective: Objective = serde_json::from_str(raw).map_err(|error| {
-        invalid(format!(
-            "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD\",\"minimum\":n}}]}}: {error}"
-        ))
-    })?;
-    let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
-    let snapshot = evidence.snapshot();
-    let mut inventory = dfmcp_intent::InventoryStockpile::new();
-    let ledger = effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
-    for (token, field) in [
-        ("DRINK", effects::STOCK_DRINK_FIELD),
-        ("FOOD", effects::STOCK_FOOD_FIELD),
-    ] {
-        if !objective.quotas.iter().any(|quota| quota.item == token) {
-            continue;
+/// The complete original production request, before stock-dependent lowering.
+/// Duplicate quotas mean the largest minimum; their canonical order and JSON
+/// are independent of the order in which equivalent goals were submitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProductionRequest {
+    quotas: BTreeMap<String, u32>,
+}
+
+impl ProductionRequest {
+    pub(crate) fn parse(raw: &str) -> Result<Self> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Quota {
+            item: String,
+            minimum: u32,
         }
-        let held = ledger
-            .and_then(|ledger| ledger.fields.get(field))
-            .and_then(|fact| laboratory_fact_value(fact, snapshot.tick));
-        let Some(Value::U64(held)) = held else {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Objective {
+            template: String,
+            quotas: Vec<Quota>,
+        }
+        if raw.len() > MAX_ACTIONS_JSON_BYTES {
+            return Err(invalid("production objective exceeds its byte bound"));
+        }
+        let objective: Objective = serde_json::from_str(raw).map_err(|error| {
+            invalid(format!(
+                "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD\",\"minimum\":n}}]}}: {error}"
+            ))
+        })?;
+        if objective.template != "production" {
+            return Err(invalid("production objective requires template=production"));
+        }
+        // Bound submitted records before normalization: duplicates must not
+        // bypass the same input allowance as distinct requested goals.
+        if objective.quotas.is_empty() || objective.quotas.len() > MAX_LIST_ITEMS {
+            return Err(invalid(
+                "production objective requires 1..64 submitted quotas",
+            ));
+        }
+        let mut quotas = BTreeMap::<String, u32>::new();
+        for quota in objective.quotas {
+            if !matches!(quota.item.as_str(), "DRINK" | "FOOD") {
+                return Err(invalid(format!(
+                    "production quota token {:?} is outside the laboratory DRINK/FOOD model",
+                    quota.item
+                )));
+            }
+            let minimum = quotas.entry(quota.item).or_default();
+            *minimum = (*minimum).max(quota.minimum);
+        }
+        Ok(Self { quotas })
+    }
+
+    pub(crate) fn canonical_json(&self) -> String {
+        json!({
+            "template": "production",
+            "quotas": self.quotas.iter().map(|(item, minimum)| {
+                json!({"item": item, "minimum": minimum})
+            }).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+
+    /// Recompile from the original quotas at this one observed snapshot.
+    /// Work-order completion and the original stock goal remain separate.
+    pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
+        let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
+        let snapshot = evidence.snapshot();
+        let mut inventory = dfmcp_intent::InventoryStockpile::new();
+        let ledger =
+            effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
+        let mut terminal = Vec::with_capacity(self.quotas.len());
+        for (token, minimum) in &self.quotas {
+            let field = match token.as_str() {
+                "DRINK" => effects::STOCK_DRINK_FIELD,
+                "FOOD" => effects::STOCK_FOOD_FIELD,
+                _ => return Err(invalid("production quota escaped its closed model")),
+            };
+            let held = ledger
+                .and_then(|ledger| ledger.fields.get(field))
+                .and_then(|fact| laboratory_fact_value(fact, snapshot.tick));
+            let Some(Value::U64(held)) = held else {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!(
+                        "production quota for {token} requires an established laboratory stock count in {field}"
+                    ),
+                ));
+            };
+            let count = u32::try_from(*held).map_err(|_| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "observed production stock exceeds the compiler's exact u32 count bound",
+                )
+            })?;
+            inventory.set_stock(token, count);
+            let ledger = ledger.ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    "production stock ledger is not established",
+                )
+            })?;
+            terminal.push(Predicate::FieldCompare {
+                entity_id: ledger.id,
+                field: field.to_owned(),
+                op: CompareOp::Ge,
+                value: Value::U64(u64::from(*minimum)),
+            });
+        }
+        let quotas: Vec<dfmcp_intent::ProductionQuota> = self
+            .quotas
+            .iter()
+            .map(|(item, minimum)| dfmcp_intent::ProductionQuota {
+                item_token: item.clone(),
+                minimum_stock: *minimum,
+            })
+            .collect();
+        let plan = lab_recipes().plan_quotas(
+            &quotas,
+            &inventory,
+            dfmcp_intent::ProductionPlanningLimits::default(),
+        )?;
+        let analysis = json!({
+            "model": "laboratory recipes (5 units per batch, no modeled inputs; each job needs its completed workshop and a living worker with the labor); stock read from the stock ledger",
+            "feasible": plan.model_feasible(),
+            "requirements": plan.requirements().iter().map(|r| json!({
+                "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
+                "planned": r.planned_units, "missing": r.missing_units,
+            })).collect::<Vec<_>>(),
+            "shortages": plan.shortages().iter().map(|s| json!({
+                "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
+            })).collect::<Vec<_>>(),
+        });
+        if !plan.model_feasible() {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!("production quotas are infeasible in the laboratory model: {analysis}"),
+            ));
+        }
+        if plan.steps().is_empty() {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "observed stock already meets every quota; nothing to produce",
+            ));
+        }
+        // An order that can never progress is not a plan: name every blocker.
+        let blockers: Vec<String> = plan
+            .steps()
+            .iter()
+            .filter_map(|step| {
+                effects::work_order_blocker(snapshot, &step.job_token)
+                    .map(|why| format!("{} ({}): {why}", step.output_token, step.job_token))
+            })
+            .collect();
+        if !blockers.is_empty() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!(
-                    "production quota for {token} requires an established laboratory stock count in {field}"
+                    "production cannot progress in the observed fortress: {}; build the workshop or enable the labor first",
+                    blockers.join("; ")
                 ),
             ));
-        };
-        let count = u32::try_from(*held).map_err(|_| {
-            DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "observed production stock exceeds the compiler's exact u32 count bound",
-            )
-        })?;
-        inventory.set_stock(token, count);
-    }
-    let quotas: Vec<dfmcp_intent::ProductionQuota> = objective
-        .quotas
-        .into_iter()
-        .map(|q| dfmcp_intent::ProductionQuota {
-            item_token: q.item,
-            minimum_stock: q.minimum,
-        })
-        .collect();
-    let plan = lab_recipes().plan_quotas(
-        &quotas,
-        &inventory,
-        dfmcp_intent::ProductionPlanningLimits::default(),
-    )?;
-    let analysis = json!({
-        "model": "laboratory recipes (5 units per batch, no modeled inputs; each job needs its completed workshop and a living worker with the labor); stock read from the stock ledger",
-        "feasible": plan.model_feasible(),
-        "requirements": plan.requirements().iter().map(|r| json!({
-            "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
-            "planned": r.planned_units, "missing": r.missing_units,
-        })).collect::<Vec<_>>(),
-        "shortages": plan.shortages().iter().map(|s| json!({
-            "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
-        })).collect::<Vec<_>>(),
-    });
-    if !plan.model_feasible() {
-        return Err(DfmcpError::new(
-            ErrorCode::PreconditionsFailed,
-            format!("production quotas are infeasible in the laboratory model: {analysis}"),
-        ));
-    }
-    if plan.steps().is_empty() {
-        return Err(DfmcpError::new(
-            ErrorCode::InvalidIntent,
-            "observed stock already meets every quota; nothing to produce",
-        ));
-    }
-    // An order that can never progress is not a plan: name every blocker.
-    let blockers: Vec<String> = plan
-        .steps()
-        .iter()
-        .filter_map(|step| {
-            effects::work_order_blocker(snapshot, &step.job_token)
-                .map(|why| format!("{} ({}): {why}", step.output_token, step.job_token))
-        })
-        .collect();
-    if !blockers.is_empty() {
-        return Err(DfmcpError::new(
-            ErrorCode::PreconditionsFailed,
-            format!(
-                "production cannot progress in the observed fortress: {}; build the workshop or enable the labor first",
-                blockers.join("; ")
-            ),
-        ));
-    }
-    let steps: Vec<Json> = plan
-        .steps()
-        .iter()
-        .map(|step| {
-            json!({
-                "action": {
-                    "kind": "create_work_order",
-                    "name": format!("{} for quota", step.output_token.to_lowercase()),
-                    "job_token": step.job_token,
-                    "amount": step.batches,
-                    "conditions": [{
-                        "kind": "item_count_below",
-                        "item_token": step.output_token,
-                        "threshold": step.inventory_threshold,
-                    }],
-                },
-                "depends_on": step.depends_on,
+        }
+        let steps: Vec<Json> = plan
+            .steps()
+            .iter()
+            .map(|step| {
+                json!({
+                    "action": {
+                        "kind": "create_work_order",
+                        "name": format!("{} for quota", step.output_token.to_lowercase()),
+                        "job_token": step.job_token,
+                        "amount": step.batches,
+                        "conditions": [{
+                            "kind": "item_count_below",
+                            "item_token": step.output_token,
+                            "threshold": step.inventory_threshold,
+                        }],
+                    },
+                    "depends_on": step.depends_on,
+                })
             })
+            .collect();
+        Ok(ProductionCompilation {
+            actions: Json::Array(steps).to_string(),
+            analysis,
+            terminal: Predicate::All(terminal).normalized(),
         })
-        .collect();
-    Ok((Json::Array(steps).to_string(), analysis))
+    }
+}
+
+pub(crate) struct ProductionCompilation {
+    pub(crate) actions: String,
+    pub(crate) analysis: Json,
+    pub(crate) terminal: Predicate,
 }
 
 /// Observed economy alerts: stocks that will run out soon, are exhausted, or
@@ -2191,12 +2256,11 @@ mod tests {
     #[test]
     fn production_objectives_preserve_stock_thresholds_in_executable_actions() -> Result<()> {
         let snapshot = scenario_snapshot("starter_fortress", FortressId::new(3), false)?;
-        let (raw, analysis) = production_actions(
-            &snapshot,
+        let compiled = ProductionRequest::parse(
             r#"{"template":"production","quotas":[{"item":"DRINK","minimum":46},{"item":"FOOD","minimum":66}]}"#,
-        )?;
-        assert_eq!(analysis["feasible"], true);
-        let steps = parse_steps(&raw)?;
+        )?.compile(&snapshot)?;
+        assert_eq!(compiled.analysis["feasible"], true);
+        let steps = parse_steps(&compiled.actions)?;
         assert_eq!(steps.len(), 2);
         for step in &steps {
             let Action::CreateWorkOrder {
@@ -2275,7 +2339,8 @@ mod tests {
             }
             snapshot.refresh_hash();
             assert!(
-                production_actions(&snapshot, request)
+                ProductionRequest::parse(request)?
+                    .compile(&snapshot)
                     .is_err_and(|e| e.code == ErrorCode::PreconditionsFailed)
             );
         }
@@ -2283,11 +2348,124 @@ mod tests {
         no_ledger.graph.entities.remove(&starter::STOCK_LEDGER);
         no_ledger.refresh_hash();
         assert!(
-            production_actions(&no_ledger, request)
+            ProductionRequest::parse(request)?
+                .compile(&no_ledger)
                 .is_err_and(|e| e.code == ErrorCode::PreconditionsFailed)
         );
-        assert!(production_actions(&original, request).is_ok());
+        assert!(
+            ProductionRequest::parse(request)?
+                .compile(&original)
+                .is_ok()
+        );
         Ok(())
+    }
+
+    #[test]
+    fn production_requests_normalize_complete_quotas_before_lowering() -> Result<()> {
+        let first = ProductionRequest::parse(
+            r#"{"template":"production","quotas":[{"item":"FOOD","minimum":70},{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]}"#,
+        )?;
+        let second = ProductionRequest::parse(
+            r#"{"quotas":[{"minimum":40,"item":"DRINK"},{"minimum":70,"item":"FOOD"}],"template":"production"}"#,
+        )?;
+        assert_eq!(first, second);
+        assert_eq!(first.canonical_json(), second.canonical_json());
+        assert_eq!(ProductionRequest::parse(&first.canonical_json())?, first);
+        let world = scenario_snapshot("starter_fortress", FortressId::new(314), false)?;
+        let compiled = first.compile(&world)?;
+        let steps = parse_steps(&compiled.actions)?;
+        assert_eq!(steps.len(), 1, "the drink quota already holds");
+        assert!(matches!(
+            &steps[0].action,
+            Action::CreateWorkOrder { job_token, amount: 2, .. } if job_token == "PREPARE_MEAL"
+        ));
+        assert_eq!(
+            compiled.terminal,
+            Predicate::All(vec![
+                Predicate::FieldCompare {
+                    entity_id: starter::STOCK_LEDGER,
+                    field: effects::STOCK_DRINK_FIELD.to_owned(),
+                    op: CompareOp::Ge,
+                    value: Value::U64(40),
+                },
+                Predicate::FieldCompare {
+                    entity_id: starter::STOCK_LEDGER,
+                    field: effects::STOCK_FOOD_FIELD.to_owned(),
+                    op: CompareOp::Ge,
+                    value: Value::U64(70),
+                },
+            ])
+            .normalized(),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn production_goal_retains_initially_satisfied_stock_and_unknowns() -> Result<()> {
+        let mut world = scenario_snapshot("starter_fortress", FortressId::new(315), false)?;
+        let request = ProductionRequest::parse(
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]}"#,
+        )?;
+        let terminal = request.compile(&world)?.terminal;
+        let ledger = world
+            .graph
+            .entities
+            .get_mut(&starter::STOCK_LEDGER)
+            .ok_or_else(|| invalid("fixture ledger missing"))?;
+        ledger.fields.insert(
+            effects::STOCK_FOOD_FIELD.to_owned(),
+            lab_fact(Value::U64(65)),
+        );
+        ledger.fields.insert(
+            effects::STOCK_DRINK_FIELD.to_owned(),
+            lab_fact(Value::U64(39)),
+        );
+        world.refresh_hash();
+        assert_eq!(
+            dfmcp_world::PredicateEvidence::laboratory(&world)?.evaluate(&terminal)?,
+            dfmcp_world::PredicateTruth::False
+        );
+        let ledger = world
+            .graph
+            .entities
+            .get_mut(&starter::STOCK_LEDGER)
+            .ok_or_else(|| invalid("fixture ledger missing"))?;
+        let mut unknown = lab_fact(Value::U64(40));
+        unknown.source = FactSource::AgentAssertion("assumed stock".to_owned());
+        ledger
+            .fields
+            .insert(effects::STOCK_DRINK_FIELD.to_owned(), unknown);
+        world.refresh_hash();
+        assert_eq!(
+            dfmcp_world::PredicateEvidence::laboratory(&world)?.evaluate(&terminal)?,
+            dfmcp_world::PredicateTruth::Unknown
+        );
+        assert!(
+            request
+                .compile(&world)
+                .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn production_request_rejects_bad_templates_unknown_zero_quotas_and_input_overflow() {
+        for raw in [
+            r#"{"template":"blueprint","quotas":[{"item":"DRINK","minimum":50}]}"#,
+            r#"{"template":"production","quotas":[]}"#,
+            r#"{"template":"production","quotas":[{"item":"STEEL","minimum":0},{"item":"DRINK","minimum":50}]}"#,
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":4294967296}]}"#,
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":50,"discard":true}]}"#,
+        ] {
+            assert!(ProductionRequest::parse(raw).is_err(), "{raw}");
+        }
+        let maximum = json!({"template":"production",
+            "quotas": vec![json!({"item":"DRINK","minimum":50}); MAX_LIST_ITEMS]});
+        assert!(ProductionRequest::parse(&maximum.to_string()).is_ok());
+        let over = json!({"template":"production",
+            "quotas": vec![json!({"item":"DRINK","minimum":50}); MAX_LIST_ITEMS + 1]});
+        assert!(ProductionRequest::parse(&over.to_string()).is_err());
+        assert!(ProductionRequest::parse(&" ".repeat(MAX_ACTIONS_JSON_BYTES + 1)).is_err());
     }
 
     #[test]

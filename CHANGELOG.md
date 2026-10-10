@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-10 — Preserve original production goals
+
+- Keep normalized original DRINK/FOOD quotas through planning, stale-plan replay
+  and durable source recovery. Recompute required batches from the current
+  eligible stock, and return fresh production analysis with an explicit rebase.
+- Seal every original stock minimum into the plan-level goal, including quotas
+  that needed no work order. Work-order completion retains its own proof and
+  can no longer stand in for the requested stock level after consumption.
+- Require task completion to establish the original goal as well as completed,
+  quiescent work. Expose current goal evidence separately from action receipts;
+  exhausted work with an unmet goal requires explicit replanning, and unknown
+  goal evidence requires reconciliation. Resolve witnessed rebase aliases to
+  the actual committed goal; never dispatch replacement work automatically.
+- Bound submitted quotas before normalization, validate the exact template, and
+  reject simultaneous explicit production and blueprint-alias requests. Add a
+  distinct durable production source tag without upgrading legacy action lists.
+- Pass all 15 durable-store unit tests, including the two new source-codec cases,
+  and all 27 actual production/observation module tests through a temporary
+  direct-source harness. Full MCP compilation remains blocked by SIGKILL in the
+  unchanged pinned Asupersync dependency; MCP facade/Task regressions are present
+  but their execution is not claimed. Durable objective history is a separate
+  increment; this change preserves the request of retained unfinished commits.
+
 ## 2026-10-10 — Bounded foreground room supervision
 
 - Add `track_room_readiness.py wait` to supervise several complete joint samples

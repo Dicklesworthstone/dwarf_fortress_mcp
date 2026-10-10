@@ -437,6 +437,32 @@ carries a `remedy` — the exact `fortress.plan` arguments for a work order
 sized for about four rounds. Worlds without a ledger (`empty`) have no
 metabolism. None of these rates are claims about Dwarf Fortress.
 
+### Original production quotas
+
+A production request such as
+`{"template":"production","quotas":[{"item":"DRINK","minimum":60}]}`
+retains that original stock goal through planning, replay and the durable source
+record. Stale-plan replay recalculates batches from current eligible inventory;
+its `rebased_plan.production` reports the new stock and proposed production.
+Requests accept 1–64 submitted quotas for exact `DRINK` or `FOOD` tokens. Duplicate
+quotas combine by their greatest minimum and canonical token order. Explicit
+production and its blueprint alias cannot both be supplied.
+
+The plan-level terminal condition is the conjunction of every original stock
+minimum, including a quota that was already satisfied and generated no action.
+Individual work orders retain their exact action-completion postconditions.
+Consumption can therefore leave a completed plan's original stock goal unmet.
+`fortress_wait` still reports action progress in its top-level status; its
+`objectives` and Agent Turn carry the separate original-goal truth.
+
+A Task also exposes `original_goal`, `action_proof_status` and physical work. It
+can complete only with a currently proven original goal and completed, quiescent
+original work. Finished work with a false goal reports `needs_replan`; unknown
+goal evidence requires reconciliation. Neither case dispatches a replacement
+order. Rebase aliases resolve to the actual committed objective, and current
+Observe authority gates the goal evidence. The original production source tag
+does not reconstruct quota intentions from older action-only journal records.
+
 ### Conditional production
 
 Work orders accept a bounded `conditions` array through the ordinary laboratory
