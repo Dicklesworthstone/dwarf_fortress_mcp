@@ -44,6 +44,44 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Production goals compile missing staffing and workshops (2026-10-10)
+
+Original laboratory production sources now accept opt-in `prerequisites`:
+permission to enable known-disabled labor and explicit bounded Still/Kitchen
+sites. The compiler emits existing SetLabor, Build and CreateWorkOrder actions
+in one sealed dependency plan. Each order waits for its required setup proof;
+normal capabilities, risks, compensation and checkpoint rules remain effective.
+Existing complete workshops and eligible staffing are reused.
+
+Staffing is selected jointly across both roles with bounded top-two candidate
+sets. Distinct usable workers take priority, followed by fewer labor enables,
+military-status preference and canonical IDs. This protects scarce specialists
+and scarce enableable roles. When one worker must serve both orders, the later
+order depends on the earlier one's verified completion, so its original sealed
+deadline includes the known wait. Existing FOOD-before-DRINK lowering is retained.
+
+Assignment requires explicit known life and an eligible false prior labor flag;
+unavailable evidence never becomes permission or exact inverse compensation.
+Needed construction requires caller-selected one-level sites of at most 64
+tiles, established floor/support/safe surroundings, and known non-overlapping
+building geometry. The complete entity scan is bounded to 65,536 records; at
+most four setup actions and two orders reach the ordinary bounded parser.
+
+The durable original source retains every quota and unused site permission.
+Replay recomputes batches and missing setup from current evidence; all original
+stock minima remain the terminal goal. Analysis explains observed/planned
+staffing and workshops, added dependencies and required action capabilities.
+Requests without prerequisite options retain previous source and action shapes.
+
+**Evidence:** fifteen focused Rust tests are present, including actual
+planner/MemoryAdapter setup execution, capability refusal, unknown evidence,
+replay and an unequal shared-worker deadline scenario. Two independent source
+reviews traced the compiler, planner and adapter integration. An independent
+JavaScript oracle matched exhaustive staffing selection in 1,103,762 bounded
+configurations. That oracle is not Rust execution. Current compilation, Rust
+tests and rustfmt could not run during the execution-service disconnection;
+no full-workspace, native or live qualification is claimed.
+
 ### Fresh original-goal proof for semantic workforce actions (2026-10-10)
 
 The single-step semantic workforce handoff now has a foreground original-goal

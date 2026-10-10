@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-10 — Compile missing production staffing and workshops
+
+- Add explicit prerequisite options to original DRINK/FOOD production sources:
+  permission to enable known-disabled labor and bounded Still/Kitchen sites.
+  Compile real setup actions and per-order dependencies under existing action
+  authority, compensation, construction checks and checkpoint rules.
+- Select workers jointly across both roles, maximizing distinct capacity before
+  minimizing labor changes. Preserve scarce specialists and treat unavailable
+  labor and military evidence explicitly. Require known life and known-false
+  prior flags for new assignments; keep other labors and squad membership.
+- Serialize orders that must share one worker. Use verified completion
+  dependencies so a short order retains its full sealed horizon after waiting
+  behind a larger order, while preserving established FOOD-first ordering.
+- Retain every original quota and explicit site through canonical source storage
+  and replay. Reuse newly ready setup, recompute batches from eligible current
+  inventory, and report the required setup and action capabilities.
+- Add fifteen focused Rust regressions, including real planner/adapter setup,
+  authority refusal and unequal-order execution. Two independent source reviews
+  passed; an independent 1,103,762-case staffing oracle matched exhaustive
+  selection. Current Rust compilation/tests/rustfmt remain unverified because
+  the execution service is disconnected. No native/live admission is added.
+
 ## 2026-10-10 — Prove original workforce goals from fresh observations
 
 - Add a foreground goal monitor to the existing semantic workforce handoff.

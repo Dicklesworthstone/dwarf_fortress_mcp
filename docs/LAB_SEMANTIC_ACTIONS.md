@@ -510,6 +510,96 @@ order. Rebase aliases resolve to the actual committed objective, and current
 Observe authority gates the goal evidence. The original production source tag
 does not reconstruct quota intentions from older action-only journal records.
 
+### Production prerequisites
+
+A production source can explicitly authorize missing staffing and name sites
+for missing workshops. These options stay inside the original production JSON:
+
+```json
+{
+  "template": "production",
+  "quotas": [
+    {"item": "DRINK", "minimum": 50},
+    {"item": "FOOD", "minimum": 70}
+  ],
+  "prerequisites": {
+    "assign_labor": true,
+    "workshops": [
+      {"building": "workshop:Still", "location": [0, 0, 10]},
+      {"building": "workshop:Kitchen", "location": [2, 0, 10]}
+    ]
+  }
+}
+```
+
+The compiler emits ordinary labor, construction and work-order actions in one
+sealed plan. Each work order depends on its own missing prerequisites, and
+normal action postconditions must verify before it can dispatch. Existing ready
+workshops and usable staffing are reused. Planning itself changes no world state;
+the existing Plan, ConfigureLabor, Construct, ConfigureProduction and Checkpoint
+rules govern review and execution of the generated actions.
+
+Staffing considers both production roles together. It first maximizes distinct
+usable workers, then minimizes labor enables, then prefers known non-military
+workers, unknown military status, known military assignment and canonical IDs.
+Two candidates per role suffice for this two-role selection, so at most four
+pairs are examined after a bounded scan. This avoids consuming the only brewer
+for cooking when another worker can be assigned cooking. The compiler changes
+neither existing enabled labor flags nor military membership.
+
+Every selected worker must have eligible, explicitly true life evidence. A new
+labor assignment additionally requires an eligible, explicitly false prior labor
+flag. Missing, omitted, stale, asserted, replayed or future-dated data cannot
+establish that prior value. This restriction keeps the existing inverse labor
+action an exact compensation. With `assign_labor: false` (the default), only
+already enabled labor qualifies.
+
+When both orders must use the same selected worker, the later order depends on
+verified completion of the earlier order. The existing planner therefore extends
+its sealed obligation after the earlier horizon; a small order does not lose its
+deadline while waiting behind a large one. The established FOOD-before-DRINK
+lowering order is preserved. This handles known contention within this goal;
+other goals' backlog and later worker loss remain part of bounded runtime
+observation and may still require a new plan.
+
+Construction is explicit and bounded:
+
+- At most two sites are accepted, for `workshop:Still` and
+  `workshop:Kitchen`, and each must serve an original requested quota.
+- `location` is required. Optional `min` and `max` must be supplied together;
+  otherwise the footprint is that one tile. A footprint must contain its
+  location, lie on one level and contain at most 64 tiles.
+- Duplicate workshop kinds, overlapping proposed footprints, unsupported fields
+  or kinds, and coordinates whose one-tile halo would overflow are refused.
+- A needed site requires established floor, support below it, an observed safe
+  one-tile halo and known non-overlapping footprints for every existing building.
+  A supplied coordinate is a constraint, not evidence that the site is safe.
+- A site for a currently ready workshop remains in the canonical original source
+  for later replay; it does not cause unnecessary construction.
+
+The compiler bounds setup to 65,536 canonical entities, four setup actions and
+two orders. Expanded output also passes the existing 16 KiB/16-step action
+parser. Returned production analysis lists observed versus planned staffing and
+workshops, action indices, shared-worker dependencies and required action
+capabilities. Missing permissions or evidence produce explicit refusals.
+
+Every original stock quota remains in the plan terminal condition, including
+quotas initially satisfied. Replaying the original production source retains
+`assign_labor` and all explicit sites, recomputes missing batches and reuses
+newly completed setup. Requests without `prerequisites` retain the previous
+canonical source shape, action order and independent-order behavior; they still
+refuse missing production prerequisites.
+
+Fifteen Rust regressions are present, including actual planner/MemoryAdapter
+execution of setup dependencies, capability refusal before effects, scarce-role
+selection, unequal shared-worker deadlines, unknown evidence, site validation
+and replay. An independent JavaScript oracle matched joint staffing against
+exhaustive selection in 1,103,762 small configurations. The oracle does not
+execute Rust. Current compilation, Rust tests and rustfmt are unverified while
+the execution service is disconnected. These are reference-laboratory features,
+not claims about real DF production, native mutation admission or a broader
+global labor scheduler.
+
 ### Conditional production
 
 Work orders accept a bounded `conditions` array through the ordinary laboratory
