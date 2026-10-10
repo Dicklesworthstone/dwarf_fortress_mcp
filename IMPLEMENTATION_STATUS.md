@@ -44,6 +44,44 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable original-room readiness workflow (2026-10-10)
+
+`scripts/track_room_readiness.py` now makes the existing joint room condition
+usable through `start`, `sample`, `inspect` and `cancel`. Its separate private
+journal retains the complete original room-backed batch, geometry, furnishing
+DAG, allocation evidence, every original placement receipt and file identity,
+endpoint and fixed game-time policy. Reopening cannot substitute a successful
+subset or renew the deadline. A single sample brackets the released complete
+operations capture with identical paused map endpoints and all original receipt
+queries. Every original floor, required wall and furnishing shares one stability
+window; separately timed successes cannot complete the room.
+
+Synchronized read intent precedes native contact. Full raw evidence and complete
+output reservation precede publication, followed by file/parent synchronization
+and original-source rechecks before acknowledgement. Interrupted reads carry no
+effective stability credit. Offline replay recomputes progress without restoring
+publication authority; cancellation remains available after original-source loss.
+Both top-level and nested readiness claims require original custody in the current
+call. Whole original plans, per-target room associations and historical evidence
+remain visible after restart. Source, clock and identity changes, torn journals,
+ambiguous writes and failed final output checks cannot become verified success.
+
+The workflow is bounded to 32 furnishings, 4,096 map cells, a 128 MiB journal,
+1,030 frames and a 256 KiB complete response under one shrinking operation budget.
+It uses existing unadmitted furniture/1.19, operations/1.4 and map/1.5 query
+profiles. It adds no native mutation, room assignment, canonical evidence issuer,
+Rust MCP integration or production admission. Readiness is historical sampled
+terrain and furnishing evidence; present usability, continuous preservation and
+an atomic cross-profile snapshot remain unproven. See `docs/ROOM_READINESS.md`
+and `architecture/room_readiness_monitor_v1.json`.
+
+**Evidence:** the existing joint-condition and synthetic TCP acquisition suites
+passed all 27 tests. New private-file and CLI subprocess tests exercise full
+original-plan custody, restart, interrupted acquisition, source loss, immutable
+deadlines, map drift, bounds and complete-result publication. Their recorded
+execution is described in `docs/ROOM_READINESS.md`. These are Python/POSIX and
+synthetic-peer tests, not native SDK, live-fortress or full-repository qualification.
+
 ### Durable semantic workforce handoff (2026-10-07)
 
 `SemanticWorkforceSession` now connects an original sealed, single-step `SetLabor`

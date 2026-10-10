@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-10 — Durable whole-room readiness
+
+- Connect the existing joint terrain/furnishing condition to an executable
+  `start`/`sample`/`inspect`/`cancel` workflow. Retain the complete original room,
+  all placement receipts and source-file custody across process restarts.
+- Require every original floor, required wall and furnishing to satisfy one
+  shared advancing-tick stability window. Preserve the original deadline and
+  observation allowance; an interrupted read has zero effective streak.
+- Persist read intent before query-only acquisition and full raw map/operations
+  evidence before acknowledgement. Reserve the complete original-plan response,
+  synchronize file and parent, and recheck source custody before publishing.
+- Recheck query authority after final source verification and owner close.
+  Revocation withholds the response while preserving synchronized history for
+  offline inspection.
+- Keep offline cancellation available after original batch loss and withhold
+  combined readiness without verified original custody. Refuse torn or altered
+  histories, ambiguous writes, source changes and substituted receipt subsets.
+- Add private-file and subprocess recovery tests, including actual process death
+  at the operations-release boundary and the maximum 32-furnishing room. Scope
+  remains Python development evidence using existing unadmitted query profiles;
+  native room assignments, live qualification and production admission remain open.
+
 ## 2026-10-07 — Durable semantic-to-native workforce execution
 
 - Hand an original sealed single-step SetLabor plan to the actual workforce

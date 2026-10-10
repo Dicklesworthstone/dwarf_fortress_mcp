@@ -116,6 +116,17 @@ not whole-room completion: `room_completion_proven`, `terrain_completion_proven`
 and `room_assignments_observed` remain false. No monitor discharges or retries
 placement effects, certifies current usability or claims continuous stability.
 
+## Monitor the original terrain and furnishings together
+
+Use [`track_room_readiness.py`](ROOM_READINESS.md) when the goal includes the
+original room floors and required bedroom walls as well as installed furniture.
+Its separate query-only environment combines two identical paused map reads,
+one complete operations capture, and every original receipt in a single durable
+sample. The entire original room shares one advancing-tick stability window;
+a lost wall or an incomplete furnishing resets it. `start`, `sample`, `inspect`
+and `cancel` retain the full room intention and original placement custody across
+process restarts. See [room readiness](ROOM_READINESS.md) for the exact commands.
+
 ## Executed development tests
 
 ```sh

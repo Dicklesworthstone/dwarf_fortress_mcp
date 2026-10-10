@@ -1,0 +1,66 @@
+{
+  "schema": "dfmcp.room-readiness-monitor-contract/1",
+  "status": "implemented_unadmitted_python_development_only",
+  "beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "entrypoint": "scripts/track_room_readiness.py",
+  "result_schema": "dfmcp.room-readiness-monitor-result/1",
+  "condition_policy": "dfmcp.original-room-terrain-and-furnishings/1",
+  "operations": ["start", "sample", "inspect", "cancel"],
+  "original_batch": {
+    "requires": "complete_original_room_backed_batch_with_every_step_registered_and_placed",
+    "retains": ["full_room_plan", "full_furniture_plan", "allocation_evidence", "all_original_receipts", "original_file_bytes_and_inode_identities", "original_native_source_and_endpoint"],
+    "subset_or_replacement_selection_permitted": false,
+    "goal_policy_renewed_on_reopen": false,
+    "cancel_requires_original_batch": false
+  },
+  "sampling": {
+    "transport": "one_foreground_connection_with_six_query_only_bindings",
+    "sequence": ["query_all_original_receipts", "map_before", "complete_operations_capture_and_release", "map_after", "query_all_original_receipts"],
+    "map_endpoints_identical": true,
+    "map_and_operations_paused_at_same_tick": true,
+    "generation_namespaces": "separate_profile_identities",
+    "stability": "one_global_advancing_tick_streak_over_all_original_terrain_and_furnishings",
+    "interrupted_read_effective_streak": 0,
+    "replay_restores_publication_permission": false,
+    "automatic_reconnect_or_failed_acquisition_retry": false
+  },
+  "custody": {
+    "goal_magic": "DFMRDC01",
+    "goal_digest_domain": "dfmcp.original-room-readiness-goal/1",
+    "journal_magic": "DFMRDJ01",
+    "journal_checksum_domain": "dfmcp.room-readiness-journal/1",
+    "read_intent_synced_before_native_contact": true,
+    "complete_raw_sample_retained": true,
+    "complete_result_reserved_before_publication": true,
+    "original_custody_rechecked_before_and_after_publication": true,
+    "journal_outside_original_batch": true
+  },
+  "bounds": {
+    "furnishings": [1, 32],
+    "map_cells": 4096,
+    "origin_bytes": 2097152,
+    "goal_bytes": 2293968,
+    "sample_bytes": 17340670,
+    "journal_bytes": 134217728,
+    "journal_frames": 1030,
+    "observations": 512,
+    "rpc_calls_per_operation": 332,
+    "output_bytes": 262144,
+    "timeout_ms": [1, 60000]
+  },
+  "claims": {
+    "joint_readiness_requires_current_original_custody": true,
+    "historical_sampled_conditions_only": true,
+    "native_mutation_or_time_control": false,
+    "placement_effects_discharged": false,
+    "retry_placement_permitted": false,
+    "room_assignments_observed": false,
+    "current_usability_proven": false,
+    "continuous_wall_preservation_proven": false,
+    "atomic_cross_profile_snapshot_proven": false,
+    "canonical_world_anchor": false,
+    "rust_mcp_integration": false,
+    "live_game_qualification": false,
+    "production_admitted": false
+  }
+}

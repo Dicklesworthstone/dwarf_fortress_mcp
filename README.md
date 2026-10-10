@@ -187,6 +187,19 @@ dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>  # score idle | follow_r
 
 Laboratory results are semantics and calibration, never Dwarf Fortress evidence.
 
+### Durable whole-room readiness
+
+The development room workflow can monitor every original floor, required wall
+and placed furnishing in one shared stability window. Start from the original
+room-backed placement batch with `scripts/track_room_readiness.py`; `sample`
+continues the fixed goal across processes, `inspect` replays its evidence, and
+`cancel` stops monitoring while retaining the placement history. Full map and
+receipt-linked operations evidence is journaled before success is acknowledged.
+
+This uses the existing unadmitted query profiles and reports historical sampled
+readiness. Native room assignments and present usability remain unproven. See
+the [room readiness workflow](docs/ROOM_READINESS.md) for commands and limits.
+
 ## Exact admission, not “works on my machine”
 
 Source presence is not compatibility evidence. One exact tuple must pass:
