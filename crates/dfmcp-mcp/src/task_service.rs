@@ -88,6 +88,8 @@ fn compact_original_goal(work: &TaskWork, task_id: &str, payload: &Value) -> Val
         } else { Value::Null },
         "restore_abandoned_anchor": original_goal["restore_abandoned_anchor"],
         "abandonment_publication_pending": original_goal["abandonment_publication_pending"].as_bool().unwrap_or(false),
+        "continuation": original_goal["continuation"],
+        "continuation_request": original_goal["continuation_request"],
         "condition_digest": condition_digest,
         "completion_inferred_from_action_states": false,
         "details": format!("df://session/{}/task-{task_id}~evidence-0", work.session_id),

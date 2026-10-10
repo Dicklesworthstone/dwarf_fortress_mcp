@@ -96,6 +96,7 @@ impl Objective {
         result["plan_digest"] = json!(self.plan_digest.to_hex());
         result["summary"] = json!(source_summary(&self.source));
         result["original_source"] = source_json(&self.source);
+        result["continuation"] = self.source.continuation_json();
         result["owner_session_id"] = json!(self.owner_session_id.to_string());
         result["owned_by_current_session"] =
             json!(self.originating_process && self.owner_session_id == session.session_id);
@@ -140,6 +141,30 @@ impl Objective {
             json!(!abandoned && truth == PredicateTruth::False && quiet == Some(true));
         result["replacement_work_dispatched"] = json!(false);
         result["blind_retry_allowed"] = json!(false);
+        if !abandoned
+            && truth == PredicateTruth::False
+            && quiet == Some(true)
+            && matches!(
+                &self.source,
+                PlanSource::Production { .. } | PlanSource::ProductionContinuation { .. }
+            )
+        {
+            // An affordance carries no new authority. Reuse the exact intake
+            // gate so active/unknown sibling pursuits are not offered duplicate
+            // work; commit repeats the check even if this proposal was possible.
+            match continuation_source(session, self.plan_digest, None, None) {
+                Ok(_) => {
+                    result["continuation_request"] = goal_continuation::request_json(
+                        &session.session_id.to_string(),
+                        self.plan_digest,
+                    );
+                }
+                Err(error) => {
+                    result["continuation_refused"] =
+                        json!({"code": error.code.as_str(), "message": error.message});
+                }
+            }
+        }
         if abandoned {
             result["status"] = json!("abandoned");
         } else if self.verification_error.is_some() {
@@ -171,7 +196,8 @@ fn source_summary(source: &PlanSource) -> &str {
         PlanSource::Pause { summary, .. }
         | PlanSource::Actions { summary, .. }
         | PlanSource::Blueprint { summary, .. }
-        | PlanSource::Production { summary, .. } => summary,
+        | PlanSource::Production { summary, .. }
+        | PlanSource::ProductionContinuation { summary, .. } => summary,
     }
 }
 
@@ -182,15 +208,135 @@ fn source_json(source: &PlanSource) -> Value {
         }
         PlanSource::Actions { raw, .. }
         | PlanSource::Blueprint { raw, .. }
-        | PlanSource::Production { raw, .. } => json!({
+        | PlanSource::Production { raw, .. }
+        | PlanSource::ProductionContinuation { raw, .. } => json!({
             "kind": match source {
                 PlanSource::Actions { .. } => "actions",
                 PlanSource::Blueprint { .. } => "blueprint",
+                PlanSource::ProductionContinuation { .. } => "production_continuation",
                 _ => "production",
             },
             "request": serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone())),
         }),
     }
+}
+
+/// Reconstruct the complete intent for a new pursuit. This is a current
+/// authority/evidence gate only: archived objective verification calls the pure
+/// source compiler instead and never consults the current mutable goal book.
+pub(super) fn continuation_source(
+    session: &LabSession,
+    parent: Digest32,
+    summary: Option<String>,
+    exclude_candidate: Option<Digest32>,
+) -> Result<PlanSource> {
+    let context = context_for(session, session.next_request_id);
+    authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
+    authorize_entry(&context, Capability::Plan, RiskTier::ReadOnly)?;
+    if session.objectives.len() > MAX_OBJECTIVES_PER_FORTRESS
+        || session.objectives.len() > context.budget.max_entities as usize
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "continuation lineage inspection exceeds its bounded goal domain",
+        ));
+    }
+    let objective = session.objectives.iter().find(|goal| goal.plan_digest == parent)
+        .ok_or_else(|| DfmcpError::new(ErrorCode::PreconditionsFailed,
+            "the original production goal is not retained; no replacement request can be inferred from action receipts"))?;
+    if objective.abandoned(session) {
+        return Err(DfmcpError::new(
+            ErrorCode::PreconditionsFailed,
+            "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
+        ));
+    }
+    if let Some(reason) = &objective.verification_error {
+        return Err(DfmcpError::new(ErrorCode::CorruptLedger, reason.clone()));
+    }
+    let original = objective.plan.as_ref().ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "the original sealed goal is unavailable",
+        )
+    })?;
+    let continuation = match &objective.source {
+        PlanSource::Production { raw, .. } => goal_continuation::ProductionContinuation::new(
+            parent,
+            parent,
+            crate::lab_world::ProductionRequest::parse(raw)?,
+        )?,
+        PlanSource::ProductionContinuation { raw, .. } => {
+            goal_continuation::ProductionContinuation::parse(raw)?.next(parent)?
+        }
+        _ => {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "continue_goal supports retained production objectives; legacy action, pause and room sources contain no inferred production quotas",
+            ));
+        }
+    };
+    let quiet = goal_work_quiescent(session, objective)?;
+    goal_continuation::validate_goal_evidence(
+        original,
+        session.adapter.snapshot(),
+        &context,
+        quiet,
+    )?;
+    for other in &session.objectives {
+        if other.plan_digest == parent || Some(other.plan_digest) == exclude_candidate {
+            continue;
+        }
+        let root = match &other.source {
+            PlanSource::Production { .. } => Some(other.plan_digest),
+            PlanSource::ProductionContinuation { raw, .. } => {
+                Some(goal_continuation::ProductionContinuation::parse(raw)?.root)
+            }
+            _ => None,
+        };
+        if root == Some(continuation.root) && !goal_work_quiescent(session, other)? {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!(
+                    "original goal lineage still has unresolved work in plan {}; observe or explicitly drain that pursuit before continuing",
+                    other.plan_digest.to_hex()
+                ),
+            ));
+        }
+    }
+    Ok(PlanSource::ProductionContinuation {
+        summary: summary.map_or_else(
+            || source_summary(&objective.source).to_owned(),
+            |summary| summary,
+        ),
+        raw: continuation.canonical_json(),
+    })
+}
+
+/// A proposal can become unsafe without changing its own original action IDs.
+/// Check the parent and every retained same-root pursuit again before commit.
+/// The identical candidate may already have been durably admitted by a failed
+/// commit; excluding only its exact digest preserves ordinary idempotent retry.
+pub(super) fn validate_continuation(
+    session: &LabSession,
+    source: &PlanSource,
+    exclude_candidate: Option<Digest32>,
+) -> Result<()> {
+    let Some(continuation) = source.continuation()? else {
+        return Ok(());
+    };
+    let current = continuation_source(
+        session,
+        continuation.parent,
+        Some(source_summary(source).to_owned()),
+        exclude_candidate,
+    )?;
+    if current.continuation()?.as_ref() != Some(&continuation) {
+        return Err(DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "continuation source no longer matches its retained original request and lineage",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn original_goal_observation(

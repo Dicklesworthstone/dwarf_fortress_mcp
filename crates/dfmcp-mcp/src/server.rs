@@ -53,6 +53,13 @@ mod restore_work;
 mod objectives;
 use objectives::{Objective, objective_history_roots};
 
+#[path = "goal_continuation.rs"]
+mod goal_continuation;
+
+#[cfg(test)]
+#[path = "goal_continuation_mcp_tests.rs"]
+mod goal_continuation_mcp_tests;
+
 #[cfg(test)]
 #[path = "physical_work_mcp_tests.rs"]
 mod physical_work_mcp_tests;
@@ -1413,6 +1420,12 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// A new explicit pursuit of the complete retained production request.
+    /// Flat lineage and source bytes participate in the newly reviewed seal.
+    ProductionContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl PlanSource {
@@ -1438,6 +1451,10 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::ProductionContinuation { summary, raw } => D::ProductionContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1460,11 +1477,32 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            D::ProductionContinuation { summary, raw } => Self::ProductionContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
     fn intent(&self, id: IntentId, snapshot: &WorldSnapshot) -> Result<Intent> {
         self.compile(id, snapshot).map(|(intent, _)| intent)
+    }
+
+    fn continuation(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
+        match self {
+            Self::ProductionContinuation { raw, .. } => {
+                goal_continuation::ProductionContinuation::parse(raw).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn continuation_json(&self) -> serde_json::Value {
+        match self.continuation() {
+            Ok(Some(source)) => source.lineage_json(),
+            Ok(None) => serde_json::Value::Null,
+            Err(error) => json!({"status": "indeterminate", "reason": error.message}),
+        }
     }
 
     /// Compile the original request and its optional production analysis from
@@ -1488,6 +1526,11 @@ impl PlanSource {
                 // work orders retain their own exact completion postconditions.
                 intent.terminal_condition = compiled.terminal;
                 Ok((intent, Some(compiled.analysis)))
+            }
+            Self::ProductionContinuation { summary, raw } => {
+                goal_continuation::ProductionContinuation::parse(raw)?
+                    .compile(id, snapshot, summary)
+                    .map(|(intent, analysis)| (intent, Some(analysis)))
             }
             Self::Blueprint { summary, raw } => {
                 let (origin, template) = crate::lab_world::parse_blueprint(raw)?;
@@ -2671,6 +2714,22 @@ pub(crate) fn plan_request(
     production: Option<String>,
 ) -> String {
     // A production objective arrives as a blueprint template.
+    let continuation = match blueprint
+        .as_deref()
+        .filter(|raw| goal_continuation::is_request(raw))
+        .map(goal_continuation::parse_request)
+        .transpose()
+    {
+        Ok(request) => request,
+        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+    };
+    if continuation.is_some() && paused_target.is_some() {
+        return coded_error_payload(
+            "fortress.plan",
+            ErrorCode::InvalidRequest,
+            "continue_goal cannot be combined with a pause target",
+        );
+    }
     if production.is_some()
         && blueprint
             .as_deref()
@@ -2707,6 +2766,7 @@ pub(crate) fn plan_request(
     } else {
         "unpause the simulation".to_owned()
     };
+    let summary_supplied = summary.is_some();
     let summary = summary.map_or(default_summary, |value| value);
     if summary.len() > MAX_SUMMARY_BYTES {
         return coded_error_payload(
@@ -2730,25 +2790,37 @@ pub(crate) fn plan_request(
             if let Err(error) = authorize_entry(&ctx, Capability::Plan, RiskTier::ReadOnly) {
                 return dfmcp_error_payload("fortress.plan", &error);
             }
-            let snapshot = guard.adapter.snapshot();
-            let source = match (production, actions, blueprint) {
-                (Some(raw), _, _) => {
-                    let request = match crate::lab_world::ProductionRequest::parse(&raw) {
-                        Ok(request) => request,
-                        Err(error) => return dfmcp_error_payload("fortress.plan", &error),
-                    };
-                    PlanSource::Production {
-                        summary,
-                        raw: request.canonical_json(),
-                    }
+            let source = if let Some(parent) = continuation {
+                match objectives::continuation_source(
+                    guard,
+                    parent,
+                    summary_supplied.then_some(summary),
+                    None,
+                ) {
+                    Ok(source) => source,
+                    Err(error) => return dfmcp_error_payload("fortress.plan", &error),
                 }
-                (_, _, Some(raw)) => PlanSource::Blueprint { summary, raw },
-                (_, Some(raw), None) => PlanSource::Actions { summary, raw },
-                (None, None, None) => PlanSource::Pause {
-                    summary,
-                    paused_target: paused_target.is_some_and(|value| value),
-                },
+            } else {
+                match (production, actions, blueprint) {
+                    (Some(raw), _, _) => {
+                        let request = match crate::lab_world::ProductionRequest::parse(&raw) {
+                            Ok(request) => request,
+                            Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                        };
+                        PlanSource::Production {
+                            summary,
+                            raw: request.canonical_json(),
+                        }
+                    }
+                    (_, _, Some(raw)) => PlanSource::Blueprint { summary, raw },
+                    (_, Some(raw), None) => PlanSource::Actions { summary, raw },
+                    (None, None, None) => PlanSource::Pause {
+                        summary,
+                        paused_target: paused_target.is_some_and(|value| value),
+                    },
+                }
             };
+            let snapshot = guard.adapter.snapshot();
             let (intent, production_analysis) = match source.compile(IntentId::new(rid), snapshot) {
                 Ok(compiled) => compiled,
                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
@@ -2772,6 +2844,7 @@ pub(crate) fn plan_request(
                         "forecast": forecast_plan(&guard.adapter, &plan, &ctx),
                         "live_routing": live_routing_json(&plan),
                         "production": production_analysis,
+                        "continuation": source.continuation_json(),
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
                     guard.pending = Some(PendingPlan {
@@ -2846,6 +2919,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
     let pending = session.pending.as_ref().map(|pending| {
         json!({
             "plan_digest": pending.digest,
+            "continuation": pending.source.continuation_json(),
             "expires_at_tick": pending.plan.expires_at_tick.0,
             "anchor_sequence": pending.plan.anchor.cursor.sequence,
             "required_capabilities": plan_authority(&pending.plan)
@@ -3287,7 +3361,10 @@ fn rebase_by_witness(
     // action/predicate witness does not cover those range and negative reads.
     // A changed anchor therefore requires a newly reviewed source replay;
     // equal action bytes alone cannot certify unchanged sealed deadlines.
-    if matches!(&stale.source, PlanSource::Production { .. }) {
+    if matches!(
+        &stale.source,
+        PlanSource::Production { .. } | PlanSource::ProductionContinuation { .. }
+    ) {
         return Err(json!({
             "accepted": false,
             "reason": "production planning requires current workload and prerequisite evidence; review a newly sealed intent replay",
@@ -3326,6 +3403,10 @@ fn rebase_by_witness(
 }
 
 fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
+    if let Err(error) = objectives::validate_continuation(session, &stale.source, None) {
+        session.pending = Some(stale);
+        return dfmcp_error_payload("fortress.commit", &error);
+    }
     let rid = match next_request_id(session) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.commit", &error),
@@ -3362,6 +3443,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
                 "required_capabilities": plan.required_capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
                 "steps": crate::lab_world::plan_steps_json(&plan),
                 "production": production_analysis,
+                "continuation": stale.source.continuation_json(),
             });
             payload["rebase"] = json!({
                 "method": "intent_replay",
@@ -3694,6 +3776,17 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     ErrorCode::Conflict,
                     "plan digest does not match the pending prepared plan; plans are sealed over their digest",
                 );
+            }
+            // New pursuit is reviewed separately from old goal history. Repeat
+            // current truth/authority and complete-lineage quiescence checks
+            // before any lease, durable admission or adapter reservation.
+            let retry_candidate = (pending.plan.anchor == guard.adapter.snapshot().anchor())
+                .then_some(pending.plan.digest);
+            if let Err(error) =
+                objectives::validate_continuation(guard, &pending.source, retry_candidate)
+            {
+                guard.pending = Some(pending);
+                return dfmcp_error_payload("fortress.commit", &error);
             }
             if !guard.commit_receipts.contains_key(&plan_digest)
                 && guard.commit_receipts.len() >= MAX_LAB_COMMIT_RECEIPTS

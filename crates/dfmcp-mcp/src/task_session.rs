@@ -389,14 +389,16 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
             "agent_turn": packet,
             "scope": "laboratory_process_only",
             "next_step": if goal_unconfirmed_after_work {
-                json!({
+                if needs_replan && let Some(next) = goal.get("continuation_request").filter(|next| next.is_object()) {
+                    next.clone()
+                } else { json!({
                     "tool": "fortress.observe", "arguments": {"session_id": session.session_id.to_string()},
                     "note": if needs_replan {
                         "the original work finished but the original goal is unmet; inspect current evidence and explicitly review a new plan; no replacement work was dispatched"
                     } else {
                         "the original work finished but its original goal cannot be established; reconcile the missing goal evidence before deciding on any new work"
                     },
-                })
+                }) }
             } else if status == McpTaskStatus::Working
                 && (proof_status == McpTaskStatus::Failed || progress.unknown_work > 0) {
                 json!({

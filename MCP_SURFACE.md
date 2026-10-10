@@ -204,6 +204,15 @@ capabilities, checkpoint policy, predicted diff, cost, invalidators, alternative
 explanation. The executable laboratory supports every non-extension semantic
 action family and furnished blueprint objectives; see `docs/LAB_SEMANTIC_ACTIONS.md`.
 
+The laboratory `blueprint` JSON string also accepts the closed
+`{"template":"continue_goal","plan_digest":"<retained production goal>"}` form.
+It compiles a new reviewed plan from the complete original quotas and setup
+options under current Observe/Plan authority. Original and same-root work must
+be proven quiet, and commit repeats the check before effects. Parent/root
+lineage survives durable recovery; no old grants, actions or proof are reused
+as authority. See `docs/PRODUCTION_GOAL_CONTINUATION.md` for the exact bounds,
+refusals, source-seal binding and explicit commit workflow.
+
 ### `fortress.commit`
 
 Requires exact plan ID/digest, expected anchor, and confirmation seal when policy requires.

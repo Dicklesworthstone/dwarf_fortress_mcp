@@ -44,6 +44,45 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Explicit continuation of retained production goals (2026-10-10)
+
+The existing laboratory `fortress.plan` blueprint argument now accepts the
+closed `continue_goal` template naming a retained committed production digest.
+It retrieves every original quota and setup permission/site, checks current
+Observe/Plan authority and original False truth, proves original and same-root
+physical/deferred work quiet, then compiles a new plan for explicit review.
+Unknown evidence, active work, abandoned restore epochs and legacy action
+sources cannot authorize an inferred replacement request.
+
+Commit repeats the complete-lineage gate before leases, durable admission or
+adapter reservations. A reviewed proposal cannot duplicate another session's
+newly committed pursuit. Only an unchanged exact seal may exclude its identical
+previously admitted candidate for idempotent retry; stale replay creates a new
+seal and therefore excludes no unresolved old candidate. Both production source
+kinds require reviewed replay after anchor changes.
+
+The new durable `production_continuation` kind stores a flat versioned envelope
+with immediate parent, original root and complete production request. Its source
+digest, including unused setup permissions, participates in the actual plan
+seal. Recovery reproduces the exact archived plan without consulting today's
+mutable goal book or restoring dispatch authority. Original first achievement,
+action receipts and source remain immutable. Goal, handoff and compact Task
+projections preserve lineage and expose an eligible explicit planning request.
+Existing source, planner, capability, workload and 64-goal bounds remain active.
+
+**Evidence:** all 65 actual-source production/projection/continuation tests pass,
+including ten new continuation regressions using the real planner and adapter.
+All 96 laboratory tests pass, including all 27 durable-store tests and the new
+continuation retirement, compaction and reopen case. Focused warning-denied
+Clippy passes for all laboratory targets, the adapter library, and the actual
+production/continuation source modules. Inventoried source inputs remained
+unchanged through these final tests and lint checks. Ten MCP integration tests cover shared sessions,
+unknown siblings, authority expiry, repeated restarts, restore abandonment and
+the exact-seal retry boundary. They are source-reviewed and formatted but have
+not executed: full MCP compilation is killed in unchanged Asupersync before
+reaching MCP. No full-workspace or native/live qualification is claimed.
+See `docs/PRODUCTION_GOAL_CONTINUATION.md` for the usable request and limits.
+
 ### Durable native original-goal monitoring (2026-10-10)
 
 The semantic workforce adapter now provides a separate operator-opened

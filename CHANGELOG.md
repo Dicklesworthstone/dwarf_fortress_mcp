@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-10 — Continue retained production goals through a new reviewed plan
+
+- Add the closed continue_goal blueprint form to existing fortress.plan. Retrieve
+  all original quotas and setup permissions/sites, require current authority and
+  False goal truth, and prove the original and same-root work quiet before
+  proposing fresh deficits. Unknown, active, abandoned and legacy sources refuse.
+- Recheck lineage at commit before reservations/effects. Preserve exact-seal
+  idempotent retries while forbidding their candidate exemption from carrying
+  into a new seal after the world anchor changes.
+- Persist a flat production_continuation source with parent/root identity and
+  the complete original request. Bind even unused setup fields into the plan
+  seal, reconstruct historical plans purely, and preserve original achievements,
+  receipts and action identities. Expose lineage and explicit next-plan requests
+  in goal, handoff and Task evidence without dispatching replacement work.
+- Pass 65 actual-source module tests, including ten new continuation cases;
+  pass all 96 laboratory tests, including all 27 durable-store cases and the new
+  continuation retirement/compaction regression. Pass focused warning-denied
+  Clippy for the laboratory, adapter library and actual source modules on
+  unchanged inventoried inputs.
+  Add ten MCP integration regressions and pass focused source review/formatting.
+  Full MCP execution remains blocked in unchanged Asupersync under the shared
+  memory limit. No native/live admission or full-workspace qualification added.
+
 ## 2026-10-10 — Recover native original-goal history across restart
 
 - Add an operator-opened private goal-history store and durable foreground

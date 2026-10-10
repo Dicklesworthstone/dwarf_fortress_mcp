@@ -133,6 +133,12 @@ pub enum DurablePlanSource {
         summary: String,
         raw: String,
     },
+    /// A separately reviewed pursuit retaining the original production request
+    /// and flat parent/root lineage. Reopening never grants dispatch authority.
+    ProductionContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl DurablePlanSource {
@@ -144,6 +150,9 @@ impl DurablePlanSource {
             Self::Actions { summary, raw } => ("actions", summary, raw),
             Self::Blueprint { summary, raw } => ("blueprint", summary, raw),
             Self::Production { summary, raw } => ("production", summary, raw),
+            Self::ProductionContinuation { summary, raw } => {
+                ("production_continuation", summary, raw)
+            }
         }
     }
 
@@ -416,6 +425,10 @@ fn parse_plan(
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
         "production" => DurablePlanSource::Production {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "production_continuation" => DurablePlanSource::ProductionContinuation {
             summary,
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
@@ -2527,6 +2540,14 @@ mod tests {
                 summary: "legacy blueprint record".to_owned(),
                 raw: original.to_owned(),
             },
+            DurablePlanSource::ProductionContinuation {
+                summary: "continue original quotas".to_owned(),
+                raw: format!(
+                    "{{\"schema\":\"dfmcp.production-continuation/1\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"production\":{original}}}",
+                    Digest32::of_bytes(b"parent").to_hex(),
+                    Digest32::of_bytes(b"root").to_hex()
+                ),
+            },
         ];
         {
             let mut store = DurableLabStore::open(&dir.0)?;
@@ -2592,6 +2613,43 @@ mod tests {
         ] {
             assert!(Record::parse(&bad).is_err_and(|error| error.code == ErrorCode::CorruptLedger));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn continuation_source_keeps_lineage_after_objective_retirement_and_compaction() -> Result<()> {
+        let dir = TempDir::new("continuation-objective");
+        let sealed = snapshot(53, 1);
+        let plan = Digest32::of_bytes(b"continuation plan");
+        let source = DurablePlanSource::ProductionContinuation {
+            summary: "new pursuit".to_owned(),
+            raw: format!(
+                "{{\"schema\":\"dfmcp.production-continuation/1\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"production\":{{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK\",\"minimum\":60}}]}}}}",
+                Digest32::of_bytes(b"parent").to_hex(),
+                Digest32::of_bytes(b"root").to_hex()
+            ),
+        };
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            store.persist_objective_commit(
+                &sealed,
+                plan,
+                7,
+                source.clone(),
+                SessionId::new(8),
+                &[],
+            )?;
+            store.retire_commit(sealed.fortress_id, plan)?;
+            store.compact()?;
+        }
+        let store = DurableLabStore::open(&dir.0)?;
+        let objective = store
+            .objectives(sealed.fortress_id)
+            .find(|objective| objective.plan_digest == plan)
+            .ok_or_else(|| corrupt("continuation objective was retired with its actions"))?;
+        assert_eq!(objective.source, source);
+        assert!(store.commit(sealed.fortress_id, plan).is_none());
+        assert_eq!(store.load_snapshot(objective.sealed_state_hash)?, sealed);
         Ok(())
     }
 
