@@ -1483,6 +1483,7 @@ impl PlanSource {
                 let request = crate::lab_world::ProductionRequest::parse(raw)?;
                 let compiled = request.compile(snapshot)?;
                 let mut intent = semantic_intent(id, snapshot, summary.clone(), &compiled.actions)?;
+                compiled.apply_capacity_horizon(&mut intent)?;
                 // The original minimum stocks are the goal. The individual
                 // work orders retain their own exact completion postconditions.
                 intent.terminal_condition = compiled.terminal;
@@ -3281,6 +3282,17 @@ fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
+    // Quota lowering reads the complete production domain, including absence
+    // of competing orders, current service and setup candidates. The current
+    // action/predicate witness does not cover those range and negative reads.
+    // A changed anchor therefore requires a newly reviewed source replay;
+    // equal action bytes alone cannot certify unchanged sealed deadlines.
+    if matches!(&stale.source, PlanSource::Production { .. }) {
+        return Err(json!({
+            "accepted": false,
+            "reason": "production planning requires current workload and prerequisite evidence; review a newly sealed intent replay",
+        }));
+    }
     let base = session
         .history
         .get(&stale.plan.anchor.state_hash)

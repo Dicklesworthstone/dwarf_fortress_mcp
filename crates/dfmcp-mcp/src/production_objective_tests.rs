@@ -94,6 +94,24 @@ fn stock(session: &str, field: &str) -> TestResult<u64> {
 }
 
 #[test]
+fn changed_anchor_requires_reviewed_production_replay_even_when_stock_is_unchanged() -> TestResult {
+    let session = open("743021")?;
+    let planned = plan(&session, json!([{"item":"DRINK","minimum":45}]))?;
+    wait(&session, 1)?;
+    let replayed = commit(&session, &planned)?;
+    assert_eq!(replayed["ok"], false, "{replayed}");
+    assert_eq!(replayed["rebase"]["method"], "intent_replay", "{replayed}");
+    assert_ne!(
+        replayed["rebased_plan"]["plan_digest"], planned["plan_digest"],
+        "the new workload horizon must have its own reviewed seal",
+    );
+    assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 40);
+    let committed = commit(&session, &replayed["rebased_plan"])?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    Ok(())
+}
+
+#[test]
 fn finished_production_work_does_not_prove_stock_consumed_during_the_plan() -> TestResult {
     let session = open("743001")?;
     wait(&session, 1099)?; // Source tick 1100; metabolism starts at tick 1.

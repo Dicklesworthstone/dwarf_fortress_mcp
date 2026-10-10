@@ -26,6 +26,14 @@ use dfmcp_world::{
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
+#[path = "production_workload.rs"]
+mod production_workload;
+use production_workload::ProductionWorkload;
+
+#[cfg(test)]
+#[path = "production_workload_tests.rs"]
+mod production_workload_tests;
+
 /// Largest semantic action request accepted by `fortress.plan`.
 pub(crate) const MAX_ACTIONS_JSON_BYTES: usize = 16 * 1024;
 /// Most steps one laboratory plan may request.
@@ -1085,6 +1093,10 @@ impl ProductionRequest {
             .iter()
             .map(|step| (step.output_token.as_str(), step.job_token.as_str()))
             .collect();
+        // Existing physical work belongs to the shared fortress, including
+        // work whose original process/action handles no longer exist. Its
+        // observed remaining service cannot disappear from a new deadline.
+        let workload = ProductionWorkload::capture(snapshot, &jobs)?;
         let setup = match &self.prerequisites {
             Some(options) => compile_production_prerequisites(snapshot, &jobs, options)?,
             None => {
@@ -1128,9 +1140,11 @@ impl ProductionRequest {
             for dependency in &step.depends_on {
                 let dependency = u32::try_from(*dependency)
                     .map_err(|_| invalid("production dependency step index overflow"))?;
-                dependencies.insert(dependency.checked_add(offset).ok_or_else(|| {
-                    invalid("production dependency step index overflow")
-                })?);
+                dependencies.insert(
+                    dependency
+                        .checked_add(offset)
+                        .ok_or_else(|| invalid("production dependency step index overflow"))?,
+                );
             }
             order_indices.insert(
                 step.job_token.clone(),
@@ -1155,6 +1169,9 @@ impl ProductionRequest {
         let actions = Json::Array(steps).to_string();
         // The expanded program obeys the ordinary action parser's byte/step bounds.
         let parsed = parse_steps(&actions)?;
+        if let Some(capacity) = workload.analysis() {
+            analysis["capacity"] = capacity;
+        }
         if self.prerequisites.is_some() {
             analysis["prerequisites"] = json!({
                 "steps_added": setup_count,
@@ -1164,7 +1181,8 @@ impl ProductionRequest {
                 "scope": "reference laboratory only; generated setup requires its own action capabilities; jobs sharing one selected worker are serialized through completion dependencies",
             });
             analysis["required_action_capabilities"] = json!(
-                parsed.iter()
+                parsed
+                    .iter()
                     .map(|step| step.action.capability().as_str())
                     .collect::<BTreeSet<_>>()
             );
@@ -1173,10 +1191,10 @@ impl ProductionRequest {
             actions,
             analysis,
             terminal: Predicate::All(terminal).normalized(),
+            workload,
         })
     }
 }
-
 
 #[derive(Default)]
 struct ProductionSetup {
@@ -1187,11 +1205,7 @@ struct ProductionSetup {
     staffing: Vec<Json>,
 }
 
-fn production_fact<'a>(
-    entity: &'a EntityRecord,
-    field: &str,
-    tick: GameTick,
-) -> Option<&'a Value> {
+fn production_fact<'a>(entity: &'a EntityRecord, field: &str, tick: GameTick) -> Option<&'a Value> {
     entity
         .fields
         .get(field)
@@ -1238,17 +1252,18 @@ fn production_site_is_eligible(
                 "production workshop requires established open floor at {at:?}"
             )));
         }
-        let below_z = at.z.checked_sub(1)
-            .ok_or_else(|| invalid("production site cannot represent its support level"))?;
+        let below_z =
+            at.z.checked_sub(1)
+                .ok_or_else(|| invalid("production site cannot represent its support level"))?;
         let below = MapCoord::new(at.x, at.y, below_z);
         if !matches!(
             snapshot.tile_code_at(below),
             Some(
                 tile_codes::SOLID_WALL
-                | tile_codes::FLOOR
-                | tile_codes::STAIR
-                | tile_codes::RAMP
-                | tile_codes::FORTIFICATION
+                    | tile_codes::FLOOR
+                    | tile_codes::STAIR
+                    | tile_codes::RAMP
+                    | tile_codes::FORTIFICATION
             )
         ) {
             return Err(production_setup_refusal(format!(
@@ -1325,7 +1340,9 @@ fn select_production_workers<'a>(
     assign_labor: bool,
 ) -> Result<Vec<&'a EntityRecord>> {
     if fields.is_empty() || fields.len() > MAX_PRODUCTION_WORKSHOP_SITES {
-        return Err(invalid("production staffing requires one or two closed jobs"));
+        return Err(invalid(
+            "production staffing requires one or two closed jobs",
+        ));
     }
     let change_cost = |unit: &EntityRecord, field: &str| {
         u8::from(production_fact(unit, field, tick) != Some(&Value::Bool(true)))
@@ -1428,9 +1445,7 @@ fn compile_production_prerequisites(
     let workers = select_production_workers(snapshot.tick, &living, &fields, options.assign_labor)?;
     let mut worker_jobs = BTreeMap::<EntityId, String>::new();
     let mut setup = ProductionSetup::default();
-    for ((output, job, workshop, field, labor), worker) in
-        requirements.iter().zip(workers)
-    {
+    for ((output, job, workshop, field, labor), worker) in requirements.iter().zip(workers) {
         let mut dependencies = BTreeSet::new();
         let already_enabled =
             production_fact(worker, field, snapshot.tick) == Some(&Value::Bool(true));
@@ -1463,7 +1478,9 @@ fn compile_production_prerequisites(
             // Completion proof for the earlier order releases this worker.
             // The ordinary planner also offsets the later obligation by the
             // predecessor's horizon, so queue time cannot consume its own.
-            setup.serial_after.insert((*job).to_owned(), previous_job.clone());
+            setup
+                .serial_after
+                .insert((*job).to_owned(), previous_job.clone());
         }
         setup.staffing.push(json!({
             "job_token": job,
@@ -1539,6 +1556,17 @@ pub(crate) struct ProductionCompilation {
     pub(crate) actions: String,
     pub(crate) analysis: Json,
     pub(crate) terminal: Predicate,
+    workload: ProductionWorkload,
+}
+
+impl ProductionCompilation {
+    /// Bind the queued-service allowance to actual sealed step identities.
+    /// Call before preparing the intent; changing a deadline changes its seal.
+    /// This only describes a reference-model allowance, never future proof or
+    /// permission to dispatch existing or new work.
+    pub(crate) fn apply_capacity_horizon(&self, intent: &mut dfmcp_intent::Intent) -> Result<()> {
+        self.workload.apply_horizon(&self.actions, intent)
+    }
 }
 
 /// Observed economy alerts: stocks that will run out soon, are exhausted, or

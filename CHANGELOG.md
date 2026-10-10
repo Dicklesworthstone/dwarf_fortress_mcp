@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-10 — Plan production against the existing work queue
+
+- Read current registered physical orders before compiling new quotas, including
+  work whose original process handles are gone. Refuse overlapping same-output
+  producers with exact observed work details; never count future output as stock.
+- Bind conservative queued service, partial progress and setup dependencies into
+  actual step obligations, within the existing one-year horizon. Preserve source
+  and action bytes for uncontended plans, bound scans/output, and reject missing
+  workload evidence or overflow before publishing any changed intent.
+- Require reviewed source replay for stale production plans. The current witness
+  omits production-domain absence/progress/setup reads, so matching action bytes
+  cannot authorize changed deadlines automatically.
+- Pass 55 actual-source production/projection tests, including twelve queue
+  regressions and the fifteen prerequisite cases. The real planner/adapter cases
+  demonstrate old-deadline failure and new-deadline success behind existing work.
+  Add an MCP reviewed-replay regression; its execution remains blocked by the full MCP dependency build.
+- Execute the previous exact `57c0cd6` feature generation on pinned nightly:
+  32 native integration, 21 timeline, 95 laboratory and 43 actual-source production
+  tests passed. Earlier outage-era unexecuted notes are superseded for those
+  tested targets only; no full-workspace or native/live admission is claimed.
+
 ## 2026-10-10 — Compile missing production staffing and workshops
 
 - Add explicit prerequisite options to original DRINK/FOOD production sources:

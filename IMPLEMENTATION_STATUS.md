@@ -44,6 +44,46 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Production plans account for existing physical work (2026-10-10)
+
+Original DRINK/FOOD quota compilation now inspects current registered brewing
+and cooking orders, including work recovered without process-local handles.
+An active producer of the same requested output causes explicit refusal with
+its source anchor, identity, status and earned work. Predicted output is never
+credited as current stock or used to justify a duplicate conditional order.
+
+Other registered production contributes a conservative queued-service allowance
+to newly sealed obligation deadlines. The allowance includes remaining batches
+and earned partial work, respects setup/dependency horizons, and is bounded with
+the whole plan to one model year. Complete-source scans are capped at 65,536
+entities and 128 active registered orders; explanations show at most 16 rows.
+Unknown lifecycle/progress evidence refuses planning. The allowance describes
+reference-model scheduling under stated assumptions, not guaranteed completion.
+
+Current order absence, progress and setup candidates are range reads absent
+from the existing action/predicate witness. Production plans therefore require
+explicit source replay and review after any anchor change; equal action bytes
+cannot silently approve changed deadlines. Uncontended requests preserve their
+existing source and action shapes, and replay recomputes current workload.
+
+**Evidence:** the actual-source production/projection harness passed 55 tests,
+including twelve new queue cases and all fifteen prerequisite cases. Regressions
+execute the real planner, MemoryAdapter and finite-capacity timeline: a small
+order fails under its former isolated deadline and succeeds after allowing for
+twenty earlier batches in both production directions. A further MCP regression
+covers mandatory reviewed replay; full MCP compilation was killed in unchanged Asupersync before reaching MCP.
+No native/live admission or whole-workspace qualification is claimed.
+
+### Executed Rust evidence for the preceding feature generation (2026-10-10)
+
+With the execution service restored, the exact unchanged `57c0cd6` source passed
+32 semantic-workforce integration tests, all 21 effects-timeline tests (including
+512 exhaustive finite-capacity configurations), all 95 laboratory tests, and
+43 actual-source production/projection tests on the pinned 2026-08-31 nightly.
+These results execute the previously unverified capacity, prerequisite and fresh
+goal-monitor code; their earlier outage-era notes remain historical. They do not
+establish formatting, warning-denied Clippy, full MCP or live qualification.
+
 ### Production goals compile missing staffing and workshops (2026-10-10)
 
 Original laboratory production sources now accept opt-in `prerequisites`:
