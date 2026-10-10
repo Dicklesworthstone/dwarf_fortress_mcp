@@ -27,7 +27,12 @@ use crate::workforce_control::{
 use crate::workforce_session::{WorkforceSession, view_cost};
 
 pub mod evidence_owner;
+pub mod goal_history;
 pub mod goal_monitor;
+pub use goal_history::{
+    DurableWorkforceGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
+    open_private_goal_history_store,
+};
 pub mod projection;
 pub mod store;
 pub use goal_monitor::{WorkforceGoalMonitor, WorkforceGoalProgress, WorkforceGoalResult};

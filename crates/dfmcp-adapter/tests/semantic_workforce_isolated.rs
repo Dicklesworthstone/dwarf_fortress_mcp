@@ -16,4 +16,8 @@ mod semantic_workforce_acquisition {
     mod goal_monitor {
         include!("../src/semantic_workforce/tests/goal_monitor.rs");
     }
+
+    mod goal_history {
+        include!("../src/semantic_workforce/tests/goal_history.rs");
+    }
 }

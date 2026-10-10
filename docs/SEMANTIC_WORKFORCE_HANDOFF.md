@@ -218,6 +218,49 @@ cannot run this path; an explicit 128 MiB fixture regression is present. There
 is no background polling, automatic clock advancement, new wire generation,
 generic MCP route, compatibility issuer or live admission.
 
+## Durable original-goal history
+
+For restartable monitoring, the operator opens a separate
+`open_private_goal_history_store(path, native_journal, review, initialize,
+read_only, context)`. The private path is operator configuration and is never
+accepted through MCP JSON. A store belongs to one exact original review and
+native journal, under the existing descriptor-pinned, exclusively locked
+0700-parent/0600-file implementation. Initialization and reopening are distinct.
+
+Pass the opened store to `begin_durable_goal_monitor(history, seal,
+original_identity, context, authorize_history)`. It returns an exclusively owned
+`DurableWorkforceGoalMonitor`; the monitor and store cannot be cloned or detached
+to bypass history. `poll_original_goal_durable` takes the same fresh-source and
+independent-policy inputs as the process-local poll. No assignment is replayed.
+
+Before contact, the read intent and next canonical cursor are synced. The
+complete raw selected-workforce capture and source clock floors are synced
+before source policy can authorize publication. An accepted publication marker
+is synced and verified before the pending monitor becomes visible. Denied reads,
+explicit interruptions and uncertain writes cannot bridge a stability streak.
+The open handle fences after ambiguous storage publication and must be reopened.
+
+Recovery reprojects every retained published raw capture and replays all original
+predicates through the actual obligation runtime. Historical policy must be
+independently reissued twice under the current retained authority floor; the
+stored compact fingerprint is used only for exact comparison. Neither stored
+bytes nor a newly broader policy can manufacture retrospective proof. Missing,
+changed or denied historical authority refuses verified recovery.
+
+Verified first achievement and terminal obligation history survive this replay.
+`latest()` is always empty after restart: proving the current goal requires a
+new observation. Unfinished stability resets, while the original absolute
+deadline, cadence and canonical/native/tick floors remain. Fresh true predicates
+still cannot resolve an Unknown native action outcome. Query/Observe-only
+recovery gains no control authority.
+
+Retention is bounded to 8 MiB and 1,024 events, with no silent pruning or tail
+repair. Each poll reserves byte work and space for all four possible events
+before appending or contacting the source, including the caller's event budget.
+A small budget refuses with unchanged history and no native call. Replaying a
+large retained history may require a larger explicit operation budget; exhaustion
+returns no partially reconstructed proof.
+
 ## Restart and bounded recovery
 
 After reopening, `inventory` exposes historical native records without granting
@@ -281,13 +324,14 @@ synchronization, complete repagination, independent authority, invalidation,
 deadline and byte bounds, source closure and the V1 wire codec. It substitutes
 no private production implementation or filesystem helper.
 
-Seventeen additional original-goal integration tests are now present in the same
-target (32 tests total). They cover fresh-versus-receipt truth, complete original
-goal conjunction, temporal interruptions and exact deadlines, canonical/native
-identity, independent source policy, current authority, source closure, read-only
-recovery and byte bounds. Current Rust compilation, tests and rustfmt could not
-run because the execution service disconnected even for read-only commands.
-The earlier passing acquisition generation does not qualify these changed bytes.
+The current public-API target passes all 43 integration tests on pinned nightly:
+15 acquisition cases, 17 fresh-goal cases and 11 durable-history cases. The new
+cases execute historical reauthorization, first-achievement replay, interrupted
+stability, immutable deadline/cadence, clock/cursor floors, denied/widened policy,
+crash-before-publication, Unknown native actions, bounded pre-contact refusal,
+and real private-file lock/reopen/symlink/mode checks. Two source reviews found
+and resolved the event-budget admission gap. All 379 inventoried semantic inputs
+remained unchanged across the final native and production-module runs.
 
 The earlier twenty handoff/store unit regressions also remain unexecuted: the
 monolithic adapter unit build was killed by shared-memory exhaustion before

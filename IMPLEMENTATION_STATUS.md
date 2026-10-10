@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable native original-goal monitoring (2026-10-10)
+
+The semantic workforce adapter now provides a separate operator-opened
+`GoalHistoryStore` and exclusively owned `DurableWorkforceGoalMonitor`.
+`begin_durable_goal_monitor` and `poll_original_goal_durable` preserve the exact
+original semantic/native review, raw selected-workforce captures, publication
+boundaries, interruptions and canonical/native/tick floors across process loss.
+
+Recovery independently reissues the original historical source policy twice
+under current Query/Observe authority, reprojects each raw capture and replays
+all original predicates through the real temporal runtime. Stored policy
+fingerprints are comparison-only. A missing, changed or broader source grant
+cannot manufacture a previously unproved historical achievement.
+
+The verified first achievement and original terminal outcome survive recovery;
+current evidence and unfinished stability do not. Fresh observations remain
+necessary, original deadline/cadence do not renew, and an Unknown native action
+remains unresolved even when the goal becomes true. Read intent precedes native
+contact; raw capture precedes proof; synced publication precedes returned state.
+Ambiguous writes fence the handle. The private append-only store has an 8 MiB /
+1,024-event bound, exact journal/review binding, and no silent repair or pruning.
+All four possible poll events are reserved before contact, including caller
+bounds, so refusal cannot strand newly observed floors behind a small budget.
+
+**Evidence:** all 43 actual adapter integration tests pass on pinned nightly,
+including eleven new durable-history cases and real private-file custody tests.
+Independent review covered historical authority, raw replay, original temporal
+semantics and ambiguous I/O. Final native43 and queue55 runs kept all 379
+inventoried semantic inputs byte-identical. This is an adapter feature; broader
+semantic MCP dispatch, an independent canonical issuer, real native execution
+and live admission remain separate work. No protocol or production map changes.
+
 ### Production plans account for existing physical work (2026-10-10)
 
 Original DRINK/FOOD quota compilation now inspects current registered brewing
@@ -155,8 +187,9 @@ execution service disconnected. The preceding fifteen passing acquisition
 tests apply to their earlier generation, not this changed source.
 
 This is an adapter API over an existing development workforce source. Independent
-source authority, broader semantic MCP dispatch, durable native goal history,
-real native evidence and live admission remain separate work. No wire method,
+source authority, broader semantic MCP dispatch, real native evidence and live
+admission remain separate work. Durable history is supplied by the later
+increment above. No wire method,
 production runner or compatibility registry entry is added.
 
 ### Finite laboratory production capacity (2026-10-10)

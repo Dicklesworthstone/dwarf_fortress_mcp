@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-10 — Recover native original-goal history across restart
+
+- Add an operator-opened private goal-history store and durable foreground
+  workforce monitor bound to the exact original semantic/native review.
+  Retain complete raw captures, interrupted reads and observation floors.
+- Reconstruct historical achievement by replaying the original predicates and
+  temporal runtime under independently reissued historical policy and current
+  authority. Stored fingerprints compare policy; they cannot restore grants.
+- Preserve first achievement and original deadline/cadence while resetting fresh
+  evidence and unfinished stability. Keep Unknown native effects unresolved.
+- Sync intent before contact, raw capture before proof and publication before
+  returning state. Reserve all possible events before contact; ambiguous writes
+  fence the owner. Reuse private-file custody with explicit 8 MiB/1,024-event
+  bounds and no repair/pruning.
+- Pass all 43 actual adapter integration tests, including eleven new history,
+  crash, authority, event-budget and real private-file cases. Independent review
+  found and resolved the pre-contact event-budget gap. The final native and
+  queue55 runs used unchanged semantic inputs. No generic MCP execution path,
+  native/live admission or full-workspace qualification is added.
+
 ## 2026-10-10 — Plan production against the existing work queue
 
 - Read current registered physical orders before compiling new quotas, including

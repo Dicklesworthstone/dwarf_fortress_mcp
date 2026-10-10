@@ -909,3 +909,5 @@ fn association_post_sync_byte_mismatch_fences_before_publishing_the_new_root() -
     assert_eq!(recovered.get(&association.key), Some(&association));
     Ok(())
 }
+
+mod goal_history;
