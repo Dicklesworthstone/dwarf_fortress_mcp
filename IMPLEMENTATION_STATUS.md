@@ -44,6 +44,37 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Finite laboratory production capacity (2026-10-10)
+
+Registered brewing and cooking orders now compete for actual reference-model
+worker and workshop slots. Each running order needs one eligible living
+labor-enabled unit and one completed matching workshop. A multi-skilled unit
+cannot service both families in one interval. A bounded iterative matching
+algorithm preserves earlier partial-work/canonical-ID preferences while moving
+flexible workers where needed to keep specialists productive.
+
+The causal timeline allocates service after condition evaluation and refreshes
+capacity blockers after world events. Waiting orders preserve earned work but
+bank no elapsed time. Workshop completion and worker death affect only later
+intervals. Matching is capped at 65,536 canonical entities before new matching
+allocations, and source scans, traversal and ordering consume the existing
+advancement budget. Whole-advance publication remains atomic in the caller's
+transaction shadow.
+
+**Evidence:** nine new Rust test functions are present, including 512 exhaustive
+actual-timeline skill/workshop configurations, partition comparisons, source
+eligibility, capacity changes and budget refusal. Two existing simultaneous-stock
+fixtures now provide the two workers and workshops their scenario requires.
+An independent JavaScript exhaustive oracle matched the allocation algorithm
+against all feasible distinct-worker assignments in 60,016 small configurations.
+That oracle does not execute Rust. Compilation, Rust tests and rustfmt for this
+increment could not run because the execution service disconnected even for
+read-only commands; earlier passing suites do not qualify these changed bytes.
+
+The model covers brewing/cooking capacity only. It does not schedule shared
+labor across excavation, construction or military work, and adds no native
+protocol, MCP tool, live capability or compatibility admission.
+
 ### Original-goal lifecycle in the MCP laboratory (2026-10-10)
 
 The laboratory commit, progress, restart, shared-session and restore paths now

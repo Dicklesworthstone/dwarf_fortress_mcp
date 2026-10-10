@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-10 — Make production compete for finite workers and workshops
+
+- Allocate one eligible living worker and one completed matching workshop to
+  each running brewing or cooking order. A multi-skilled worker cannot count
+  twice, and additional orders no longer manufacture extra service capacity.
+- Use bounded deterministic matching to keep specialists productive, preferring
+  earned partial work and then canonical order identity. Preserve canonical
+  completion ties and successful wait-partition equivalence.
+- Expose worker/workshop capacity blockers, retain earned work without banking
+  waiting time, and apply workshop completion or worker death only to later
+  causal intervals. Charge matching against the existing advancement budget
+  and reject oversized domains before the new matching allocations.
+- Add nine Rust regression functions, including 512 exhaustive reference-timeline
+  configurations. An independent 60,016-case JavaScript assignment oracle passed;
+  it validates the allocation algorithm separately from the Rust implementation.
+  Rust compilation, tests and rustfmt remain unverified while the execution
+  service is disconnected. No native or full-workspace qualification is claimed.
+
 ## 2026-10-10 — Recover and share original goals through MCP
 
 - Connect the durable objective store to actual laboratory commit, progress,

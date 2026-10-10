@@ -28,6 +28,9 @@ use dfmcp_world::{
 use crate::action::{Action, BuildingKind, DigMode, WorkOrderCondition};
 use crate::plan::ObligationSpec;
 
+#[path = "effects_capacity.rs"]
+mod capacity;
+
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
 pub const LABOR_FIELD_PREFIX: &str = "labor.";
 /// Field holding burrow membership on a unit: `burrow.<burrow entity id>`.
@@ -122,11 +125,7 @@ pub fn work_order_product(job_token: &str) -> Option<(&'static str, u64)> {
 /// progress. Jobs without an entry have no modeled requirement.
 #[must_use]
 pub fn work_order_requirements(job_token: &str) -> Option<(&'static str, &'static str)> {
-    match job_token {
-        "BREW_DRINK" => Some(("workshop:Still", "BREW")),
-        "PREPARE_MEAL" | "COOK_MEAL" => Some(("workshop:Kitchen", "COOK")),
-        _ => None,
-    }
+    capacity::requirements(job_token)
 }
 
 /// Field a stalled work order carries naming what it is waiting for.
@@ -1081,6 +1080,9 @@ pub const MAX_EFFECT_ADVANCE_WORK_UNITS: u64 = 100_000_000;
 /// Aggregate excavation footprint admitted before allocating any pending-tile
 /// sets. A work budget alone must not permit enormous simultaneous caches.
 pub const MAX_EFFECT_ADVANCE_CACHED_DIG_TILES: u64 = 1_048_576;
+/// Canonical entity domain admitted before allocating production capacity
+/// matching state. Each source unit and completed workshop has capacity one.
+pub const MAX_EFFECT_ADVANCE_PRODUCTION_ENTITIES: usize = 65_536;
 
 /// Explicit CPU-work budget for the reference event timeline. Work units charge
 /// source facts, entity and condition scans, and terrain visits before the work.
@@ -1166,8 +1168,10 @@ impl EffectAdvanceBudget {
 ///
 /// At a shared tick, construction and excavation settle first, then production
 /// units in ascending entity order, then drink/food consumption, then arrivals
-/// and combat in ascending hostile order. A worker killed at that tick cannot
-/// contribute to a later interval. Internal event boundaries are not foreground
+/// and combat in ascending hostile order. Registered production jobs share a
+/// finite pool: one eligible living unit and one completed matching workshop
+/// per running order. A worker killed at that tick cannot contribute to a later
+/// interval. Internal event boundaries are not foreground
 /// observations and do not poll obligations or manufacture proof samples.
 ///
 /// Successful advances have identical physical values under different wait
@@ -1227,6 +1231,11 @@ pub fn advance_effects_with_limits(
 enum ConditionRecord {
     Known(Vec<WorkOrderCondition>),
     Unavailable(String),
+}
+
+struct TimelineProduction {
+    ready: Vec<usize>,
+    blockers: BTreeMap<usize, Option<String>>,
 }
 
 struct TimelineOrder {
@@ -1456,6 +1465,43 @@ impl EffectTimeline {
         ))
     }
 
+    fn production_schedule(
+        &self,
+        snapshot: &WorldSnapshot,
+        budget: &mut EffectAdvanceBudget,
+    ) -> Result<TimelineProduction> {
+        budget.charge(self.orders.len() as u64 + 1)?;
+        if snapshot.graph.entities.len() > MAX_EFFECT_ADVANCE_PRODUCTION_ENTITIES
+            && self.orders.iter().any(|order| work_order_requirements(&order.job).is_some())
+        {
+            return Err(advance_budget_error(
+                "production capacity exceeds its explicit canonical entity bound",
+            ));
+        }
+        let mut ready = Vec::new();
+        let mut blockers = BTreeMap::new();
+        for (index, order) in self.orders.iter().enumerate() {
+            if active_order(snapshot, order.id)? {
+                let blocker = match self.gate(snapshot, order, budget)? {
+                    ProductionGate::Ready { .. } => {
+                        ready.push(index);
+                        None
+                    }
+                    ProductionGate::Blocked(reason) => Some(reason),
+                };
+                blockers.insert(index, blocker);
+            }
+        }
+        let selected = capacity::select(snapshot, &self.orders, ready, budget)?;
+        for (index, reason) in selected.waiting {
+            blockers.insert(index, Some(reason));
+        }
+        Ok(TimelineProduction {
+            ready: selected.ready,
+            blockers,
+        })
+    }
+
     fn next_interval(
         &self,
         snapshot: &WorldSnapshot,
@@ -1468,18 +1514,14 @@ impl EffectTimeline {
                 + 1,
         )?;
         let mut delta = remaining;
-        let mut ready = Vec::new();
-        for (index, order) in self.orders.iter().enumerate() {
-            if active_order(snapshot, order.id)?
-                && matches!(
-                    self.gate(snapshot, order, budget)?,
-                    ProductionGate::Ready { .. }
-                )
-            {
-                let work = field_u64(entity(snapshot, order.id)?, "work_ticks", snapshot.tick)?;
-                delta = delta.min(WORK_ORDER_TICKS_PER_UNIT - work);
-                ready.push(index);
-            }
+        let ready = self.production_schedule(snapshot, budget)?.ready;
+        for index in &ready {
+            let work = field_u64(
+                entity(snapshot, self.orders[*index].id)?,
+                "work_ticks",
+                snapshot.tick,
+            )?;
+            delta = delta.min(WORK_ORDER_TICKS_PER_UNIT - work);
         }
         for id in &self.buildings {
             if active_building(snapshot, *id)? {
@@ -1616,14 +1658,9 @@ impl EffectTimeline {
         budget: &mut EffectAdvanceBudget,
     ) -> Result<bool> {
         let mut changed = false;
-        for order in &self.orders {
-            if active_order(snapshot, order.id)? {
-                let blocker = match self.gate(snapshot, order, budget)? {
-                    ProductionGate::Ready { .. } => None,
-                    ProductionGate::Blocked(reason) => Some(reason),
-                };
-                changed |= write_production_blocker(snapshot, order.id, blocker)?;
-            }
+        let schedule = self.production_schedule(snapshot, budget)?;
+        for (index, blocker) in schedule.blockers {
+            changed |= write_production_blocker(snapshot, self.orders[index].id, blocker)?;
         }
         Ok(changed)
     }

@@ -581,6 +581,37 @@ seal under the stronger default proof, the existing recovery path keeps it
 indeterminate. Conditional production adds no live mutation capability or
 compatibility admission.
 
+### Finite production capacity
+
+Brewing and cooking share the observed labor pool. During each causal interval,
+one living unit with the required eligible labor flag and one completed matching
+workshop can serve one running order. The same multi-skilled unit cannot brew
+and cook at once; adding orders alone does not create production capacity.
+
+The deterministic allocator first prefers orders with more earned partial-unit
+work, then lower canonical entity IDs. It finds a maximum set of simultaneous
+assignments for the two registered recipe families, moving a flexible worker
+when doing so lets a specialist serve another order. This is a throughput and
+continuation policy, not a skill, travel or fairness optimizer.
+
+Conditions are checked before allocating service. An order waiting for a stock
+threshold or prerequisite consumes no worker or workshop slot. An eligible order
+that cannot acquire service records a worker- or workshop-capacity explanation
+in `blocked_by`. It retains earned partial work and earns no waiting ticks.
+Completion, new workshop availability, stock changes and worker death release
+or remove capacity only for subsequent intervals. Successful wait partitions
+preserve the same physical outcome.
+
+Capacity matching admits at most 65,536 canonical entities before its ready,
+blocker and candidate allocations. Source scans, matching traversal and sorting
+consume the same bounded advancement work allowance. A refused advance still
+publishes no partial world through the ordinary transaction-shadow contract.
+
+This pool covers `BREW_DRINK` and `PREPARE_MEAL`/`COOK_MEAL` only. Other
+reference job tokens retain their abstract behavior. Mining, construction and
+military activity do not yet compete for these worker slots; none of these
+scheduling rules describes native Dwarf Fortress capacity.
+
 ### Causal time, competing work and bounded advancement
 
 The reference model advances between actual work and world-event boundaries:
