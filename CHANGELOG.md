@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-11 — Prove original native work-order goals
+
+- Add bounded foreground original-goal monitoring to `SemanticWorkOrderSession`
+  using concrete existing operations/1.3 and selected progress/1.12 read clients,
+  bracketed by identical current work-orders/1.10 queue captures.
+- Bind the original Created receipt and key-derived order identity to complete
+  item/job/building evidence under independently issued policy. Preserve both
+  progress endpoint witnesses and distinct native/canonical chronology.
+- Evaluate all original postconditions, plan and obligation terminals, fixed
+  deadlines, cadence, failure and sampled stability. Keep current truth and first
+  achievement separate; Unknown native insertion never becomes verified through
+  independent goal truth.
+- Require exact finite-order zero remaining, validated/inactive status and a
+  qualified complete empty job roster for physical quiescence. Missing orders
+  and zero counters alone remain insufficient.
+- Bind each non-cloneable monitor to its unique current session opening;
+  replacement or reopen cannot reuse an old streak. Goal history remains
+  process-local, with fresh observation after read-only reattachment.
+- Pass all 38 actual-adapter integration tests, including 17 new original-goal
+  cases, and warning-denied library and focused test Clippy on unchanged compiled
+  inputs. This extends the operator embedding API; generic MCP dispatch,
+  durable native goal history and native/live admission remain incomplete.
+
 ## 2026-10-11 — Complete dependent work within one foreground wait
 
 - Interleave real laboratory advancement with dependency-ordered observations

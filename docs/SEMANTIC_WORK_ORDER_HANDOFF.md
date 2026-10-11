@@ -7,7 +7,9 @@ identity and obligation through review, durable preparation, one native insertio
 attempt, inspection and restart recovery.
 
 The handoff uses the existing work-orders/1.10 protocol and coordinator. It is
-an embedding API for the trusted operator-owned acquisition shell. The generic
+an embedding API for the trusted operator-owned acquisition shell. Foreground
+goal monitoring also uses the existing operations/1.3 and selected-order
+progress/1.12 reads. The generic
 MCP route remains advisory, and this module supplies no compatibility admission,
 source-policy issuer, bridge method or new production runner.
 
@@ -88,10 +90,84 @@ return the record to Prepared for another insertion attempt.
 `NativeOrderCreation::Inserted { native_order_id, receipt }`. Inserted requires
 strict native Created readback for the original plan. It establishes insertion
 of that manager order only. It does not prove workshop execution, produced
-items, the original postconditions or stock goal. `original_goal_proven()`
-therefore remains false, and `pending_obligation()` returns the unchanged
-original obligation. No background goal monitor or production replenishment is
-started by this handoff.
+items, the original postconditions or stock goal. On this insertion result,
+`original_goal_proven()` remains false, and `pending_obligation()` returns the
+unchanged original obligation. The separate foreground goal API below can
+observe and prove the original goal; insertion does not start a monitor or
+production replenishment automatically.
+
+## Observe and prove the original goal
+
+After insertion or exact historical reattachment, call
+`begin_goal_monitor(seal, context)` and retain its `WorkOrderGoalMonitor`.
+`poll_original_goal` takes that monitor, an owner-allocated canonical cursor,
+current context, factories for the existing progress and operations sources,
+and an independent evidence-policy callback. The concrete source implementations
+use `ProgressRpcClient` and `OperationsRpcClient<DeadlineStream>`; source setup
+and credentials remain owned by the trusted embedding shell.
+
+One foreground call acquires the current original creation queue, reads the
+selected original order, captures complete operations, reads the selected order
+again, and repeats the creation queue. The queue endpoints must be identical;
+the progress endpoints must have identical selected rows and fortress state
+with an advancing capture sequence. All sources must agree on the same paused
+tick, fortress, world/site and software versions. Native generations and counters
+remain separate across families. The result retains both progress witnesses,
+the operations capture and the exact queue witness under one source digest.
+It neither advances the clock nor sends a mutation.
+
+The projection preserves the original order's key-derived canonical identity
+and adds only observed finite-order fields. It combines those with the existing
+canonical operations projection for jobs, items and buildings. The source
+factories close before two independent policy checks and publication. Observed
+field names and digests are an inventory, not source grants: the callback must
+independently qualify each source and domain. It cannot declare the selected
+order to be a complete WorkOrder domain or widen the projection to all entities,
+edges, citizens or terrain.
+
+`WorkOrderGoalResult` separates the following results:
+
+| Result | Required evidence |
+| --- | --- |
+| `creation_result()` | The exact original strict Created receipt; otherwise Unverified. |
+| `progress().current_goal` | Current truth of every original postcondition, plan terminal predicate and obligation terminal predicate together. |
+| `original_goal_proven()` | Current True goal plus fulfillment of the original temporal obligation, without a current True failure predicate. |
+| `progress().physical_work` | Outstanding, Quiescent or Unknown physical work independently of original-goal truth. |
+| `semantic_completion_proven()` | Original goal proved, original insertion verified and physical quiescence proved at the same frontier. |
+
+Physical quiescence is conservative: the exact original finite order must still
+be present with qualified zero remaining, validated and inactive status, and an
+independently qualified complete empty global job roster at the same paused
+frontier. An unrelated active job can therefore defer this proof. This family
+does not expose manager-order ownership for individual jobs. Zero remaining
+alone, disappearance, an active or unvalidated row, missing policy and a nonempty
+job roster cannot prove quiescence. A current stock goal can be True while this
+completion evidence remains Unknown. An Unknown creation receipt is never
+resolved by independent goal truth.
+
+The monitor uses the unchanged original deadline, cadence, failure predicate
+and stability requirement. Distinct canonical observations and eligible game
+ticks are required for stability; a gap or failed acquisition/policy check
+interrupts an unfinished streak. Counter increases, finite recipe/amount changes,
+source resets, clock/cursor rollback and disappearance followed by reappearance
+refuse or fence the observation. Session-wide source floors prevent a newer
+goal from making an older source current again.
+
+The current goal and first achieved anchor remain separate. Later False or
+Unknown observations preserve first achievement without claiming present
+success. This native goal history is currently process-local. Reattachment
+starts a fresh streak against the original deadline; the durable semantic/native
+association does not restore goal achievement history. One session opening owns
+one current monitor: creating a replacement invalidates its predecessor, and a
+reopened session cannot accept an old monitor. There is no clone/import path for
+branching around an interrupted streak.
+
+Polling requires current Query and Observe authority even after read-only
+reattachment. It restores no control grant or preparation lifetime. The combined
+projection is bounded to 4,096 entities and 8,192 edges; the call requires an
+entity budget of at least 4,096 and reserves 128 MiB for projection plus separate
+source setup/read, view and policy budgets before contact. The same shrinking
+wall deadline spans acquisition, verification and publication.
 
 ## Restart and uncertain effects
 
@@ -166,9 +242,18 @@ expiry, cross-goal chronology, forked cursors, changed incarnations, real privat
 file reopen and malformed custody. The complete citizen acquisition owner is
 exercised through preparation and commit.
 
-All 21 integration cases pass. All 18 existing work-order coordinator cases,
-all 43 workforce integration tests and all 93 production module tests also pass,
-with warning-denied adapter-library Clippy and 644 unchanged inventoried inputs.
+The extended target has 38 passing integration cases: all 21 insertion/custody
+cases and 17 original-goal cases. The latter use real closed RPC clients for
+positive goal completion and cover current False/Unknown truth, immutable first
+achievement, physical quiescence, original deadlines/stability, missing or lost
+policy, read-only recovery, source changes, aggregate bounds and exclusive
+monitor ownership across replacement/reopen. Adapter-library and focused
+integration-target Clippy pass with warnings denied. The compiled native
+production and test inputs remained unchanged during final validation.
+
+The earlier insertion increment also passed all 18 existing work-order
+coordinator cases, all 43 workforce integration tests and all 93 production
+module tests with its then-current inventoried inputs.
 
 This evidence uses synthetic native responses and real local storage. It does
 not establish a DFHack plugin build, live-fort campaign, native mutation

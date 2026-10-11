@@ -2,6 +2,9 @@
 //! Exercise the ordinary production coordinator through public APIs, strict native
 //! codecs, injected acquisition/storage, and real private-file custody.
 
+#[path = "semantic_work_orders/goal_monitor.rs"]
+mod goal_monitor;
+
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Seek, SeekFrom, Write};

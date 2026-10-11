@@ -67,6 +67,15 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
             .as_ref()
             .map(|selection| &selection.observation))
     }
+    /// Authenticated manifest of the exact retained queue capture. This is a
+    /// read-only identity view; it neither reconnects nor grants source authority.
+    pub fn selected_manifest(
+        &self,
+        context: &OperationContext,
+    ) -> Result<Option<&WorkOrderManifest>> {
+        self.access(context)?;
+        Ok(self.selected.as_ref().map(|selection| &selection.manifest))
+    }
     /// Invalidating a review also invalidates its native planning selection.
     pub fn clear_selection(&mut self) {
         self.selected = None;

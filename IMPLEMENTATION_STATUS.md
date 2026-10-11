@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Prove original native work-order goals (2026-10-11)
+
+`SemanticWorkOrderSession::poll_original_goal` now observes and proves the
+complete original goal after native insertion or exact read-only reattachment.
+It uses concrete existing operations/1.3 and selected progress/1.12 read clients
+with matching work-orders/1.10 queue endpoints. Captures must describe one
+paused fortress frontier; native generations and the owner-allocated canonical
+cursor remain separate. Both progress endpoints and the operations/queue
+witnesses remain available for independently issued source policy.
+
+The exact original Created receipt binds the finite order to its original
+key-derived canonical entity. All original postconditions, plan terminal and
+obligation terminal participate in proof, with unchanged failure, deadline,
+cadence and stability rules. Current False/Unknown truth is separate from
+process-local first achievement. A source reset, changed order, cursor gap or
+failed policy cannot manufacture continuity or positive samples. Replacement
+invalidates the old monitor; a new session opening cannot import its streak.
+
+Semantic completion additionally requires physical quiescence: the exact
+original finite order remains present with qualified zero remaining and
+validated/inactive status, alongside a qualified complete empty global job
+roster. A missing order, zero counter alone, nonempty roster or Unknown original
+insertion cannot prove completion. This conservative job rule remains necessary
+because the read family does not expose originating manager-order IDs on jobs.
+The monitor performs no game mutation or time advancement and consumes explicit
+entity, byte and wall budgets. See `docs/SEMANTIC_WORK_ORDER_HANDOFF.md`.
+
+**Evidence:** all 38 actual-adapter public integration tests pass, including 17
+new original-goal cases and the existing 21 insertion/custody cases. Positive
+completion runs the real closed RPC clients over strict fixture streams;
+refusal, policy, recovery, deadline, continuity, counter and ownership cases also
+pass. Adapter-library and focused test Clippy pass with warnings denied on
+unchanged compiled native source/test inputs. These are synthetic native
+responses, not a DFHack plugin or live-fort qualification. The generic MCP route,
+durable native goal history, independent policy issuer and live admission remain
+separate unfinished boundaries.
+
 ### Complete dependent work within one foreground wait (2026-10-11)
 
 The laboratory's `fortress.wait` now interleaves time advancement and retained

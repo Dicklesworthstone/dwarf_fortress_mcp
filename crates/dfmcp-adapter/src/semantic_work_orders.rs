@@ -22,7 +22,13 @@ use crate::work_order_control::{
 };
 use crate::work_orders::{WorkOrderObservation, WorkOrderPlan, WorkOrderState};
 
+pub mod goal_monitor;
+pub mod goal_projection;
 pub mod store;
+pub use goal_monitor::{
+    OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProgress, WorkOrderGoalResult,
+};
+pub use goal_projection::{WorkOrderGoalProjection, WorkOrderPhysicalState};
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};
 
@@ -476,6 +482,9 @@ pub struct SemanticWorkOrderSession<S, B, N> {
     associations: AssociationStore<B>,
     attached: Option<SemanticWorkOrderReview>,
     floor: SourceFloor,
+    // A foreground proof streak belongs to exactly one current monitor and
+    // this opening. A new monitor or reopened session cannot reuse an old streak.
+    goal_owner: Option<std::sync::Arc<()>>,
 }
 impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
     SemanticWorkOrderSession<S, B, N>
@@ -490,6 +499,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             associations,
             attached: None,
             floor: SourceFloor::default(),
+            goal_owner: None,
         };
         out.view(&mut Call::new(c)?)?;
         Ok(out)

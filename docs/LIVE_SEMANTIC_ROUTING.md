@@ -99,8 +99,20 @@ and native chronology prevents older sources from authorizing new control.
 Historical Query-authorized reattachment and reconciliation preserve Unknown
 without inserting another order. Strict Created readback becomes a distinct
 `NativeOrderCreation::Inserted` result; original goals and obligations stay
-pending. See `SEMANTIC_WORK_ORDER_HANDOFF.md` for the closed recipes, operator
-acquisition API, private store, bounds and failure behavior.
+pending on that insertion result.
+
+A separate foreground `poll_original_goal` path now combines complete
+operations/1.3 and selected progress/1.12 observations bracketed by the original
+creation queue. The exact native Created receipt binds the observed finite order
+to the original semantic identity. Independent source policy gates the complete
+original postconditions, plan goal and temporal obligation. Current truth,
+sampled first achievement and physical quiescence are separate: zero remaining
+alone or a missing order cannot prove completion, and an Unknown insertion stays
+unresolved. Completion requires the exact inactive validated finite order plus
+a qualified complete empty job roster and a proved original goal. History is
+process-local, with exclusive monitor ownership and original deadlines retained
+through read-only reattachment. See `SEMANTIC_WORK_ORDER_HANDOFF.md` for the
+closed recipes, acquisition API, private store, limits and failure behavior.
 
 ## Furniture constraints remain explicit
 
