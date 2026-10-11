@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-11 — Complete dependent work within one foreground wait
+
+- Interleave real laboratory advancement with dependency-ordered observations
+  so one bounded wait can execute dig, build and production successors. Preserve
+  original actions, deadlines, cadence and scoped dispatch authority.
+- Make each simulated round atomic, with aggregate action/poll/round limits and
+  a cooperative wall deadline. Stop on deferred pause and report actual elapsed
+  and remaining time on partial refusal.
+- Publish each frontier and original-goal achievement before further progress;
+  retain an intermediate achievement through later consumption and durable
+  reopen. Fence further effects when publication fails.
+- Render Task status from the final retained receipt without an extra poll.
+  Keep original per-action proof anchors and current physical work distinct;
+  Agent Turns adopt authorized partial-wait observations on errors.
+- Pass 104 actual-source module tests, including eight new progression cases,
+  and warning-denied all-target Clippy. Four MCP integration regressions and
+  existing durable fixtures are source-reviewed/formatted but unexecuted; the
+  full MCP build remains blocked before MCP in the unchanged Asupersync graph.
+  No native/live or full-workspace qualification is claimed.
+
 ## 2026-10-11 — Continue original goals after verified durable recovery
 
 - Fix continuation rejecting every durable reopen because the new observation

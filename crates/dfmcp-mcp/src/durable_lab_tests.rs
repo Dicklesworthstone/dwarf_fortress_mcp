@@ -65,6 +65,33 @@ fn serialized() -> std::sync::MutexGuard<'static, ()> {
     crate::server::serialized_durable_tests()
 }
 
+/// Simulate an external laboratory interval during which the agent collected
+/// no proof samples. Ordinary fortress.wait now observes intermediate frontiers.
+fn advance_without_observing(session: &str, ticks: u64) -> TestResult {
+    let handle = crate::server::lookup_session_str(session)?;
+    let mut guard = handle.lock().map_err(|_| "test session poisoned")?;
+    let (_, mut context) = crate::server::next_context(&mut guard)?;
+    context.authorize(
+        dfmcp_core::Capability::ControlClock,
+        dfmcp_core::RiskTier::Reversible,
+        &[],
+        None,
+    )?;
+    context.anchor.tick = context
+        .anchor
+        .tick
+        .checked_add(ticks)
+        .ok_or("test clock overflow")?;
+    context.authorize(
+        dfmcp_core::Capability::ControlClock,
+        dfmcp_core::RiskTier::Reversible,
+        &[],
+        None,
+    )?;
+    guard.adapter.advance_ticks(ticks)?;
+    Ok(())
+}
+
 struct StateDir(std::path::PathBuf);
 
 impl Drop for StateDir {
@@ -585,11 +612,23 @@ fn recovered_proof_keeps_its_original_deadline() -> TestResult {
         let tick = resumed["anchor"]["game_tick"]
             .as_u64()
             .ok_or("resume tick missing")?;
-        let waited = parsed(&fortress_wait(
-            Some(second),
-            Some(deadline - tick + u64::from(late)),
-        ))?;
+        // A supervised wait would sample the completed dig well before its
+        // deadline. Preserve this test's deliberate observation gap instead.
+        advance_without_observing(&second, deadline - tick + u64::from(late))?;
+        {
+            let handle = crate::server::lookup_session_str(&second)?;
+            handle
+                .lock()
+                .map_err(|_| "test session poisoned")?
+                .grants
+                .retain(|grant| grant.capability != dfmcp_core::Capability::ControlClock);
+        }
+        let waited = parsed(&fortress_wait(Some(second), Some(0)))?;
         assert_eq!(waited["ok"], true, "{waited}");
+        assert_eq!(
+            waited["advanced_game_ticks"], 0,
+            "Observe alone can inspect recovered work: {waited}"
+        );
         let proof = &waited["carried_obligations"][0];
         assert_eq!(proof["deadline_tick"], deadline, "{waited}");
         assert_eq!(
@@ -982,7 +1021,23 @@ fn durable_failed_work_survives_two_restarts_until_real_completion() -> TestResu
     assert_eq!(failed["commit_state"], "Failed", "{failed}");
     assert_eq!(failed["work_state"]["state"], "active", "{failed}");
     assert_eq!(failed["open_actions_remaining"], 1, "{failed}");
-    let original_proof = failed["observed_anchor"].clone();
+    let original_proof = {
+        let handle = crate::server::lookup_session_str(&session)?;
+        let guard = handle.lock().map_err(|_| "test session poisoned")?;
+        let action = dfmcp_core::ActionId::new(u128::from_str_radix(
+            committed["actions"][0]["action_id"]
+                .as_str()
+                .ok_or("original action missing")?,
+            16,
+        )?);
+        let receipt = guard
+            .adapter
+            .action_receipt(action)
+            .ok_or("original proof missing")?;
+        // The foreground wait may continue beyond the first terminal proof.
+        // Its final world anchor is not that immutable historical receipt.
+        crate::server::anchor_json(&receipt.observed_anchor)
+    };
 
     for restart in 0..2 {
         crate::server::simulate_durable_restart(Some(dir.0.clone()));

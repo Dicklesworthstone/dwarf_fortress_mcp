@@ -251,6 +251,19 @@ clock and observation grants through its final tick, and within the negotiated
 game-tick budget. Zero-tick polling requires observation authority only.
 Goal outcome and observed physical work are reported separately.
 
+Laboratory waits interleave bounded time slices with dependency-ordered polling
+of retained original actions. Original obligation cadence/deadlines constrain
+the slices; ready successors can start and finish in the same call. Each round
+publishes world, proof and original-goal history before another round proceeds.
+A newly dispatched pause stops the remaining advancement.
+`wait_progress` reports requested, advanced and remaining game ticks, successful
+observation rounds, action polls and deferred dispatches. A partial refusal
+retains those counters and, under current Observe authority, the actual anchor,
+pause state and work in the Agent Turn. A persistence failure fences further
+progress and is reported as `durability_pending`. Each polled action carries
+its immutable proof `observed_anchor` separately from current physical work.
+See `docs/LAB_FOREGROUND_PROGRESS.md` for the bounded implementation and evidence.
+
 ### `fortress.cancel`
 
 Starts or advances request/drain/compensate/finalize. It never means “delete the record.” Active

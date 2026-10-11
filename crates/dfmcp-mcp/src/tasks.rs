@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use dfmcp_adapter::{CancelMode, GameAdapter};
+use dfmcp_adapter::{ActionReceipt, CancelMode, GameAdapter};
 use dfmcp_core::{ActionId, CommitState, EvidenceId, GameTick, OperationContext, PlanId, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,21 +82,29 @@ pub fn project_action_task(
     context: &OperationContext,
 ) -> Result<McpTaskProjection> {
     let receipt = adapter.poll_action(action_id, context)?;
+    Ok(project_action_receipt(&receipt))
+}
+
+/// Render a receipt already observed by the owning progression loop. Unlike
+/// `project_action_task`, this cannot dispatch a deferred step while formatting
+/// a response or add a second observation outside the published frontier.
+#[must_use]
+pub fn project_action_receipt(receipt: &ActionReceipt) -> McpTaskProjection {
     let evidence_id = receipt.evidence.first().map(|e| e.id);
     let summary = match receipt.evidence.first() {
         Some(item) => item.summary.clone(),
-        None => receipt.message,
+        None => receipt.message.clone(),
     };
 
-    Ok(McpTaskProjection::from_commit_state(
-        action_id,
+    McpTaskProjection::from_commit_state(
+        receipt.action_id,
         None,
         receipt.state,
         summary,
         evidence_id,
         None,
         receipt.observed_anchor.tick,
-    ))
+    )
 }
 
 pub fn cancel_action_task(

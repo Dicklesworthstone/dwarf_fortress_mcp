@@ -49,7 +49,7 @@ fortress_plan(actions='[
   {"action":{"kind":"create_work_order","name":"brew","job_token":"BREW_DRINK","amount":2},"depends_on":[1]},
   {"action":{"kind":"set_labor","units":["1003"],"labor":"BREW","enabled":true}}]')
 fortress_commit(plan_digest=...)
-fortress_wait(max_game_ticks=100)   # repeat until open_actions_remaining is 0
+fortress_wait(max_game_ticks=2000)  # progresses dependent steps within this wait
 ```
 
 Original DRINK/FOOD production quotas also use this sealed action loop. New
@@ -91,8 +91,10 @@ before anything is committed. Advancement and polling refusals also make the
 forecast unavailable with their actual reason; a failed partial simulation is
 not reported as an available prediction. The final slice is clipped to the
 requested obligation horizon. Forecasts assume no other agent acts and the
-fortress stays as it is; real completion also depends on how often the agent
-waits, because deferred steps dispatch when a wait observes their prerequisites.
+fortress stays as it is. An explicit wait now observes intermediate frontiers
+and dispatches eligible successors within that call. Its original obligation
+cadences can be finer than the forecast's reported resolution; neither the
+forecast nor elapsed time alone certifies completion.
 
 The Agent Turn compares those forecasts with what is later observed. When a
 step reaches a different terminal state than forecast, completes later than the
@@ -128,7 +130,16 @@ deadline is failed; sufficient proof at the deadline itself is accepted.
 the session's game-tick budget; a paused fortress reports `blocked`. Positive
 tick requests require `control_clock`, and an unpaused advance must fit within
 the clock and observation grants through the requested final tick. A zero-tick
-poll needs observation authority without clock control.
+poll needs observation authority without clock control, including unresolved
+recovered work with no live action handle. A wait interleaves advancement and
+dependency-ordered polling in bounded rounds, honoring original cadences and
+deadlines. It publishes world, work and original-goal history before continuing.
+A deferred pause stops further advancement within the same call. The result's
+`wait_progress` reports actual elapsed and remaining ticks; partial refusals
+preserve the authorized current anchor and work in the Agent Turn. Each action
+row retains its original proof anchor independently of current physical work.
+See [`LAB_FOREGROUND_PROGRESS.md`](LAB_FOREGROUND_PROGRESS.md) for aggregate
+bounds, publication failures and the validation boundary.
 
 On the modern stdio server, a client that negotiates Tasks can use
 `fortress_commit(as_task=true)` to retain and supervise the original plan under

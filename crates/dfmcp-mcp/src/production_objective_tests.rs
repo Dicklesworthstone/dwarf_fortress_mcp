@@ -142,7 +142,7 @@ fn production_reserves_consumption_until_the_original_goal_is_proved() -> TestRe
     let settled = wait(&session, 300)?;
     assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 63);
     assert_eq!(
-        settled["polled_actions"][0]["state"], "verified",
+        settled["polled_actions"][0]["state"], "Verified",
         "{settled}"
     );
     assert_eq!(
@@ -183,7 +183,7 @@ fn joint_production_reserves_a_quota_already_satisfied_at_the_source() -> TestRe
     assert!(
         settled["polled_actions"]
             .as_array()
-            .is_some_and(|actions| actions.iter().all(|action| action["state"] == "verified")),
+            .is_some_and(|actions| actions.iter().all(|action| action["state"] == "Verified")),
         "{settled}"
     );
     assert_eq!(

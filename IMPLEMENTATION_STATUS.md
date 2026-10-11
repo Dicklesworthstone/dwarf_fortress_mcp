@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete dependent work within one foreground wait (2026-10-11)
+
+The laboratory's `fortress.wait` now interleaves time advancement and retained
+action polling. A sufficiently long call can prove excavation, dispatch and
+complete construction, then dispatch and complete production. The first round
+observes without advancing; later rounds honor original cadence/deadlines and
+current scoped effect authority. A deferred pause stops time within the call.
+The original sealed plan, identities and obligation runtimes remain unchanged.
+
+Each round publishes an atomic simulated frontier. The session then persists
+world, work dispositions and original-goal history before another round can
+consume time or dispatch. Intermediate achievement survives later consumption
+and durable reopen. Failure reports actual advanced/remaining time, and current
+Observe authority gates the partial frontier shown in the Agent Turn. A durable
+publication failure fences later progress. Final Task rendering cannot poll or
+cause another effect; each action retains its original proof anchor separately
+from its current physical work.
+
+One request bounds aggregate dispatches, tracked identities, rounds and polls
+and uses one cooperative wall deadline. It does not create new plans, run in the
+background or transfer a shared peer's action authority. See
+`docs/LAB_FOREGROUND_PROGRESS.md` for exact behavior and limits.
+
+**Evidence:** all 104 actual-source module tests and all-target warning-denied
+Clippy pass. Eight new tests use the real StaticPlanner, MemoryAdapter and
+obligation runtime, covering dependency chains, exact deadlines/cadence,
+deferred pause, rollback, authority, original identity, aggregate budgets and
+explicit continuation. Four facade/persistence integration regressions and
+existing durable fixture corrections are source-reviewed and formatted but
+unexecuted. Full MCP compilation remains blocked before MCP in the unchanged
+Asupersync graph; no full-workspace or native/live qualification is claimed.
+
 ### Continue retained goals after verified durable recovery (2026-10-11)
 
 A durable laboratory reopen resets observation cursors; it does not abandon the

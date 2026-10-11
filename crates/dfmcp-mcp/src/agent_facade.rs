@@ -336,7 +336,12 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
                         value_or_null(observed.get("work_state"));
                     if was_open && !action_is_nonterminal(Some(&new_state)) {
                         let view = state.plan_actions[index].clone();
-                        compare_with_forecast(state, &view, &new_state, observed_tick);
+                        let receipt_tick = observed
+                            .get("observed_anchor")
+                            .and_then(|anchor| anchor.get("game_tick"))
+                            .and_then(Value::as_u64)
+                            .or(observed_tick);
+                        compare_with_forecast(state, &view, &new_state, receipt_tick);
                     }
                 }
             }
@@ -1418,6 +1423,12 @@ fn has_drain_observation(operation: &str, payload: &Value) -> bool {
         && payload.get("drain_progress").is_some_and(Value::is_object)
 }
 
+fn has_wait_observation(operation: &str, payload: &Value) -> bool {
+    operation == "fortress.wait"
+        && payload.get("observed_anchor").is_some_and(Value::is_object)
+        && payload.get("wait_progress").is_some_and(Value::is_object)
+}
+
 fn presentation_state(
     operation: &str,
     payload: &mut Value,
@@ -1451,11 +1462,13 @@ fn presentation_state(
         Some(existing) => {
             let prior = existing.anchor.clone();
             existing.fresh_surprises.clear();
-            // A later drain step may refuse after earlier stops or an
-            // emergency pause succeeded. Its anchored observation is current
-            // even though the requested drain is incomplete. Keep that work
-            // and clock state visible without treating the refusal as success.
-            if is_ok(payload) || has_drain_observation(operation, payload) {
+            // A wait or drain can refuse after publishing earlier progress.
+            // Keep its authorized current work and clock state visible even
+            // though the requested operation remains incomplete.
+            if is_ok(payload)
+                || has_drain_observation(operation, payload)
+                || has_wait_observation(operation, payload)
+            {
                 update_orientation(operation, payload, existing);
             } else if let Some(rebased) = payload.get("rebased_plan") {
                 record_surprise(
@@ -1744,7 +1757,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
 }
 
 #[tool(
-    description = "Poll active work and return bounded verification state. max_game_ticks lets laboratory game time pass first (only while unpaused, within the session game-tick budget) and then polls every open committed action across plans (which also dispatches deferred steps whose dependencies verified)."
+    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Reports actual elapsed and remaining ticks, the final action states and original goals; a pause or failure stops further progression."
 )]
 pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
     let recorded = json!({"max_game_ticks": max_game_ticks});
