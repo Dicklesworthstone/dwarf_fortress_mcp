@@ -15,7 +15,10 @@ mod planner;
 pub use action::{
     Action, ActionScope, BuildingKind, DigMode, MaterialSelector, WorkOrderCondition,
 };
-pub use alert_fsm::{CivilianAlertFsm, ThreatLevel};
+pub use alert_fsm::{
+    AlertDecision, AlertObservation, AlertRecoveryPolicy, CivilianAlertFsm, ThreatAssessment,
+    ThreatLevel,
+};
 pub use blueprint::{BlueprintPlanner, BlueprintTemplate, HazardAssessment};
 pub use effect_quiescence::{EffectWorkState, inspect_effect_work};
 pub use labor::{
