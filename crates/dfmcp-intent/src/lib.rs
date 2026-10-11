@@ -7,6 +7,7 @@ pub mod effect_quiescence;
 pub mod effects;
 pub mod execution;
 pub mod labor;
+pub mod labor_execution;
 pub mod logistics;
 pub mod obligation;
 mod plan;
@@ -25,6 +26,7 @@ pub use labor::{
     DwarfLaborProfile, HIGH_STRESS_THRESHOLD, LaborAllocation, LaborAllocationLimits,
     LaborAllocator, LaborDemand, LaborStaffing,
 };
+pub use labor_execution::LaborExecutionPlan;
 pub use logistics::{
     InventoryStockpile, ProductionLogisticsCompiler, ProductionPlan, ProductionPlanningLimits,
     ProductionQuota, ProductionRecipe, ProductionRequirement, ProductionShortage, ProductionStep,
