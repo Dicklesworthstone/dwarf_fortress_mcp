@@ -44,6 +44,17 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Retain source floors through rejected original-goal brackets (2026-10-11)
+
+Selected-order observations now advance the retained progress floor before
+cross-source bracket validation. A newer finite counter remains known even
+when that progress endpoint disagrees with the queue or the other endpoint;
+later observations cannot increase the counter and erase the contradiction.
+Original-goal evaluation uses a private pending transition and exposes it only
+after final policy and publication checks. All 40 actual-adapter work-order
+integration cases pass, including both partial-bracket regressions. This
+increment does not yet persist native goal history across process restart.
+
 ### Continue interrupted setup after action retirement and another reopen (2026-10-11)
 
 An original production goal can now retain proof that a dependent step was

@@ -153,6 +153,11 @@ source resets, clock/cursor rollback and disappearance followed by reappearance
 refuse or fence the observation. Session-wide source floors prevent a newer
 goal from making an older source current again.
 
+Each typed progress endpoint advances its own retained counter floor before
+cross-source bracket validation. A rejected bracket therefore cannot erase a
+newer remaining counter and permit an increase in a later sample. Goal proof
+is evaluated privately and becomes visible only after final publication checks.
+
 The current goal and first achieved anchor remain separate. Later False or
 Unknown observations preserve first achievement without claiming present
 success. This native goal history is currently process-local. Reattachment

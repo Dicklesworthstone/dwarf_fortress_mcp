@@ -1121,3 +1121,120 @@ fn actual_closed_rpc_clients_drive_the_original_goal_to_completion_and_only_send
     }
     Ok(())
 }
+
+#[test]
+fn progress_before_a_mismatched_queue_frontier_still_fences_later_counter_increase() -> Result<()> {
+    let (f, mut session, review) = goal_fixture()?;
+    let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+    poll(&f, &mut session, &mut monitor, 1, 10, 4, true, false, |p| {
+        Ok(grant(p))
+    })?;
+    let queue = advance(&f, 20)?;
+    let later = changed_clock(
+        &queue,
+        queue.generation(),
+        queue.sequence(),
+        queue.tick() + 1,
+    )?;
+    let id = review.native_plan().observation().next_order_id();
+    let closed = Rc::new(Cell::new(0));
+    let source = native_progress(vec![progress(&later, id, 3, 2, 1, 3)?], Rc::clone(&closed));
+    let operations_contacts = Cell::new(0);
+    let refused = session.poll_original_goal(
+        &mut monitor,
+        ObservationCursor {
+            epoch: f.context.anchor.cursor.epoch,
+            sequence: f.context.anchor.cursor.sequence + 2,
+        },
+        &f.context,
+        |_| Ok(source),
+        |_| {
+            operations_contacts.set(operations_contacts.get() + 1);
+            Err::<OperationsFixture, _>(rejected())
+        },
+        |p, _| Ok(grant(p)),
+    );
+    assert_eq!(
+        refused.err().ok_or_else(rejected)?.code,
+        ErrorCode::StaleAnchor
+    );
+    assert_eq!(closed.get(), 1);
+    assert_eq!(operations_contacts.get(), 0);
+    assert!(monitor.latest().is_none());
+    assert!(
+        !monitor.is_fenced(),
+        "a coherent but differently timed endpoint may be sampled again"
+    );
+    let increase = poll(&f, &mut session, &mut monitor, 3, 30, 3, true, false, |p| {
+        Ok(grant(p))
+    });
+    assert_eq!(
+        increase.err().ok_or_else(rejected)?.code,
+        ErrorCode::StaleAnchor
+    );
+    assert!(
+        monitor.is_fenced(),
+        "the consumed remaining=2 cannot be rolled back to 3"
+    );
+    assert!(monitor.first_satisfied_anchor().is_none());
+    Ok(())
+}
+
+#[test]
+fn changed_second_progress_endpoint_still_fences_later_counter_increase() -> Result<()> {
+    let (f, mut session, review) = goal_fixture()?;
+    let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+    poll(&f, &mut session, &mut monitor, 1, 10, 4, true, false, |p| {
+        Ok(grant(p))
+    })?;
+    let queue = advance(&f, 20)?;
+    let id = review.native_plan().observation().next_order_id();
+    let closed = Rc::new(Cell::new(0));
+    let source = native_progress(
+        vec![
+            progress(&queue, id, 3, 3, 1, 3)?,
+            progress(&queue, id, 4, 2, 1, 3)?,
+        ],
+        Rc::clone(&closed),
+    );
+    let raw = operations(&queue, true, false);
+    let refused = session.poll_original_goal(
+        &mut monitor,
+        ObservationCursor {
+            epoch: f.context.anchor.cursor.epoch,
+            sequence: f.context.anchor.cursor.sequence + 2,
+        },
+        &f.context,
+        |_| Ok(source),
+        |_| {
+            Ok(OperationsFixture {
+                raw,
+                closed: Rc::clone(&closed),
+            })
+        },
+        |p, _| Ok(grant(p)),
+    );
+    assert_eq!(
+        refused.err().ok_or_else(rejected)?.code,
+        ErrorCode::StaleAnchor
+    );
+    assert_eq!(closed.get(), 2);
+    assert!(monitor.latest().is_none());
+    assert!(
+        !monitor.is_fenced(),
+        "a decreasing endpoint alone does not change the finite order"
+    );
+    let increase = poll(&f, &mut session, &mut monitor, 3, 30, 3, true, false, |p| {
+        Ok(grant(p))
+    });
+    assert_eq!(
+        increase.err().ok_or_else(rejected)?.code,
+        ErrorCode::StaleAnchor
+    );
+    assert!(
+        monitor.is_fenced(),
+        "failed bracket cannot erase its second endpoint"
+    );
+    assert!(monitor.first_satisfied_anchor().is_none());
+    Ok(())
+}

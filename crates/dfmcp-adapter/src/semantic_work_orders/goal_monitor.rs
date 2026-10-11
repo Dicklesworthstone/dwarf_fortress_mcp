@@ -30,11 +30,11 @@ use super::{
     SemanticWorkOrderSession, VIEW_COST, custody, error, exhausted, original,
 };
 
-const PROJECTION_BYTES: u64 = 128 * 1024 * 1024;
+pub(super) const PROJECTION_BYTES: u64 = 128 * 1024 * 1024;
 const OPERATIONS_BYTES: u64 = 16 * 1024 * 1024;
-const POLICY_BYTES: u64 = 1024 * 1024;
+pub(super) const POLICY_BYTES: u64 = 1024 * 1024;
 const OUTPUT_BYTES: u64 = 8192;
-const POLL_BYTES: u64 = LOCAL_BYTES
+pub(super) const POLL_BYTES: u64 = LOCAL_BYTES
     + PROJECTION_BYTES
     + OPERATIONS_BYTES
     + 2 * BOOTSTRAP_BYTE_RESERVE
@@ -55,7 +55,7 @@ impl OperationsGoalSource for OperationsRpcClient<DeadlineStream> {
     }
 }
 
-fn authorize(original: StateAnchor, c: &OperationContext) -> Result<()> {
+pub(super) fn authorize(original: StateAnchor, c: &OperationContext) -> Result<()> {
     if c.anchor.fortress_id != original.fortress_id
         || c.anchor.cursor.epoch != original.cursor.epoch
     {
@@ -74,8 +74,16 @@ fn creation(
     if record.plan() != &review.native {
         return Err(custody());
     }
-    let effect = WorkOrderEffect::decode(record.effect().canonical_bytes(), &review.native)?;
-    if record.state() == CreationState::Created && effect.state() == WorkOrderState::Created {
+    historical_creation(review, record.state(), record.effect())
+}
+
+pub(super) fn historical_creation(
+    review: &SemanticWorkOrderReview,
+    state: CreationState,
+    effect: &WorkOrderEffect,
+) -> Result<NativeOrderCreation> {
+    let effect = WorkOrderEffect::decode(effect.canonical_bytes(), &review.native)?;
+    if state == CreationState::Created && effect.state() == WorkOrderState::Created {
         Ok(NativeOrderCreation::Inserted {
             native_order_id: effect.created_order_id().ok_or_else(custody)?,
             receipt: effect.receipt().ok_or_else(custody)?,
@@ -142,25 +150,25 @@ impl WorkOrderGoalResult {
 /// contradiction. Reattachment starts a fresh streak with the original deadline.
 #[derive(Debug)]
 pub struct WorkOrderGoalMonitor {
-    owner: Weak<()>,
-    review: SemanticWorkOrderReview,
-    operations: LiveOperationsState,
-    progress_manifest: Option<ProgressManifest>,
-    progress_floor: Option<ProgressObservation>,
+    pub(super) owner: Weak<()>,
+    pub(super) review: SemanticWorkOrderReview,
+    pub(super) operations: LiveOperationsState,
+    pub(super) progress_manifest: Option<ProgressManifest>,
+    pub(super) progress_floor: Option<ProgressObservation>,
     postconditions: Predicate,
     conjunction: Predicate,
-    runtime: Option<ObligationRuntime>,
-    action_id: ActionId,
-    cursor_floor: ObservationCursor,
-    high_tick: GameTick,
-    last_anchor: Option<StateAnchor>,
+    pub(super) runtime: Option<ObligationRuntime>,
+    pub(super) action_id: ActionId,
+    pub(super) cursor_floor: ObservationCursor,
+    pub(super) high_tick: GameTick,
+    pub(super) last_anchor: Option<StateAnchor>,
     first_satisfied_anchor: Option<StateAnchor>,
     latest: Option<WorkOrderGoalProgress>,
-    interrupted: bool,
-    fenced: bool,
+    pub(super) interrupted: bool,
+    pub(super) fenced: bool,
 }
 impl WorkOrderGoalMonitor {
-    fn new(
+    pub(super) fn new(
         review: SemanticWorkOrderReview,
         context: &OperationContext,
         owner: Weak<()>,
@@ -214,6 +222,28 @@ impl WorkOrderGoalMonitor {
             fenced: false,
         })
     }
+    // Proof transitions remain private until their durable publication succeeds.
+    // A public Clone would let callers branch around a retained contradiction.
+    pub(super) fn pending_sample(&self) -> Self {
+        Self {
+            owner: self.owner.clone(),
+            review: self.review.clone(),
+            operations: self.operations.clone(),
+            progress_manifest: self.progress_manifest.clone(),
+            progress_floor: self.progress_floor.clone(),
+            postconditions: self.postconditions.clone(),
+            conjunction: self.conjunction.clone(),
+            runtime: self.runtime.clone(),
+            action_id: self.action_id,
+            cursor_floor: self.cursor_floor,
+            high_tick: self.high_tick,
+            last_anchor: self.last_anchor,
+            first_satisfied_anchor: self.first_satisfied_anchor,
+            latest: self.latest.clone(),
+            interrupted: self.interrupted,
+            fenced: self.fenced,
+        }
+    }
     pub fn original_plan(&self) -> &dfmcp_intent::PreparedPlan {
         &self.review.original
     }
@@ -240,7 +270,7 @@ impl WorkOrderGoalMonitor {
         }
         Ok(())
     }
-    fn cursor(&self, cursor: ObservationCursor) -> Result<()> {
+    pub(super) fn cursor(&self, cursor: ObservationCursor) -> Result<()> {
         if self.fenced
             || cursor.epoch != self.review.original.anchor.cursor.epoch
             || cursor.sequence <= self.cursor_floor.sequence
@@ -255,7 +285,7 @@ impl WorkOrderGoalMonitor {
         }
         Ok(())
     }
-    fn capture_floor(
+    pub(super) fn capture_floor(
         &mut self,
         manifest: &ProgressManifest,
         capture: &ProgressObservation,
@@ -296,7 +326,7 @@ impl WorkOrderGoalMonitor {
         self.progress_floor = Some(capture.clone());
         Ok(())
     }
-    fn sample(
+    pub(super) fn sample(
         &mut self,
         projection: &WorkOrderGoalProjection,
         policy: &EvidencePolicy,
@@ -367,7 +397,7 @@ impl WorkOrderGoalMonitor {
     }
 }
 
-fn same_progress(before: &ProgressObservation, after: &ProgressObservation) -> bool {
+pub(super) fn same_progress(before: &ProgressObservation, after: &ProgressObservation) -> bool {
     before.generation() == after.generation()
         && after.sequence() > before.sequence()
         && before.tick() == after.tick()
@@ -379,7 +409,10 @@ fn same_progress(before: &ProgressObservation, after: &ProgressObservation) -> b
         && before.rows() == after.rows()
 }
 
-fn capture_frontier(capture: &ProgressObservation, queue: &WorkOrderObservation) -> Result<()> {
+pub(super) fn capture_frontier(
+    capture: &ProgressObservation,
+    queue: &WorkOrderObservation,
+) -> Result<()> {
     if !capture.paused()
         || capture.tick() != queue.tick()
         || capture.fortress_id() != queue.fortress_id()
@@ -399,6 +432,58 @@ fn capture_frontier(capture: &ProgressObservation, queue: &WorkOrderObservation)
     }
     Ok(())
 }
+
+/// Private hooks preserve acquisition order and publish proof only after its
+/// history is durable. A caller cannot substitute a sink or import a monitor.
+pub(super) trait GoalPublication {
+    fn preflight(&mut self, _cursor: ObservationCursor, _call: &mut Call) -> Result<()> {
+        Ok(())
+    }
+    fn started(
+        &mut self,
+        _monitor: &WorkOrderGoalMonitor,
+        _cursor: ObservationCursor,
+        _call: &mut Call,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn queue_captured(&mut self, _queue: &WorkOrderObservation, _call: &mut Call) -> Result<()> {
+        Ok(())
+    }
+    fn progress_captured(
+        &mut self,
+        _manifest: &ProgressManifest,
+        _capture: &ProgressObservation,
+        _call: &mut Call,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn operations_captured(
+        &mut self,
+        _capture: &LiveOperationsObservation,
+        _call: &mut Call,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn published(
+        &mut self,
+        _projection: &WorkOrderGoalProjection,
+        _policy: &EvidencePolicy,
+        _record: &CreationRecord,
+        _call: &mut Call,
+    ) -> Result<()> {
+        Ok(())
+    }
+    fn failed(
+        &mut self,
+        _monitor: &WorkOrderGoalMonitor,
+        _context: &OperationContext,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+struct ProcessLocalPublication;
+impl GoalPublication for ProcessLocalPublication {}
 
 impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
     SemanticWorkOrderSession<S, B, N>
@@ -440,7 +525,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         context: &OperationContext,
         progress_factory: F,
         operations_factory: G,
-        mut policy: A,
+        policy: A,
     ) -> Result<WorkOrderGoalResult>
     where
         P: ProgressSource,
@@ -449,6 +534,34 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         G: FnOnce(&OperationContext) -> Result<O>,
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
+        self.poll_original_goal_with_publication(
+            monitor,
+            cursor,
+            context,
+            (progress_factory, operations_factory),
+            policy,
+            &mut ProcessLocalPublication,
+        )
+    }
+
+    pub(super) fn poll_original_goal_with_publication<P, O, F, G, A, J>(
+        &mut self,
+        monitor: &mut WorkOrderGoalMonitor,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        factories: (F, G),
+        mut policy: A,
+        publication: &mut J,
+    ) -> Result<WorkOrderGoalResult>
+    where
+        P: ProgressSource,
+        O: OperationsGoalSource,
+        F: FnOnce(&OperationContext) -> Result<P>,
+        G: FnOnce(&OperationContext) -> Result<O>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+        J: GoalPublication,
+    {
+        let (progress_factory, operations_factory) = factories;
         monitor.latest = None;
         let result = (|| {
             let owner = monitor.owner.upgrade().ok_or_else(|| {
@@ -487,6 +600,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 return Err(exhausted());
             }
             call.admit(POLL_BYTES)?;
+            publication.preflight(cursor, &mut call)?;
             call.reserve(LOCAL_BYTES + PROJECTION_BYTES + OUTPUT_BYTES)?;
             let policy_budget = call.reserve(POLICY_BYTES)?;
             let final_policy_budget = call.reserve(POLICY_BYTES)?;
@@ -504,7 +618,18 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             let creation = creation(&review, record)?;
             let native_state = record.state();
             let source_manifest = record.manifest().clone();
-            let queue = self.observe_native(&mut call)?;
+            publication.started(monitor, cursor, &mut call)?;
+            let queue = self.observe_native(&mut call).inspect_err(|cause| {
+                if cause.code == ErrorCode::StaleAnchor {
+                    monitor.fenced = true;
+                }
+            })?;
+            monitor.high_tick = monitor.high_tick.max(GameTick(queue.tick()));
+            publication
+                .queue_captured(&queue, &mut call)
+                .inspect_err(|_| {
+                    monitor.fenced = true;
+                })?;
             if self.native.selected_manifest(&call.current()?)? != Some(&source_manifest)
                 || queue.generation() != review.native.observation().generation()
                 || !queue.paused()
@@ -516,7 +641,6 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "current creation queue changed original source identity or paused clock",
                 ));
             }
-            monitor.high_tick = monitor.high_tick.max(GameTick(queue.tick()));
             call.context.anchor.tick = monitor.high_tick;
             authorize(review.original.anchor, &call.current()?)?;
             let ids = [review.native.observation().next_order_id()];
@@ -537,6 +661,10 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             let read = call.reserve(RPC_BYTE_RESERVE)?;
             let before = source.read(&ids, Duration::from_millis(read.budget.max_wall_millis))?;
             let before = ProgressObservation::decode(before.canonical_bytes(), &ids)?;
+            monitor.high_tick = monitor.high_tick.max(GameTick(before.tick()));
+            publication
+                .progress_captured(&manifest, &before, &mut call)
+                .inspect_err(|_| monitor.fenced = true)?;
             if source.manifest() != &manifest || before.generation() != manifest.generation {
                 source.fence();
                 monitor.fenced = true;
@@ -545,8 +673,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "progress source changed during acquisition",
                 ));
             }
-            capture_frontier(&before, &queue)?;
             monitor.capture_floor(&manifest, &before)?;
+            capture_frontier(&before, &queue)?;
             call.context.anchor.tick = call.context.anchor.tick.max(monitor.high_tick);
             authorize(review.original.anchor, &call.current()?)?;
             let raw = {
@@ -565,8 +693,11 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             {
                 return Err(exhausted());
             }
-            raw.validate()?;
+            raw.validate().inspect_err(|_| monitor.fenced = true)?;
             monitor.high_tick = monitor.high_tick.max(raw.jobs.tick());
+            publication
+                .operations_captured(&raw, &mut call)
+                .inspect_err(|_| monitor.fenced = true)?;
             call.context.anchor.tick = call.context.anchor.tick.max(monitor.high_tick);
             authorize(review.original.anchor, &call.current()?)?;
             let mut operations = monitor.operations.clone();
@@ -583,16 +714,36 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             let read = call.reserve(RPC_BYTE_RESERVE)?;
             let after = source.read(&ids, Duration::from_millis(read.budget.max_wall_millis))?;
             let after = ProgressObservation::decode(after.canonical_bytes(), &ids)?;
-            if source.manifest() != &manifest || !same_progress(&before, &after) {
+            monitor.high_tick = monitor.high_tick.max(GameTick(after.tick()));
+            publication
+                .progress_captured(&manifest, &after, &mut call)
+                .inspect_err(|_| monitor.fenced = true)?;
+            if source.manifest() != &manifest {
+                source.fence();
+                monitor.fenced = true;
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "progress source changed during the second acquisition",
+                ));
+            }
+            monitor.capture_floor(&manifest, &after)?;
+            if !same_progress(&before, &after) {
                 source.fence();
                 return Err(error(
                     ErrorCode::StaleAnchor,
                     "selected order changed across the complete operations capture",
                 ));
             }
-            monitor.capture_floor(&manifest, &after)?;
             drop(source);
-            let final_queue = self.observe_native(&mut call)?;
+            let final_queue = self.observe_native(&mut call).inspect_err(|cause| {
+                if cause.code == ErrorCode::StaleAnchor {
+                    monitor.fenced = true;
+                }
+            })?;
+            monitor.high_tick = monitor.high_tick.max(GameTick(final_queue.tick()));
+            publication
+                .queue_captured(&final_queue, &mut call)
+                .inspect_err(|_| monitor.fenced = true)?;
             if final_queue != queue
                 || self.native.selected_manifest(&call.current()?)? != Some(&source_manifest)
             {
@@ -622,6 +773,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             authorize(review.original.anchor, &c)?;
             let granted = policy(&projection, &c)?;
             let evidence = projection.evidence(granted.clone())?;
+            let mut pending = monitor.pending_sample();
+            let progress = pending.sample(&projection, &granted, &evidence)?;
             let (_, final_records) = self.view(&mut call)?;
             self.exact(&review)?;
             if !final_records.contains(record) {
@@ -640,7 +793,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 .verify(&call.reserve(super::STORE_BYTES)?)?;
             authorize(review.original.anchor, &call.current()?)?;
             self.floor.retain_anchor(projection.anchor())?;
-            let progress = monitor.sample(&projection, &granted, &evidence)?;
+            publication.published(&projection, &granted, record, &mut call)?;
+            *monitor = pending;
             Ok(WorkOrderGoalResult {
                 progress,
                 creation,
@@ -649,7 +803,14 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         })();
         self.native.clear_selection();
         if result.is_err() {
+            if let Some(clock) = self.floor.native {
+                monitor.high_tick = monitor.high_tick.max(GameTick(clock.tick));
+            }
             monitor.observation_interrupted()?;
+            if let Err(cause) = publication.failed(monitor, context) {
+                monitor.fenced = true;
+                return Err(cause);
+            }
         }
         result
     }

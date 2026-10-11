@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-11 — Retain source history when original-goal sampling fails
+
+- Retain selected-order counters from both progress endpoints before rejecting
+  an inconsistent queue or operations bracket. A later counter increase cannot
+  hide behind the failed sample and become eligible goal evidence.
+- Evaluate original-goal proof on a private pending transition, after retaining
+  source identity and before exposing the result. Internal acquisition and
+  publication boundaries support durable history without granting source policy.
+- Pass 40 actual-adapter work-order integration cases, including both rejected
+  bracket regressions. Goal history remains process-local in this increment.
+
 ## 2026-10-11 — Preserve undispatched original goals through repeated recovery
 
 - Retain exact anchored `not_dispatched` steps in the original objective when
