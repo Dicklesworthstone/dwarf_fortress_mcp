@@ -33,7 +33,8 @@ use crate::work_orders::{WorkOrderRecipe, WorkOrderSpec};
 mod resolution;
 pub use resolution::{
     LiveIdentitySchema, LiveRoutingEvidence, NativeUnitIdentity, ResolvedFurnitureRoute,
-    ResolvedWorkforceRoute, resolve_furniture_step, resolve_workforce_step,
+    ResolvedWorkOrderRoute, ResolvedWorkforceRoute, resolve_furniture_step,
+    resolve_work_order_step, resolve_workforce_step,
 };
 
 /// Largest dig/1.16 rectangle edge.

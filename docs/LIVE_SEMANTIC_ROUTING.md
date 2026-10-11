@@ -84,6 +84,24 @@ receipt into verified action completion. Its supported subset, current-truth
 projection and read-only recovery flow are documented in
 `docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
 
+## Original work-order execution handoff
+
+`resolve_work_order_step` binds one original closed furniture-recipe action to
+the complete work-orders/1.10 queue, exact independently authorized canonical
+source and original semantic key. Queue membership does not establish material
+availability, workshop progress or produced goods.
+
+`SemanticWorkOrderSession` carries that original plan through durable semantic
+association, native preparation, confirmed single-attempt insertion and restart.
+Independent evidence is refreshed after queue capture and again at native effect
+boundaries, including after DispatchStarted sync. Cross-goal retained canonical
+and native chronology prevents older sources from authorizing new control.
+Historical Query-authorized reattachment and reconciliation preserve Unknown
+without inserting another order. Strict Created readback becomes a distinct
+`NativeOrderCreation::Inserted` result; original goals and obligations stay
+pending. See `SEMANTIC_WORK_ORDER_HANDOFF.md` for the closed recipes, operator
+acquisition API, private store, bounds and failure behavior.
+
 ## Furniture constraints remain explicit
 
 Both `LiveRequest::Furniture` and `LiveResolution::FurnitureItem` retain the full

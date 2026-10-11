@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original semantic native work-order handoff (2026-10-11)
+
+`SemanticWorkOrderSession` now carries one original unconditional
+`CreateWorkOrder` for the four closed wooden-furniture recipes into the existing
+work-orders/1.10 coordinator. It preserves the original semantic key, complete
+plan and obligation while binding the native candidate to independently
+qualified canonical source and a complete paused queue capture. The concrete
+complete citizen acquisition owner supplies the observing side without creating
+new source-policy or compatibility authority.
+
+A separate private `DFMSOJ01` association store retains the exact semantic/native
+identity and journal incarnation before native preparation. Fresh evidence and
+custody checks guard preparation and the sole insertion attempt; the final guard
+runs after DispatchStarted sync. Cross-goal canonical and native source floors
+survive restart, and sorted retained-history validation rejects forks before
+merging maxima. Ambiguous persistence or native effects remain unresolved.
+
+Current Query authority permits exact original-plan reattachment, historical
+inspection and receipt reconciliation. Unknown cannot become permission to
+insert again. Native Created readback is reported separately as
+`NativeOrderCreation::Inserted`; original postconditions and goal remain unproved
+and the original obligation is unchanged. Cancellation retires only local
+undispatched preparation. This is a bounded operator-owned Rust handoff, with
+no new MCP tool/dispatch route, wire method, production runner or admitted tuple.
+
+**Evidence:** all 21 new public integration tests pass against the actual adapter
+library, covering strict native codecs, complete citizen acquisition, all closed
+recipes, lost reply without redispatch, authority and budget refusal, sync
+failure, exact restart, cross-goal chronology and real private-file storage.
+All 18 existing work-order coordinator regressions, all 43 workforce integration
+tests and all 93 actual-source production tests pass. Warning-denied adapter
+library Clippy passes; all 644 inventoried source/build inputs stay byte-identical
+across these checks. Independent review and scoped formatting pass. Native
+responses are synthetic; this does not establish a plugin build, live campaign
+or full-workspace qualification. See `docs/SEMANTIC_WORK_ORDER_HANDOFF.md` for the supported API,
+original-plan recovery requirements and limits.
+
 ### Consumption-aware original production and whole-goal forecasts (2026-10-11)
 
 New laboratory production intake uses fixed `consumption_aware_v1` source

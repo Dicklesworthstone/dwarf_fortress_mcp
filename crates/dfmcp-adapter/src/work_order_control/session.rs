@@ -67,6 +67,10 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
             .as_ref()
             .map(|selection| &selection.observation))
     }
+    /// Invalidating a review also invalidates its native planning selection.
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+    }
     /// A failed refresh never leaves the old witness eligible for new control.
     pub fn observe(&mut self, context: &OperationContext) -> Result<WorkOrderObservation> {
         self.access(context)?;
@@ -142,6 +146,21 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         witness: Digest32,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
+        self.plan_guarded(key, spec, witness, context, 0, |_, _| Ok(()))
+    }
+    /// Opt-in semantic guard; ordinary native callers retain their existing path.
+    pub fn plan_guarded<G>(
+        &mut self,
+        key: &str,
+        spec: WorkOrderSpec,
+        witness: Digest32,
+        context: &OperationContext,
+        guard_bytes: u64,
+        guard: G,
+    ) -> Result<CreationRecord>
+    where
+        G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
+    {
         self.production(context)?;
         validate_key(key)?;
         if let Some(record) = self.journal.lookup(key, context)? {
@@ -161,7 +180,9 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
                 "creation requires a connection",
             )
         })?;
-        let result = self.journal.prepare(source, &plan, context);
+        let result = self
+            .journal
+            .prepare_guarded(source, &plan, context, guard_bytes, guard);
         if result.is_err() {
             self.selected = None;
         }
@@ -195,6 +216,21 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         witness: Digest32,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
+        self.commit_guarded(key, digest, witness, context, 0, |_, _| Ok(()))
+    }
+    /// Preserve the journal's sync-before-dispatch ordering for a semantic guard.
+    pub fn commit_guarded<G>(
+        &mut self,
+        key: &str,
+        digest: Digest32,
+        witness: Digest32,
+        context: &OperationContext,
+        guard_bytes: u64,
+        guard: G,
+    ) -> Result<CreationRecord>
+    where
+        G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
+    {
         self.production(context)?;
         let record = self.record(key, digest, context)?;
         if record.plan().observation().witness() != witness {
@@ -223,7 +259,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
                 "creation requires a connection",
             )
         })?;
-        self.journal.commit(source, record.plan(), context)
+        self.journal
+            .commit_guarded(source, record.plan(), context, guard_bytes, guard)
     }
     /// Prepared/terminal replay does not contact the bridge or modify evidence.
     pub fn reconcile(

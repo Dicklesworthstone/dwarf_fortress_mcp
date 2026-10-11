@@ -15,6 +15,7 @@ use crate::live_spatial::{
     SpatialStateView,
     citizens::{LiveSpatialCitizenState, citizen_entity_id},
 };
+use crate::work_orders::{WorkOrderObservation, WorkOrderPlan};
 use crate::workforce_control::{
     AssignmentEffect, AssignmentPhase, AssignmentPlan, AssignmentSpec, WorkforceCapture,
 };
@@ -410,6 +411,71 @@ fn selected_step<'a>(
         }
     }
     Ok(step)
+}
+
+/// A source-bound candidate for one closed work-orders/1.10 recipe. The original
+/// semantic name remains in the original plan; the native wire does not add a
+/// manager-order name or prove any original postcondition or production goal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedWorkOrderRoute {
+    semantic_plan: Digest32,
+    step: StepId,
+    anchor: StateAnchor,
+    source_digest: Digest32,
+    native_plan: WorkOrderPlan,
+}
+
+impl ResolvedWorkOrderRoute {
+    pub const fn semantic_plan_digest(&self) -> Digest32 {
+        self.semantic_plan
+    }
+    pub const fn step(&self) -> StepId {
+        self.step
+    }
+    pub const fn anchor(&self) -> StateAnchor {
+        self.anchor
+    }
+    pub const fn source_digest(&self) -> Digest32 {
+        self.source_digest
+    }
+    pub fn native_plan(&self) -> &WorkOrderPlan {
+        &self.native_plan
+    }
+}
+
+/// Resolve the original key and recipe against the exact source-qualified
+/// canonical anchor and independently captured complete native queue. Native
+/// membership alone establishes no material availability or production progress.
+pub fn resolve_work_order_step(
+    plan: &PreparedPlan,
+    step_id: StepId,
+    evidence: &LiveRoutingEvidence<'_>,
+    observation: &WorkOrderObservation,
+) -> Result<ResolvedWorkOrderRoute> {
+    let step = selected_step(plan, step_id, evidence)?;
+    let route = route_step(step)
+        .outcome
+        .map_err(|refusal| invalid(refusal.reason))?;
+    let LiveRequest::WorkOrder { spec } = route.request else {
+        return Err(invalid(
+            "selected step is not a supported work-order creation",
+        ));
+    };
+    evidence.native_capture(
+        observation.world_folder(),
+        observation.site_id(),
+        observation.generation(),
+        observation.tick(),
+        observation.paused(),
+    )?;
+    let native_plan = WorkOrderPlan::new(observation.clone(), &step.idempotency_key, spec)?;
+    Ok(ResolvedWorkOrderRoute {
+        semantic_plan: plan.digest,
+        step: step_id,
+        anchor: plan.anchor,
+        source_digest: evidence.source_digest(),
+        native_plan,
+    })
 }
 
 /// Resolve a single-labor request without broadening it to a multi-labor detail.

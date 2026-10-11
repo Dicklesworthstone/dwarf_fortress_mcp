@@ -86,6 +86,13 @@ impl Allowance {
         self.bytes = self.bytes.checked_sub(bytes).ok_or_else(exhausted)?;
         Ok(())
     }
+    fn guard_context(&self, context: &OperationContext, bytes: u64) -> Result<OperationContext> {
+        let mut current = context.clone();
+        current.budget.max_wall_millis =
+            u64::try_from(self.remaining()?.as_millis()).map_err(|_| exhausted())?;
+        current.budget.max_bytes = bytes;
+        Ok(current)
+    }
 }
 fn authorize(context: &OperationContext, fortress: FortressId, production: bool) -> Result<()> {
     if context.anchor.fortress_id != fortress {
@@ -583,6 +590,23 @@ impl<S: EffectJournalStorage> WorkOrderJournal<S> {
         plan: &WorkOrderPlan,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
+        self.prepare_guarded(source, plan, context, 0, |_, _| Ok(()))
+    }
+    /// Independently revalidate semantic custody and evidence immediately before
+    /// native preparation. The guard's byte allowance is reserved from this call;
+    /// the guard receives the same shrinking deadline and no additional grants.
+    pub fn prepare_guarded<N, G>(
+        &mut self,
+        source: &mut N,
+        plan: &WorkOrderPlan,
+        context: &OperationContext,
+        guard_bytes: u64,
+        mut guard: G,
+    ) -> Result<CreationRecord>
+    where
+        N: WorkOrderSource,
+        G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
+    {
         let mut budget = Allowance::new(context)?;
         self.writable(context, true)?;
         if self.records.contains_key(plan.key()) {
@@ -598,8 +622,17 @@ impl<S: EffectJournalStorage> WorkOrderJournal<S> {
         }
         self.reserve(3)?;
         budget.charge(RPC_RESERVE_BYTES)?;
+        budget.charge(guard_bytes)?;
         if budget.bytes < MAX_FRAME_BYTES as u64 {
             return Err(exhausted());
+        }
+        guard(plan, &budget.guard_context(context, guard_bytes)?)?;
+        self.writable(context, true)?;
+        if source.manifest() != &manifest {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "creation source changed during semantic preparation guard",
+            ));
         }
         let reply = source.prepare(plan, budget.remaining()?);
         let effect = checked(source, &manifest, plan, reply)?;
@@ -619,6 +652,23 @@ impl<S: EffectJournalStorage> WorkOrderJournal<S> {
         plan: &WorkOrderPlan,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
+        self.commit_guarded(source, plan, context, 0, |_, _| Ok(()))
+    }
+    /// The guard runs AFTER DispatchStarted is synced and before the sole native
+    /// insertion call. Guard failure preserves dispatch uncertainty and fences the
+    /// native source; it can never return the record to Prepared.
+    pub fn commit_guarded<N, G>(
+        &mut self,
+        source: &mut N,
+        plan: &WorkOrderPlan,
+        context: &OperationContext,
+        guard_bytes: u64,
+        mut guard: G,
+    ) -> Result<CreationRecord>
+    where
+        N: WorkOrderSource,
+        G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
+    {
         let mut budget = Allowance::new(context)?;
         self.writable(context, true)?;
         budget.charge(MAX_RECORD_BYTES as u64)?;
@@ -639,6 +689,7 @@ impl<S: EffectJournalStorage> WorkOrderJournal<S> {
         }
         self.reserve(2)?;
         budget.charge(RPC_RESERVE_BYTES)?;
+        budget.charge(guard_bytes)?;
         if budget.bytes < 2 * MAX_FRAME_BYTES as u64 {
             return Err(exhausted());
         }
@@ -648,7 +699,14 @@ impl<S: EffectJournalStorage> WorkOrderJournal<S> {
             let mut started = old.clone();
             started.state = CreationState::DispatchStarted;
             self.append(started, &mut budget)?;
+            guard(plan, &budget.guard_context(context, guard_bytes)?)?;
             self.writable(context, true)?;
+            if source.manifest() != &old.manifest {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "creation source changed during semantic dispatch guard",
+                ));
+            }
             let reply = source.commit(plan, &old.effect, budget.remaining()?);
             let reply = checked(source, &old.manifest, plan, reply);
             let mut next = old;

@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-11 — Execute original semantic work orders through native custody
+
+- Add `SemanticWorkOrderSession` for one original unconditional wooden-furniture
+  work order through the existing work-orders/1.10 coordinator. Preserve the
+  original action key, full semantic plan, native review and pending obligation.
+- Resolve against complete queue capture and independently authorized canonical
+  evidence. Reuse the complete citizen acquisition owner; refresh evidence at
+  preparation and after durable DispatchStarted immediately before insertion.
+- Add a separate private immutable semantic/native association journal. Sync and
+  verify it before native preparation, reject unassociated old keys and refuse
+  uncertain native work before persisting a fresh association.
+- Retain distinct canonical and native chronology across goals/restart. Validate
+  sorted retained histories before merging current floors; query-only historical
+  reattachment/reconciliation neither renews authority nor dispatches again.
+- Report strict Created readback as native order insertion only. Original goals
+  remain unproved; prepared-only cancellation cannot remove a created order or
+  discharge Unknown effects. Bound source, history, acquisition and call budgets.
+- Pass all 21 new actual-adapter public integration tests, including complete
+  citizen acquisition, lost Created reply, sync failure, restart chronology and
+  real private-file custody. All 18 existing work-order coordinator regressions,
+  all 43 workforce integration tests and all 93 production module tests pass;
+  warning-denied adapter-library Clippy passes. All 644 inventoried source and
+  build inputs remain unchanged across final checks. Independent source review
+  and scoped formatting pass. No generic MCP dispatch or live admission is added.
+
 ## 2026-10-11 — Reach original production reserves through consumption
 
 - Add fixed `consumption_aware_v1` planning for new production requests and
