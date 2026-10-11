@@ -1,0 +1,40 @@
+{
+  "workflow": "labor_allocation_v1",
+  "roster": [
+    {
+      "id": "1001",
+      "skills": {
+        "MINING": 20,
+        "BREW": 10
+      },
+      "stress_level": 100,
+      "assigned_labors": [
+        "BREW"
+      ]
+    },
+    {
+      "id": "1002",
+      "skills": {
+        "BREW": 9
+      },
+      "stress_level": 100,
+      "assigned_labors": []
+    }
+  ],
+  "demands": [
+    {
+      "labor": "MINING",
+      "skill": "MINING",
+      "workers": 1,
+      "minimum_skill": 1,
+      "priority": 0
+    },
+    {
+      "labor": "BREW",
+      "skill": "BREW",
+      "workers": 1,
+      "minimum_skill": 1,
+      "priority": 1
+    }
+  ]
+}

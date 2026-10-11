@@ -26,6 +26,7 @@ pub mod ee_memory;
 pub mod evaluation;
 pub mod http_resumption_lab;
 pub mod job_control_session;
+#[path = "lab_workflows.rs"]
 mod lab_world;
 pub mod live_control_server;
 pub mod live_excavation_run_server;

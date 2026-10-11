@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dfmcp:labor-execution-request:1",
+  "title": "Declared workforce allocation action request",
+  "description": "Caller-declared skill/stress model, not observed native workforce evidence. The semantic planner must independently establish the proposed initial labor matrix and citizen liveness.",
+  "$comment": "Rust additionally checks total UTF-8 bytes (16384), u64 identity range, duplicate JSON keys, total requested positions (64), output steps (16), compiled bytes (262144), and work. String length bounds in Rust count UTF-8 bytes, not code points. Duplicate citizen IDs and demand labor names are rejected by Rust; schema shape validation is not execution eligibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workflow",
+    "roster",
+    "demands"
+  ],
+  "properties": {
+    "workflow": {
+      "const": "labor_allocation_v1"
+    },
+    "roster": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "demands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/demand"
+      }
+    }
+  },
+  "$defs": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "\\S",
+      "not": {
+        "pattern": "\u0000"
+      }
+    },
+    "labor": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/token"
+        },
+        {
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        }
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "skills",
+        "stress_level",
+        "assigned_labors"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "skills": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "$ref": "#/$defs/token"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          }
+        },
+        "stress_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "assigned_labors": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/token"
+          }
+        }
+      }
+    },
+    "demand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labor",
+        "skill",
+        "workers",
+        "minimum_skill",
+        "priority"
+      ],
+      "properties": {
+        "labor": {
+          "$ref": "#/$defs/labor"
+        },
+        "skill": {
+          "$ref": "#/$defs/token"
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "minimum_skill": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      }
+    }
+  }
+}

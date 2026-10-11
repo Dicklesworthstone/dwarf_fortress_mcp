@@ -1,0 +1,33 @@
+[
+  {
+    "action": {
+      "kind": "set_labor",
+      "units": [
+        "1001",
+        "1002"
+      ],
+      "labor": "MINING",
+      "enabled": false
+    }
+  },
+  {
+    "action": {
+      "kind": "set_labor",
+      "units": [
+        "1002"
+      ],
+      "labor": "BREW",
+      "enabled": false
+    }
+  },
+  {
+    "action": {
+      "kind": "set_labor",
+      "units": [
+        "1001"
+      ],
+      "labor": "BREW",
+      "enabled": true
+    }
+  }
+]
