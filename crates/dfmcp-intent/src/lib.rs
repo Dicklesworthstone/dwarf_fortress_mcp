@@ -18,7 +18,10 @@ pub use action::{
 pub use alert_fsm::{CivilianAlertFsm, ThreatLevel};
 pub use blueprint::{BlueprintPlanner, BlueprintTemplate, HazardAssessment};
 pub use effect_quiescence::{EffectWorkState, inspect_effect_work};
-pub use labor::{DwarfLaborProfile, HIGH_STRESS_THRESHOLD, LaborAllocator};
+pub use labor::{
+    DwarfLaborProfile, HIGH_STRESS_THRESHOLD, LaborAllocation, LaborAllocationLimits,
+    LaborAllocator, LaborDemand, LaborStaffing,
+};
 pub use logistics::{
     InventoryStockpile, ProductionLogisticsCompiler, ProductionPlan, ProductionPlanningLimits,
     ProductionQuota, ProductionRecipe, ProductionRequirement, ProductionShortage, ProductionStep,
