@@ -185,8 +185,11 @@ fn durable_fortress_survives_restart_with_work_and_checkpoints() -> TestResult {
     assert_eq!(commits[0]["steps"][0]["state"], "dispatched");
     assert_eq!(commits[0]["steps"][1]["state"], "not_dispatched");
     let carried = &resumed["durable"]["carried_obligations"];
-    assert_eq!(carried.as_array().map(Vec::len), Some(1), "{resumed}");
+    assert_eq!(carried.as_array().map(Vec::len), Some(2), "{resumed}");
     assert_eq!(carried[0]["action"], "designate_dig");
+    assert_eq!(carried[1]["state"], "not_dispatched");
+    assert_eq!(carried[1]["work_state"]["state"], "never_dispatched");
+    assert!(carried[1]["proof_anchor"].is_object());
 
     // The world is exactly what was persisted.
     assert_eq!(terrain(&second)?, before_crash);
@@ -348,7 +351,7 @@ fn crashes_at_each_commit_boundary_recover_without_false_success() -> TestResult
                 "after_commit_record",
                 false,
                 Some("not_dispatched".to_owned()),
-                None
+                Some("not_dispatched".to_owned())
             ),
             // The step and its world reached disk together.
             (

@@ -100,6 +100,47 @@ False truth and physical quiescence of every same-root pursuit are still checked
 when planning and committing a continuation. Recovery neither dispatches old
 actions nor recreates their grants or preparation lifetimes.
 
+## Preserve original steps that were never dispatched
+
+A production plan can lose its process while workshop construction is active
+and the dependent original order is still prepared. Recovery observes the
+existing construction but never dispatches that old deferred order. Once
+construction finishes, the original stock goal remains unmet. A new reviewed
+continuation must be able to reuse the workshop and finish that same goal.
+
+The goal book now retains positive nondispatch custody after the original
+action commit retires. Retirement copies only a step's latest explicit
+`not_dispatched` state with its exact atomically recorded world anchor. The
+original objective owns that bounded map independently of the retired action
+commit. Journal compaction retains each referenced snapshot, and subsequent
+reopens recover the same original source, seal, step and anchor.
+
+Both the first recovery of an active commit and later recovery of a retired
+goal verify that evidence against the original sealed plan. The archived
+snapshot must have its recorded hash and complete anchor, follow the original
+seal, precede the verified recovery head, and contain no contradictory creator
+under the original step's exact identity. Current contradictory creator presence
+also blocks the claim. Invalid or unanchored legacy evidence stays unresolved;
+even a physically completed conflicting creator cannot bypass reconciliation.
+Current entity absence alone never creates retirement custody.
+
+On the first opening, a final recovered `NeverDispatched` row carries the proof
+while other original work finishes. On later openings, the verified retired map
+provides the evidence without reconstructing an action handle. Authorized goal
+observations expose `retired_undispatched_steps`, with each original step, proof
+anchor and `verified_retired_dispatch_custody` basis. These historical facts do
+not make a currently unmet stock goal true, supply current grants or permit old
+idempotency keys to be dispatched.
+
+The journal uses new `W` atomic-progress and `R` retirement records for custody
+transfer; legacy progress and retirement records keep their previous semantics.
+Compaction writes each objective source separately from its bounded `N` custody
+record, preserving the existing source and ordinary-record limits. At most 256
+step anchors can belong to one retained goal. Unknown objectives, live-commit
+imports, duplicate or out-of-order custody, missing snapshots and mismatched
+anchors refuse. An uncertain append fences further publication until verified
+reopen reconciles the durable frontier.
+
 ## Lineage, restart and bounds
 
 Continuation responses and goal observations identify both the immediate
@@ -181,3 +222,31 @@ current grants; the existing durable test explicitly checks old seals across
 successive new epochs. Full MCP execution remains unavailable after its bounded
 Asupersync build reached the shared memory ceiling. These exact component tests
 do not establish full-workspace or live qualification.
+
+## Retired nondispatch validation
+
+The retirement increment passes all 35 durable store/objective unit tests,
+including eight new custody cases, all 13 durable-progress integration tests,
+and all-target lab Clippy with warnings denied. The new cases cover both
+retirement paths, compaction and repeated reopen, latest-state precedence,
+legacy conservatism, exact archive retention, malformed imports, maximum source
+and step bounds, and partial versus complete lost-acknowledgment writes.
+
+All 109 actual-source module tests and warning-denied all-target harness Clippy
+also pass. Five new helper tests execute the real production compiler,
+StaticPlanner, MemoryAdapter, effect timeline and DurableLabStore. The positive
+case completes original construction after recovery, retires and compacts its
+commit, survives two reopen cycles, and uses a new continuation to satisfy the
+original stock goal without dispatching the old deferred key. Other cases
+reject missing or foreign custody, changed/future/forked archives, current
+creator contradictions and abandoned history in a rewound world. All 653
+inventoried Rust, Cargo and harness inputs remain unchanged during the final
+helper test and Clippy window.
+
+Three new MCP facade regressions exercise both recovery openings, the first
+opening's unanchored/future/creator refusals, and the prohibition on falling back
+from invalid custody to a physically completed original creator. Those tests
+and the updated durable facade fixtures are source-reviewed and formatted;
+they remain unexecuted because the full MCP build is blocked in unchanged
+Asupersync before reaching the facade. Component execution does not establish
+full-workspace qualification, a native build or live admission.

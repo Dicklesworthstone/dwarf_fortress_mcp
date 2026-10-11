@@ -129,6 +129,53 @@ fn wait(session: &str, ticks: u64) -> TestResult<Value> {
     Ok(waited)
 }
 
+fn production_with_unfinished_setup(session: &str) -> TestResult<(Value, PreparedPlan)> {
+    in_session(session, |guard| {
+        let mut snapshot = guard.adapter.snapshot().clone();
+        snapshot.graph.entities.remove(&starter::STILL);
+        snapshot.cursor = snapshot
+            .cursor
+            .checked_next()
+            .ok_or_else(|| fixture_error("fixture cursor exhausted"))?;
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot)?;
+        guard.grants.push(CapabilityGrant {
+            capability: Capability::Construct,
+            max_risk: RiskTier::Guarded,
+            scope: CapabilityScope {
+                fortress_id: Some(guard.fortress_id),
+                ..CapabilityScope::default()
+            },
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+        Ok(())
+    })?;
+    let planned = parsed(&facade::fortress_plan(
+        Some(session.to_owned()),
+        None,
+        None,
+        None,
+        Some(
+            json!({
+                "template":"production", "quotas":[{"item":"DRINK","minimum":50}],
+                "prerequisites":{"workshops":[{"building":"workshop:Still","location":[0,0,10]}]},
+            })
+            .to_string(),
+        ),
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let original = in_session(session, |guard| {
+        guard
+            .pending
+            .as_ref()
+            .map(|pending| pending.plan.clone())
+            .ok_or_else(|| fixture_error("original setup plan missing"))
+    })?;
+    assert_eq!(original.steps.len(), 2);
+    Ok((planned, original))
+}
+
 fn goal(session: &str, digest: &str) -> TestResult<Value> {
     in_session(session, |guard| {
         original_goal_observation(guard, digest).map(|(_, value)| value)
@@ -602,6 +649,317 @@ fn durable_reopen_continues_the_flat_original_goal_and_retains_root_history() ->
     wait(&third, 100)?;
     assert_eq!(goal(&third, &root)?["predicate_truth"], "true");
     assert_history_unchanged(&original_history, &goal(&third, &root)?);
+    Ok(())
+}
+
+#[test]
+fn unfinished_original_setup_can_continue_on_both_recovery_openings() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let directory = StateDir::new("retired-setup");
+    let first = open("7844020", false, true)?;
+    let (planned, original) = production_with_unfinished_setup(&first)?;
+    let root = identity(&planned, "plan_digest")?;
+    let order = original
+        .steps
+        .iter()
+        .find(|step| matches!(step.action, Action::CreateWorkOrder { .. }))
+        .ok_or("original order missing")?;
+    let old_key = order.idempotency_key.clone();
+    let order_step = order.id;
+    commit_ok(&first, &planned)?;
+    assert_eq!(goal(&first, &root)?["physical_quiescent"], false);
+    simulate_durable_restart(Some(directory.0.clone()));
+    let second = open("7844020", false, true)?;
+    in_session(&second, |guard| {
+        let row = guard
+            .carried
+            .iter()
+            .find(|row| row.step == Some(order_step))
+            .ok_or_else(|| fixture_error("first recovery lost nondispatch custody"))?;
+        assert!(row.is_final());
+        assert_eq!(row.work_state, EffectWorkState::NeverDispatched);
+        assert!(row.proof_anchor.is_some());
+        assert!(guard.last_action.is_none());
+        Ok(())
+    })?;
+    let blocked = continuation(&second, &root, "construction must finish first")?;
+    assert_eq!(blocked["ok"], false, "{blocked}");
+    assert_eq!(blocked["error"]["code"], "preconditions_failed");
+    wait(&second, effects::BUILD_TICKS)?;
+    let after_build = goal(&second, &root)?;
+    assert_eq!(after_build["predicate_truth"], "false", "{after_build}");
+    assert_eq!(after_build["physical_quiescent"], true, "{after_build}");
+    let before = effects_before(&second)?;
+    let first_review = continuation(&second, &root, "review after first recovery")?;
+    assert_eq!(first_review["ok"], true, "{first_review}");
+    assert_eq!(effects_before(&second)?, before);
+    with_durable_store(|store| {
+        let retained = store
+            .objective(original.anchor.fortress_id, original.digest)
+            .ok_or_else(|| fixture_error("durable original goal missing"))?;
+        assert!(
+            retained
+                .retired_never_dispatched
+                .contains_key(&order_step.get())
+        );
+        assert!(
+            store
+                .commit(original.anchor.fortress_id, original.digest)
+                .is_none()
+        );
+        store.compact()
+    })?;
+    simulate_durable_restart(Some(directory.0.clone()));
+    let third = open("7844020", false, true)?;
+    let recovered = goal(&third, &root)?;
+    assert_eq!(recovered["physical_quiescent"], true, "{recovered}");
+    assert_eq!(recovered["predicate_truth"], "false");
+    assert_eq!(
+        recovered["retired_undispatched_steps"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        recovered["retired_undispatched_steps"][0]["step"],
+        order_step.get()
+    );
+    assert_eq!(recovered["original_source"], after_build["original_source"]);
+    in_session(&third, |guard| {
+        assert!(
+            guard.carried.is_empty(),
+            "retired goal custody must survive without live commit recovery"
+        );
+        assert!(guard.commit_receipts.is_empty());
+        assert!(
+            !guard
+                .adapter
+                .snapshot()
+                .graph
+                .entities
+                .contains_key(&effects::created_entity_id(&old_key, 0))
+        );
+        Ok(())
+    })?;
+    let next = continuation(&third, &root, "finish the original stock goal")?;
+    assert_eq!(next["ok"], true, "{next}");
+    commit_ok(&third, &next)?;
+    wait(&third, 200)?;
+    assert_eq!(goal(&third, &root)?["predicate_truth"], "true");
+    in_session(&third, |guard| {
+        assert!(
+            !guard
+                .adapter
+                .snapshot()
+                .graph
+                .entities
+                .contains_key(&effects::created_entity_id(&old_key, 0)),
+            "continuation must never redispatch the original deferred key"
+        );
+        Ok(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn first_recovery_rejects_unanchored_future_and_contradicted_nondispatch() -> TestResult {
+    let _serial = serialized_durable_tests();
+    for (index, mode) in [
+        "unanchored",
+        "future",
+        "archived_creator",
+        "current_creator",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let directory = StateDir::new(mode);
+        let selector = format!("784403{index}");
+        let first = open(&selector, false, true)?;
+        let (planned, original) = production_with_unfinished_setup(&first)?;
+        let root = identity(&planned, "plan_digest")?;
+        let order = original
+            .steps
+            .iter()
+            .find(|step| matches!(step.action, Action::CreateWorkOrder { .. }))
+            .ok_or("original order missing")?;
+        let (sealed, source) = in_session(&first, |guard| {
+            let pending = guard
+                .pending
+                .as_ref()
+                .ok_or_else(|| fixture_error("original source missing"))?;
+            Ok((guard.adapter.snapshot().clone(), pending.source.durable()))
+        })?;
+        let mut changed = sealed.clone();
+        changed.cursor = changed
+            .cursor
+            .checked_next()
+            .ok_or("fixture cursor exhausted")?;
+        if mode == "future" {
+            changed.tick = GameTick(changed.tick.0 + 10);
+        } else {
+            let mut entity = changed
+                .graph
+                .entities
+                .get(&starter::STOCK_LEDGER)
+                .cloned()
+                .ok_or("fixture ledger missing")?;
+            entity.id = effects::created_entity_id(&order.idempotency_key, 0);
+            changed.graph.entities.insert(entity.id, entity);
+        }
+        changed.refresh_hash();
+        with_durable_store(|store| {
+            store.persist_objective_commit(
+                &sealed,
+                original.digest,
+                original.intent_id.get(),
+                source,
+                SessionId::new(99),
+                &[],
+            )?;
+            if mode == "unanchored" {
+                store.persist_step(
+                    sealed.fortress_id,
+                    original.digest,
+                    order.id.get(),
+                    "not_dispatched",
+                )?;
+            } else {
+                let updates: Vec<_> = original
+                    .steps
+                    .iter()
+                    .map(|step| dfmcp_lab::durable::DurableStepUpdate {
+                        plan_digest: original.digest,
+                        step: step.id.get(),
+                        state: "not_dispatched".to_owned(),
+                    })
+                    .collect();
+                let archive = if mode == "current_creator" {
+                    &sealed
+                } else {
+                    &changed
+                };
+                store.persist_progress("starter_fortress", archive, &updates, &[])?;
+                if mode == "future" {
+                    store.persist_head("starter_fortress", &sealed)?;
+                } else if mode == "current_creator" {
+                    store.persist_head("starter_fortress", &changed)?;
+                }
+            }
+            Ok(())
+        })?;
+        simulate_durable_restart(Some(directory.0.clone()));
+        let second = open(&selector, false, true)?;
+        in_session(&second, |guard| {
+            let carried = guard
+                .carried
+                .iter()
+                .find(|row| row.step == Some(order.id))
+                .ok_or_else(|| fixture_error("uncertain original step disappeared"))?;
+            assert_eq!(carried.state, "indeterminate", "{mode}: {carried:?}");
+            assert!(!carried.is_final());
+            Ok(())
+        })?;
+        assert_eq!(goal(&second, &root)?["physical_quiescent"], false, "{mode}");
+        let proposal = continuation(&second, &root, "unknown original work cannot be duplicated")?;
+        assert_eq!(proposal["ok"], false, "{mode}: {proposal}");
+        assert_eq!(proposal["error"]["code"], "preconditions_failed");
+    }
+    Ok(())
+}
+
+#[test]
+fn contradicted_custody_cannot_fall_back_to_completed_original_work() -> TestResult {
+    let _serial = serialized_durable_tests();
+    for (index, mode) in ["carried", "indeterminate", "retired"]
+        .into_iter()
+        .enumerate()
+    {
+        let directory = StateDir::new(&format!("completed-contradiction-{mode}"));
+        let selector = format!("784404{index}");
+        let first = open(&selector, false, true)?;
+        let (planned, original) = production_with_unfinished_setup(&first)?;
+        let root = identity(&planned, "plan_digest")?;
+        let order = original
+            .steps
+            .iter()
+            .find(|step| matches!(step.action, Action::CreateWorkOrder { .. }))
+            .ok_or("original order missing")?;
+        commit_ok(&first, &planned)?;
+        simulate_durable_restart(Some(directory.0.clone()));
+        let second = open(&selector, false, true)?;
+        wait(&second, effects::BUILD_TICKS)?;
+        assert_eq!(goal(&second, &root)?["physical_quiescent"], true);
+        let session = if mode == "retired" {
+            simulate_durable_restart(Some(directory.0.clone()));
+            open(&selector, false, true)?
+        } else {
+            second
+        };
+        in_session(&session, |guard| {
+            let mut shadow = guard.adapter.snapshot().clone();
+            // Inject an actual completed creator under the old key, as a
+            // contradiction of retained nondispatch. This is a fault fixture,
+            // not a malformed entity whose work inspection happens to fail.
+            effects::apply_effect(&mut shadow, &order.action, &order.idempotency_key)?;
+            let amount = match order.action {
+                Action::CreateWorkOrder { amount, .. } => u64::from(amount),
+                _ => return Err(fixture_error("fixture original action is not a work order")),
+            };
+            let elapsed =
+                amount * effects::WORK_ORDER_TICKS_PER_UNIT + effects::DRINK_INTERVAL_TICKS;
+            shadow.tick = GameTick(shadow.tick.0 + elapsed);
+            effects::advance_effects(&mut shadow, elapsed)?;
+            shadow.cursor = shadow
+                .cursor
+                .checked_next()
+                .ok_or_else(|| fixture_error("fixture cursor exhausted"))?;
+            shadow.refresh_hash();
+            for step in &original.steps {
+                assert!(
+                    dfmcp_intent::inspect_effect_work(
+                        &shadow,
+                        &step.action,
+                        &step.idempotency_key,
+                        true,
+                    )?
+                    .is_quiescent(),
+                    "every actual creator is physically complete"
+                );
+            }
+            assert_eq!(
+                PredicateEvidence::laboratory(&shadow)?.evaluate(&original.terminal_condition)?,
+                PredicateTruth::False,
+                "consumption leaves the original goal unmet again"
+            );
+            if mode == "indeterminate" {
+                let carried = guard
+                    .carried
+                    .iter_mut()
+                    .find(|row| row.step == Some(order.id))
+                    .ok_or_else(|| fixture_error("original carried step missing"))?;
+                carried.state = "indeterminate".to_owned();
+                carried.proof_anchor = None;
+                carried.work_state = EffectWorkState::Unknown {
+                    entity_id: Some(effects::created_entity_id(&order.idempotency_key, 0)),
+                    reason: "injected contradictory original dispatch custody".to_owned(),
+                };
+            }
+            guard.adapter.inject_snapshot(shadow)
+        })?;
+        let observed = goal(&session, &root)?;
+        assert_eq!(observed["predicate_truth"], "false", "{mode}: {observed}");
+        assert_eq!(observed["physical_quiescent"], false, "{mode}: {observed}");
+        let before = effects_before(&session)?;
+        let refused = continuation(
+            &session,
+            &root,
+            "contradictory custody requires reconciliation",
+        )?;
+        assert_eq!(refused["ok"], false, "{mode}: {refused}");
+        assert_eq!(refused["error"]["code"], "preconditions_failed");
+        assert_eq!(effects_before(&session)?, before);
+    }
     Ok(())
 }
 

@@ -44,6 +44,42 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Continue interrupted setup after action retirement and another reopen (2026-10-11)
+
+An original production goal can now retain proof that a dependent step was
+never dispatched after the owning action commit retires. Previously, recovery
+could finish workshop construction, discard the undispatched order's custody,
+then permanently block continuation after another restart because the missing
+old order was indistinguishable from an uncertain dispatched effect.
+
+Retirement now copies only the latest explicit `not_dispatched` state and exact
+atomic anchor into the retained original objective. New journal generations
+preserve that transfer without changing legacy replay; compaction writes a
+separate bounded custody map and retains every referenced snapshot. The source,
+original plan seal, historical achievement and old action identities remain
+unchanged. No old action handle or dispatch authority is reconstructed.
+
+Both first-opening carried recovery and later retired-goal recovery check the
+exact archived frontier against the original seal, chronology and creator
+identity. Unanchored legacy records, missing custody and contradictory current
+creators remain unresolved. A failed custody check cannot fall through to a
+completed physical entity and permit new work. Authorized goal observations
+expose retained step anchors; current Observe/Plan authority, verified active
+lineage, False original truth and complete same-root quiescence still gate a
+fresh continuation. See `docs/PRODUCTION_GOAL_CONTINUATION.md`.
+
+**Evidence:** all 35 durable store/objective unit tests (eight new custody
+cases), all 13 durable-progress integration tests and all-target lab Clippy with
+warnings denied pass. All 109 actual-source module tests (five new custody
+cases) and warning-denied all-target harness Clippy pass, with 653 unchanged
+inventoried inputs through the final helper window. Actual planning, reference
+effects, durable retirement, compaction, repeated recovery and successful
+continuation execute in those helper tests. Three new MCP facade tests and
+existing fixture corrections are source-reviewed/formatted but unexecuted;
+unchanged Asupersync still prevents the full MCP target from compiling within
+the shared memory budget. This is component evidence, not full-workspace,
+native-build or live qualification. The production bead remains in progress.
+
 ### Prove original native work-order goals (2026-10-11)
 
 `SemanticWorkOrderSession::poll_original_goal` now observes and proves the

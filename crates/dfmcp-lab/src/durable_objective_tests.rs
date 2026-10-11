@@ -455,6 +455,7 @@ fn uncertain_admission_fences_retries_and_reopens_without_double_eviction() -> R
             owner_session_id: SessionId::new(9),
             first_satisfied_anchor: None,
             restore_abandoned_anchor: None,
+            retired_never_dispatched: BTreeMap::new(),
         };
         store.write_object(&incoming)?;
         let payload = Record::ObjectiveCommit {
@@ -566,6 +567,7 @@ fn valid_chain_cannot_hide_mismatched_original_source_or_evidence_anchors() -> R
             owner_session_id: SessionId::new(9),
             first_satisfied_anchor: Some(proof.anchor()),
             restore_abandoned_anchor: Some(restored.anchor()),
+            retired_never_dispatched: BTreeMap::new(),
         };
         match corrupt_field {
             0 => goal.sealed_state_hash = other.state_hash,
@@ -609,6 +611,7 @@ fn objective_codecs_refuse_unbounded_or_ambiguous_new_records() -> Result<()> {
         owner_session_id: SessionId::new(9),
         first_satisfied_anchor: None,
         restore_abandoned_anchor: None,
+        retired_never_dispatched: BTreeMap::new(),
     };
     let admission = Record::ObjectiveCommit {
         objective: goal.clone(),
@@ -625,6 +628,7 @@ fn objective_codecs_refuse_unbounded_or_ambiguous_new_records() -> Result<()> {
         retired: vec![],
         satisfied: vec![digest(1)],
         abandoned: vec![digest(2)],
+        retain_nondispatch: false,
     };
     for record in [&admission, &retained, &progress] {
         assert_eq!(Record::parse(&record.payload())?, *record);

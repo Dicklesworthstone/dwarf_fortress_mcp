@@ -70,6 +70,9 @@ mod lab_progress_mcp_tests;
 #[path = "goal_continuation.rs"]
 mod goal_continuation;
 
+#[path = "goal_custody.rs"]
+mod goal_custody;
+
 #[cfg(test)]
 #[path = "goal_continuation_mcp_tests.rs"]
 mod goal_continuation_mcp_tests;
@@ -1143,12 +1146,12 @@ fn recover_commit(
     for step in &plan.steps {
         let recorded = commit.steps.get(&step.id.get()).map(String::as_str);
         let kind = crate::lab_world::action_kind(&step.action);
-        let recorded_anchor = commit.step_anchors.get(&step.id.get()).copied();
+        let mut recorded_anchor = commit.step_anchors.get(&step.id.get()).copied();
         // Legacy peers could publish a head without the originating session's
         // step record. Divergent unanchored absence cannot prove nondispatch.
         let unanchored_absence = recorded_anchor.is_none()
-            && head_diverged
-            && matches!(recorded, None | Some("not_dispatched" | "abandoned"));
+            && (matches!(recorded, Some("not_dispatched" | "abandoned"))
+                || (head_diverged && recorded.is_none()));
         let state = match recorded {
             None if !unanchored_absence => {
                 if let Some(head) = &original_head {
@@ -1162,6 +1165,16 @@ fn recover_commit(
                         }],
                         &[],
                     )?;
+                    recorded_anchor = store
+                        .commit(fortress, commit.plan_digest)
+                        .and_then(|commit| commit.step_anchors.get(&step.id.get()))
+                        .copied();
+                    if recorded_anchor != Some(sealed.anchor()) {
+                        return Err(DfmcpError::new(
+                            ErrorCode::CorruptLedger,
+                            "new nondispatch recovery evidence did not retain its exact sealed frontier",
+                        ));
+                    }
                 }
                 "not_dispatched".to_owned()
             }
@@ -1173,7 +1186,50 @@ fn recover_commit(
                 state.as_str(),
                 "verified" | "failed" | "cancelled" | "compensated"
             );
-        let work_state = if state == "not_dispatched" && !unanchored_absence {
+        let invalid_nondispatch = if state == "not_dispatched" && !unanchored_absence {
+            (|| -> Result<()> {
+                let anchor = recorded_anchor.ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::CorruptLedger,
+                        "recovered nondispatch has no atomic frontier",
+                    )
+                })?;
+                let upper = original_head
+                    .as_ref()
+                    .ok_or_else(|| {
+                        DfmcpError::new(
+                            ErrorCode::CorruptLedger,
+                            "recovered nondispatch has no retained fortress head",
+                        )
+                    })?
+                    .anchor;
+                let archived = store.load_snapshot(anchor.state_hash)?;
+                goal_custody::verify_nondispatch_frontier(
+                    &plan,
+                    step.id.get(),
+                    anchor,
+                    &archived,
+                    Some(upper),
+                )?;
+                if !goal_custody::effect_identity_absent(step, recovered) {
+                    return Err(DfmcpError::new(
+                        ErrorCode::CorruptLedger,
+                        "current effect identity contradicts recovered nondispatch custody",
+                    ));
+                }
+                Ok(())
+            })()
+            .err()
+            .map(|error| format!("{}: {}", error.code.as_str(), error.message))
+        } else {
+            None
+        };
+        let work_state = if let Some(reason) = &invalid_nondispatch {
+            EffectWorkState::Unknown {
+                entity_id: None,
+                reason: reason.clone(),
+            }
+        } else if state == "not_dispatched" && !unanchored_absence {
             EffectWorkState::NeverDispatched
         } else {
             dfmcp_intent::inspect_effect_work(recovered, &step.action, &step.idempotency_key, true)
@@ -1182,12 +1238,12 @@ fn recover_commit(
                     reason: format!("{}: {}", error.code.as_str(), error.message),
                 })
         };
-        if state == "dispatched"
+        let unfinished = state == "dispatched"
             || unanchored_terminal
             || unanchored_absence
-            || !work_state.is_quiescent()
-        {
-            open += 1;
+            || !work_state.is_quiescent();
+        if unfinished || work_state == EffectWorkState::NeverDispatched {
+            open += usize::from(unfinished);
             let mut predicates = step.postconditions.clone();
             if let Some(obligation) = &step.obligation {
                 predicates.push(obligation.terminal.clone());
@@ -1228,7 +1284,10 @@ fn recover_commit(
                     )),
                 ),
             };
-            let unresolved = unanchored_terminal || unanchored_absence || monitor_error.is_some();
+            let unresolved = unanchored_terminal
+                || unanchored_absence
+                || invalid_nondispatch.is_some()
+                || monitor_error.is_some();
             carried.push(CarriedStep {
                 plan_digest: commit.plan_digest,
                 step: Some(step.id),
@@ -1244,7 +1303,7 @@ fn recover_commit(
                 } else if unanchored_absence {
                     Some("the legacy world advanced without an anchored dispatch record; absence of that record cannot prove the effect was not dispatched".to_owned())
                 } else {
-                    monitor_error
+                    invalid_nondispatch.clone().or(monitor_error)
                 },
                 failure_reason: None,
                 work_step: Some(step.clone()),
@@ -1265,7 +1324,8 @@ fn recover_commit(
             "recorded_anchor": recorded_anchor.as_ref().map(anchor_json),
             "work_state": effect_work_json(&work_state),
             "blind_retry_allowed": false,
-            "proof_class": if unanchored_terminal || unanchored_absence { "unanchored_legacy_record" }
+            "proof_class": if invalid_nondispatch.is_some() { "invalid_nondispatch_custody" }
+                else if unanchored_terminal || unanchored_absence { "unanchored_legacy_record" }
                 else if recorded_anchor.is_some() { "atomic_world_frontier" } else { "not_proven" },
         }));
     }

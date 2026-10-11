@@ -181,6 +181,11 @@ pub struct DurableObjective {
     pub owner_session_id: SessionId,
     pub first_satisfied_anchor: Option<StateAnchor>,
     pub restore_abandoned_anchor: Option<StateAnchor>,
+    /// Exact atomic step frontiers retained when the original action commit
+    /// retired. Only an explicitly recorded `not_dispatched` step may enter
+    /// this map. Missing effects, cancelled work and live prepared steps are
+    /// not nondispatch evidence, and this history never grants dispatch.
+    pub retired_never_dispatched: BTreeMap<u32, StateAnchor>,
 }
 
 impl DurableObjective {
@@ -191,10 +196,16 @@ impl DurableObjective {
             ));
         }
         self.source.validate_bound()?;
+        if self.retired_never_dispatched.len() > MAX_STEPS_PER_COMMIT {
+            return Err(corrupt(
+                "objective nondispatch custody exceeds its step bound",
+            ));
+        }
         if self
             .first_satisfied_anchor
             .iter()
             .chain(self.restore_abandoned_anchor.iter())
+            .chain(self.retired_never_dispatched.values())
             .any(|anchor| anchor.fortress_id != self.fortress_id)
         {
             return Err(corrupt("objective evidence belongs to another fortress"));
@@ -254,6 +265,9 @@ enum Record {
         retired: Vec<Digest32>,
         satisfied: Vec<Digest32>,
         abandoned: Vec<Digest32>,
+        /// New W records retain anchored nondispatch history at retirement;
+        /// legacy V records retain their original, weaker semantics.
+        retain_nondispatch: bool,
     },
     Checkpoint(DurableCheckpoint),
     Commit(DurableCommit),
@@ -263,6 +277,13 @@ enum Record {
     },
     /// Compaction representation; action commits are retained separately.
     Objective(DurableObjective),
+    /// Compaction representation of retired-step custody. Kept separate from
+    /// the source record so both remain within the ordinary record bound.
+    ObjectiveCustody {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        steps: BTreeMap<u32, StateAnchor>,
+    },
     Step {
         fortress_id: FortressId,
         plan_digest: Digest32,
@@ -279,6 +300,7 @@ enum Record {
     Done {
         fortress_id: FortressId,
         plan_digest: Digest32,
+        retain_nondispatch: bool,
     },
 }
 
@@ -489,8 +511,15 @@ fn progress_payload(
     updates: &[DurableStepUpdate],
     retired: &[Digest32],
     objectives: Option<(&[Digest32], &[Digest32])>,
+    retain_nondispatch: bool,
 ) -> String {
-    let tag = if objectives.is_some() { "V" } else { "F" };
+    let tag = if retain_nondispatch {
+        "W"
+    } else if objectives.is_some() {
+        "V"
+    } else {
+        "F"
+    };
     let mut payload = format!(
         "{tag} {} {} {} {} {} {} {} {}",
         head.fortress_id.get(),
@@ -555,14 +584,21 @@ impl Record {
                 head,
                 updates,
                 retired,
-            } => progress_payload(head, updates, retired, None),
+            } => progress_payload(head, updates, retired, None, false),
             Self::ProgressWithObjectives {
                 head,
                 updates,
                 retired,
                 satisfied,
                 abandoned,
-            } => progress_payload(head, updates, retired, Some((satisfied, abandoned))),
+                retain_nondispatch,
+            } => progress_payload(
+                head,
+                updates,
+                retired,
+                Some((satisfied, abandoned)),
+                *retain_nondispatch,
+            ),
             Self::Checkpoint(checkpoint) => format!(
                 "C {} {:032x} {} {}",
                 checkpoint.fortress_id.get(),
@@ -615,6 +651,28 @@ impl Record {
                 optional_anchor_payload(objective.first_satisfied_anchor),
                 optional_anchor_payload(objective.restore_abandoned_anchor),
             ),
+            Self::ObjectiveCustody {
+                fortress_id,
+                plan_digest,
+                steps,
+            } => {
+                let mut payload = format!(
+                    "N {} {} {}",
+                    fortress_id.get(),
+                    plan_digest.to_hex(),
+                    steps.len(),
+                );
+                for (step, anchor) in steps {
+                    payload.push_str(&format!(
+                        " {step} {} {} {} {}",
+                        anchor.state_hash.to_hex(),
+                        anchor.tick.0,
+                        anchor.cursor.epoch,
+                        anchor.cursor.sequence,
+                    ));
+                }
+                payload
+            }
             Self::Step {
                 fortress_id,
                 plan_digest,
@@ -643,12 +701,18 @@ impl Record {
             Self::Done {
                 fortress_id,
                 plan_digest,
-            } => format!("D {} {}", fortress_id.get(), plan_digest.to_hex()),
+                retain_nondispatch,
+            } => format!(
+                "{} {} {}",
+                if *retain_nondispatch { "R" } else { "D" },
+                fortress_id.get(),
+                plan_digest.to_hex(),
+            ),
         }
     }
 
     fn parse(payload: &str) -> Result<Self> {
-        if payload.starts_with("F ") || payload.starts_with("V ") {
+        if payload.starts_with("F ") || payload.starts_with("V ") || payload.starts_with("W ") {
             return Self::parse_progress(payload);
         }
         if payload.len() > MAX_RECORD_BYTES {
@@ -656,6 +720,9 @@ impl Record {
         }
         if payload.starts_with("G ") {
             return Self::parse_objective_commit(payload);
+        }
+        if payload.starts_with("N ") {
+            return Self::parse_objective_custody(payload);
         }
         let fields: Vec<&str> = payload.split(' ').collect();
         match fields.as_slice() {
@@ -744,6 +811,7 @@ impl Record {
                         abandoned_epoch,
                         abandoned_sequence,
                     )?,
+                    retired_never_dispatched: BTreeMap::new(),
                 };
                 objective.validate()?;
                 Ok(Self::Objective(objective))
@@ -793,9 +861,10 @@ impl Record {
                     },
                 })
             }
-            ["D", fortress, digest] => Ok(Self::Done {
+            [tag @ ("D" | "R"), fortress, digest] => Ok(Self::Done {
                 fortress_id: FortressId::new(parse_u64(fortress)?),
                 plan_digest: parse_digest(digest)?,
+                retain_nondispatch: *tag == "R",
             }),
             _ => Err(corrupt("journal record kind or arity is not recognized")),
         }
@@ -843,11 +912,69 @@ impl Record {
             owner_session_id,
             first_satisfied_anchor: None,
             restore_abandoned_anchor: None,
+            retired_never_dispatched: BTreeMap::new(),
         };
         objective.validate()?;
         Ok(Self::ObjectiveCommit {
             objective,
             evicted_history,
+        })
+    }
+
+    fn parse_objective_custody(payload: &str) -> Result<Self> {
+        if payload.len() > MAX_RECORD_BYTES {
+            return Err(corrupt(
+                "journal objective custody exceeds its record bound",
+            ));
+        }
+        let mut fields = payload.split(' ');
+        let mut next = || {
+            fields
+                .next()
+                .ok_or_else(|| corrupt("journal objective custody is truncated"))
+        };
+        if next()? != "N" {
+            return Err(corrupt("journal objective custody kind is invalid"));
+        }
+        let fortress_id = FortressId::new(parse_u64(next()?)?);
+        let plan_digest = parse_digest(next()?)?;
+        let count = parse_u64(next()?)?;
+        if count == 0 || count > MAX_STEPS_PER_COMMIT as u64 {
+            return Err(corrupt("journal objective custody exceeds its step bound"));
+        }
+        let mut steps = BTreeMap::new();
+        for _ in 0..count {
+            let step = u32::try_from(parse_u64(next()?)?)
+                .map_err(|_| corrupt("journal objective custody step is malformed"))?;
+            if steps
+                .last_key_value()
+                .is_some_and(|(previous, _)| *previous >= step)
+            {
+                return Err(corrupt(
+                    "journal objective custody steps are not strictly ordered",
+                ));
+            }
+            let state_hash = parse_digest(next()?)?;
+            let tick = GameTick(parse_u64(next()?)?);
+            let epoch = parse_u64(next()?)?;
+            let sequence = parse_u64(next()?)?;
+            steps.insert(
+                step,
+                StateAnchor {
+                    fortress_id,
+                    state_hash,
+                    tick,
+                    cursor: ObservationCursor { epoch, sequence },
+                },
+            );
+        }
+        if fields.next().is_some() {
+            return Err(corrupt("journal objective custody has trailing fields"));
+        }
+        Ok(Self::ObjectiveCustody {
+            fortress_id,
+            plan_digest,
+            steps,
         })
     }
 
@@ -863,7 +990,7 @@ impl Record {
                 .ok_or_else(|| corrupt("journal progress record is truncated"))
         };
         let tag = next()?;
-        if !matches!(tag, "F" | "V") {
+        if !matches!(tag, "F" | "V" | "W") {
             return Err(corrupt("journal progress record kind is invalid"));
         }
         let fortress_id = FortressId::new(parse_u64(next()?)?);
@@ -874,7 +1001,7 @@ impl Record {
         let sequence = parse_u64(next()?)?;
         let update_count = parse_u64(next()?)?;
         let retired_count = parse_u64(next()?)?;
-        let (satisfied_count, abandoned_count) = if tag == "V" {
+        let (satisfied_count, abandoned_count) = if matches!(tag, "V" | "W") {
             (parse_u64(next()?)?, parse_u64(next()?)?)
         } else {
             (0, 0)
@@ -928,13 +1055,14 @@ impl Record {
                 state_hash,
             },
         };
-        Ok(if tag == "V" {
+        Ok(if matches!(tag, "V" | "W") {
             Self::ProgressWithObjectives {
                 head,
                 updates,
                 retired,
                 satisfied,
                 abandoned,
+                retain_nondispatch: tag == "W",
             }
         } else {
             Self::Progress {
@@ -1136,6 +1264,7 @@ impl DurableLabStore {
                 .first_satisfied_anchor
                 .iter()
                 .chain(objective.restore_abandoned_anchor.iter())
+                .chain(objective.retired_never_dispatched.values())
             {
                 if verified_anchors.get(&anchor.state_hash) != Some(anchor) {
                     return Err(corrupt(
@@ -1225,6 +1354,7 @@ impl DurableLabStore {
                                 .first_satisfied_anchor
                                 .iter()
                                 .chain(objective.restore_abandoned_anchor.iter())
+                                .chain(objective.retired_never_dispatched.values())
                                 .map(|anchor| anchor.state_hash),
                         )
                     }),
@@ -1570,7 +1700,12 @@ impl DurableLabStore {
         {
             return Ok(());
         }
-        let record = if satisfied.is_empty() && abandoned.is_empty() {
+        // Custody is acquired only when a commit is retired. A live prepared
+        // step may still dispatch and cannot become immutable absence history.
+        let retain_nondispatch = retired
+            .iter()
+            .any(|digest| self.objective(fortress, *digest).is_some());
+        let record = if satisfied.is_empty() && abandoned.is_empty() && !retain_nondispatch {
             Record::Progress {
                 head,
                 updates,
@@ -1583,6 +1718,7 @@ impl DurableLabStore {
                 retired,
                 satisfied,
                 abandoned,
+                retain_nondispatch,
             }
         };
         let mut candidate = self.index.clone();
@@ -1701,6 +1837,7 @@ impl DurableLabStore {
             owner_session_id,
             first_satisfied_anchor: None,
             restore_abandoned_anchor: None,
+            retired_never_dispatched: BTreeMap::new(),
         };
         let evicted_history: Vec<_> = evicted.into_iter().collect();
         self.index
@@ -1743,7 +1880,8 @@ impl DurableLabStore {
         )
     }
 
-    /// Retire a commit whose steps are all final.
+    /// Retire a commit whose steps are all final. If its original objective is
+    /// retained, preserve exact anchored nondispatch records with that goal.
     pub fn retire_commit(&mut self, fortress_id: FortressId, plan_digest: Digest32) -> Result<()> {
         self.ensure_writable()?;
         if self.commit(fortress_id, plan_digest).is_none() {
@@ -1753,6 +1891,7 @@ impl DurableLabStore {
             Record::Done {
                 fortress_id,
                 plan_digest,
+                retain_nondispatch: self.objective(fortress_id, plan_digest).is_some(),
             },
             None,
         )
@@ -1889,8 +2028,18 @@ impl DurableLabStore {
                     .objectives
                     .values()
                     .flat_map(BTreeMap::values)
-                    .cloned()
-                    .map(Record::Objective),
+                    .flat_map(|objective| {
+                        let mut source = objective.clone();
+                        source.retired_never_dispatched.clear();
+                        let custody = (!objective.retired_never_dispatched.is_empty()).then(|| {
+                            Record::ObjectiveCustody {
+                                fortress_id: objective.fortress_id,
+                                plan_digest: objective.plan_digest,
+                                steps: objective.retired_never_dispatched.clone(),
+                            }
+                        });
+                        std::iter::once(Record::Objective(source)).chain(custody)
+                    }),
             )
             .collect();
         for record in live {
@@ -1971,6 +2120,7 @@ impl Index {
         objective.validate()?;
         if objective.first_satisfied_anchor.is_some()
             || objective.restore_abandoned_anchor.is_some()
+            || !objective.retired_never_dispatched.is_empty()
         {
             return Err(corrupt(
                 "objective admission cannot invent historical evidence",
@@ -2026,6 +2176,47 @@ impl Index {
         Ok(())
     }
 
+    fn apply_progress(
+        &mut self,
+        head: DurableHead,
+        updates: Vec<DurableStepUpdate>,
+        retired: Vec<Digest32>,
+        retain_nondispatch: bool,
+    ) -> Result<()> {
+        let fortress_id = head.fortress_id;
+        let anchor = head.anchor;
+        self.apply(Record::Head(head))?;
+        for update in updates {
+            self.apply(Record::StepAt {
+                fortress_id,
+                plan_digest: update.plan_digest,
+                step: update.step,
+                state: update.state,
+                anchor,
+            })?;
+        }
+        for plan_digest in retired {
+            if self
+                .commits
+                .get(&fortress_id)
+                .and_then(|book| book.get(&plan_digest))
+                .is_some_and(|commit| commit.steps.values().any(|state| state == "dispatched"))
+            {
+                return Err(corrupt("progress retired a plan with dispatched work"));
+            }
+            let retained_objective = self
+                .objectives
+                .get(&fortress_id)
+                .is_some_and(|book| book.contains_key(&plan_digest));
+            self.apply(Record::Done {
+                fortress_id,
+                plan_digest,
+                retain_nondispatch: retain_nondispatch && retained_objective,
+            })?;
+        }
+        Ok(())
+    }
+
     fn apply(&mut self, record: Record) -> Result<()> {
         match record {
             Record::Head(head) => {
@@ -2045,42 +2236,14 @@ impl Index {
                 head,
                 updates,
                 retired,
-            } => {
-                let fortress_id = head.fortress_id;
-                let anchor = head.anchor;
-                self.apply(Record::Head(head))?;
-                for update in updates {
-                    self.apply(Record::StepAt {
-                        fortress_id,
-                        plan_digest: update.plan_digest,
-                        step: update.step,
-                        state: update.state,
-                        anchor,
-                    })?;
-                }
-                for plan_digest in retired {
-                    if self
-                        .commits
-                        .get(&fortress_id)
-                        .and_then(|book| book.get(&plan_digest))
-                        .is_some_and(|commit| {
-                            commit.steps.values().any(|state| state == "dispatched")
-                        })
-                    {
-                        return Err(corrupt("progress retired a plan with dispatched work"));
-                    }
-                    self.apply(Record::Done {
-                        fortress_id,
-                        plan_digest,
-                    })?;
-                }
-            }
+            } => self.apply_progress(head, updates, retired, false)?,
             Record::ProgressWithObjectives {
                 head,
                 updates,
                 retired,
                 satisfied,
                 abandoned,
+                retain_nondispatch,
             } => {
                 if satisfied.len() > MAX_OBJECTIVES_PER_FORTRESS
                     || abandoned.len() > MAX_OBJECTIVES_PER_FORTRESS
@@ -2111,11 +2274,7 @@ impl Index {
                         ));
                     }
                 }
-                self.apply(Record::Progress {
-                    head,
-                    updates,
-                    retired,
-                })?;
+                self.apply_progress(head, updates, retired, retain_nondispatch)?;
                 for digest in satisfied {
                     let objective = self
                         .objectives
@@ -2184,6 +2343,11 @@ impl Index {
             }
             Record::Objective(objective) => {
                 objective.validate()?;
+                if !objective.retired_never_dispatched.is_empty() {
+                    return Err(corrupt(
+                        "objective source record cannot import retired step custody",
+                    ));
+                }
                 if let Some(commit) = self
                     .commits
                     .get(&objective.fortress_id)
@@ -2215,6 +2379,40 @@ impl Index {
                     ));
                 }
                 book.insert(objective.plan_digest, objective);
+            }
+            Record::ObjectiveCustody {
+                fortress_id,
+                plan_digest,
+                steps,
+            } => {
+                if steps.is_empty()
+                    || steps.len() > MAX_STEPS_PER_COMMIT
+                    || steps
+                        .values()
+                        .any(|anchor| anchor.fortress_id != fortress_id)
+                {
+                    return Err(corrupt(
+                        "objective custody is not a bounded fortress step map",
+                    ));
+                }
+                if self
+                    .commits
+                    .get(&fortress_id)
+                    .is_some_and(|book| book.contains_key(&plan_digest))
+                {
+                    return Err(corrupt(
+                        "a live action commit cannot import nondispatch custody",
+                    ));
+                }
+                let objective = self
+                    .objectives
+                    .get_mut(&fortress_id)
+                    .and_then(|book| book.get_mut(&plan_digest))
+                    .ok_or_else(|| corrupt("custody names an unknown original objective"))?;
+                if !objective.retired_never_dispatched.is_empty() {
+                    return Err(corrupt("objective nondispatch custody was recorded twice"));
+                }
+                objective.retired_never_dispatched = steps;
             }
             Record::Step {
                 fortress_id,
@@ -2259,7 +2457,38 @@ impl Index {
             Record::Done {
                 fortress_id,
                 plan_digest,
+                retain_nondispatch,
             } => {
+                if retain_nondispatch {
+                    let commit = self
+                        .commits
+                        .get(&fortress_id)
+                        .and_then(|book| book.get(&plan_digest))
+                        .ok_or_else(|| corrupt("retirement names an unknown durable commit"))?;
+                    if commit.steps.values().any(|state| state == "dispatched") {
+                        return Err(corrupt("retirement cannot discard dispatched work"));
+                    }
+                    let objective = self
+                        .objectives
+                        .get_mut(&fortress_id)
+                        .and_then(|book| book.get_mut(&plan_digest))
+                        .ok_or_else(|| corrupt("retirement names an unknown original objective"))?;
+                    if !objective.retired_never_dispatched.is_empty() {
+                        return Err(corrupt(
+                            "retained objective cannot retire action work twice",
+                        ));
+                    }
+                    // The durable step record is the evidence. Neither a
+                    // missing record nor an absent world entity qualifies.
+                    objective.retired_never_dispatched = commit
+                        .steps
+                        .iter()
+                        .filter(|(_, state)| state.as_str() == "not_dispatched")
+                        .filter_map(|(step, _)| {
+                            commit.step_anchors.get(step).map(|anchor| (*step, *anchor))
+                        })
+                        .collect();
+                }
                 let book = self
                     .commits
                     .get_mut(&fortress_id)
@@ -2279,6 +2508,10 @@ impl Index {
 #[cfg(test)]
 #[path = "durable_objective_tests.rs"]
 mod objective_tests;
+
+#[cfg(test)]
+#[path = "durable_custody_tests.rs"]
+mod custody_tests;
 
 #[cfg(test)]
 mod tests {

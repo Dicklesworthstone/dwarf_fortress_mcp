@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-11 — Preserve undispatched original goals through repeated recovery
+
+- Retain exact anchored `not_dispatched` steps in the original objective when
+  its action commit retires. Interrupted workshop setup can finish after a
+  crash, survive another reopen, and permit a fresh reviewed continuation of
+  the same stock goal without dispatching the original deferred order.
+- Atomically transfer custody through new progress/retirement journal records;
+  compact the bounded step map separately from its source and pin every exact
+  archived frontier. Preserve legacy semantics, latest-state precedence and
+  publication fencing on uncertain writes.
+- Apply the same original-seal, archive/hash, chronology and creator checks on
+  both recovery paths. Missing or unanchored legacy custody remains unresolved.
+  A failed or contradicted custody claim cannot fall through to generic
+  inspection of a completed creator and authorize duplicate pursuit.
+- Keep current Observe/Plan, active recovery lineage and all same-root physical
+  quiescence checks. Expose authorized retired step evidence without restoring
+  original action handles, dispatch keys, grants or preparation lifetimes.
+- Pass 35 durable store/objective tests, including eight new cases; 13
+  durable-progress integration tests; and all-target lab Clippy with warnings
+  denied. Pass all 109 actual-source module tests, including five new recovery
+  cases, and warning-denied all-target harness Clippy on unchanged inputs.
+- Add three facade regressions and update existing recovery fixtures. These are
+  source-reviewed/formatted but unexecuted because unchanged Asupersync blocks
+  the full MCP build. No full-workspace, native-build or live qualification is
+  claimed. See `docs/PRODUCTION_GOAL_CONTINUATION.md`.
+
 ## 2026-10-11 — Prove original native work-order goals
 
 - Add bounded foreground original-goal monitoring to `SemanticWorkOrderSession`

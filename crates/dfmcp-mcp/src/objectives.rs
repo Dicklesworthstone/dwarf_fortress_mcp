@@ -26,6 +26,9 @@ pub(super) struct Objective {
     /// Live adapter handles can still own deferred dispatch. Recovery and
     /// restore never reconstruct that authority from the retained plan.
     original_handles_live: bool,
+    /// Positive retired-step custody, verified against the original seal and
+    /// exact archived frontier. A missing entity never populates this map.
+    retired_never_dispatched: BTreeMap<u32, goal_custody::RetiredNondispatchProof>,
     first_satisfied_anchor: Option<StateAnchor>,
     historical_proof_verified: bool,
     restore_abandoned_anchor: Option<StateAnchor>,
@@ -48,6 +51,7 @@ impl Objective {
             plan: Some(plan.clone()),
             active_observation_anchor: Some(plan.anchor),
             original_handles_live: true,
+            retired_never_dispatched: BTreeMap::new(),
             first_satisfied_anchor: None,
             historical_proof_verified: false,
             restore_abandoned_anchor: None,
@@ -139,6 +143,16 @@ impl Objective {
         result["abandonment_publication_pending"] =
             json!(session.objective_restore.contains(&self.plan_digest));
         result["physical_quiescent"] = json!(quiet);
+        result["retired_undispatched_steps"] = json!(
+            self.retired_never_dispatched
+                .iter()
+                .map(|(step, proof)| json!({
+                    "step": step,
+                    "proof_anchor": anchor_json(&proof.anchor()),
+                    "basis": "verified_retired_dispatch_custody",
+                }))
+                .collect::<Vec<_>>()
+        );
         result["pursuit_active"] =
             json!(!abandoned && truth != PredicateTruth::True && quiet != Some(true));
         result["needs_replan"] =
@@ -425,13 +439,28 @@ fn goal_work_quiescent(session: &LabSession, objective: &Objective) -> Result<bo
         if objective.original_handles_live {
             return Ok(false);
         }
-        if session.carried.iter().any(|carried| {
-            carried.plan_digest == plan.digest
-                && carried.step == Some(step.id)
-                && carried.is_final()
-                && carried.work_state == EffectWorkState::NeverDispatched
-        }) {
+        if let Some(proof) = objective.retired_never_dispatched.get(&step.id.get()) {
+            // Contradicted custody requires reconciliation even if the
+            // contradictory entity now looks like completed physical work.
+            if !proof.covers(plan, step, session.adapter.snapshot()) {
+                return Ok(false);
+            }
             continue;
+        }
+        if let Some(carried) = session
+            .carried
+            .iter()
+            .find(|carried| carried.plan_digest == plan.digest && carried.step == Some(step.id))
+        {
+            if carried.state == "indeterminate" {
+                return Ok(false);
+            }
+            if carried.is_final() && carried.work_state == EffectWorkState::NeverDispatched {
+                if !goal_custody::effect_identity_absent(step, session.adapter.snapshot()) {
+                    return Ok(false);
+                }
+                continue;
+            }
         }
         if !dfmcp_intent::inspect_effect_work(
             session.adapter.snapshot(),
@@ -575,6 +604,12 @@ pub(super) fn objective_history_roots(session: &LabSession) -> impl Iterator<Ite
                     .restore_abandoned_anchor
                     .map(|anchor| anchor.state_hash),
             )
+            .chain(
+                objective
+                    .retired_never_dispatched
+                    .values()
+                    .map(|proof| proof.anchor().state_hash),
+            )
     })
 }
 
@@ -596,6 +631,7 @@ pub(super) fn recover_objective(
         plan: None,
         active_observation_anchor: None,
         original_handles_live: false,
+        retired_never_dispatched: BTreeMap::new(),
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
         restore_abandoned_anchor: retained.restore_abandoned_anchor,
@@ -639,6 +675,24 @@ pub(super) fn recover_objective(
                 "the original goal source does not reproduce its sealed plan digest",
             ));
         }
+        if !retained.retired_never_dispatched.is_empty()
+            && store
+                .commit(retained.fortress_id, retained.plan_digest)
+                .is_some()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "a live original commit cannot import retired nondispatch custody",
+            ));
+        }
+        let mut retired = BTreeMap::new();
+        for (step, anchor) in &retained.retired_never_dispatched {
+            let archived = store.load_snapshot(anchor.state_hash)?;
+            let proof = goal_custody::RetiredNondispatchProof::verify(
+                &plan, retained, *step, &archived, recovery,
+            )?;
+            retired.insert(*step, proof);
+        }
         if let Some(anchor) = retained.first_satisfied_anchor {
             let proof = store.load_snapshot(anchor.state_hash)?;
             if proof.anchor() != anchor
@@ -678,6 +732,7 @@ pub(super) fn recover_objective(
             objective.active_observation_anchor = Some(recovery.active_anchor());
         }
         objective.plan = Some(plan);
+        objective.retired_never_dispatched = retired;
         Ok(())
     })();
     if let Err(error) = checked {
