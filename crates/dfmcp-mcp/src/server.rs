@@ -1314,7 +1314,15 @@ fn load_durable_fortress(
                 "durable head belongs to a different fortress",
             ));
         }
-        let mut adapter = MemoryAdapter::recovered(snapshot)?;
+        let mut adapter = MemoryAdapter::recovered(snapshot.clone())?;
+        // The durable head is still the pre-recovery world. Bind retained goals
+        // to this exact reset before any recovered progress can publish a head.
+        let goal_recovery = goal_continuation::RecoveredGoalLineage::verify(
+            &snapshot,
+            head.anchor,
+            adapter.snapshot().anchor(),
+        )?;
+        drop(snapshot);
         let mut checkpoints = 0;
         for checkpoint in store.checkpoints(fortress_id).cloned().collect::<Vec<_>>() {
             adapter.adopt_checkpoint(
@@ -1327,7 +1335,7 @@ fn load_durable_fortress(
         let mut commits = Vec::new();
         let objectives = store
             .objectives(fortress_id)
-            .map(|retained| objectives::recover_objective(store, retained))
+            .map(|retained| objectives::recover_objective(store, retained, &goal_recovery))
             .collect();
         for commit in store.commits(fortress_id).cloned().collect::<Vec<_>>() {
             commits.push(recover_commit(

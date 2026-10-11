@@ -189,6 +189,10 @@ fn continuation_refuses_unknown_true_and_unresolved_original_goals() -> Result<(
         .and_then(|ledger| ledger.fields.get_mut(effects::STOCK_DRINK_FIELD))
         .ok_or_else(|| invalid("missing fixture stock"))?;
     stock.presence = Some(FactPresence::Unknown("not observed".to_owned()));
+    snapshot.cursor = snapshot
+        .cursor
+        .checked_next()
+        .ok_or_else(|| invalid("fixture cursor exhausted"))?;
     snapshot.refresh_hash();
     assert_eq!(
         validate_goal_evidence(&original, &snapshot, &context(&snapshot), true)
@@ -204,6 +208,10 @@ fn continuation_refuses_unknown_true_and_unresolved_original_goals() -> Result<(
         .ok_or_else(|| invalid("missing fixture stock"))?;
     stock.presence = Some(FactPresence::Known(WorldValue::U64(60)));
     stock.value = WorldValue::U64(60);
+    snapshot.cursor = snapshot
+        .cursor
+        .checked_next()
+        .ok_or_else(|| invalid("fixture cursor exhausted"))?;
     snapshot.refresh_hash();
     assert_eq!(
         validate_goal_evidence(&original, &snapshot, &context(&snapshot), true)
@@ -246,6 +254,266 @@ fn current_observe_and_plan_authority_are_required_without_copying_old_grants() 
             .map(|error| error.code),
         Some(ErrorCode::StaleAnchor)
     );
+    Ok(())
+}
+
+#[test]
+fn verified_recovery_continues_real_consumed_goals_across_two_observation_epochs() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(world()?);
+    let original = original(adapter.snapshot(), &request()?)?;
+    let immutable = original.clone();
+    let prepared = adapter.prepare(&original, &context(adapter.snapshot()))?;
+    let receipt = adapter.commit(&original, &prepared, &context(adapter.snapshot()))?;
+    adapter.advance_ticks(200)?;
+    for action in receipt.actions {
+        assert_eq!(
+            adapter
+                .poll_action(action.action_id, &context(adapter.snapshot()))?
+                .state,
+            CommitState::Verified
+        );
+    }
+    adapter.advance_ticks(1_000)?;
+    let mut parent = original.clone();
+    let mut continuation =
+        ProductionContinuation::new(original.digest, original.digest, request()?)?;
+    for epoch in 1..=2 {
+        let persisted = adapter.snapshot().clone();
+        adapter = MemoryAdapter::recovered(persisted.clone())?;
+        let recovery = RecoveredGoalLineage::verify(
+            &persisted,
+            persisted.anchor(),
+            adapter.snapshot().anchor(),
+        )?;
+        assert_eq!(recovery.active_anchor().cursor.epoch, epoch);
+        assert_eq!(
+            validate_goal_evidence(
+                &parent,
+                adapter.snapshot(),
+                &context(adapter.snapshot()),
+                true
+            )
+            .err()
+            .map(|error| error.code),
+            Some(ErrorCode::StaleAnchor),
+            "an old plan alone cannot authorize its new observation epoch"
+        );
+        let quiet = parent.steps.iter().try_fold(true, |quiet, step| {
+            dfmcp_intent::inspect_effect_work(
+                adapter.snapshot(),
+                &step.action,
+                &step.idempotency_key,
+                true,
+            )
+            .map(|work| quiet && work.is_quiescent())
+        })?;
+        assert!(quiet);
+        validate_goal_evidence_in_active_lineage(
+            &parent,
+            recovery.active_anchor(),
+            adapter.snapshot(),
+            &context(adapter.snapshot()),
+            quiet,
+        )?;
+        let (intent, _) = continuation.compile(
+            IntentId::new(u128::from(epoch) + 1),
+            adapter.snapshot(),
+            "recovered original quota",
+        )?;
+        assert_eq!(intent.terminal_condition, original.terminal_condition);
+        let next = StaticPlanner::default().prepare_laboratory(
+            adapter.snapshot(),
+            &intent,
+            &context(adapter.snapshot()),
+        )?;
+        let prepared = adapter.prepare(&next, &context(adapter.snapshot()))?;
+        let receipt = adapter.commit(&next, &prepared, &context(adapter.snapshot()))?;
+        adapter.advance_ticks(100)?;
+        for action in receipt.actions {
+            assert_eq!(
+                adapter
+                    .poll_action(action.action_id, &context(adapter.snapshot()))?
+                    .state,
+                CommitState::Verified
+            );
+        }
+        assert_eq!(
+            PredicateEvidence::laboratory(adapter.snapshot())?
+                .evaluate(&original.terminal_condition)?,
+            PredicateTruth::True
+        );
+        assert_eq!(
+            original, immutable,
+            "recovery never reseals original history"
+        );
+        parent = next;
+        continuation = continuation.next(parent.digest)?;
+        if epoch == 1 {
+            adapter.advance_ticks(1_100)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn recovery_binding_requires_the_exact_durable_world_and_single_epoch_reset() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(world()?);
+    adapter.advance_ticks(100)?;
+    let persisted = adapter.snapshot().clone();
+    let recovered = MemoryAdapter::recovered(persisted.clone())?;
+    let valid = RecoveredGoalLineage::verify(
+        &persisted,
+        persisted.anchor(),
+        recovered.snapshot().anchor(),
+    )?;
+    assert_eq!(valid.previous_anchor(), persisted.anchor());
+    for variant in 0..5 {
+        let mut changed = recovered.snapshot().clone();
+        match variant {
+            0 => changed.paused = !changed.paused,
+            1 => changed.tick = GameTick(changed.tick.0 + 1),
+            2 => changed.cursor.epoch += 1,
+            3 => changed.cursor.sequence += 1,
+            _ => changed.fortress_id = FortressId::new(999),
+        }
+        changed.refresh_hash();
+        assert_eq!(
+            RecoveredGoalLineage::verify(&persisted, persisted.anchor(), changed.anchor())
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::CorruptLedger),
+            "changed recovery variant {variant}"
+        );
+    }
+    let mut wrong_head = persisted.anchor();
+    wrong_head.tick = GameTick(wrong_head.tick.0 + 1);
+    assert_eq!(
+        RecoveredGoalLineage::verify(&persisted, wrong_head, recovered.snapshot().anchor())
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::CorruptLedger)
+    );
+    let mut exhausted = persisted;
+    exhausted.cursor.epoch = u64::MAX;
+    exhausted.refresh_hash();
+    assert_eq!(
+        RecoveredGoalLineage::verify(
+            &exhausted,
+            exhausted.anchor(),
+            recovered.snapshot().anchor()
+        )
+        .err()
+        .map(|error| error.code),
+        Some(ErrorCode::CursorGap)
+    );
+    Ok(())
+}
+
+#[test]
+fn recovered_goal_binding_preserves_authority_truth_quiescence_and_continuity_gates() -> Result<()>
+{
+    let mut adapter = MemoryAdapter::new(world()?);
+    let original = original(adapter.snapshot(), &request()?)?;
+    adapter.advance_ticks(100)?;
+    let persisted = adapter.snapshot().clone();
+    let mut forked_original = original.clone();
+    forked_original.anchor.state_hash = Digest32::of_bytes(b"another seal at the same cursor");
+    assert_eq!(
+        validate_goal_evidence_in_active_lineage(
+            &forked_original,
+            original.anchor,
+            &persisted,
+            &context(&persisted),
+            true,
+        )
+        .err()
+        .map(|error| error.code),
+        Some(ErrorCode::StaleAnchor),
+        "a later current cursor cannot hide an original/active fork"
+    );
+    let recovered = MemoryAdapter::recovered(persisted.clone())?;
+    let snapshot = recovered.snapshot();
+    let recovery = RecoveredGoalLineage::verify(&persisted, persisted.anchor(), snapshot.anchor())?;
+    let validate = |snapshot: &WorldSnapshot, context: &OperationContext, quiet| {
+        validate_goal_evidence_in_active_lineage(
+            &original,
+            recovery.active_anchor(),
+            snapshot,
+            context,
+            quiet,
+        )
+    };
+    validate(snapshot, &context(snapshot), true)?;
+    assert_eq!(
+        validate(snapshot, &context(snapshot), false)
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::PreconditionsFailed)
+    );
+    for capability in [Capability::Observe, Capability::Plan] {
+        let mut expired = context(snapshot);
+        for grant in &mut expired.grants {
+            if grant.capability == capability {
+                grant.expires_at_tick = Some(GameTick(0));
+            }
+        }
+        assert_eq!(
+            validate(snapshot, &expired, true)
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::CapabilityDenied)
+        );
+    }
+    for variant in 0..4 {
+        let mut changed = snapshot.clone();
+        match variant {
+            0 => changed.tick = GameTick(changed.tick.0 - 1),
+            1 => changed.cursor.epoch += 1,
+            2 => changed.paused = !changed.paused,
+            _ => changed.fortress_id = FortressId::new(999),
+        }
+        changed.refresh_hash();
+        assert_eq!(
+            validate(&changed, &context(&changed), true)
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::StaleAnchor),
+            "unestablished current lineage variant {variant}"
+        );
+    }
+    for (presence, code) in [
+        (
+            FactPresence::Unknown("not observed after recovery".to_owned()),
+            ErrorCode::PreconditionsFailed,
+        ),
+        (
+            FactPresence::Known(WorldValue::U64(60)),
+            ErrorCode::InvalidIntent,
+        ),
+    ] {
+        let mut changed = snapshot.clone();
+        let stock = changed
+            .graph
+            .entities
+            .get_mut(&starter::STOCK_LEDGER)
+            .and_then(|ledger| ledger.fields.get_mut(effects::STOCK_DRINK_FIELD))
+            .ok_or_else(|| invalid("missing fixture stock"))?;
+        if let FactPresence::Known(value) = &presence {
+            stock.value = value.clone();
+        }
+        stock.presence = Some(presence);
+        changed.cursor = changed
+            .cursor
+            .checked_next()
+            .ok_or_else(|| invalid("fixture cursor exhausted"))?;
+        changed.refresh_hash();
+        assert_eq!(
+            validate(&changed, &context(&changed), true)
+                .err()
+                .map(|error| error.code),
+            Some(code)
+        );
+    }
     Ok(())
 }
 

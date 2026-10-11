@@ -545,7 +545,12 @@ fn durable_reopen_continues_the_flat_original_goal_and_retains_root_history() ->
     with_durable_store(|store| store.compact())?;
     simulate_durable_restart(Some(directory.0.clone()));
     let second = open("7844006", false, true)?;
-    assert_history_unchanged(&original_history, &goal(&second, &root)?);
+    let recovered_root = goal(&second, &root)?;
+    assert_history_unchanged(&original_history, &recovered_root);
+    assert_ne!(
+        recovered_root["sealed_anchor"]["epoch"], recovered_root["observed_anchor"]["epoch"],
+        "durable reopen preserves the old seal in a new observation epoch"
+    );
     let before = effects_before(&second)?;
     assert!(
         before.commit_receipts.is_empty(),
@@ -567,6 +572,10 @@ fn durable_reopen_continues_the_flat_original_goal_and_retains_root_history() ->
     let third = open("7844006", false, true)?;
     let recovered_child = goal(&third, &child)?;
     assert_history_unchanged(&child_history, &recovered_child);
+    assert_ne!(
+        recovered_child["sealed_anchor"]["epoch"], recovered_child["observed_anchor"]["epoch"],
+        "each durable reopen needs its own owner-verified active lineage"
+    );
     assert_history_unchanged(&original_history, &goal(&third, &root)?);
     assert_eq!(
         recovered_child["original_source"]["request"]["production"],
@@ -593,6 +602,110 @@ fn durable_reopen_continues_the_flat_original_goal_and_retains_root_history() ->
     wait(&third, 100)?;
     assert_eq!(goal(&third, &root)?["predicate_truth"], "true");
     assert_history_unchanged(&original_history, &goal(&third, &root)?);
+    Ok(())
+}
+
+#[test]
+fn arbitrary_epoch_changes_cannot_rebind_live_or_recovered_original_goals() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let directory = StateDir::new("unestablished-epoch");
+    for (index, recover) in [false, true].into_iter().enumerate() {
+        let selector = format!("784402{index}");
+        let first = open(&selector, false, recover)?;
+        let (original, history) = consumed_goal(&first)?;
+        let root = identity(&original, "plan_digest")?;
+        let session = if recover {
+            simulate_durable_restart(Some(directory.0.clone()));
+            open(&selector, false, true)?
+        } else {
+            first
+        };
+        let proposal = continuation(&session, &root, "review before an unestablished epoch")?;
+        assert_eq!(proposal["ok"], true, "{proposal}");
+        in_session(&session, |guard| {
+            let mut changed = guard.adapter.snapshot().clone();
+            changed.cursor = changed
+                .cursor
+                .checked_reset_epoch()
+                .ok_or_else(|| fixture_error("fixture epoch exhausted"))?;
+            changed.refresh_hash();
+            // This is not the durable-recovery owner path and not an explicit
+            // checkpoint restore. No original goal is rebound to this epoch.
+            guard.adapter.inject_snapshot(changed)
+        })?;
+        let observed = goal(&session, &root)?;
+        assert_history_unchanged(&history, &observed);
+        assert_eq!(observed["predicate_truth"], "false");
+        // Injecting a snapshot clears live action handles. Recovered goals can
+        // still inspect their retained physical identities; live goals must
+        // conservatively keep that lost handle evidence unresolved.
+        assert_eq!(observed["physical_quiescent"], recover);
+        assert!(observed["restore_abandoned_anchor"].is_null());
+        if recover {
+            assert_eq!(observed["continuation_refused"]["code"], "stale_anchor");
+        } else {
+            assert!(observed["continuation_request"].is_null());
+            assert!(observed["continuation_refused"].is_null());
+        }
+        let before = effects_before(&session)?;
+        let denied_plan = continuation(&session, &root, "old history is not an epoch issuer")?;
+        assert_eq!(denied_plan["ok"], false, "{denied_plan}");
+        assert_eq!(denied_plan["error"]["code"], "stale_anchor");
+        let denied_commit = commit(&session, &proposal)?;
+        assert_eq!(denied_commit["ok"], false, "{denied_commit}");
+        assert_eq!(denied_commit["error"]["code"], "stale_anchor");
+        assert!(denied_commit["rebased_plan"].is_null());
+        assert_eq!(effects_before(&session)?, before);
+    }
+    Ok(())
+}
+
+#[test]
+fn recovered_goal_binding_never_restores_expired_observe_or_plan_authority() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let directory = StateDir::new("recovered-authority");
+    let first = open("7844022", false, true)?;
+    let (original, history) = consumed_goal(&first)?;
+    let root = identity(&original, "plan_digest")?;
+    simulate_durable_restart(Some(directory.0.clone()));
+    let session = open("7844022", false, true)?;
+    let proposal = continuation(
+        &session,
+        &root,
+        "current authority is required after recovery",
+    )?;
+    assert_eq!(proposal["ok"], true, "{proposal}");
+    for capability in [Capability::Observe, Capability::Plan] {
+        in_session(&session, |guard| {
+            for grant in &mut guard.grants {
+                if grant.capability == capability {
+                    grant.expires_at_tick = Some(GameTick(0));
+                }
+            }
+            Ok(())
+        })?;
+        let before = effects_before(&session)?;
+        let refused = continuation(&session, &root, "history is not current authority")?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "capability_denied");
+        let refused = commit(&session, &proposal)?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "capability_denied");
+        assert_eq!(effects_before(&session)?, before);
+        in_session(&session, |guard| {
+            for grant in &mut guard.grants {
+                if grant.capability == capability {
+                    grant.expires_at_tick = None;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    assert_history_unchanged(&history, &goal(&session, &root)?);
+    commit_ok(&session, &proposal)?;
+    wait(&session, 100)?;
+    assert_eq!(goal(&session, &root)?["predicate_truth"], "true");
+    assert_history_unchanged(&history, &goal(&session, &root)?);
     Ok(())
 }
 

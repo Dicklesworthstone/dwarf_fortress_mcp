@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Continue retained goals after verified durable recovery (2026-10-11)
+
+A durable laboratory reopen resets observation cursors; it does not abandon the
+retained production goal. The previous continuation gate compared current epoch
+to the immutable original plan and therefore rejected every reopened pursuit.
+Recovery now verifies the exact persisted head and its single reset/rehashed
+anchor, then binds each fully verified, nonabandoned objective to that current
+process-local observation frontier. Original plan digests, source bytes and
+first achievement remain unchanged.
+
+Continuation still requires current authority, False original goal truth and
+complete original/same-root physical quiescence. Current evidence must advance
+the verified active frontier within its epoch; arbitrary resets, backward ticks
+or cursors and same-cursor forks refuse. Checkpoint restore clears continuity
+immediately while staging abandonment, and durable abandonment cannot be reopened
+as an active goal. Neither recovery nor planning restores old action handles,
+preparation lifetimes or dispatch grants.
+
+**Evidence:** all 96 actual-source production/projection/source/continuation/
+forecast tests pass, including three new recovery regressions. The real
+MemoryAdapter test executes two recovery epochs and new pursuits while retaining
+the original goal and seal. Mutation cases cover exact persisted/recovered
+identity, clocks, cursor forks, authority, Unknown truth and unresolved work.
+All-target warning-denied module Clippy passes; all 644 inventoried inputs remain
+unchanged. Two new MCP facade tests cover arbitrary epoch changes and expired
+current authority, and the existing repeated-reopen test now explicitly checks
+old seals in new epochs. These facade tests remain source-reviewed/formatted,
+not executed: the full MCP check was stopped during unchanged Asupersync
+compilation at the shared 8 GiB ceiling before reaching MCP. The final native
+increment also passes all 96 laboratory tests. This establishes no full-workspace,
+plugin or live qualification.
+
 ### Original semantic native work-order handoff (2026-10-11)
 
 `SemanticWorkOrderSession` now carries one original unconditional

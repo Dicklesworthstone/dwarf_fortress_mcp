@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-11 — Continue original goals after verified durable recovery
+
+- Fix continuation rejecting every durable reopen because the new observation
+  epoch differed from the immutable original plan anchor. Verify the exact
+  persisted head and its reset/rehashed recovery anchor once per fortress, then
+  bind each fully reconstructed active goal to that process-local frontier.
+- Keep original source, seal and historical achievement unchanged. Require
+  current evidence to advance the verified active lineage and reject arbitrary
+  epoch changes, backward clocks/cursors and same-cursor forks. Checkpoint
+  restore clears active continuity immediately and persists abandonment.
+- Preserve current Observe/Plan authority and complete original/sibling work
+  quiescence at both planning and commit; recovery restores no dispatch grant.
+- Pass all 96 actual-source production/continuation/forecast tests, including
+  three new recovery regressions with real two-epoch execution, and warning-denied
+  all-target Clippy. All 644 inventoried source/build inputs remain unchanged.
+  Add two facade regressions and strengthen the repeated durable-reopen test.
+- The full MCP check remains unexecuted: its bounded attempt was stopped while
+  unchanged Asupersync was compiling at the shared 8 GiB memory ceiling, before
+  reaching MCP. No full-workspace or native/live qualification is claimed.
+
 ## 2026-10-11 — Execute original semantic work orders through native custody
 
 - Add `SemanticWorkOrderSession` for one original unconditional wooden-furniture

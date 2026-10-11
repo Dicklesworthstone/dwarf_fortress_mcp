@@ -76,6 +76,30 @@ which fixed generation a new continuation would choose. An unresolved admitted
 candidate then requires
 inspection or explicit recovery, rather than another pursuit.
 
+## Durable reopen preserves a pursuit; checkpoint restore abandons it
+
+A durable laboratory reopen changes the observation epoch so old action handles
+and cursors cannot become current authority. That reset does not itself abandon
+a retained production goal. Recovery verifies the exact persisted head, computes
+its expected cursor reset and state hash, and requires that complete anchor to
+match the actual recovered adapter. It then reconstructs each original plan
+from its exact archived source and verifies its recorded history before binding
+the goal to that recovered observation frontier.
+
+New continuation planning requires current evidence to advance that verified
+frontier within its bound epoch. A caller-supplied newer epoch, backward tick or
+cursor, same-cursor fork, changed world bytes or goal without verified continuity
+cannot create a new pursuit. Repeated genuine durable reopens establish new
+process-local continuity while preserving original plan digests, source bytes,
+first achievement and parent/root lineage.
+
+Checkpoint restore follows a separate path: it abandons the old pursuits and
+clears their active continuity immediately, even before durable publication
+finishes. The recorded abandonment survives reopen. Current authority, original
+False truth and physical quiescence of every same-root pursuit are still checked
+when planning and committing a continuation. Recovery neither dispatches old
+actions nor recreates their grants or preparation lifetimes.
+
 ## Lineage, restart and bounds
 
 Continuation responses and goal observations identify both the immediate
@@ -143,3 +167,17 @@ legacy-parent promotion only on new planning, and exact lineage comparison.
 Additional source and forecast cases prove distinct modern seals, exact reopen,
 original quota truth and physical quiescence. Public facade expectation updates
 remain source-reviewed/formatted pending execution of the full MCP target.
+
+## Verified recovery validation
+
+The recovery increment passes all 96 actual-source module tests and
+warning-denied all-target Clippy with 644 unchanged inventoried inputs. The
+three new tests exercise real production and two actual adapter recoveries,
+exact-head/reset mutations, arbitrary epochs, cursor/tick regression, forked
+anchors, current grant expiry, Unknown goal truth and unresolved work. Original
+source, terminal predicate and plan seal remain unchanged through new pursuits.
+Two facade tests add planning/commit refusal after injected epochs and expired
+current grants; the existing durable test explicitly checks old seals across
+successive new epochs. Full MCP execution remains unavailable after its bounded
+Asupersync build reached the shared memory ceiling. These exact component tests
+do not establish full-workspace or live qualification.

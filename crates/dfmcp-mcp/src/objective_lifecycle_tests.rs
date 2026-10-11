@@ -445,7 +445,17 @@ fn unverifiable_archived_goal_or_first_proof_remains_indeterminate() -> TestResu
                 retained.first_satisfied_anchor =
                     Some(store.load_snapshot(retained.sealed_state_hash)?.anchor());
             }
-            Ok(objectives::recover_objective(store, &retained))
+            let head = store
+                .head(fortress)
+                .ok_or_else(|| fixture_error("durable fixture head missing"))?;
+            let persisted = store.load_snapshot(head.anchor.state_hash)?;
+            let recovered = MemoryAdapter::recovered(persisted.clone())?;
+            let recovery = goal_continuation::RecoveredGoalLineage::verify(
+                &persisted,
+                head.anchor,
+                recovered.snapshot().anchor(),
+            )?;
+            Ok(objectives::recover_objective(store, &retained, &recovery))
         })?;
         let shown = in_session(&session, |guard| {
             let original = std::mem::replace(&mut guard.objectives, vec![invalid]);

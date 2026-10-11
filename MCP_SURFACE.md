@@ -219,8 +219,10 @@ The laboratory `blueprint` JSON string also accepts the closed
 It compiles a new reviewed plan from the complete original quotas and setup
 options under current Observe/Plan authority. Original and same-root work must
 be proven quiet, and commit repeats the check before effects. Parent/root
-lineage survives durable recovery; no old grants, actions or proof are reused
-as authority. See `docs/PRODUCTION_GOAL_CONTINUATION.md` for the exact bounds,
+lineage survives durable recovery. A verified reopen binds the retained goal
+to the exact recovered world while preserving its old seal; arbitrary epoch
+changes and checkpoint-abandoned pursuits remain refused. No old grants,
+actions or proof are reused as authority. See `docs/PRODUCTION_GOAL_CONTINUATION.md` for the exact bounds,
 refusals, source-seal binding and explicit commit workflow.
 
 ### `fortress.commit`

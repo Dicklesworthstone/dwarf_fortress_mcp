@@ -20,6 +20,9 @@ pub(super) struct Objective {
     sealed_state_hash: Digest32,
     sealed_anchor: Option<StateAnchor>,
     plan: Option<PreparedPlan>,
+    /// Current process-local continuity, separate from the immutable plan seal.
+    /// Only live commit or exact durable recovery can establish this frontier.
+    active_observation_anchor: Option<StateAnchor>,
     /// Live adapter handles can still own deferred dispatch. Recovery and
     /// restore never reconstruct that authority from the retained plan.
     original_handles_live: bool,
@@ -43,6 +46,7 @@ impl Objective {
             sealed_state_hash: plan.anchor.state_hash,
             sealed_anchor: Some(plan.anchor),
             plan: Some(plan.clone()),
+            active_observation_anchor: Some(plan.anchor),
             original_handles_live: true,
             first_satisfied_anchor: None,
             historical_proof_verified: false,
@@ -276,12 +280,28 @@ pub(super) fn continuation_source(
         }
     };
     let quiet = goal_work_quiescent(session, objective)?;
-    goal_continuation::validate_goal_evidence(
-        original,
-        session.adapter.snapshot(),
-        &context,
-        quiet,
-    )?;
+    let active = objective.active_observation_anchor.ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "the original goal has no verified active observation lineage",
+        )
+    })?;
+    if active == original.anchor {
+        goal_continuation::validate_goal_evidence(
+            original,
+            session.adapter.snapshot(),
+            &context,
+            quiet,
+        )?;
+    } else {
+        goal_continuation::validate_goal_evidence_in_active_lineage(
+            original,
+            active,
+            session.adapter.snapshot(),
+            &context,
+            quiet,
+        )?;
+    }
     for other in &session.objectives {
         if other.plan_digest == parent || Some(other.plan_digest) == exclude_candidate {
             continue;
@@ -513,6 +533,7 @@ pub(super) fn record_objective_progress(
             && objective.restore_abandoned_anchor.is_none()
         {
             objective.restore_abandoned_anchor = Some(anchor);
+            objective.active_observation_anchor = None;
         }
         if satisfied.contains(&objective.plan_digest)
             && objective.first_satisfied_anchor.is_none()
@@ -530,6 +551,7 @@ pub(super) fn record_objective_progress(
 pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
     for objective in &mut session.objectives {
         objective.original_handles_live = false;
+        objective.active_observation_anchor = None;
     }
     session.objective_restore.extend(
         session
@@ -558,7 +580,11 @@ pub(super) fn objective_history_roots(session: &LabSession) -> impl Iterator<Ite
 
 /// Recompile only against the exact archived seal. Recovered plans are proof
 /// and identity material; no action handle or dispatch authority is restored.
-pub(super) fn recover_objective(store: &DurableLabStore, retained: &DurableObjective) -> Objective {
+pub(super) fn recover_objective(
+    store: &DurableLabStore,
+    retained: &DurableObjective,
+    recovery: &goal_continuation::RecoveredGoalLineage,
+) -> Objective {
     let source = PlanSource::from_durable(&retained.source);
     let mut objective = Objective {
         plan_digest: retained.plan_digest,
@@ -568,6 +594,7 @@ pub(super) fn recover_objective(store: &DurableLabStore, retained: &DurableObjec
         sealed_state_hash: retained.sealed_state_hash,
         sealed_anchor: None,
         plan: None,
+        active_observation_anchor: None,
         original_handles_live: false,
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
@@ -633,6 +660,22 @@ pub(super) fn recover_objective(store: &DurableLabStore, retained: &DurableObjec
                     "the retained goal abandonment has no exact fortress anchor",
                 ));
             }
+        }
+        if retained.restore_abandoned_anchor.is_none() {
+            let prior = recovery.previous_anchor();
+            if prior.fortress_id != retained.fortress_id
+                || plan.anchor.cursor.epoch > prior.cursor.epoch
+                || plan.anchor.tick > prior.tick
+                || (plan.anchor.cursor.epoch == prior.cursor.epoch
+                    && plan.anchor.cursor.sequence > prior.cursor.sequence)
+                || (plan.anchor.cursor == prior.cursor && plan.anchor != prior)
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "the original goal does not precede its verified durable recovery head",
+                ));
+            }
+            objective.active_observation_anchor = Some(recovery.active_anchor());
         }
         objective.plan = Some(plan);
         Ok(())

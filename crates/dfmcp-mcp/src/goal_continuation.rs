@@ -8,6 +8,7 @@
 use crate::lab_world::{MAX_ACTIONS_JSON_BYTES, ProductionPlanner, ProductionRequest, parse_steps};
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, ErrorCode, IntentId, OperationContext, Result, RiskTier,
+    StateAnchor,
 };
 use dfmcp_intent::{Constraint, Intent, PreparedPlan, StaticPlanner};
 use dfmcp_world::{PredicateEvidence, PredicateTruth, WorldSnapshot};
@@ -90,6 +91,56 @@ pub(crate) struct ProductionContinuation {
     pub(crate) root: Digest32,
     request: ProductionRequest,
     version: SourceVersion,
+}
+
+/// Process-local evidence that recovery preserved one exact durable world while
+/// resetting its observation cursor. This carries no grants or dispatch handles,
+/// and cannot be reconstructed from a continuation request or an old plan alone.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RecoveredGoalLineage {
+    previous: StateAnchor,
+    active: StateAnchor,
+}
+
+impl RecoveredGoalLineage {
+    pub(crate) fn verify(
+        persisted: &WorldSnapshot,
+        durable_head: StateAnchor,
+        recovered: StateAnchor,
+    ) -> Result<Self> {
+        if !persisted.hash_is_valid() || persisted.anchor() != durable_head {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "goal recovery does not start from the exact persisted fortress head",
+            ));
+        }
+        let mut expected = persisted.clone();
+        expected.cursor = expected.cursor.checked_reset_epoch().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CursorGap,
+                "goal recovery observation epoch is exhausted",
+            )
+        })?;
+        expected.refresh_hash();
+        if expected.anchor() != recovered {
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "goal recovery changed the durable world instead of only resetting its observation epoch",
+            ));
+        }
+        Ok(Self {
+            previous: durable_head,
+            active: recovered,
+        })
+    }
+
+    pub(crate) const fn previous_anchor(&self) -> StateAnchor {
+        self.previous
+    }
+
+    pub(crate) const fn active_anchor(&self) -> StateAnchor {
+        self.active
+    }
 }
 
 impl ProductionContinuation {
@@ -257,15 +308,45 @@ pub(crate) fn validate_goal_evidence(
     context: &OperationContext,
     work_quiescent: bool,
 ) -> Result<()> {
+    validate_goal_evidence_in_active_lineage(
+        original,
+        original.anchor,
+        snapshot,
+        context,
+        work_quiescent,
+    )
+}
+
+/// Only the authoritative goal book supplies `active`: the original commit
+/// anchor, or the verified recovery frontier bound after exact source replay.
+/// Retained semantic intent crosses recovery; old action or observation authority
+/// does not. An arbitrary epoch change is not a new binding.
+pub(crate) fn validate_goal_evidence_in_active_lineage(
+    original: &PreparedPlan,
+    active: StateAnchor,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    work_quiescent: bool,
+) -> Result<()> {
     context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
     context.authorize(Capability::Plan, RiskTier::ReadOnly, &[], None)?;
+    let current = snapshot.anchor();
     if context.anchor != snapshot.anchor()
         || original.anchor.fortress_id != snapshot.fortress_id
-        || original.anchor.cursor.epoch != snapshot.anchor().cursor.epoch
+        || active.fortress_id != snapshot.fortress_id
+        || original.anchor.cursor.epoch > active.cursor.epoch
+        || original.anchor.tick > active.tick
+        || (original.anchor.cursor.epoch == active.cursor.epoch
+            && original.anchor.cursor.sequence > active.cursor.sequence)
+        || (original.anchor.cursor == active.cursor && original.anchor != active)
+        || active.cursor.epoch != current.cursor.epoch
+        || active.cursor.sequence > current.cursor.sequence
+        || active.tick > current.tick
+        || (active.cursor.sequence == current.cursor.sequence && active != current)
     {
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
-            "continuation evidence belongs to a different current anchor or fortress",
+            "continuation evidence does not advance the original goal's verified active observation lineage",
         ));
     }
     match PredicateEvidence::laboratory(snapshot)?.evaluate(&original.terminal_condition)? {
