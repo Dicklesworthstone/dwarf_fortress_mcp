@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-11 — Reach original production reserves through consumption
+
+- Add fixed `consumption_aware_v1` planning for new production requests and
+  continuations. Budget observed population consumption through the complete
+  sealed schedule, including setup, existing queued service, shared workers and
+  quotas already satisfied at the source. Keep original terminal minima intact.
+- Apply joint read-only staffing to ordinary quota requests too. Serialize
+  orders that must share their only eligible worker; setup remains opt-in.
+  Bound reserve iteration and quantities, and refuse unknown source evidence.
+- Preserve historical production and continuation `/1` compiler bytes and seals.
+  New production seals bind the complete canonical request; continuation `/2`
+  selects the fixed new compiler without changing the original retained request.
+- Require Verified actions, True original goal and physically quiet original
+  work together for whole-plan forecast completion. Expose separate predicted
+  proof, goal and physical-work results, preserving Unknown and immutable proof.
+- Pass all 93 actual-source production/projection/continuation/forecast tests,
+  including 28 new cases with the actual StaticPlanner and MemoryAdapter, and
+  focused warning-denied Clippy for those source modules. Update public MCP
+  expectation tests for new reserve behavior and later consumption of completed
+  goals; these facade tests remain source-reviewed/formatted, not executed.
+  No full-workspace qualification or native/live admission is added.
+
 ## 2026-10-10 — Continue retained production goals through a new reviewed plan
 
 - Add the closed continue_goal blueprint form to existing fortress.plan. Retrieve

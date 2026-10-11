@@ -867,12 +867,17 @@ mod tests {
 
     #[test]
     fn completed_production_tasks_fail_unmet_consumed_and_joint_original_quotas() -> TestResult {
-        for (selector, before_ticks, work_ticks, quotas) in [
-            ("7824201", 1099, 200, json!([{"item":"DRINK","minimum":60}])),
+        for (selector, work_ticks, after_ticks, quotas) in [
+            (
+                "7824201",
+                200,
+                1_000,
+                json!([{"item":"DRINK","minimum":60}]),
+            ),
             (
                 "7824202",
-                1150,
                 50,
+                1_150,
                 json!([{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]),
             ),
         ] {
@@ -897,11 +902,6 @@ mod tests {
             ))?;
             assert_eq!(opened["ok"], true, "{opened}");
             let session = opened["session_id"].as_str().ok_or("session missing")?;
-            let advanced: Value = serde_json::from_str(&wait_with_ticks(
-                Some(session.to_owned()),
-                Some(before_ticks),
-            ))?;
-            assert_eq!(advanced["ok"], true, "{advanced}");
             let planned: Value = serde_json::from_str(&plan_request(
                 Some(session.to_owned()),
                 None,
@@ -920,6 +920,12 @@ mod tests {
             let settled: Value =
                 serde_json::from_str(&wait_with_ticks(Some(session.to_owned()), Some(work_ticks)))?;
             assert_eq!(settled["ok"], true, "{settled}");
+            assert_eq!(view(session, digest)?.status, McpTaskStatus::Completed);
+            let consumed: Value = serde_json::from_str(&wait_with_ticks(
+                Some(session.to_owned()),
+                Some(after_ticks),
+            ))?;
+            assert_eq!(consumed["ok"], true, "{consumed}");
             let observed = view(session, digest)?;
             assert_eq!(
                 observed.status,

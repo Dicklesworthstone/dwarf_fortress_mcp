@@ -112,33 +112,54 @@ fn changed_anchor_requires_reviewed_production_replay_even_when_stock_is_unchang
 }
 
 #[test]
-fn finished_production_work_does_not_prove_stock_consumed_during_the_plan() -> TestResult {
+fn production_reserves_consumption_until_the_original_goal_is_proved() -> TestResult {
     let session = open("743001")?;
     wait(&session, 1099)?; // Source tick 1100; metabolism starts at tick 1.
     let planned = plan(&session, json!([{"item":"DRINK","minimum":60}]))?;
+    assert_eq!(
+        planned["production"]["consumption"]["planner"],
+        "consumption_aware_v1"
+    );
+    let requirement = &planned["production"]["requirements"][0];
+    assert_eq!(requirement["minimum_stock"], 60);
+    assert_eq!(requirement["planning_stock_target"], 67);
+    assert_eq!(requirement["consumption_allowance"], 7);
+    {
+        let owner = resolve_session(Some(session.clone()))?;
+        let guard = owner.lock().map_err(|_| "session poisoned")?;
+        let pending = guard.pending.as_ref().ok_or("plan missing")?;
+        let PlanSource::Production { raw, .. } = &pending.source else {
+            return Err("original production source missing".into());
+        };
+        assert_eq!(parsed(raw)?["planner"], "consumption_aware_v1");
+        assert!(matches!(
+            &pending.plan.steps[0].action,
+            Action::CreateWorkOrder { amount: 6, .. }
+        ));
+    }
     let committed = commit(&session, &planned)?;
     assert_eq!(committed["ok"], true, "{committed}");
-    let settled = wait(&session, 200)?;
-    assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 53);
+    let settled = wait(&session, 300)?;
+    assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 63);
     assert_eq!(
         settled["polled_actions"][0]["state"], "verified",
         "{settled}"
     );
     assert_eq!(
-        settled["objectives"][0]["predicate_truth"], "false",
+        settled["objectives"][0]["predicate_truth"], "true",
         "{settled}"
     );
-    assert_ne!(settled["objectives"][0]["status"], "achieved", "{settled}");
-    assert!(settled["objectives"][0]["achieved_tick"].is_null());
+    assert_eq!(settled["objectives"][0]["status"], "achieved", "{settled}");
+    assert!(settled["objectives"][0]["achieved_tick"].is_u64());
     assert_eq!(
         settled["agent_turn"]["briefing"]["objective_status"][0]["predicate_truth"],
-        "false"
+        "true"
     );
     Ok(())
 }
 
 #[test]
-fn joint_production_goal_keeps_a_quota_that_needed_no_order() -> TestResult {
+fn joint_production_reserves_a_quota_already_satisfied_at_the_source() -> TestResult {
     let session = open("743002")?;
     wait(&session, 1150)?; // The first drink meal occurs at game tick 1201.
     let planned = plan(
@@ -147,21 +168,29 @@ fn joint_production_goal_keeps_a_quota_that_needed_no_order() -> TestResult {
             {"item":"DRINK","minimum":40}, {"item":"FOOD","minimum":65},
         ]),
     )?;
-    assert_eq!(planned["steps"].as_array().map(Vec::len), Some(1));
+    assert_eq!(planned["steps"].as_array().map(Vec::len), Some(2));
+    let drink = planned["production"]["requirements"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["item"] == "DRINK"))
+        .ok_or("drink requirement missing")?;
+    assert_eq!(drink["minimum_stock"], 40);
+    assert_eq!(drink["planning_stock_target"], 47);
     let committed = commit(&session, &planned)?;
     assert_eq!(committed["ok"], true, "{committed}");
-    let settled = wait(&session, 50)?;
+    let settled = wait(&session, 100)?;
     assert_eq!(stock(&session, effects::STOCK_FOOD_FIELD)?, 65);
-    assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 33);
-    assert_eq!(
-        settled["polled_actions"][0]["state"], "verified",
+    assert_eq!(stock(&session, effects::STOCK_DRINK_FIELD)?, 43);
+    assert!(
+        settled["polled_actions"]
+            .as_array()
+            .is_some_and(|actions| actions.iter().all(|action| action["state"] == "verified")),
         "{settled}"
     );
     assert_eq!(
-        settled["objectives"][0]["predicate_truth"], "false",
+        settled["objectives"][0]["predicate_truth"], "true",
         "{settled}"
     );
-    assert!(settled["objectives"][0]["achieved_tick"].is_null());
+    assert!(settled["objectives"][0]["achieved_tick"].is_u64());
     Ok(())
 }
 

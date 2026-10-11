@@ -5,7 +5,7 @@
 //! before using it. Recovery can reproduce a seal without consulting a mutable
 //! parent book because every continuation retains the complete original request.
 
-use crate::lab_world::{MAX_ACTIONS_JSON_BYTES, ProductionRequest, parse_steps};
+use crate::lab_world::{MAX_ACTIONS_JSON_BYTES, ProductionPlanner, ProductionRequest, parse_steps};
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, ErrorCode, IntentId, OperationContext, Result, RiskTier,
 };
@@ -14,7 +14,32 @@ use dfmcp_world::{PredicateEvidence, PredicateTruth, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/1";
+const LEGACY_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/1";
+const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
+
+/// Archive parsing selects the historical algorithm; new planning selects one
+/// fixed generation without editing the original retained quota/setup request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceVersion {
+    Legacy,
+    ConsumptionAwareV1,
+}
+
+impl SourceVersion {
+    fn schema(self) -> &'static str {
+        match self {
+            Self::Legacy => LEGACY_SOURCE_SCHEMA,
+            Self::ConsumptionAwareV1 => SOURCE_SCHEMA,
+        }
+    }
+
+    fn domain(self) -> &'static [u8] {
+        match self {
+            Self::Legacy => b"dfmcp-production-continuation-source/1\0",
+            Self::ConsumptionAwareV1 => b"dfmcp-production-continuation-source/2\0",
+        }
+    }
+}
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -64,6 +89,7 @@ pub(crate) struct ProductionContinuation {
     pub(crate) parent: Digest32,
     pub(crate) root: Digest32,
     request: ProductionRequest,
+    version: SourceVersion,
 }
 
 impl ProductionContinuation {
@@ -71,6 +97,15 @@ impl ProductionContinuation {
         parent: Digest32,
         root: Digest32,
         request: ProductionRequest,
+    ) -> Result<Self> {
+        Self::from_parts(parent, root, request, SourceVersion::ConsumptionAwareV1)
+    }
+
+    fn from_parts(
+        parent: Digest32,
+        root: Digest32,
+        request: ProductionRequest,
+        version: SourceVersion,
     ) -> Result<Self> {
         if parent == Digest32::ZERO || root == Digest32::ZERO {
             return Err(invalid(
@@ -81,6 +116,7 @@ impl ProductionContinuation {
             parent,
             root,
             request,
+            version,
         };
         bounded(&source.canonical_json())?;
         Ok(source)
@@ -98,18 +134,27 @@ impl ProductionContinuation {
         bounded(raw)?;
         let source: Source = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid retained goal continuation: {error}")))?;
-        if source.schema != SOURCE_SCHEMA {
-            return Err(invalid("unknown retained goal continuation schema"));
+        let version = match source.schema.as_str() {
+            LEGACY_SOURCE_SCHEMA => SourceVersion::Legacy,
+            SOURCE_SCHEMA => SourceVersion::ConsumptionAwareV1,
+            _ => return Err(invalid("unknown retained goal continuation schema")),
+        };
+        let request = ProductionRequest::parse(&source.production.to_string())?;
+        if version == SourceVersion::Legacy && request.planner().is_some() {
+            return Err(invalid(
+                "legacy continuation source cannot contain a later production compiler generation",
+            ));
         }
-        Self::new(
+        Self::from_parts(
             digest(&source.parent_plan_digest)?,
             digest(&source.root_plan_digest)?,
-            ProductionRequest::parse(&source.production.to_string())?,
+            request,
+            version,
         )
     }
 
-    /// A second continuation changes only the immediate parent. The original
-    /// quotas and permitted setup sites remain flat and bounded across restarts.
+    /// New planning always uses the current fixed generation. The original
+    /// request and root remain unchanged, including for a legacy parent.
     pub(crate) fn next(&self, parent: Digest32) -> Result<Self> {
         Self::new(parent, self.root, self.request.clone())
     }
@@ -118,7 +163,8 @@ impl ProductionContinuation {
         // ProductionRequest generates canonical, valid JSON. Embed its exact
         // bytes directly so no fallback can replace an original request.
         format!(
-            "{{\"schema\":\"{SOURCE_SCHEMA}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"production\":{}}}",
+            "{{\"schema\":\"{}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"production\":{}}}",
+            self.version.schema(),
             self.parent.to_hex(),
             self.root.to_hex(),
             self.request.canonical_json(),
@@ -126,19 +172,31 @@ impl ProductionContinuation {
     }
 
     pub(crate) fn source_digest(&self) -> Digest32 {
-        let mut bytes = b"dfmcp-production-continuation-source/1\0".to_vec();
+        let mut bytes = self.version.domain().to_vec();
         bytes.extend_from_slice(self.canonical_json().as_bytes());
         Digest32::of_bytes(&bytes)
     }
 
     pub(crate) fn lineage_json(&self) -> Value {
-        json!({
+        let mut lineage = json!({
             "parent_plan_digest": self.parent.to_hex(),
             "root_plan_digest": self.root.to_hex(),
             "continuation_source_digest": self.source_digest().to_hex(),
             "requires_explicit_commit": true,
             "replacement_work_dispatched": false,
-        })
+        });
+        if self.version == SourceVersion::ConsumptionAwareV1 {
+            lineage["source_schema"] = json!(SOURCE_SCHEMA);
+            lineage["planner"] = json!("consumption_aware_v1");
+        }
+        lineage
+    }
+
+    /// Current authorization validates retained lineage independently of the
+    /// already sealed compiler generation. Replaying a known legacy candidate
+    /// must not silently upgrade its source or invalidate its exact retry.
+    pub(crate) fn same_original_request(&self, other: &Self) -> bool {
+        self.parent == other.parent && self.root == other.root && self.request == other.request
     }
 
     pub(crate) fn compile(
@@ -161,7 +219,14 @@ impl ProductionContinuation {
                 "continuation summary plus its source seal exceeds the planner bound; supply a shorter summary",
             ));
         }
-        let compiled = self.request.compile(snapshot)?;
+        let compiled = match self.version {
+            SourceVersion::Legacy => self.request.compile(snapshot)?,
+            SourceVersion::ConsumptionAwareV1 => self
+                .request
+                .clone()
+                .with_planner(ProductionPlanner::ConsumptionAwareV1)
+                .compile(snapshot)?,
+        };
         let requested_actions = parse_steps(&compiled.actions)?;
         let max_risk = requested_actions
             .iter()

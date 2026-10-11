@@ -194,14 +194,88 @@ impl ProductionWorkload {
                 "production workload allowance belongs to a different source or action program",
             ));
         }
+        let obligations = self.obligations(&intent.requested_actions, false, |index, action| {
+            let step = StepId::new(u32::try_from(index).map_err(|_| horizon_error())?);
+            Ok(derive_step_idempotency_key(
+                intent.id,
+                intent.anchor,
+                step,
+                action,
+            ))
+        })?;
+        for (requested, obligation) in intent.requested_actions.iter_mut().zip(obligations) {
+            requested.obligation = obligation;
+        }
+        Ok(())
+    }
+
+    /// Exact relative horizon of the default obligations that the new compiler
+    /// will seal. A preview key changes predicates only, never their deadlines.
+    pub(super) fn horizon_ticks(&self, actions: &str) -> Result<u64> {
+        let obligations = self.obligations(&parse_steps(actions)?, true, |index, _| {
+            Ok(format!("production-consumption-horizon-{index}"))
+        })?;
+        Ok(self.latest_deadline(&obligations).0 - self.anchor.tick.0)
+    }
+
+    /// Bind the same complete horizon used to size consumption reserves to real
+    /// step identities. Unlike the legacy path this also seals zero-backlog
+    /// defaults, so preview and preparation cannot choose different horizons.
+    pub(super) fn apply_complete_horizon(
+        &self,
+        actions: &str,
+        intent: &mut Intent,
+        expected_ticks: u64,
+    ) -> Result<()> {
+        if intent.anchor != self.anchor || intent.requested_actions != parse_steps(actions)? {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "production consumption horizon belongs to a different source or action program",
+            ));
+        }
+        let obligations = self.obligations(&intent.requested_actions, true, |index, action| {
+            let step = StepId::new(u32::try_from(index).map_err(|_| horizon_error())?);
+            Ok(derive_step_idempotency_key(
+                intent.id,
+                intent.anchor,
+                step,
+                action,
+            ))
+        })?;
+        if self.latest_deadline(&obligations).0 - self.anchor.tick.0 != expected_ticks {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "production consumption reserve and sealed obligation horizons disagree",
+            ));
+        }
+        // A refusal above leaves the caller's original intent unchanged.
+        for (requested, obligation) in intent.requested_actions.iter_mut().zip(obligations) {
+            requested.obligation = obligation;
+        }
+        Ok(())
+    }
+
+    fn latest_deadline(&self, obligations: &[Option<ObligationSpec>]) -> GameTick {
+        obligations
+            .iter()
+            .filter_map(|obligation| obligation.as_ref().map(|value| value.deadline_tick))
+            .max()
+            .unwrap_or(self.anchor.tick)
+    }
+
+    fn obligations(
+        &self,
+        actions: &[RequestedAction],
+        strict_service_bound: bool,
+        mut key: impl FnMut(usize, &Action) -> Result<String>,
+    ) -> Result<Vec<Option<ObligationSpec>>> {
         let horizon_limit = self
             .anchor
             .tick
             .checked_add(effects::MAX_DEFAULT_OBLIGATION_TICKS)
             .ok_or_else(horizon_error)?;
-        let mut obligations: Vec<Option<ObligationSpec>> =
-            Vec::with_capacity(intent.requested_actions.len());
-        for (index, requested) in intent.requested_actions.iter().enumerate() {
+        let mut obligations: Vec<Option<ObligationSpec>> = Vec::with_capacity(actions.len());
+        for (index, requested) in actions.iter().enumerate() {
             let mut start = self.anchor.tick;
             for dependency in &requested.depends_on {
                 let previous = obligations.get(*dependency as usize).ok_or_else(|| {
@@ -212,6 +286,17 @@ impl ProductionWorkload {
                 }
             }
             let action = requested.action.normalized();
+            if strict_service_bound && let Action::CreateWorkOrder { amount, .. } = &action {
+                // The historical default caps an oversized obligation. The
+                // consumption solver must refuse instead of mistaking that
+                // cap for enough service to produce the requested quantity.
+                u64::from(*amount)
+                    .checked_mul(effects::WORK_ORDER_TICKS_PER_UNIT)
+                    .and_then(|ticks| ticks.checked_mul(2))
+                    .and_then(|ticks| ticks.checked_add(100))
+                    .filter(|ticks| *ticks <= effects::MAX_DEFAULT_OBLIGATION_TICKS)
+                    .ok_or_else(horizon_error)?;
+            }
             if matches!(&action, Action::CreateWorkOrder { .. }) {
                 // A condition-blocked existing order can become ready after
                 // setup, so setup time cannot be assumed to drain its service.
@@ -220,10 +305,9 @@ impl ProductionWorkload {
                     .checked_add(self.allowance_ticks)
                     .ok_or_else(horizon_error)?;
             }
-            let step = StepId::new(u32::try_from(index).map_err(|_| horizon_error())?);
-            let key = derive_step_idempotency_key(intent.id, intent.anchor, step, &action);
+            let key = key(index, &action)?;
             let obligation =
-                effects::default_obligation(&action, &key, intent.anchor.fortress_id, start)?;
+                effects::default_obligation(&action, &key, self.anchor.fortress_id, start)?;
             if obligation
                 .as_ref()
                 .is_some_and(|obligation| obligation.deadline_tick > horizon_limit)
@@ -232,11 +316,6 @@ impl ProductionWorkload {
             }
             obligations.push(obligation);
         }
-        // Publish the newly sealed deadlines only after the entire bounded
-        // program fits. A refused horizon leaves the caller's intent intact.
-        for (requested, obligation) in intent.requested_actions.iter_mut().zip(obligations) {
-            requested.obligation = obligation;
-        }
-        Ok(())
+        Ok(obligations)
     }
 }

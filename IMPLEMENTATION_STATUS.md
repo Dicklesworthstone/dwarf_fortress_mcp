@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Consumption-aware original production and whole-goal forecasts (2026-10-11)
+
+New laboratory production intake uses fixed `consumption_aware_v1` source
+semantics. Joint staffing applies even without setup options, and orders
+sharing their only eligible worker receive verified-completion dependencies.
+Observed population and metabolism phase determine reserves through the complete
+sealed obligation horizon, including setup and existing queued service. The
+bounded monotone calculation includes every original quota while preserving its
+exact terminal minimum and refusing unknown or overflowing planning evidence.
+
+New production sources retain their compiler field and bind every canonical
+request field into the actual plan seal, including unused setup permissions and
+sites. Historical sources without the field preserve their prior bytes,
+compiler, summary and seal. New `production_continuation` `/2` envelopes choose
+the fixed new compiler while preserving the original request; historical `/1`
+reconstruction and exact pending-candidate retry preserve the sealed generation.
+
+Discarded-fork forecasts evaluate the original terminal predicate and physical
+work separately from action proof. Whole-plan completion requires Verified
+actions, True original goal and physically quiescent work together. Unknown goal
+truth stays Unknown, and early proof does not hide active work. Separate output
+fields retain action timing, goal truth and physical-work state. Prediction
+never certifies canonical state, creates authority or dispatches real work.
+
+**Evidence:** all 93 actual-source production/projection/source/continuation/
+forecast tests pass, including 28 new cases. These execute actual workspace
+StaticPlanner, MemoryAdapter, finite-capacity effects and source qualification.
+Focused warning-denied Clippy passes for the actual source modules and their
+tests on the pinned 2026-08-31 compiler. Updated MCP facade/Task expectation
+regressions are source-reviewed and formatted but have not executed for this
+increment. No full-workspace, native-game or live qualification is claimed.
+See `docs/PRODUCTION_RESERVE_PLANNING.md` for usage, bounds and assumptions.
+
 ### Explicit continuation of retained production goals (2026-10-10)
 
 The existing laboratory `fortress.plan` blueprint argument now accepts the

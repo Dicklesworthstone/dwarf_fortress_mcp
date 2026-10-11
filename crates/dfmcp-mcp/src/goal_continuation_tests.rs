@@ -374,3 +374,142 @@ fn next_request_uses_the_existing_fortress_plan_blueprint_contract() -> Result<(
     assert_eq!(parse_request(raw)?, root);
     Ok(())
 }
+
+fn legacy_archive() -> String {
+    format!(
+        "{{\"schema\":\"dfmcp.production-continuation/1\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"production\":{{\"quotas\":[{{\"item\":\"DRINK\",\"minimum\":60}}],\"template\":\"production\"}}}}",
+        "1".repeat(64),
+        "2".repeat(64)
+    )
+}
+
+#[test]
+fn legacy_archive_preserves_exact_source_bytes_and_digest_domain() -> Result<()> {
+    let raw = legacy_archive();
+    let legacy = ProductionContinuation::parse(&raw)?;
+    assert_eq!(legacy.canonical_json(), raw);
+    let mut original_domain = b"dfmcp-production-continuation-source/1\0".to_vec();
+    original_domain.extend_from_slice(raw.as_bytes());
+    assert_eq!(legacy.source_digest(), Digest32::of_bytes(&original_domain));
+    assert_eq!(
+        legacy.source_digest().to_hex(),
+        "4793ae0dd140b10f944111af4d61cb625abef0eee59f954b425860a535ef9051"
+    );
+    assert_eq!(legacy.version, SourceVersion::Legacy);
+    assert_eq!(legacy.request.planner(), None);
+    assert!(legacy.lineage_json()["planner"].is_null());
+    Ok(())
+}
+
+#[test]
+fn legacy_archive_replays_the_old_algorithm_while_new_pursuit_covers_consumption() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(world()?);
+    adapter.advance_ticks(1099)?;
+    let legacy = ProductionContinuation::parse(&legacy_archive())?;
+    let before = legacy.compile(IntentId::new(7), adapter.snapshot(), "old continuation")?;
+    assert!(matches!(
+        before.0.requested_actions[0].action,
+        Action::CreateWorkOrder { amount: 4, .. }
+    ));
+    let current = ProductionContinuation::new(legacy.parent, legacy.root, legacy.request.clone())?;
+    let upgraded = current.compile(IntentId::new(7), adapter.snapshot(), "new continuation")?;
+    assert!(matches!(upgraded.0.requested_actions[0].action,
+        Action::CreateWorkOrder { amount, .. } if amount > 4));
+    assert_eq!(before.0.terminal_condition, upgraded.0.terminal_condition);
+    assert!(current.same_original_request(&legacy));
+    assert_ne!(current.source_digest(), legacy.source_digest());
+    assert_eq!(
+        current.request.canonical_json(),
+        legacy.request.canonical_json()
+    );
+    assert_eq!(
+        current.request.planner(),
+        None,
+        "the original request is retained; the outer version selects the new compiler"
+    );
+    let reopened = ProductionContinuation::parse(&legacy.canonical_json())?;
+    assert_eq!(
+        reopened.compile(IntentId::new(7), adapter.snapshot(), "old continuation")?,
+        before
+    );
+    let reopened_current = ProductionContinuation::parse(&current.canonical_json())?;
+    assert_eq!(
+        reopened_current.compile(IntentId::new(7), adapter.snapshot(), "new continuation")?,
+        upgraded
+    );
+    Ok(())
+}
+
+#[test]
+fn new_continuation_of_legacy_parent_keeps_original_request_and_root() -> Result<()> {
+    let legacy = ProductionContinuation::parse(&legacy_archive())?;
+    let parent = Digest32::of_bytes(b"next retained committed parent");
+    let next = legacy.next(parent)?;
+    assert_eq!(next.version, SourceVersion::ConsumptionAwareV1);
+    assert_eq!(next.parent, parent);
+    assert_eq!(next.root, legacy.root);
+    assert_eq!(next.request, legacy.request);
+    assert_eq!(next.lineage_json()["source_schema"], SOURCE_SCHEMA);
+    assert_eq!(next.lineage_json()["planner"], "consumption_aware_v1");
+    assert_eq!(ProductionContinuation::parse(&next.canonical_json())?, next);
+    Ok(())
+}
+
+#[test]
+fn retry_comparison_accepts_only_the_same_original_request_and_lineage() -> Result<()> {
+    let legacy = ProductionContinuation::parse(&legacy_archive())?;
+    let current = ProductionContinuation::new(legacy.parent, legacy.root, legacy.request.clone())?;
+    assert!(legacy.same_original_request(&current));
+    let changed_quota = ProductionContinuation::new(
+        legacy.parent,
+        legacy.root,
+        ProductionRequest::parse(
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":61}]}"#,
+        )?,
+    )?;
+    assert!(!legacy.same_original_request(&changed_quota));
+    let changed_permission = ProductionContinuation::new(
+        legacy.parent,
+        legacy.root,
+        ProductionRequest::parse(
+            r#"{"template":"production","quotas":[{"item":"DRINK","minimum":60}],"prerequisites":{"assign_labor":true}}"#,
+        )?,
+    )?;
+    assert!(!legacy.same_original_request(&changed_permission));
+    let other = Digest32::of_bytes(b"wrong lineage");
+    assert!(!legacy.same_original_request(&ProductionContinuation::new(
+        other,
+        legacy.root,
+        legacy.request.clone()
+    )?));
+    assert!(!legacy.same_original_request(&ProductionContinuation::new(
+        legacy.parent,
+        other,
+        legacy.request.clone()
+    )?));
+    Ok(())
+}
+
+#[test]
+fn legacy_envelope_cannot_smuggle_a_later_compiler_into_archived_history() -> Result<()> {
+    let mut source: Value =
+        serde_json::from_str(&legacy_archive()).map_err(|error| invalid(error.to_string()))?;
+    source["production"]["planner"] = json!("consumption_aware_v1");
+    assert_eq!(
+        ProductionContinuation::parse(&source.to_string())
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::InvalidRequest)
+    );
+    source["schema"] = json!(SOURCE_SCHEMA);
+    let current = ProductionContinuation::parse(&source.to_string())?;
+    assert_eq!(
+        current.request.planner(),
+        Some(ProductionPlanner::ConsumptionAwareV1)
+    );
+    assert_eq!(
+        ProductionContinuation::parse(&current.canonical_json())?,
+        current
+    );
+    Ok(())
+}

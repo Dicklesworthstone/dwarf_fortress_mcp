@@ -262,7 +262,6 @@ fn consumed_goal_continuation_requires_a_new_explicit_commit_and_keeps_original_
 fn continuation_keeps_a_quota_that_needed_no_original_order() -> TestResult {
     let _serial = serialized_durable_tests();
     let session = open("7844002", false, false)?;
-    wait(&session, 1_150)?;
     let original = production(
         &session,
         json!([{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":65}]),
@@ -271,6 +270,8 @@ fn continuation_keeps_a_quota_that_needed_no_original_order() -> TestResult {
     assert_eq!(original["steps"].as_array().map(Vec::len), Some(1));
     commit_ok(&session, &original)?;
     wait(&session, 50)?;
+    assert_eq!(goal(&session, &root)?["predicate_truth"], "true");
+    wait(&session, 1_150)?; // A later meal consumes a reserve that originally needed no work.
     let parent = goal(&session, &root)?;
     assert_eq!(parent["predicate_truth"], "false");
     assert_eq!(parent["physical_quiescent"], true);

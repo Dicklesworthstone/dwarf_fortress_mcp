@@ -330,7 +330,10 @@ pub(super) fn validate_continuation(
         Some(source_summary(source).to_owned()),
         exclude_candidate,
     )?;
-    if current.continuation()?.as_ref() != Some(&continuation) {
+    if !current
+        .continuation()?
+        .is_some_and(|expected| continuation.same_original_request(&expected))
+    {
         return Err(DfmcpError::new(
             ErrorCode::CorruptLedger,
             "continuation source no longer matches its retained original request and lineage",

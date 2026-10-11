@@ -52,6 +52,11 @@ fortress_commit(plan_digest=...)
 fortress_wait(max_game_ticks=100)   # repeat until open_actions_remaining is 0
 ```
 
+Original DRINK/FOOD production quotas also use this sealed action loop. New
+requests budget consumption and finite capacity without changing the original
+terminal minima; historical sources preserve their exact compiler generation.
+See [`PRODUCTION_RESERVE_PLANNING.md`](PRODUCTION_RESERVE_PLANNING.md).
+
 Instead of explicit actions an agent can state an objective:
 
 ```text
@@ -71,8 +76,16 @@ excavation. The result is an ordinary sealed plan with forecast; `actions` and
 `fortress_plan` also returns a `forecast` (epistemic state `predicted`): the
 sealed plan is committed on a discarded fork of the world and laboratory time is
 run forward to every obligation deadline, reporting each step's predicted
-terminal state and tick, `predicted_completion_tick`, `blocked_by_pause`, and the
-forecast's `resolution_ticks`. A step that would fail at commit (for example
+terminal state and tick, `blocked_by_pause`, and the forecast's
+`resolution_ticks`. Whole-plan `predicted_complete` and
+`predicted_completion_tick` require all action proofs Verified, the exact
+original terminal predicate True, and original physical work quiescent at the
+same predicted frontier. Separate `predicted_actions_complete`,
+`predicted_actions_completion_tick`, `predicted_goal_truth`,
+`predicted_goal_complete` and `predicted_physical_quiescent` preserve the reason
+an original goal remains incomplete. Unknown is never success; an early action
+proof does not stop observation of its continuing physical work. A step that
+would fail at commit (for example
 digging unobserved terrain) shows up as `available: false` with the refusal,
 before anything is committed. Advancement and polling refusals also make the
 forecast unavailable with their actual reason; a failed partial simulation is

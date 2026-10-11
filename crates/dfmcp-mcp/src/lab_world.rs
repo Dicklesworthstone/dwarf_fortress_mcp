@@ -30,9 +30,16 @@ use serde_json::{Value as Json, json};
 mod production_workload;
 use production_workload::ProductionWorkload;
 
+#[path = "production_consumption.rs"]
+mod production_consumption;
+
 #[cfg(test)]
 #[path = "production_workload_tests.rs"]
 mod production_workload_tests;
+
+#[cfg(test)]
+#[path = "production_consumption_tests.rs"]
+mod production_consumption_tests;
 
 /// Largest semantic action request accepted by `fortress.plan`.
 pub(crate) const MAX_ACTIONS_JSON_BYTES: usize = 16 * 1024;
@@ -832,6 +839,15 @@ fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
 pub(crate) struct ProductionRequest {
     quotas: BTreeMap<String, u32>,
     prerequisites: Option<ProductionPrerequisites>,
+    planner: Option<ProductionPlanner>,
+}
+
+/// A fixed compiler generation retained in the original request. Missing
+/// generation means the historical stock-only compiler, including on replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProductionPlanner {
+    ConsumptionAwareV1,
 }
 
 /// Original permission to synthesize setup, independent of the current stock.
@@ -882,6 +898,7 @@ impl ProductionRequest {
             template: String,
             quotas: Vec<Quota>,
             prerequisites: Option<Prerequisites>,
+            planner: Option<ProductionPlanner>,
         }
         if raw.len() > MAX_ACTIONS_JSON_BYTES {
             return Err(invalid("production objective exceeds its byte bound"));
@@ -981,7 +998,23 @@ impl ProductionRequest {
         Ok(Self {
             quotas,
             prerequisites,
+            planner: objective.planner,
         })
+    }
+
+    /// New intake selects a named, immutable generation. Archived source uses
+    /// `parse` so upgrading the server cannot silently change an old seal.
+    pub(crate) fn parse_current(raw: &str) -> Result<Self> {
+        Ok(Self::parse(raw)?.with_planner(ProductionPlanner::ConsumptionAwareV1))
+    }
+
+    pub(crate) fn with_planner(mut self, planner: ProductionPlanner) -> Self {
+        self.planner = Some(planner);
+        self
+    }
+
+    pub(crate) fn planner(&self) -> Option<ProductionPlanner> {
+        self.planner
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -1003,12 +1036,32 @@ impl ProductionRequest {
                 })).collect::<Vec<_>>(),
             });
         }
+        if self.planner == Some(ProductionPlanner::ConsumptionAwareV1) {
+            request["planner"] = json!("consumption_aware_v1");
+        }
         request.to_string()
     }
 
     /// Recompile from the original quotas at this one observed snapshot.
     /// Work-order completion and the original stock goal remain separate.
     pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
+        match self.planner {
+            None => self.compile_targets(snapshot, &self.quotas, false),
+            Some(ProductionPlanner::ConsumptionAwareV1) => {
+                production_consumption::compile(self, snapshot)
+            }
+        }
+    }
+
+    /// Lower one bounded candidate while preserving every original terminal
+    /// quota. Planning stock targets may include predicted consumption; they
+    /// never replace the user's original objective or count as observed stock.
+    fn compile_targets(
+        &self,
+        snapshot: &WorldSnapshot,
+        targets: &BTreeMap<String, u32>,
+        joint_staffing: bool,
+    ) -> Result<ProductionCompilation> {
         let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
         let snapshot = evidence.snapshot();
         let mut inventory = dfmcp_intent::InventoryStockpile::new();
@@ -1052,8 +1105,7 @@ impl ProductionRequest {
                 value: Value::U64(u64::from(*minimum)),
             });
         }
-        let quotas: Vec<dfmcp_intent::ProductionQuota> = self
-            .quotas
+        let quotas: Vec<dfmcp_intent::ProductionQuota> = targets
             .iter()
             .map(|(item, minimum)| dfmcp_intent::ProductionQuota {
                 item_token: item.clone(),
@@ -1117,7 +1169,21 @@ impl ProductionRequest {
                         ),
                     ));
                 }
-                ProductionSetup::default()
+                if joint_staffing {
+                    // Observed capacity is relevant even when the caller did
+                    // not authorize changing it. This can add dependencies,
+                    // but no labor or construction action is permitted.
+                    compile_production_prerequisites(
+                        snapshot,
+                        &jobs,
+                        &ProductionPrerequisites {
+                            assign_labor: false,
+                            workshops: BTreeMap::new(),
+                        },
+                    )?
+                } else {
+                    ProductionSetup::default()
+                }
             }
         };
         let setup_count = setup.actions.len();
@@ -1186,12 +1252,20 @@ impl ProductionRequest {
                     .map(|step| step.action.capability().as_str())
                     .collect::<BTreeSet<_>>()
             );
+        } else if joint_staffing {
+            analysis["staffing"] = json!({
+                "workers": setup.staffing,
+                "workshops": setup.workshops,
+                "selection_policy": "maximize distinct observed eligible workers, then military preference and canonical per-job entity IDs; serialize jobs sharing a worker",
+                "setup_actions_authorized": false,
+            });
         }
         Ok(ProductionCompilation {
             actions,
             analysis,
             terminal: Predicate::All(terminal).normalized(),
             workload,
+            consumption_horizon: None,
         })
     }
 }
@@ -1557,6 +1631,7 @@ pub(crate) struct ProductionCompilation {
     pub(crate) analysis: Json,
     pub(crate) terminal: Predicate,
     workload: ProductionWorkload,
+    consumption_horizon: Option<u64>,
 }
 
 impl ProductionCompilation {
@@ -1565,7 +1640,12 @@ impl ProductionCompilation {
     /// This only describes a reference-model allowance, never future proof or
     /// permission to dispatch existing or new work.
     pub(crate) fn apply_capacity_horizon(&self, intent: &mut dfmcp_intent::Intent) -> Result<()> {
-        self.workload.apply_horizon(&self.actions, intent)
+        match self.consumption_horizon {
+            Some(horizon) => self
+                .workload
+                .apply_complete_horizon(&self.actions, intent, horizon),
+            None => self.workload.apply_horizon(&self.actions, intent),
+        }
     }
 }
 
