@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::Cell;
 use std::io::Cursor;
 use std::time::Instant;
 
@@ -806,6 +807,8 @@ fn budgets_and_revoked_observe_refuse_before_any_capture_or_new_source() -> Resu
                 .retain(|g| g.capability != Capability::Observe),
         }
         let reads = f.native.borrow().reads;
+        let progress_contacts = Cell::new(0_u32);
+        let operations_contacts = Cell::new(0_u32);
         let result = session.poll_original_goal::<ProgressFixture, OperationsFixture, _, _, _>(
             &mut monitor,
             ObservationCursor {
@@ -814,15 +817,19 @@ fn budgets_and_revoked_observe_refuse_before_any_capture_or_new_source() -> Resu
             },
             &context,
             |_| {
-                panic!("precontact refusal opened progress");
+                progress_contacts.set(progress_contacts.get() + 1);
+                Err::<ProgressFixture, _>(rejected())
             },
             |_| {
-                panic!("precontact refusal opened operations");
+                operations_contacts.set(operations_contacts.get() + 1);
+                Err::<OperationsFixture, _>(rejected())
             },
             |_, _| Err(rejected()),
         );
         assert!(result.is_err());
         assert_eq!(f.native.borrow().reads, reads);
+        assert_eq!(progress_contacts.get(), 0);
+        assert_eq!(operations_contacts.get(), 0);
     }
     Ok(())
 }
