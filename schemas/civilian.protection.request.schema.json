@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Named civilian protection request",
+  "description": "Reference configuration only, not physical evacuation or threat clearance. Rust additionally enforces u64 range, distinct burrow identity and input byte bounds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workflow",
+    "burrow",
+    "civilians"
+  ],
+  "properties": {
+    "workflow": {
+      "const": "civilian_protection_v1"
+    },
+    "burrow": {
+      "$ref": "#/$defs/id"
+    },
+    "civilians": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20,
+      "pattern": "^[1-9][0-9]*$"
+    }
+  }
+}

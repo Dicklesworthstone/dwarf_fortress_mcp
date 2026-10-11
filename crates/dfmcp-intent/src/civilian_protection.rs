@@ -44,8 +44,8 @@ pub struct ProtectionProgress {
 }
 
 /// Immutable bounded lowering. The fortress must already be observed paused;
-/// use the ordinary pause plan first when it is running. This prevents time
-/// advancing between restriction activation and membership configuration.
+/// use the ordinary pause plan first when it is running. A lost pause refuses
+/// the next dispatch; this does not claim ownership of an external game clock.
 #[derive(Clone, Debug)]
 pub struct CivilianProtectionPlan {
     burrow: EntityId,
@@ -135,7 +135,10 @@ impl CivilianProtectionPlan {
     #[must_use]
     pub fn into_requested_actions(self) -> Vec<RequestedAction> { self.steps }
 
-    fn goal(&self, fortress: FortressId) -> Predicate {
+    /// Pure goal composition for an already authorized observation shell. This
+    /// predicate grants no source eligibility, read capability or effect authority.
+    #[must_use]
+    pub fn configuration_goal(&self, fortress: FortressId) -> Predicate {
         let mut predicates = vec![self.membership_goal.clone()];
         predicates.extend(effects::default_postconditions(&self.steps[0].action, "", fortress));
         Predicate::All(predicates).normalized()
@@ -165,7 +168,7 @@ impl CivilianProtectionPlan {
     ) -> Result<PreparedPlan> {
         self.authorize(evidence, context)?;
         if context.budget.max_actions < self.steps.len() as u32 { return Err(exhausted()); }
-        let goal = self.goal(evidence.snapshot().fortress_id);
+        let goal = self.configuration_goal(evidence.snapshot().fortress_id);
         let mut steps = self.steps.clone();
         steps[1].postconditions = vec![goal.clone()];
         let risk = steps.iter().map(|step| step.action.risk()).max().ok_or_else(exhausted)?;
@@ -186,7 +189,7 @@ impl CivilianProtectionPlan {
         let mut progress = ProtectionProgress {
             anchor: context.anchor, requested_civilians: self.civilians.len(), assigned: 0,
             unassigned: 0, unknown_memberships: 0,
-            configuration: evidence.evaluate(&self.goal(context.anchor.fortress_id))?,
+            configuration: evidence.evaluate(&self.configuration_goal(context.anchor.fortress_id))?,
         };
         for id in &self.civilians {
             match evidence.evaluate(&membership(*id, self.burrow))? {
