@@ -22,9 +22,14 @@ use crate::work_order_control::{
 };
 use crate::work_orders::{WorkOrderObservation, WorkOrderPlan, WorkOrderState};
 
+pub mod goal_history;
 pub mod goal_monitor;
 pub mod goal_projection;
 pub mod store;
+pub use goal_history::{
+    DurableWorkOrderGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
+    open_private_goal_history_store,
+};
 pub use goal_monitor::{
     OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProgress, WorkOrderGoalResult,
 };
@@ -359,16 +364,37 @@ impl NativeClock {
 /// This owner does not issue restore epochs or bridge incarnations. A retained
 /// source binds one of each; a separately established recovery/session owns any
 /// transition. Canonical cursors and native intervention sequences stay distinct.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SourceFloor {
     canonical: Option<StateAnchor>,
     native: Option<NativeClock>,
+    // Valid source observations may advance game time even when a later family
+    // or proof publication fails. Replacing a monitor cannot revive older time.
+    authority_tick: Option<(u64, GameTick)>,
 }
 impl SourceFloor {
+    fn retain_tick(&mut self, epoch: u64, tick: GameTick) -> Result<()> {
+        if self
+            .canonical
+            .is_some_and(|anchor| anchor.cursor.epoch != epoch)
+            || self.native.is_some_and(|clock| clock.epoch != epoch)
+            || self
+                .authority_tick
+                .is_some_and(|(old_epoch, _)| old_epoch != epoch)
+        {
+            return Err(custody());
+        }
+        let high = self.authority_tick.map_or(tick, |(_, high)| high.max(tick));
+        self.authority_tick = Some((epoch, high));
+        Ok(())
+    }
     fn retain_anchor(&mut self, anchor: StateAnchor) -> Result<()> {
         if self
             .native
             .is_some_and(|clock| clock.epoch != anchor.cursor.epoch)
+            || self
+                .authority_tick
+                .is_some_and(|(epoch, _)| epoch != anchor.cursor.epoch)
         {
             return Err(custody());
         }
@@ -383,6 +409,7 @@ impl SourceFloor {
                 _ => return Err(custody()),
             }
         }
+        self.retain_tick(anchor.cursor.epoch, anchor.tick)?;
         self.canonical = Some(anchor);
         Ok(())
     }
@@ -390,6 +417,9 @@ impl SourceFloor {
         if self
             .canonical
             .is_some_and(|anchor| anchor.cursor.epoch != clock.epoch)
+            || self
+                .authority_tick
+                .is_some_and(|(epoch, _)| epoch != clock.epoch)
         {
             return Err(custody());
         }
@@ -410,16 +440,21 @@ impl SourceFloor {
         } else {
             self.native = Some(clock);
         }
+        self.retain_tick(clock.epoch, GameTick(clock.tick))?;
         Ok(())
     }
     fn permit_anchor(&self, anchor: StateAnchor) -> Result<()> {
-        if self.canonical.is_some_and(|old| {
-            anchor.fortress_id != old.fortress_id
-                || anchor.cursor.epoch != old.cursor.epoch
-                || anchor.cursor.sequence < old.cursor.sequence
-                || anchor.tick < old.tick
-                || (anchor.cursor.sequence == old.cursor.sequence && anchor != old)
-        }) {
+        if self
+            .authority_tick
+            .is_some_and(|(epoch, tick)| anchor.cursor.epoch != epoch || anchor.tick < tick)
+            || self.canonical.is_some_and(|old| {
+                anchor.fortress_id != old.fortress_id
+                    || anchor.cursor.epoch != old.cursor.epoch
+                    || anchor.cursor.sequence < old.cursor.sequence
+                    || anchor.tick < old.tick
+                    || (anchor.cursor.sequence == old.cursor.sequence && anchor != old)
+            })
+        {
             return Err(error(
                 ErrorCode::StaleAnchor,
                 "original work-order source predates or forks retained canonical evidence",
@@ -428,12 +463,16 @@ impl SourceFloor {
         Ok(())
     }
     fn permit_native(&self, clock: NativeClock) -> Result<()> {
-        if self.native.is_some_and(|old| {
-            clock.epoch != old.epoch
-                || clock.generation != old.generation
-                || clock.sequence < old.sequence
-                || clock.tick < old.tick
-        }) {
+        if self
+            .authority_tick
+            .is_some_and(|(epoch, tick)| clock.epoch != epoch || GameTick(clock.tick) < tick)
+            || self.native.is_some_and(|old| {
+                clock.epoch != old.epoch
+                    || clock.generation != old.generation
+                    || clock.sequence < old.sequence
+                    || clock.tick < old.tick
+            })
+        {
             return Err(error(
                 ErrorCode::StaleAnchor,
                 "native work-order capture predates retained evidence or changes incarnation",
@@ -442,6 +481,17 @@ impl SourceFloor {
         Ok(())
     }
     fn authority(&self, call: &mut Call) -> Result<()> {
+        if let Some((epoch, tick)) = self.authority_tick {
+            if call.context.anchor.cursor.epoch < epoch {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "authority predates the retained source epoch",
+                ));
+            }
+            if call.context.anchor.cursor.epoch == epoch {
+                call.context.anchor.tick = call.context.anchor.tick.max(tick);
+            }
+        }
         if let Some(anchor) = self.canonical {
             if call.context.anchor.cursor.epoch < anchor.cursor.epoch {
                 return Err(error(

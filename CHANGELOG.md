@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-11 — Recover original native work-order goals across restart
+
+- Add a bounded, operator-owned private goal-history store and exclusive durable
+  monitor. Sync read intent, both queue/progress endpoints, complete operations
+  and original creation context before publishing proof.
+- Rebuild original achievement and obligation history under twice independently
+  reissued exact source policy. Preserve original deadlines/cadence; reset
+  unfinished stability and current truth on reopen. Earlier Unverified insertion
+  stays unlinked after later Created reconciliation.
+- Retain partial progress and operations allocation/source floors. Fence source
+  changes, unretained oversized captures and incomplete crash prefixes. Preserve
+  current authority floors across monitor replacement; ambiguous storage fences
+  publication until independently verified recovery.
+- Keep raw custody and source authority separate, with distinct bounded codecs,
+  private-file identity/locking and immutable read-only recovery. Generic MCP
+  dispatch and native/live admission remain separate work.
+- Pass all 56 actual-adapter work-order integration tests, including 16 new
+  durable-history cases, and warning-denied library/integration Clippy with 416
+  unchanged inventoried inputs. This establishes component behavior with
+  synthetic native responses and real storage, not native/live qualification.
+
 ## 2026-10-11 — Retain source history when original-goal sampling fails
 
 - Retain selected-order counters from both progress endpoints before rejecting

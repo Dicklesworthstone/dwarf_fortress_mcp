@@ -160,12 +160,12 @@ is evaluated privately and becomes visible only after final publication checks.
 
 The current goal and first achieved anchor remain separate. Later False or
 Unknown observations preserve first achievement without claiming present
-success. This native goal history is currently process-local. Reattachment
-starts a fresh streak against the original deadline; the durable semantic/native
-association does not restore goal achievement history. One session opening owns
-one current monitor: creating a replacement invalidates its predecessor, and a
-reopened session cannot accept an old monitor. There is no clone/import path for
-branching around an interrupted streak.
+success. `begin_goal_monitor` creates process-local history; the optional durable
+owner below preserves reauthorized achievement through restart. The semantic/native
+association alone does not restore goal history. One session opening owns one
+current monitor: creating a replacement invalidates its predecessor, and a
+reopened session cannot accept an old monitor. Neither monitor can be cloned or
+detached from its custody to branch around an interrupted streak.
 
 Polling requires current Query and Observe authority even after read-only
 reattachment. It restores no control grant or preparation lifetime. The combined
@@ -173,6 +173,66 @@ projection is bounded to 4,096 entities and 8,192 edges; the call requires an
 entity budget of at least 4,096 and reserves 128 MiB for projection plus separate
 source setup/read, view and policy budgets before contact. The same shrinking
 wall deadline spans acquisition, verification and publication.
+
+## Durable original-goal history
+
+The operator may open a separate `GoalHistoryStore` for one exact semantic
+review and native journal, then call
+`begin_durable_goal_monitor(history, seal, context, authorize_history)`.
+`poll_original_goal_durable` takes the same canonical cursor, progress factory,
+operations factory and independent policy callback as the process-local poll.
+It reads native state without inserting, advancing time or changing work.
+
+`open_private_goal_history_store(path, native_journal, review, initialize,
+read_only, context)` uses the existing descriptor-pinned private-file custody:
+an exact-mode 0700 parent, an exact-mode 0600 regular file, exclusive locking
+and identity checks. The path is operator configuration, never an MCP argument.
+Initialization is exclusive; read-only history may recover historical proof
+but cannot publish new samples. Reopen still requires the exact original
+PreparedPlan and read-only semantic reattachment.
+
+The distinct `DFMWOH01`/`DFMWOF01`/`DFMWOE01` hash-chained format retains at most
+16 MiB and 2,048 events. It synchronizes the selected canonical read cursor,
+initial queue, first selected progress capture, complete operations capture,
+second progress capture, final queue and accepted publication marker in order.
+All eight possible events, including a failure interruption, and full byte
+verification are reserved before native contact. Exhausted storage refuses the
+poll; no silent pruning, rollover, repair or truncation occurs.
+
+Every raw capture retains its own family identity and source floor before a
+later acquisition or policy can fail. Operations captures replay in order
+through one persistent operations owner, preserving entity generations and
+allocation history. Consumed source identity changes, counter increases and
+oversized captures that cannot be retained fence fresh proof. A later tick
+from a rejected partial capture also raises the session's authority floor;
+replacing the monitor cannot revive an older grant or source clock.
+
+Recovery reconstructs each Published projection with its original sampled
+creation state and exact typed effect. A historical Created effect must still
+match the terminal native journal receipt. An earlier Unverified sample remains
+unlinked after later Created reconciliation. Stored policy fingerprints are
+comparison data only: the caller must independently reissue the exact policy
+twice, at the maximum current/history authority tick. Missing, narrowed,
+widened or changed historical policy refuses proof recovery.
+Each retained operations projection and both policy checks consume the caller's
+recovery budget; replay never replenishes its byte or wall allowance.
+
+The original predicates and obligation runtime reconstruct first achievement,
+terminal history, cadence and the unchanged absolute deadline. `latest()` is
+always absent after reopen. Unfinished stability resets, and present goal truth
+or physical quiescence requires a fresh poll. A failed explicit acquisition
+retains its completed source floors and interruption; a well-formed unfinished
+crash prefix with no durable Published/Interrupted boundary fences new polling
+because an unrecorded source reset cannot be ruled out. Earlier reauthorized
+achievement remains inspectable. A fully persisted publication with a lost
+acknowledgment can recover normally after exact storage verification.
+Corrupt or torn frames are refused unchanged rather than partially repaired.
+
+`historical_obligation_status()`, `first_satisfied_anchor()`,
+`last_observation_anchor()`, `high_cursor()`, `high_tick()` and `is_fenced()`
+make those distinctions explicit. `observation_interrupted(context)` persists
+a known gap without native contact. Recovery restores no mutation grant,
+preparation lifetime, independent source policy or evidence of current absence.
 
 ## Restart and uncertain effects
 
@@ -247,14 +307,19 @@ expiry, cross-goal chronology, forked cursors, changed incarnations, real privat
 file reopen and malformed custody. The complete citizen acquisition owner is
 exercised through preparation and commit.
 
-The extended target has 38 passing integration cases: all 21 insertion/custody
-cases and 17 original-goal cases. The latter use real closed RPC clients for
+The extended target has 56 passing integration cases: all 21 insertion/custody
+cases, 19 process-local goal cases and 16 durable-history cases. Goal tests use real closed RPC clients for
 positive goal completion and cover current False/Unknown truth, immutable first
 achievement, physical quiescence, original deadlines/stability, missing or lost
 policy, read-only recovery, source changes, aggregate bounds and exclusive
-monitor ownership across replacement/reopen. Adapter-library and focused
+monitor ownership across replacement/reopen. Durable cases additionally cover
+repeated historical recovery, unchanged deadline/cadence, Unknown-to-Created
+receipt reconciliation without retrospective linkage, exact policy reissuance,
+consumed partial-source floors, session authority across monitor replacement,
+source/oversize fencing, lost publication acknowledgments, incomplete crash
+prefixes, read-only mode and real private-file custody. Adapter-library and focused
 integration-target Clippy pass with warnings denied. The compiled native
-production and test inputs remained unchanged during final validation.
+production and test inputs (416 inventoried files) remained unchanged during final validation.
 
 The earlier insertion increment also passed all 18 existing work-order
 coordinator cases, all 43 workforce integration tests and all 93 production

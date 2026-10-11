@@ -20,6 +20,7 @@ use crate::work_order_control::{CreationRecord, CreationState, WorkOrderSource};
 use crate::work_order_progress::{
     BOOTSTRAP_BYTE_RESERVE, ProgressManifest, ProgressObservation, ProgressSource, RPC_BYTE_RESERVE,
 };
+use crate::work_orders::rpc::WorkOrderManifest;
 use crate::work_orders::{WorkOrderEffect, WorkOrderObservation, WorkOrderState};
 
 use super::goal_projection::{
@@ -409,6 +410,55 @@ pub(super) fn same_progress(before: &ProgressObservation, after: &ProgressObserv
         && before.rows() == after.rows()
 }
 
+/// Source identity is separate from temporary pause/tick bracket disagreement.
+/// Progress generations belong to their own family, never the queue counter.
+pub(super) fn progress_identity(
+    review: &SemanticWorkOrderReview,
+    native: &WorkOrderManifest,
+    manifest: &ProgressManifest,
+    capture: &ProgressObservation,
+) -> Result<()> {
+    let original = review.native.observation();
+    if manifest.generation == 0
+        || manifest.generation == u64::MAX
+        || capture.generation() != manifest.generation
+        || manifest.df_version != native.df_version
+        || manifest.dfhack_version != native.dfhack_version
+        || capture.fortress_id() != review.original.anchor.fortress_id
+        || capture.site() != original.site_id()
+        || capture.world_folder() != original.world_folder()
+    {
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "progress capture changed original source identity or software",
+        ));
+    }
+    Ok(())
+}
+
+/// A first operations capture must already belong to the original fortress;
+/// bootstrap has no prior operations observation against which to check this.
+pub(super) fn operations_identity(
+    review: &SemanticWorkOrderReview,
+    native: &WorkOrderManifest,
+    capture: &LiveOperationsObservation,
+) -> Result<()> {
+    let original = review.native.observation();
+    if capture.jobs.fortress_id()? != review.original.anchor.fortress_id
+        || capture.jobs.site_id < 0
+        || capture.jobs.site_id as u32 != original.site_id()
+        || capture.jobs.world_folder != original.world_folder()
+        || capture.jobs.df_version != native.df_version
+        || capture.jobs.dfhack_version != native.dfhack_version
+    {
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "operations capture changed original source identity or software",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn capture_frontier(
     capture: &ProgressObservation,
     queue: &WorkOrderObservation,
@@ -563,6 +613,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
     {
         let (progress_factory, operations_factory) = factories;
         monitor.latest = None;
+        let mut owner_matched = false;
         let result = (|| {
             let owner = monitor.owner.upgrade().ok_or_else(|| {
                 error(
@@ -580,6 +631,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "original-goal monitor belongs to another session opening",
                 ));
             }
+            owner_matched = true;
             let mut call = Call::new(context)?;
             call.context.anchor.tick = call.context.anchor.tick.max(monitor.high_tick);
             self.floor.authority(&mut call)?;
@@ -660,12 +712,13 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             }
             let read = call.reserve(RPC_BYTE_RESERVE)?;
             let before = source.read(&ids, Duration::from_millis(read.budget.max_wall_millis))?;
-            let before = ProgressObservation::decode(before.canonical_bytes(), &ids)?;
             monitor.high_tick = monitor.high_tick.max(GameTick(before.tick()));
+            let before = ProgressObservation::decode(before.canonical_bytes(), &ids)
+                .inspect_err(|_| monitor.fenced = true)?;
             publication
                 .progress_captured(&manifest, &before, &mut call)
                 .inspect_err(|_| monitor.fenced = true)?;
-            if source.manifest() != &manifest || before.generation() != manifest.generation {
+            if source.manifest() != &manifest {
                 source.fence();
                 monitor.fenced = true;
                 return Err(error(
@@ -673,6 +726,10 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "progress source changed during acquisition",
                 ));
             }
+            progress_identity(&review, &source_manifest, &manifest, &before).inspect_err(|_| {
+                source.fence();
+                monitor.fenced = true;
+            })?;
             monitor.capture_floor(&manifest, &before)?;
             capture_frontier(&before, &queue)?;
             call.context.anchor.tick = call.context.anchor.tick.max(monitor.high_tick);
@@ -681,6 +738,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 let mut source = operations_factory(&call.reserve(BOOTSTRAP_BYTE_RESERVE)?)?;
                 source.read_operations(&call.reserve(OPERATIONS_BYTES)?)?
             };
+            raw.validate().inspect_err(|_| monitor.fenced = true)?;
+            monitor.high_tick = monitor.high_tick.max(raw.jobs.tick());
             if raw
                 .jobs
                 .jobs
@@ -691,17 +750,24 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 > MAX_GOAL_ENTITIES
                 || raw.attachments.len() > MAX_GOAL_EDGES
             {
+                // This valid capture was consumed but is too large for retained
+                // goal projection. Its source/reset evidence cannot be forgotten.
+                monitor.fenced = true;
                 return Err(exhausted());
             }
-            raw.validate().inspect_err(|_| monitor.fenced = true)?;
-            monitor.high_tick = monitor.high_tick.max(raw.jobs.tick());
             publication
                 .operations_captured(&raw, &mut call)
+                .inspect_err(|_| monitor.fenced = true)?;
+            operations_identity(&review, &source_manifest, &raw)
                 .inspect_err(|_| monitor.fenced = true)?;
             call.context.anchor.tick = call.context.anchor.tick.max(monitor.high_tick);
             authorize(review.original.anchor, &call.current()?)?;
             let mut operations = monitor.operations.clone();
-            if operations.publish(raw)? == JobPublication::Reset {
+            if operations
+                .publish(raw)
+                .inspect_err(|_| monitor.fenced = true)?
+                == JobPublication::Reset
+            {
                 monitor.fenced = true;
                 return Err(error(
                     ErrorCode::StaleAnchor,
@@ -713,8 +779,9 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             monitor.operations = operations;
             let read = call.reserve(RPC_BYTE_RESERVE)?;
             let after = source.read(&ids, Duration::from_millis(read.budget.max_wall_millis))?;
-            let after = ProgressObservation::decode(after.canonical_bytes(), &ids)?;
             monitor.high_tick = monitor.high_tick.max(GameTick(after.tick()));
+            let after = ProgressObservation::decode(after.canonical_bytes(), &ids)
+                .inspect_err(|_| monitor.fenced = true)?;
             publication
                 .progress_captured(&manifest, &after, &mut call)
                 .inspect_err(|_| monitor.fenced = true)?;
@@ -726,6 +793,10 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "progress source changed during the second acquisition",
                 ));
             }
+            progress_identity(&review, &source_manifest, &manifest, &after).inspect_err(|_| {
+                source.fence();
+                monitor.fenced = true;
+            })?;
             monitor.capture_floor(&manifest, &after)?;
             if !same_progress(&before, &after) {
                 source.fence();
@@ -806,11 +877,23 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             if let Some(clock) = self.floor.native {
                 monitor.high_tick = monitor.high_tick.max(GameTick(clock.tick));
             }
+            let retained = if owner_matched {
+                self.floor.retain_tick(
+                    monitor.review.original.anchor.cursor.epoch,
+                    monitor.high_tick,
+                )
+            } else {
+                Ok(())
+            };
+            if retained.is_err() {
+                monitor.fenced = true;
+            }
             monitor.observation_interrupted()?;
             if let Err(cause) = publication.failed(monitor, context) {
                 monitor.fenced = true;
                 return Err(cause);
             }
+            retained?;
         }
         result
     }

@@ -44,6 +44,49 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Recover original native work-order goal achievement durably (2026-10-11)
+
+`SemanticWorkOrderSession` now supports an operator-owned `GoalHistoryStore`
+and exclusive `DurableWorkOrderGoalMonitor`. The bounded private history retains
+read intent, both creation-queue endpoints, both selected-progress endpoints,
+complete operations captures, sampled native creation context and publication
+boundaries. Each capture is durable before a later source or policy can fail;
+the proof transition stays private until its publication is synced and verified.
+
+Recovery binds the same original plan, semantic review and native journal, then
+replays operations through one persistent owner and the original predicates
+through the real obligation runtime. Every historical policy must be reissued
+independently, exactly, twice at the current maximum authority tick. A stored
+fingerprint grants nothing. Historical Unverified insertion remains unlinked
+after later reconciliation; a historical Created sample must still match its
+exact terminal native receipt.
+
+First achievement and terminal history survive repeated reopen. `latest()` is
+absent, unfinished stability resets, and original deadlines/cadence remain.
+Fresh goal truth, physical quiescence and insertion certainty remain distinct.
+Interrupted reads retain progress/allocation/source floors. Unrecordable source
+changes and well-formed incomplete crash prefixes fence new proof; previous
+reauthorized achievement remains inspectable. Corrupt/torn frames refuse recovery
+without repair. Higher consumed ticks remain session authority floors even when
+the monitor is replaced. Full event and byte costs are reserved before contact.
+
+The new `DFMWOH01`/`DFMWOF01`/`DFMWOE01` family is bounded to 16 MiB and 2,048
+events, uses existing descriptor-pinned private-file custody, and permits
+read-only historical recovery. No insertion, native protocol, grant issuer,
+generic MCP dispatch or production admission is added. The broader execution
+bead remains in progress. See `docs/SEMANTIC_WORK_ORDER_HANDOFF.md`.
+
+**Evidence:** all 56 actual-adapter work-order integration cases pass, including
+16 durable-history cases and both partial-bracket counter regressions. The
+history cases exercise repeated reopen, False/Unknown current truth, original
+deadline/cadence, exact historical policy, later receipt reconciliation, partial
+source floors, lost publication acknowledgment, source/oversize fencing,
+authority-preserving monitor replacement and real private-file custody.
+Adapter-library and integration-target Clippy pass with warnings denied; all
+416 inventoried native/semantic inputs remained unchanged during the successful
+run. These are component tests with synthetic native responses and real local
+storage, not a DFHack plugin build, live-fort or full-workspace qualification.
+
 ### Retain source floors through rejected original-goal brackets (2026-10-11)
 
 Selected-order observations now advance the retained progress floor before
@@ -53,7 +96,7 @@ later observations cannot increase the counter and erase the contradiction.
 Original-goal evaluation uses a private pending transition and exposes it only
 after final policy and publication checks. All 40 actual-adapter work-order
 integration cases pass, including both partial-bracket regressions. This
-increment does not yet persist native goal history across process restart.
+increment underpins the optional durable recovery described above.
 
 ### Continue interrupted setup after action retirement and another reopen (2026-10-11)
 
@@ -124,9 +167,9 @@ completion runs the real closed RPC clients over strict fixture streams;
 refusal, policy, recovery, deadline, continuity, counter and ownership cases also
 pass. Adapter-library and focused test Clippy pass with warnings denied on
 unchanged compiled native source/test inputs. These are synthetic native
-responses, not a DFHack plugin or live-fort qualification. The generic MCP route,
-durable native goal history, independent policy issuer and live admission remain
-separate unfinished boundaries.
+responses, not a DFHack plugin or live-fort qualification. Optional durable
+native goal history is implemented above. The generic MCP route, independent
+policy issuer and live admission remain separate unfinished boundaries.
 
 ### Complete dependent work within one foreground wait (2026-10-11)
 

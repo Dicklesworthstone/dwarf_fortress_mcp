@@ -1238,3 +1238,6 @@ fn changed_second_progress_endpoint_still_fences_later_counter_increase() -> Res
     assert!(monitor.first_satisfied_anchor().is_none());
     Ok(())
 }
+
+#[path = "goal_history.rs"]
+mod goal_history;
