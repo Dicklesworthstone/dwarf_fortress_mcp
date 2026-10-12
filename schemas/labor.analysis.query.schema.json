@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dfmcp:labor-analysis-query:1",
+  "title": "Staffing analysis using observed initial labor settings",
+  "description": "Read-only analysis. Skills and stress are caller-declared preferences; labor settings and living status require qualified observations.",
+  "$comment": "The existing query input limit is 1024 UTF-8 bytes. Rust also checks duplicate keys and IDs, u64 range, distinct labor names, total slots, exact sources and aggregate work/byte bounds. This schema supplies no native evidence or authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "roster",
+    "demands"
+  ],
+  "properties": {
+    "mode": {
+      "const": "labor_allocation"
+    },
+    "roster": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "demands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/demand"
+      }
+    },
+    "max_work": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    }
+  },
+  "$defs": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "\\S",
+      "not": {
+        "pattern": "[\\u0000-\\u001f\\u007f-\\u009f]"
+      }
+    },
+    "labor": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/token"
+        },
+        {
+          "maxLength": 128
+        }
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "skills",
+        "stress_level"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "skills": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "$ref": "#/$defs/token"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          }
+        },
+        "stress_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      }
+    },
+    "demand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labor",
+        "skill",
+        "workers",
+        "minimum_skill",
+        "priority"
+      ],
+      "properties": {
+        "labor": {
+          "$ref": "#/$defs/labor"
+        },
+        "skill": {
+          "$ref": "#/$defs/token"
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "minimum_skill": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      }
+    }
+  }
+}

@@ -12,6 +12,8 @@ pub(crate) use base::*;
 mod labor_workflow;
 #[path = "civilian_protection_workflow.rs"]
 mod civilian_protection_workflow;
+#[path = "labor_analysis_query.rs"]
+mod labor_analysis_query;
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 use dfmcp_intent::RequestedAction;
@@ -47,9 +49,12 @@ pub(crate) fn query(snapshot: &WorldSnapshot, raw: &str) -> Result<Value> {
     }
     if raw.trim_start().starts_with('{')
         && let Ok(selector) = serde_json::from_str::<QueryName>(raw)
-        && selector.mode == "civilian_protection"
     {
-        return civilian_protection_workflow::query(snapshot, raw);
+        match selector.mode.as_str() {
+            "civilian_protection" => return civilian_protection_workflow::query(snapshot, raw),
+            "labor_allocation" => return labor_analysis_query::query(snapshot, raw),
+            _ => {}
+        }
     }
     base::query(snapshot, raw)
 }
@@ -60,3 +65,6 @@ mod labor_workflow_tests;
 #[cfg(test)]
 #[path = "civilian_protection_workflow_tests.rs"]
 mod civilian_protection_workflow_tests;
+#[cfg(test)]
+#[path = "labor_analysis_query_tests.rs"]
+mod labor_analysis_query_tests;
