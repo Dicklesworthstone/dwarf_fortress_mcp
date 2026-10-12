@@ -12,6 +12,9 @@ use serde_json::{Value, json};
 
 use super::{Page, anchor_json, budget, invalid, page_identity, paginate, validate_shape};
 
+#[path = "shelter_watch_handoff.rs"]
+mod watch_handoff;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
@@ -34,6 +37,7 @@ struct Request {
     limit: Option<u32>,
     continuation: Option<String>,
     max_work: Option<u64>,
+    watch: Option<watch_handoff::Spec>,
 }
 fn entity(raw: &str) -> Result<EntityId> {
     if raw.is_empty() || raw.len() > 20 || raw.starts_with('0')
@@ -73,18 +77,24 @@ pub(super) fn execute(state: &LiveSpatialCitizenState, context: &OperationContex
     let regions = request.shelters.iter().map(|area| MapCuboid::new(coord(area.min), coord(area.max)))
         .collect::<Result<Vec<_>>>()?;
     let selection = ShelterSelection::new(&citizens, &regions)?;
+    let proposal = request.watch.as_ref().map(|spec| spec.build(&selection, context)).transpose()?;
     let maximum = request.max_work.unwrap_or(shelter::MAX_WORK);
     let mut narrowed = context.clone();
     let elapsed = u64::try_from(started.elapsed().as_millis()).map_err(|_| budget("shelter wall overflow"))?;
     narrowed.budget.max_wall_millis = context.budget.max_wall_millis.checked_sub(elapsed)
         .filter(|left| *left > 0).ok_or_else(|| budget("shelter wall allowance exhausted"))?;
     let report = shelter::assess(state, &narrowed, &selection, maximum)?;
-    let model = Digest32::of_bytes(json!({"domain":"dfmcp-shelter-status-model/1",
+    let base_model = Digest32::of_bytes(json!({"domain":"dfmcp-shelter-status-model/1",
         "policy":shelter::POLICY,"selection":selection.digest().to_string(),
         "anchor":anchor_json(report.anchor),"source_digest":report.source_digest.to_string()})
         .to_string().as_bytes());
+    // Preserve original status identities without a handoff. Otherwise bind
+    // every page to the exact complete prospective watch request as well.
+    let model = proposal.as_ref().map_or(base_model, |p| Digest32::of_bytes(json!({
+        "domain":"dfmcp-shelter-watch-status-model/1","base_model":base_model.to_string(),
+        "request_digest":p["request_digest"]}).to_string().as_bytes()));
     let identity = page_identity(context, model, maximum);
-    let out = json!({
+    let mut out = json!({
         "schema":"dfmcp.query.result/1","kind":"shelter_status",
         "anchor":anchor_json(report.anchor),"source_digest":report.source_digest.to_string(),
         "bridge_generation":report.bridge_generation,"source_profile":"spatial/1.8",
@@ -102,6 +112,7 @@ pub(super) fn execute(state: &LiveSpatialCitizenState, context: &OperationContex
         "mutation_dispatched":false,"native_captures":0,"control_authority_granted":false,
         "interpretation":"Named living citizen incarnations inside declared geometry at this capture only. Not safe shelter, native burrow membership, a route, stable presence, evacuation causality or permission to release restrictions."
     });
+    if let Some(proposal) = proposal { out["watch_proposal"] = proposal; }
     let out = paginate(out, report.rows.len(), context,
         Page { limit, continuation: request.continuation.as_deref(), prefix: "ss1", identity },
         |index| {

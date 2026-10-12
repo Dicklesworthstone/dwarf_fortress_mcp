@@ -104,6 +104,61 @@
         "type": "string",
         "pattern": "[^a-z0-9:]"
       }
+    },
+    "watch": {
+      "$comment": "Optional prospective whole-selection watch handoff. It registers nothing. Rust checks UTF-8 byte limits, future absolute deadline within the session horizon, and room for the requested cadence/samples. Existing status responses and identities are unchanged when absent or null.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "deadline_tick"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "not": {
+            "pattern": "\u0000"
+          }
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256,
+          "not": {
+            "type": "string",
+            "pattern": "\u0000"
+          }
+        },
+        "deadline_tick": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "poll_interval_ticks": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "stable_observations": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 64
+        }
+      }
     }
   }
 }
