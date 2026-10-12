@@ -1,0 +1,37 @@
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "watch",
+    "key": "original-shelter-arrival",
+    "condition": {
+      "op": "shelter_set",
+      "citizens": [
+        {
+          "entity_id": "3298534883338",
+          "generation": 1
+        },
+        {
+          "entity_id": "3298534883339",
+          "generation": 1
+        }
+      ],
+      "shelters": [
+        {
+          "min": [
+            0,
+            0,
+            5
+          ],
+          "max": [
+            1,
+            1,
+            5
+          ]
+        }
+      ]
+    },
+    "deadline_tick": 1000,
+    "poll_interval_ticks": 10,
+    "stable_observations": 2
+  }
+}

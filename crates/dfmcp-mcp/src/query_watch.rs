@@ -21,6 +21,8 @@ pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 pub(super) mod batch;
 #[path = "query_watch_construction.rs"]
 mod construction;
+#[path = "query_watch_shelter.rs"]
+mod shelter;
 #[path = "query_watch_count.rs"]
 mod counts;
 #[path = "query_condition_evaluation.rs"]
@@ -30,7 +32,9 @@ mod replay;
 pub(super) use replay::Replay as HistoricalWatchReplay;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
-    construction::extend_schema(inspection::extend_schema(counts::extend_schema(schema)?)?)
+    shelter::extend_schema(construction::extend_schema(inspection::extend_schema(
+        counts::extend_schema(schema)?,
+    )?)?)
 }
 pub(super) fn condition_query(
     snapshot: &WorldSnapshot,
@@ -84,6 +88,10 @@ enum Comparison {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Condition {
+    ShelterSet {
+        citizens: Vec<shelter::Target>,
+        shelters: Vec<shelter::Area>,
+    },
     FurnitureSet {
         targets: Vec<construction::Target>,
         test: construction::Test,
@@ -390,6 +398,8 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     }
     let mut nodes = 0usize;
     let mut furniture_targets = 0usize;
+    let mut shelter_targets = 0usize;
+    let mut shelter_regions = 0usize;
     while let Some((condition, depth)) = pending.pop() {
         nodes += 1;
         if nodes > MAX_CONDITIONS || depth > MAX_CONDITION_DEPTH {
@@ -398,6 +408,18 @@ fn validate_definition(definition: &Definition) -> Result<()> {
             ));
         }
         match condition {
+            Condition::ShelterSet { citizens, shelters } => {
+                shelter::validate(citizens, shelters)?;
+                shelter_targets = shelter_targets.saturating_add(citizens.len());
+                shelter_regions = shelter_regions.saturating_add(shelters.len());
+                if shelter_targets > 2 * shelter::MAX_TARGETS
+                    || shelter_regions > 2 * shelter::MAX_REGIONS
+                {
+                    return Err(bounded(
+                        "success/failure shelter sets exceed their shared target/region bounds",
+                    ));
+                }
+            }
             Condition::FurnitureSet { targets, .. } => {
                 construction::validate(targets)?;
                 furniture_targets = furniture_targets.saturating_add(targets.len());
@@ -516,6 +538,9 @@ impl Probe {
     ) -> Result<Truth> {
         budget.charge()?;
         match condition {
+            Condition::ShelterSet { citizens, shelters } => {
+                shelter::evaluate(self, snapshot, citizens, shelters, budget)
+            }
             Condition::FurnitureSet { targets, test } => {
                 construction::evaluate(self, snapshot, targets, *test, budget)
             }
