@@ -1,0 +1,31 @@
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "shelter_status",
+    "citizens": [
+      {
+        "entity_id": "3298534883338",
+        "generation": 1
+      },
+      {
+        "entity_id": "3298534883339",
+        "generation": 1
+      }
+    ],
+    "shelters": [
+      {
+        "min": [
+          0,
+          0,
+          5
+        ],
+        "max": [
+          1,
+          1,
+          5
+        ]
+      }
+    ],
+    "limit": 16
+  }
+}

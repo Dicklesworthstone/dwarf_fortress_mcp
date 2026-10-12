@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 use dfmcp_adapter::live_spatial::SpatialStateView;
 use dfmcp_adapter::shelter_analysis::{
-    ArrivalStatus, MAX_CITIZENS, MAX_SHELTERS, MAX_WORK, REQUIRED_BYTES, ShelterSelection, assess,
+    ArrivalStatus, MAX_CITIZENS, MAX_SHELTERS, MAX_WORK, ShelterSelection, assess,
 };
 use dfmcp_core::{EntityId, ErrorCode, MapCoord, MapCuboid, Result};
 use dfmcp_world::PredicateTruth;
@@ -103,7 +103,7 @@ fn requires_current_read_authority_anchor_and_all_independent_budgets() -> Resul
     assert_eq!(assess(&state, &c, &goal, good.work_units)?, good);
     assert!(matches!(assess(&state, &c, &goal, good.work_units-1), Err(e) if e.code==ErrorCode::BudgetExceeded));
     for n in [0, MAX_WORK+1] { assert!(assess(&state, &c, &goal, n).is_err()); }
-    c.budget.max_bytes = REQUIRED_BYTES - 1;
+    c.budget.max_bytes = goal.required_bytes() - 1;
     assert!(matches!(assess(&state, &c, &goal, MAX_WORK), Err(e) if e.code==ErrorCode::BudgetExceeded));
     c = context(&state)?; c.budget.max_entities = 1;
     assert!(assess(&state, &c, &goal, MAX_WORK).is_err());

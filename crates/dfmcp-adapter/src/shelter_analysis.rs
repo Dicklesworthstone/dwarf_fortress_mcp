@@ -9,12 +9,12 @@ use std::time::Instant;
 
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, MapCuboid,
-    OperationContext, Result, RiskTier, StateAnchor,
+    OperationContext, Result, RiskTier, StateAnchor, GameTick,
 };
-use dfmcp_world::{EntityKind, PredicateTruth};
+use dfmcp_world::{EntityKind, EntityRecord, FactSource, PredicateTruth, Value, WorldSnapshot};
 
 use crate::live_spatial::{SpatialStateView, citizens::{
-    LiveCitizen, LiveSpatialCitizenState, MAX_SPATIAL_CITIZEN_BYTES, citizen_entity_id,
+    LiveCitizen, LiveSpatialCitizenState, citizen_entity_id,
 }};
 
 pub const POLICY: &str = "named-incarnations-coherent-citizen-position/1";
@@ -22,10 +22,9 @@ pub const MAX_CITIZENS: usize = 128;
 pub const MAX_SHELTERS: usize = 16;
 pub const MAX_SHELTER_TILES: u64 = 262_144;
 pub const MAX_WORK: u64 = 1_000_000;
-// Source-digest calculation re-encodes the bounded native capture, including
-// temporary component buffers. Reserve that work before any encoding. No full
-// canonical-world copy is made: the validated native owner lends immutable state.
-pub const REQUIRED_BYTES: u64 = 5 * MAX_SPATIAL_CITIZEN_BYTES as u64;
+// Maximum bounded selection/report workspace. The actual requirement scales
+// with the named goal; it must also fit narrowed native query-result budgets.
+pub const REQUIRED_BYTES: u64 = 32 * 1024;
 
 fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -102,6 +101,9 @@ impl ShelterSelection {
     pub fn citizens(&self) -> &[CitizenTarget] { &self.citizens }
     pub fn shelters(&self) -> &[MapCuboid] { &self.shelters }
     pub const fn digest(&self) -> Digest32 { self.digest }
+    pub fn required_bytes(&self) -> u64 {
+        1_024 + self.citizens.len() as u64 * 128 + self.shelters.len() as u64 * 64
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +178,43 @@ fn position_status(citizen: &LiveCitizen, dimensions: [u32; 3], shelters: &[MapC
     }
 }
 
+// The native owner publishes this digest with its immutable projection. Reuse
+// it instead of re-encoding megabytes of unrelated items and skill histories for
+// a small positional query. Source admission remains the observing shell's duty.
+fn fact_matches(entity: &EntityRecord, field: &str, native: &str, expected: &Value,
+    source: Digest32, tick: GameTick) -> bool
+{
+    entity.fields.get(field).is_some_and(|fact| {
+        fact.source_digest == source && fact.observed_at == tick
+            && matches!(&fact.source, FactSource::DfhackField(name) if name == native)
+            && fact.known_value() == Some(expected)
+    })
+}
+fn published_digest(snapshot: &WorldSnapshot, count: usize) -> Result<Digest32> {
+    let root = snapshot.graph.entities.get(&EntityId::new(1)).ok_or_else(invariant)?;
+    let profile = root.fields.get("observation_profile").ok_or_else(invariant)?;
+    let source = profile.source_digest;
+    if source == Digest32::ZERO
+        || !fact_matches(root, "observation_profile", "spatial/1.8.capture",
+            &Value::Text("spatial/1.8".to_owned()), source, snapshot.tick)
+        || !fact_matches(root, "strict_citizen_count", "spatial/1.8.citizens.count",
+            &Value::U64(count as u64), source, snapshot.tick)
+    { return Err(invariant()); }
+    Ok(source)
+}
+fn verify_citizen(entity: &EntityRecord, citizen: &LiveCitizen, source: Digest32, tick: GameTick) -> Result<()> {
+    for (field, native, expected) in [
+        ("native_unit_id", "spatial/1.8.citizen.unit_id", Value::U64(u64::from(citizen.native_id))),
+        ("position", "spatial/1.8.citizen.position", Value::Coord(citizen.position)),
+        ("alive", "spatial/1.8.alive", Value::Bool(citizen.alive())),
+        ("active", "spatial/1.8.active", Value::Bool(citizen.active())),
+        ("visible", "spatial/1.8.visible", Value::Bool(citizen.visible())),
+    ] {
+        if !fact_matches(entity, field, native, &expected, source, tick) { return Err(invariant()); }
+    }
+    Ok(())
+}
+
 /// Analyze actual native positions, not reference assignments or caller facts.
 /// This does no I/O and creates neither an action nor a mutation permission.
 pub fn assess(state: &LiveSpatialCitizenState, context: &OperationContext,
@@ -183,7 +222,7 @@ pub fn assess(state: &LiveSpatialCitizenState, context: &OperationContext,
 {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    if maximum_work == 0 || maximum_work > MAX_WORK || context.budget.max_bytes < REQUIRED_BYTES {
+    if maximum_work == 0 || maximum_work > MAX_WORK || context.budget.max_bytes < selection.required_bytes() {
         return Err(exhausted());
     }
     let snapshot = state.snapshot().ok_or_else(|| invalid("coherent citizen capture is absent"))?;
@@ -206,9 +245,10 @@ pub fn assess(state: &LiveSpatialCitizenState, context: &OperationContext,
         }
         Ok(())
     };
-    // Charge comparisons before inspecting the retained roster. Source encoding
-    // and hashing are separately bounded by REQUIRED_BYTES and the wall deadline.
+    // Charge comparisons before inspecting the retained roster. No full-source
+    // encoding, canonical-world clone, or native acquisition occurs here.
     charge(source.citizens().len() as u64 + selection.shelters.len() as u64 + 1)?;
+    let source_digest = published_digest(snapshot, source.citizens().len())?;
     let mut rows = Vec::with_capacity(selection.citizens.len());
     let (mut inside, mut outside, mut not_alive, mut unresolved) = (0, 0, 0, 0);
     for target in &selection.citizens {
@@ -220,6 +260,7 @@ pub fn assess(state: &LiveSpatialCitizenState, context: &OperationContext,
             let citizen = &source.citizens()[index];
             let entity = snapshot.graph.entities.get(&target.entity_id).ok_or_else(invariant)?;
             if entity.id != target.entity_id || entity.kind != EntityKind::Unit { return Err(invariant()); }
+            verify_citizen(entity, citizen, source_digest, snapshot.tick)?;
             row.observed_generation = Some(entity.generation);
             row.observed_revision = Some(entity.revision);
             if entity.generation != target.generation {
@@ -237,7 +278,6 @@ pub fn assess(state: &LiveSpatialCitizenState, context: &OperationContext,
         rows.push(row);
     }
     charge(1)?;
-    let source_digest = state.source_digest()?;
     charge(0)?;
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let arrival_truth = if outside + not_alive > 0 { PredicateTruth::False }
