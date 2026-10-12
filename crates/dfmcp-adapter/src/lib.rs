@@ -67,6 +67,7 @@ pub mod order_run;
 pub mod pause_reconciliation;
 pub mod semantic_work_orders;
 pub mod semantic_workforce;
+pub mod shelter_analysis;
 pub mod spatial_inventory;
 pub mod transceiver;
 pub mod work_order_control;
