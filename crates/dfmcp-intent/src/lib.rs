@@ -9,6 +9,7 @@ pub mod effects;
 pub mod execution;
 pub mod labor;
 pub mod labor_execution;
+pub mod labor_observation;
 pub mod logistics;
 pub mod obligation;
 mod plan;
