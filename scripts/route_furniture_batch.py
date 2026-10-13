@@ -385,7 +385,7 @@ def main(argv=None):
                 step = next((s for s in batch.plan.steps if s.name == args.step), None)
                 require(step is not None, 'unknown original recovery step')
                 journal = batch.effects.get(batch.key(step))
-                authority = None if journal.state.terminal is not None else native.Authority.load()
+                authority = native.Authority.load() if placement.recovery_requires_native(journal, operation == 'cancel') else None
                 state = recover(batch, args.step, authority, cancel=operation == 'cancel')
             else:
                 state = batch.stop() if operation == 'stop' else batch.audit()

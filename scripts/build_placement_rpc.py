@@ -14,6 +14,7 @@ import struct
 import time
 
 from build_placement_wire import Capture, Plan, Record, Selection, Rejected, integer, require, successor
+from build_placement_reconciliation import verify_reconciliation
 
 METHODS = ('Handshake', 'ReadPlacement', 'PreparePlacement', 'CommitPlacement',
            'QueryPlacement', 'CancelPlacement')
@@ -293,7 +294,12 @@ class Client:
                             'fresh preparation has historical evidence')
                 previous = self._records.get(plan.key)
                 if previous is not None:
-                    successor(previous, record)
+                    if operation == 'QueryPlacement' and previous.phase == 'indeterminate' and record.phase == 'placed':
+                        require(manifest.generation == plan.before.generation,
+                                'reconciliation crossed the original native incarnation')
+                        verify_reconciliation(previous, record)
+                    else:
+                        successor(previous, record)
                 require(previous is not None or len(self._records) < 32, 'connection record allowance exhausted')
                 self._records[plan.key] = record
             elif plan is not None:

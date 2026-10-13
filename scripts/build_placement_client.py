@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from typing import Callable
 
 from build_placement_rpc import Authority, Budget, Client, Reply
@@ -137,9 +138,21 @@ def start(owner: PlacementDirectory, authority: Authority, selection: Selection,
         return result(journal, reply, stored), plan
 
 
+def recovery_requires_native(journal: Journal, cancel: bool = False) -> bool:
+    """Indeterminate is pending evidence, not a terminal offline result.
+
+    Cancellation never turns an attempted placement into nonapplication. It
+    remains an offline no-op for a retained uncertain receipt; query may recover
+    exact Placed evidence. Already resolved receipts always stay offline.
+    """
+    require(type(cancel) is bool, 'invalid recovery operation')
+    record = journal.state.terminal
+    return record is None or (not cancel and record.phase == 'indeterminate')
+
+
 def recover(journal: Journal, authority: Authority | None, cancel: bool = False) -> dict:
     journal.owner.check()
-    if journal.state.terminal is not None:
+    if not recovery_requires_native(journal, cancel):
         return result(journal, None, False)
     require(authority is not None and authority.address == journal.state.address,
             'operator endpoint differs from durable intent')
@@ -150,8 +163,41 @@ def recover(journal: Journal, authority: Authority | None, cancel: bool = False)
         journal.owner.check()
         reply = client.cancel(journal.state.plan) if cancel else client.query(journal.state.plan)
         bind(journal, reply)
-        stored = journal.retain(reply) if reply.record is not None else False
-        return result(journal, reply, stored)
+        previous = journal.state.terminal
+        if previous is not None and previous.phase == 'indeterminate' and reply.record is not None and reply.record.phase == 'placed':
+            stored = journal.retain_reconciliation(reply)
+        else:
+            stored = journal.retain(reply) if reply.record is not None else False
+        out = result(journal, reply, stored)
+        authority.guard('QueryPlacement')
+        journal.owner.budget.remaining()
+        journal.owner.check()
+        return out
+
+
+def write_output(raw: bytes) -> int:
+    # A failed output attempt must never emit a second object or repeat a query.
+    try:
+        stream = getattr(sys.stdout, 'buffer', None)
+        data = raw if stream is not None else raw.decode('ascii')
+        stream = sys.stdout if stream is None else stream
+        if stream.write(data) != len(data):
+            return 2
+        stream.flush()
+    except (OSError, ValueError, KeyboardInterrupt):
+        return 2
+    return 0
+
+
+def publish(operation: str, out: dict, plan: Plan | None, budget: Budget,
+            authority: Authority | None, owner: PlacementDirectory | None = None) -> int:
+    raw = bounded_output(packet(operation, out, plan))
+    if authority is not None:
+        authority.guard('QueryPlacement')
+    if owner is not None:
+        owner.check()
+    budget.remaining()
+    return write_output(raw)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--limit', type=int, default=32)
     parser.add_argument('--continuation')
     args = parser.parse_args(argv)
+    output_attempted = False
     try:
         planning = args.operation in ('plan', 'start')
         require(all((value is not None) == planning for value in (args.kind, args.item, args.target)),
@@ -178,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         require(args.operation == 'inventory' or (args.limit == 32 and args.continuation is None),
                 'inventory-only page options')
         integer(args.limit, 1, 64)
-        budget, plan = Budget(args.timeout_ms), None
+        budget, plan, authority = Budget(args.timeout_ms), None, None
         if args.key is not None:
             key_text(args.key)
         if planning:
@@ -195,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
                            'blockers': list(reply.capture.blockers) + (['native_unresolved'] if reply.unresolved else []),
                            'game_effect_performed': False}
                 out.update(manifest=reply.manifest.view(), native_contacted=True)
+            return publish(args.operation, out, plan, budget, authority)
         else:
             with PlacementDirectory(args.directory, budget, writable=args.operation in ('start', 'query', 'cancel')) as owner:
                 if args.operation == 'inventory':
@@ -203,17 +251,20 @@ def main(argv: list[str] | None = None) -> int:
                     out['pending_count'] = out['pending']
                     out['pending_work'] = [row for row in out['rows'] if row['pending']]
                 elif args.operation == 'start':
-                    out, plan = start(owner, Authority.load(True), selected, args.key, args.expected_plan)
+                    authority = Authority.load(True)
+                    out, plan = start(owner, authority, selected, args.key, args.expected_plan)
                 else:
                     journal = owner.get(args.key)
                     plan = journal.state.plan
                     if args.operation == 'inspect':
                         out = result(journal, None, False)
                     else:
-                        authority = None if journal.state.terminal is not None else Authority.load()
+                        authority = Authority.load() if recovery_requires_native(journal, args.operation == 'cancel') else None
                         out = recover(journal, authority, args.operation == 'cancel')
-        print(bounded_output(packet(args.operation, out, plan)).decode('ascii'), end='')
-        return 0
+                # Keep original directory custody through final serialization and output.
+                status = publish(args.operation, out, plan, budget, authority, owner)
+                output_attempted = True
+                return status
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt) as error:
         # No arbitrary native text, source bytes, credentials or paths in errors.
         failure = packet(args.operation, {'effect_status': 'unknown', 'pending': True,
@@ -221,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             'retry_permitted': False, 'construction_completion_proven': False})
         failure.update(ok=False, error_class=type(error).__name__,
             detail='Request, custody, source, budget or evidence refused. Inspect retained work; do not retry placement.')
-        print(bounded_output(failure).decode('ascii'), end='')
+        if not output_attempted:
+            write_output(bounded_output(failure))
         return 2
 
 
