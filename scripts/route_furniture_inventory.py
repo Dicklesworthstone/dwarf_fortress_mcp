@@ -19,6 +19,7 @@ from construction_receipt import Manifest, decode_operations
 from furniture_allocation import Candidate, Request
 from furniture_plan import canonical, integer, require
 import route_furniture_allocation as routes
+from route_furniture_sequence import allocate_sequenced_routes
 
 OPT_IN = 'DFMCP_ALLOW_UNADMITTED_ROUTE_FURNITURE'
 ENDPOINT = 'DFMCP_ROUTE_FURNITURE_ENDPOINT'
@@ -256,6 +257,7 @@ def candidates_from(observed, request: Request, work) -> tuple[tuple[Candidate, 
 
 def packet(result: dict | None, request: Request | None = None, source: dict | None = None) -> dict:
     success = result is not None
+    sequence = result.get('delivery_sequence') if success else None
     return {'schema': 'dfmcp.route-furniture-inventory-result/1', 'ok': success,
             'result': result, 'request': request.json() if success else None,
             'source': source if success else None,
@@ -267,11 +269,14 @@ def packet(result: dict | None, request: Request | None = None, source: dict | N
                 'phase': 'propose', 'session_id': None, 'turn_id': None, 'request_id': None, 'anchor': None,
                 'continuity': {'status': 'bootstrap' if success else 'indeterminate', 'basis': None, 'gap': None},
                 'profile': 'tactical', 'briefing': {'status': result['status'] if success else 'unestablished',
-                    'runtime_admitted': False, 'mutation_admissible': False, 'items_reserved': False},
+                    'runtime_admitted': False, 'mutation_admissible': False, 'items_reserved': False,
+                    **({'delivery_sequence': sequence['status']} if sequence is not None else {})},
                 'changes': [], 'attention': [], 'active_work': [], 'affordances': [], 'recommendations': [],
                 'uncertainty': ['Equal paused map endpoints bracket a released inventory, not an atomic cross-profile snapshot or continuous stability.',
                     'Routes use a bounded dry floor/stair model, not native unit pathfinding, danger, or outside-region reachability.',
-                    'The exact-item plan does not retain future route constraints. Earlier placements may obstruct later routes; fresh native review remains required.',
+                    ('Delivery sequencing checks only a captured candidate model, not future routes. Fresh original-selection review remains required.'
+                     if sequence is not None else
+                     'The exact-item plan does not retain future route constraints. Earlier placements may obstruct later routes; fresh native review remains required.'),
                     'No placement receipts or active effects were queried. This proposal cannot clear uncertainty, reserve items, or authorize placement.'],
                 'coverage': {'scope': 'bracketed_bounded_map_and_complete_operations_inventory',
                     'native_acquisition': 'established_by_this_call' if success else 'unestablished',
@@ -288,9 +293,10 @@ def bounded_output(value: dict) -> bytes:
 
 
 def run(request: Request, region: Region, authority: Authority, budget: wire.Budget,
-        *, max_route_steps: int = routes.MAX_ROUTE_STEPS) -> bytes:
+        *, max_route_steps: int = routes.MAX_ROUTE_STEPS, sequence_deliveries: bool = False) -> bytes:
     require(type(request) is Request and type(region) is Region and type(authority) is Authority,
             'closed route inventory inputs required')
+    require(type(sequence_deliveries) is bool, 'delivery sequencing requires an explicit boolean')
     request.__post_init__()
     region.__post_init__()
     integer(max_route_steps, 0, routes.MAX_ROUTE_STEPS)
@@ -319,8 +325,13 @@ def run(request: Request, region: Region, authority: Authority, budget: wire.Bud
         budget.remaining()
         authority.guard()
 
-    result = routes.allocate_routes(request, selected, map_raw, guard,
-                                    max_route_steps=max_route_steps, maximum_work=solver_allowance)
+    if sequence_deliveries:
+        request, result = allocate_sequenced_routes(
+            request, selected, map_raw, guard,
+            max_route_steps=max_route_steps, maximum_work=solver_allowance)
+    else:
+        result = routes.allocate_routes(request, selected, map_raw, guard,
+                                        max_route_steps=max_route_steps, maximum_work=solver_allowance)
     source = {'policy': ACQUISITION_POLICY, 'endpoint': f'{authority.address[0]}:{authority.address[1]}',
               'game_tick': observed.tick, 'paused_at_capture': True,
               'map': {'profile': 'map/1.5', 'sha256': terrain.digest, 'bytes': len(map_raw),

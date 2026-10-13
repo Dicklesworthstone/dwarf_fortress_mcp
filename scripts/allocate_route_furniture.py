@@ -69,13 +69,18 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--origin', nargs=3, type=int, required=True)
         parser.add_argument('--size', nargs=3, type=int, required=True)
         parser.add_argument('--max-route-steps', type=int, default=MAX_ROUTE_STEPS)
+        parser.add_argument('--sequence-deliveries', action='store_true',
+                            help='strengthen dependencies to keep all selected deliveries feasible in the captured route model')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         args = parser.parse_args(argv)
         budget = Budget(args.timeout_ms)
         region = Region(tuple(args.origin), tuple(args.size))
         request = read_request(args.request_file, budget)
         authority = Authority.load()
-        output = run(request, region, authority, budget, max_route_steps=args.max_route_steps)
+        options = {'max_route_steps': args.max_route_steps}
+        if args.sequence_deliveries:
+            options['sequence_deliveries'] = True
+        output = run(request, region, authority, budget, **options)
         budget.remaining()
         authority.guard()
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
