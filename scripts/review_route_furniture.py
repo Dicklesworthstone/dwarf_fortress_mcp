@@ -70,6 +70,8 @@ def main(argv=None):
         parser.add_argument('--origin', type=int, nargs=3)
         parser.add_argument('--size', type=int, nargs=3)
         parser.add_argument('--max-route-steps', type=int)
+        parser.add_argument('--sequence-deliveries', action='store_true',
+                            help='create only: preserve selected items and add dependencies to avoid modeled route blockage')
         parser.add_argument('--review-file')
         parser.add_argument('--expected-review')
         parser.add_argument('--timeout-ms', type=int, default=10000)
@@ -82,11 +84,15 @@ def main(argv=None):
         require(all((value is not None) != creating for value in (args.review_file, args.expected_review)),
                 'check requires the retained artifact and independent digest')
         require(creating or args.max_route_steps is None, 'check cannot change the original route limit')
+        require(creating or not args.sequence_deliveries, 'check cannot reorder an original review')
         if creating:
             request = Request.decode(read_file(args.request_file, MAX_REQUEST_BYTES, budget))
             region = inventory.Region(tuple(args.origin), tuple(args.size))
             maximum = inventory.routes.MAX_ROUTE_STEPS if args.max_route_steps is None else args.max_route_steps
-            raw = runtime.create(request, region, inventory.Authority.load(), budget, max_route_steps=maximum)
+            options = {'max_route_steps': maximum}
+            if args.sequence_deliveries:
+                options['sequence_deliveries'] = True
+            raw = runtime.create(request, region, inventory.Authority.load(), budget, **options)
         else:
             model.digest_text(args.expected_review)
             review = model.Review.decode(read_file(args.review_file, model.MAX_BYTES, budget),

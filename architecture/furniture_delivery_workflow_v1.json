@@ -1,0 +1,16 @@
+{
+  "schema": "dfmcp.furniture-delivery-workflow-contract/1",
+  "entry": "review_route_furniture.py create --sequence-deliveries",
+  "compiler": "route_furniture_sequence.allocate_sequenced_routes",
+  "default": "legacy allocation unchanged",
+  "check_reordering": "refused before file read or native contact",
+  "acquisition": "existing single map/inventory bracket; no additional native calls",
+  "request_binding": "effective request retained with complete plan and review",
+  "blocked_order": "diagnostic only; no plan or review",
+  "maximum_output_bytes": 98304,
+  "export_work_reserved": 100000,
+  "solver_budget": "shared allocation/sequence/forward verification; never replenished",
+  "native_mutations": false,
+  "rewrites_existing_custody": false,
+  "admission_change": false
+}

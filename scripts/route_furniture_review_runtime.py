@@ -12,6 +12,7 @@ from furniture_plan import canonical, integer, require
 import route_furniture_allocation as routes
 import route_furniture_inventory as inventory
 import route_furniture_review as review_model
+import route_furniture_sequence as sequencing
 
 # Fixed work reservation for creating/validating/serializing the bounded artifact.
 # It is never borrowed from the already reserved route solver allowance.
@@ -77,6 +78,12 @@ def packet(result=None, request=None, source=None, *, operation='check', review=
     turn['coverage']['placement_gate_enforced'] = False
     turn['uncertainty'].append(
         'Retain the complete review and its expected digest separately. Rechecking original selections neither enforces a native placement gate nor resolves any outstanding effect.')
+    if result is not None and 'delivery_sequence' in result:
+        sequence = result['delivery_sequence']
+        turn['coverage']['delivery_order_model'] = sequence['model']
+        turn['coverage']['delivery_order_checked'] = sequence['candidate_model_sequence_proven']
+        turn['uncertainty'].append(
+            'Delivery order models earlier target tiles as blocked. It preserves selected items and original constraints, but is not native hauling or a guarantee of future routes. Fresh placement review remains required.')
     if result is None:
         value['error'] = {'code': 'ROUTE_FURNITURE_REVIEW_REFUSED',
             'detail': 'Original review, source, authority, evidence or budget refused. No current review established; no placement was attempted.'}
@@ -99,7 +106,9 @@ def finish(result, request, source, counts, authority, budget, *, operation, rev
 
 
 def create(request: Request, region: inventory.Region, authority: inventory.Authority,
-           budget: inventory.wire.Budget, *, max_route_steps=routes.MAX_ROUTE_STEPS) -> bytes:
+           budget: inventory.wire.Budget, *, max_route_steps=routes.MAX_ROUTE_STEPS,
+           sequence_deliveries: bool = False) -> bytes:
+    require(type(sequence_deliveries) is bool, 'delivery sequencing requires explicit Boolean opt-in')
     integer(max_route_steps, 0, routes.MAX_ROUTE_STEPS)
     require(budget.work_steps > EXPORT_WORK, 'review export work must be reserved before native contact')
     raw, source, candidates, types, counts = acquire(request, region, authority, budget)
@@ -111,8 +120,15 @@ def create(request: Request, region: inventory.Region, authority: inventory.Auth
         budget.remaining()
         authority.guard()
 
-    result = routes.allocate_routes(request, candidates, raw, guard,
-                                    max_route_steps=max_route_steps, maximum_work=allowance)
+    if sequence_deliveries:
+        # Use the shared compiler once, and keep its strengthened request with
+        # the allocation through review creation and final publication. Never
+        # apply this to a retained review or an already-started batch.
+        request, result = sequencing.allocate_sequenced_routes(
+            request, candidates, raw, guard, max_route_steps=max_route_steps, maximum_work=allowance)
+    else:
+        result = routes.allocate_routes(request, candidates, raw, guard,
+                                        max_route_steps=max_route_steps, maximum_work=allowance)
     review = None
     if result['status'] == 'allocated':
         selected_types = {row['item']: types[row['item']] for row in result['assignments']}
