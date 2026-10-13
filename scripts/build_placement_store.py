@@ -4,6 +4,8 @@ Host-local cooperating custody, not cross-controller exclusion or anti-rollback
 against a malicious owner. No repair, overwrite, eviction or commit replay.
 Indeterminate native records are immutable retained evidence, not permission to
 replace an uncertain receipt with a subsequent observation or another dispatch.
+An explicit reconciled frame can append full original-attempt Placed evidence;
+the original uncertain frame remains in the chain and never grants a retry.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import stat
 
 from build_placement_rpc import Budget, Manifest, Reply, endpoint
 from build_placement_wire import Capture, Plan, Record, canonical, digest, exact_hex, integer, key_text, require
+from build_placement_reconciliation import verify_reconciliation
 
 MAX_FILE = 32768
 MAX_FRAME = 16384
@@ -63,6 +66,7 @@ class State:
     terminal_manifest: Manifest | None = None
     frames: int = 1
     tail: str = ''
+    reconciled_from: Record | None = None
 
     @property
     def pending(self) -> bool:
@@ -79,7 +83,12 @@ class State:
                 'original_manifest': self.manifest.view(),
                 'receipt_manifest': None if self.terminal_manifest is None else self.terminal_manifest.view(),
                 'retry_permitted': False, 'construction_completion_proved': False,
-                'storage_acknowledged_this_call': False}
+                'storage_acknowledged_this_call': False,
+                'reconciliation': None if self.reconciled_from is None else {
+                    'original_indeterminate_receipt': self.reconciled_from.raw[-32:].hex(),
+                    'placed_receipt': self.terminal.raw[-32:].hex(),
+                    'original_uncertainty_retained': True,
+                    'new_placement_dispatched': False}}
 
 
 def apply(state: State | None, kind: str, payload: object) -> State:
@@ -92,8 +101,20 @@ def apply(state: State | None, kind: str, payload: object) -> State:
         manifest = manifest_from(p['manifest'])
         require(manifest.generation == plan.before.generation, 'intent generation mismatch')
         return State(plan, manifest, endpoint(p['endpoint']))
-    require(state.terminal is None, 'record after immutable native receipt')
     from dataclasses import replace
+    if kind == 'reconciled':
+        require(state.terminal is not None and state.reconciled_from is None,
+                'reconciliation requires one retained unresolved receipt')
+        p = exact_object(payload, {'record_hex', 'manifest', 'previous_receipt'})
+        value = Record.decode(exact_hex(p['record_hex'], maximum=6144), state.plan)
+        manifest = manifest_from(p['manifest'])
+        require(p['previous_receipt'] == state.terminal.raw[-32:].hex()
+                and manifest == state.manifest == state.terminal_manifest,
+                'reconciliation changed the original receipt or native source')
+        verify_reconciliation(state.terminal, value)
+        return replace(state, terminal=value, terminal_manifest=manifest,
+                       reconciled_from=state.terminal)
+    require(state.terminal is None, 'record after immutable native receipt')
     if kind == 'dispatch':
         p = exact_object(payload, {'plan_digest'})
         require(state.prepared is not None and not state.dispatched
@@ -116,7 +137,7 @@ def apply(state: State | None, kind: str, payload: object) -> State:
 def replay(raw: bytes) -> State:
     require(type(raw) is bytes and 0 < len(raw) <= MAX_FILE and raw.endswith(b'\n'), 'incomplete or oversized journal')
     lines = raw.splitlines(keepends=True)
-    require(1 <= len(lines) <= 4, 'journal transition count exceeded')
+    require(1 <= len(lines) <= 5, 'journal transition count exceeded')
     state, previous = None, '0' * 64
     from dataclasses import replace
     for index, line in enumerate(lines):
@@ -249,6 +270,28 @@ class Journal:
             return False
         self.append('prepared' if prepared else 'terminal',
                     {'record_hex': value.raw.hex(), 'manifest': reply.manifest.view()})
+        return True
+
+    def retain_reconciliation(self, reply: Reply) -> bool:
+        """Append original-attempt recovery, never rewrite the uncertain receipt.
+
+        Only the explicit query/recovery owner invokes this method. Normal retain
+        keeps its immutable-receipt behavior. Exact repeated replies are no-ops;
+        all other transitions after Placed/refusal/cancellation still refuse.
+        """
+        self.owner.check()
+        require(type(reply) is Reply and type(reply.record) is Record,
+                'reconciliation requires a complete native record')
+        previous = self.state.terminal
+        require(previous is not None, 'no uncertain receipt to reconcile')
+        require(reply.manifest == self.state.manifest == self.state.terminal_manifest,
+                'reconciliation cannot cross a native incarnation or software change')
+        if reply.record.raw == previous.raw:
+            self.owner.check()
+            return False
+        verify_reconciliation(previous, reply.record)
+        self.append('reconciled', {'record_hex': reply.record.raw.hex(),
+            'manifest': reply.manifest.view(), 'previous_receipt': previous.raw[-32:].hex()})
         return True
 
 
