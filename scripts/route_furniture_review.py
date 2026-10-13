@@ -13,9 +13,10 @@ import ipaddress
 import json
 import re
 
-from furniture_allocation import Candidate, Guard, MAX_ITEMS, Request, distance, idle
+from furniture_allocation import Candidate, Guard, MAX_ITEMS, Request, idle
 from furniture_plan import FurniturePlan, Step, canonical, integer, require, unique
 import route_furniture_allocation as routes
+from route_furniture_allocation import distance
 
 SCHEMA = 'dfmcp.route-furniture-review/1'
 POLICY = 'original-items-and-constraints-fresh-routes/1'

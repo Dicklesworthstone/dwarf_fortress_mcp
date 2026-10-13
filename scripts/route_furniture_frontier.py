@@ -10,10 +10,10 @@ from __future__ import annotations
 import hashlib
 
 from build_placement_wire import Capture, Record, Selection, KINDS, MAX_RECORD_BYTES
-from furniture_allocation import Candidate, distance, idle
+from furniture_allocation import Candidate, idle
 from furniture_plan import canonical, label, require
 from route_furniture_review import Review, Source, candidate, digest_text, revalidate
-from route_furniture_allocation import Work, MAX_WORK
+from route_furniture_allocation import Work, MAX_WORK, distance
 
 POLICY = 'original-route-constraints-after-verified-placement-prefix/1'
 MAX_OUTPUT = 96 * 1024
