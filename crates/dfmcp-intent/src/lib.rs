@@ -13,6 +13,7 @@ pub mod labor_observation;
 pub mod logistics;
 pub mod obligation;
 mod plan;
+pub mod plan_archive;
 mod planner;
 
 pub use action::{
