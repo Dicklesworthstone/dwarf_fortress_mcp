@@ -89,7 +89,10 @@ class Client(wire.Client):
     existing operations calls keep their original page limits and validators.
     """
     def __init__(self, authority: Authority, region: Region, budget: wire.Budget):
-        require(type(authority) is Authority and type(region) is Region,
+        # Trusted embedding owners may narrow authority through a subtype. The
+        # CLI still loads its exact read-only environment; native methods and
+        # credential fields remain the same four fixed read bindings below.
+        require(isinstance(authority, Authority) and type(region) is Region,
                 'closed route inventory authority and region required')
         region.__post_init__()
         authority.guard()
