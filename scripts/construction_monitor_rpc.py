@@ -120,8 +120,11 @@ def encode(fields: dict[int, int | bytes]) -> bytes:
     return bytes(out)
 
 
-def decode(raw: bytes, maximum: int = 14) -> dict[int, int | bytes]:
-    require(type(raw) is bytes and len(raw) <= MAX_REPLY, 'oversized native reply')
+def decode(raw: bytes, maximum: int = 14, *, maximum_bytes: int = MAX_REPLY) -> dict[int, int | bytes]:
+    # Larger fixed-profile map replies opt in explicitly; existing page callers
+    # keep their unchanged bound. The enclosing transport bounds before reading.
+    integer(maximum_bytes, 1, MAX_CAPTURE)
+    require(type(raw) is bytes and len(raw) <= maximum_bytes, 'oversized native reply')
     offset, fields = 0, {}
 
     def number() -> int:

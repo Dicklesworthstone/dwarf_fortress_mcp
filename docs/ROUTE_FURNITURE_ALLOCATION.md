@@ -66,3 +66,124 @@ truncation, maximum candidate/slot counts and an 8,255-tile snake in a maximum-s
 map. Both reused upstream Python modules were verified against their pinned Git
 blob hashes. No Rust, native DFHack, full repository or production qualification
 is implied, and the broader beads remain open.
+
+## Executable map/inventory read workflow
+
+`allocate_route_furniture.py` now drives the allocator from the unchanged
+`dfmcp_map_v1_5` and `dfmcp_operations_v1_4` plugins. It does not load plugins or
+change the game. The operator supplies a bounded map region and the existing
+`dfmcp.furniture-request/1` request file. In an isolated environment, configure:
+
+```text
+DFMCP_ALLOW_UNADMITTED_ROUTE_FURNITURE=1
+DFMCP_ROUTE_FURNITURE_ENDPOINT=127.0.0.1:5000
+DFMCP_OPERATIONS_PAGED_TOKEN=<operator-configured operations read token>
+DFMCP_MAP_TOKEN=<operator-configured map read token>
+```
+
+The endpoint is optional (the value shown is its default); each token must be
+32..256 UTF-8 bytes without NUL. All other `DFMCP_` variables, including placement
+credentials and production-admission state, are refused. No read credential is
+copied into a result, error, plan or log.
+
+```sh
+python3 scripts/allocate_route_furniture.py \
+  --request-file furnishings-request.json \
+  --origin 0 0 5 --size 64 64 1 \
+  --max-route-steps 1000 --timeout-ms 10000
+```
+
+Coordinates and route limits above are illustrative, not a known fortress.
+The request file is read completely under a no-follow final-component open;
+nonregular, oversized, duplicate-field, changed and malformed input is refused
+before native contact. Parent path components have ordinary filesystem semantics;
+this input file is not private journal custody. The input is never rewritten.
+No output plan file, journal, reservation or native effect is created.
+
+One TCP connection binds only the map and operations `Handshake` and
+`ReadObservation` methods. It obtains map-before, one complete operations roster,
+its verified original-token release, and map-after. Both map captures must be
+byte-identical and retain the same map manifest. Map and inventory must have the
+same fortress folder/site, paused tick and software versions. Their native
+incarnation numbers remain separate namespaces. The selected region must match
+exactly. The socket closes before roster projection and route optimization.
+
+The existing operations decoder and retained-page reader are reused, including
+full relation validation, whole-capture SHA-256, exact offsets, retained token,
+manifest consistency and release acknowledgment. A small additive parameter to
+the shared protobuf decoder allows the fixed map profile's larger reply ceiling;
+all existing callers keep their unchanged default page limit. The transport
+bounds the declared frame before reading, and the decoder applies the same bound.
+No generic method or caller-selected wire profile is exposed.
+
+Candidate projection uses the existing furniture inventory policy: only supported
+ground singleton furniture, with known material, valid coordinates, no other
+projected flags, no holder/container relation, no contained item, no job-item
+attachment and no explicit exclusion. Every item receives one classification.
+The complete roster is validated before selection, so an attachment on the last
+page cannot be skipped to make an attractive item appear available.
+
+### Output and handoff limits
+
+Successful acquisition emits one bounded JSON/Agent Turn object with `ok: true`.
+Its `result.status` is `allocated`, `shortage`, or `target_unestablished`; callers
+must inspect that status, not just the exit code. Only `allocated` has a complete
+`result.plan` in the existing exact-item plan format. Shortage and unknown-target
+reports exit zero but never contain an executable subset. Refused operations
+exit two with `ok: false`, null result/request/source and a sanitized stable error.
+A partial stdout write cannot start another acquisition or print a second object.
+
+The pure result and its decision digest remain unchanged inside the outer
+acquisition packet. Its `native_acquisition_proven: false` describes the pure
+allocator; the outer `native_capture_established` records acquisition by this
+invocation. The separate source record binds both raw capture digests, manifests,
+region, horizons, classification counts and pure allocation digest. These are
+local evidence identities, not signatures or independent network attestation.
+The Agent Turn canonical world anchor remains null: this Python workflow does not
+issue a Rust world generation.
+
+The plan can be separately reviewed with the existing furniture-batch workflow,
+but this command does NOT produce a durable route-aware placement handoff.
+Neither legacy exact-item plans nor this report enforce future route freshness,
+maximum route length or material restrictions at later placement time. Earlier
+furnishings may block a route for a later target. Reobserve and review instead of
+inferring future accessibility or silently substituting another item. Existing
+placement receipts and unresolved effects are not inspected or discharged.
+
+Equal paused endpoints around inventory do not establish an atomic cross-profile
+snapshot, continuous stability, native movement rules, global absence, danger or
+placement eligibility. These limits remain explicit in every successful packet.
+
+### Shared budgets and validation
+
+The full invocation shares one 1..60,000 ms wall deadline (default 10,000), 272 RPC
+calls, 20 MiB network allowance, and 20,000,000 work units. Four bindings, two
+handshakes, two map reads, at least one inventory page and its release are admitted
+before connection. Longer inventories consume additional calls from that same
+allowance. The solver reserves the remaining work allowance after decoding and
+projection; its internal counter charges every structural unit. The outer callback
+rechecks deadline and current authority, without refilling either allowance.
+CPU checks and synchronous I/O deadlines are cooperative, not hard real-time
+preemption. Complete output is at most 96 KiB, never a truncated executable plan.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
+  test_route_furniture_allocation test_route_furniture_inventory -v
+```
+
+All **35 actual Python test functions passed**: 16 core tests and 19 integration
+functions. Integration tests use an independently encoded, joined loopback peer
+and real CLI subprocesses. They cover three-page inventory with a final attachment,
+map replies larger than an operations page, all 512 item-flag words, holder and
+containment exclusions, wrong fortress/tick/pause/region, source/nonce drift,
+malformed frames and protobuf, lost release replies, wrong release tokens,
+notification limits, single-use acquisition, no-write CLI behavior, sanitized
+failures, pre-contact budgets, post-acquisition deadline loss, solver revocation
+and final-render revocation. The peer asserts literal fixed bindings and request
+fields, not just constants imported from the client. Existing source dependencies
+were reconstructed byte-exactly and checked against their pinned Git blob hashes;
+only the shared decoder's explicit bounded-size parameter was changed.
+
+The peer is not DFHack. No real SDK/plugin build, live fortress, Rust/MCP route,
+full repository qualification or production admission is established. This adds
+an executable native-protocol client; it does not claim a native-game test pass.
