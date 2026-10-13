@@ -3,6 +3,8 @@
 
 #[path = "semantic_query_core.rs"]
 mod core_query;
+#[path = "dominance_query.rs"]
+mod dominance_query;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
@@ -20,7 +22,7 @@ use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
 
 pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
-    query_watch::extend_count_schema(schema)
+    dominance_query::extend_schema(query_watch::extend_count_schema(schema)?)
 }
 
 /// Ownership of a durable watch registry belongs to the enclosing session.
@@ -145,6 +147,7 @@ pub fn execute(
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
+        Some("dominators") => dominance_query::execute(snapshot, context, input),
         _ => core_query::execute(snapshot, context, input),
     }
 }

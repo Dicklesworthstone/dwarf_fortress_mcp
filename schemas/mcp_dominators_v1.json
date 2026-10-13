@@ -1,0 +1,28 @@
+{
+  "title": "Directed bottlenecks in the authorized observed projection",
+  "description": "Rooted immediate dominators, not shortest paths, game walkability or causal/resource feasibility. Query authority and matching root/target generations are required. Supplying a target returns only its unavoidable-node chain and impact records, after complete bounded analysis. Without a target, returns the complete dominator tree. Runtime checks u64 overflow, UTF-8 byte limits, exact anchors, deadlines, work and output budgets; no partial analysis is returned.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "root", "root_generation", "edge_kinds"],
+  "properties": {
+    "kind": {"const": "dominators"},
+    "root": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+    "root_generation": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "edge_kinds": {
+      "type": "array", "minItems": 1, "maxItems": 32,
+      "items": {
+        "oneOf": [
+          {"enum": ["located_at", "contained_in", "assigned_to", "member_of", "performs", "requires", "produces", "uses", "supports", "threatens", "ordered_by", "parent_of"]},
+          {"type": "string", "pattern": "^custom:[^\u0000]+$", "maxLength": 128}
+        ]
+      }
+    },
+    "direction": {"anyOf": [{"enum": ["outgoing", "incoming"]}, {"type": "null"}], "default": "outgoing"},
+    "target": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+    "target_generation": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+  },
+  "dependentRequired": {
+    "target": ["target_generation"],
+    "target_generation": ["target"]
+  }
+}

@@ -52,6 +52,59 @@ units, and immediately before return. Shared snapshot hashing/index construction
 is count-bounded but not cooperatively interrupted by this callback. No thread,
 background task, additional dependency, or transport authority is introduced.
 
+## Agent-facing query
+
+The existing structured `fortress.query` dispatcher now accepts `dominators`.
+The query schema is composed into the runtime's existing query union; no new
+MCP tool or native effect is added. Supply this object as the tool's `query`
+argument alongside the existing session identifier:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "dominators",
+    "root": "1",
+    "root_generation": 1,
+    "edge_kinds": ["requires"],
+    "direction": "outgoing",
+    "target": "5",
+    "target_generation": 1
+  }
+}
+```
+
+The IDs above are illustrative, not stable identifiers from a live fortress.
+Use the IDs and generations from the selected session's current projection.
+`expected_anchor` may additionally pin the complete observation anchor.
+
+Omit both target fields to request the full `dominator_tree` view. Supplying
+both selects `target_chain`: it returns the unavoidable-node records and impact
+counts for that objective, with total reachable/unreachable counts and the same
+complete-analysis witness. It does not emit unrelated tree rows or the full
+unreachable list (`unreachable` is null). `analysis_complete: true` and
+`truncated: false` refer to complete analysis and the requested view, not to
+emitting every graph vertex. A present but unreachable target reports
+`unreachable_in_projection`; a missing endpoint is an invalid request, not a
+proof of absence. Generation mismatches fail with `Conflict` even for an
+unreachable target.
+
+The analysis witness describes the entire rooted graph; different target views
+can therefore share it. It is not a digest of the serialized presentation.
+Whole-fortress Query authority is checked before parsing and again during
+analysis and before return. The endpoint enforces the caller's foreground wall
+deadline, entity budget, response byte/token budget, and the bounded graph work
+allowance. Active-watch metadata reservation and complete-turn publication use
+the existing dispatcher; failed rendering does not register work or mutate state.
+
+Ten additional Rust regressions cover semantic dispatch, target focus, reversed
+relations, generation/anchor fences, scope/cancellation/expiry, malformed inputs,
+output/deadline budgets, failed publication, and runtime schema composition.
+These Rust tests have **not been executed in the authoring environment**.
+Python JSON Schema checks passed six accepted and sixteen rejected request cases;
+source checks also matched the registered edge selectors and dispatcher/schema
+linkage. Those checks do not establish Rust compilation or MCP transport success.
+
 ## Implementation and validation status — 2026-10-13
 
 Source includes 11 Rust tests: diamond reconvergence, reversed direction, explicit
@@ -80,5 +133,6 @@ release-admission status changes. Required follow-up on a Rust-equipped host:
 
 ```text
 cargo test -p dfmcp-world --test graph_dominance
+cargo test -p dfmcp-mcp dominance_query
 ./scripts/verify.sh
 ```
