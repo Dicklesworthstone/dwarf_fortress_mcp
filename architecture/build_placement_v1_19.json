@@ -88,6 +88,20 @@
   "item_flags2_allowed": 0,
   "cancellation_deconstructs": false,
   "indeterminate_blocks_new_keys": true,
+  "indeterminate_recovery": {
+    "method": "QueryPlacement",
+    "permitted_transition": "Indeterminate -> exact original Placed receipt",
+    "writer_calls": 0,
+    "maximum_captures": 2,
+    "maximum_insertion_verifications": 1,
+    "requires_original_generation_and_post_dispatch_sequence": true,
+    "requires_original_expected_capture_including_tick": true,
+    "requires_independent_complete_insertion_proof": true,
+    "requires_final_exact_capture": true,
+    "allows_nonapplication_or_cancel_inference": false,
+    "failed_proof_preserves_record_and_fence": true,
+    "resolved_receipts_remain_immutable": true
+  },
   "source_changes_preserve_records_and_uncertainty": true,
   "native_record_eviction": false,
   "domains": {
@@ -106,7 +120,9 @@
     "bridge/dfhack-build-v1_19/CMakeLists.txt",
     "tests/native/build_placement/stubs.h",
     "tests/native/build_placement/handler.cpp",
-    "scripts/test_build_placement_native.py"
+    "scripts/test_build_placement_native.py",
+    "tests/native/build_placement/receipt_recovery.cpp",
+    "scripts/test_build_placement_rpc_recovery.py"
   ],
   "upstream_api_inspection": {
     "dfhack_revision": "7e4d6190861ea9aaadd648534cd6c1089a1958ae",

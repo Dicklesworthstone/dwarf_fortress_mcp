@@ -381,7 +381,9 @@ command_result CommitPlacement(color_ostream &, const wire::Request *in, wire::R
 }
 command_result QueryPlacement(color_ostream &, const wire::Request *in, wire::Reply *out) {
     return guarded(in, out, 160, false, [&] {
-        if (const auto *record = engine.query(in->idempotency_key(), in->plan_digest())) out->set_effect_record(record->encode());
+        // Read-only recovery can finish the original proof; no writer is reachable.
+        if (const auto *record = engine.reconcile(in->idempotency_key(), in->plan_digest(),
+            capture, verify)) out->set_effect_record(record->encode());
     });
 }
 command_result CancelPlacement(color_ostream &, const wire::Request *in, wire::Reply *out) {
