@@ -12,3 +12,12 @@ there is no Rust toolchain or DF/DFHack runtime in the authoring environment.
 No full-workspace, native, live, registry, floor, artifact or runtime admission
 is claimed. The graph integration bead `df-franken-storage-mvcc-54h.4` stays open.
 See `docs/MAP_ROUTE_RESILIENCE.md` for the precise scope and validation commands.
+
+The shared spatial/1.6 and spatial/1.8 query path now exposes the analysis through
+`map_route_resilience`, with compact cuts, paged path positions, source/session/
+anchor-bound commitments, current Query checks and complete output budgeting.
+It does not acquire fresh native state or add authority. Thirteen additional
+actual-source query tests are present but unexecuted (28 total core/query tests).
+Python schema validation passes 15 accepted and 32 rejected shapes; the existing
+algorithm-design oracle rerun passes 42,856 graph/map/model cases. These do not
+establish Rust compilation, formatting, lint, transport, native or live success.

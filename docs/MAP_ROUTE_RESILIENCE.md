@@ -100,3 +100,84 @@ Rust-toolchain-free authoring environment. Required actual-source validation:
 cargo test -p dfmcp-world --test map_resilience
 ./scripts/verify.sh
 ```
+
+## Shared spatial query integration
+
+The existing spatial structured query dispatcher now accepts
+`map_route_resilience` in the spatial/1.6 and citizen-inclusive spatial/1.8 read
+paths. Schema discovery composes the new closed variant into the existing
+query union; the eleven-tool surface is unchanged. Supply this value as the
+existing `fortress.query` tool's `query` argument, with the session identifier
+as usual:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "map_route_resilience",
+    "start": [0, 0, 5],
+    "goal": [4, 0, 5],
+    "disjointness": "internal_tiles",
+    "section": "cut"
+  }
+}
+```
+
+These coordinates are illustrative; both endpoints must be distinct positions
+inside the session's captured region. `expected_anchor` can additionally pin
+the complete anchor. The caller must hold current whole-fortress Query authority;
+scoped or use-limited grants are not widened, and a continuation supplies no
+authority. The current source fence and complete Agent Turn/watch budget rules
+still apply at the owning server. No extra source read, native method, mutation,
+watch, reservation or background task is created.
+
+The default `cut` section returns at most six separator rows with the complete
+analysis summary and commitment to every path. `paths` returns individual
+positions, with path ID, position ordinal and total path length. `all` returns
+cut rows first and then the same path-position stream. Long routes therefore
+remain pageable even when an entire route would exceed a single-row budget.
+`limit` is 1..128, default 16; the existing byte-aware paginator may narrow it.
+Pages recompute the bounded deterministic analysis rather than retaining a new
+mutable cache or independent generation.
+
+`analysis_complete` and `certificate_verified` refer to the underlying analysis,
+not whether all path positions were displayed. `truncated` refers to the selected
+section's presentation. An excluded endpoint has null path/separator counts and
+both analysis flags false; it is not converted to zero. Eligible endpoints with
+no route have a checked zero only in this bounded observed model.
+
+The certificate reports packing and separator cardinalities and whether its cut
+contains the direct endpoint edge. Tile mode with adjacent endpoints explicitly
+reports `mixed_internal_tile_and_direct_edge_cut`; `pure_internal_tile_cut_size`
+is null in this case and in edge mode. Both endpoint deletion and claims of
+native safety/throughput remain disabled.
+
+The structural digest binds the full source anchor, source bytes' digest,
+session identity, both endpoints, region, disjointness and route policy, supplied
+work bound, actual structural work and the complete ordered path/cut witness.
+Changing the section or page limit preserves that witness digest. The analysis
+identity additionally binds the selected section. Continuations bind it through
+the existing session/query/capture token: changing source, session, endpoint,
+mode, section or work policy refuses rather than silently starting a new page.
+A page limit can change without skipping positions. Query authorization and the
+foreground wall deadline are checked during analysis and rendering and again
+before return; final source identity and snapshot hash are rechecked.
+
+Thirteen additional actual-source Rust regressions exercise the shared query
+dispatcher with strict spatial/1.6 and spatial/1.8 fixtures, canonical publication,
+compact versus expanded views, complete paging, current authority, anchor fences,
+continuation invalidation, exclusions, direct-edge semantics and budgets. They
+remain **unexecuted**, as do the fifteen core regressions. The verifier also now
+bounds caller-supplied path lengths before lexicographic comparisons, covered
+by an additional mutation in the existing forged-certificate test.
+
+Python JSON Schema validation passed 15 accepted and 32 rejected request shapes.
+The original shared dispatcher was reconstructed and its Git blob SHA verified
+before making the additive module, variant, routing and schema changes. These
+are source/schema checks, not MCP transport or Rust execution evidence.
+
+Additional actual-source validation on a Rust-equipped host:
+
+```text
+cargo test -p dfmcp-mcp 'spatial_queries::resilience::tests'
+```

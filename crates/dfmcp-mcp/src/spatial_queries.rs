@@ -15,6 +15,8 @@ mod blueprint;
 mod connectivity;
 #[path = "spatial_construction.rs"]
 mod construction;
+#[path = "spatial_resilience.rs"]
+mod resilience;
 
 fn invalid(s: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, s)
@@ -35,6 +37,7 @@ enum Query {
     BlueprintLayout(blueprint::Request),
     ConstructionProgress(construction::Request),
     MapConnectivity(connectivity::Request),
+    MapRouteResilience(resilience::Request),
     MapRoute {
         start: [u32; 3],
         goal: [u32; 3],
@@ -89,6 +92,7 @@ pub(super) fn handles(input: &Value) -> bool {
                 | "spatial_inventory_plan"
                 | "blueprint_layout"
                 | "map_connectivity"
+                | "map_route_resilience"
                 | "construction_progress"
         )
     )
@@ -268,6 +272,7 @@ pub(super) fn execute<T: SpatialStateView + OperationsStateView>(
         Query::BlueprintLayout(request) => blueprint::execute(state, c, source, request),
         Query::ConstructionProgress(request) => construction::execute(state, c, source, request),
         Query::MapConnectivity(request) => connectivity::execute(state, c, source, request),
+        Query::MapRouteResilience(request) => resilience::execute(state, c, source, request),
         Query::MapRoute {
             start,
             goal,
@@ -392,6 +397,10 @@ pub(super) fn schema() -> Result<Value> {
         "../../../schemas/mcp_construction_progress_v1.json"
     ))
     .map_err(|_| invalid("construction schema invalid"))?;
+    let resilience: Value = serde_json::from_str(include_str!(
+        "../../../schemas/mcp_map_route_resilience_v1.json"
+    ))
+    .map_err(|_| invalid("route resilience schema invalid"))?;
     let variants = base["$defs"]["query"]["oneOf"]
         .as_array_mut()
         .ok_or_else(|| invalid("base query variants absent"))?;
@@ -400,5 +409,6 @@ pub(super) fn schema() -> Result<Value> {
     variants.push(blueprint);
     variants.push(connectivity);
     variants.push(construction);
+    variants.push(resilience);
     Ok(base)
 }

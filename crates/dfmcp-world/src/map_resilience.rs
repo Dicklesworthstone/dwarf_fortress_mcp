@@ -295,6 +295,8 @@ fn verify<F: FnMut() -> Result<(), MapError>>(
     if report.endpoint_excluded != excluded
         || report.paths.len() > MAX_PATHS
         || report.minimum_cut.len() != report.paths.len()
+        // Bound each caller-supplied path before lexicographic comparisons.
+        || report.paths.iter().any(|path| path.len() < 2 || path.len() > graph.adjacent.len())
         || report.minimum_cut.windows(2).any(|pair| pair[0] >= pair[1])
         || report.paths.windows(2).any(|pair| pair[0] >= pair[1])
         || report.candidate_tiles != graph.candidates.iter().filter(|&&v| v).count() as u32

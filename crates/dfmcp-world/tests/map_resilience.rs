@@ -283,7 +283,7 @@ fn malformed_maps_and_endpoints_are_refused() -> Result<(), MapError> {
 fn certificate_rejects_forged_packings_cuts_counts_and_changed_maps() -> Result<(), MapError> {
     let map = grid([3, 3, 1])?;
     let report = run(&map, Disjointness::InternalTiles)?;
-    for which in 0..6 {
+    for which in 0..7 {
         let mut forged = report.clone();
         match which {
             0 => forged.paths[0][1] = 8,
@@ -291,6 +291,7 @@ fn certificate_rejects_forged_packings_cuts_counts_and_changed_maps() -> Result<
             2 => forged.minimum_cut[0] = CutElement::Tile(0),
             3 => forged.minimum_cut[0] = CutElement::Tile(8),
             4 => forged.candidate_tiles += 1,
+            5 => forged.paths[0] = vec![0; map.cells.len() + 1],
             _ => forged.minimum_cut.clear(),
         }
         assert!(verify_certificate(&map, &forged, MAX_ROUTE_WORK).is_err(), "mutation {which}");

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Observed route redundancy and minimum separator",
+  "description": "Read-only analysis of the current bounded spatial capture, not native movement, throughput or safety. Disjointness is explicit. Runtime checks distinct in-region endpoints, complete anchors, current authority, shrinking wall and work budgets, and complete response bounds. Default section is cut; routes paginate by individual position, not by entire path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "start", "goal", "disjointness"],
+  "properties": {
+    "kind": {"const": "map_route_resilience"},
+    "start": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+    "goal": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 32767}},
+    "disjointness": {"enum": ["edges", "internal_tiles"]},
+    "section": {"anyOf": [{"enum": ["cut", "paths", "all"]}, {"type": "null"}]},
+    "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]},
+    "max_work": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 1000000}, {"type": "null"}]},
+    "continuation": {"anyOf": [{"type": "string", "maxLength": 128, "pattern": "^sp1:[1-9][0-9]{0,5}:[0-9a-f]{64}$"}, {"type": "null"}]}
+  }
+}
