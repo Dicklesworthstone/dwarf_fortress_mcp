@@ -330,7 +330,12 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
         self.journal.verify(&mut work)?;
         work.charge(MAX_BODY_BYTES)?;
         let entry = self.journal.known(key, digest)?;
-        if !entry.needs_reconciliation() {
+        // A retained terminal Indeterminate receipt is deliberately outside the
+        // ordinary successor FSM, but query-only exact-source reconciliation may
+        // append its original positive proof. Cancellation never takes this path:
+        // an attempted effect cannot be converted into nonapplication.
+        let receipt_reconciliation = !cancel && entry.can_reconcile_receipt();
+        if !entry.needs_reconciliation() && !receipt_reconciliation {
             return Ok(entry);
         }
         self.journal.online(false)?;
@@ -351,15 +356,19 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
         let mut source = self.connect(
             entry.plan().before().selection(),
             Some(entry.plan()),
-            false,
+            receipt_reconciliation,
             &mut work,
             factory,
             guard,
         )?;
         let request = work.reserve(self.journal.operation_reserve())?;
-        let result = self
-            .journal
-            .recover(&mut source, key, digest, cancel, &request, guard);
+        let result = if receipt_reconciliation {
+            self.journal
+                .reconcile_receipt(&mut source, key, digest, &request, guard)
+        } else {
+            self.journal
+                .recover(&mut source, key, digest, cancel, &request, guard)
+        };
         self.last_native_summary = Some(source.native_summary());
         source.fence();
         self.high_tick = self.high_tick.max(self.journal.high_tick());
@@ -367,3 +376,8 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
         result
     }
 }
+
+
+#[cfg(test)]
+#[path = "session_reconciliation_tests.rs"]
+mod reconciliation_tests;
