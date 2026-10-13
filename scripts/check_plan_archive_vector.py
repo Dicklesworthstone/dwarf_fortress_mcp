@@ -53,6 +53,44 @@ def vector():
     frame = b'DFMPAR01' + u32(len(body)) + body
     return frame + digest(b'dfmcp-exact-plan-archive/1\0' + frame), semantic, preimage
 
+def verify_frame(raw, semantic, identity):
+    """Independent framing prepass only, NOT typed Rust plan validation."""
+    if (not isinstance(raw, bytes) or not 44 < len(raw) <= 4194304
+            or raw[:8] != b'DFMPAR01'
+            or struct.unpack('>I', raw[8:12])[0] != len(raw) - 44
+            or raw[-32:] != identity
+            or digest(b'dfmcp-exact-plan-archive/1\0' + raw[:-32]) != identity
+            or raw[-64:-32] != semantic):
+        raise ValueError('invalid frame or independently expected identity')
+
+
+def framing_faults(raw, semantic):
+    identity = raw[-32:]
+    verify_frame(raw, semantic, identity)
+    cases = [raw[:i] for i in range(len(raw))]
+    for i in range(len(raw)):
+        corrupt = bytearray(raw)
+        corrupt[i] ^= 1
+        cases.append(bytes(corrupt))
+    cases.append(raw + b'\0')
+    for damaged in cases:
+        try:
+            verify_frame(damaged, semantic, identity)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('damaged framing accepted')
+    for bad_semantic, bad_identity in [(digest(b'other'), identity),
+                                        (semantic, digest(b'other'))]:
+        try:
+            verify_frame(raw, bad_semantic, bad_identity)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('different external identity accepted')
+    return len(cases) + 2
+
+
 def main():
     expected, semantic, _ = vector()
     actual = bytes.fromhex((FIXTURES / 'plan_archive_pause_v1.hex').read_text().strip())
@@ -61,7 +99,8 @@ def main():
     assert struct.unpack('>I', actual[8:12])[0] == len(actual) - 44
     assert actual[-32:] == digest(b'dfmcp-exact-plan-archive/1\0' + actual[:-32])
     print(f'Independent archive vector: {len(actual)} bytes; semantic {semantic.hex()}')
-    print('Fixture, frame length and object checksum passed. Rust source not executed.')
+    print(f'Independent framing fault/identity cases: {framing_faults(actual, semantic)} refused')
+    print('Fixture and framing design passed. Rust codec/store not executed; typed semantic validation not tested by this script.')
 
 if __name__ == '__main__':
     main()

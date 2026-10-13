@@ -47,7 +47,7 @@ impl Default for ArchiveLimits {
     }
 }
 impl ArchiveLimits {
-    fn validate(self) -> Result<()> {
+    pub fn validate(self) -> Result<()> {
         if !(OVERHEAD + 1..=MAX_ARCHIVE_BYTES).contains(&self.max_bytes)
             || !(1..=MAX_ARCHIVE_STEPS).contains(&self.max_steps)
             || !(1..=MAX_NODES).contains(&self.max_nodes)
@@ -88,8 +88,8 @@ pub fn encode(plan: &PreparedPlan, limits: ArchiveLimits) -> Result<(Vec<u8>, Pl
     encode_with_check(plan, limits, || Ok(()))
 }
 
-/// A caller may supply cancellation/deadline checks. Checks run at entry, each
-/// 128 visited nodes and each bounded raw/string operation, and before return.
+/// A caller may supply cancellation/deadline checks. Checks run at entry, every
+/// node/collection visit and bounded raw/string operation, and before return.
 /// Legacy structural validation and hashing are byte/node-bounded, not internally
 /// interrupted. The callback has no authority to change the borrowed plan.
 pub fn encode_with_check<F: FnMut() -> Result<()>>(

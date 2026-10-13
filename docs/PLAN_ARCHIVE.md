@@ -75,3 +75,104 @@ cargo test --locked -p dfmcp-intent --test plan_archive
 
 No full qualification, native/live success, production admission, or broader
 storage-bead completion is claimed.
+
+## Durable owner and original work-order reattachment
+
+`dfmcp_adapter::plan_archive::PlanArchiveStore` holds exactly one immutable
+archive under injected `EffectJournalStorage` custody. `create` requires current
+whole-fortress Query and Plan authority; it validates the entire source before
+storage contact, refuses nonempty backing, writes the frame, flushes and syncs,
+and independently reads every byte back before returning the store and seal.
+It never truncates or overwrites an existing complete or partial archive.
+
+`open` is read-only. It requires an independently retained `PlanArchiveSeal`,
+verifies the complete frame and recovered original plan, and compares the backing
+bytes again before accepting custody. `recover` rechecks the whole backing before
+and after decoding. Changed bytes, extent or storage identity fence that owner;
+putting old bytes back does not unfence it. A fresh verified reopen is required.
+Invalid credentials or insufficient budgets do not repair bytes or grant access.
+
+`create_private_plan_archive` and `open_private_plan_archive` use the existing
+Linux x86_64/aarch64 descriptor-pinned private-file backend: normalized absolute
+operator paths, no symbolic links, a 0700 parent and a single-link 0600 regular
+file, exclusive locking, and file plus directory synchronization on publication.
+The creation wrapper validates and reserves the source before it can create a
+file. An existing file is never silently adopted by create. Unsupported platforms
+refuse instead of substituting weaker file custody. Paths are embedding/operator
+configuration, not MCP tool arguments.
+
+The immutable archive is not a new native effect journal. It does not migrate
+old associations or recover original content that was never archived. Retain
+both archive identities in the operator's original handoff before relying on
+restart recovery; deriving expected identity from a file's own trailer defeats
+that selection check. A digest is not an operator signature or policy grant.
+
+### Workflow
+
+Before native preparation, archive the exact `PreparedPlan` already inspected
+by the operator and retain the returned seal. After restart, open the existing
+native coordinator and its association journal under their existing recovery
+rules, then open the original archive using that retained seal:
+
+```text
+let mut archive = open_private_plan_archive(
+    &operator_path, retained_archive_seal, archive_limits, &current_context,
+)?;
+let review = archive.reattach_work_order(&mut recovered_work_order_session, &current_context)?;
+```
+
+This is an embedding sketch, not a runnable standalone example. The helper
+loads the exact original plan, then calls the **existing** semantic work-order
+`reattach` path using the remaining byte allowance and wall deadline. It cannot
+prepare, insert, reconcile, renew expiry, start a goal monitor or issue policy.
+The coordinator still requires the original native key, association, exact plan
+and source binding. An archive cannot adopt unrelated/unassociated native work.
+Unknown native effects remain Unknown; recovering the plan does not prove an
+insertion or goal. Labor and other embeddings can explicitly pass `recover()`'s
+original value to their own existing review/recovery APIs; no automatic generic
+dispatch was introduced.
+
+### Authority, budgets and failure scope
+
+Every load uses current Query authority, not archived grants or the original
+anchor's tick. The store is bound to the opening session and fortress. Contexts
+older than the original epoch/tick/sequence or inconsistent at the same cursor
+refuse. Within an open owner, accepted current-context floors cannot regress.
+A later independently supplied restore epoch may inspect the old plan as history,
+but this does not make that plan valid for dispatch in the restored fortress.
+The trusted embedding remains responsible for issuing fresh current contexts
+on reopen; this immutable file does not persist a global authorization clock.
+
+The total foreground deadline is capped at 60 seconds and never replenished
+between file open, codec, verification and native reattachment. Before codec
+work, the store reserves four times the selected `ArchiveLimits.max_bytes` in
+byte-budget units, plus actual read/write/verification bytes. This is a fixed
+policy reservation, not a count of every internal copy or a peak-memory estimate.
+The core's independent byte/node/depth limits remain in force. Narrow the archive
+profile for small plans rather than granting a larger operation by default.
+The step count is also bounded by the current entity allowance during decoding.
+File reads and writes are checked between chunks; a blocking injected I/O call
+cannot be preempted internally by this synchronous owner.
+
+A short write, failed sync, cancellation/deadline loss, or failed readback returns
+no published owner. Surviving partial bytes refuse unchanged. A complete frame
+whose sync acknowledgment was lost can be explicitly opened read-only under its
+known seal. That proves readable original bytes only: it does not retroactively
+certify the lost durability acknowledgment or authorize a new native attempt.
+
+Sixteen additional Rust store regressions are present, covering private-file
+custody, exact publication/reopen, no-write recovery, denied authority, expired
+grants, session and context floors, exact budgets, every fixture truncation and
+byte corruption, partial writes, lost sync acknowledgment and permanently fenced
+owners. All **29 Rust codec/store tests remain uncompiled and unexecuted here**.
+The native reattachment helper is source-reviewed, not runtime-qualified.
+
+The independent Python fixture/framing check now also rejects **651** truncation,
+byte corruption, trailing-byte and changed external-identity cases. These are
+Python framing checks; they do not execute the Rust decoder, store or private-file
+backend and do not cover typed plan validation.
+
+```text
+python scripts/check_plan_archive_vector.py
+cargo test --locked -p dfmcp-adapter --test plan_archive_store
+```
