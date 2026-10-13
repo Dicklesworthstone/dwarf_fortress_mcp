@@ -12,6 +12,12 @@ use dfmcp_core::{DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, Result, Stat
 use crate::canonical::{put_bytes, put_str, put_u32, put_u64};
 use crate::{EdgeKind, WorldSnapshot};
 
+mod dominance;
+pub use dominance::{
+    DOMINANCE_POLICY, DominanceAnalysis, DominanceQuery, DominatorRecord,
+    analyze_dominators, analyze_dominators_with_check,
+};
+
 const MAX_VERTICES: usize = 100_000;
 const MAX_EDGES: usize = 1_000_000;
 const MAX_WORK: u64 = 10_000_000;
