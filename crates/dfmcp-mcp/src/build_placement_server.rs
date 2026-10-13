@@ -806,6 +806,7 @@ where
         Action::Recover(key, plan, cancel) => {
             state.abandon();
             let old = state.control.get(&key, plan, &work.take(c, LOCAL_BYTES)?)?;
+            let receipt_reconciliation = !cancel && old.can_reconcile_receipt();
             let selection = old.plan().before().selection();
             let mut guard = policy::Guard {
                 policy: &state.policy,
@@ -822,7 +823,9 @@ where
                 &mut guard,
             )?;
             Ok(
-                json!({"ok":true,"effect":presentation::record(&entry),"commit_retried":false,"building_undone":false}),
+                json!({"ok":true,"effect":presentation::record(&entry),
+                    "receipt_reconciled":receipt_reconciliation && !entry.unresolved(),
+                    "commit_retried":false,"building_undone":false}),
             )
         }
         Action::Explain(key, plan) => {

@@ -448,6 +448,66 @@ fn lost_commit_reply_requires_query_and_never_dispatches_twice() -> Result<()> {
     Ok(())
 }
 #[test]
+fn terminal_indeterminate_query_reconciles_exact_receipt_without_second_commit() -> Result<()> {
+    let (mut state, _, game) = setup()?;
+    let review = prepare(&mut state, &game)?;
+    let seal = digest(
+        review["result"]["review_seal"]
+            .as_str()
+            .ok_or_else(exhausted)?,
+    )?;
+    game.borrow_mut().indeterminate = true;
+    let uncertain = commit(&mut state, &game, seal, &mut Guard::default())?;
+    assert_eq!(
+        uncertain["result"]["effect"]["summary"]["native_phase"],
+        "indeterminate"
+    );
+    assert_eq!(
+        game.borrow()
+            .calls
+            .iter()
+            .filter(|&&s| s == "commit")
+            .count(),
+        1
+    );
+
+    // Model the native plugin's exact-frontier query reconciliation: the
+    // original key now returns its byte-valid Placed proof, not a new dispatch.
+    game.borrow_mut().indeterminate = false;
+    game.borrow_mut().record = Some(BuildRecord::decode(&fixture("placed")?)?);
+    let resolved = call(
+        &mut state,
+        &game,
+        "fortress.wait",
+        Ok(Action::Recover("golden".into(), plan()?.digest(), false)),
+        &mut Guard::default(),
+    )?;
+    assert_eq!(resolved["result"]["receipt_reconciled"], true);
+    assert_eq!(
+        resolved["result"]["effect"]["summary"]["native_phase"],
+        "placed"
+    );
+    assert_eq!(
+        game.borrow()
+            .calls
+            .iter()
+            .filter(|&&s| s == "commit")
+            .count(),
+        1
+    );
+    assert_eq!(
+        game.borrow()
+            .calls
+            .iter()
+            .filter(|&&s| s == "query")
+            .count(),
+        2
+    );
+    assert_eq!(game.borrow().factories, 2);
+    Ok(())
+}
+
+#[test]
 fn reopened_preparation_has_no_review_or_commit_connection() -> Result<()> {
     let (mut state, memory, game) = setup()?;
     let review = prepare(&mut state, &game)?;
