@@ -20,6 +20,7 @@ REQUEST_SCHEMA = 'dfmcp.furniture-request/1'
 MAX_ITEMS = 65536
 MAX_DISTANCE = 65532
 MAX_ID = 2147483646
+MAX_VERTICAL_DISTANCE = 127  # A bounded map capture spans at most 128 levels.
 Guard = Callable[[], None]
 
 
@@ -43,6 +44,8 @@ class Slot:
     material: tuple[int, int] | None = None
     subtype: int | None = None
     max_distance: int = MAX_DISTANCE
+    # Explicit route-only opt-in. Zero retains the original same-level contract.
+    max_vertical_distance: int = 0
 
     def __post_init__(self) -> None:
         step = Step(self.name, self.kind, 0, self.target, self.after)
@@ -52,16 +55,22 @@ class Slot:
         if self.subtype is not None:
             integer(self.subtype, -1, 2147483647)
         integer(self.max_distance, 0, MAX_DISTANCE)
+        integer(self.max_vertical_distance, 0, MAX_VERTICAL_DISTANCE)
 
     def json(self) -> dict:
-        return {'name': self.name, 'kind': self.kind, 'target': list(self.target),
-                'after': list(self.after), 'material': None if self.material is None else list(self.material),
-                'subtype': self.subtype, 'max_distance': self.max_distance}
+        out = {'name': self.name, 'kind': self.kind, 'target': list(self.target),
+               'after': list(self.after), 'material': None if self.material is None else list(self.material),
+               'subtype': self.subtype, 'max_distance': self.max_distance}
+        # Preserve every legacy canonical request/review digest byte-for-byte.
+        if self.max_vertical_distance:
+            out['max_vertical_distance'] = self.max_vertical_distance
+        return out
 
     @classmethod
     def from_json(cls, value: object) -> Slot:
         require(type(value) is dict and {'name', 'kind', 'target'} <= set(value)
-                and set(value) <= {'name', 'kind', 'target', 'after', 'material', 'subtype', 'max_distance'},
+                and set(value) <= {'name', 'kind', 'target', 'after', 'material', 'subtype',
+                                  'max_distance', 'max_vertical_distance'},
                 'invalid allocation slot fields')
         require(type(value['target']) is list and type(value.get('after', [])) is list,
                 'invalid allocation target or dependency array')
@@ -69,7 +78,7 @@ class Slot:
         require(material is None or type(material) is list, 'invalid material array')
         return cls(value['name'], value['kind'], tuple(value['target']), tuple(value.get('after', [])),
                    None if material is None else tuple(material), value.get('subtype'),
-                   value.get('max_distance', MAX_DISTANCE))
+                   value.get('max_distance', MAX_DISTANCE), value.get('max_vertical_distance', 0))
 
 
 @dataclass(frozen=True)
@@ -251,6 +260,8 @@ def allocate(request: Request, candidates: tuple[Candidate, ...], guard: Guard =
     guard()
     require(type(request) is Request, 'invalid allocation request type')
     request.__post_init__()
+    require(not any(slot.max_vertical_distance for slot in request.slots),
+            'cross-level furniture requires the observed route allocator')
     require(type(candidates) is tuple and len(candidates) <= MAX_ITEMS, 'candidate bound exceeded')
     n, seen, excluded = len(request.slots), set(), set(request.excluded_items)
     heaps: list[list[tuple[int, int]]] = [[] for _ in request.slots]

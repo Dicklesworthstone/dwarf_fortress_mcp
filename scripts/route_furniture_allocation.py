@@ -14,8 +14,8 @@ import heapq
 import struct
 
 from furniture_allocation import (
-    Candidate, Guard, MAX_ITEMS, Request, _maximum_matching, _minimum_cost,
-    distance, idle,
+    Candidate, Guard, MAX_ITEMS, Request, Slot, _maximum_matching, _minimum_cost,
+    distance as same_level_distance, idle,
 )
 from furniture_plan import FurniturePlan, Step, canonical, integer, require
 
@@ -27,6 +27,28 @@ MAX_ROUTE_STEPS = MAX_TILES - 1
 MAX_CAPTURE_BYTES = 575 + 20 * MAX_TILES
 MAX_WORK = 20_000_000
 MAX_OUTPUT = 49152
+VERTICAL_POLICY = 'bounded-endpoint-levels-and-3d-manhattan/1'
+
+
+def distance(slot: Slot, item: Candidate) -> int | None:
+    """Original selectors plus explicitly bounded cross-level endpoints.
+
+    This is only a geometric lower bound. A compatible observed stair path and
+    the independent total route limit must still pass before any assignment.
+    The non-route allocator deliberately remains same-level only.
+    """
+    vertical = abs(slot.target[2] - item.position[2])
+    if vertical > slot.max_vertical_distance:
+        return None
+    if vertical == 0:
+        return same_level_distance(slot, item)
+    projected = Candidate(item.id, item.kind,
+                          (item.position[0], item.position[1], slot.target[2]),
+                          item.material, item.subtype)
+    horizontal = same_level_distance(slot, projected)
+    if horizontal is None or horizontal + vertical > slot.max_distance:
+        return None
+    return horizontal + vertical
 
 
 class Work:
@@ -256,6 +278,12 @@ def allocate_routes(request: Request, candidates: tuple[Candidate, ...], terrain
               'placement_eligibility_proven': False, 'pathfinding_proven': False,
               'future_routes_preserved': False, 'global_absence_proven': False,
               'items_reserved': False, 'game_effect_performed': False, 'production_admitted': False}
+    if any(slot.max_vertical_distance for slot in request.slots):
+        result['same_level_endpoints_only'] = False
+        result['vertical_endpoint_policy'] = VERTICAL_POLICY
+        result['vertical_limits'] = [
+            {'slot': slot.name, 'max_vertical_distance': slot.max_vertical_distance}
+            for slot in request.slots]
     # An unobserved/unsupported target cannot become a certified zero supply.
     if all(target['reason'] == 'candidate' for target in targets):
         graph = terrain.adjacency(work)
