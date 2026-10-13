@@ -278,6 +278,23 @@ public:
         const auto it = records_.find(key); if (it == records_.end()) return nullptr;
         require(it->second.plan == plan, 7); return &it->second;
     }
+    // Read-only recovery of an attempted placement, never a second writer call.
+    // Only the unchanged original paused frontier can discharge uncertainty.
+    // Unknown, prepared and terminal keys remain pure historical lookups.
+    template<class Reader, class Verifier> const Record *reconcile(const std::string &key,
+        const std::string &plan, Reader read, Verifier verify) {
+        Busy owned(busy_);
+        const auto *known = query(key, plan);
+        if (!known || known->phase != Phase::Indeterminate) return known;
+        auto &r = records_.find(key)->second;
+        if (!unresolved_ || !available() || generation_ != r.before.generation
+            || sequence_ != r.before.sequence + 1) return &r;
+        try {
+            const auto expected = r.before.expected_after().encode();
+            verify_after(r, expected, read, verify);
+        } catch (...) { /* Allocation/read failures preserve the original uncertain record. */ }
+        return &r;
+    }
     template<class Reader> const Record &prepare(const std::string &key, const Selection &selection,
         const std::string &witness, const std::string &plan, std::uint64_t now_ms, Reader read) {
         Busy owned(busy_); key_valid(key); require(plan == plan_digest(selection, witness), 7);
@@ -314,18 +331,24 @@ public:
         interrupt(); r.phase = Phase::Indeterminate; r.reason = Reason::NativeFailure; unresolved_ = true;
         try { write(r.before); }
         catch (...) { /* DFHack can throw after linking a building or job. Readback decides. */ }
+        verify_after(r, expected, read, verify);
+        return r;
+    }
+private:
+    // Commit and reconciliation use the same complete, double-captured proof.
+    // Publish nothing until every native relationship and receipt byte validates.
+    template<class Reader, class Verifier> void verify_after(Record &r,
+        const std::string &expected, Reader read, Verifier verify) {
         try {
             const auto after = inspect(r.before.selection, read);
-            if (after.encode() != expected) return r;
+            if (after.encode() != expected) return;
             const auto proof = verify(r.before);
-            if (!proof.matches(r.before) || inspect(r.before.selection, read).encode() != expected) return r;
+            if (!proof.matches(r.before) || inspect(r.before.selection, read).encode() != expected) return;
             Record next = r; next.after = after; next.insertion = proof;
             next.phase = Phase::Placed; next.reason = Reason::None;
             (void)next.encode(); r = std::move(next); unresolved_ = false;
         } catch (...) { /* No rollback, no retry, no invented nonapplication. */ }
-        return r;
     }
-private:
     std::uint64_t generation_, sequence_ = 0;
     bool unresolved_ = false, busy_ = false;
     std::map<std::string, Record> records_;
