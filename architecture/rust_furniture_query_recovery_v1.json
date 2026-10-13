@@ -1,0 +1,19 @@
+{
+  "schema": "dfmcp.rust-furniture-query-recovery/1",
+  "profile": "furniture/1.19",
+  "status": "source_present_unadmitted",
+  "wire_methods_changed": false,
+  "ordinary_record_successors_changed": false,
+  "native_fence_clear_requires": ["QueryPlacement", "fully_decoded_Placed", "exact_requested_plan", "original_native_generation"],
+  "seen_indeterminate_successor_requires": ["QueryPlacement", "fully_decoded_Placed", "exact_original_plan", "original_native_generation", "native_unresolved_false"],
+  "invalid_successor_preserves_previous_summary": true,
+  "recovery_restores_dispatch_permit": false,
+  "new_dependencies": [],
+  "source": "crates/dfmcp-adapter/src/build_placement/rpc.rs",
+  "tests": "crates/dfmcp-adapter/src/build_placement/rpc/receipt_query_tests.rs",
+  "rust_tests_executed_in_editing_environment": false,
+  "real_dfhack_sdk_qualified": false,
+  "live_qualified": false,
+  "production_admitted": false,
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"]
+}

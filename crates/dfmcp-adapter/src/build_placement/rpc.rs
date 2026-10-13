@@ -441,8 +441,7 @@ impl Wire {
         require(
             retained <= 256
                 && retained >= self.retained
-                && (retained != 0 || !unresolved)
-                && (!self.unresolved || unresolved),
+                && (retained != 0 || !unresolved),
             "invalid furniture native retention or uncertainty fence",
         )?;
         let capture = if let Request::Observe(selection) = request {
@@ -479,6 +478,14 @@ impl Wire {
         } else {
             None
         };
+        // A flag alone cannot discharge uncertainty. The complete original
+        // receipt has already passed canonical decoding and request binding.
+        require(
+            !self.unresolved
+                || unresolved
+                || original_query_proof(request, record.as_ref(), manifest.generation),
+            "native furniture uncertainty cleared without original query proof",
+        )?;
         let replayed = if matches!(request, Request::Prepare(_)) {
             let replayed = reply.boolean(11)?;
             if !replayed {
@@ -699,26 +706,43 @@ impl BuildRpc {
     ) -> Result<Reply> {
         let plan = request.plan().ok_or_else(malformed)?;
         self.valid_plan(plan, request.place())?;
+        let prior_summary = (self.wire.retained, self.wire.unresolved);
         let reply = self.wire.call(request, context, duration)?;
-        if let Some(record) = &reply.record {
-            if let Some(old) = self.seen.get(plan.key()) {
-                old.validate_successor(record)?;
+        let checked: Result<()> = (|| {
+            if let Some(record) = &reply.record {
+                let previous = self.seen.get(plan.key());
+                if let Some(old) = previous {
+                    validate_query_successor(
+                        request, old, record, self.binding.generation(), self.wire.unresolved,
+                    )?;
+                } else {
+                    require(
+                        self.seen.len() < 32,
+                        "furniture connection record allowance exhausted",
+                    )?;
+                }
+                require(
+                    (self.seen.len() + usize::from(previous.is_none())) as u64
+                        <= self.wire.retained,
+                    "inconsistent furniture native retained count",
+                )?;
             } else {
                 require(
-                    self.seen.len() < 32,
-                    "furniture connection record allowance exhausted",
+                    !self.seen.contains_key(plan.key()),
+                    "known native furniture record disappeared",
                 )?;
             }
+            Ok(())
+        })();
+        if let Err(cause) = checked {
+            // finish() fences this connection. Keep its last validated summary,
+            // not an untrusted cleared fence from a contradictory successor.
+            self.wire.retained = prior_summary.0;
+            self.wire.unresolved = prior_summary.1;
+            return Err(cause);
+        }
+        if let Some(record) = &reply.record {
             self.seen.insert(plan.key().to_owned(), record.clone());
-            require(
-                self.seen.len() as u64 <= self.wire.retained,
-                "inconsistent furniture native retained count",
-            )?;
-        } else {
-            require(
-                !self.seen.contains_key(plan.key()),
-                "known native furniture record disappeared",
-            )?;
         }
         Ok(reply)
     }
@@ -838,3 +862,49 @@ impl BuildSource for BuildRpc {
 
 #[cfg(test)]
 mod tests;
+
+// Beads: df-dfhack-bridge-plane-c-pic.4/.5. These checks carry no authority and
+// change no ordinary BuildRecord successor, native method or wire encoding.
+fn original_query_proof(
+    request: Request<'_>,
+    record: Option<&BuildRecord>,
+    generation: u64,
+) -> bool {
+    let Request::Query(plan) = request else {
+        return false;
+    };
+    record.is_some_and(|record| {
+        record.phase() == BuildPhase::Placed
+            && record.plan() == plan
+            && plan.before().generation() == generation
+    })
+}
+
+fn validate_query_successor(
+    request: Request<'_>,
+    previous: &BuildRecord,
+    next: &BuildRecord,
+    generation: u64,
+    unresolved: bool,
+) -> Result<()> {
+    if previous.phase() != BuildPhase::Indeterminate || next.phase() != BuildPhase::Placed {
+        return previous.validate_successor(next);
+    }
+    require(
+        !unresolved
+            && previous.plan() == next.plan()
+            && original_query_proof(request, Some(next), generation),
+        "furniture recovery is query-only and bound to the original source",
+    )?;
+    // Decode full evidence, not only its phase or checksum. Placed requires
+    // exact expected-after bytes and the original stage-zero insertion links.
+    require(
+        BuildRecord::decode(previous.canonical_bytes())? == *previous
+            && BuildRecord::decode(next.canonical_bytes())? == *next,
+        "noncanonical furniture recovery successor",
+    )
+}
+
+#[cfg(test)]
+#[path = "rpc/receipt_query_tests.rs"]
+mod receipt_query_tests;
