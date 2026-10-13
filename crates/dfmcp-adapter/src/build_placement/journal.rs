@@ -1,8 +1,9 @@
 //! Durable furniture intent, one-shot dispatch and exact-record recovery.
 //!
 //! Every native effect is preceded by synchronized intent/preparation/dispatch
-//! records. Reopen restores evidence only. Native indeterminacy is immutable and
-//! keeps the entire journal fenced against new placements. The caller owns all
+//! records. Reopen restores evidence only. Native indeterminacy fences new work
+//! until explicit original-receipt reconciliation is durably retained. Ordinary
+//! receipt replay remains immutable. The caller owns all
 //! blocking work and supplies current runtime, lease and checkpoint policy.
 use std::collections::BTreeMap;
 use std::io::SeekFrom;
@@ -19,6 +20,7 @@ use super::{
 use crate::control_effect_journal::EffectJournalStorage;
 
 pub mod private_file;
+mod receipt_reconciliation;
 
 pub const MAX_ENTRIES: usize = 256;
 pub const MAX_FRAMES: u32 = 1792;
@@ -309,7 +311,10 @@ fn transition(old: Option<&BuildEntry>, next: &BuildEntry) -> Result<()> {
     let Some(old) = old else {
         return check(next.state == Intent && next.native.is_none());
     };
-    check(old.plan == next.plan && old != next && old.state != Terminal)?;
+    if old.state == Terminal {
+        return receipt_reconciliation::validate_transition(old, next);
+    }
+    check(old.plan == next.plan && old != next)?;
     check(
         (!old.dispatch_started || next.dispatch_started)
             && (!old.cancel_requested || next.cancel_requested),
@@ -720,6 +725,8 @@ impl<S: EffectJournalStorage> BuildJournal<S> {
             BuildState::DispatchStarted => 4,
             BuildState::Tracking => 3,
             BuildState::CancelRequested => 2,
+            // One positive-proof frame remains possible after retained uncertainty.
+            BuildState::Terminal if entry.can_reconcile_receipt() => 1,
             BuildState::Terminal => 0,
         };
         if self.frames + 1 + remaining > MAX_FRAMES
