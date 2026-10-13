@@ -75,7 +75,7 @@ def plan_view(plan: Plan) -> dict:
 
 def bind(journal: Journal, reply: Reply) -> None:
     require(software_equal(journal.state.manifest, reply.manifest)
-            and reply.manifest.generation >= journal.state.manifest.generation,
+            and reply.manifest.generation >= journal.state.source_generation,
             'recovery source or software differs from recorded intent')
 
 
@@ -88,8 +88,14 @@ def result(journal: Journal, reply: Reply | None, stored: bool) -> dict:
         bind(journal, reply)
         out['current_manifest'] = reply.manifest.view()
         out['source_changed_since_intent'] = reply.manifest.generation != journal.state.manifest.generation
-        out['effect'] = reply.record.view() if reply.record is not None else None
-        out['effect_status'] = reply.record.phase if reply.record else 'unknown_absent_native_record'
+        out['native_record_present'] = reply.record is not None
+        if reply.record is not None:
+            out['effect'] = reply.record.view()
+            out['effect_status'] = reply.record.phase
+        elif journal.state.terminal is None:
+            out['effect_status'] = 'unknown_absent_native_record'
+        # Absence cannot erase a durably retained uncertain receipt or turn
+        # its pending obligation into an assertion of native nonapplication.
         out['native_unresolved'] = reply.unresolved
     bounded_output(packet('inspect', out, journal.state.plan))
     return out
@@ -154,11 +160,14 @@ def recover(journal: Journal, authority: Authority | None, cancel: bool = False)
     journal.owner.check()
     if not recovery_requires_native(journal, cancel):
         return result(journal, None, False)
+    # Query can publish a native proof and clear its uncertainty fence. Refuse
+    # before contact unless this owner can durably retain that original proof.
+    require(journal.owner.writable, 'online recovery requires writable receipt custody')
     require(authority is not None and authority.address == journal.state.address,
             'operator endpoint differs from durable intent')
     with Client(authority, journal.owner.budget, journal.state.plan.before.selection) as client:
         require(software_equal(client.manifest, journal.state.manifest)
-                and client.manifest.generation >= journal.state.manifest.generation,
+                and client.manifest.generation >= journal.state.source_generation,
                 'recovery handshake source or software mismatch')
         journal.owner.check()
         reply = client.cancel(journal.state.plan) if cancel else client.query(journal.state.plan)

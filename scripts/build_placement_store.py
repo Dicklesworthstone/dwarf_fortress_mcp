@@ -72,6 +72,12 @@ class State:
     def pending(self) -> bool:
         return self.terminal is None or not self.terminal.resolved
 
+    @property
+    def source_generation(self) -> int:
+        # Retained recovery replies may name a newer native incarnation. Never
+        # roll back the source floor already acknowledged in the original file.
+        return (self.terminal_manifest or self.manifest).generation
+
     def view(self) -> dict:
         return {'key': self.plan.key, 'plan_digest': self.plan.digest.hex(),
                 'stage': (('terminal' if self.terminal.resolved else 'receipt_recorded') if self.terminal
@@ -237,6 +243,9 @@ class Journal:
         new = self.raw + frame_bytes(self.state, kind, payload)
         # Complete replay before append bounds every transition and the total.
         state = replay(new)
+        if state.terminal is not None and state.terminal.phase == 'indeterminate':
+            require(state.frames < 5 and len(new) + MAX_FRAME <= MAX_FILE,
+                    'no reserved capacity for the original positive receipt')
         self.owner.budget.remaining()
         if kind == 'dispatch':
             # Consume in-memory dispatch authority before the first write.
@@ -260,7 +269,7 @@ class Journal:
         require(value is not None and Record.decode(value.raw, self.state.plan) == value,
                 'reply has no exact matching record')
         require(software_equal(reply.manifest, self.state.manifest)
-                and reply.manifest.generation >= self.state.manifest.generation,
+                and reply.manifest.generation >= self.state.source_generation,
                 'native software changed or source regressed')
         if self.state.terminal is not None:
             require(value.raw == self.state.terminal.raw, 'conflicting immutable native receipt')
