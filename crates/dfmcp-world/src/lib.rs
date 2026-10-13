@@ -16,6 +16,7 @@ mod ledger;
 pub mod map_connectivity;
 pub mod map_reachability;
 pub mod map_region;
+pub mod map_resilience;
 pub mod merkle;
 mod model;
 pub mod publication;
