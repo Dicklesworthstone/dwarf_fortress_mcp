@@ -107,6 +107,11 @@ class Goal:
         return value
 
     @property
+    def receipts(self) -> tuple[bytes, ...]:
+        """Existing foreground wait consumes the same complete receipt set."""
+        return self.condition.receipts
+
+    @property
     def digest(self) -> str:
         return hashlib.sha256(b'dfmcp-route-batch-construction-goal/1\0' + self.encode()).hexdigest()
 
