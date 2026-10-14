@@ -1,0 +1,16 @@
+{
+  "schema": "dfmcp.route-furniture-final-contract/1",
+  "implementation": "scripts/route_furniture_final.py",
+  "required_custody": "all original steps registered and placed; no pending or stopped work",
+  "maximum_original_receipts": 32,
+  "native_read_methods": ["build.Handshake", "build.QueryPlacement", "operations.Handshake", "operations.ReadObservation", "map.Handshake", "map.ReadObservation"],
+  "acquisition": "all receipts / map / complete released operations / equal map / all receipts",
+  "predicate": "construction_prefix.assess_prefix",
+  "analysis_reservation": 6000000,
+  "final_work_floor": 100000,
+  "maximum_output_bytes": 98304,
+  "next_placement_required": false,
+  "creates_temporal_goal": false,
+  "game_effects": false,
+  "production_admission_changed": false
+}
