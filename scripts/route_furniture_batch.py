@@ -102,7 +102,7 @@ def packet(operation: str, result: dict | None, error=False) -> dict:
         **({'error': {'code': 'ROUTE_BATCH_REFUSED', 'detail':
             'Original custody, source, authority, confirmation or budget refused. Recover the original batch and keys; never retry placement.'}} if error else {}),
         'agent_turn': {'schema': 'dfmcp.agent_turn/1', 'operation': 'route_furniture_batch.' + operation,
-            'phase': 'reconcile' if error else 'propose' if operation == 'review' else 'inspect',
+            'phase': 'reconcile' if error else 'propose' if operation in ('review', 'review-run') else 'inspect',
             'session_id': None, 'turn_id': None, 'request_id': None, 'anchor': None,
             'continuity': {'status': 'indeterminate' if error else 'stale', 'basis': None, 'gap': None},
             'profile': 'tactical', 'briefing': {'runtime_admitted': False,
@@ -346,15 +346,18 @@ class Parser(argparse.ArgumentParser):
 
 def main(argv=None):
     operation, batch, authority = 'unknown', None, None
+    output_attempted = False
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('init', 'inspect', 'review', 'advance', 'query', 'cancel', 'stop'))
+        parser.add_argument('operation', choices=('init', 'inspect', 'review', 'advance', 'query', 'cancel', 'stop', 'review-run', 'run'))
         parser.add_argument('--directory', required=True)
         parser.add_argument('--batch-id')
         parser.add_argument('--review-file')
         parser.add_argument('--expected-review')
         parser.add_argument('--expected-plan')
         parser.add_argument('--confirm-review')
+        parser.add_argument('--max-steps', type=int)
+        parser.add_argument('--confirm-run')
         parser.add_argument('--step')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         args = parser.parse_args(argv)
@@ -365,7 +368,17 @@ def main(argv=None):
         require(all((v is not None) == (operation == 'advance') for v in (args.expected_plan, args.confirm_review)),
                 'advance requires exact native plan and route confirmation')
         require((args.step is not None) == (operation in ('query', 'cancel')), 'recovery alone selects an original child')
-        budget = Budget(args.timeout_ms)
+        running = operation in ('review-run', 'run')
+        require((args.max_steps is not None) == running, 'only run/review-run require an explicit step cap')
+        require((args.confirm_run is not None) == (operation == 'run'), 'run requires its separate exact confirmation')
+        if running:
+            import route_furniture_run as runner
+            limits = runner.Limits(args.max_steps, args.timeout_ms)
+            if args.confirm_run is not None:
+                digest_text(args.confirm_run)
+            budget = runner.make_budget(limits, _steps=sys.modules[__name__])
+        else:
+            budget = Budget(args.timeout_ms)
         if operation == 'init':
             saved = read_review(args.review_file, args.expected_review, budget)
             authority = Authority.load()
@@ -374,8 +387,13 @@ def main(argv=None):
             batch = Batch(args.directory, state['batch_id'], budget)
             state = batch.audit()
         else:
-            batch = Batch(args.directory, args.batch_id, budget, writable=operation in ('advance', 'query', 'cancel', 'stop'))
-            if operation in ('review', 'advance'):
+            batch = Batch(args.directory, args.batch_id, budget, writable=operation in ('advance', 'query', 'cancel', 'stop', 'run'))
+            if running:
+                authority = Authority.load(operation == 'run')
+                state = (runner.review_run(batch, authority, limits, _steps=sys.modules[__name__])
+                         if operation == 'review-run' else
+                         runner.run(batch, authority, limits, args.confirm_run, _steps=sys.modules[__name__]))
+            elif operation in ('review', 'advance'):
                 authority = Authority.load(operation == 'advance')
                 state = (review_step(batch, authority) if operation == 'review' else
                          advance(batch, args.expected_plan, args.confirm_review, authority))
@@ -389,14 +407,18 @@ def main(argv=None):
                 state = recover(batch, args.step, authority, cancel=operation == 'cancel')
             else:
                 state = batch.stop() if operation == 'stop' else batch.audit()
-        raw = encoded(operation, state)
+        faulted = operation == 'run' and state['run']['faulted']
+        raw = encoded(operation, state, error=faulted)
         if authority is not None:
             authority.guard('QueryPlacement')
         batch.check()
         budget.remaining()
-        return publish(raw)  # Custody remains held until the one output attempt returns.
+        output_attempted = True
+        published = publish(raw)  # Hold custody through the single output attempt.
+        return 2 if faulted else published
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
-        publish(encoded(operation, None, True))
+        if not output_attempted:
+            publish(encoded(operation, None, True))
         return 2
     finally:
         if batch is not None:

@@ -42,11 +42,20 @@ class Limits:
                 'maximum_disk_bytes': 1024 * 1024 * 1024}
 
 
-def make_budget(limits: Limits):
+def _step_api(provided):
+    # The script entrypoint supplies its own module to avoid importing a second
+    # copy of its Authority class under __main__. This is an embedding port,
+    # never a command-line selector or native-method override.
+    if provided is None:
+        import route_furniture_batch as provided
+    return provided
+
+
+def make_budget(limits: Limits, *, _steps=None):
     """Allocate ONCE, before opening custody; no per-step deadline or quota reset."""
     require(type(limits) is Limits, 'closed run limits required')
     limits.__post_init__()
-    import route_furniture_batch as steps
+    steps = _step_api(_steps)
     budget = steps.Budget(limits.timeout_ms)
     maximum = limits.json()
     budget.calls = maximum['maximum_calls']
@@ -106,9 +115,9 @@ def _reserve(steps, state):
             'complete original batch and run outcomes cannot fit')
 
 
-def review_run(batch, authority, limits: Limits):
+def review_run(batch, authority, limits: Limits, *, _steps=None):
     """Read-only proposal for one exact bounded prefix, never automatic consent."""
-    import route_furniture_batch as steps
+    steps = _step_api(_steps)
     _limits(batch, limits)
     authority.guard()
     state = steps.review_step(batch, authority)
@@ -153,7 +162,7 @@ def _stop(state):
     return None
 
 
-def run(batch, authority, limits: Limits, confirmed: str):
+def run(batch, authority, limits: Limits, confirmed: str, *, _steps=None):
     """Execute at most the explicitly confirmed original prefix on this thread.
 
     A fresh run review must match the external confirmation before the first
@@ -162,7 +171,7 @@ def run(batch, authority, limits: Limits, confirmed: str):
     journal and one-use-native-permit gate still runs. No failed step is retried.
     After any progress, replaying the old run confirmation fails on inventory.
     """
-    import route_furniture_batch as steps
+    steps = _step_api(_steps)
     digest_text(confirmed)
     _limits(batch, limits)
     require(batch.writable, 'batch run requires original writable custody')
