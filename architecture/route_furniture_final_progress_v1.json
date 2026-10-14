@@ -1,0 +1,14 @@
+{
+  "schema": "dfmcp.route-furniture-final-progress-contract/1",
+  "implementation": "scripts/route_furniture_final_progress.py",
+  "scope_schema": "dfmcp.route-furniture-final-progress/1",
+  "clock_key_prefix": "frf-",
+  "requires_all_placements": true,
+  "review_required_status": "construction_pending",
+  "one_clock_commit_maximum": true,
+  "shared_history_gate": true,
+  "automatic_clock_loop": false,
+  "furniture_placement": false,
+  "completion_claim": false,
+  "production_admission_changed": false
+}
