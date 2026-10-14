@@ -1,126 +1,84 @@
-"""Source regressions for explicit construction-progress review and recovery.
+"""The original eight progress scenarios, now executed on actual clock I/O/files.
 
-The native clock client is replaced with a deterministic port here. These tests
-exercise confirmation binding and no-retry semantics, not DFHack transport.
+v2 requires an exact observed clock and durable batch association. Route/custody
+remain explicit ports; the native clock implementation is not replaced.
 """
-from contextlib import contextmanager
 from pathlib import Path
-import types
 import unittest
-from unittest.mock import patch
 
-import route_furniture_progress as progress
-
-
-class Budget:
-    def __init__(self):
-        self.calls=1000; self.network_bytes=10_000_000; self.disk_bytes=10_000_000
-    def remaining(self): return 10.0
-    def reserve(self, field, count):
-        value=getattr(self,field)
-        if count>value: raise ValueError('budget')
-        setattr(self,field,value-count)
-
-
-class Batch:
-    def __init__(self, status='construction_pending'):
-        self.id='a'*64
-        self.review=types.SimpleNamespace(digest='b'*64)
-        self.budget=Budget()
-        self.writable=False
-        self.status=status
-        self.checked=0
-    def audit(self):
-        return {'batch_id':self.id,'review_digest':self.review.digest,
-                'inventory_verified':True,'inventory_digest':'c'*64,
-                'next_step':'chair','steps':[]}
-    def check(self): self.checked+=1
-
-
-class Authority:
-    def __init__(self):
-        self.address=('127.0.0.1',5000); self.run_token=b'r'*32; self.guards=0
-    def guard(self,*_): self.guards+=1
-    def clock_guard(self): self.guards+=1
-
-
-def frontier(batch, authority):
-    state=batch.audit()
-    report={'batch_id':batch.id,'status':batch.status,'evidence_digest':'d'*64,
-            'construction_prefix':{'status':'pending' if batch.status=='construction_pending' else 'quiescent'}}
-    state.update(route_frontier=report, confirm_review=None, expected_plan=None)
-    return state,report
+import route_furniture_clock_context as context
+from test_route_furniture_clock_context import fixture, reviewed
 
 
 class ProgressTests(unittest.TestCase):
     def test_review_confirms_only_current_construction_pending_frontier(self):
-        batch=Batch()
-        with patch.object(progress,'_frontier',side_effect=frontier),              patch.object(progress,'_reserve'):
-            out=progress.review_progress(batch,Authority(),30,5000)
-        self.assertEqual(len(out['progress_review']['confirm_progress']),64)
-        batch.status='ready'
-        with patch.object(progress,'_frontier',side_effect=frontier),              patch.object(progress,'_reserve'):
-            out=progress.review_progress(batch,Authority(),30,5000)
-        self.assertIsNone(out['progress_review']['confirm_progress'])
+        with fixture() as (m, route, peer, batch, auth, folder):
+            result = m.review_progress(batch, auth, 30, 50)
+            self.assertEqual(len(result['progress_review']['confirm_progress']), 64)
+            batch.route_status = 'ready'
+            before = len(peer.operations)
+            result = m.review_progress(batch, auth, 30, 50)
+            self.assertIsNone(result['progress_review']['confirm_progress'])
+            self.assertEqual(len(peer.operations), before)
 
     def test_confirmation_binds_ticks_wall_inventory_and_frontier(self):
-        batch=Batch()
-        state,report=frontier(batch,Authority())
-        _,one=progress._scope(batch,state,report,30,5000)
-        _,two=progress._scope(batch,state,report,31,5000)
-        self.assertNotEqual(one,two)
-        state['inventory_digest']='e'*64
-        _,three=progress._scope(batch,state,report,30,5000)
-        self.assertNotEqual(one,three)
-        report=dict(report,evidence_digest='f'*64)
-        _,four=progress._scope(batch,batch.audit(),report,30,5000)
-        self.assertNotEqual(one,four)
+        with fixture() as (m, route, peer, batch, auth, folder):
+            result = m.review_progress(batch, auth, 30, 50)
+            original = context.Scope.create(result['progress_review']['scope'])
+            for key, value in (('game_ticks', 31), ('wall_ms', 51),
+                               ('inventory_digest', 'e' * 64), ('frontier_evidence', 'f' * 64)):
+                changed = context.Scope.create({**original.value(), key: value})
+                self.assertNotEqual(original.digest, changed.digest)
+                self.assertNotEqual(original.intent()['idempotency_key'], changed.intent()['idempotency_key'])
 
     def test_same_confirmation_has_one_derived_record_and_key(self):
-        confirmation='1'*64
-        self.assertEqual(progress._clock_key(confirmation),'frp-'+confirmation)
-        self.assertEqual(progress._record_path('/private/clock',confirmation),
-                         Path('/private/clock/progress-'+confirmation+'.run'))
+        with fixture() as (m, route, peer, batch, auth, folder):
+            confirmation = '1' * 64
+            self.assertEqual(m._clock_key(confirmation), 'frp-' + confirmation)
+            self.assertEqual(m._record_path('/private/clock', confirmation),
+                             Path('/private/clock/progress-' + confirmation + '.run'))
 
     def test_stale_confirmation_refuses_before_clock_start(self):
-        batch=Batch(); authority=types.SimpleNamespace(address=('127.0.0.1',5000),
-            run_token=b'r'*32,clock_guard=lambda:None)
-        with patch.object(progress,'ProgressAuthority',type('PA',(object,),{})):
-            pass
-        # Pure scope mismatch proves the effect confirmation cannot be reused.
-        state,report=frontier(batch,Authority())
-        _,actual=progress._scope(batch,state,report,30,5000)
-        _,changed=progress._scope(batch,state,report,31,5000)
-        self.assertNotEqual(actual,changed)
+        with fixture() as (m, route, peer, batch, auth, folder):
+            confirmation = reviewed(m, batch, auth, 30, 50)
+            with self.assertRaises(ValueError): m.progress(batch, auth, 31, 50, confirmation, str(folder))
+            self.assertNotIn('PrepareRun', peer.operations)
+            self.assertNotIn('CommitRun', peer.operations)
+            self.assertEqual(list(folder.iterdir()), [])
 
     def test_query_path_is_read_only_with_respect_to_run_dispatch(self):
-        self.assertNotIn('clock.start(', progress.query_progress.__doc__ or '')
-        # Structural guard: recovery implementation contains query/recover but no start call.
-        import inspect
-        source=inspect.getsource(progress.query_progress)
-        self.assertIn('clock.recover',source)
-        self.assertNotIn('clock.start',source)
+        with fixture() as (m, route, peer, batch, auth, folder):
+            confirmation = reviewed(m, batch, auth)
+            peer.drop_commit = True
+            with self.assertRaises(ValueError): m.progress(batch, auth, 20, 50, confirmation, str(folder))
+            before = len(peer.operations)
+            result = m.query_progress(batch, auth, confirmation, str(folder))
+            self.assertEqual(peer.operations[before:], ['Handshake', 'QueryRun'])
+            self.assertTrue(result['construction_progress']['clock_terminal_pause_verified'])
 
     def test_progress_has_exactly_one_start_and_no_loop(self):
-        import inspect
-        source=inspect.getsource(progress.progress)
-        self.assertEqual(source.count('clock.start('),1)
-        self.assertNotIn('while ',source)
-        self.assertNotIn('for ',source)
+        with fixture() as (m, route, peer, batch, auth, folder):
+            confirmation = reviewed(m, batch, auth)
+            result = m.progress(batch, auth, 20, 50, confirmation, str(folder))
+            self.assertEqual(peer.operations.count('PrepareRun'), 1)
+            self.assertEqual(peer.operations.count('CommitRun'), 1)
+            self.assertFalse(result['construction_progress']['automatic_second_clock_burst'])
 
     def test_progress_refuses_writable_route_batch(self):
-        batch=Batch(); batch.writable=True
-        authority=object.__new__(progress.ProgressAuthority)
-        with self.assertRaises(ValueError):
-            progress.progress(batch,authority,30,5000,'1'*64,'/private/clock')
+        with fixture() as (m, route, peer, batch, auth, folder):
+            batch.writable = True
+            with self.assertRaises(ValueError): m.progress(batch, auth, 20, 50, '1' * 64, str(folder))
+            self.assertEqual(peer.operations, [])
+            self.assertEqual(list(folder.iterdir()), [])
 
     def test_policy_never_claims_placement_or_automatic_second_burst(self):
-        import inspect
-        source=inspect.getsource(progress.progress)+inspect.getsource(progress.query_progress)
-        self.assertIn("'automatic_second_clock_burst': False",source)
-        self.assertIn("'placement_dispatched': False",source)
-        self.assertIn("'placement_retry_permitted': False",source)
+        with fixture() as (m, route, peer, batch, auth, folder):
+            confirmation = reviewed(m, batch, auth)
+            result = m.progress(batch, auth, 20, 50, confirmation, str(folder))
+            for key in ('automatic_second_clock_burst', 'placement_dispatched',
+                        'placement_retry_permitted', 'construction_completion_proven'):
+                self.assertFalse(result['construction_progress'][key])
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     unittest.main()

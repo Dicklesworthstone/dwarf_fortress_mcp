@@ -282,7 +282,7 @@ def retain(path: Path, result: dict) -> dict:
 
 
 @contextmanager
-def new_run(path: Path) -> Iterator[None]:
+def new_run(path: Path) -> Iterator[int]:
     """Hold recovery ownership and refuse orphan evidence before a new dispatch."""
     import fcntl
     parent = _open_parent(path)
@@ -294,6 +294,8 @@ def new_run(path: Path) -> Iterator[None]:
             except FileNotFoundError:
                 continue
             raise c.Rejected('new run requires unused intent and outcome paths')
-        yield
+        # Borrow this descriptor to keep the SAME directory lock through
+        # caller-owned associations and OutcomeStore publication. Do not close it.
+        yield parent
     finally:
         os.close(parent)
