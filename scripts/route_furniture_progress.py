@@ -22,6 +22,7 @@ import route_furniture_run as runner
 from route_furniture_review import Source, digest_text
 from route_furniture_batch_store import Batch
 from route_furniture_clock_context import Client, POLICY, SCHEMA, Scope, ScopeStore
+from route_furniture_clock_inventory import Inventory
 
 MAX_OUTPUT = 256 * 1024
 # Admission thresholds only; actual native frames/bytes consume the SAME budget.
@@ -227,24 +228,35 @@ def progress(batch, authority: ProgressAuthority, ticks: int, wall_ms: int,
             'shared foreground deadline cannot contain the bounded run')
     authority.clock_guard()
     with outcomes.new_run(path) as parent:
-        with ScopeStore(path, parent, batch, confirmation, create=scope) as binding:
-            def guard():
-                binding.check()
-                scope.bind(batch, current=True)
-            with Client(authority, budget, guard, intent=scope.intent(),
-                        effect_guard=binding.verify_intent) as client:
-                result = clock.start(client, authority.address, path,
-                                     _clock_key(confirmation), ticks, wall_ms)
-            # Borrow the original directory lock instead of releasing it between
-            # native completion and original terminal evidence publication.
-            with outcomes.OutcomeStore(path, parent_fd=parent) as store:
-                require(store.intent == scope.intent(), 'retained intent differs from batch association')
-                retained = store.retain(result)
-                output = _result(batch, authority, scope, retained, contacted=True,
-                                 committed=client.commit_attempted, refresh=True)
-                binding.check()
-                store.check()
-                return output
+        with Inventory(path.parent, batch, parent_fd=parent) as history:
+            # A new confirmation must not bypass an unresolved older effect.
+            # Read/verify the whole directory, never just a filtered output page.
+            history.admit_new(scope)
+            with ScopeStore(path, parent, batch, confirmation, create=scope) as binding:
+                def guard():
+                    binding.check()
+                    scope.bind(batch, current=True)
+                def effect_guard(intent):
+                    history.check()
+                    binding.verify_intent(intent)
+                    history.check()
+                with Client(authority, budget, guard, intent=scope.intent(),
+                            effect_guard=effect_guard) as client:
+                    result = clock.start(client, authority.address, path,
+                                         _clock_key(confirmation), ticks, wall_ms)
+                # Borrow the original directory lock instead of releasing it between
+                # native completion and original terminal evidence publication.
+                with outcomes.OutcomeStore(path, parent_fd=parent) as store:
+                    require(store.intent == scope.intent(), 'retained intent differs from batch association')
+                    retained = store.retain(result)
+                    output = _result(batch, authority, scope, retained, contacted=True,
+                                     committed=client.commit_attempted, refresh=True)
+                    output['construction_progress']['prior_clock_inventory_digest'] = history.digest
+                    encoded('progress', output)
+                    binding.check()
+                    store.check()
+                    history.check()
+                    return output
 
 
 def query_progress(batch, authority: ProgressAuthority | None, confirmation: str,
@@ -288,9 +300,36 @@ def query_progress(batch, authority: ProgressAuthority | None, confirmation: str
             return output
 
 
+def inventory_state(batch, history: Inventory, *, selection='all', limit=16, continuation=None):
+    """Offline handoff of original clock identities; no execution permission."""
+    page = history.page(selection=selection, limit=limit, continuation=continuation)
+    state = batch.audit()
+    state.update(advance_allowed=False, expected_plan=None, confirm_review=None,
+                 execution_review_required=True, clock_inventory=page)
+    encoded('inventory', state)
+    history.check()
+    return state
+
+
 def packet(operation, state=None, error=False):
     value = route.packet('progress-' + operation, state, error)
     value['schema'] = 'dfmcp.route-furniture-progress-result/2'
+    if state is not None and 'clock_inventory' in state:
+        inventory = state['clock_inventory']
+        turn = value['agent_turn']
+        turn['phase'] = 'inspect'
+        turn['briefing'].update(clock_records=inventory['counts']['records'],
+                               unresolved_clocks=inventory['counts']['unresolved'],
+                               clock_start_authorized=False)
+        turn['coverage']['clock_history_directory_validated'] = True
+        turn['coverage']['clock_history_other_batch_details_omitted'] = True
+        turn['active_work'] = list(turn['active_work']) + [
+            {'kind': 'construction_clock', 'clock_record_id': row['clock_record_id'],
+             'status': row['status'], 'query_supported': row['query_supported'],
+             'retry_permitted': False}
+            for row in inventory['rows'] if not row['resolved']]
+        turn['uncertainty'].append(
+            'Clock history covers only the selected private directory. It does not prove current pause, global absence, construction completion or permission to retry. Scope-only and source-loss records require original-custody investigation.')
     if state is not None and 'construction_progress' in state:
         progress = state['construction_progress']
         value['agent_turn']['briefing'].update(
@@ -321,16 +360,19 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv=None):
-    batch, operation, output_attempted = None, 'unknown', False
+    batch, history, operation, output_attempted = None, None, 'unknown', False
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('review', 'progress', 'query'))
+        parser.add_argument('operation', choices=('review', 'progress', 'query', 'inventory'))
         parser.add_argument('--directory', required=True)
         parser.add_argument('--batch-id', required=True)
         parser.add_argument('--ticks', type=int)
         parser.add_argument('--wall-ms', type=int)
         parser.add_argument('--confirm-progress')
         parser.add_argument('--clock-directory')
+        parser.add_argument('--selection', choices=('all', 'pending', 'terminal'))
+        parser.add_argument('--limit', type=int)
+        parser.add_argument('--continuation')
         parser.add_argument('--wait-ms', type=int)
         parser.add_argument('--refresh-frontier', action='store_true')
         parser.add_argument('--timeout-ms', type=int, default=10000)
@@ -338,13 +380,23 @@ def main(argv=None):
         operation = args.operation
         require(all((v is not None) == (operation in ('review', 'progress'))
                     for v in (args.ticks, args.wall_ms)), 'ticks and wall-ms belong only to review/progress')
-        require(all((v is not None) == (operation in ('progress', 'query'))
-                    for v in (args.confirm_progress, args.clock_directory)),
-                'progress/query require confirmation and private clock directory')
+        require((args.confirm_progress is not None) == (operation in ('progress', 'query')),
+                'only progress/query select an exact original confirmation')
+        require((args.clock_directory is not None) == (operation in ('progress', 'query', 'inventory')),
+                'progress/query/inventory require a private clock directory')
+        require(operation == 'inventory' or all(v is None for v in (
+            args.selection, args.limit, args.continuation)), 'paging options belong only to inventory')
+        page_limit = 16 if args.limit is None else integer(args.limit, 1, 64)
+        if operation == 'inventory':
+            directory = Path(args.clock_directory)
+            require(directory.is_absolute() and '..' not in directory.parts
+                    and len(str(directory)) <= 4096, 'absolute private clock directory required')
+            require(args.continuation is None or len(args.continuation) <= 2048,
+                    'clock-history continuation exceeds bound')
         require(operation == 'query' or (args.wait_ms is None and not args.refresh_frontier),
                 'wait and refresh belong only to query')
         digest_text(args.batch_id)
-        if operation != 'query':
+        if operation in ('review', 'progress'):
             integer(args.ticks, 1, 1200)
             integer(args.wall_ms, 1, 60000)
         if args.confirm_progress is not None:
@@ -352,17 +404,26 @@ def main(argv=None):
         wait_ms = 0 if args.wait_ms is None else integer(args.wait_ms, 0, 60000)
         budget = route.Budget(args.timeout_ms)
         # Offline terminal query needs no credentials or native connection.
-        authority = (None if operation == 'query' and not args.refresh_frontier
-                     and not any(key in os.environ for key in RUN_ENV) else ProgressAuthority.load())
+        authority = (None if operation == 'inventory' or (operation == 'query'
+                     and not args.refresh_frontier and not any(key in os.environ for key in RUN_ENV))
+                     else ProgressAuthority.load())
         batch = Batch(args.directory, args.batch_id, budget, writable=False)
-        state = (review_progress(batch, authority, args.ticks, args.wall_ms)
-                 if operation == 'review' else
-                 progress(batch, authority, args.ticks, args.wall_ms,
-                          args.confirm_progress, args.clock_directory)
-                 if operation == 'progress' else
-                 query_progress(batch, authority, args.confirm_progress, args.clock_directory,
-                                wait_ms, refresh_frontier=args.refresh_frontier))
+        if operation == 'inventory':
+            # Keep both directory and original batch custody through stdout.
+            history = Inventory(Path(args.clock_directory), batch).__enter__()
+            state = inventory_state(batch, history, selection=args.selection or 'all',
+                                    limit=page_limit, continuation=args.continuation)
+        else:
+            state = (review_progress(batch, authority, args.ticks, args.wall_ms)
+                     if operation == 'review' else
+                     progress(batch, authority, args.ticks, args.wall_ms,
+                              args.confirm_progress, args.clock_directory)
+                     if operation == 'progress' else
+                     query_progress(batch, authority, args.confirm_progress, args.clock_directory,
+                                    wait_ms, refresh_frontier=args.refresh_frontier))
         raw = encoded(operation, state)
+        if history is not None:
+            history.check()
         if authority is not None:
             authority.clock_guard()
         batch.check()
@@ -374,6 +435,8 @@ def main(argv=None):
             publish(encoded(operation, None, True))
         return 2
     finally:
+        if history is not None:
+            history.close()
         if batch is not None:
             batch.close()
 

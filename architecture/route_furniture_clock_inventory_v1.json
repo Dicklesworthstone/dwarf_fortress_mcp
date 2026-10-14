@@ -22,5 +22,17 @@
   "repairs_or_pruning": false,
   "cross_directory_fence": false,
   "malicious_owner_rollback_protection": false,
-  "production_admission_change": false
+  "production_admission_change": false,
+  "cli": "route_furniture_progress.py inventory",
+  "confirmation_required_for_discovery": false,
+  "inventory_credentials_required": false,
+  "inventory_stdout_custody": "original batch and clock directory held through one final attempt",
+  "progress_gate": "complete prior directory checked before ScopeStore/new native intent",
+  "progress_effect_rechecks": [
+    "PrepareRun",
+    "CommitRun",
+    "result"
+  ],
+  "exact_key_recovery": "unchanged; no directory-wide scan required",
+  "query_may_dispatch": false
 }

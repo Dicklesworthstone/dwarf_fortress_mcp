@@ -315,6 +315,7 @@ class InventoryTests(unittest.TestCase):
             with history.Inventory(directory, batch):
                 with self.assertRaises(BlockingIOError):
                     with history.Inventory(directory, batch): pass
+            with history.Inventory(directory, batch): pass
 
     def test_checks_detect_new_removed_and_byte_identical_replaced_history(self):
         for variant in ('add', 'remove', 'replace', 'modify'):
@@ -448,6 +449,59 @@ class InventoryTests(unittest.TestCase):
             with history.Inventory(directory, batch) as owner:
                 self.assertEqual(owner.page()['counts']['records'], 2)
                 self.assertTrue(owner.page()['directory_history_reconciled'])
+
+    def test_valid_native_intent_with_same_key_still_must_match_scope_bytes(self):
+        with setup() as (directory, batch):
+            scoped, path = save(directory, batch, phase=None)
+            intent = scoped.intent()
+            intent['game_ticks'] = 21
+            plan = clock.plan_for(21, intent['wall_ms'], bytes.fromhex(intent['observation_hex']))
+            intent['plan_digest_hex'] = plan.hex()
+            intent['prepare_token_hex'] = clock.token_for(intent['idempotency_key'], plan).hex()
+            clock.verify_intent(intent)
+            path.write_bytes(canonical({'intent': intent, 'sha256':
+                hashlib.sha256(canonical(intent)).hexdigest()}) + b'\n')
+            with self.assertRaises(ValueError):
+                with history.Inventory(directory, batch): pass
+
+    def test_exact_shared_work_and_disk_boundaries(self):
+        with setup() as (directory, batch):
+            save(directory, batch)
+            batch.budget = Budget()
+            before_work, before_disk = batch.budget.work_steps, batch.budget.disk_bytes
+            with history.Inventory(directory, batch) as owner:
+                expected = owner.page()
+            work, disk = before_work - batch.budget.work_steps, before_disk - batch.budget.disk_bytes
+            batch.budget = Budget()
+            batch.budget.work_steps, batch.budget.disk_bytes = work, disk
+            with history.Inventory(directory, batch) as owner:
+                self.assertEqual(owner.page(), expected)
+            self.assertEqual((batch.budget.work_steps, batch.budget.disk_bytes), (0, 0))
+            for field, limit in (('work_steps', work), ('disk_bytes', disk)):
+                batch.budget = Budget(); setattr(batch.budget, field, limit - 1)
+                with self.assertRaises(ValueError):
+                    with history.Inventory(directory, batch) as owner: owner.page()
+
+    def test_every_cooperative_abort_returns_no_inventory_and_releases_custody(self):
+        with setup() as (directory, batch):
+            save(directory, batch, phase=None)
+            batch.budget = Budget()
+            calls = []
+            batch.budget.work_hook = lambda: calls.append(1)
+            with history.Inventory(directory, batch) as owner: owner.page()
+            raw = bytes_in(directory)
+            for stop in range(len(calls)):
+                batch.budget = Budget(); seen = []
+                def hook():
+                    seen.append(1)
+                    if len(seen) == stop + 1: raise ValueError('cancelled')
+                batch.budget.work_hook = hook
+                with self.assertRaises(ValueError):
+                    with history.Inventory(directory, batch) as owner: owner.page()
+                self.assertEqual(bytes_in(directory), raw)
+                batch.budget.work_hook = lambda: None
+                # The failed attempt's clock-directory lock must be gone.
+                with history.Inventory(directory, batch): pass
 
     def test_close_releases_descriptors_even_after_failed_entry(self):
         with setup() as (directory, batch):

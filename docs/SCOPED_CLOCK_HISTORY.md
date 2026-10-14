@@ -85,3 +85,89 @@ native sockets, writes and fsync during offline discovery. The original batch
 custody and budget are explicit test ports, not a live game or complete private
 batch integration. No Rust, native plugin, live fortress or full-workspace
 qualification is claimed.
+
+## Executable discovery and mandatory progress gate
+
+The existing progress CLI now exposes an **offline** inventory operation:
+
+```sh
+python3 scripts/route_furniture_progress.py inventory \
+  --directory /absolute/private/route-batch --batch-id <original-batch-id> \
+  --clock-directory /absolute/private/clock-records \
+  --selection pending --limit 16
+```
+
+The paths and batch ID are operator-supplied examples. No clock confirmation,
+route/clock credentials or native connection is required. Original batch custody
+and the entire scoped-clock directory remain locked through the single stdout
+attempt. A short or failed write does not emit another object. The full original
+batch is retained in the response; offline inspection always clears execution
+confirmation and sets `advance_allowed` to false.
+
+`result.clock_inventory.rows` provides original `clock_record_id` values usable
+with the **existing** `query --confirm-progress` path. Its complete counts include
+unresolved records outside a filtered page. `--selection` accepts all, pending or
+terminal; `--limit` accepts 1..64; `--continuation` requires the same selection and
+limit and an unchanged complete inventory. These options belong only to inventory.
+An empty terminal page cannot hide pending clock work from the new-effect gate.
+Other-batch details are omitted, explicitly, but their validated counts and any
+unresolved effects still participate in that gate. Keep other batches' original
+custody for their own recovery; discovery never adopts them.
+
+`progress` now discovers and validates all prior records **under the same locked
+clock directory**, before creating a new scope, native intent or preparation.
+Any unresolved original/foreign/unbound/scope-only/SourceLost record blocks new
+clock work even when a newly acquired confirmation is otherwise valid. Existing
+read-only review can still run; its confirmation is not permission to bypass
+history. Use exact-key recovery where supported. Missing intent or source loss
+cannot be resolved by deleting files, inventing records or retrying the effect.
+
+Prior membership and exact file identities/bytes are rechecked immediately around
+the existing synchronized-intent guard at both PrepareRun and CommitRun. A changed
+old record after preparation prevents commit and preserves the new original intent
+for query-only recovery. Only the admitted new effect's three fixed filenames may
+appear; normal ScopeStore/OutcomeStore validation continues for those files. The
+new effect, old history, terminal retention and result rendering share the same
+existing directory lock, deadline, work and storage budgets. No native method,
+clock scope/intent/receipt generation or production admission has changed.
+
+Exact-key `query` deliberately remains independent of unrelated directory entries:
+it can recover an intact original record even when another record is damaged.
+The original terminal query fixture is byte-identical to the upstream command.
+Once recovery establishes a valid stopped/refused receipt, a new discovery sees
+that result. SourceLost remains unresolved and cannot authorize another effect.
+All directory guarantees remain local; changing the selected directory is outside
+the guarantee, not globally prevented by this feature.
+
+## Executed integration evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_scoped_clock_inventory.py --mutations
+```
+
+All **40 tests** pass with no skips: 27 inventory/codec/private-file cases and
+13 complete progress/CLI-source cases. All eight weakened implementations fail
+assertion-based regressions; syntax/import failures are not counted. The runner
+hashes all 12 executed production/test inputs before and after testing.
+
+An independently retained upstream `route_furniture_progress.py` blob
+`88b68026acdd8518a65735d2b1e36b85896bfc43` reproduces the missing gate: a fresh
+confirmation sends one PrepareRun and one CommitRun despite an older unresolved
+clock intent in the same directory. The updated implementation refuses that
+counterexample without either call or a new scope. Existing offline terminal
+query output remains byte-identical on the unchanged fixture.
+
+Tests execute the actual native clock clients and strict codecs over TCP to
+bounded joined synthetic peers, plus real private scope/intent/outcome files,
+locks and synchronization. They exercise discovery after a lost commit reply,
+query-only recovery of the discovered exact key, one permitted new effect after
+resolved history, changed history after intent sync or preparation, final-output
+custody and cancellation. The complete 256-record inventory and exact work/disk
+boundaries are covered. No simulated native reply is described as a live game.
+
+Original route acquisition, original batch custody/budget and the enclosing route
+packet are explicit test ports. The complete production progress module is loaded
+without source rewriting; imported clock/scope/source/allocation/review code uses
+exact upstream bytes. These checks do not qualify real route acquisition, complete
+private-batch integration, DFHack SDK/game, Rust/MCP or the whole workspace.
+The two broad implementation beads remain open.
