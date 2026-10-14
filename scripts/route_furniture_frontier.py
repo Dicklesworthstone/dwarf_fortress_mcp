@@ -14,8 +14,9 @@ from furniture_allocation import Candidate, idle
 from furniture_plan import canonical, label, require
 from route_furniture_review import Review, Source, candidate, digest_text, revalidate
 from route_furniture_allocation import Work, MAX_WORK, distance
+from route_furniture_suffix import assess_remaining
 
-POLICY = 'original-route-constraints-after-verified-placement-prefix/1'
+POLICY = 'original-route-constraints-and-fixed-delivery-suffix/2'
 MAX_OUTPUT = 96 * 1024
 
 
@@ -132,13 +133,34 @@ def assess(review: Review, batch_id: str, placed: tuple[bytes, ...], before: Cap
     status = ('ready' if all(row['status'] == 'constraints_met' for row in active) else
               'route_blocked' if any(row['status'] == 'constraints_not_met' for row in active)
               else 'route_unestablished')
+    delivery = None
+    if status == 'ready':
+        # Individual routes can all exist now while the first placement cuts
+        # off a later delivery. Verify the ORIGINAL fixed suffix on this same
+        # fresh map; never rerun allocation or edit retained dependencies.
+        positions = {}
+        for row in active:
+            work()
+            positions[row['item']] = tuple(row['current_position'])
+        allowance = maximum_work - work.used - 2  # Reserve final publication.
+        require(allowance > 0, 'route frontier has no remaining delivery allowance')
+        suffix = assess_remaining(plan, tuple(row['slot'] for row in retained),
+            positions, terrain_raw, work.check, max_route_steps=original['max_route_steps'],
+            maximum_work=allowance)
+        work.used += suffix['work_units']
+        # Nested computational allowances must not leak into the paired seal.
+        # The outer work counter still accounts for the whole suffix pass.
+        delivery = {key: value for key, value in suffix.items()
+                    if key not in ('work_units', 'maximum_work')}
+        status = {'ready': 'ready', 'blocked': 'route_blocked',
+                  'unestablished': 'route_unestablished'}[delivery['status']]
     work()
     out = {'schema': 'dfmcp.route-furniture-frontier/1', 'policy': POLICY, 'status': status,
            'batch_id': batch_id, 'review_digest': review.digest, 'original_plan_digest': plan.digest,
            'original_plan': plan.json(), 'next_step': next_step.name,
            'native_before_digest': before.witness.hex(), 'source': source.json(),
            'placed_prefix': retained, 'rows': rows, 'remaining_steps': len(active),
-           'max_route_steps': original['max_route_steps'],
+           'max_route_steps': original['max_route_steps'], 'delivery_suffix': delivery,
            'all_remaining_selections_checked': True, 'reallocation_performed': False,
            'placement_authorized': False, 'native_pathfinding_proven': False,
            'atomic_route_placement_proven': False, 'future_routes_preserved': False,

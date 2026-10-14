@@ -59,3 +59,65 @@ tests with synthetic captures, not native I/O, DFHack gameplay, Rust or full
 workspace qualification. The pure checker alone is not an execution gate;
 placement-frontier integration is the subsequent boundary. No native protocol,
 mutation authority, compatibility entry or production runner is changed.
+
+## Mandatory placement-frontier integration
+
+`route_furniture_frontier.assess` now runs this checker for every otherwise-ready
+frontier, including reviews created before delivery sequencing existed. It first
+retains all original receipt, source, native BEFORE and full-inventory/selector
+checks. Only qualified current positions and the complete verified prefix reach
+the suffix checker. Unknown or mismatched original work cannot be skipped by
+running the route solver. A blocked suffix changes the outer result to
+`route_blocked` even when all individual rows still say `constraints_met`.
+
+The original plan and review are never rewritten or reordered during execution.
+The frontier policy is now
+`original-route-constraints-and-fixed-delivery-suffix/2`. Its additive
+`delivery_suffix` field carries the complete check, or null when original
+selection qualification already refused. The outer evidence digest binds this
+field and the new policy, invalidating old individual-route confirmation seals.
+Nested work allowance fields are removed from the semantic envelope while their
+actual cost is charged to the outer allowance. Exact evidence therefore remains
+stable under a smaller valid work budget.
+
+The existing `route_furniture_batch.acquire_frontier` calls this same function
+from review, before child intent, and again after dispatch intent has synced but
+before native commit. No native method or coordinator transition is changed.
+At the final check a newly blocked suffix prevents dispatch; the existing pending
+original-key recovery rule remains in force, not a new retry permit. This check
+adds no map lock: changes after the final capture remain outside its guarantee.
+
+Receipt journals, batch roots, original review bytes and historical receipt
+meaning are unchanged. Query/cancel recovery remains separate from readiness;
+a valid route result cannot resolve an uncertain effect. A legacy ordering that
+fails the fresh conservative model requires operator attention, not automatic
+recompilation. The existing six-million-unit per-frontier execution reservation
+and overall foreground limits are unchanged. All passes share that reservation;
+a request that cannot afford the additional suffix proof refuses rather than
+omitting it, increasing its budget or publishing partial success.
+
+## Integrated evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
+  test_route_furniture_frontier -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s scripts/tests -p 'route_furniture_suffix*tests.py' -v
+```
+
+The combined 39 tests pass: the 14 unchanged frontier tests, 14 suffix component
+tests and 11 new frontier-integration cases. The original frontier source was
+also executed on the counterexample: it returned ready where the new code
+returns route_blocked. The integration tests exercise actual review creation,
+strict native Capture/Record codecs, exact receipt redecoding, source binding,
+post-prefix observation and the final-check evidence comparison without native
+I/O doubles. All six unchanged production dependencies match the GitHub blobs.
+Five additional weakened frontier variants fail assertion regressions: omitting
+the checker, ignoring its outcome, resetting its allowance, relaxing the original
+route limit and dropping the suffix from the confirmation evidence.
+
+These tests do not execute the private batch store, placement coordinator,
+native transport or a live fortress; default coordinator integration follows the
+existing call path and is source-reviewed, not newly end-to-end qualified.
+There is no Rust/full-workspace, SDK/plugin, live compatibility or admission
+qualification claim. Broader execution beads remain in progress.

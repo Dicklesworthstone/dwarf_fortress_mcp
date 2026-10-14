@@ -9,14 +9,32 @@
   "positions": "exact remaining original item identities; no replacement",
   "prefix_authority": "caller must authenticate complete original receipt prefix",
   "selectors_and_source_authority": "caller must independently qualify before use",
-  "outcomes": ["ready", "blocked", "unestablished"],
+  "outcomes": [
+    "ready",
+    "blocked",
+    "unestablished"
+  ],
   "partial_route_certificate": false,
-  "evidence_exclusions": ["work_units", "maximum_work"],
+  "evidence_exclusions": [
+    "work_units",
+    "maximum_work"
+  ],
   "maximum_steps": 32,
   "maximum_tiles": 16384,
   "maximum_work": 20000000,
   "maximum_output_bytes": 49152,
   "native_calls": false,
   "mutation_authority": false,
-  "production_admission": false
+  "production_admission": false,
+  "execution_frontier": {
+    "entry": "route_furniture_frontier.assess",
+    "policy": "original-route-constraints-and-fixed-delivery-suffix/2",
+    "required_after": "complete original receipt, source and current selector qualification",
+    "result_field": "delivery_suffix",
+    "blocked_outcome": "route_blocked",
+    "old_confirmation_seals": "invalidated by the new policy and bound suffix evidence",
+    "budget": "consume remaining frontier allowance; never replenish",
+    "native_journal_formats_changed": false,
+    "native_coordinator_end_to_end_qualified": false
+  }
 }
