@@ -1,0 +1,22 @@
+{
+  "schema": "dfmcp.furniture-delivery-suffix-contract/1",
+  "implementation": "scripts/route_furniture_suffix.py",
+  "entry": "assess_remaining",
+  "result_schema": "dfmcp.furniture-delivery-suffix/1",
+  "policy": "original-fixed-suffix-after-placed-target-removal/1",
+  "model": "captured-route-graph-delete-placed-targets/1",
+  "order": "exact original canonical suffix; no reordering",
+  "positions": "exact remaining original item identities; no replacement",
+  "prefix_authority": "caller must authenticate complete original receipt prefix",
+  "selectors_and_source_authority": "caller must independently qualify before use",
+  "outcomes": ["ready", "blocked", "unestablished"],
+  "partial_route_certificate": false,
+  "evidence_exclusions": ["work_units", "maximum_work"],
+  "maximum_steps": 32,
+  "maximum_tiles": 16384,
+  "maximum_work": 20000000,
+  "maximum_output_bytes": 49152,
+  "native_calls": false,
+  "mutation_authority": false,
+  "production_admission": false
+}
