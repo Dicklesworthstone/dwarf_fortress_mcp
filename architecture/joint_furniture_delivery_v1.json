@@ -1,0 +1,20 @@
+{
+  "schema": "dfmcp.joint-furniture-delivery-contract/1",
+  "policy": "preserve-initial-else-bounded-reverse-item-search/1",
+  "scope": "complete_supplied_items_original_constraints_captured_target_removal_model",
+  "input": "new_request_and_complete_projected_candidates_and_map_1_5",
+  "retained_review_input": false,
+  "max_search_nodes": 4096,
+  "max_work": 20000000,
+  "max_slots": 32,
+  "max_candidates": 65536,
+  "max_tiles": 16384,
+  "max_output_bytes": 49152,
+  "search_tie_break": "descending_sink_name_then_shortest_delivery_then_item_id",
+  "candidate_reduction": "remaining_slot_count_after_blocked_routing_and_used_item_exclusion",
+  "partial_plan": false,
+  "search_exhaustion_is_infeasibility": false,
+  "global_cost_optimality": false,
+  "native_effect": false,
+  "production_admission_changed": false
+}
