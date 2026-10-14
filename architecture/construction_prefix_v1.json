@@ -1,0 +1,17 @@
+{
+  "schema": "dfmcp.construction-prefix-contract/1",
+  "entry": "construction_prefix.assess_prefix",
+  "policy": "original-installed-furniture-and-no-held-or-item-linked-jobs/1",
+  "maximum_prefix": 32,
+  "maximum_capture_bytes": 16777216,
+  "maximum_work": 20000000,
+  "maximum_output_bytes": 65536,
+  "observation": "one complete paused operations/1.4 capture",
+  "original_prefix_custody": "required from execution owner, not supplied by pure predicate",
+  "predecessor_gate_met": ["no_predecessors", "quiescent"],
+  "unknown_held_job": "blocks selected quiescence",
+  "goal_stability_or_deadline_created": false,
+  "global_quiescence_proven": false,
+  "native_protocol_changed": false,
+  "production_admission_changed": false
+}

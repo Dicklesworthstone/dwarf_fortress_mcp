@@ -317,9 +317,21 @@ class Assessment:
 
 
 def assess(goal: Goal, observed: Operations, guard: Guard) -> Assessment:
-    """No job disappearance, count change or matching ID alone proves success."""
+    """Evaluate the existing goal without changing its temporal policy."""
+    return assess_placed_receipt(goal.receipt, observed, guard)
+
+
+def assess_placed_receipt(receipt: bytes, observed: Operations, guard: Guard) -> Assessment:
+    """Assess current construction without inventing a new monitoring deadline.
+
+    The caller must obtain Operations by complete decoding and separately bind
+    its acquisition/source authority. This stateless condition neither advances
+    a Goal nor certifies stability, quiescence, custody or mutation permission.
+    """
     guard()
-    record = goal.record
+    record = Record.decode(receipt)
+    require(record.phase == 'placed' and type(observed) is Operations,
+            'construction assessment requires a placed receipt and complete operations')
     p, before = record.insertion, record.plan.before
     building, item = observed.buildings.get(p.building), observed.items.get(p.item)
     outcome = Assessment('pending', None if building is None else building.stage,
