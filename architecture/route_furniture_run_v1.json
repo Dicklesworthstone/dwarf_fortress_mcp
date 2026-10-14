@@ -1,0 +1,18 @@
+{
+  "schema": "dfmcp.route-furniture-run-contract/1",
+  "implementation": "scripts/route_furniture_run.py",
+  "policy": "explicit-original-prefix-with-fresh-per-step-gates/1",
+  "review_entry": "review_run",
+  "execution_entry": "run",
+  "maximum_steps": 32,
+  "maximum_wall_millis": 60000,
+  "confirmation": ["batch", "review", "inventory", "first_native_plan", "first_paired_review", "exact_prefix", "limits"],
+  "per_step": "existing review_step and advance; all original final guards",
+  "resume": "new explicit review only; original-key recovery remains separate",
+  "automatic_retry": false,
+  "automatic_recovery": false,
+  "new_native_method": false,
+  "construction_completion_proven": false,
+  "production_admitted": false,
+  "validation_scope": "Python run owner with explicit step/custody ports, not native execution"
+}
