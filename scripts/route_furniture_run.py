@@ -94,6 +94,48 @@ def _scope(batch, state, limits):
     return approved
 
 
+
+# Local journal eligibility and observed execution readiness are different.
+# A pending construction does not change original custody, but must stop effects.
+UNREADY_FRONTIERS = frozenset((
+    'route_blocked', 'route_unestablished', 'construction_pending',
+    'construction_unestablished', 'construction_blocked',
+))
+CUSTODY_FIELDS = ('batch_id', 'review_digest', 'inventory_digest', 'plan_digest',
+                  'placed', 'next_step', 'pending_step', 'status', 'stopped')
+
+
+def _review_status(batch, before, observed):
+    """Bind a complete read to unchanged original custody, not to permission.
+
+    The one-step owner may narrow advance_allowed after a successful acquisition.
+    That is a valid unready observation, not damaged custody or native failure.
+    Unknown statuses and contradictory confirmation fields still fail closed.
+    """
+    after = batch.audit()
+    require(before['advance_allowed'] is True and after['advance_allowed'] is True
+            and before['status'] == 'ready' and not before['stopped'],
+            'original custody cannot admit a readiness review')
+    for state in (before, observed, after):
+        require(state['inventory_verified'] is True and state['batch_id'] == batch.id
+                and state['review_digest'] == batch.review.digest,
+                'readiness review differs from original custody')
+    require(all(before[key] == observed[key] == after[key] for key in CUSTODY_FIELDS),
+            'original inventory changed during readiness review')
+    status = observed['route_frontier']['status']
+    require(type(status) is str and status in UNREADY_FRONTIERS | {'ready'},
+            'unknown execution readiness status')
+    if status == 'ready':
+        require(observed['advance_allowed'] is True, 'ready review withheld advancement')
+        digest_text(observed['expected_plan'])
+        digest_text(observed['confirm_review'])
+    else:
+        require(observed['expected_plan'] is None and observed['confirm_review'] is None,
+                'unready observation cannot issue placement confirmation')
+        observed['advance_allowed'] = False
+    return status
+
+
 def _confirmation(batch, state, limits, approved):
     require(state.get('confirm_review') is not None and state.get('expected_plan') is not None,
             'run requires a ready first-step review')
@@ -120,10 +162,12 @@ def review_run(batch, authority, limits: Limits, *, _steps=None):
     steps = _step_api(_steps)
     _limits(batch, limits)
     authority.guard()
+    before = batch.audit()
+    approved = _scope(batch, before, limits)
     state = steps.review_step(batch, authority)
-    approved = _scope(batch, state, limits)
+    status = _review_status(batch, before, state)
     scope, confirmation = (None, None)
-    if state['confirm_review'] is not None:
+    if status == 'ready':
         scope, confirmation = _confirmation(batch, state, limits, approved)
     state['run_review'] = {'policy': POLICY, 'scope': scope, 'confirm_run': confirmation,
                            'automatic_retry_permitted': False, 'max_steps': limits.max_steps,
@@ -135,15 +179,29 @@ def review_run(batch, authority, limits: Limits, *, _steps=None):
     return state
 
 
-def _finish(steps, batch, authority, scope, outcomes, stop_reason, *, faulted=False):
+def _finish(steps, batch, authority, scope, outcomes, stop_reason, *, faulted=False,
+            observation=None):
     # Audit reads local original journals only. On lost custody/deadline this may
     # itself refuse; callers then keep the on-disk history and emit the usual
     # sanitized error, rather than converting cached progress into current proof.
     state = batch.audit()
+    require(scope is None or (scope['batch_id'] == batch.id
+            and scope['review_digest'] == batch.review.digest), 'run origin changed')
+    if observation is not None:
+        status = _review_status(batch, state, observation)
+        require(status == stop_reason and status in UNREADY_FRONTIERS,
+                'stopped run observation disagrees with its reason')
+        state['route_frontier'] = observation['route_frontier']
+    # Custody's ready means no unresolved child, not currently safe to execute.
+    # Never manufacture a fresh permit from the final offline journal audit.
+    state.update(advance_allowed=False, expected_plan=None, confirm_review=None,
+                 route_constraints_checked_this_call=observation is not None,
+                 execution_review_required=True)
     state['run'] = {'schema': SCHEMA, 'policy': POLICY, 'scope': scope,
                     'stop_reason': stop_reason, 'outcomes': outcomes,
                     'confirmed_placements_this_call': sum(row['phase'] == 'placed' for row in outcomes),
                     'advance_invocations_this_call': len(outcomes), 'faulted': faulted,
+                    'confirmation_validated': scope is not None,
                     'automatic_recovery_attempted': False, 'automatic_retry_permitted': False,
                     'clock_control_performed': False, 'construction_completion_proven': False}
     steps.encoded('run', state, error=faulted)
@@ -177,10 +235,14 @@ def run(batch, authority, limits: Limits, confirmed: str, *, _steps=None):
     require(batch.writable, 'batch run requires original writable custody')
     authority.guard('CommitPlacement')
     initial = batch.audit()
-    _scope(batch, initial, limits)  # Refuse stopped/pending work BEFORE native I/O.
+    approved = _scope(batch, initial, limits)  # Refuse unresolved work BEFORE native I/O.
     require(_admit_step(batch), 'first run step does not fit aggregate allowance')
     first = steps.review_step(batch, authority)
-    approved = _scope(batch, first, limits)
+    status = _review_status(batch, initial, first)
+    if status != 'ready':
+        # Well-formed consent is not validated by an unready observation. Return
+        # a read-only stop with no approved scope and no attempted placement.
+        return _finish(steps, batch, authority, None, [], status, observation=first)
     scope, actual = _confirmation(batch, first, limits, approved)
     require(actual == confirmed, 'run confirmation differs from current original prefix or limits')
     outcomes = []
@@ -196,10 +258,16 @@ def run(batch, authority, limits: Limits, confirmed: str, *, _steps=None):
             require(state['next_step'] == name, 'run cannot skip or reorder original work')
             if not _admit_step(batch):
                 return _finish(steps, batch, authority, scope, outcomes, 'aggregate_budget_boundary')
-            current = steps.review_step(batch, authority)
+            try:
+                current = steps.review_step(batch, authority)
+                status = _review_status(batch, state, current)
+            except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
+                # A failed read is not a placement attempt. Retain earlier
+                # outcomes if custody still permits, but never an older review.
+                return _finish(steps, batch, authority, scope, outcomes, 'review_failed', faulted=True)
+            if status != 'ready':
+                return _finish(steps, batch, authority, scope, outcomes, status, observation=current)
         require(current['next_step'] == name and current['advance_allowed'], 'run frontier changed')
-        if current['confirm_review'] is None or current['expected_plan'] is None:
-            return _finish(steps, batch, authority, scope, outcomes, current['route_frontier']['status'])
         _reserve(steps, current)
         # Record an invocation, not a fabricated claim of native dispatch. If the
         # coordinator raises after dispatch sync, query the local journal only.
