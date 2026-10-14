@@ -12,7 +12,7 @@ import stat
 import sys
 
 from furniture_allocation import Request
-from furniture_plan import MAX_BYTES as MAX_REQUEST_BYTES, require
+from furniture_plan import MAX_BYTES as MAX_REQUEST_BYTES, integer, require
 import route_furniture_inventory as inventory
 import route_furniture_review as model
 import route_furniture_review_runtime as runtime
@@ -72,6 +72,10 @@ def main(argv=None):
         parser.add_argument('--max-route-steps', type=int)
         parser.add_argument('--sequence-deliveries', action='store_true',
                             help='create only: preserve selected items and add dependencies to avoid modeled route blockage')
+        parser.add_argument('--search-delivery-items', action='store_true',
+                            help='create with sequencing only: search alternative items before sealing a new review')
+        parser.add_argument('--delivery-search-nodes', type=int,
+                            help='alternative-item search bound, 1..4096; never a proof when exhausted')
         parser.add_argument('--review-file')
         parser.add_argument('--expected-review')
         parser.add_argument('--timeout-ms', type=int, default=10000)
@@ -85,6 +89,12 @@ def main(argv=None):
                 'check requires the retained artifact and independent digest')
         require(creating or args.max_route_steps is None, 'check cannot change the original route limit')
         require(creating or not args.sequence_deliveries, 'check cannot reorder an original review')
+        require(not args.search_delivery_items or (creating and args.sequence_deliveries),
+                'alternative items require new sequenced review creation')
+        require(args.delivery_search_nodes is None or args.search_delivery_items,
+                'node bound requires alternative-item search')
+        if args.delivery_search_nodes is not None:
+            integer(args.delivery_search_nodes, 1, runtime.joint.MAX_SEARCH_NODES)
         if creating:
             request = Request.decode(read_file(args.request_file, MAX_REQUEST_BYTES, budget))
             region = inventory.Region(tuple(args.origin), tuple(args.size))
@@ -92,6 +102,10 @@ def main(argv=None):
             options = {'max_route_steps': maximum}
             if args.sequence_deliveries:
                 options['sequence_deliveries'] = True
+            if args.search_delivery_items:
+                options['search_delivery_items'] = True
+                if args.delivery_search_nodes is not None:
+                    options['max_search_nodes'] = args.delivery_search_nodes
             raw = runtime.create(request, region, inventory.Authority.load(), budget, **options)
         else:
             model.digest_text(args.expected_review)

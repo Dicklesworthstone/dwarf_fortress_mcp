@@ -15,10 +15,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('test_joint_furniture_delivery', 'test_cross_level_furniture',
            'test_cross_level_furniture_review', 'test_cross_level_furniture_frontier',
-           'test_furniture_delivery_workflow')
+           'test_furniture_delivery_workflow', 'test_joint_furniture_workflow')
 FILES = ('furniture_plan.py', 'furniture_allocation.py', 'build_placement_wire.py',
          'route_furniture_allocation.py', 'route_furniture_sequence.py', 'route_furniture_review.py',
-         'route_furniture_frontier.py', 'route_furniture_review_runtime.py', 'review_route_furniture.py',
+         'route_furniture_frontier.py', 'route_furniture_suffix.py',
+         'route_furniture_review_runtime.py', 'review_route_furniture.py',
          'route_furniture_joint.py', 'check_joint_furniture_delivery.py',
          *(name + '.py' for name in MODULES))
 MUTATIONS = (

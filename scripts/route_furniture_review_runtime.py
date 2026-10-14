@@ -13,6 +13,7 @@ import route_furniture_allocation as routes
 import route_furniture_inventory as inventory
 import route_furniture_review as review_model
 import route_furniture_sequence as sequencing
+import route_furniture_joint as joint
 
 # Fixed work reservation for creating/validating/serializing the bounded artifact.
 # It is never borrowed from the already reserved route solver allowance.
@@ -82,8 +83,15 @@ def packet(result=None, request=None, source=None, *, operation='check', review=
         sequence = result['delivery_sequence']
         turn['coverage']['delivery_order_model'] = sequence['model']
         turn['coverage']['delivery_order_checked'] = sequence['candidate_model_sequence_proven']
-        turn['uncertainty'].append(
-            'Delivery order models earlier target tiles as blocked. It preserves selected items and original constraints, but is not native hauling or a guarantee of future routes. Fresh placement review remains required.')
+        if 'delivery_search' in result:
+            search = result['delivery_search']
+            turn['coverage']['delivery_item_search_policy'] = search['policy']
+            turn['coverage']['delivery_search_complete'] = search['search_complete']
+            turn['uncertainty'].append(
+                'Explicit new-review item search may change initial selections, never original constraints. Replacements are listed; the exported review freezes its new exact items. Search exhaustion is not infeasibility and no result proves native hauling or future routes.')
+        else:
+            turn['uncertainty'].append(
+                'Delivery order models earlier target tiles as blocked. It preserves selected items and original constraints, but is not native hauling or a guarantee of future routes. Fresh placement review remains required.')
     if result is None:
         value['error'] = {'code': 'ROUTE_FURNITURE_REVIEW_REFUSED',
             'detail': 'Original review, source, authority, evidence or budget refused. No current review established; no placement was attempted.'}
@@ -107,8 +115,14 @@ def finish(result, request, source, counts, authority, budget, *, operation, rev
 
 def create(request: Request, region: inventory.Region, authority: inventory.Authority,
            budget: inventory.wire.Budget, *, max_route_steps=routes.MAX_ROUTE_STEPS,
-           sequence_deliveries: bool = False) -> bytes:
+           sequence_deliveries: bool = False, search_delivery_items: bool = False,
+           max_search_nodes: int = joint.MAX_SEARCH_NODES) -> bytes:
     require(type(sequence_deliveries) is bool, 'delivery sequencing requires explicit Boolean opt-in')
+    require(type(search_delivery_items) is bool and (not search_delivery_items or sequence_deliveries),
+            'alternative items require explicit sequencing and item-search opt-in')
+    integer(max_search_nodes, 1, joint.MAX_SEARCH_NODES)
+    require(search_delivery_items or max_search_nodes == joint.MAX_SEARCH_NODES,
+            'search node limits require alternative-item search')
     integer(max_route_steps, 0, routes.MAX_ROUTE_STEPS)
     require(budget.work_steps > EXPORT_WORK, 'review export work must be reserved before native contact')
     raw, source, candidates, types, counts = acquire(request, region, authority, budget)
@@ -120,7 +134,13 @@ def create(request: Request, region: inventory.Region, authority: inventory.Auth
         budget.remaining()
         authority.guard()
 
-    if sequence_deliveries:
+    if search_delivery_items:
+        # Only new proposals may change initial selections. The complete result,
+        # strengthened request and final selected native types stay together.
+        request, result = joint.allocate_joint_routes(
+            request, candidates, raw, guard, max_route_steps=max_route_steps,
+            maximum_work=allowance, max_search_nodes=max_search_nodes)
+    elif sequence_deliveries:
         # Use the shared compiler once, and keep its strengthened request with
         # the allocation through review creation and final publication. Never
         # apply this to a retained review or an already-started batch.

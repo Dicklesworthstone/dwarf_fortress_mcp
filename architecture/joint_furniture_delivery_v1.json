@@ -16,5 +16,8 @@
   "search_exhaustion_is_infeasibility": false,
   "global_cost_optimality": false,
   "native_effect": false,
-  "production_admission_changed": false
+  "production_admission_changed": false,
+  "review_cli": "review_route_furniture.py create --sequence-deliveries --search-delivery-items",
+  "search_on_check_allowed": false,
+  "default_packets_changed": false
 }

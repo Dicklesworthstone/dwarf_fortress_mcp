@@ -83,3 +83,48 @@ inventory, budget and outer packet dependencies. No native TCP acquisition,
 private batch parent, Rust/MCP, real DFHack game or full-workspace qualification
 was executed here. No wire, permission or production-admission change is made.
 Beads: df-franken-storage-mvcc-54h.4; df-dfhack-bridge-plane-c-pic.3/.4/.5.
+
+## Executable new-review opt-in
+
+The existing read-only review command now exposes the same solver:
+
+```sh
+python3 scripts/review_route_furniture.py create \
+  --request-file furnishings-request.json \
+  --origin 0 0 5 --size 64 64 1 \
+  --sequence-deliveries --search-delivery-items \
+  --delivery-search-nodes 4096 --timeout-ms 10000
+```
+
+Paths and coordinates are illustrative. Use the existing map/inventory read
+configuration from ROUTE_FURNITURE_REVIEW.md. Search adds no acquisition or native
+method: one captured inventory/map bracket supplies the existing solver and its
+fallback. Both share the same remaining work allowance; the independent export
+reservation and final authority/response-size checks remain enforced.
+
+`--search-delivery-items` requires `create` and `--sequence-deliveries`.
+`--delivery-search-nodes` is optional and requires item search. Invalid modes,
+nonpositive/oversized limits, and any search option with `check` are refused
+before input-file or native reads. The Python runtime mirrors these constraints
+with `search_delivery_items` and `max_search_nodes` arguments.
+
+The complete exported review freezes the fallback's exact chosen items and
+strengthened dependency graph. Packet request, plan, selected native types and
+review identity all refer to that same final assignment. The result lists all
+changes from the initially chosen items. Later `check` never invokes allocation;
+a missing selected item remains unestablished even when a replacement is nearby.
+Neither search failure outcome exports a review. Check `result.status`, not just
+exit zero: exhaustion is a valid incomplete diagnostic, not a success plan.
+
+Without the opt-in, both prior default and sequence-only fixture responses are
+byte-identical to the preceding runtime. No existing review, private journal,
+placement, credential, source generation or production admission is modified.
+
+The combined runner now passes **62 tests**, including nine new actual runtime/
+CLI/file-read cases, with the same five assertion-rejected core mutants. New
+cases cover complete review export, frozen follow-up selection, separate failure
+outcomes, pre-contact option refusal, unchanged files and default packets, one
+shared allowance, final revocation/output refusal, and one redacted native-error
+response without retry. Workflow acquisition, budget and outer packet boundaries
+are explicit doubles. This remains component/workflow evidence, not native TCP,
+private batch-parent, Rust/MCP, real-game or full-workspace qualification.
