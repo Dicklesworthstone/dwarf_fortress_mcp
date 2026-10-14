@@ -97,7 +97,7 @@ def selection(step):
 
 
 def packet(operation: str, result: dict | None, error=False) -> dict:
-    return {'schema': 'dfmcp.route-furniture-batch-result/1', 'ok': not error,
+    value = {'schema': 'dfmcp.route-furniture-batch-result/1', 'ok': not error,
         'result': result, 'runtime_admitted': False,
         **({'error': {'code': 'ROUTE_BATCH_REFUSED', 'detail':
             'Original custody, source, authority, confirmation or budget refused. Recover the original batch and keys; never retry placement.'}} if error else {}),
@@ -116,6 +116,13 @@ def packet(operation: str, result: dict | None, error=False) -> dict:
                 'Source and private-file custody are local; another controller or operator can act independently.'],
             'budget': {'maximum_output_bytes': MAX_OUTPUT, 'token_count_measured': False},
             'references': [] if result is None else [result.get('batch_id'), result.get('review_digest')]}}
+    report = result.get('route_frontier') if type(result) is dict else None
+    construction = report.get('construction_prefix') if type(report) is dict else None
+    if type(construction) is dict:
+        value['agent_turn']['briefing']['execution_frontier_status'] = report['status']
+        value['agent_turn']['briefing']['predecessor_construction_status'] = construction['status']
+        value['agent_turn']['coverage']['construction_prefix_checked'] = True
+    return value
 
 
 def encoded(operation, result, error=False):
@@ -151,6 +158,7 @@ def acquire_frontier(batch, before, authority, budget):
     import route_furniture_inventory as inventory
     import route_furniture_allocation as routes
     from construction_receipt import decode_operations
+    from construction_frontier import gate_frontier
 
     class ReadAuthority(inventory.Authority):
         def guard(self):
@@ -188,6 +196,11 @@ def acquire_frontier(batch, before, authority, budget):
     result = frontier.assess(batch.review, batch.id, prefix, before, candidates,
         {item.id: observed.items[item.id].native_type for item in candidates}, raw, source,
         guard, maximum_work=ANALYSIS_RESERVATION)
+    # Placed is job registration, not finished hauling/construction. Preserve
+    # the exact prefix and require current quiescence before another delivery.
+    # This consumes the remainder of the SAME reserved analysis allowance.
+    result = gate_frontier(result, prefix, operations_raw, guard,
+                           maximum_work=ANALYSIS_RESERVATION)
     batch.check()
     guard()
     return result
@@ -227,7 +240,8 @@ def review_step(batch, authority, acquire=None):
     reserve(state, report)
     state.update(route_frontier=report, expected_plan=plan.digest.hex() if report['status'] == 'ready' else None,
                  confirm_review=confirmation(batch, plan, state['inventory_digest'], report) if report['status'] == 'ready' else None,
-                 route_constraints_checked_this_call=True)
+                 route_constraints_checked_this_call=True,
+                 advance_allowed=report['status'] == 'ready')
     encoded('review', state)
     authority.guard()
     batch.check()

@@ -36,8 +36,9 @@ partial result. No native calls, new protocol, dispatch or retry authority exist
 This is single-capture selected-construction quiescence, NOT durable goal
 achievement, continuous stability, global quiescence, causal attribution,
 current usability, production admission or permission to discharge an effect.
-The source module is ready for the execution-owner integration; until that
-integration lands it does not itself change route-batch readiness.
+The default route owner now applies this predicate through the composition in
+`CONSTRUCTION_EXECUTION_GATE.md`. The pure predicate alone still supplies no
+execution authority or authentication of the original prefix's completeness.
 
 ## Executed component evidence
 

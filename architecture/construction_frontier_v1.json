@@ -1,0 +1,20 @@
+{
+  "schema": "dfmcp.construction-frontier-contract/1",
+  "entry": "route_furniture_batch.acquire_frontier",
+  "composition": "construction_frontier.gate_frontier",
+  "accepted_route_policy": "original-route-constraints-and-fixed-delivery-suffix/2",
+  "execution_policy": "original-route-delivery-and-quiescent-construction-prefix/3",
+  "capture_binding": ["inventory_sha256", "tick", "horizons"],
+  "prefix_binding": ["key", "receipt_digest", "native_plan_digest"],
+  "maximum_input_bytes": 98304,
+  "maximum_output_bytes": 163840,
+  "shared_owner_analysis_work": 6000000,
+  "native_calls_added": 0,
+  "execution_boundaries": ["review", "before_intent", "before_commit_after_dispatch_intent_sync"],
+  "pending_review_confirms": false,
+  "current_predicate_creates_temporal_goal": false,
+  "old_route_only_confirmation_accepted": false,
+  "pending_key_retried": false,
+  "private_journal_format_changed": false,
+  "production_admission_changed": false
+}
