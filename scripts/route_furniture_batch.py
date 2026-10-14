@@ -164,7 +164,7 @@ def acquire_frontier(batch, before, authority, budget):
         def guard(self):
             authority.guard()
 
-    require(type(authority) is Authority and authority.address == batch.address,
+    require(isinstance(authority, Authority) and authority.address == batch.address,
             'route batch endpoint differs from original custody')
     require(budget.work_steps > ANALYSIS_RESERVATION, 'complete route analysis not admitted')
     authority.guard()

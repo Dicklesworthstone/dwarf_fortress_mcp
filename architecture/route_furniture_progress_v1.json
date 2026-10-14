@@ -1,0 +1,28 @@
+{
+  "schema": "dfmcp.route-furniture-progress-contract/1",
+  "implementation": "scripts/route_furniture_progress.py",
+  "policy": "explicit-one-bounded-clock-burst-for-construction-progress/1",
+  "review_required_status": "construction_pending",
+  "confirmation_binds": [
+    "batch_id",
+    "review_digest",
+    "inventory_digest",
+    "next_step",
+    "frontier_evidence",
+    "construction_status",
+    "game_ticks",
+    "wall_ms"
+  ],
+  "clock_profile": "run/1.13",
+  "maximum_game_ticks_per_effect": 1200,
+  "maximum_wall_ms_per_effect": 60000,
+  "automatic_clock_loop": false,
+  "furniture_placement_permitted": false,
+  "placement_retry_permitted": false,
+  "query_recovery_dispatches_mutation": false,
+  "clock_record_path": "derived from progress confirmation inside operator-selected private directory",
+  "same_endpoint_required": true,
+  "post_stop_review_required": true,
+  "native_methods_added": 0,
+  "production_admission_changed": false
+}
