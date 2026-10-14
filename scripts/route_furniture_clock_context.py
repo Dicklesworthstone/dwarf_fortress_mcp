@@ -22,6 +22,11 @@ SCOPE_SUFFIX = '.scope.json'
 SCOPE_KEYS = {'schema', 'policy', 'batch_id', 'review_digest', 'plan_digest',
               'inventory_digest', 'next_step', 'frontier_evidence', 'source',
               'game_ticks', 'wall_ms', 'clock_manifest', 'clock_observation_hex'}
+FINAL_POLICY = 'exact-clock-and-complete-original-batch-one-bounded-progress-effect/1'
+FINAL_SCHEMA = 'dfmcp.route-furniture-final-progress/1'
+FINAL_SCOPE_KEYS = {'schema', 'policy', 'phase', 'batch_id', 'review_digest', 'plan_digest',
+                    'inventory_digest', 'frontier_evidence', 'source', 'game_ticks',
+                    'wall_ms', 'clock_manifest', 'clock_observation_hex'}
 
 
 @dataclass(frozen=True)
@@ -83,10 +88,14 @@ class Scope:
                     'original clock-progress frontier changed')
         return value
 
+    @property
+    def clock_key(self):
+        return 'frp-' + self.digest
+
     def intent(self):
         value = self.value()
         raw = clock.exact_hex(value['clock_observation_hex'], 35)
-        key = 'frp-' + self.digest
+        key = self.clock_key
         plan = clock.plan_for(value['game_ticks'], value['wall_ms'], raw)
         return clock.verify_intent({
             'format': 'dfmcp.bounded-run-intent/1', 'endpoint': value['source']['endpoint'],
@@ -98,13 +107,104 @@ class Scope:
             'effect_status': 'indeterminate_until_native_query'})
 
 
+@dataclass(frozen=True)
+class FinalScope:
+    """Immutable clock consent after every original placement is registered."""
+
+    raw: bytes
+
+    @property
+    def digest(self):
+        return clock.digest(b'dfmcp-route-furniture-final-progress-confirmation/1', self.raw).hex()
+
+    @property
+    def clock_key(self):
+        return 'frf-' + self.digest
+
+    def value(self):
+        require(type(self.raw) is bytes and 0 < len(self.raw) < storage.MAX_FILE,
+                'final progress scope exceeds its byte bound')
+        value = decode_json(self.raw)
+        require(type(value) is dict and set(value) == FINAL_SCOPE_KEYS
+                and canonical(value) == self.raw and value['schema'] == FINAL_SCHEMA
+                and value['policy'] == FINAL_POLICY and value['phase'] == 'final_construction',
+                'invalid canonical final progress scope')
+        for key in ('batch_id', 'review_digest', 'plan_digest', 'inventory_digest', 'frontier_evidence'):
+            digest_text(value[key])
+        integer(value['game_ticks'], 1, 1200)
+        integer(value['wall_ms'], 1, 60000)
+        source = Source.from_json(value['source'])
+        manifest = value['clock_manifest']
+        require(type(manifest) is dict and set(manifest) == {'generation', 'df_version', 'dfhack_version'},
+                'invalid selected final clock manifest')
+        integer(manifest['generation'], 1, 2**64 - 2)
+        require((manifest['df_version'], manifest['dfhack_version']) ==
+                (source.df_version, source.dfhack_version), 'final clock and route software differ')
+        before = clock.snapshot(clock.exact_hex(value['clock_observation_hex'], 35))
+        require(before['generation'] == manifest['generation'] and before['tick'] == source.tick
+                and before['loaded'] and before['clock_valid'] and before['paused'],
+                'clock differs from the reviewed loaded paused final frontier')
+        return value
+
+    @classmethod
+    def create(cls, value):
+        out = cls(canonical(value))
+        out.value()
+        return out
+
+    def bind(self, batch, *, current=False):
+        value = self.value()
+        require(value['batch_id'] == batch.id and value['review_digest'] == batch.review.digest
+                and value['plan_digest'] == batch.plan.digest,
+                'final clock scope belongs to another original batch or review')
+        source = Source.from_json(value['source'])
+        require(clock.endpoint(source.endpoint) == batch.address, 'final clock scope endpoint changed')
+        batch.source.permits(source)
+        state = batch.audit()
+        require(state['inventory_verified'] is True, 'original final batch custody unverified')
+        if current:
+            require(state['inventory_digest'] == value['inventory_digest']
+                    and state['status'] == 'all_placed' and state['next_step'] is None
+                    and state['pending_step'] is None and state['stopped'] is False
+                    and state['placed'] == len(batch.plan.steps),
+                    'original final clock-progress frontier changed')
+        return value
+
+    def intent(self):
+        value = self.value()
+        raw = clock.exact_hex(value['clock_observation_hex'], 35)
+        plan = clock.plan_for(value['game_ticks'], value['wall_ms'], raw)
+        return clock.verify_intent({
+            'format': 'dfmcp.bounded-run-intent/1', 'endpoint': value['source']['endpoint'],
+            'idempotency_key': self.clock_key, 'game_ticks': value['game_ticks'], 'wall_ms': value['wall_ms'],
+            'observation_hex': raw.hex(), 'plan_digest_hex': plan.hex(),
+            'prepare_token_hex': clock.token_for(self.clock_key, plan).hex(),
+            'df_version': value['clock_manifest']['df_version'],
+            'dfhack_version': value['clock_manifest']['dfhack_version'],
+            'effect_status': 'indeterminate_until_native_query'})
+
+
+def decode_scope(raw):
+    """Decode retained next-step or final-construction scope without migration."""
+    value = decode_json(raw)
+    require(type(value) is dict and 'schema' in value, 'clock scope lacks schema')
+    if value['schema'] == SCHEMA:
+        scope = Scope(raw)
+    elif value['schema'] == FINAL_SCHEMA:
+        scope = FinalScope(raw)
+    else:
+        raise ValueError('unsupported clock scope generation')
+    scope.value()
+    return scope
+
+
 class ScopeStore:
     """Immutable association under the caller's already-held clock directory lock.
 
     Sync before native intent/preparation. Existing unassociated v1 records are
     never adopted. Orphan/torn files remain intact and cannot permit redispatch.
     """
-    def __init__(self, path: Path, parent: int, batch, expected: str, *, create: Scope | None = None):
+    def __init__(self, path: Path, parent: int, batch, expected: str, *, create: Scope | FinalScope | None = None):
         digest_text(expected)
         self.path, self.parent, self.batch = path, parent, batch
         self.budget = batch.budget
@@ -125,7 +225,7 @@ class ScopeStore:
             self.batch.budget.remaining()
             self._parent()
             if self.create is not None:
-                require(type(self.create) is Scope and self.create.digest == self.expected,
+                require(type(self.create) in (Scope, FinalScope) and self.create.digest == self.expected,
                         'scope differs from independently confirmed identity')
                 self.create.bind(self.batch, current=True)
                 data = self.create.raw + b'\n'
@@ -148,7 +248,7 @@ class ScopeStore:
             self.data = storage._read(self.fd, self.parent, self.name)
             require(data is None or data == self.data, 'progress scope changed after synchronization')
             require(self.data.endswith(b'\n'), 'incomplete progress scope')
-            self.scope = Scope(self.data[:-1])
+            self.scope = decode_scope(self.data[:-1])
             self.scope.bind(self.batch)
             require(self.scope.digest == self.expected, 'progress scope confirmation mismatch')
             self.stamp = storage._fingerprint(os.fstat(self.fd))

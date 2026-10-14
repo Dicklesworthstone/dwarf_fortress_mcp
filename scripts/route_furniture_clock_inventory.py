@@ -16,7 +16,7 @@ import re
 
 import bounded_run_outcomes as storage
 from furniture_plan import canonical, decode_json, integer, require
-from route_furniture_clock_context import Scope, SCOPE_SUFFIX
+from route_furniture_clock_context import FinalScope, Scope, SCOPE_SUFFIX, decode_scope
 from route_furniture_review import digest_text
 
 POLICY = 'complete-private-scoped-clock-history-before-new-effect/1'
@@ -149,20 +149,22 @@ class Inventory:
                 scope, association, next_step = None, 'unbound', None
                 if SCOPE_SUFFIX in files:
                     require(raw[SCOPE_SUFFIX].endswith(b'\n'), 'incomplete clock scope')
-                    scope = Scope(raw[SCOPE_SUFFIX][:-1])
+                    scope = decode_scope(raw[SCOPE_SUFFIX][:-1])
                     value = scope.value()
                     require(scope.digest == identity, 'clock scope filename differs from its identity')
                     association = 'original_batch' if value['batch_id'] == self.batch.id else 'other_batch'
                     if association == 'original_batch':
                         scope.bind(self.batch)
-                        next_step = value['next_step']
+                        next_step = value.get('next_step')
                 saved = None
                 if '' in files:
                     self.budget.reserve('disk_bytes', STORE_READ_RESERVATION)
                     with storage.OutcomeStore(self.directory / files[''], parent_fd=self.parent) as store:
                         require(store.source_stat == self._files[files['']].stamp
                                 and store.source_data == raw[''], 'intent changed between reads')
-                        require(store.intent['idempotency_key'] == 'frp-' + identity,
+                        expected_key = scope.clock_key if scope is not None else store.intent['idempotency_key']
+                        require(expected_key in ('frp-' + identity, 'frf-' + identity)
+                                and store.intent['idempotency_key'] == expected_key,
                                 'clock intent key differs from its record name')
                         if scope is not None:
                             require(store.intent == scope.intent(), 'native intent differs from original scope')
@@ -181,7 +183,9 @@ class Inventory:
                           'scope_without_intent' if '' not in files else
                           'native_outcome_unknown' if saved is None else
                           'source_lost' if phase == 'source_lost' else 'terminal_record_verified')
-                rows.append({'clock_record_id': identity, 'clock_key': 'frp-' + identity,
+                clock_key = scope.clock_key if scope is not None else (
+                    store.intent['idempotency_key'] if '' in files else 'frp-' + identity)
+                rows.append({'clock_record_id': identity, 'clock_key': clock_key,
                              'association': association, 'next_step': next_step,
                              'native_phase': phase, 'status': reason, 'resolved': resolved,
                              'query_supported': queryable and association == 'original_batch',
@@ -229,14 +233,14 @@ class Inventory:
                                                  for r in self._rows),
                 'query_supported': sum(r['query_supported'] for r in self._rows)}
 
-    def admit_new(self, scope: Scope):
+    def admit_new(self, scope: Scope | FinalScope):
         """Narrow local admission only; no native permission or file creation.
 
         ALL prior scoped records in this selected directory must be resolved.
         Unknown/unassociated/foreign-source-loss history cannot be hidden by a
         caller's page filter. A different directory is outside this local claim.
         """
-        require(type(scope) is Scope and not self._allowed_new, 'new clock scope already selected')
+        require(type(scope) in (Scope, FinalScope) and not self._allowed_new, 'new clock scope already selected')
         self.check()
         scope.bind(self.batch, current=True)
         require(self._groups < MAX_RECORDS and all(r['resolved'] for r in self._rows),
