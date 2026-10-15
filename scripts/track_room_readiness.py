@@ -16,7 +16,7 @@ from build_placement_wire import Rejected, canonical, require
 from construction_plan import Goal as Condition
 from furniture_batch import Batch
 from furniture_completion import Origin
-from room_readiness import POLICY, Progress
+from room_readiness import POLICY, CIRCULATION_POLICY, Progress
 from room_readiness_rpc import Authority, Budget, acquire
 from room_readiness_store import Goal, Journal, State, MAX_FILE, MAX_FRAMES
 import track_furniture_batch as furnishing
@@ -38,7 +38,9 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
     original = (source_verified and verified and not error and state is not None)
     satisfied = bool(original and progress.phase == 'satisfied')
     observed = bool(verified and progress is not None and progress.map_witness is not None)
-    result.update(condition_policy=POLICY,
+    circulation = state is not None and state.goal.require_circulation
+    policy = CIRCULATION_POLICY if circulation else POLICY
+    result.update(condition_policy=policy,
         room_readiness_sampled_condition=satisfied,
         room_completion_proven=False, terrain_completion_proven=False,
         room_assignments_observed=False, atomic_cross_profile_snapshot_proven=False,
@@ -75,7 +77,7 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
         work['kind'] = 'room_readiness_monitor'
     if observed:
         turn['references'].append({
-            'kind': 'joint_room_readiness_sample', 'profile': POLICY,
+            'kind': 'joint_room_readiness_sample', 'profile': policy,
             'sha256': progress.sample_digest, 'game_tick': progress.last_tick,
             'map_observation_witness': progress.map_witness,
             'historical': True, 'canonical_world_anchor': False,
@@ -87,6 +89,11 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
         'Room assignments, structural safety, pathfinding and construction causality are not established by this monitor.',
         'Combined readiness requires verified original batch custody in this call. Cancellation verifies only the monitor journal and never discharges or retries a placement effect.',
     ]
+    if circulation:
+        result['circulation_required'] = True
+        turn['coverage']['circulation_shares_joint_stability_window'] = True
+        turn['uncertainty'].append(
+            'Strict circulation requires clear cardinal model routes to every original entry and furnishing approach. Unit-occupied or unobserved passages cannot prove clear access; no route outside the original floor mask is evaluated.')
     if error:
         value['error'] = {
             'code': 'ROOM_READINESS_MONITOR_REFUSED',
@@ -145,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--stable-span-ticks', type=int)
         parser.add_argument('--max-gap-ticks', type=int)
         parser.add_argument('--max-observations', type=int)
+        parser.add_argument('--require-circulation', action='store_true', default=None,
+                            help='start a version-2 joint goal requiring sampled clear room routes')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         foreground.add_arguments(parser)
         args = parser.parse_args(argv)
@@ -155,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         choices = (args.interval_ticks, args.stable_samples, args.stable_span_ticks,
                    args.max_gap_ticks, args.max_observations)
         require(all(value is not None for value in initial) if operation == 'start'
-                else all(value is None for value in initial + choices),
+                else all(value is None for value in initial + choices + (args.require_circulation,)),
                 'start requires original room batch and fixed policy; reopening cannot replace them')
         if operation == 'start':
             batch = Batch(args.batch, budget)
@@ -165,11 +174,13 @@ def main(argv: list[str] | None = None) -> int:
                 **{name: value for name, value in zip(
                     ('interval', 'stable_samples', 'stable_span', 'max_gap', 'max_observations'), choices)
                     if value is not None})
-            goal = Goal(origin, condition, guard=budget.work)
+            goal = Goal(origin, condition, guard=budget.work,
+                        require_circulation=args.require_circulation is True)
             authority = Authority.load()
             require(authority.address == origin.address,
                     'room query endpoint differs from original furnishing batch')
-            reserve(operation, State(goal, origin.address, Progress(goal.digest)), source_verified=True)
+            reserve(operation, State(goal, origin.address, Progress(goal.digest,
+                    circulation_required=goal.require_circulation)), source_verified=True)
             origin.verify_batch(batch)
             authority.guard()
             owner = Journal(args.journal, budget, writable=True, create=(goal, origin.address))

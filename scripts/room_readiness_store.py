@@ -22,6 +22,7 @@ from furniture_completion import Origin, MAX_ORIGIN
 import room_readiness as readiness
 
 GOAL_MAGIC = b'DFMRDC01'
+CIRCULATION_GOAL_MAGIC = b'DFMRDC02'
 GOAL_DOMAIN = b'dfmcp.original-room-readiness-goal/1\0'
 MAX_GOAL = MAX_ORIGIN + construction.MAX_GOAL + 16
 MAGIC = b'DFMRDJ01'
@@ -54,11 +55,13 @@ class Goal:
     origin: Origin
     condition: construction.Goal
     guard: InitVar[Guard | None] = None
+    require_circulation: bool = False
     readiness_goal: readiness.Goal = derived(init=False, repr=False, compare=False)
 
     def __post_init__(self, guard: Guard | None) -> None:
         work = _idle if guard is None else guard
         work()
+        require(type(self.require_circulation) is bool, 'exact circulation policy Boolean required')
         require(type(self.origin) is Origin and type(self.condition) is construction.Goal,
                 'room readiness requires complete original batch and construction condition')
         origin = Origin.decode(self.origin.encode(), work)
@@ -70,7 +73,8 @@ class Goal:
             condition.max_observations)
         require(condition.encode() == expected.encode(),
                 'room readiness cannot omit or substitute original placement receipts')
-        joint = readiness.Goal(origin.room_handoff, condition, checkpoint=work)
+        joint = readiness.Goal(origin.room_handoff, condition, checkpoint=work,
+                               require_circulation=self.require_circulation)
         object.__setattr__(self, 'origin', origin)
         object.__setattr__(self, 'condition', condition)
         object.__setattr__(self, 'readiness_goal', joint)
@@ -109,7 +113,11 @@ class Goal:
         return self.condition.max_observations
 
     def encode(self) -> bytes:
-        return (GOAL_MAGIC + _blob(self.origin.encode(), MAX_ORIGIN)
+        require(type(self.require_circulation) is bool
+                and self.readiness_goal.require_circulation == self.require_circulation,
+                'original circulation policy disagrees with derived condition')
+        magic = CIRCULATION_GOAL_MAGIC if self.require_circulation else GOAL_MAGIC
+        return (magic + _blob(self.origin.encode(), MAX_ORIGIN)
                 + _blob(self.condition.encode(), construction.MAX_GOAL))
 
     @classmethod
@@ -117,11 +125,13 @@ class Goal:
         work = _idle if guard is None else guard
         work()
         reader = Cursor(raw, MAX_GOAL)
-        require(reader.take(8) == GOAL_MAGIC, 'wrong original room readiness goal generation')
+        magic = reader.take(8)
+        require(magic in (GOAL_MAGIC, CIRCULATION_GOAL_MAGIC),
+                'wrong original room readiness goal generation')
         origin = Origin.decode(_read_blob(reader, MAX_ORIGIN), work)
         condition = construction.Goal.decode(_read_blob(reader, construction.MAX_GOAL))
         reader.finish()
-        result = cls(origin, condition, guard=work)
+        result = cls(origin, condition, guard=work, require_circulation=magic == CIRCULATION_GOAL_MAGIC)
         require(result.encode() == raw, 'noncanonical original room readiness goal')
         work()
         return result
@@ -170,7 +180,8 @@ def transition(state: State | None, kind: str, payload: bytes, budget: Budget) -
         goal = Goal.decode(payload[2 + size:], budget.work)
         require(address == goal.origin.address,
                 'room readiness endpoint differs from the original batch')
-        return State(goal, address, readiness.Progress(goal.digest))
+        return State(goal, address, readiness.Progress(goal.digest,
+                     circulation_required=goal.require_circulation))
     require(not state.progress.terminal, 'record follows immutable terminal room evidence')
     if kind == 'read_started':
         require(not payload, 'room readiness read-start contains unexpected data')

@@ -19,8 +19,10 @@ from furniture_allocation import Candidate, Guard, idle
 from furniture_plan import canonical, require
 from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_HANDOFF
 import room_terrain_goal as terrain
+import room_circulation
 
 POLICY = 'dfmcp.original-room-terrain-and-furnishings/1'
+CIRCULATION_POLICY = 'dfmcp.original-room-terrain-furnishings-and-circulation/2'
 MAX_GOAL = MAX_HANDOFF + construction.MAX_GOAL + 16
 MAX_SAMPLE = construction.MAX_SAMPLE + 2 * terrain.terrain.MAX_CAPTURE_BYTES + 1024
 
@@ -39,10 +41,12 @@ class Goal:
     room: RoomFurnitureHandoff
     condition: construction.Goal
     checkpoint: InitVar[Guard | None] = None
+    require_circulation: bool = False
 
     def __post_init__(self, checkpoint: Guard | None) -> None:
         guard = idle if checkpoint is None else checkpoint
         guard()
+        require(type(self.require_circulation) is bool, 'exact circulation policy Boolean required')
         require(type(self.room) is RoomFurnitureHandoff and type(self.condition) is construction.Goal,
                 'complete original room and construction condition required')
         room = RoomFurnitureHandoff.decode(self.room.encode(), guard)
@@ -76,17 +80,20 @@ class Goal:
         return terrain.RoomTerrainGoal(self.room.room_plan, self.condition.deadline, checkpoint=guard)
 
     def encode(self) -> bytes:
-        return (b'DFMRDG01' + _blob(self.room.encode(), MAX_HANDOFF)
+        require(type(self.require_circulation) is bool, 'exact circulation policy Boolean required')
+        magic = b'DFMRDG02' if self.require_circulation else b'DFMRDG01'
+        return (magic + _blob(self.room.encode(), MAX_HANDOFF)
                 + _blob(self.condition.encode(), construction.MAX_GOAL))
 
     @classmethod
     def decode(cls, raw: bytes, guard: Guard = idle) -> Goal:
         reader = Cursor(raw, MAX_GOAL)
-        require(reader.take(8) == b'DFMRDG01', 'wrong room readiness goal generation')
+        magic = reader.take(8)
+        require(magic in (b'DFMRDG01', b'DFMRDG02'), 'wrong room readiness goal generation')
         room = RoomFurnitureHandoff.decode(_read_blob(reader, MAX_HANDOFF), guard)
         condition = construction.Goal.decode(_read_blob(reader, construction.MAX_GOAL))
         reader.finish()
-        result = cls(room, condition, checkpoint=guard)
+        result = cls(room, condition, checkpoint=guard, require_circulation=magic == b'DFMRDG02')
         require(result.encode() == raw, 'noncanonical room readiness goal')
         return result
 
@@ -164,6 +171,8 @@ class Sample:
         diagnosis['furniture_occupancy'] = {
             'all_targets_have_building_occupancy': not missing,
             'missing_targets': missing, 'building_identity_from_map_proven': False}
+        if goal.require_circulation:
+            diagnosis['circulation'] = _circulation(goal, capture, guard)
         guard()
         return capture, diagnosis
 
@@ -172,16 +181,63 @@ class Sample:
         return hashlib.sha256(b'dfmcp-room-readiness-sample/1\0' + self.encode()).hexdigest()
 
 
+def _circulation(goal: Goal, capture: map_wire.Capture, guard: Guard) -> dict:
+    selected = terrain.terrain.selection(goal.room.room_plan, guard)
+    require(capture.region == selected.region, 'circulation capture differs from original room mask')
+    body = selected.plan.json()
+    owners = {}
+    entries = []
+    for area in body['areas']:
+        guard()
+        entries.append((area['name'], tuple(area['entry_point'])))
+        for unit in area['units']:
+            for name in unit['slots']:
+                guard()
+                require(name not in owners, 'room furnishing has multiple area owners')
+                owners[name] = area['name']
+    slots = body['furniture_request']['slots']
+    require(set(owners) == {slot['name'] for slot in slots}, 'circulation lost an original furnishing')
+    furnishings = tuple((slot['name'], owners[slot['name']], tuple(slot['target'])) for slot in slots)
+    clear, uncertain = set(), set()
+    ox, oy, oz = capture.region.origin
+    sx, sy, sz = capture.region.size
+    for point in sorted(selected.floors):
+        guard()
+        x, y, z = point
+        require(ox <= x < ox + sx and oy <= y < oy + sy and oz <= z < oz + sz,
+                'circulation floor outside original capture')
+        tile = capture.tiles[((z - oz) * sy + y - oy) * sx + x - ox]
+        if tile.presence != 2:
+            uncertain.add(point)
+        else:
+            _, shape, depth, magma, _, dig, building, units, *_ = tile.attributes
+            if shape == 3 and not (depth or magma or dig or building):
+                if units:
+                    uncertain.add(point)
+                else:
+                    clear.add(point)
+    result = room_circulation.assess(selected.floors, frozenset(clear), frozenset(uncertain),
+        tuple(entries), furnishings, connected=body['intent'].get('connect_areas', False), guard=guard)
+    result['map_observation_witness'] = capture.witness
+    result['room_plan_digest'] = selected.plan.digest
+    result['source_bound_digest'] = hashlib.sha256(b'dfmcp-room-circulation-source/1\0'
+        + canonical({'map': capture.witness, 'room': selected.plan.digest,
+                     'evidence': result['evidence_digest']})).hexdigest()
+    guard()
+    return result
+
+
 @dataclass(frozen=True)
 class Progress(construction.Progress):
     map_source: bytes | None = None
     map_witness: str | None = None
     sample_digest: str | None = None
     terrain_diagnosis: bytes | None = None
+    circulation_required: bool = False
 
     def view(self) -> dict:
         result = super().view()
-        result.update(policy=POLICY,
+        result.update(policy=CIRCULATION_POLICY if self.circulation_required else POLICY,
             terrain_at_last_observation=None if self.terrain_diagnosis is None else json.loads(self.terrain_diagnosis),
             map_observation_witness=self.map_witness, joint_sample_digest=self.sample_digest,
             room_readiness_sampled_condition=self.phase == 'satisfied',
@@ -189,6 +245,9 @@ class Progress(construction.Progress):
                 row.condition.status == 'condition_met' for row in self.assessments),
             atomic_cross_profile_snapshot_proven=False, continuous_wall_preservation_proven=False,
             room_assignments_observed=False, room_completion_proven=False, production_admitted=False)
+        if self.circulation_required:
+            result['circulation_required'] = True
+            result['native_pathfinding_proven'] = False
         return result
 
 
@@ -214,23 +273,34 @@ def advance(state: Progress, goal: Goal, sample: Sample, guard: Guard = idle) ->
     witness = sample.digest
     good_terrain = (diagnosis['all_required_shapes_at_sample']
                     and diagnosis['furniture_occupancy']['all_targets_have_building_occupancy'])
+    good_access = (not goal.require_circulation
+                   or diagnosis['circulation']['all_required_routes_clear'])
+    good_sample = good_terrain and good_access
     same_tick_change = (state.last_tick == captured.tick and state.sample_digest is not None
                         and state.sample_digest != witness)
     previous = replace(state, goal_digest=goal.condition.digest)
-    if not good_terrain or same_tick_change:
+    if not good_sample or same_tick_change:
         previous = replace(previous, streak=0, first_tick=None, counted_tick=None)
     # Only this reducer owns temporal progress. Terrain cannot latch a separate
     # terminal success, and a false terrain sample cannot advance its streak.
     current = construction.advance(previous, goal.condition, sample.furnishings, guard)
     current = replace(current, goal_digest=goal.digest, map_source=source,
                       map_witness=captured.witness, sample_digest=witness,
-                      terrain_diagnosis=canonical(diagnosis))
+                      terrain_diagnosis=canonical(diagnosis),
+                      circulation_required=goal.require_circulation)
     if state.map_source is not None and state.map_source != source:
         current = replace(current, phase='invalidated', reason='room_map_source_changed',
                           reason_building=None, streak=0, first_tick=None, counted_tick=None)
-    elif not current.terminal and (not good_terrain or same_tick_change):
-        current = replace(current, phase='active', reason=(
-            'original_room_terrain_not_ready' if not good_terrain else 'room_sample_changed_at_same_tick'),
-            reason_building=None, streak=0, first_tick=None, counted_tick=None)
+    elif current.phase in ('active', 'candidate', 'satisfied') and (not good_sample or same_tick_change):
+        # The child may satisfy a one-sample/zero-span goal after we reset its
+        # streak. That is NOT joint success. Preserve failure/invalidation/deadline
+        # precedence, and charge the lifetime sample limit even on this refusal.
+        exhausted = current.observations >= goal.condition.max_observations
+        reason = ('sample_budget_exhausted' if exhausted else
+                  'original_room_terrain_not_ready' if not good_terrain else
+                  'original_room_circulation_not_ready' if not good_access else
+                  'room_sample_changed_at_same_tick')
+        current = replace(current, phase='expired' if exhausted else 'active', reason=reason,
+                          reason_building=None, streak=0, first_tick=None, counted_tick=None)
     guard()
     return current
