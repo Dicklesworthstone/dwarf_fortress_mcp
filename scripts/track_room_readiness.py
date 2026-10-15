@@ -10,6 +10,7 @@ Beads: df-dfhack-bridge-plane-c-pic.3/.4/.5; WP-05/07/10.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import sys
 
 from build_placement_wire import Rejected, canonical, require
@@ -21,6 +22,7 @@ from room_readiness_rpc import Authority, Budget, acquire
 from room_readiness_store import Goal, Journal, State, MAX_FILE, MAX_FRAMES
 import track_furniture_batch as furnishing
 import construction_wait as foreground
+import room_readiness_current as current
 
 MAX_OUTPUT = 256 * 1024
 
@@ -99,7 +101,45 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
             'code': 'ROOM_READINESS_MONITOR_REFUSED',
             'detail': 'Original room batch, complete evidence, source, authority, budget or monitor custody refused. Preserve the monitor and original placement history; do not retry placement.',
         }
+    if operation == 'check':
+        # Never leave a historical success next to a fresh failure under the
+        # same unqualified result key. Preserve the entire old packet as history.
+        value['schema'] = 'dfmcp.room-readiness-check-result/1'
+        value['result'] = {
+            'history': result, 'current_readiness': None,
+            'current_condition_at_sample': None, 'fresh_acquisition_completed': False,
+            'monitor_updated': False, 'durable_sample_published': False,
+            'stability_evaluated': False, 'placement_effects_reconciled': False,
+        }
+        turn['briefing']['historical_room_readiness_sampled_condition'] = satisfied
+        turn['briefing'].pop('room_readiness_sampled_condition', None)
+        turn['briefing']['current_condition_at_sample'] = None
+        turn['coverage'].update(fresh_room_condition_observed=False,
+                                monitor_updated=False, current_sample_durable=False)
+        turn['uncertainty'].append(
+            'Check is an ephemeral current diagnosis. It does not update terminal history, '
+            'earn stability credit, resolve an interrupted monitor read or persist this new sample.')
     return value
+
+
+def attach_current(value: dict, inspection: dict) -> None:
+    """Publish fresh and historical evidence in distinct named sections."""
+    require(value['schema'] == 'dfmcp.room-readiness-check-result/1',
+            'fresh inspection belongs only to a check response')
+    value['result'].update(current_readiness=inspection,
+                          current_condition_at_sample=inspection['condition_truth'],
+                          fresh_acquisition_completed=True)
+    turn = value['agent_turn']
+    turn['briefing'].update(current_condition_at_sample=inspection['condition_truth'],
+                            current_condition_status=inspection['status'],
+                            current_condition_game_tick=inspection['game_tick'])
+    turn['coverage']['fresh_room_condition_observed'] = True
+    turn['references'].append({
+        'kind': 'current_room_condition', 'profile': current.POLICY,
+        'sha256': inspection['evidence_digest'], 'game_tick': inspection['game_tick'],
+        'joint_sample_digest': inspection['joint_sample_digest'],
+        'acquired_this_call': True, 'durably_retained': False, 'canonical_world_anchor': False,
+    })
 
 
 def output(value: dict) -> bytes:
@@ -139,10 +179,10 @@ class Parser(argparse.ArgumentParser):
 def main(argv: list[str] | None = None) -> int:
     operation, owner, batch, last_state = 'unknown', None, None, None
     native_contacted, authority = False, None
-    wait_result = None
+    wait_result, current_result = None, None
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('start', 'sample', 'wait', 'inspect', 'cancel'))
+        parser.add_argument('operation', choices=('start', 'sample', 'wait', 'inspect', 'check', 'cancel'))
         parser.add_argument('--journal', required=True)
         parser.add_argument('--batch')
         parser.add_argument('--batch-id')
@@ -242,6 +282,37 @@ def main(argv: list[str] | None = None) -> int:
                 # required in addition to the complete receipt-monitor sample.
                 additional_rpc_calls=5)
             stored = wait_result.samples > 0
+        elif operation == 'check':
+            # Journal and original batch were opened read-only above. A fresh
+            # query may inspect any terminal phase but cannot reopen its monitor.
+            authority = Authority.load()
+            require(authority.address == owner.state.address,
+                    'check endpoint differs from original room readiness goal')
+            reserved = reserve(operation, owner.state, source_verified=True,
+                               native_contacted=True, storage_acknowledged=False)
+            require(len(reserved) + current.MAX_OUTPUT + 4096 <= MAX_OUTPUT,
+                    'complete historical and fresh room evidence cannot fit')
+            history, history_length = owner.state, owner.length
+            owner.check()
+            source_guard()
+            authority.guard()
+            budget.remaining()
+            native_contacted = True
+            sample = acquire(authority, history.goal.readiness_goal, budget)
+
+            def inspect_guard() -> None:
+                budget.work()
+                authority.guard()
+
+            owner.check()
+            source_guard()
+            current_result = current.inspect(history.goal.readiness_goal, sample,
+                baseline=replace(history.progress, goal_digest=history.goal.readiness_goal.digest),
+                guard=inspect_guard)
+            owner.check()
+            source_guard()
+            require(owner.state == history and owner.length == history_length,
+                    'read-only check changed original monitor history')
         elif operation == 'cancel':
             stored = owner.cancel(lambda candidate: reserve(operation, candidate,
                                                             storage_acknowledged=True))
@@ -255,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
             'frames': last_state.frames, 'bytes': owner.length, 'head': last_state.tail.hex()}
         if wait_result is not None:
             value['result']['wait'] = wait_result.view()
+        if current_result is not None:
+            attach_current(value, current_result)
         raw = output(value)
         # Final rendering cannot outlive source custody or the authority that
         # acquired the newly persisted sample, including a terminal sample.

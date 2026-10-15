@@ -1,0 +1,33 @@
+{
+  "schema": "dfmcp.room-current-readiness-contract/1",
+  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "entrypoint": "scripts/track_room_readiness.py check --journal <original-monitor>",
+  "result_schema": "dfmcp.room-readiness-check-result/1",
+  "condition_schema": "dfmcp.room-current-condition/1",
+  "policy": "dfmcp.original-room-current-condition/1",
+  "selection": "all original terrain, furnishings, occupancy and original optional circulation",
+  "source": "existing receipt/map/operations bracket; no new native methods",
+  "acquisitions_per_call": 1,
+  "journal_access": "read_only",
+  "original_batch_access": "read_only",
+  "current_report_bytes": 65536,
+  "presentation_reservation_bytes": 4096,
+  "complete_response_bytes": 262144,
+  "result_sections": ["history", "current_readiness", "current_condition_at_sample"],
+  "statuses": ["condition_met", "condition_not_met", "blocked_unknown", "invalidated_reference"],
+  "truth": ["true", "false", "unknown"],
+  "floors": "last retained monitor sample only; check does not persist a newer floor",
+  "terminal_history_reopened": false,
+  "deadline_renewed": false,
+  "stable_sample_added": false,
+  "lost_monitor_read_resolved": false,
+  "placement_effect_reconciled": false,
+  "automatic_retry": false,
+  "native_mutation": false,
+  "production_admission_changed": false,
+  "failure": "fresh diagnosis withheld; original monitor and effect history unchanged",
+  "tests": {
+    "executed": "27 focused tests with injected validated-native/file/transport/authority owners",
+    "not_executed": "8 actual-codec and real-private-journal companion tests; missing upstream source modules"
+  }
+}
