@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import hashlib
 import json
 
+import room_connections as connections
+
 from furniture_allocation import Guard, Request, Slot, idle
 from furniture_plan import MAX_BYTES, canonical, integer, label, require, unique
 
@@ -181,6 +183,40 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
              'item_constraints': constraints}, parts, units, selections, entrance)
 
 
+def _connect_project(compiled, floors: set[Point], targets: set[Point],
+                     forbidden: list[_Rect], low: Point, extent: Point,
+                     guard: Guard) -> connections.Connections:
+    """Preserve every required bedroom wall while joining complete area floors."""
+    require(extent[2] == 1, 'connected room projects require one level; stairs are not inferred')
+    protected = set(targets)
+    high = tuple(a + n for a, n in zip(low, extent))
+    for area, _, units, _, _ in compiled:
+        if area['template']['kind'] != 'bedroom_cluster':
+            continue
+        for unit in units:
+            x, y, z = unit['origin']
+            width, height, _ = unit['size']
+            doorway = tuple(unit['doorway'])
+            for yy in range(y - 1, y + height + 1):
+                for xx in range(x - 1, x + width + 1):
+                    guard()
+                    p = (xx, yy, z)
+                    if ((xx in (x - 1, x + width) or yy in (y - 1, y + height))
+                            and p != doorway and all(a <= n < b for a, n, b in zip(low, p, high))):
+                        protected.add(p)
+    # Only the already bounded capture is scanned. Huge excluded cuboids are
+    # membership tests, never expanded volumes or permission to enlarge a route.
+    for p in _Rect(low, extent, 'capture', '').points(guard):
+        for excluded in forbidden:
+            guard()
+            if all(a <= n < b for a, n, b in zip(excluded.origin, p, excluded.end)):
+                protected.add(p)
+                break
+    return connections.connect(floors - targets, protected,
+        tuple((area['name'], entry) for area, _, _, _, entry in compiled),
+        (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard)
+
+
 @dataclass(frozen=True)
 class RoomPlan:
     """Immutable compiled bytes. Decode regenerates, rather than trusting outputs."""
@@ -189,8 +225,10 @@ class RoomPlan:
     @classmethod
     def compile(cls, value: object, guard: Guard = idle) -> RoomPlan:
         guard()
-        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions'})
+        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas'})
         require(value['schema'] == INTENT_SCHEMA, 'wrong room-provisioning request generation')
+        connect_areas = value.get('connect_areas', False)
+        require(type(connect_areas) is bool, 'connect_areas must be an exact Boolean')
         areas = value['areas']
         require(type(areas) is list and 1 <= len(areas) <= MAX_AREAS, 'room plan needs 1..8 areas')
         exclusions = value.get('excluded_regions', [])
@@ -267,12 +305,30 @@ class RoomPlan:
             geometry.append({'name': area['name'], 'entry_point': list(entrance), 'units': units,
                 'floor_tiles': len(floor), 'walkable_tiles': len(walkable), 'approaches': access,
                 'access_digest': hashlib.sha256(b'dfmcp-room-geometric-access/1\0' + witness).hexdigest()})
+        project_connections = None
+        if connect_areas:
+            routed = _connect_project(compiled, floors, targets, forbidden, low, extent, guard)
+            corridors = [_Rect(origin, size, 'project_corridor', '') for origin, size in routed.parts]
+            require(len(parts) + len(corridors) <= MAX_PARTS,
+                    'connected room project exceeds the existing 32-part excavation limit')
+            expanded = set().union(*(set(part.points(guard)) for part in corridors))
+            require(expanded == set(routed.added) and not expanded & floors
+                    and sum(p.volume for p in corridors) == len(expanded),
+                    'corridor partition differs from the exact selected mask')
+            parts.extend(corridors)
+            floors.update(expanded)
+            require(len(floors) <= MAX_TILES, 'connected room project exceeds the tile limit')
+            project_connections = routed.summary()
+            project_connections['root_area'] = compiled[0][0]['name']
+            project_connections['areas'] = [area['name'] for area, *_ in compiled]
         parts.sort(key=lambda p: (p.origin[::-1], p.size[::-1]))
         blueprint = {'schema': 'dfmcp.excavation-blueprint/1', 'parts': [p.part() for p in parts]}
         require(len(canonical(blueprint)) <= MAX_BYTES, 'excavation artifact exceeds existing input bound')
         intent = {'schema': INTENT_SCHEMA, 'world_folder': request.folder, 'site': request.site,
             'areas': [area for area, *_ in compiled], 'excluded_items': list(request.excluded_items),
             'excluded_regions': [{'origin': list(r.origin), 'size': list(r.size)} for r in forbidden]}
+        if connect_areas:
+            intent['connect_areas'] = True
         require(len(canonical(intent)) <= MAX_BYTES, 'normalized room request exceeds input bound')
         # Match the existing read-only blueprint's semantic mask identity. The
         # exact downstream normal-mining partition is still owned by dig_blueprint.
@@ -289,6 +345,8 @@ class RoomPlan:
             'wall_preservation_observed': False, 'room_assignments_created': False,
             'prepared_plan_created': False, 'room_completion_proven': False,
             'mutation_authority_granted': False, 'construction_completion_proven': False}
+        if project_connections is not None:
+            body['project_connections'] = project_connections
         plan = cls(canonical(body))
         require(len(plan.encode()) <= MAX_PLAN_BYTES, 'complete room plan exceeds bounded artifact')
         guard()

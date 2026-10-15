@@ -1,0 +1,55 @@
+{
+  "schema": "dfmcp.room-project-connections-contract/1",
+  "policy": "dfmcp.room-project-connections/1",
+  "parent_contract": "architecture/room_provisioning_v1.json",
+  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "request": {
+    "schema": "dfmcp.room-provisioning-request/1",
+    "optional_field": "connect_areas",
+    "type": "boolean",
+    "default": false,
+    "legacy_normalization": "absent_or_false_omitted_from_normalized_intent_and_no_project_connections_output",
+    "true": "connect_every_original_area_and_walkable_floor_component_or_refuse_complete_plan"
+  },
+  "result_field": "project_connections",
+  "entrypoint": "scripts/plan_rooms.py compile --request-file rooms.json",
+  "limits": {
+    "areas": 8,
+    "levels": 1,
+    "capture_cells": 1024,
+    "routing_work_units": 100000,
+    "witness_bytes": 131072,
+    "whole_plan_floor_tiles_including_furniture": 512,
+    "whole_plan_excavation_parts": 32,
+    "whole_plan_furniture_slots": 32
+  },
+  "routing": {
+    "root": "entry_of_ascii_first_area",
+    "sources": "all_currently_connected_intended_floor_cells",
+    "destinations": "every_unconnected_intended_floor_cell",
+    "movement": "horizontal_cardinal_only",
+    "objective_per_link": "new_excavation_then_path_length",
+    "tie_break": "coordinate_tuple_ascending_then_first_equal_cost_parent",
+    "partition": "equal_horizontal_runs_merged_across_consecutive_rows",
+    "global_network_optimality_claimed": false,
+    "capture_expansion": false,
+    "blocked": ["planned_furniture", "required_bedroom_walls_except_original_doorways", "excluded_region_cells"]
+  },
+  "preservation": [
+    "Original room footprints, furnishings, constraints and per-area access witnesses remain unchanged.",
+    "Only added route cells enter the existing floor excavation blueprint; no bounding-box fill.",
+    "The plan and excavation-mask digests include every added corridor.",
+    "Canonical plan decoding recomputes connections from the retained complete original intention.",
+    "Every routing checkpoint invokes the original caller guard; areas do not renew its work or wall budget.",
+    "Bounds, interruption or an unreachable area yield no partial connected plan."
+  ],
+  "source_files": ["scripts/room_connections.py", "scripts/room_provisioning.py"],
+  "test_files": ["tests/test_room_connections.py", "tests/test_connected_room_provisioning.py"],
+  "example": "schemas/examples/connected_rooms_v1.json",
+  "native_methods_added": [],
+  "game_effects": [],
+  "native_pathfinding_proven": false,
+  "terrain_observed": false,
+  "existing_fort_access_proven": false,
+  "production_admission_changed": false
+}
