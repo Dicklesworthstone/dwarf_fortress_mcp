@@ -41,6 +41,10 @@ def neighbors(p: Point) -> tuple[Point, ...]:
     return (x - 1, y, z), (x, y - 1, z), (x, y + 1, z), (x + 1, y, z)
 
 
+class WorkLimit(ValueError):
+    """Routing stopped without proving either a connection or impossibility."""
+
+
 class _Work:
     def __init__(self, guard: Guard, maximum: int) -> None:
         require(type(maximum) is int and 1 <= maximum <= MAX_WORK,
@@ -48,7 +52,8 @@ class _Work:
         self.guard, self.maximum, self.used = guard, maximum, 0
 
     def charge(self) -> None:
-        require(self.used < self.maximum, 'room connections exhausted bounded work')
+        if self.used >= self.maximum:
+            raise WorkLimit('room connections exhausted bounded work')
         self.used += 1
         self.guard()
 

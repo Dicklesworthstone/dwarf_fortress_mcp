@@ -1,12 +1,31 @@
 {
   "schema": "dfmcp.room-access-contract/1",
   "status": "python_component_checked_not_live_qualified",
-  "owning_beads": ["dfmcp-wp-pln01-spatial-blueprint-layout-pwd", "df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "owning_beads": [
+    "dfmcp-wp-pln01-spatial-blueprint-layout-pwd",
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
   "room_request_field": "access",
-  "access_required_fields": ["point", "region"],
-  "region_required_fields": ["origin", "size"],
+  "access_required_fields": [
+    "point",
+    "region"
+  ],
+  "region_required_fields": [
+    "origin",
+    "size"
+  ],
   "requires_connect_areas": true,
-  "limits": {"access_points": 1, "areas": 8, "target_cells_including_access": 512, "excavation_parts_including_access": 32, "routing_cells": 1024, "routing_axis": 128, "levels": 1},
+  "limits": {
+    "access_points": 1,
+    "areas": 8,
+    "target_cells_including_access": 512,
+    "excavation_parts_including_access": 32,
+    "routing_cells": 1024,
+    "routing_axis": 128,
+    "levels": 1
+  },
   "semantics": [
     "Root and every original area must be cardinally connected after treating furniture as blocked.",
     "The access point is part of the original floor goal, not omitted from downstream terrain proof.",
@@ -22,5 +41,25 @@
   "existing_fortress_access_proven": false,
   "mutation_authority_granted": false,
   "production_admission_changed": false,
-  "tests": ["tests/test_room_access.py"]
+  "tests": [
+    "tests/test_room_access.py",
+    "tests/test_room_access_layout.py",
+    "tests/test_room_access_tcp.py"
+  ],
+  "layout_request_field": "access_point",
+  "layout_policy": "dfmcp.mrv-entrance-room-layout/1",
+  "layout_routing_domain": "complete_original_layout_region",
+  "observed_entrance": "original_decoded_map_capture_visible_dry_undesignated_unoccupied_floor_before_site_mask_intersection",
+  "observed_evidence_fields": [
+    "point",
+    "epistemic_status",
+    "game_tick",
+    "map_witness",
+    "point_floor_observed",
+    "same_capture_as_layout",
+    "point_is_existing_fortress_entrance_proven",
+    "native_pathfinding_proven",
+    "current_access_proven"
+  ],
+  "router_budget_exhaustion": "inconclusive_WorkLimit_not_no_layout_in_domain"
 }

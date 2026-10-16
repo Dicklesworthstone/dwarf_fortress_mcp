@@ -103,6 +103,12 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
     require(capture.paused and (capture.folder, capture.site) == (request['world_folder'], request['site']),
             'observed layout requires the original paused fortress')
     observed, counts = _site(capture, work)
+    if 'access_point' in request:
+        work()
+        # Check the decoded observation BEFORE caller site-mask intersection:
+        # caller "F" on an observed wall must not become evidence of a floor.
+        require(observed.at(tuple(request['access_point'])) == 'F',
+                'access point must be observed visible dry undesignated unoccupied floor')
     effective = observed
     if 'site_mask' in request:
         original = SiteMask.from_json(request['site_mask'], work)
@@ -125,6 +131,13 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             'adjacent_hazards_observed': False, 'construction_support_proven': False,
             'current_terrain_proven': False, 'mutation_authority_granted': False,
             'production_admitted': False}
+    if 'access_point' in request:
+        body['access_evidence'] = {
+            'point': request['access_point'], 'epistemic_status': 'observed',
+            'game_tick': capture.tick, 'map_witness': capture.witness,
+            'point_floor_observed': True, 'same_capture_as_layout': True,
+            'point_is_existing_fortress_entrance_proven': False,
+            'native_pathfinding_proven': False, 'current_access_proven': False}
     result = ObservedLayout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete observed layout exceeds output bound')
     guard()

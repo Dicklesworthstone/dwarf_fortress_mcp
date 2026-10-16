@@ -13,6 +13,8 @@ from typing import Callable
 
 from furniture_plan import canonical, integer, require
 from room_site_mask import SiteMask
+from room_access import Access
+from room_connections import WorkLimit as ConnectionWorkLimit
 from room_orientation import ROTATIONS, rotation
 from room_provisioning import (
     INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
@@ -23,6 +25,7 @@ REQUEST_SCHEMA = 'dfmcp.room-layout-request/1'
 RESULT_SCHEMA = 'dfmcp.room-layout-result/1'
 POLICY = 'dfmcp.mrv-connected-room-layout/1'
 ORIENTED_POLICY = 'dfmcp.mrv-oriented-room-layout/1'
+ACCESS_POLICY = 'dfmcp.mrv-entrance-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
@@ -175,7 +178,7 @@ def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work)
 def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
-            {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask'})
+            {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     domain = _region(value['region'], domain=True)
     focus = _vector(value.get('focus', list(domain[0])), 1, 32766)
@@ -228,6 +231,14 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
         site_mask = SiteMask.from_json(value['site_mask'], work)
         require((site_mask.origin, site_mask.size) == domain, 'site mask must match the complete layout domain')
         request['site_mask'] = site_mask.json()
+    if 'access_point' in value:
+        work()
+        access = Access.from_json({'point': value['access_point'], 'region': request['region']})
+        require(not any(_contains(region, access.point) for region in regions),
+                'access point intersects an excluded region')
+        if 'site_mask' in request:
+            require(site_mask.permits_floor(access.point), 'access point forbidden by site mask')
+        request['access_point'] = list(access.point)
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -364,6 +375,12 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 forbidden |= 1 << index
             if cell not in '.W':
                 wall_forbidden |= 1 << index
+    if 'access_point' in request:
+        work()
+        x, y, _ = request['access_point']
+        # A retained bedroom wall cannot consume the selected entrance. Furniture
+        # collision and whole-route feasibility are checked by the real compiler.
+        wall_forbidden |= 1 << ((y - low[1]) * size[0] + x - low[0])
     domains = tuple(_candidates(p, request, forbidden, work, wall_forbidden) for p in profiles)
     require(sum(map(len, domains)) <= MAX_CANDIDATES, 'layout candidate inventory exceeds bound')
     nodes, leaves, rejected, backtracks = 0, 0, 0, 0
@@ -396,8 +413,12 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                        'excluded_items': request['excluded_items'], 'excluded_regions': request['excluded_regions']}
             if 'site_mask' in request:
                 lowered['site_mask'] = request['site_mask']
+            if 'access_point' in request:
+                lowered['access'] = {'point': request['access_point'], 'region': request['region']}
             try:
                 plan = RoomPlan.compile(lowered, work)
+            except ConnectionWorkLimit as cause:
+                raise WorkLimit('room connection work allowance exhausted') from cause
             except ValueError:
                 if work.interrupted:
                     raise
@@ -443,7 +464,7 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': ORIENTED_POLICY if oriented else POLICY,
+    body = {'schema': RESULT_SCHEMA, 'policy': ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
             'status': status, 'request': request,
             'request_digest': _digest(b'dfmcp-room-layout-request/1\0', request),
             'room_plan': None if solution is None else solution.json(),
