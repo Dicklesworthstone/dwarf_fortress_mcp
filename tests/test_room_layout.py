@@ -126,9 +126,10 @@ class LayoutTests(unittest.TestCase):
 
     def test_exhaustive_small_obstacle_domains_match_independent_cell_oracle(self):
         # 256 masks; three possible translations of the actual 4x3 dining area.
-        blockers = [(x, y, 2) for x in range(10,14) for y in (10,14)]
+        blockers = [(x, y, 2) for x in (10,13) for y in (10,11,12,14)]
         placements = [{(x,y,2) for x in range(10,14) for y in range(start,start+3)}
                       for start in range(10,13)]
+        accepted = refused = 0
         for bits in range(1 << len(blockers)):
             blocked = {p for i,p in enumerate(blockers) if bits & (1<<i)}
             doc = request(dining(), size=(4,5,1), excluded_regions=[
@@ -136,9 +137,13 @@ class LayoutTests(unittest.TestCase):
             out = solve(doc).json()
             expected = any(not p & blocked for p in placements)
             self.assertEqual(out['status'] == 'layout_found', expected, bits)
+            accepted += int(expected)
+            refused += int(not expected)
             if not expected:
                 self.assertTrue(out['search']['domain_exhausted'])
                 self.assertIsNone(out['room_plan'])
+        self.assertGreater(accepted, 0)
+        self.assertGreater(refused, 0)
 
     def test_two_area_feasibility_matches_exhaustive_origin_pairs(self):
         # The complete native-model corridor compiler must validate each pair;

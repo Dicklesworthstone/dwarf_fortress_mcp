@@ -1,0 +1,21 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "region1",
+  "site": 2,
+  "region": {"origin": [10, 10, 2], "size": [18, 16, 1]},
+  "focus": [10, 10, 2],
+  "areas": [
+    {
+      "name": "sleep",
+      "template": {"kind": "bedroom_cluster", "rooms_count": 2, "room_size": [3, 3]},
+      "item_constraints": {"bed": {"material": [419, -1], "max_distance": 100}}
+    },
+    {
+      "name": "eat",
+      "template": {"kind": "dining_hall", "table_count": 3, "columns": 3}
+    }
+  ],
+  "excluded_items": [],
+  "excluded_regions": [],
+  "search": {"max_nodes": 10000, "max_work": 2000000}
+}

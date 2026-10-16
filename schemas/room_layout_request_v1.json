@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Structural contract only. Runtime additionally checks UTF-8 byte bounds, exact integer types, region extents/products, duplicates by identity, fixed-origin containment, whole request capacity, finite search budgets, and canonical regenerated artifacts. No native observation or mutation authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "world_folder",
+    "site",
+    "region",
+    "areas"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dfmcp.room-layout-request/1"
+    },
+    "world_folder": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "not": {
+        "pattern": "\u0000"
+      }
+    },
+    "site": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "region": {
+      "$ref": "#/$defs/domain"
+    },
+    "focus": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 32766
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "areas": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/area"
+      },
+      "minItems": 1,
+      "maxItems": 8
+    },
+    "excluded_items": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483646
+      },
+      "uniqueItems": true,
+      "maxItems": 4096
+    },
+    "excluded_regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/excluded_region"
+      },
+      "uniqueItems": true,
+      "maxItems": 32
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "max_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "max_work": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000000
+        }
+      }
+    }
+  },
+  "$defs": {
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "size"
+      ],
+      "properties": {
+        "origin": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32766
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "size": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            {
+              "const": 1
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "excluded_region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "size"
+      ],
+      "properties": {
+        "origin": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32767
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32768
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "bedroom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "rooms_count",
+        "room_size"
+      ],
+      "properties": {
+        "kind": {
+          "const": "bedroom_cluster"
+        },
+        "rooms_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "room_size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 7
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "dining": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "table_count"
+      ],
+      "properties": {
+        "kind": {
+          "const": "dining_hall"
+        },
+        "table_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "bed": {
+          "$ref": "#/$defs/constraint"
+        },
+        "chair": {
+          "$ref": "#/$defs/constraint"
+        },
+        "table": {
+          "$ref": "#/$defs/constraint"
+        }
+      }
+    },
+    "constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "material": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 2147483647
+                },
+                {
+                  "type": "integer",
+                  "minimum": -1,
+                  "maximum": 2147483647
+                }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
+        },
+        "subtype": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 2147483647
+        },
+        "max_distance": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65532
+        }
+      }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "template"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24,
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "not": {
+            "pattern": "[^A-Za-z0-9_.-]"
+          }
+        },
+        "template": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/bedroom"
+            },
+            {
+              "$ref": "#/$defs/dining"
+            }
+          ]
+        },
+        "item_constraints": {
+          "$ref": "#/$defs/constraints"
+        },
+        "origin": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32766
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "origin_region": {
+          "$ref": "#/$defs/domain"
+        }
+      },
+      "not": {
+        "required": [
+          "origin",
+          "origin_region"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "template": {
+                "properties": {
+                  "kind": {
+                    "const": "dining_hall"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "item_constraints": {
+                "not": {
+                  "required": [
+                    "bed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
