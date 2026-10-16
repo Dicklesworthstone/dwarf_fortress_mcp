@@ -12,6 +12,7 @@ import json
 
 import room_connections as connections
 from room_site_mask import SiteMask
+from room_orientation import compile_rotated_area
 
 from furniture_allocation import Guard, Request, Slot, idle
 from furniture_plan import MAX_BYTES, canonical, integer, label, require, unique
@@ -113,7 +114,9 @@ def _neighbors(point: Point) -> tuple[Point, ...]:
 
 
 def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], list[dict], Point]:
-    _object(value, {'name', 'origin', 'template'}, {'item_constraints'})
+    _object(value, {'name', 'origin', 'template'}, {'item_constraints', 'rotation'})
+    if 'rotation' in value:
+        return compile_rotated_area(value, guard, _area)
     name = label(value['name'])
     require(len(name) <= 24, 'area name exceeds room-slot namespace allowance')
     x, y, z = origin = _vector(value['origin'], 1, 32766)
