@@ -1,0 +1,26 @@
+{
+  "schema": "dfmcp.room-access-contract/1",
+  "status": "python_component_checked_not_live_qualified",
+  "owning_beads": ["dfmcp-wp-pln01-spatial-blueprint-layout-pwd", "df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "room_request_field": "access",
+  "access_required_fields": ["point", "region"],
+  "region_required_fields": ["origin", "size"],
+  "requires_connect_areas": true,
+  "limits": {"access_points": 1, "areas": 8, "target_cells_including_access": 512, "excavation_parts_including_access": 32, "routing_cells": 1024, "routing_axis": 128, "levels": 1},
+  "semantics": [
+    "Root and every original area must be cardinally connected after treating furniture as blocked.",
+    "The access point is part of the original floor goal, not omitted from downstream terrain proof.",
+    "Required bedroom walls, excluded regions and site constraints also prohibit the access point and corridors.",
+    "The routing domain can exceed the room hull but is never itself an excavation mask.",
+    "Final target capture and semantic mask digest use the tight complete target hull.",
+    "The root participates in the deterministic connection witness even without added corridors.",
+    "No partial room project or changed constraints are returned after refusal or cancellation.",
+    "Requests without access preserve previous canonical outputs."
+  ],
+  "native_methods_added": [],
+  "game_effects": [],
+  "existing_fortress_access_proven": false,
+  "mutation_authority_granted": false,
+  "production_admission_changed": false,
+  "tests": ["tests/test_room_access.py"]
+}

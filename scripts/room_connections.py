@@ -124,7 +124,8 @@ class Connections:
 
 def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozenset[Point],
             entries: tuple[tuple[str, Point], ...], region: Region, *,
-            max_new_tiles: int, guard: Guard = idle, max_work: int = MAX_WORK) -> Connections:
+            max_new_tiles: int, guard: Guard = idle, max_work: int = MAX_WORK,
+            root: Point | None = None) -> Connections:
     """Connect the complete intended floor in one fixed same-level capture.
 
     Inputs are copied only after size admission. No vertical movement or outside
@@ -167,7 +168,12 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
                 'invalid or duplicate room entry')
         names.add(entry[0])
     entries = tuple(sorted(entries))
-    root = entries[0][1]
+    explicit_root = root
+    if root is None:
+        root = entries[0][1]
+    else:
+        work.charge()
+        require(point(root) and root in floors, 'connection root must be an admitted floor cell')
     original, walkable, added, links, paths = set(floors), set(floors), set(), [], []
     connected = _flood(walkable, root, work)
     while connected != walkable:
@@ -212,6 +218,8 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
     witness = {'policy': POLICY, 'region': region, 'entries': entries,
                'original_floor': sorted(original), 'blocked': sorted(blocked),
                'paths': paths, 'walkable': sorted(connected), 'parts': parts}
+    if explicit_root is not None:
+        witness['root'] = explicit_root
     raw = json.dumps(witness, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
                      allow_nan=False).encode('ascii')
     require(len(raw) <= 128 * 1024, 'room-connection witness exceeds bound')

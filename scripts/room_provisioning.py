@@ -13,6 +13,7 @@ import json
 import room_connections as connections
 from room_site_mask import SiteMask
 from room_orientation import compile_rotated_area
+from room_access import Access
 
 from furniture_allocation import Guard, Request, Slot, idle
 from furniture_plan import MAX_BYTES, canonical, integer, label, require, unique
@@ -189,7 +190,8 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
 
 def _connect_project(compiled, floors: set[Point], targets: set[Point],
                      forbidden: list[_Rect], low: Point, extent: Point,
-                     guard: Guard, site_mask: SiteMask | None = None) -> connections.Connections:
+                     guard: Guard, site_mask: SiteMask | None = None,
+                     root: Point | None = None) -> connections.Connections:
     """Preserve every required bedroom wall while joining complete area floors."""
     require(extent[2] == 1, 'connected room projects require one level; stairs are not inferred')
     protected = set(targets)
@@ -220,7 +222,7 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
                 break
     return connections.connect(floors - targets, protected,
         tuple((area['name'], entry) for area, _, _, _, entry in compiled),
-        (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard)
+        (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard, root=root)
 
 
 @dataclass(frozen=True)
@@ -231,10 +233,12 @@ class RoomPlan:
     @classmethod
     def compile(cls, value: object, guard: Guard = idle) -> RoomPlan:
         guard()
-        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask'})
+        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask', 'access'})
         require(value['schema'] == INTENT_SCHEMA, 'wrong room-provisioning request generation')
         connect_areas = value.get('connect_areas', False)
         require(type(connect_areas) is bool, 'connect_areas must be an exact Boolean')
+        entrance_access = Access.from_json(value['access']) if 'access' in value else None
+        require(entrance_access is None or connect_areas, 'access requires complete project connection')
         site_mask = SiteMask.from_json(value['site_mask'], guard) if 'site_mask' in value else None
         areas = value['areas']
         require(type(areas) is list and 1 <= len(areas) <= MAX_AREAS, 'room plan needs 1..8 areas')
@@ -321,7 +325,22 @@ class RoomPlan:
                 'access_digest': hashlib.sha256(b'dfmcp-room-geometric-access/1\0' + witness).hexdigest()})
         project_connections = None
         if connect_areas:
-            routed = _connect_project(compiled, floors, targets, forbidden, low, extent, guard, site_mask)
+            route_low, route_size, root = low, extent, None
+            if entrance_access is not None:
+                root = entrance_access.point
+                require(root not in targets, 'furniture obstructs the requested access point')
+                for cell in sorted(floors):
+                    guard()
+                    require(entrance_access.contains(cell), 'room floor outside access routing region')
+                route_low, route_size = entrance_access.origin, entrance_access.size
+                if root not in floors:
+                    # Retain the entrance itself in the original goal. Without
+                    # this seed, downstream terrain proof could omit its truth.
+                    require(len(floors) < MAX_TILES, 'access point exceeds the tile limit')
+                    parts.append(_Rect(root, (1, 1, 1), 'access_point', ''))
+                    floors.add(root)
+            routed = _connect_project(compiled, floors, targets, forbidden,
+                                      route_low, route_size, guard, site_mask, root)
             corridors = [_Rect(origin, size, 'project_corridor', '') for origin, size in routed.parts]
             require(len(parts) + len(corridors) <= MAX_PARTS,
                     'connected room project exceeds the existing 32-part excavation limit')
@@ -333,8 +352,18 @@ class RoomPlan:
             floors.update(expanded)
             require(len(floors) <= MAX_TILES, 'connected room project exceeds the tile limit')
             project_connections = routed.summary()
-            project_connections['root_area'] = compiled[0][0]['name']
+            project_connections['root_area'] = compiled[0][0]['name'] if root is None else None
             project_connections['areas'] = [area['name'] for area, *_ in compiled]
+            if entrance_access is not None:
+                project_connections['access'] = {
+                    **entrance_access.json(), 'all_areas_connected_to_point': True,
+                    'point_is_existing_fortress_entrance_proven': False,
+                    'point_floor_observed': False}
+                # The existing excavation codec hashes a tight target hull,
+                # not the larger domain that was permitted for corridor search.
+                low = tuple(min(p.origin[i] for p in parts) for i in range(3))
+                high = tuple(max(p.end[i] for p in parts) for i in range(3))
+                extent = tuple(b - a for a, b in zip(low, high))
         parts.sort(key=lambda p: (p.origin[::-1], p.size[::-1]))
         blueprint = {'schema': 'dfmcp.excavation-blueprint/1', 'parts': [p.part() for p in parts]}
         require(len(canonical(blueprint)) <= MAX_BYTES, 'excavation artifact exceeds existing input bound')
@@ -345,6 +374,8 @@ class RoomPlan:
             intent['connect_areas'] = True
         if site_mask is not None:
             intent['site_mask'] = site_mask.json()
+        if entrance_access is not None:
+            intent['access'] = entrance_access.json()
         require(len(canonical(intent)) <= MAX_BYTES, 'normalized room request exceeds input bound')
         # Match the existing read-only blueprint's semantic mask identity. The
         # exact downstream normal-mining partition is still owned by dig_blueprint.
