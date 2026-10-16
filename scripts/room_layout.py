@@ -1,4 +1,4 @@
-"""Choose all room origins together, then lower through the existing RoomPlan.
+"""Choose room origins and allowed orientations, then lower through RoomPlan.
 
 Offline intended geometry only. No terrain observation, inventory selection,
 mutation, hidden relaxation, random search, or globally optimal layout claim.
@@ -6,13 +6,14 @@ Beads: dfmcp-wp-pln01-spatial-blueprint-layout-pwd; df-dfhack-bridge-plane-c-pic
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from typing import Callable
 
 from furniture_plan import canonical, integer, require
 from room_site_mask import SiteMask
+from room_orientation import ROTATIONS, rotation
 from room_provisioning import (
     INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
     MAX_TILES, RoomPlan, _json, _object, _vector,
@@ -21,13 +22,14 @@ from room_provisioning import (
 REQUEST_SCHEMA = 'dfmcp.room-layout-request/1'
 RESULT_SCHEMA = 'dfmcp.room-layout-result/1'
 POLICY = 'dfmcp.mrv-connected-room-layout/1'
+ORIENTED_POLICY = 'dfmcp.mrv-oriented-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
 MAX_WORK = 20_000_000
 DEFAULT_NODES = 10_000
 DEFAULT_WORK = 2_000_000
-MAX_CANDIDATES = MAX_AREAS * MAX_CAPTURE_VOLUME
+MAX_CANDIDATES = MAX_AREAS * MAX_CAPTURE_VOLUME * len(ROTATIONS)
 Guard = Callable[[], None]
 Point = tuple[int, int, int]
 
@@ -93,12 +95,13 @@ class _Profile:
     high: Point
     parts: int
     slots: int
+    variants: tuple[_Profile, ...] = ()
 
 
 def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
     """Derive shape/constraints from the actual compiler, never a second template."""
     anchor = (128, 128, level)
-    value = {key: area[key] for key in ('name', 'template', 'item_constraints') if key in area}
+    value = {key: area[key] for key in ('name', 'template', 'item_constraints', 'rotation') if key in area}
     plan = RoomPlan.compile({'schema': INTENT_SCHEMA, 'world_folder': folder, 'site': site,
                              'areas': [{**value, 'origin': list(anchor)}]}, work)
     body = plan.json()
@@ -138,6 +141,37 @@ def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Pr
                     len(body['excavation_blueprint']['parts']), body['furniture_count'])
 
 
+def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Profile:
+    """One variable per area, with at most four actual compiler-derived shapes."""
+    require(not ('rotation' in area and 'rotations' in area),
+            'choose a fixed rotation or allowed rotations, not both')
+    if 'rotations' not in area:
+        if 'rotation' not in area:
+            return _profile(area, folder, site, level, work)
+        angle = rotation(area['rotation'])
+        normalized = {key: value for key, value in area.items() if key != 'rotation'}
+        if angle:
+            normalized['rotation'] = angle
+        return _profile(normalized, folder, site, level, work)
+    choices = area['rotations']
+    require(type(choices) is list and 1 <= len(choices) <= len(ROTATIONS),
+            'layout requires 1..4 allowed quarter-turn rotations')
+    angles = tuple(sorted(rotation(value) for value in choices))
+    require(len(set(angles)) == len(angles), 'duplicate allowed room rotation')
+    base = {key: value for key, value in area.items() if key != 'rotations'}
+    variants = tuple(_profile({**base, **({'rotation': angle} if angle else {})},
+                              folder, site, level, work) for angle in angles)
+    first = variants[0]
+    if len(variants) == 1:
+        return first
+    require(all((len(v.floors), v.parts, v.slots) == (len(first.floors), first.parts, first.slots)
+                for v in variants), 'rotation changed complete template cardinality')
+    normalized = json.loads(first.area)
+    normalized.pop('rotation', None)
+    normalized['rotations'] = list(angles)
+    return replace(first, area=canonical(normalized), variants=variants)
+
+
 def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
@@ -151,7 +185,7 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     profiles = []
     for area in areas:
         work()
-        _object(area, {'name', 'template'}, {'item_constraints', 'origin', 'origin_region'})
+        _object(area, {'name', 'template'}, {'item_constraints', 'origin', 'origin_region', 'rotation', 'rotations'})
         require(not ('origin' in area and 'origin_region' in area),
                 'choose a fixed origin or an origin region, not both')
         if 'origin' in area:
@@ -161,7 +195,7 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
             low, size = _region(area['origin_region'], domain=True)
             require(_contains(domain, low) and _contains(domain, tuple(a + n - 1 for a, n in zip(low, size))),
                     'area origin domain must fit the complete layout domain')
-        profiles.append(_profile(area, value['world_folder'], value['site'], domain[0][2], work))
+        profiles.append(_layout_profile(area, value['world_folder'], value['site'], domain[0][2], work))
     profiles.sort(key=lambda p: json.loads(p.area)['name'])
     normalized_areas = [json.loads(p.area) for p in profiles]
     require(len({a['name'] for a in normalized_areas}) == len(profiles), 'duplicate layout area name')
@@ -204,11 +238,30 @@ class _Candidate:
     origin: Point
     floors: int
     walls: int
+    rotation: int = 0
 
 
 def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
                 wall_forbidden: int = 0) -> tuple[_Candidate, ...]:
-    """At most 1024 bitset candidates; no full plan copy per candidate origin."""
+    """At most 1024 bitset candidates per allowed orientation; no plan copies."""
+    if profile.variants:
+        # Alternatives share one MRV variable and one caller-owned work/node
+        # allowance. Never restart the solver or drop areas for another angle.
+        candidates = []
+        entries = {}
+        for variant in profile.variants:
+            work()
+            entries[json.loads(variant.area).get('rotation', 0)] = variant.entry
+            candidates.extend(_candidates(variant, request, forbidden, work, wall_forbidden))
+        require(len(candidates) <= len(ROTATIONS) * MAX_CAPTURE_VOLUME,
+                'oriented room candidate inventory exceeds bound')
+        def score(candidate: _Candidate):
+            work()
+            entry = entries[candidate.rotation]
+            distance = sum(abs(candidate.origin[i] + entry[i] - request['focus'][i]) for i in range(3))
+            return distance, candidate.origin[1], candidate.origin[0], candidate.origin[2], candidate.rotation
+        candidates.sort(key=score)
+        return tuple(candidates)
     low, size = _region(request['region'], domain=True)
     area = json.loads(profile.area)
     width = size[0]
@@ -238,7 +291,7 @@ def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
             shift = (y + profile.low[1] - low[1]) * width + x + profile.low[0] - low[0]
             floors = floor_bits << shift
             if not (floors & forbidden or (wall_bits << shift) & wall_forbidden):
-                candidates.append(_Candidate(origin, floors, wall_bits << shift))
+                candidates.append(_Candidate(origin, floors, wall_bits << shift, area.get('rotation', 0)))
     focus = request['focus']
     candidates.sort(key=lambda c: (sum(abs(c.origin[i] + profile.entry[i] - focus[i]) for i in range(3)),
                                     c.origin[1], c.origin[0], c.origin[2]))
@@ -282,7 +335,7 @@ class Layout:
 def solve(raw: bytes, guard: Guard = _idle) -> Layout:
     """First compiler-valid full layout under deterministic MRV backtracking.
 
-    No-layout is relative to every enumerated translation in this finite domain
+    No-layout is relative to every allowed orientation/translation in this domain
     AND the existing connected RoomPlan compiler. Search-node exhaustion is
     inconclusive; work/cancellation refusal raises without returning any plan.
     """
@@ -332,6 +385,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 work()
                 area = json.loads(profile.area)
                 area.pop('origin_region', None)
+                area.pop('rotations', None)
+                area.pop('rotation', None)
+                if chosen[index].rotation:
+                    area['rotation'] = chosen[index].rotation
                 area['origin'] = list(chosen[index].origin)
                 areas.append(area)
             lowered = {'schema': INTENT_SCHEMA, 'world_folder': request['world_folder'],
@@ -366,7 +423,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(canonical(['select', index, len(fits)]))
         for candidate in fits:
             work()
-            trace.update(canonical(['try', index, candidate.origin]))
+            event = ['try', index, candidate.origin]
+            if candidate.rotation:
+                event.append(candidate.rotation)
+            trace.update(canonical(event))
             chosen[index] = candidate
             plan = search_tree(floors | candidate.floors, walls | candidate.walls)
             if plan is not None:
@@ -382,7 +442,9 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         status = 'search_limit_reached'
         trace.update(b'node_limit\0')
     work()
-    body = {'schema': RESULT_SCHEMA, 'policy': POLICY, 'status': status, 'request': request,
+    oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
+    body = {'schema': RESULT_SCHEMA, 'policy': ORIENTED_POLICY if oriented else POLICY,
+            'status': status, 'request': request,
             'request_digest': _digest(b'dfmcp-room-layout-request/1\0', request),
             'room_plan': None if solution is None else solution.json(),
             'search': {'nodes_visited': nodes, 'complete_layouts_tested': leaves,

@@ -279,7 +279,7 @@ class LayoutTests(unittest.TestCase):
                   request(search={'beam':1}),request(*[dining(str(i)) for i in range(9)]),
                   request(bedroom(count=10),dining(count=2))]
         for extra in ({'origin':[10,10,True]}, {'origin':[10,10,2],'origin_region':{'origin':[10,10,2],'size':[1,1,1]}},
-                      {'origin_region':{'origin':[1,1,2],'size':[2,2,1]}}, {'rotation':90}):
+                      {'origin_region':{'origin':[1,1,2],'size':[2,2,1]}}, {'rotation':45}):
             cases.append(request(dining(**extra)))
         for r in cases:
             with self.subTest(r=r),self.assertRaises((ValueError,TypeError)):solve(r)

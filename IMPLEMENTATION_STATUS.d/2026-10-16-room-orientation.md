@@ -14,3 +14,23 @@ compiler/dependency modules materialized for these tests were checked against
 their Git blob identities before modification. Rust/native/live-game and the
 complete repository suite were not executed in this environment. General live
 MCP mutation admission and native room assignments remain outside this change.
+
+Follow-up: `room_layout` now expands each area's explicitly allowed quarter-turns
+into the same MRV search variable, bounded by the original shared work/node
+allowances. It lowers the complete selected project through `RoomPlan`, retains
+the original allowed set, and binds nonzero selected angles into the trace and
+sealed plan. Old requests preserve byte-identical outputs and work counts.
+
+Validation: 50 Python tests pass (16 template-orientation, 18 new global-layout
+orientation, 16 existing layout cases). Coverage includes a two-hall site that
+requires different angles simultaneously; complete 16-slot allocation; 64 new
+exhaustive obstacle masks; 256 existing obstacle masks; bounded cancellation;
+legacy goldens; process hash-seed replay; ten actual CLI solve/replay artifact
+exports; and CLI refusal to export an inconclusive partial result. The unchanged
+CLI and original layout tests were verified against their fetched Git blob
+identities before execution. The existing layout negative-angle test was updated
+from now-admitted 90 to still-forbidden 45; no test was removed or ignored.
+
+This does not close the broad spatial-planner/native-mutation beads. The observed
+map wrapper's delegation was reviewed, but live map acquisition, Rust/native
+builds, full-repository qualification and production admission were not tested.

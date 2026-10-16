@@ -53,3 +53,63 @@ Focused regression command:
 ```sh
 python3 -m unittest discover -s tests -p 'test_room_orientation.py' -v
 ```
+
+## Automatic orientation selection
+
+The existing `scripts/layout_rooms.py` command accepts either a fixed
+`rotation` or a nonempty `rotations` array on each layout area. The array is a
+set of permitted quarter-turns, not a preference order. Duplicate angles,
+noninteger values and supplying both fields are rejected. Omitting both keeps
+the original unrotated search; a single zero choice is canonically identical
+to the old request.
+
+```json
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "your-save-folder",
+  "site": 7,
+  "region": {"origin": [100, 100, 2], "size": [3, 13, 1]},
+  "areas": [{
+    "name": "dining",
+    "rotations": [0, 90, 180, 270],
+    "template": {"kind": "dining_hall", "table_count": 4, "columns": 4}
+  }]
+}
+```
+
+Save this as `layout-request.json`, then run:
+
+```sh
+python3 scripts/layout_rooms.py --request-file layout-request.json --emit layout > layout.json
+python3 scripts/layout_rooms.py --layout-file layout.json --emit room-plan > room-plan.json
+```
+
+This narrow site has no unrotated fit. The solver selects a 90-degree hall at
+pivot `[102, 100, 2]`, then produces the existing complete room-plan artifact.
+All other exports (`room-request`, `excavation`, `furniture-request`, `report`)
+remain available. Replay regenerates both the search and the selected plan.
+
+Each area is one variable in the existing whole-project backtracking search.
+Candidates include every permitted orientation and translation that fits the
+floor/wall constraints. Different areas can choose different orientations;
+fixed origins, origin regions, exclusions and site masks stay in world
+coordinates and are never rotated or relaxed. The selected angle is frozen in
+the downstream room intent, while the layout artifact retains the allowed set.
+
+Ordering is deterministic: entry distance to focus, origin y/x/z, then angle;
+area selection still uses minimum remaining candidates with lexical area ties.
+There are at most 4,096 candidates per area and 32,768 across eight areas.
+The original aggregate work and node allowances cover all variants and final
+compilation. Exhausting a node allowance remains inconclusive; exhausting work
+or cancellation returns no partial plan. A no-layout result is only relative
+to the declared finite domain, allowed angles and existing corridor compiler,
+not a global impossibility or optimality claim.
+
+Oriented searches report policy `dfmcp.mrv-oriented-room-layout/1`. Legacy
+requests retain their previous policy, output bytes, trace and work counts.
+The observed-site wrapper delegates to this same normalizer/solver; no extra
+native operation or new mutation authority is introduced.
+
+```sh
+python3 -m unittest discover -s tests -p 'test_room_layout*.py' -v
+```
