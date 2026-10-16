@@ -11,6 +11,7 @@ import hashlib
 import json
 
 import room_connections as connections
+from room_site_mask import SiteMask
 
 from furniture_allocation import Guard, Request, Slot, idle
 from furniture_plan import MAX_BYTES, canonical, integer, label, require, unique
@@ -185,7 +186,7 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
 
 def _connect_project(compiled, floors: set[Point], targets: set[Point],
                      forbidden: list[_Rect], low: Point, extent: Point,
-                     guard: Guard) -> connections.Connections:
+                     guard: Guard, site_mask: SiteMask | None = None) -> connections.Connections:
     """Preserve every required bedroom wall while joining complete area floors."""
     require(extent[2] == 1, 'connected room projects require one level; stairs are not inferred')
     protected = set(targets)
@@ -207,6 +208,8 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
     # Only the already bounded capture is scanned. Huge excluded cuboids are
     # membership tests, never expanded volumes or permission to enlarge a route.
     for p in _Rect(low, extent, 'capture', '').points(guard):
+        if site_mask is not None and not site_mask.permits_floor(p):
+            protected.add(p)
         for excluded in forbidden:
             guard()
             if all(a <= n < b for a, n, b in zip(excluded.origin, p, excluded.end)):
@@ -225,10 +228,11 @@ class RoomPlan:
     @classmethod
     def compile(cls, value: object, guard: Guard = idle) -> RoomPlan:
         guard()
-        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas'})
+        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask'})
         require(value['schema'] == INTENT_SCHEMA, 'wrong room-provisioning request generation')
         connect_areas = value.get('connect_areas', False)
         require(type(connect_areas) is bool, 'connect_areas must be an exact Boolean')
+        site_mask = SiteMask.from_json(value['site_mask'], guard) if 'site_mask' in value else None
         areas = value['areas']
         require(type(areas) is list and 1 <= len(areas) <= MAX_AREAS, 'room plan needs 1..8 areas')
         exclusions = value.get('excluded_regions', [])
@@ -266,6 +270,10 @@ class RoomPlan:
         targets = {slot.target for slot in request.slots}
         floors = set().union(*(set(part.points(guard)) for part in parts))
         require(targets <= floors, 'furnishing outside complete excavation mask')
+        if site_mask is not None:
+            for point in sorted(floors):
+                guard()
+                require(site_mask.permits_floor(point), 'room floor forbidden by site mask')
         # Enforce separating room walls across ALL areas, not merely within each
         # cluster. A corridor from another area cannot open a bedroom wall.
         for area, _, units, _, _ in compiled:
@@ -281,6 +289,9 @@ class RoomPlan:
                         if xx in (px - 1, px + width) or yy in (py - 1, py + height):
                             require((xx, yy, pz) == door or (xx, yy, pz) not in floors,
                                     'another excavation opens a required bedroom wall')
+                            if site_mask is not None and (xx, yy, pz) != door:
+                                require(site_mask.permits_wall((xx, yy, pz)),
+                                        'required bedroom wall forbidden by site mask')
         geometry = []
         for area, group, units, slots, entrance in compiled:
             floor = set().union(*(set(part.points(guard)) for part in group))
@@ -307,7 +318,7 @@ class RoomPlan:
                 'access_digest': hashlib.sha256(b'dfmcp-room-geometric-access/1\0' + witness).hexdigest()})
         project_connections = None
         if connect_areas:
-            routed = _connect_project(compiled, floors, targets, forbidden, low, extent, guard)
+            routed = _connect_project(compiled, floors, targets, forbidden, low, extent, guard, site_mask)
             corridors = [_Rect(origin, size, 'project_corridor', '') for origin, size in routed.parts]
             require(len(parts) + len(corridors) <= MAX_PARTS,
                     'connected room project exceeds the existing 32-part excavation limit')
@@ -329,6 +340,8 @@ class RoomPlan:
             'excluded_regions': [{'origin': list(r.origin), 'size': list(r.size)} for r in forbidden]}
         if connect_areas:
             intent['connect_areas'] = True
+        if site_mask is not None:
+            intent['site_mask'] = site_mask.json()
         require(len(canonical(intent)) <= MAX_BYTES, 'normalized room request exceeds input bound')
         # Match the existing read-only blueprint's semantic mask identity. The
         # exact downstream normal-mining partition is still owned by dig_blueprint.

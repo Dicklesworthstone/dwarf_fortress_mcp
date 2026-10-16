@@ -82,6 +82,9 @@
           "maximum": 20000000
         }
       }
+    },
+    "site_mask": {
+      "$ref": "#/$defs/site_mask"
     }
   },
   "$defs": {
@@ -345,6 +348,29 @@
           }
         }
       ]
+    },
+    "site_mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region",
+        "cells"
+      ],
+      "properties": {
+        "region": {
+          "$ref": "#/$defs/domain"
+        },
+        "cells": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[.FWX]+$",
+          "not": {
+            "pattern": "[^.FWX]"
+          }
+        }
+      },
+      "$comment": "Complete x-fastest mask must match the exact layout region and its cell count. Dot permits floor/wall, F floor only, W wall only, X neither. Constraint, not source authority."
     }
   }
 }

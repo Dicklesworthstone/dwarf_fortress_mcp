@@ -1,0 +1,17 @@
+{
+  "schema": "dfmcp.room-site-mask-contract/1",
+  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "optional_request_field": "site_mask",
+  "consumers": ["room_layout.solve", "room_provisioning.RoomPlan.compile"],
+  "cell_order": "x_fastest_then_y_single_z",
+  "cell_uses": {".": ["floor", "wall"], "F": ["floor"], "W": ["wall"], "X": []},
+  "limits": {"cells": 1024, "levels": 1, "axis": 128},
+  "outside_mask": "neither_use_permitted",
+  "layout_mask_region": "exact_complete_search_domain",
+  "checks": ["candidate_floors", "candidate_walls", "compiled_floors", "compiled_walls", "all_connecting_corridors"],
+  "import": "regenerate_complete_search_and_geometry",
+  "omission": "legacy_bytes_and_counters_unchanged",
+  "native_acquisition": false,
+  "mutation_authority": false,
+  "production_admission_changed": false
+}

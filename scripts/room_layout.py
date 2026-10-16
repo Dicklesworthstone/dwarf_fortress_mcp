@@ -12,6 +12,7 @@ import json
 from typing import Callable
 
 from furniture_plan import canonical, integer, require
+from room_site_mask import SiteMask
 from room_provisioning import (
     INTENT_SCHEMA, MAX_AREAS, MAX_CAPTURE_VOLUME, MAX_PARTS, MAX_PLAN_BYTES,
     MAX_TILES, RoomPlan, _json, _object, _vector,
@@ -140,7 +141,7 @@ def _profile(area: dict, folder: str, site: int, level: int, work: _Work) -> _Pr
 def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
-            {'focus', 'excluded_items', 'excluded_regions', 'search'})
+            {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     domain = _region(value['region'], domain=True)
     focus = _vector(value.get('focus', list(domain[0])), 1, 32766)
@@ -189,6 +190,10 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
                'region': _region_json(domain), 'focus': list(focus), 'areas': normalized_areas,
                'excluded_items': sorted(items), 'excluded_regions': [_region_json(r) for r in sorted(regions)],
                'search': search}
+    if 'site_mask' in value:
+        site_mask = SiteMask.from_json(value['site_mask'], work)
+        require((site_mask.origin, site_mask.size) == domain, 'site mask must match the complete layout domain')
+        request['site_mask'] = site_mask.json()
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -201,7 +206,8 @@ class _Candidate:
     walls: int
 
 
-def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work) -> tuple[_Candidate, ...]:
+def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work,
+                wall_forbidden: int = 0) -> tuple[_Candidate, ...]:
     """At most 1024 bitset candidates; no full plan copy per candidate origin."""
     low, size = _region(request['region'], domain=True)
     area = json.loads(profile.area)
@@ -231,7 +237,7 @@ def _candidates(profile: _Profile, request: dict, forbidden: int, work: _Work) -
                 continue
             shift = (y + profile.low[1] - low[1]) * width + x + profile.low[0] - low[0]
             floors = floor_bits << shift
-            if not floors & forbidden:
+            if not (floors & forbidden or (wall_bits << shift) & wall_forbidden):
                 candidates.append(_Candidate(origin, floors, wall_bits << shift))
     focus = request['focus']
     candidates.sort(key=lambda c: (sum(abs(c.origin[i] + profile.entry[i] - focus[i]) for i in range(3)),
@@ -297,7 +303,15 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 if _contains(region, (low[0] + x, low[1] + y, low[2])):
                     forbidden |= 1 << (y * size[0] + x)
                     break
-    domains = tuple(_candidates(p, request, forbidden, work) for p in profiles)
+    wall_forbidden = 0
+    if 'site_mask' in request:
+        for index, cell in enumerate(request['site_mask']['cells']):
+            work()
+            if cell not in '.F':
+                forbidden |= 1 << index
+            if cell not in '.W':
+                wall_forbidden |= 1 << index
+    domains = tuple(_candidates(p, request, forbidden, work, wall_forbidden) for p in profiles)
     require(sum(map(len, domains)) <= MAX_CANDIDATES, 'layout candidate inventory exceeds bound')
     nodes, leaves, rejected, backtracks = 0, 0, 0, 0
     trace = hashlib.sha256(b'dfmcp-room-layout-search/1\0')
@@ -323,6 +337,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             lowered = {'schema': INTENT_SCHEMA, 'world_folder': request['world_folder'],
                        'site': request['site'], 'areas': areas, 'connect_areas': True,
                        'excluded_items': request['excluded_items'], 'excluded_regions': request['excluded_regions']}
+            if 'site_mask' in request:
+                lowered['site_mask'] = request['site_mask']
             try:
                 plan = RoomPlan.compile(lowered, work)
             except ValueError:
