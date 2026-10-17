@@ -21,8 +21,7 @@ from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_HANDOF
 import room_terrain_goal as terrain
 import room_circulation
 
-POLICY = 'dfmcp.original-room-terrain-and-furnishings/1'
-CIRCULATION_POLICY = 'dfmcp.original-room-terrain-furnishings-and-circulation/2'
+from room_readiness_policy import ReadinessPolicy, POLICY, CIRCULATION_POLICY, ACCESS_POLICY
 MAX_GOAL = MAX_HANDOFF + construction.MAX_GOAL + 16
 MAX_SAMPLE = construction.MAX_SAMPLE + 2 * terrain.terrain.MAX_CAPTURE_BYTES + 1024
 
@@ -42,15 +41,18 @@ class Goal:
     condition: construction.Goal
     checkpoint: InitVar[Guard | None] = None
     require_circulation: bool = False
+    require_project_access: bool = False
 
     def __post_init__(self, checkpoint: Guard | None) -> None:
         guard = idle if checkpoint is None else checkpoint
         guard()
-        require(type(self.require_circulation) is bool, 'exact circulation policy Boolean required')
+        policy = ReadinessPolicy(self.require_circulation, self.require_project_access)
         require(type(self.room) is RoomFurnitureHandoff and type(self.condition) is construction.Goal,
                 'complete original room and construction condition required')
         room = RoomFurnitureHandoff.decode(self.room.encode(), guard)
         condition = construction.Goal.decode(self.condition.encode())
+        if policy.project_access:
+            policy.access_point(room.room_plan.json())
         plan = room.allocation.plan()
         require(len(condition.goals) == len(plan.steps), 'room readiness cannot select a receipt subset')
         steps = {step.item: step for step in plan.steps}
@@ -80,8 +82,10 @@ class Goal:
         return terrain.RoomTerrainGoal(self.room.room_plan, self.condition.deadline, checkpoint=guard)
 
     def encode(self) -> bytes:
-        require(type(self.require_circulation) is bool, 'exact circulation policy Boolean required')
-        magic = b'DFMRDG02' if self.require_circulation else b'DFMRDG01'
+        policy = ReadinessPolicy(self.require_circulation, self.require_project_access)
+        if policy.project_access:
+            policy.access_point(self.room.room_plan.json())
+        magic = policy.magic()
         return (magic + _blob(self.room.encode(), MAX_HANDOFF)
                 + _blob(self.condition.encode(), construction.MAX_GOAL))
 
@@ -89,11 +93,12 @@ class Goal:
     def decode(cls, raw: bytes, guard: Guard = idle) -> Goal:
         reader = Cursor(raw, MAX_GOAL)
         magic = reader.take(8)
-        require(magic in (b'DFMRDG01', b'DFMRDG02'), 'wrong room readiness goal generation')
+        policy = ReadinessPolicy.decode(magic)
         room = RoomFurnitureHandoff.decode(_read_blob(reader, MAX_HANDOFF), guard)
         condition = construction.Goal.decode(_read_blob(reader, construction.MAX_GOAL))
         reader.finish()
-        result = cls(room, condition, checkpoint=guard, require_circulation=magic == b'DFMRDG02')
+        result = cls(room, condition, checkpoint=guard, require_circulation=policy.circulation,
+                     require_project_access=policy.project_access)
         require(result.encode() == raw, 'noncanonical room readiness goal')
         return result
 
@@ -217,7 +222,8 @@ def _circulation(goal: Goal, capture: map_wire.Capture, guard: Guard) -> dict:
                 else:
                     clear.add(point)
     result = room_circulation.assess(selected.floors, frozenset(clear), frozenset(uncertain),
-        tuple(entries), furnishings, connected=body['intent'].get('connect_areas', False), guard=guard)
+        tuple(entries), furnishings, connected=body['intent'].get('connect_areas', False), guard=guard,
+        access_point=ReadinessPolicy(goal.require_circulation, goal.require_project_access).access_point(body))
     result['map_observation_witness'] = capture.witness
     result['room_plan_digest'] = selected.plan.digest
     result['source_bound_digest'] = hashlib.sha256(b'dfmcp-room-circulation-source/1\0'
@@ -234,10 +240,11 @@ class Progress(construction.Progress):
     sample_digest: str | None = None
     terrain_diagnosis: bytes | None = None
     circulation_required: bool = False
+    project_access_required: bool = False
 
     def view(self) -> dict:
         result = super().view()
-        result.update(policy=CIRCULATION_POLICY if self.circulation_required else POLICY,
+        result.update(policy=ReadinessPolicy(self.circulation_required, self.project_access_required).name,
             terrain_at_last_observation=None if self.terrain_diagnosis is None else json.loads(self.terrain_diagnosis),
             map_observation_witness=self.map_witness, joint_sample_digest=self.sample_digest,
             room_readiness_sampled_condition=self.phase == 'satisfied',
@@ -248,6 +255,8 @@ class Progress(construction.Progress):
         if self.circulation_required:
             result['circulation_required'] = True
             result['native_pathfinding_proven'] = False
+        if self.project_access_required:
+            result['project_access_required'] = True
         return result
 
 
@@ -287,7 +296,8 @@ def advance(state: Progress, goal: Goal, sample: Sample, guard: Guard = idle) ->
     current = replace(current, goal_digest=goal.digest, map_source=source,
                       map_witness=captured.witness, sample_digest=witness,
                       terrain_diagnosis=canonical(diagnosis),
-                      circulation_required=goal.require_circulation)
+                      circulation_required=goal.require_circulation,
+                      project_access_required=goal.require_project_access)
     if state.map_source is not None and state.map_source != source:
         current = replace(current, phase='invalidated', reason='room_map_source_changed',
                           reason_building=None, streak=0, first_tick=None, counted_tick=None)

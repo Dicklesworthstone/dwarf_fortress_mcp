@@ -18,6 +18,7 @@ from construction_plan import Goal as Condition
 from furniture_batch import Batch
 from furniture_completion import Origin
 from room_readiness import POLICY, CIRCULATION_POLICY, Progress
+from room_readiness_policy import ReadinessPolicy
 from room_readiness_rpc import Authority, Budget, acquire
 from room_readiness_store import Goal, Journal, State, MAX_FILE, MAX_FRAMES
 import track_furniture_batch as furnishing
@@ -41,7 +42,8 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
     satisfied = bool(original and progress.phase == 'satisfied')
     observed = bool(verified and progress is not None and progress.map_witness is not None)
     circulation = state is not None and state.goal.require_circulation
-    policy = CIRCULATION_POLICY if circulation else POLICY
+    project_access = state is not None and state.goal.require_project_access
+    policy = ReadinessPolicy(circulation, project_access).name
     result.update(condition_policy=policy,
         room_readiness_sampled_condition=satisfied,
         room_completion_proven=False, terrain_completion_proven=False,
@@ -96,6 +98,11 @@ def packet(operation: str, state: State | None, *, source_verified: bool = False
         turn['coverage']['circulation_shares_joint_stability_window'] = True
         turn['uncertainty'].append(
             'Strict circulation requires clear cardinal model routes to every original entry and furnishing approach. Unit-occupied or unobserved passages cannot prove clear access; no route outside the original floor mask is evaluated.')
+    if project_access:
+        result['project_access_required'] = True
+        turn['coverage']['project_access_shares_joint_stability_window'] = True
+        turn['uncertainty'].append(
+            'All required routes start at the original project access point. Room-local reachability alone cannot satisfy this version-3 goal; existing-fortress membership and native pathfinding remain unproven.')
     if error:
         value['error'] = {
             'code': 'ROOM_READINESS_MONITOR_REFUSED',
@@ -194,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--max-observations', type=int)
         parser.add_argument('--require-circulation', action='store_true', default=None,
                             help='start a version-2 joint goal requiring sampled clear room routes')
+        parser.add_argument('--require-project-access', action='store_true', default=None,
+                            help='start a version-3 goal requiring routes from the original access point; includes circulation')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         foreground.add_arguments(parser)
         args = parser.parse_args(argv)
@@ -204,7 +213,8 @@ def main(argv: list[str] | None = None) -> int:
         choices = (args.interval_ticks, args.stable_samples, args.stable_span_ticks,
                    args.max_gap_ticks, args.max_observations)
         require(all(value is not None for value in initial) if operation == 'start'
-                else all(value is None for value in initial + choices + (args.require_circulation,)),
+                else all(value is None for value in initial + choices
+                         + (args.require_circulation, args.require_project_access)),
                 'start requires original room batch and fixed policy; reopening cannot replace them')
         if operation == 'start':
             batch = Batch(args.batch, budget)
@@ -215,12 +225,14 @@ def main(argv: list[str] | None = None) -> int:
                     ('interval', 'stable_samples', 'stable_span', 'max_gap', 'max_observations'), choices)
                     if value is not None})
             goal = Goal(origin, condition, guard=budget.work,
-                        require_circulation=args.require_circulation is True)
+                        require_circulation=(args.require_circulation is True or args.require_project_access is True),
+                        require_project_access=args.require_project_access is True)
             authority = Authority.load()
             require(authority.address == origin.address,
                     'room query endpoint differs from original furnishing batch')
             reserve(operation, State(goal, origin.address, Progress(goal.digest,
-                    circulation_required=goal.require_circulation)), source_verified=True)
+                    circulation_required=goal.require_circulation,
+                    project_access_required=goal.require_project_access)), source_verified=True)
             origin.verify_batch(batch)
             authority.guard()
             owner = Journal(args.journal, budget, writable=True, create=(goal, origin.address))

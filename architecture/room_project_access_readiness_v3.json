@@ -1,12 +1,45 @@
 {
   "schema": "dfmcp.room-project-access-readiness-contract/3",
-  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "owning_beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
   "circulation_policy": "dfmcp.observed-room-access-circulation/2",
   "root": "exact point retained by the original regenerated room intent",
-  "truth": {"true": "all required routes observed clear", "unknown": "at least one required route only potentially clear and none false", "false": "at least one required route absent from the declared potential graph"},
-  "limits": {"floor_cells": 512, "areas": 8, "furnishings": 32, "records": 41, "work": 100000, "output_bytes": 32768},
+  "truth": {
+    "true": "all required routes observed clear",
+    "unknown": "at least one required route only potentially clear and none false",
+    "false": "at least one required route absent from the declared potential graph"
+  },
+  "limits": {
+    "floor_cells": 512,
+    "areas": 8,
+    "furnishings": 32,
+    "records": 41,
+    "work": 100000,
+    "output_bytes": 32768
+  },
   "legacy": "Omitted access point preserves old evidence and work counts byte-for-byte.",
   "native_methods_added": [],
   "game_effects": [],
-  "production_admission_changed": false
+  "production_admission_changed": false,
+  "goal_policy": "dfmcp.original-room-terrain-furnishings-and-project-access/3",
+  "goal_magic": "DFMRDG03",
+  "original_goal_magic": "DFMRDC03",
+  "journal_magic": "DFMRDJ01",
+  "legacy_goals": {
+    "DFMRDG01": "terrain_and_furnishings",
+    "DFMRDG02": "room_local_circulation",
+    "DFMRDC01": "original_terrain_and_furnishings",
+    "DFMRDC02": "original_room_local_circulation"
+  },
+  "cli": {
+    "entrypoint": "scripts/track_room_readiness.py",
+    "start_option": "--require-project-access",
+    "implies_circulation": true,
+    "requires_original_access_point": true,
+    "reopen_cannot_replace_policy": true
+  },
+  "evidence_scope": "43_component_and_raw_codec_tests_pass_store_cli_source_reviewed_not_full_monitor_qualification"
 }

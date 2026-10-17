@@ -30,3 +30,67 @@ Test command:
 ```sh
 python3 -m unittest discover -s tests -p 'test_room_access_circulation.py' -v
 ```
+
+## Persist the complete access requirement
+
+For an original entrance-backed furniture batch, start a **new** monitor with:
+
+```sh
+python3 scripts/track_room_readiness.py start \
+  --batch /private/room-furnishings --batch-id "$BATCH_ID" \
+  --journal /private/room-monitor/readiness-access \
+  --deadline-tick "$ABSOLUTE_DEADLINE" \
+  --require-project-access \
+  --interval-ticks 10 --stable-samples 2 --stable-span-ticks 10
+```
+
+Use the existing isolated query-only readiness environment documented in
+`ROOM_READINESS.md`; this adds neither credentials nor mutation methods. The
+new option includes circulation. It fails if the original RoomPlan lacks a
+connected `intent.access` requirement; it never selects or invents an entrance.
+
+The inner goal uses `DFMRDG03`, the original-custody goal uses `DFMRDC03`, and
+both seal the stronger scope into their existing goal digests. The outer
+`DFMRDJ01` journal frame format and all raw sample bounds remain unchanged.
+The policy is `dfmcp.original-room-terrain-furnishings-and-project-access/3`.
+
+Every original terrain, furnishing, and entrance route shares one stability
+window. A known building obstruction before the first room breaks access even
+when every room-local route and furniture condition is true. Unit occupancy
+or unobserved passages cannot earn a positive access sample. The existing
+reducer resets unfinished stability and retains its original deadline,
+cadence, lifetime allowance and source floors. Physical effects are not retried.
+
+`sample`, `wait`, `inspect`, `check` and `cancel` recover the selected scope from
+the original journal. Passing either policy option while reopening is refused.
+A fresh `check` uses the same versioned Goal/Sample validation and can report
+failed current access separately from a previous sampled success. It neither
+rewrites that success nor renews authority or stability credit.
+
+Versions 1 and 2 continue to decode and replay with their original meaning.
+The presence of `intent.access` in a saved plan does not upgrade an old
+room-local monitor. `--require-circulation` without the new option still starts
+a version-2 monitor; do not interpret its success as entrance reachability.
+No stored journal is repaired, relabeled or migrated in place.
+
+### Validation scope
+
+43 Python tests pass: 12 circulation tests (including 6,561 three-state graph
+configurations), 9 policy tests, 6 source-projection seam tests and 16 full
+raw-codec readiness cases. The seam tests inject selection/tile records; the
+raw-codec cases instead run the actual original-room, allocation handoff,
+placement receipt, map and operations decoders using synthetic source bytes.
+They cover maximum eight-area/32-furnishing selection, blocked and unknown
+entrances, same-tick changes, interruptions, source regressions, fixed deadlines
+and lifetime budgets, and fresh checks without rewriting terminal history.
+
+```sh
+PYTHONPATH=scripts:tests python3 -m unittest \
+  test_room_access_circulation test_room_readiness_policy \
+  test_room_readiness_access_seam test_room_project_access_readiness -v
+```
+
+The complete private-journal and CLI transport workflow was not executed in the
+component checkout. Store and CLI changes were source-reviewed and syntax
+checked. These tests do not qualify native DFHack, Rust, full-repository or
+live-fortress operation, and no production admission gate was changed.
