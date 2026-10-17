@@ -1,0 +1,12 @@
+{
+  "schema": "dfmcp.room-project-access-readiness-contract/3",
+  "owning_beads": ["df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "circulation_policy": "dfmcp.observed-room-access-circulation/2",
+  "root": "exact point retained by the original regenerated room intent",
+  "truth": {"true": "all required routes observed clear", "unknown": "at least one required route only potentially clear and none false", "false": "at least one required route absent from the declared potential graph"},
+  "limits": {"floor_cells": 512, "areas": 8, "furnishings": 32, "records": 41, "work": 100000, "output_bytes": 32768},
+  "legacy": "Omitted access point preserves old evidence and work counts byte-for-byte.",
+  "native_methods_added": [],
+  "game_effects": [],
+  "production_admission_changed": false
+}

@@ -12,6 +12,7 @@ import json
 from typing import Callable
 
 POLICY = 'dfmcp.observed-room-circulation/1'
+ACCESS_POLICY = 'dfmcp.observed-room-access-circulation/2'
 MAX_TILES = 512
 MAX_AREAS = 8
 MAX_FURNISHINGS = 32
@@ -59,7 +60,8 @@ def _neighbors(point: Point) -> tuple[Point, ...]:
 def assess(floors: frozenset[Point], clear: frozenset[Point],
            uncertain: frozenset[Point], entries: tuple[tuple[str, Point], ...],
            furnishings: tuple[tuple[str, str, Point], ...], *, connected: bool,
-           guard: Guard = _idle, max_work: int = MAX_WORK) -> dict:
+           guard: Guard = _idle, max_work: int = MAX_WORK,
+           access_point: Point | None = None) -> dict:
     """Evaluate every area entry and furnishing approach in one sampled model.
 
     `clear` contains observed dry undesignated floors with zero occupancy.
@@ -68,6 +70,10 @@ def assess(floors: frozenset[Point], clear: frozenset[Point],
     in both graphs, even when its occupancy was absent in the supplied sample.
     True means a clear route exists; unknown means only a potential route exists;
     false means neither exists WITHIN THIS MODEL, never global unreachability.
+
+    With an explicit original `access_point`, every route starts there, not at
+    the first room. This is a separate versioned evidence policy. Omitting it
+    preserves legacy bytes, work counts and room-local semantics exactly.
     """
     _require(type(connected) is bool and type(max_work) is int
              and 1 <= max_work <= MAX_WORK, 'invalid circulation policy or work bound')
@@ -117,16 +123,25 @@ def assess(floors: frozenset[Point], clear: frozenset[Point],
     _require({area for _, area, _ in furnishings} == set(by_area), 'area has no original furnishing')
     _require(not connected or len({p[2] for p in floors}) == 1,
              'connected circulation has no implicit stairs')
+    if access_point is not None:
+        charge()
+        _point(access_point)
+        _require(connected and access_point in floors and access_point not in targets,
+                 'project access must be an unoccupied intended floor of a connected project')
+    policy = POLICY if access_point is None else ACCESS_POLICY
     furnishings = tuple(sorted(furnishings))
     walkable = floors - targets
     known = clear & walkable
     possible = (clear | uncertain) & walkable
     # Charge canonicalization/sorting before it can consume unbounded work.
     charge(16 * (len(floors) + len(entries) + len(furnishings)))
-    model = _digest(b'dfmcp-room-circulation-model/1\0', {
-        'policy': POLICY, 'floors': sorted(floors), 'clear': sorted(clear),
+    model_inputs = {
+        'policy': policy, 'floors': sorted(floors), 'clear': sorted(clear),
         'uncertain': sorted(uncertain), 'entries': entries, 'furnishings': furnishings,
-        'connected': connected})
+        'connected': connected}
+    if access_point is not None:
+        model_inputs['access_point'] = access_point
+    model = _digest(b'dfmcp-room-circulation-model/1\0', model_inputs)
 
     def search(start: Point, admitted: frozenset[Point]) -> dict[Point, tuple[Point | None, int]]:
         charge()
@@ -144,14 +159,15 @@ def assess(floors: frozenset[Point], clear: frozenset[Point],
                     pending.append(neighbor)
         return found
 
-    roots = (entries[0],) if connected else entries
+    # None denotes the independent project root, never an invented ninth area.
+    roots = ((None, access_point),) if access_point is not None else ((entries[0],) if connected else entries)
     searches = {area: (search(point, known), search(point, possible)) for area, point in roots}
 
-    def row(kind: str, name: str, area: str, endpoint: Point) -> dict:
+    def row(kind: str, name: str, area: str | None, endpoint: Point) -> dict:
         charge()
-        root = entries[0][0] if connected else area
+        root = None if access_point is not None else (entries[0][0] if connected else area)
         certain_routes, potential_routes = searches[root]
-        approaches = (endpoint,) if kind == 'area_entry' else _neighbors(endpoint)
+        approaches = _neighbors(endpoint) if kind == 'furnishing' else (endpoint,)
         chosen, truth = None, 'false'
         route = {}
         for tree, value in ((certain_routes, 'true'), (potential_routes, 'unknown')):
@@ -180,9 +196,11 @@ def assess(floors: frozenset[Point], clear: frozenset[Point],
 
     rows = [row('area_entry', name, name, point) for name, point in entries]
     rows += [row('furnishing', name, area, point) for name, area, point in furnishings]
+    if access_point is not None:
+        rows.insert(0, row('project_access', 'project_access', None, access_point))
     counts = {value: sum(r['truth'] == value for r in rows) for value in ('true', 'false', 'unknown')}
     truth = 'false' if counts['false'] else 'unknown' if counts['unknown'] else 'true'
-    result = {'policy': POLICY, 'model_digest': model, 'truth': truth,
+    result = {'policy': policy, 'model_digest': model, 'truth': truth,
               'all_required_routes_clear': truth == 'true', 'connected_project_required': connected,
               'selected_areas': len(entries), 'selected_furnishings': len(furnishings),
               'counts': counts, 'records': rows, 'records_complete': True,
@@ -192,6 +210,10 @@ def assess(floors: frozenset[Point], clear: frozenset[Point],
               'native_pathfinding_proven': False, 'outside_project_routes_evaluated': False,
               'existing_fort_access_proven': False, 'continuous_access_proven': False,
               'game_effect_performed': False}
+    if access_point is not None:
+        result.update(access_point=list(access_point), project_access_required=True,
+                      root_kind='original_project_access_point',
+                      point_is_existing_fortress_entrance_proven=False)
     charge()
     result['work_units'] = work
     result['evidence_digest'] = _digest(b'dfmcp-room-circulation-evidence/1\0', result)
