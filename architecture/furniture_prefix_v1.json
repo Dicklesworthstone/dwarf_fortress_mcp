@@ -1,0 +1,16 @@
+{
+  "schema": "dfmcp.furniture-prefix-contract/1",
+  "review_schema": "dfmcp.furniture-prefix-review/1",
+  "policy": "original-furniture-prefix-fresh-native-plans/1",
+  "native_profile": "furniture/1.19",
+  "maximum_prefix_steps": 8,
+  "maximum_original_steps": 32,
+  "ordering": "existing_canonical_kahn_dependency_order",
+  "confirmation": "original_exact_items_targets_and_dependencies_with_fresh_native_plans",
+  "unknown_outcome": "stop_and_recover_original_key_explicitly",
+  "partial_original_plan": false,
+  "automatic_retry": false,
+  "atomic": false,
+  "construction_completion_proven": false,
+  "production_admitted": false
+}
