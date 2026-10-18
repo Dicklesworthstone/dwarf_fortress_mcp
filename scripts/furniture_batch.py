@@ -711,7 +711,11 @@ def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, 
         if batch.terrain_handoff is not None:
             batch.budget.publication_terrain = batch.terrain_handoff
         step, initial = select_next(batch, expected_id)
-        require(len(encoded('advance', initial)) + 32768 < output_limit(initial), 'batch outcome reservation exceeds bound')
+        from furniture_output_bounds import inventory_bound, PRESENTATION_MARGIN
+        sizing = inventory_bound(initial, (step,))
+        sizing['advanced_step'] = step.name
+        require(len(encoded('advance', sizing, False)) + PRESENTATION_MARGIN <= output_limit(initial),
+                'batch outcome reservation exceeds bound')
         authority = Authority.load(True)
         if batch.room_handoff is not None:
             batch.budget.publication_authority = authority

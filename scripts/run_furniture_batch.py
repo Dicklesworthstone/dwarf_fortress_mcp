@@ -17,8 +17,6 @@ import furniture_prefix as policy
 RPC_PER_STEP = 19  # Review: 6 bindings + handshake + read; advance: those + query/prepare/commit.
 WIRE_PER_STEP = 6 * 1024 * 1024  # Includes maximum bounded notifications in both connections.
 MAX_WORK = 8_000_000
-ROW_RESERVATION = 4096
-FINAL_RESERVATION = 8192
 REVIEW_FIELDS = frozenset(('before', 'blockers', 'expected_plan', 'confirm_review'))
 
 
@@ -100,8 +98,19 @@ def result(state: dict, selected: policy.Prefix, outcomes: list[dict], reason: s
 
 
 def reserve(api, state: dict, selected: policy.Prefix, budget: Budget) -> None:
-    raw = api.encoded('run_prefix', result(state, selected, [], 'prefix_completed', budget))
-    policy.require(len(raw) + budget.steps * ROW_RESERVATION + FINAL_RESERVATION <= api.output_limit(state),
+    from furniture_output_bounds import inventory_bound, prefix_outcomes_bound, PRESENTATION_MARGIN
+    from furniture_plan import Step
+    steps = selected.json()['steps']
+    original = tuple(Step.from_json({k: v for k, v in step.items() if k != 'key'}) for step in steps)
+    bounded = inventory_bound(state, original)
+    probe = result(bounded, selected, prefix_outcomes_bound(steps), 'preflight_blocked', budget)
+    probe['prefix_run'].update(steps_admitted=budget.steps,
+        rpc_calls_used=budget.steps * RPC_PER_STEP, native_bytes_used=budget.steps * WIRE_PER_STEP,
+        work_checks_used=MAX_WORK, reviewed_prefix_placed=False)
+    # This envelope bounds sizes only and is never returned or retained. Include
+    # the real packet renderer and exact original plan/room/terrain metadata.
+    raw = api.encoded('run_prefix', probe, False)
+    policy.require(len(raw) + PRESENTATION_MARGIN <= api.output_limit(state),
                    'complete original furnishing output cannot fit before native contact')
     budget.remaining()
 
@@ -137,9 +146,11 @@ def run(path: str, batch_id: str, confirm_run: str, budget: Budget, *, _api=None
         current = {k: v for k, v in proposed.items() if k not in REVIEW_FIELDS}
         policy.same_inventory(state, current, budget.remaining)
         policy.require(current['next_step'] == step['name'], 'review escaped the confirmed prefix')
+        from furniture_output_bounds import MAX_BLOCKER_BYTES
         blockers = proposed['blockers']
         policy.require(type(blockers) is list and len(blockers) <= 32
-                       and all(type(b) is str and 1 <= len(b) <= 128 for b in blockers), 'invalid native blocker disclosure')
+                       and all(type(b) is str and 1 <= len(b) <= 128 for b in blockers)
+                       and len(policy.canonical(blockers)) <= MAX_BLOCKER_BYTES, 'invalid native blocker disclosure')
         if blockers:
             policy.require(proposed['expected_plan'] is None and proposed['confirm_review'] is None,
                            'blocked native review carries execution confirmation')
