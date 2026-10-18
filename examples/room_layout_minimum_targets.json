@@ -1,0 +1,36 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "ranking-fixture",
+  "site": 7,
+  "region": {
+    "origin": [
+      10,
+      10,
+      2
+    ],
+    "size": [
+      16,
+      10,
+      1
+    ]
+  },
+  "access_point": [
+    25,
+    19,
+    2
+  ],
+  "areas": [
+    {
+      "name": "hall",
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 4,
+        "columns": 4
+      }
+    }
+  ],
+  "search": {
+    "max_work": 2000000
+  },
+  "objective": "minimum-target-tiles/1"
+}

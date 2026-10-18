@@ -1,0 +1,30 @@
+{
+  "schema": "dfmcp.room-layout-optimization-contract/1",
+  "request_schema": "dfmcp.room-layout-request/1",
+  "field": "objective",
+  "value": "minimum-target-tiles/1",
+  "result_policy": "dfmcp.mrv-ranked-room-layout/1",
+  "comparison_order": [
+    "target_tiles",
+    "total_entry_distance",
+    "lexical_area_placements_yxz_rotation"
+  ],
+  "ranked_candidate": "complete_compiler_accepted_original_project",
+  "lower_bound": "disjoint_area_tile_sum_then_independent_entry_distance_and_placement_minima",
+  "retained_complete_incumbents": 1,
+  "maximum_areas": 8,
+  "maximum_furnishings": 32,
+  "maximum_candidate_placements": 32768,
+  "maximum_search_nodes": 100000,
+  "maximum_work_checks": 20000000,
+  "maximum_output_bytes": 98304,
+  "node_limit_with_incumbent": "layout_found_with_optimality_unproven",
+  "node_limit_without_incumbent": "search_limit_reached_without_plan",
+  "work_deadline_or_cancellation": "refuse_without_plan",
+  "connection_strategy_independent": true,
+  "legacy_default_bytes_unchanged": true,
+  "actual_mining_cost_observed": false,
+  "native_pathfinding_proven": false,
+  "global_optimum_proven": false,
+  "production_admitted": false
+}

@@ -28,6 +28,8 @@ ORIENTED_POLICY = 'dfmcp.mrv-oriented-room-layout/1'
 ACCESS_POLICY = 'dfmcp.mrv-entrance-room-layout/1'
 FALLBACK_POLICY = 'dfmcp.mrv-minimum-fallback-room-layout/1'
 FALLBACK_STRATEGY = 'greedy-then-minimum-tiles/1'
+MINIMUM_TARGETS_OBJECTIVE = 'minimum-target-tiles/1'
+OPTIMIZATION_POLICY = 'dfmcp.mrv-ranked-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
@@ -181,12 +183,15 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
             {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point',
-             'connection_strategy'})
+             'connection_strategy', 'objective'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     if 'connection_strategy' in value:
         require(type(value['connection_strategy']) is str
                 and value['connection_strategy'] == FALLBACK_STRATEGY,
                 'unsupported room connection strategy')
+    if 'objective' in value:
+        require(type(value['objective']) is str and value['objective'] == MINIMUM_TARGETS_OBJECTIVE,
+                'unsupported room layout objective')
     domain = _region(value['region'], domain=True)
     focus = _vector(value.get('focus', list(domain[0])), 1, 32766)
     require(_contains(domain, focus), 'layout focus must be inside the same-level domain')
@@ -248,6 +253,8 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
         request['access_point'] = list(access.point)
     if 'connection_strategy' in value:
         request['connection_strategy'] = FALLBACK_STRATEGY
+    if 'objective' in value:
+        request['objective'] = MINIMUM_TARGETS_OBJECTIVE
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -353,11 +360,12 @@ class Layout:
 
 
 def solve(raw: bytes, guard: Guard = _idle) -> Layout:
-    """First compiler-valid full layout under deterministic MRV backtracking.
+    """First feasible layout, or explicit bounded whole-project optimization.
 
     No-layout is relative to every allowed orientation/translation in this domain
     AND the existing connected RoomPlan compiler. Search-node exhaustion is
-    inconclusive; work/cancellation refusal raises without returning any plan.
+    inconclusive without a full incumbent; work/cancellation refusal always
+    raises without returning any plan. Legacy first-feasible bytes are unchanged.
     """
     value = _json(raw, MAX_INPUT, guard)
     require(type(value) is dict, 'layout request must be an object')
@@ -397,6 +405,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
     trace.update(canonical(request))
     chosen: dict[int, _Candidate] = {}
     solution = None
+    ranking = None
+    if 'objective' in request:
+        from room_layout_rank import Ranking
+        ranking = Ranking(profiles, request['focus'], work)
 
     def search_tree(floors: int, walls: int) -> RoomPlan | None:
         nonlocal nodes, leaves, rejected, backtracks
@@ -405,6 +417,11 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             raise _NodeLimit()
         nodes += 1
         if len(chosen) == len(profiles):
+            if ranking is not None:
+                bound = ranking.cannot_improve(chosen, [])
+                if bound is not None:
+                    trace.update(canonical(['objective_bound', bound]))
+                    return None
             leaves += 1
             areas = []
             for index, profile in enumerate(profiles):
@@ -440,6 +457,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 trace.update(b'compiler_refused\0')
                 return None
             trace.update(bytes.fromhex(plan.digest))
+            if ranking is not None:
+                ranking.consider(plan)
             return plan
         available = []
         for index, candidates in enumerate(domains):
@@ -454,6 +473,11 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 trace.update(canonical(['empty_domain', index]))
                 return None
             available.append((len(fits), index, fits))
+        if ranking is not None:
+            bound = ranking.cannot_improve(chosen, available)
+            if bound is not None:
+                trace.update(canonical(['objective_bound', bound]))
+                return None
         _, index, fits = min(available, key=lambda row: (row[0], row[1]))
         trace.update(canonical(['select', index, len(fits)]))
         for candidate in fits:
@@ -464,21 +488,30 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             trace.update(canonical(event))
             chosen[index] = candidate
             plan = search_tree(floors | candidate.floors, walls | candidate.walls)
-            if plan is not None:
+            if plan is not None and ranking is None:
                 return plan
             del chosen[index]
             backtracks += 1
         return None
 
+    complete = False
     try:
         solution = search_tree(0, 0)
+        complete = True
+        if ranking is not None:
+            solution = ranking.best
         status = 'layout_found' if solution is not None else 'no_layout_in_domain'
     except _NodeLimit:
-        status = 'search_limit_reached'
+        # Only a compiler-validated whole project is an incumbent. Exhausting
+        # nodes can limit optimality, but never turns partial rooms into a plan.
+        if ranking is not None:
+            solution = ranking.best
+        status = 'layout_found' if solution is not None else 'search_limit_reached'
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': FALLBACK_POLICY if 'connection_strategy' in request
+    body = {'schema': RESULT_SCHEMA, 'policy': OPTIMIZATION_POLICY if ranking is not None
+            else FALLBACK_POLICY if 'connection_strategy' in request
             else ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
             'status': status, 'request': request,
             'request_digest': _digest(b'dfmcp-room-layout-request/1\0', request),
@@ -496,6 +529,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             'native_pathfinding_proven': False, 'existing_fort_access_proven': False,
             'items_reserved': False, 'prepared_mutation_plan_created': False,
             'game_effect_performed': False, 'production_admitted': False}
+    if ranking is not None:
+        body['optimization'] = ranking.summary(complete)
+        body['search']['work_units'] = work.used
+        body['search']['all_layouts_ranked'] = complete and ranking.pruned == 0
     result = Layout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete layout result exceeds output bound')
     guard()
