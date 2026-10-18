@@ -69,10 +69,16 @@ def _constraints(value: object, kinds: tuple[str, ...]) -> dict:
     _object(value, set(), set(kinds))
     out = {}
     for kind in kinds:
-        row = _object(value.get(kind, {}), set(), {'material', 'subtype', 'max_distance'})
+        row = _object(value.get(kind, {}), set(),
+                      {'material', 'subtype', 'max_distance', 'max_vertical_distance'})
         # Reuse the actual allocation contract, including exact integer types.
         slot = Slot.from_json({'name': kind, 'kind': kind, 'target': [1, 1, 1], **row})
         out[kind] = {key: slot.json()[key] for key in ('material', 'subtype', 'max_distance')}
+        # Zero is the legacy same-level contract; retain its exact bytes.
+        # A nonzero limit requires the observed-route allocator, which verifies
+        # actual floor/stair connectivity rather than inventing vertical access.
+        if slot.max_vertical_distance:
+            out[kind]['max_vertical_distance'] = slot.max_vertical_distance
     return out
 
 

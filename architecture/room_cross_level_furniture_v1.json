@@ -1,0 +1,18 @@
+{
+  "schema": "dfmcp.room-cross-level-furniture-contract/1",
+  "request_schema": "dfmcp.room-provisioning-request/1",
+  "field": "areas[].item_constraints.<kind>.max_vertical_distance",
+  "minimum": 0,
+  "maximum": 127,
+  "default": 0,
+  "exact_integer": true,
+  "zero_preserves_legacy_bytes": true,
+  "nonzero_requires": "observed_route_allocator",
+  "same_level_allocator_fallback": false,
+  "geometry_rotates_vertical_limit": false,
+  "original_item_constraints_preserved": true,
+  "partial_allocation": false,
+  "stairs_created": false,
+  "native_pathfinding_proven": false,
+  "production_admitted": false
+}
