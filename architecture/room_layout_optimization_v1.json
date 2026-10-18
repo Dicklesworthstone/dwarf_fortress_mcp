@@ -26,5 +26,10 @@
   "actual_mining_cost_observed": false,
   "native_pathfinding_proven": false,
   "global_optimum_proven": false,
-  "production_admitted": false
+  "production_admitted": false,
+  "cli_entry_point": "scripts/layout_rooms.py",
+  "strict_export_option": "--require-optimal-layout",
+  "strict_export_refusal": "ROOM_LAYOUT_OPTIMUM_UNPROVEN",
+  "strict_export_mutates_request": false,
+  "strict_export_checks_regenerated_result": true
 }

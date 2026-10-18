@@ -73,7 +73,7 @@ def report(result: dict | None, code: str | None = None) -> dict:
         'kind': 'review_selected_room_plan', 'room_plan_digest': plan['plan_digest'],
         'native_survey_required': True, 'mutation_authority_granted': False,
         'automatic_execution': False}]
-    return {'schema': 'dfmcp.room-layout-command/1', 'ok': code is None,
+    out = {'schema': 'dfmcp.room-layout-command/1', 'ok': code is None,
             'result': result, 'error': None if code is None else {
                 'code': code, 'detail': 'Layout request, bounded search, stable input or output refused. No partial room plan was exported.'},
             'agent_turn': {'schema': 'dfmcp.agent_turn/1', 'operation': 'rooms.layout',
@@ -93,6 +93,21 @@ def report(result: dict | None, code: str | None = None) -> dict:
                     'game_effects': 0, 'global_infeasibility_proven': False},
                 'budget': {'output_bytes_limit': MAX_COMMAND_OUTPUT, 'token_count_measured': False},
                 'references': reference}}
+    if result is not None and 'optimization' in result:
+        optimization = result['optimization']
+        best, first = optimization['score'], optimization['first_feasible_score']
+        out['agent_turn']['briefing']['layout_optimization'] = {
+            'objective': optimization['objective'],
+            'selected_target_tiles': None if best is None else best['target_tiles'],
+            'first_feasible_target_tiles': None if first is None else first['target_tiles'],
+            'search_complete': optimization['search_complete'],
+            'minimum_in_compiler_domain_proven': optimization['minimum_in_compiler_domain_proven'],
+            'stop_reason': optimization['stop_reason']}
+        out['agent_turn']['coverage']['optimization_scope'] = optimization['scope']
+        out['agent_turn']['uncertainty'].append(
+            'Optimality is limited to the declared layout domain and connection compiler. '
+            'A node-limited best-so-far plan is complete but its optimality is unproven.')
+    return out
 
 
 def export(result: Layout, kind: str) -> bytes:
@@ -140,13 +155,18 @@ def main(argv: list[str] | None = None) -> int:
         source.add_argument('--layout-file', help='recompute and verify a complete canonical layout artifact')
         parser.add_argument('--emit', choices=EXPORTS, default='layout')
         parser.add_argument('--timeout-ms', type=int, default=10000)
+        parser.add_argument('--require-optimal-layout', action='store_true',
+                            help='export only a proven optimum within the declared layout/compiler domain')
         args = parser.parse_args(argv)
         deadline = Deadline(args.timeout_ms)
         raw = read_input(args.layout_file if args.layout_file is not None else args.request_file,
                          MAX_OUTPUT if args.layout_file is not None else MAX_INPUT, deadline)
         result = (Layout.decode(raw, deadline.check) if args.layout_file is not None
                   else solve(raw, deadline.check))
-        if args.emit not in ('layout', 'report') and result.json()['status'] != 'layout_found':
+        if args.require_optimal_layout and not (result.json()['status'] == 'layout_found'
+                and result.json().get('optimization', {}).get('minimum_in_compiler_domain_proven') is True):
+            code = 'ROOM_LAYOUT_OPTIMUM_UNPROVEN'
+        elif args.emit not in ('layout', 'report') and result.json()['status'] != 'layout_found':
             code = ('ROOM_LAYOUT_SEARCH_LIMIT' if result.json()['status'] == 'search_limit_reached'
                     else 'ROOM_LAYOUT_NOT_FOUND')
         else:

@@ -96,3 +96,55 @@ post-incumbent revocation, monotone node-budget improvements, exact replay,
 constraints and fallback interaction. A differential corpus of 112 legacy
 outcomes retains byte-identical results. Native acquisition, DFHack, Rust,
 full-repository and production qualification are not implied.
+
+
+## Require a proven finite-domain optimum before export
+
+The existing CLI accepts `--require-optimal-layout` for both request input and
+saved-layout input. It verifies the regenerated `layout_found` result and requires
+`optimization.minimum_in_compiler_domain_proven` to be exactly true before any
+export. This is an output requirement, not permission to add an objective, change
+a saved request, enlarge the search budget, or silently restart optimization.
+
+```sh
+python3 scripts/layout_rooms.py --request-file examples/room_layout_minimum_targets.json --require-optimal-layout --emit layout > optimal-layout.json
+python3 scripts/layout_rooms.py --layout-file optimal-layout.json --require-optimal-layout --emit room-plan > room-plan.json
+```
+
+A node-limited incumbent, a no-layout result, and a legacy first-feasible layout
+cannot satisfy this requirement. The command exits 2 with
+`ROOM_LAYOUT_OPTIMUM_UNPROVEN` and `result: null`; it emits no room artifact.
+Without the flag, a complete best-so-far plan remains exportable under the
+explicit objective's normal contract. Existing work/deadline failures still
+return their original refusal codes, never an incumbent. A re-signed forged
+optimality flag cannot pass: saved input is replayed before export checks.
+
+The `report` export adds `agent_turn.briefing.layout_optimization`, which states
+the first-feasible and selected target counts, search completion, optimality
+scope and stopping reason. Successful strict exports preserve the selected
+artifact's exact bytes. All six export kinds retain their existing formats;
+legacy reports without an objective remain byte-identical.
+
+## Executed CLI and regression evidence
+
+Thirteen CLI tests use real subprocesses, full normal module imports and
+bounded temporary input files. Both requests and saved layouts exercise all six
+exports, with successful exact downstream RoomPlan/Request decoding and complete
+eight-item allocation. The strict path rejects every node-limited export kind.
+Other tests cover re-signed altered scores/optimality/requests, no incumbent,
+work failure after an incumbent, process hash-seed equality, original entrance
+retention, final-render deadline failure and short/failed output without another
+search or response. Deadline/output fault hooks target the actual offline CLI;
+no solver replacement, native peer or source attestation is used.
+
+The complete final component run passes 59 warnings-denied tests: 19 optimizer,
+13 CLI and 27 unchanged existing corridor/room-compiler regressions. The latter
+include the 512-tile fallback project and existing 6,561-world corridor oracle.
+The 112-result legacy search corpus and four legacy report cases retain their
+pre-change bytes. These do not establish observed-map acquisition, native DFHack,
+Rust/workspace, full-repository, live-game or production qualification.
+
+```sh
+python3 -W error -m unittest discover -s tests -p 'test_room_layout_ranking*.py' -v
+python3 -W error -m unittest discover -s tests -p 'test_room_connection_*.py' -v
+```
