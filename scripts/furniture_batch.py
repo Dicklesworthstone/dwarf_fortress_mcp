@@ -14,14 +14,18 @@ import os
 from pathlib import Path
 import secrets
 import sys
+from typing import TYPE_CHECKING
 
-from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_ROOM_HANDOFF_BYTES
-from terrain_furniture_handoff import TerrainFurnitureHandoff, MAX_BYTES as MAX_TERRAIN_HANDOFF_BYTES
-from room_terrain_origin import ReadBudget
+# Exact-item custody and original-key recovery do not require the spatial
+# planning/observation import graph. Handoff profiles load their SAME validators
+# only after their explicit format is selected; missing validators never cause
+# a fallback to a weaker profile.
+if TYPE_CHECKING:
+    from room_furniture_handoff import RoomFurnitureHandoff
+    from terrain_furniture_handoff import TerrainFurnitureHandoff
+    from furniture_handoff import Handoff
 
 import furniture_plan as model
-from furniture_handoff import Handoff, MAX_BYTES as MAX_HANDOFF_BYTES
-from furniture_allocation import Candidate
 import build_placement_client as placement
 import build_placement_store as storage
 from build_placement_rpc import Authority, Budget, Client, Reply, endpoint
@@ -38,6 +42,27 @@ MAX_ROOM_OUTPUT = 192 * 1024
 HEADER = b'{"schema":"dfmcp.furniture-batch-index/1"}\n'
 MAX_FILE = 32768
 MAX_OUTPUT = 65536
+
+
+def __getattr__(name: str):
+    """Preserve named handoff exports without importing them for legacy recovery."""
+    from importlib import import_module
+    exports = {
+        'RoomFurnitureHandoff': ('room_furniture_handoff', 'RoomFurnitureHandoff'),
+        'MAX_ROOM_HANDOFF_BYTES': ('room_furniture_handoff', 'MAX_BYTES'),
+        'TerrainFurnitureHandoff': ('terrain_furniture_handoff', 'TerrainFurnitureHandoff'),
+        'MAX_TERRAIN_HANDOFF_BYTES': ('terrain_furniture_handoff', 'MAX_BYTES'),
+        'ReadBudget': ('room_terrain_origin', 'ReadBudget'),
+        'Handoff': ('furniture_handoff', 'Handoff'),
+        'MAX_HANDOFF_BYTES': ('furniture_handoff', 'MAX_BYTES'),
+        'Candidate': ('furniture_allocation', 'Candidate'),
+    }
+    if name not in exports:
+        raise AttributeError(name)
+    module, symbol = exports[name]
+    value = getattr(import_module(module), symbol)
+    globals()[name] = value
+    return value
 
 
 def sha(raw: bytes) -> str:
@@ -66,6 +91,8 @@ def selection(step: model.Step) -> Selection:
 def validate_handoff_capture(handoff: Handoff, capture, manifest, address: str) -> None:
     """Retained inventory only narrows an independently decoded native observation."""
     from build_placement_wire import Capture
+    from furniture_handoff import Handoff
+    from furniture_allocation import Candidate
     require(type(handoff) is Handoff and type(capture) is Capture, 'invalid handoff capture')
     capture.encode()
     require(capture.generation == manifest.generation, 'placement capture generation differs')
@@ -189,6 +216,13 @@ class Batch:
             maximum = (MAX_TERRAIN_DEFINITION if with_terrain else MAX_ROOM_DEFINITION if with_room
                        else MAX_DEFINITION if with_handoff else MAX_FILE)
             require(len(raw_definition) <= maximum, 'batch definition exceeds its profile bound')
+            if with_terrain:
+                from terrain_furniture_handoff import TerrainFurnitureHandoff
+                from room_terrain_origin import ReadBudget
+            elif with_room:
+                from room_furniture_handoff import RoomFurnitureHandoff
+            elif with_handoff:
+                from furniture_handoff import Handoff
             self.terrain_handoff = (TerrainFurnitureHandoff.from_json(value['terrain_handoff'],
                                     ReadBudget(budget).checkpoint) if with_terrain else None)
             self.room_handoff = (self.terrain_handoff.room if with_terrain else
@@ -292,6 +326,7 @@ class Batch:
         if self.terrain_handoff is None:
             require(journal is None, 'legacy batch cannot adopt terrain custody')
             return
+        from room_terrain_origin import ReadBudget
         if self._terrain_journal is None:
             terrain = self.terrain_handoff
             if journal is None:
@@ -494,6 +529,8 @@ def initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, tim
                _budget: Budget | None = None) -> dict:
     budget = _budget if _budget is not None else Budget(timeout_ms)
     if terrain_handoff is not None:
+        from terrain_furniture_handoff import TerrainFurnitureHandoff
+        from room_terrain_origin import ReadBudget
         require(type(terrain_handoff) is TerrainFurnitureHandoff and handoff is None and room_handoff is None,
                 'terrain, room and standalone handoff imports are mutually exclusive')
         terrain = TerrainFurnitureHandoff.decode(terrain_handoff.encode(), ReadBudget(budget).checkpoint)
@@ -516,6 +553,7 @@ def _initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, bu
             terrain_journal.budget.checkpoint()
     terrain_guard()
     if room_handoff is not None:
+        from room_furniture_handoff import RoomFurnitureHandoff
         require(type(room_handoff) is RoomFurnitureHandoff and handoff is None,
                 'room and standalone handoff imports are mutually exclusive')
         room_handoff = RoomFurnitureHandoff.decode(room_handoff.encode(), budget.remaining)
@@ -524,6 +562,7 @@ def _initialize(path: str, plan: model.FurniturePlan, folder: str, site: int, bu
     integer(site, 0, 2147483647)
     require(type(plan) is model.FurniturePlan, 'invalid complete furniture plan')
     if handoff is not None:
+        from furniture_handoff import Handoff
         require(type(handoff) is Handoff, 'invalid furniture handoff')
         handoff = Handoff.decode(canonical(handoff.json()))
         require(plan == handoff.plan() and (folder, site) == (handoff.request.folder, handoff.request.site),
@@ -745,8 +784,11 @@ def recover(path: str, expected_id: str, step_name: str, cancel: bool = False, t
         require(step is not None, 'step outside batch')
         journal = batch.effects.get(batch.key(step))
         batch.register(step)  # Adopt a crash-before-registration intent, never dispatch it.
-        authority = None if journal.state.terminal is not None else Authority.load()
-        if batch.room_handoff is not None and authority is not None:
+        # A retained Indeterminate receipt is still pending native evidence.
+        # Use the same query/cancel decision as the actual recovery owner: only
+        # resolved receipts and cancellation of uncertain attempts stay offline.
+        authority = Authority.load() if placement.recovery_requires_native(journal, cancel) else None
+        if authority is not None:
             batch.budget.publication_authority = authority
         batch.check()
         outcome = placement.recover(journal, authority, cancel)
@@ -754,11 +796,10 @@ def recover(path: str, expected_id: str, step_name: str, cancel: bool = False, t
         out.update(native_contacted=outcome['native_contacted'], recovered_step=step.name,
                    native_query_status=outcome.get('effect_status'))
         encoded('cancel' if cancel else 'query', out)
-        if batch.room_handoff is not None:
-            if authority is not None:
-                authority.guard('QueryPlacement')
-            batch.budget.remaining()
-            batch.check()
+        if authority is not None:
+            authority.guard('QueryPlacement')
+        batch.budget.remaining()
+        batch.check()
         return out
 
 
@@ -829,6 +870,7 @@ def read_plan(path: str) -> model.FurniturePlan:
 
 
 def read_handoff(path: str) -> Handoff:
+    from furniture_handoff import Handoff, MAX_BYTES as MAX_HANDOFF_BYTES
     return Handoff.decode(read_input(path, MAX_HANDOFF_BYTES))
 
 
@@ -862,6 +904,8 @@ def main(argv: list[str] | None = None) -> int:
         budget = Budget(args.timeout_ms)
         if args.operation == 'init':
             if args.terrain_handoff is not None:
+                from terrain_furniture_handoff import TerrainFurnitureHandoff, MAX_BYTES as MAX_TERRAIN_HANDOFF_BYTES
+                from room_terrain_origin import ReadBudget
                 require(args.world_folder is None and args.site is None,
                         'terrain handoff supplies original fortress; overrides are not accepted')
                 authority = Authority.load()
@@ -872,6 +916,7 @@ def main(argv: list[str] | None = None) -> int:
                 out = initialize(args.directory, h.plan(), h.request.folder, h.request.site,
                                  terrain_handoff=terrain, _budget=budget)
             elif args.room_handoff is not None:
+                from room_furniture_handoff import RoomFurnitureHandoff, MAX_BYTES as MAX_ROOM_HANDOFF_BYTES
                 require(args.world_folder is None and args.site is None,
                         'room handoff supplies original fortress; overrides are not accepted')
                 authority = Authority.load()
