@@ -26,6 +26,8 @@ RESULT_SCHEMA = 'dfmcp.room-layout-result/1'
 POLICY = 'dfmcp.mrv-connected-room-layout/1'
 ORIENTED_POLICY = 'dfmcp.mrv-oriented-room-layout/1'
 ACCESS_POLICY = 'dfmcp.mrv-entrance-room-layout/1'
+FALLBACK_POLICY = 'dfmcp.mrv-minimum-fallback-room-layout/1'
+FALLBACK_STRATEGY = 'greedy-then-minimum-tiles/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
@@ -178,8 +180,13 @@ def _layout_profile(area: dict, folder: str, site: int, level: int, work: _Work)
 def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
-            {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point'})
+            {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point',
+             'connection_strategy'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
+    if 'connection_strategy' in value:
+        require(type(value['connection_strategy']) is str
+                and value['connection_strategy'] == FALLBACK_STRATEGY,
+                'unsupported room connection strategy')
     domain = _region(value['region'], domain=True)
     focus = _vector(value.get('focus', list(domain[0])), 1, 32766)
     require(_contains(domain, focus), 'layout focus must be inside the same-level domain')
@@ -239,6 +246,8 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
         if 'site_mask' in request:
             require(site_mask.permits_floor(access.point), 'access point forbidden by site mask')
         request['access_point'] = list(access.point)
+    if 'connection_strategy' in value:
+        request['connection_strategy'] = FALLBACK_STRATEGY
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -416,7 +425,12 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             if 'access_point' in request:
                 lowered['access'] = {'point': request['access_point'], 'region': request['region']}
             try:
-                plan = RoomPlan.compile(lowered, work)
+                # New corridor feasibility changes earlier search branches and
+                # work counts, even if a later legacy plan already succeeded.
+                # Seal the choice in the request; old artifacts must replay the
+                # original greedy search, not inherit a new search policy.
+                plan = RoomPlan.compile(lowered, work,
+                    _connection_fallback='connection_strategy' in request)
             except ConnectionWorkLimit as cause:
                 raise WorkLimit('room connection work allowance exhausted') from cause
             except ValueError:
@@ -464,7 +478,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
+    body = {'schema': RESULT_SCHEMA, 'policy': FALLBACK_POLICY if 'connection_strategy' in request
+            else ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
             'status': status, 'request': request,
             'request_digest': _digest(b'dfmcp-room-layout-request/1\0', request),
             'room_plan': None if solution is None else solution.json(),

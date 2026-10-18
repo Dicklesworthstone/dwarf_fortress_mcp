@@ -1,7 +1,9 @@
 """Bounded connections between intended room floors, never native pathfinding.
 
 Each greedy link minimizes new excavation, then cardinal path length. Stable
-coordinate ordering breaks ties; this is not a globally optimal corridor tree.
+coordinate ordering breaks ties. If greedy links exceed the tile allowance,
+retry the complete original geometry with bounded minimum-new-tile subset DP.
+The fallback shares the original work allowance and never returns a partial tree.
 The caller supplies required walls, furniture and exclusions as blocked cells.
 Beads: df-dfhack-bridge-plane-c-pic.3/.4/.5 (WP-05/WP-10).
 """
@@ -15,6 +17,7 @@ import json
 from typing import Callable
 
 POLICY = 'dfmcp.room-project-connections/1'
+MINIMUM_POLICY = 'dfmcp.room-project-minimum-connections/1'
 MAX_CELLS = 1024
 MAX_WORK = 100_000
 Point = tuple[int, int, int]
@@ -115,9 +118,12 @@ class Connections:
     walkable_tiles: int
     work_units: int
     digest: str
+    minimum_excavation: bool = False
+    component_count: int = 0
+    subset_count: int = 0
 
     def summary(self) -> dict:
-        return {'policy': POLICY, 'all_areas_connected': True,
+        out = {'policy': POLICY, 'all_areas_connected': True,
                 'new_corridor_tiles': len(self.added), 'corridor_parts': len(self.parts),
                 'connected_walkable_tiles': self.walkable_tiles,
                 'links': [{'start': list(link.start), 'end': list(link.end),
@@ -125,20 +131,31 @@ class Connections:
                 'work_units': self.work_units, 'connection_digest': self.digest,
                 'global_minimum_excavation_proven': False,
                 'native_pathfinding_proven': False, 'terrain_observed': False}
+        if self.minimum_excavation:
+            out.update(policy=MINIMUM_POLICY,
+                fallback_reason='greedy_corridors_exceeded_tile_allowance',
+                minimum_excavation_in_region_proven=True,
+                minimum_excavation_scope='fixed_same_level_floor_and_protected_masks',
+                original_floor_components=self.component_count,
+                subset_states=self.subset_count,
+                rectangle_count_optimal=False)
+        return out
 
 
 def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozenset[Point],
             entries: tuple[tuple[str, Point], ...], region: Region, *,
             max_new_tiles: int, guard: Guard = idle, max_work: int = MAX_WORK,
-            root: Point | None = None) -> Connections:
+            root: Point | None = None, minimum_fallback: bool = True) -> Connections:
     """Connect the complete intended floor in one fixed same-level capture.
 
     Inputs are copied only after size admission. No vertical movement or outside
     capture detour is invented. Refusal/cancellation returns no partial result.
+    Legacy search replay can disable the fallback without changing greedy work.
     The injected guard belongs to the caller's enclosing authority/work deadline.
     """
     work = _Work(guard, max_work)
     work.charge()
+    require(type(minimum_fallback) is bool, 'minimum fallback selection must be an exact Boolean')
     require(type(floors) in (set, frozenset) and 1 <= len(floors) <= 512
             and type(blocked) in (set, frozenset) and len(blocked) <= MAX_CELLS,
             'room-connection mask exceeds bounds')
@@ -211,8 +228,13 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
             path.append(parents[path[-1]])
         path.reverse()
         fresh = set(path) - walkable
-        require(len(added) + len(fresh) <= max_new_tiles,
-                'complete room project exceeds corridor tile allowance')
+        if len(added) + len(fresh) > max_new_tiles:
+            require(minimum_fallback, 'complete room project exceeds corridor tile allowance')
+            # Greedy exhaustion is not an impossibility proof. Start from the
+            # ORIGINAL masks, not the locally selected prefix; reuse this exact
+            # work owner so failure cannot manufacture another budget or plan.
+            return _minimum_connection(original, set(blocked), entries, region,
+                                       root, max_new_tiles, work)
         links.append(Link(path[0], path[-1], len(fresh), len(path) - 1))
         paths.append(path)
         added.update(fresh)
@@ -231,3 +253,80 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
     digest = hashlib.sha256(b'dfmcp-room-project-connections/1\0' + raw).hexdigest()
     work.charge()
     return Connections(tuple(sorted(added)), parts, tuple(links), len(connected), work.used, digest)
+
+
+
+def _minimum_connection(original: set[Point], blocked: set[Point],
+                        entries: tuple[tuple[str, Point], ...], region: Region,
+                        root: Point, allowance: int, work: _Work) -> Connections:
+    from room_connection_solver import ComponentLimit, TIE_POLICY, minimum_tiles
+
+    (x, y, z), (width, height, _) = region
+    admitted = set()
+    for px in range(x, x + width):
+        for py in range(y, y + height):
+            work.charge()
+            point = px, py, z
+            if point not in blocked:
+                admitted.add(point)
+    try:
+        minimum = minimum_tiles(original, admitted, root, allowance, work.charge)
+    except ComponentLimit as error:
+        # The layout solver already propagates this resource-exhaustion type.
+        # It must not misreport an unsearched large component set as no layout.
+        raise WorkLimit(str(error)) from error
+    added = set(minimum.added)
+    final = original | added
+    require(not added & original and not final & blocked and final <= admitted
+            and len(added) <= allowance and len(final) <= 512,
+            'minimum connection escaped the original geometry or tile allowance')
+    require(_flood(final, root, work) == final,
+            'minimum connection did not connect every original floor')
+
+    # Re-express the selected union as exact, reproducible connection paths.
+    # No new search outside that minimum mask, hull expansion or partial output.
+    built, links, paths = set(original), [], []
+    connected = _flood(built, root, work)
+    while connected != built:
+        queue = deque(sorted(connected))
+        parent = {p: None for p in connected}
+        target = None
+        while queue:
+            work.charge()
+            current = queue.popleft()
+            if current in original and current not in connected:
+                target = current
+                break
+            for following in neighbors(current):
+                work.charge()
+                if following in final and following not in parent:
+                    parent[following] = current
+                    queue.append(following)
+        require(target is not None, 'minimum connection path reconstruction failed')
+        path = [target]
+        while parent[path[-1]] is not None:
+            work.charge()
+            path.append(parent[path[-1]])
+        path.reverse()
+        fresh = set(path) - built
+        links.append(Link(path[0], path[-1], len(fresh), len(path) - 1))
+        paths.append(path)
+        built.update(fresh)
+        connected = _flood(built, root, work)
+    require(built == final and all(p in connected for _, p in entries),
+            'minimum connection retained unused cells or lost an original entry')
+    parts = _partition(added, work)
+    witness = {'policy': MINIMUM_POLICY, 'region': region, 'entries': entries,
+               'root': root, 'original_floor': sorted(original),
+               'blocked': sorted(blocked), 'paths': paths,
+               'walkable': sorted(connected), 'parts': parts,
+               'minimum_new_tiles': minimum.cost,
+               'component_representatives': minimum.representatives,
+               'subset_count': minimum.subset_count, 'tie_policy': TIE_POLICY}
+    raw = json.dumps(witness, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+                     allow_nan=False).encode('ascii')
+    require(len(raw) <= 128 * 1024, 'minimum room-connection witness exceeds bound')
+    digest = hashlib.sha256(b'dfmcp-room-project-minimum-connections/1\0' + raw).hexdigest()
+    work.charge()
+    return Connections(tuple(sorted(added)), parts, tuple(links), len(connected), work.used,
+                       digest, True, len(minimum.representatives), minimum.subset_count)

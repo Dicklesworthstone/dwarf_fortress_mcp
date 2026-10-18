@@ -1,0 +1,52 @@
+{
+  "schema": "dfmcp.room-provisioning-request/1",
+  "world_folder": "fallback-fixture",
+  "site": 7,
+  "connect_areas": true,
+  "areas": [
+    {
+      "name": "beds",
+      "origin": [
+        20,
+        20,
+        2
+      ],
+      "template": {
+        "kind": "bedroom_cluster",
+        "rooms_count": 8,
+        "room_size": [
+          7,
+          7
+        ]
+      }
+    },
+    {
+      "name": "eat_a",
+      "origin": [
+        55,
+        15,
+        2
+      ],
+      "rotation": 90,
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 1,
+        "columns": 1
+      }
+    },
+    {
+      "name": "eat_b",
+      "origin": [
+        53,
+        30,
+        2
+      ],
+      "rotation": 0,
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 1,
+        "columns": 1
+      }
+    }
+  ]
+}

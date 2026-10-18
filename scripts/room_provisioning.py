@@ -197,7 +197,8 @@ def _area(value: object, guard: Guard) -> tuple[dict, list[_Rect], list[dict], l
 def _connect_project(compiled, floors: set[Point], targets: set[Point],
                      forbidden: list[_Rect], low: Point, extent: Point,
                      guard: Guard, site_mask: SiteMask | None = None,
-                     root: Point | None = None) -> connections.Connections:
+                     root: Point | None = None, *,
+                     minimum_fallback: bool = True) -> connections.Connections:
     """Preserve every required bedroom wall while joining complete area floors."""
     require(extent[2] == 1, 'connected room projects require one level; stairs are not inferred')
     protected = set(targets)
@@ -228,7 +229,8 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
                 break
     return connections.connect(floors - targets, protected,
         tuple((area['name'], entry) for area, _, _, _, entry in compiled),
-        (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard, root=root)
+        (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard, root=root,
+        minimum_fallback=minimum_fallback)
 
 
 @dataclass(frozen=True)
@@ -237,7 +239,12 @@ class RoomPlan:
     _body: bytes
 
     @classmethod
-    def compile(cls, value: object, guard: Guard = idle) -> RoomPlan:
+    def compile(cls, value: object, guard: Guard = idle, *,
+                _connection_fallback: bool = True) -> RoomPlan:
+        # Only legacy layout-search replay narrows this internal choice. Every
+        # emitted plan still regenerates normally: successful greedy routes are
+        # identical with or without fallback. Never use a process-global switch.
+        require(type(_connection_fallback) is bool, 'invalid room connection fallback selection')
         guard()
         _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask', 'access'})
         require(value['schema'] == INTENT_SCHEMA, 'wrong room-provisioning request generation')
@@ -346,7 +353,8 @@ class RoomPlan:
                     parts.append(_Rect(root, (1, 1, 1), 'access_point', ''))
                     floors.add(root)
             routed = _connect_project(compiled, floors, targets, forbidden,
-                                      route_low, route_size, guard, site_mask, root)
+                                      route_low, route_size, guard, site_mask, root,
+                                      minimum_fallback=_connection_fallback)
             corridors = [_Rect(origin, size, 'project_corridor', '') for origin, size in routed.parts]
             require(len(parts) + len(corridors) <= MAX_PARTS,
                     'connected room project exceeds the existing 32-part excavation limit')
