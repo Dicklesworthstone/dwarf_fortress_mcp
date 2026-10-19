@@ -1,319 +1,411 @@
-"""Actual TCP reader and CLI exports; replay never reconnects or authorizes effects."""
-from __future__ import annotations
+"""Real read-only TCP, complete-source replay and CLI publication boundaries.
 
+The peer emits synthetic DFMM1500 bytes. The actual existing MapClient, framing,
+full module imports, compiler, private test files and CLI subprocesses run here;
+no native DFHack or live-fortress qualification is inferred.
+"""
 from copy import deepcopy
-import hashlib
 import json
 import os
 from pathlib import Path
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
-from room_layout_capture_fixtures import MANIFEST, capture, request, tile
-from room_layout_excavation_peer import Peer, TOKEN
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
+import excavation_observer as native
+from furniture_allocation import Candidate, Request, allocate
+from furniture_plan import canonical
 import layout_rooms as offline
 import room_layout as layout
-import room_layout_excavation as compiler
-import room_terrain as terrain
-import survey_room_excavation as command
-import survey_room_layout as survey
-from furniture_plan import canonical
-from room_excavation_handoff import RoomExcavationHandoff
+import room_layout_observed as observed
 from room_provisioning import RoomPlan
+import survey_room_layout as command
+from test_room_layout_costs import hall
+from test_room_layout_excavation_observed import MANIFEST, map_bytes, request, solve
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def environment(address=None):
-    values = {k: v for k, v in os.environ.items() if not k.startswith('DFMCP_')}
-    values['PYTHONDONTWRITEBYTECODE'] = '1'
-    if address is not None:
-        values.update({survey.OPT_IN: '1', survey.TOKEN: TOKEN, survey.ENDPOINT: address})
-    return values
+TOKEN = b'synthetic-query-only-token-12345678'
 
 
-class CommandTests(unittest.TestCase):
-    def run_cli(self, raw, source='--request-file', emit='report', env=None, script='survey_room_excavation.py'):
+def environment(peer=None):
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DFMCP_')}
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    if peer is not None:
+        env.update({command.OPT_IN: '1', command.ENDPOINT: peer.address,
+                    command.TOKEN: TOKEN.decode('ascii')})
+    return env
+
+
+class MapPeer:
+    """One joined finite session with independently selected source faults."""
+    def __init__(self, value, *, capture=None, fault=None, fragmented=False):
+        self.value, self.capture = deepcopy(value), map_bytes(value) if capture is None else capture
+        self.fault, self.fragmented = fault, fragmented
+        self.events, self.errors, self.closed = [], [], False
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(('127.0.0.1', 0))
+        self.listener.listen(1)
+        self.listener.settimeout(5)
+        self.address = '127.0.0.1:' + str(self.listener.getsockname()[1])
+        self.thread = threading.Thread(target=self._run, daemon=False)
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, kind, *_args):
+        self.thread.join(6)
+        self.listener.close()
+        if self.thread.is_alive():
+            self.thread.join(6)
+            raise AssertionError('synthetic map peer did not drain')
+        if kind is None and self.errors:
+            raise self.errors[0]
+
+    @staticmethod
+    def read(conn, count):
+        value = bytearray()
+        while len(value) < count:
+            chunk = conn.recv(count - len(value))
+            if not chunk:
+                raise AssertionError('client closed before complete expected request')
+            value += chunk
+        return bytes(value)
+
+    def send(self, conn, payload):
+        data = struct.pack('<h2xi', -1, len(payload)) + payload
+        if self.fragmented:
+            for start in range(0, len(data), 7):
+                conn.sendall(data[start:start + 7])
+        else:
+            conn.sendall(data)
+
+    def frame(self, conn):
+        method, length = struct.unpack('<h2xi', self.read(conn, 8))
+        if not 0 <= length <= 2048:
+            raise AssertionError('unbounded test request')
+        return method, native.decode(self.read(conn, length), 11)
+
+    def _run(self):
+        try:
+            with self.listener.accept()[0] as conn:
+                conn.settimeout(5)
+                self.events.append('connected')
+                if self.read(conn, 12) != b'DFHack?\n' + struct.pack('<i', 1):
+                    raise AssertionError('wrong client greeting')
+                conn.sendall(b'DFHack!\n' + struct.pack('<i', 1))
+                for number, name in enumerate(('Handshake', 'ReadObservation'), 2):
+                    method, fields = self.frame(conn)
+                    if method != 0 or fields != {1: name.encode(), 2: b'dfmcp.map.v1_5.Request',
+                            3: b'dfmcp.map.v1_5.Reply', 4: b'dfmcp_map_v1_5'}:
+                        raise AssertionError('a non-map or mutation method was bound')
+                    self.events.append('bind:' + name)
+                    self.send(conn, native.encode({1: number}))
+                nonce = None
+                for number, operation in ((2, 'handshake'), (3, 'capture')):
+                    method, fields = self.frame(conn)
+                    expected = {1: TOKEN, 3: 1, 4: 5,
+                        **dict(zip(range(5, 11), self.value['region']['origin'] + self.value['region']['size'])),
+                        11: max(1024, 575 + 20 * len(self.capture_cells()))}
+                    if method != number or {k: v for k, v in fields.items() if k != 2} != expected:
+                        raise AssertionError('native request changed original selection or authority')
+                    if not isinstance(fields.get(2), bytes) or len(fields[2]) != 32:
+                        raise AssertionError('missing fresh nonce')
+                    nonce = fields[2] if nonce is None else nonce
+                    if fields[2] != nonce:
+                        raise AssertionError('connection nonce changed')
+                    self.events.append(operation)
+                    if operation == 'capture' and self.fault == 'lost_reply':
+                        return
+                    response = {1: 1, 2: 0, 3: nonce, 4: 1, 5: 5,
+                                6: MANIFEST.generation, 7: MANIFEST.df_version.encode(),
+                                8: MANIFEST.dfhack_version.encode()}
+                    if operation == 'capture':
+                        response[9] = self.capture
+                        if self.fault == 'source_changed': response[6] += 1
+                        elif self.fault == 'wrong_nonce': response[3] = b'X' * 32
+                        elif self.fault == 'wrong_profile': response[5] = 6
+                    self.send(conn, native.encode(response))
+                if conn.recv(1) != b'':
+                    raise AssertionError('unexpected repeat read or mutation after original capture')
+        except BaseException as error:
+            self.errors.append(error)
+        finally:
+            self.closed = True
+
+    def capture_cells(self):
+        x, y, z = self.value['region']['size']
+        return range(x * y * z)
+
+
+class Buffer:
+    def __init__(self, *, short=False):
+        self.buffer = self
+        self.raw, self.calls, self.short = b'', 0, short
+
+    def write(self, raw):
+        self.calls += 1
+        self.raw += raw
+        return len(raw) - int(self.short)
+
+    def flush(self):
+        pass
+
+
+class ObservedExcavationCLITests(unittest.TestCase):
+    def cli(self, path, mode, kind='survey', *, env=None, strict=True, script='survey_room_layout.py'):
+        args = [sys.executable, '-W', 'error', str(ROOT / 'scripts' / script),
+                mode, str(path), '--emit', kind]
+        if strict:
+            args.append('--require-optimal-layout')
+        return subprocess.run(args, capture_output=True, check=False,
+                              env=environment() if env is None else env, timeout=15)
+
+    def assert_one_read(self, peer):
+        self.assertEqual(peer.events, ['connected', 'bind:Handshake', 'bind:ReadObservation', 'handshake', 'capture'])
+        self.assertTrue(peer.closed)
+        self.assertEqual(peer.errors, [])
+
+    def test_all_seven_real_tcp_exports_preserve_exact_complete_artifacts(self):
+        value = request()
+        result = solve(value)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'input.json'
-            path.write_bytes(raw)
-            return subprocess.run([sys.executable, str(ROOT / 'scripts' / script), source, str(path),
-                '--emit', emit], capture_output=True, env=environment() if env is None else env, timeout=20)
+            path = Path(directory) / 'request.json'
+            original = canonical(value)
+            path.write_bytes(original)
+            for kind in command.EXPORTS:
+                with self.subTest(kind=kind), MapPeer(value, fragmented=True) as peer:
+                    response = self.cli(path, '--request-file', kind, env=environment(peer))
+                self.assert_one_read(peer)
+                self.assertEqual(response.returncode, 0, response.stdout)
+                self.assertEqual(response.stderr, b'')
+                self.assertEqual(response.stdout, command.export(result, kind, True, require_optimal=True))
+                self.assertNotIn(TOKEN, response.stdout)
+                self.assertEqual(path.read_bytes(), original)
+                if kind == 'report':
+                    body = json.loads(response.stdout)
+                    self.assertTrue(body['agent_turn']['coverage']['native_acquisition_verified_this_call'])
+                    self.assertEqual(body['agent_turn']['briefing']['excavation_comparison']['observed_wall_targets'], 0)
+                elif kind == 'room-plan':
+                    plan = RoomPlan.decode(response.stdout)
+                    self.assertEqual(plan.json()['furniture_count'], 2)
+                elif kind == 'furniture-request':
+                    wanted = Request.decode(response.stdout)
+                    items = tuple(Candidate(i, s.kind, s.target, (0, 1), -1) for i, s in enumerate(wanted.slots))
+                    self.assertEqual(len(allocate(wanted, items)['plan']['steps']), 2)
 
-    def local_call(self, raw, source='--request-file', emit='report', env=None):
+    def test_saved_survey_exports_are_offline_and_do_not_reacquire_evidence(self):
+        result = solve(request())
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'input.json'
-            path.write_bytes(raw)
-            outputs = []
-            with patch.dict(os.environ, environment() if env is None else env, clear=True), \
-                    patch.object(offline, 'publish', side_effect=lambda data: outputs.append(data) or 0):
-                code = command.main([source, str(path), '--emit', emit])
-            self.assertEqual(len(outputs), 1)
-            return code, outputs[0]
+            path = Path(directory) / 'survey.json'
+            path.write_bytes(result.encode())
+            env = {**environment(), 'DFMCP_UNRELATED_INVALID_AUTHORITY': '1'}
+            for kind in command.EXPORTS:
+                with self.subTest(kind=kind):
+                    response = self.cli(path, '--survey-file', kind, env=env)
+                    self.assertEqual(response.returncode, 0, response.stdout)
+                    self.assertEqual(response.stderr, b'')
+                    self.assertEqual(response.stdout, command.export(result, kind, False, require_optimal=True))
+            body = json.loads(self.cli(path, '--survey-file', 'report', env=env).stdout)
+            self.assertFalse(body['agent_turn']['coverage']['native_acquisition_verified_this_call'])
+            self.assertEqual(body['agent_turn']['coverage']['native_observations'], 0)
+            self.assertEqual(path.read_bytes(), result.encode())
 
-    def complete(self, value=None):
-        value = request() if value is None else value
-        _, region, _ = compiler.prepare(canonical(value))
-        raw = capture(region, {(10, 10, 2): tile(3)})
-        return compiler.solve(canonical(value), raw, MANIFEST, '127.0.0.1:5000')
+    def test_standalone_layout_export_replays_as_assumptions_not_native_evidence(self):
+        result = solve(request())
+        nested = command.export(result, 'layout', False)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'layout.json'; path.write_bytes(nested)
+            response = self.cli(path, '--layout-file', 'report', script='layout_rooms.py')
+        self.assertEqual(response.returncode, 0, response.stdout)
+        body = json.loads(response.stdout)
+        self.assertFalse(body['result']['terrain_observed'])
+        self.assertEqual(body['result']['optimization']['cost_evidence'], 'caller_declared_not_observed')
+        self.assertEqual(body['agent_turn']['coverage']['native_observations'], 0)
+        self.assertNotIn('excavation_evidence', body['result'])
 
-    def assert_refused(self, process, code=None):
-        self.assertEqual(process.returncode, 2, process.stderr.decode())
-        self.assertEqual(process.stderr, b'')
-        result = json.loads(process.stdout)
-        self.assertFalse(result['ok'])
-        self.assertIsNone(result['result'])
-        self.assertIn('agent_turn', result)
-        if code:
-            self.assertEqual(result['error']['code'], code)
-        self.assertNotIn(TOKEN.encode(), process.stdout)
-        self.assertNotIn(b'input.json', process.stdout)
-        return result
+    def test_strict_live_and_saved_exports_refuse_node_limited_complete_incumbents(self):
+        value = request(search={'max_nodes': 2})
+        result = solve(value)
+        self.assertEqual(result.json()['status'], 'layout_found')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'request.json'; source.write_bytes(canonical(value))
+            saved = Path(directory) / 'survey.json'; saved.write_bytes(result.encode())
+            for kind in command.EXPORTS:
+                with self.subTest(kind=kind), MapPeer(value) as peer:
+                    live = self.cli(source, '--request-file', kind, env=environment(peer))
+                self.assert_one_read(peer)
+                replay = self.cli(saved, '--survey-file', kind)
+                for response in (live, replay):
+                    self.assertEqual(response.returncode, 2)
+                    self.assertEqual(response.stderr, b'')
+                    body = json.loads(response.stdout)
+                    self.assertIsNone(body['result'])
+                    self.assertEqual(body['error']['code'], 'ROOM_LAYOUT_OPTIMUM_UNPROVEN')
+                    self.assertFalse(body['agent_turn']['briefing']['mutation_admissible'])
+            ordinary = self.cli(saved, '--survey-file', strict=False)
+            self.assertEqual(ordinary.returncode, 0)
+            self.assertEqual(ordinary.stdout, result.encode())
 
-    def test_actual_single_capture_all_nine_exports_match_real_component_results(self):
-        value = request()
-        _, region, _ = compiler.prepare(canonical(value))
-        for kind in command.EXPORTS:
-            with self.subTest(kind=kind), Peer(region) as peer:
-                expected, handoff = compiler.solve(canonical(value), peer.payload, MANIFEST, peer.address)
-                actual = self.run_cli(canonical(value), emit=kind, env=environment(peer.address))
-                self.assertEqual(actual.returncode, 0, actual.stdout[:300])
-                self.assertEqual(actual.stderr, b'')
-                self.assertEqual(actual.stdout, command.export(expected, handoff, kind, True))
-                self.assertEqual(peer.calls, ['Handshake', 'ReadObservation'])
-                self.assertEqual(peer.connections, 1)
-                self.assertTrue(peer.closed.wait(2))
-                if kind == 'excavation-handoff':
-                    self.assertEqual(RoomExcavationHandoff.decode(actual.stdout), handoff)
-                if kind == 'room-plan':
-                    self.assertEqual(RoomPlan.decode(actual.stdout), handoff.plan())
+    def test_strict_flag_never_upgrades_legacy_first_feasible_search(self):
+        value = request(); value.pop('objective')
+        result = solve(value)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'legacy.json'; path.write_bytes(result.encode())
+            response = self.cli(path, '--survey-file')
+            default = self.cli(path, '--survey-file', strict=False)
+        self.assertEqual(response.returncode, 2)
+        self.assertEqual(json.loads(response.stdout)['error']['code'], 'ROOM_LAYOUT_OPTIMUM_UNPROVEN')
+        self.assertEqual(default.stdout, result.encode())
+        self.assertEqual(default.returncode, 0)
 
-    def test_all_nine_offline_exports_work_without_credentials_or_socket(self):
-        result, handoff = self.complete()
-        for kind in command.EXPORTS:
-            with self.subTest(kind=kind), patch.object(survey, '_MapClient', side_effect=AssertionError('offline contact')):
-                code, raw = self.local_call(result.encode(), '--compilation-file', kind)
-                self.assertEqual(code, 0)
-                self.assertEqual(raw, command.export(result, handoff, kind, False))
-                actual = self.run_cli(result.encode(), '--compilation-file', kind)
-                self.assertEqual(actual.returncode, 0)
-                self.assertEqual(actual.stdout, raw)
-        report = json.loads(command.export(result, handoff, 'report', False))
-        coverage = report['agent_turn']['coverage']
-        self.assertFalse(coverage['native_acquisition_verified_this_call'])
-        self.assertFalse(coverage['native_connection_attempted'])
-        self.assertEqual(coverage['native_observations'], 0)
-        self.assertEqual(coverage['derived_subregions'], 2)
-
-    def test_native_stream_closes_before_real_solver_starts(self):
-        value = request()
-        _, region, _ = compiler.prepare(canonical(value))
-        real = compiler.solve
-        with Peer(region) as peer:
-            def checked(*args):
-                self.assertTrue(peer.closed.wait(2), 'native stream stayed open during planning')
-                return real(*args)
-            with patch.object(compiler, 'solve', side_effect=checked):
-                code, raw = self.local_call(canonical(value), env=environment(peer.address))
-            self.assertEqual(code, 0)
-            report = json.loads(raw)
-            self.assertTrue(report['agent_turn']['coverage']['native_acquisition_verified_this_call'])
-            self.assertIsNone(report['agent_turn']['anchor'])
-            self.assertEqual(report['agent_turn']['coverage']['native_observations'], 1)
-
-    def test_dropped_invalid_or_confused_native_responses_never_export_handoff(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        for mode in ('alias', 'lost', 'nonce', 'protocol', 'generation', 'refused',
-                     'malformed', 'truncated', 'notification_limit'):
-            with self.subTest(mode=mode), Peer(region, mode=mode) as peer:
-                actual = self.run_cli(canonical(request()), emit='excavation-handoff', env=environment(peer.address))
-                out = self.assert_refused(actual, 'ROOM_EXCAVATION_REFUSED')
-                self.assertTrue(out['agent_turn']['coverage']['native_connection_attempted'])
-                self.assertEqual(peer.connections, 1)
-                self.assertLessEqual(len(peer.calls), 2)
-
-    def test_foreign_fortress_clock_and_dimensions_fail_after_real_acquisition(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        for options in ({'folder': 'other-fort'}, {'site': 3}, {'paused': False}, {'dimensions': (12, 12, 3)}):
-            with self.subTest(options=options), Peer(region, capture_options=options) as peer:
-                self.assert_refused(self.run_cli(canonical(request()), emit='excavation-handoff',
-                                                env=environment(peer.address)))
-
-    def test_native_halo_is_checked_and_alternate_location_is_chosen(self):
-        value = request(access=False, size=(10, 3, 1), fixed=False)
-        _, region, _ = compiler.prepare(canonical(value))
-        with Peer(region, changes={(11, 11, 3): tile(presence=1)}) as peer:
-            actual = self.run_cli(canonical(value), emit='excavation-handoff', env=environment(peer.address))
-            self.assertEqual(actual.returncode, 0, actual.stdout[:300])
-            handoff = RoomExcavationHandoff.decode(actual.stdout)
-            self.assertGreaterEqual(handoff.plan().json()['intent']['areas'][0]['origin'][0], 13)
-
-    def test_empty_work_or_unusable_halo_cannot_export_a_replacement_blueprint(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        cases = [({'default': tile(3)}, 'ROOM_EXCAVATION_NO_REMAINING_WORK'),
-                 ({'changes': {(10, 10, 2): tile(3), (17, 11, 3): tile(presence=1)}}, 'ROOM_EXCAVATION_LAYOUT_NOT_FOUND')]
-        for options, code in cases:
-            for kind in ('remaining-excavation', 'excavation-handoff'):
-                with self.subTest(code=code, kind=kind), Peer(region, **options) as peer:
-                    self.assert_refused(self.run_cli(canonical(request()), emit=kind,
-                                                    env=environment(peer.address)), code)
-
-    def test_inconclusive_search_has_report_but_no_handoff(self):
-        value = request()
-        value['search'] = {'max_nodes': 1}
-        _, region, _ = compiler.prepare(canonical(value))
-        for kind in ('report', 'compilation', 'excavation-handoff'):
-            with self.subTest(kind=kind), Peer(region) as peer:
-                actual = self.run_cli(canonical(value), emit=kind, env=environment(peer.address))
-                if kind == 'excavation-handoff':
-                    self.assert_refused(actual, 'ROOM_EXCAVATION_SEARCH_LIMIT')
-                else:
-                    self.assertEqual(actual.returncode, 0)
-                    body = json.loads(actual.stdout)
-                    if kind == 'report': body = body['result']
-                    self.assertEqual(body['status'], 'search_limit_reached')
-                    self.assertIsNone(body['handoff_digest'])
-
-    def test_complete_32_slot_native_pipeline_keeps_every_area(self):
-        value = request(access=False, size=(32, 32, 1), fixed=False)
-        value['areas'] = [{'name': str(i), 'template': {'kind': 'dining_hall', 'table_count': 2}} for i in range(8)]
-        value['search'] = {'max_work': layout.MAX_WORK}
-        _, region, _ = compiler.prepare(canonical(value))
-        with Peer(region, changes={}) as peer:
-            actual = self.run_cli(canonical(value), emit='excavation-handoff', env=environment(peer.address))
-            self.assertEqual(actual.returncode, 0, actual.stdout[:300])
-            handoff = RoomExcavationHandoff.decode(actual.stdout)
-            self.assertEqual(len(handoff.plan().request().slots), 32)
-            self.assertEqual(len(handoff.plan().json()['areas']), 8)
-
-    def test_malformed_input_and_unrepresentable_context_refuse_before_contact(self):
-        cases = [b'', b'x' * (layout.MAX_INPUT + 1), b'[' * 17 + b']' * 17,
-                 canonical({**request(), 'site': True}), canonical({**request(), 'search': {'max_work': 1}}),
-                 canonical(request(access=False, size=(128, 8, 1), fixed=False))]
-        for raw in cases:
-            with self.subTest(raw=raw[:50]), patch.object(survey, '_MapClient', side_effect=AssertionError('premature contact')):
-                code, output = self.local_call(raw, env=environment('127.0.0.1:5000'))
+    def test_caller_costs_and_bad_requests_fail_before_native_contact(self):
+        for value in (request(excavation_costs='0' * 24), request(objective=layout.COST_OBJECTIVE),
+                      request(objective='unsupported'), request(size=(33, 32, 1))):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+                output = Buffer()
+                with patch.dict(os.environ, environment(), clear=True), patch.object(sys, 'stdout', output), \
+                     patch.object(native.socket, 'socket', side_effect=AssertionError('unexpected contact')):
+                    code = command.main(['--request-file', str(path), '--emit', 'survey'])
                 self.assertEqual(code, 2)
-                self.assertFalse(json.loads(output)['agent_turn']['coverage']['native_connection_attempted'])
+                self.assertEqual(output.calls, 1)
+                self.assertFalse(json.loads(output.raw)['agent_turn']['coverage']['native_connection_attempted'])
 
-    def test_wrong_or_mixed_authority_refuses_before_contact(self):
-        base = environment('127.0.0.1:5000')
-        for key, value in ((survey.OPT_IN, 'true'), (survey.TOKEN, 'short'),
-                           (survey.ENDPOINT, '10.0.0.1:5000'), ('DFMCP_ADMITTED_BRIDGE_PROTOCOL', '1.0'),
-                           ('DFMCP_DIG_TOKEN', TOKEN)):
-            with self.subTest(key=key), patch.object(survey, '_MapClient', side_effect=AssertionError('premature contact')):
-                code, output = self.local_call(canonical(request()), env={**base, key: value})
-                self.assertEqual(code, 2)
-                self.assertNotIn(TOKEN.encode(), output)
-                self.assertFalse(json.loads(output)['agent_turn']['coverage']['native_connection_attempted'])
+    def test_lost_reply_wrong_source_and_malformed_captures_never_retry_or_publish(self):
+        value = request()
+        cases = [('lost_reply', None), ('source_changed', None), ('wrong_nonce', None), ('wrong_profile', None),
+                 (None, map_bytes(value)[:-1]), (None, map_bytes(value, paused=False)),
+                 (None, map_bytes(value, folder='another-fortress'))]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+            for fault, capture in cases:
+                with self.subTest(fault=fault, capture=capture is not None), \
+                     MapPeer(value, fault=fault, capture=capture) as peer:
+                    response = self.cli(path, '--request-file', env=environment(peer))
+                self.assert_one_read(peer)
+                self.assertEqual(response.returncode, 2)
+                self.assertEqual(response.stderr, b'')
+                body = json.loads(response.stdout)
+                self.assertIsNone(body['result'])
+                self.assertFalse(body['agent_turn']['coverage']['native_acquisition_verified_this_call'])
+                self.assertNotIn(TOKEN, response.stdout)
+                self.assertNotIn(b'another-fortress', response.stdout)
 
-    def test_revocation_after_capture_and_after_serialization_discards_outputs(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        for boundary in ('after_capture', 'after_serialization'):
-            with self.subTest(boundary=boundary), Peer(region) as peer:
-                real = compiler.solve if boundary == 'after_capture' else command.export
-                def revoked(*args):
-                    if boundary == 'after_capture':
-                        os.environ[survey.TOKEN] = 'revoked-token-still-long-enough-for-validation'
-                        return real(*args)
-                    result = real(*args)
-                    os.environ[survey.TOKEN] = 'revoked-token-still-long-enough-for-validation'
-                    return result
-                target, name = (compiler, 'solve') if boundary == 'after_capture' else (command, 'export')
-                with patch.object(target, name, side_effect=revoked):
-                    code, raw = self.local_call(canonical(request()), emit='excavation-handoff', env=environment(peer.address))
-                self.assertEqual(code, 2)
-                self.assertIsNone(json.loads(raw)['result'])
-                self.assertNotIn(b'"room_plan"', raw)
+    def test_map_connection_is_closed_before_real_ranking_search(self):
+        value = request()
+        closed, searches = [], []
+        original_close, original_solve = native.MapClient.close, layout.solve
+        def close(client):
+            original_close(client)
+            closed.append(client.closed)
+        def solve_after_close(*args, **kwargs):
+            self.assertTrue(closed and all(closed))
+            searches.append(1)
+            return original_solve(*args, **kwargs)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+            output = Buffer()
+            with MapPeer(value) as peer:
+                with patch.dict(os.environ, environment(peer), clear=True), patch.object(sys, 'stdout', output), \
+                     patch.object(native.MapClient, 'close', close), patch.object(layout, 'solve', solve_after_close):
+                    code = command.main(['--request-file', str(path), '--emit', 'survey'])
+            self.assert_one_read(peer)
+        self.assertEqual(code, 0, output.raw)
+        self.assertEqual(searches, [1])
 
-    def test_expired_outer_deadline_after_capture_does_not_publish(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        original = compiler.solve
-        with Peer(region) as peer:
-            def expired(raw, payload, manifest, address, guard):
-                guard.__self__.end = 0
-                return original(raw, payload, manifest, address, guard)
-            with patch.object(compiler, 'solve', side_effect=expired):
-                code, raw = self.local_call(canonical(request()), env=environment(peer.address))
+    def test_revoked_or_replaced_authority_after_real_search_cannot_publish_success(self):
+        value = request()
+        original = observed.solve
+        for replaced in (False, True):
+            def changed(*args, **kwargs):
+                answer = original(*args, **kwargs)
+                if replaced: os.environ[command.TOKEN] = 'different-query-token-123456789012345'
+                else: os.environ.pop(command.OPT_IN)
+                return answer
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+                output = Buffer()
+                with MapPeer(value) as peer:
+                    with patch.dict(os.environ, environment(peer), clear=True), patch.object(sys, 'stdout', output), \
+                         patch.object(observed, 'solve', changed):
+                        code = command.main(['--request-file', str(path), '--emit', 'survey'])
+                self.assert_one_read(peer)
             self.assertEqual(code, 2)
-            self.assertEqual(json.loads(raw)['error']['code'], 'ROOM_EXCAVATION_TIMEOUT')
+            self.assertEqual(output.calls, 1)
+            self.assertIsNone(json.loads(output.raw)['result'])
 
-    def test_work_allowance_is_not_renewed_after_capture(self):
-        _, region, _ = compiler.prepare(canonical(request()))
-        original = compiler.solve
-        with Peer(region) as peer:
-            def exhausted(raw, payload, manifest, address, guard):
-                guard.__self__.left = 0
-                return original(raw, payload, manifest, address, guard)
-            with patch.object(compiler, 'solve', side_effect=exhausted):
-                code, raw = self.local_call(canonical(request()), env=environment(peer.address))
-            self.assertEqual(code, 2)
-            self.assertEqual(json.loads(raw)['error']['code'], 'ROOM_EXCAVATION_WORK_LIMIT')
-
-    def test_retained_compilation_rehash_does_not_bypass_evidence_replay(self):
-        result, _ = self.complete()
-        body = result.json(); body.pop('compilation_digest')
-        body['terrain_survey']['remaining_wall_targets'].pop()
-        forged = compiler.ExcavationLayout(canonical(body)).encode()
-        actual = self.run_cli(forged, '--compilation-file', 'excavation-handoff')
-        self.assert_refused(actual)
-
-    def test_rehydrated_legacy_terrain_survey_has_valid_original_digest(self):
-        result, handoff = self.complete()
-        actual = self.run_cli(result.encode(), '--compilation-file', 'terrain-survey')
-        self.assertEqual(actual.returncode, 0)
-        doc = json.loads(actual.stdout)
-        digest = doc.pop('survey_digest')
-        self.assertEqual(digest, hashlib.sha256(b'dfmcp-room-terrain-survey/1\0' + canonical(doc)).hexdigest())
-        self.assertEqual(doc['room_plan'], handoff.plan().json())
-        self.assertLessEqual(len(actual.stdout), terrain.MAX_OUTPUT)
-
-    def test_file_symlink_and_nonregular_input_refuse_without_native_contact(self):
-        with tempfile.TemporaryDirectory() as directory:
-            real = Path(directory) / 'real.json'; real.write_bytes(canonical(request()))
-            link = Path(directory) / 'link.json'; link.symlink_to(real)
-            fifo = Path(directory) / 'fifo'; os.mkfifo(fifo)
-            for path in (link, fifo, Path(directory)):
-                output = []
-                with patch.object(survey, '_MapClient', side_effect=AssertionError('premature contact')), \
-                     patch.object(offline, 'publish', side_effect=lambda raw: output.append(raw) or 0):
-                    code = command.main(['--request-file', str(path)])
-                self.assertEqual(code, 2)
-                self.assertEqual(len(output), 1)
-                self.assertNotIn(str(path).encode(), output[0])
-
-    def test_short_output_write_never_publishes_a_second_object(self):
-        result, _ = self.complete()
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'compiled.json'; path.write_bytes(result.encode())
-            output = []
-            with patch.object(offline, 'publish', side_effect=lambda data: output.append(data) or 2), \
-                 patch.object(survey, '_MapClient', side_effect=AssertionError('offline contact')):
-                self.assertEqual(command.main(['--compilation-file', str(path), '--emit', 'excavation-handoff']), 2)
-            self.assertEqual(len(output), 1)
-            self.assertEqual(RoomExcavationHandoff.decode(output[0]).digest, result.json()['handoff_digest'])
-
-    def test_existing_layout_survey_remains_single_level_and_byte_identical(self):
+    def test_final_deadline_or_work_loss_discards_a_completely_solved_candidate(self):
         value = request()
-        region = survey.native.Region.from_json(value['region'])
-        with Peer(region) as peer:
-            expected = survey.observed.solve(canonical(value), peer.payload, MANIFEST)
-            actual = self.run_cli(canonical(value), emit='survey', env=environment(peer.address), script='survey_room_layout.py')
-            self.assertEqual(actual.returncode, 0)
-            self.assertEqual(actual.stdout, expected.encode())
-            self.assertEqual(peer.calls, ['Handshake', 'ReadObservation'])
+        original_solve, original_export = observed.solve, command.export
+        for stage in ('work', 'deadline'):
+            def exhausted_search(*args, **kwargs):
+                answer = original_solve(*args, **kwargs)
+                # The real enclosing Budget owns this injected guard.
+                if stage == 'work':
+                    args[3].__self__.left = 0
+                    args[3]()
+                return answer
+            def expired_export(*args, **kwargs):
+                answer = original_export(*args, **kwargs)
+                if stage == 'deadline':
+                    raise offline.DeadlineExceeded('injected final publication deadline')
+                return answer
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+                output = Buffer()
+                with MapPeer(value) as peer:
+                    with patch.dict(os.environ, environment(peer), clear=True), patch.object(sys, 'stdout', output), \
+                         patch.object(observed, 'solve', exhausted_search), patch.object(command, 'export', expired_export):
+                        code = command.main(['--request-file', str(path), '--emit', 'survey'])
+                self.assert_one_read(peer)
+            self.assertEqual(code, 2)
+            self.assertEqual(output.calls, 1)
+            self.assertIsNone(json.loads(output.raw)['result'])
 
-    def test_invalid_flags_never_contact_native_or_expose_paths(self):
-        outputs = []
-        with patch.object(offline, 'publish', side_effect=lambda raw: outputs.append(raw) or 0), \
-             patch.object(survey, '_MapClient', side_effect=AssertionError('premature contact')):
-            code = command.main(['--request-file', '/not/a/real/private/path', '--emit', 'excavation'])
+    def test_short_output_has_one_write_and_one_capture_without_second_response(self):
+        value = request()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'request.json'; path.write_bytes(canonical(value))
+            output = Buffer(short=True)
+            with MapPeer(value) as peer:
+                with patch.dict(os.environ, environment(peer), clear=True), patch.object(sys, 'stdout', output):
+                    code = command.main(['--request-file', str(path), '--emit', 'survey'])
+            self.assert_one_read(peer)
         self.assertEqual(code, 2)
-        self.assertEqual(len(outputs), 1)
-        self.assertNotIn(b'/not/a/real/private/path', outputs[0])
+        self.assertEqual(output.calls, 1)
+        self.assertEqual(output.raw, solve(value).encode())
+
+    def test_rehashed_forged_proof_and_counts_are_rejected_by_saved_cli(self):
+        result = solve(request(search={'max_nodes': 2}))
+        for field in ('proof', 'counts', 'costs'):
+            body = result.json(); body.pop('survey_digest')
+            if field == 'proof':
+                body['excavation_evidence']['minimum_in_compiler_domain_proven'] = True
+                body['layout']['optimization']['minimum_in_compiler_domain_proven'] = True
+            elif field == 'counts': body['excavation_evidence']['observed_wall_targets'] = 0
+            else: body['layout']['request']['excavation_costs'] = '0' * 24
+            forged = observed.ObservedLayout(canonical(body))
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'survey.json'; path.write_bytes(forged.encode())
+                response = self.cli(path, '--survey-file')
+            self.assertEqual(response.returncode, 2)
+            self.assertIsNone(json.loads(response.stdout)['result'])
+
+    def test_process_hash_seeds_leave_saved_cost_evidence_identical(self):
+        result = solve(request())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'survey.json'; path.write_bytes(result.encode())
+            for seed in ('1', '29', 'random'):
+                response = self.cli(path, '--survey-file', env={**environment(), 'PYTHONHASHSEED': seed})
+                self.assertEqual(response.returncode, 0, response.stdout)
+                self.assertEqual(response.stdout, result.encode())
 
 
 if __name__ == '__main__':

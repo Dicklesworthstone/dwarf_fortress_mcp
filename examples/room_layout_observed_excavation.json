@@ -1,0 +1,11 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "your-save-folder",
+  "site": 7,
+  "region": {"origin": [100, 100, 2], "size": [8, 3, 1]},
+  "objective": "minimum-observed-excavation/1",
+  "areas": [{
+    "name": "dining",
+    "template": {"kind": "dining_hall", "table_count": 1, "columns": 1}
+  }]
+}

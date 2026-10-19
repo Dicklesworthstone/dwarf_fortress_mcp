@@ -17,6 +17,8 @@ from room_site_mask import SiteMask
 
 SCHEMA = 'dfmcp.observed-room-layout/1'
 POLICY = 'dfmcp.visible-dry-unoccupied-room-site/1'
+EXCAVATION_OBJECTIVE = 'minimum-observed-excavation/1'
+EXCAVATION_POLICY = 'dfmcp.observed-excavation-room-site/1'
 MAX_CAPTURE_BYTES = 575 + 20 * 1024
 MAX_OUTPUT = 192 * 1024
 USES = {'.': frozenset('FW'), 'F': frozenset('F'), 'W': frozenset('W'), 'X': frozenset()}
@@ -27,10 +29,18 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
     """Use the existing complete request validator before any optional contact."""
     value = layout._json(raw, layout.MAX_INPUT, guard)
     require(type(value) is dict, 'observed layout needs the original request')
+    # Observed costs come only from the raw map, never a caller-authored mask.
+    require('excavation_costs' not in value, 'observed layout cannot import tile costs')
+    excavation = value.get('objective') == EXCAVATION_OBJECTIVE
+    normalized_input = {**value, 'objective': layout.MINIMUM_TARGETS_OBJECTIVE} if excavation else value
     search = value.get('search', {})
     layout._object(search, set(), {'max_nodes', 'max_work'})
     work = layout._Work(search.get('max_work', layout.DEFAULT_WORK), guard)
-    request, _ = layout._normalize(value, work)
+    request, _ = layout._normalize(normalized_input, work)
+    if excavation:
+        request['objective'] = EXCAVATION_OBJECTIVE
+        require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
+        work()
     return request, work
 
 
@@ -118,8 +128,19 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             symbols.append(SYMBOLS[USES[a] & USES[b]])
         effective = SiteMask(region.origin, region.size, ''.join(symbols))
     constrained = {**request, 'site_mask': effective.json()}
+    costs = None
+    if request.get('objective') == EXCAVATION_OBJECTIVE:
+        from room_layout_costs import TileCosts
+        # Use the pre-intersection observation. Caller F on a wall remains a
+        # charged wall, and hidden/unusable cells remain excluded by effective.
+        cost_cells = []
+        for cell in observed.cells:
+            work()
+            cost_cells.append('0' if cell == 'F' else '1')
+        constrained.update(objective=layout.COST_OBJECTIVE, excavation_costs=''.join(cost_cells))
+        costs = TileCosts.parse(request['region'], constrained['excavation_costs'], work)
     found = layout.solve(canonical(constrained), work)
-    body = {'schema': SCHEMA, 'policy': POLICY, 'request': request,
+    body = {'schema': SCHEMA, 'policy': EXCAVATION_POLICY if costs is not None else POLICY, 'request': request,
             'status': found.json()['status'], 'layout': found.json(),
             'source': {**capture.binding(), 'game_tick': capture.tick,
                        'capture_sha256': hashlib.sha256(capture_raw).hexdigest(),
@@ -138,6 +159,39 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             'point_floor_observed': True, 'same_capture_as_layout': True,
             'point_is_existing_fortress_entrance_proven': False,
             'native_pathfinding_proven': False, 'current_access_proven': False}
+    if costs is not None:
+        selected = found.json()['room_plan']
+        optimization = found.json()['optimization']
+        wall_targets = floor_targets = None
+        if selected is not None:
+            mask = costs.target_mask(selected, work)
+            wall_targets = floor_targets = 0
+            for index, tile in enumerate(capture.tiles):
+                work()
+                if not mask & (1 << index):
+                    continue
+                require(tile.presence == 2, 'costed target lacks visible raw evidence')
+                _, shape, depth, magma, _, dig, building, units, *_ = tile.attributes
+                require(shape in (2, 3) and not (depth or magma or dig or building or units),
+                        'costed target lacks usable raw terrain evidence')
+                wall_targets += int(shape == 2)
+                floor_targets += int(shape == 3)
+            require(wall_targets == optimization['score']['excavation_cost']
+                    and wall_targets + floor_targets == selected['target_tiles'],
+                    'ranked cost differs from complete original map evidence')
+        body['excavation_evidence'] = {
+            'objective': EXCAVATION_OBJECTIVE, 'epistemic_status': 'certified_derived',
+            'map_witness': capture.witness, 'game_tick': capture.tick,
+            'tile_costs_digest': costs.digest, 'observed_wall_targets': wall_targets,
+            'observed_floor_targets': floor_targets,
+            'selected_target_tiles': None if selected is None else selected['target_tiles'],
+            'first_feasible_wall_targets': None if optimization['first_feasible_score'] is None
+                else optimization['first_feasible_score']['excavation_cost'],
+            'minimum_in_compiler_domain_proven': optimization['minimum_in_compiler_domain_proven'],
+            'scope': optimization['scope'], 'corridors_rerouted_by_cost': False,
+            'native_mining_eligibility_proven': False, 'actual_mining_work_observed': False,
+            'current_terrain_proven': False}
+        body['work_units'] = work.used
     result = ObservedLayout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete observed layout exceeds output bound')
     guard()

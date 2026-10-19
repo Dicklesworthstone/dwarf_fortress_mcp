@@ -78,10 +78,11 @@ class _MapClient(native.MapClient):
         return min(self.budget.remaining(), super().remaining())
 
 
-def packet(result: observed.ObservedLayout | None, contacted: bool = False) -> dict:
+def packet(result: observed.ObservedLayout | None, contacted: bool = False,
+           code: str | None = None) -> dict:
     value = None if result is None else result.json()
     out = offline.report(None if value is None else value['layout'],
-                         'ROOM_TERRAIN_LAYOUT_REFUSED' if value is None else None)
+                         (code or 'ROOM_TERRAIN_LAYOUT_REFUSED') if value is None else None)
     out['schema'] = 'dfmcp.observed-room-layout-command/1'
     out['result'] = value
     if value is None:
@@ -99,10 +100,26 @@ def packet(result: observed.ObservedLayout | None, contacted: bool = False) -> d
             'witness': value['source']['map_witness'], 'game_tick': value['source']['game_tick'],
             'survey_digest': value['survey_digest'], 'canonical_anchor': False,
             'acquired_this_call': contacted})
+    if value is not None and 'excavation_evidence' in value:
+        turn['briefing']['excavation_comparison'] = value['excavation_evidence']
+        turn['uncertainty'].append(
+            'Excavation counts distinguish wall-shaped targets from existing floors in the original capture; '
+            'they do not establish mineability or game-time cost. The connection compiler is not cost-rerouted.')
     return out
 
 
-def export(result: observed.ObservedLayout, kind: str, contacted: bool) -> bytes:
+class OptimumUnproven(ValueError):
+    pass
+
+
+def export(result: observed.ObservedLayout, kind: str, contacted: bool, *,
+           require_optimal: bool = False) -> bytes:
+    require(type(require_optimal) is bool, 'optimal-layout selection must be Boolean')
+    if require_optimal:
+        selected = result.json()['layout']
+        if not (selected['status'] == 'layout_found'
+                and selected.get('optimization', {}).get('minimum_in_compiler_domain_proven') is True):
+            raise OptimumUnproven('complete observed layout optimum is unproven')
     if kind == 'report':
         raw = canonical(packet(result, contacted)) + b'\n'
     elif kind == 'survey':
@@ -125,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         source.add_argument('--survey-file', help='revalidate saved evidence offline, without native contact')
         parser.add_argument('--emit', choices=EXPORTS, default='report')
         parser.add_argument('--timeout-ms', type=int, default=10000)
+        parser.add_argument('--require-optimal-layout', action='store_true',
+                            help='export only a proven optimum in the original surveyed/compiler domain')
         args = parser.parse_args(argv)
         budget = Budget(args.timeout_ms)
         raw = offline.read_input(args.survey_file or args.request_file,
@@ -145,8 +164,11 @@ def main(argv: list[str] | None = None) -> int:
                 capture = client.observe()
             # Keep the original raw request, not a substituted narrowed intention.
             result = observed.solve(raw, capture.raw, capture.manifest, budget.work)
-        raw = export(result, args.emit, contacted)
+        raw = export(result, args.emit, contacted, require_optimal=args.require_optimal_layout)
         budget.check()
+    except OptimumUnproven:
+        offline.publish(canonical(packet(None, contacted, 'ROOM_LAYOUT_OPTIMUM_UNPROVEN')) + b'\n')
+        return 2
     except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
         offline.publish(canonical(packet(None, contacted)) + b'\n')
         return 2
