@@ -99,6 +99,14 @@ def _solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest, address: s
         selected = terrain.selection(plan, work)
         room_view = projection.project(capture_raw, manifest, padded, selected.region, work)
         report = terrain.survey(plan, room_view.raw, manifest, work)
+        if 'residual_partition' in request:
+            capacity = found['residual_capacity_evidence']
+            require(capacity['within_profile_limits'] is True
+                    and capacity['remaining_mask_digest'] == report['remaining_mask_digest']
+                    and capacity['remaining_wall_tiles'] == report['target_counts']['remaining_wall']
+                    and capacity['blueprint_parts'] == report['partition']['blueprint_parts']
+                    and capacity['normal_mining_rectangles'] == report['partition']['normal_mining_rectangles'],
+                    'final original terrain survey differs from selected residual capacity')
         status = report['status']
         if status == 'excavation_proposed':
             handoff = RoomExcavationHandoff.create(plan, room_view.raw, manifest, address, work)
@@ -182,7 +190,9 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest, address: st
           ) -> tuple[ExcavationLayout, RoomExcavationHandoff | None]:
     """Return the complete result and optional EXISTING original-room handoff.
 
-    The handoff is absent on blockage, empty work, no layout or an inconclusive
-    node search. Callers may not substitute the full excavation proposal then.
+    The handoff is absent on blockage, empty work or lack of a complete layout.
+    A node-limited complete incumbent can supply a handoff without optimality
+    proof; strict CLI export may require that proof. Never substitute the full
+    excavation proposal when the original residual handoff is absent.
     """
     return _solve(raw, capture_raw, manifest, address, guard)

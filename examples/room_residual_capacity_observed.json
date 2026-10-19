@@ -1,0 +1,29 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "capacity-fixture",
+  "site": 7,
+  "region": {
+    "origin": [
+      10,
+      10,
+      2
+    ],
+    "size": [
+      28,
+      9,
+      1
+    ]
+  },
+  "objective": "minimum-observed-excavation/1",
+  "areas": [
+    {
+      "name": "hall",
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 16,
+        "columns": 4
+      }
+    }
+  ],
+  "residual_partition": "bounded-original-dig/1"
+}

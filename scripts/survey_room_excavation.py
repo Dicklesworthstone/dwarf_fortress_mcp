@@ -35,6 +35,7 @@ class ExportUnavailable(ValueError):
 
     def __init__(self, status: str):
         self.code = {
+            'optimality_unproven': 'ROOM_EXCAVATION_OPTIMUM_UNPROVEN',
             'search_limit_reached': 'ROOM_EXCAVATION_SEARCH_LIMIT',
             'no_layout_in_domain': 'ROOM_EXCAVATION_LAYOUT_NOT_FOUND',
             'blocked': 'ROOM_EXCAVATION_TERRAIN_BLOCKED',
@@ -105,14 +106,27 @@ def packet(result: compiler.ExcavationLayout | None, contacted: bool,
         'consumer': 'dig_blueprint_client.py init --room-handoff',
         'fresh_native_review_required': True, 'confirmation_required': True,
         'automatic_execution': False, 'mutation_authority_granted': False}]
+    if value is not None and 'residual_partition' in value['request']:
+        out['result']['residual_partition'] = value['layout']['residual_partition']
+        out['result']['optimization'] = value['layout']['optimization']
+        turn['briefing']['residual_capacity'] = value['layout_evidence']['residual_capacity_evidence']
+        turn['uncertainty'].append(
+            'Residual capacity is checked for the complete selected wall mask, not a minimum rectangle cover. '
+            'Optimality is restricted to capacity-valid candidates in the declared compiler domain.')
     return out
 
 
 def export(result: compiler.ExcavationLayout, handoff: RoomExcavationHandoff | None,
-           kind: str, contacted: bool) -> bytes:
+           kind: str, contacted: bool, *, require_optimal: bool = False) -> bytes:
     """Only the current solve/replay pair enters; no unchecked imported objects."""
     require(kind in EXPORTS, 'unknown room excavation export')
     value = result.json()
+    require(type(require_optimal) is bool, 'optimal-layout selection must be an exact Boolean')
+    if require_optimal:
+        selected = value['layout']
+        if not (selected['status'] == 'layout_found'
+                and selected.get('optimization', {}).get('minimum_in_compiler_domain_proven') is True):
+            raise ExportUnavailable('optimality_unproven')
     maximum = compiler.MAX_OUTPUT
     if kind == 'report':
         raw = canonical(packet(result, contacted)) + b'\n'
@@ -150,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         source.add_argument('--compilation-file', help='replay retained evidence offline, without native contact')
         parser.add_argument('--emit', choices=EXPORTS, default='report')
         parser.add_argument('--timeout-ms', type=int, default=10000)
+        parser.add_argument('--require-optimal-layout', action='store_true',
+                            help='export only a proven optimum in the declared layout and residual-partition domain')
         args = parser.parse_args(argv)
         budget = Budget(args.timeout_ms)
         saved = args.compilation_file is not None
@@ -173,7 +189,8 @@ def main(argv: list[str] | None = None) -> int:
             # from these same bytes; never reconnect or automatically dig.
             result, handoff = compiler.solve(raw, capture.raw, capture.manifest,
                                              budget.authority.address, budget.work)
-        output = export(result, handoff, args.emit, contacted)
+        output = (export(result, handoff, args.emit, contacted, require_optimal=True)
+                  if args.require_optimal_layout else export(result, handoff, args.emit, contacted))
         budget.check()  # Includes revocation AFTER complete output serialization.
     except ExportUnavailable as cause:
         code = cause.code

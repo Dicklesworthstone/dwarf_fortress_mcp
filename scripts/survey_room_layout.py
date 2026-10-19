@@ -110,6 +110,11 @@ def packet(result: observed.ObservedLayout | None, contacted: bool = False,
                 'Corridor candidates are compared using costs derived from the original capture. '
                 'The tile and rectangle limits remain binding; global network cost optimality, '
                 'mineability and game-time cost are not established.')
+    if value is not None and 'residual_capacity_evidence' in value:
+        turn['briefing']['residual_capacity'] = value['residual_capacity_evidence']
+        turn['uncertainty'].append(
+            'Residual capacity covers the complete observed wall mask under the existing partition policy; '
+            'a padded terrain survey and fresh native dig review are still required.')
     return out
 
 

@@ -66,3 +66,64 @@ mutation authority, or production admission.
 ```sh
 python3 -W error -m unittest discover -s tests -p 'test_room_residual_capacity.py' -v
 ```
+
+## Use actual observed walls and produce an original excavation handoff
+
+Both existing map-backed commands accept the same residual strategy paired with
+`minimum-observed-excavation/1`. They reject caller-authored `excavation_costs`.
+The original decoded map, before caller site-mask intersection, supplies the
+wall/floor distinction. A caller's floor-use permission cannot convert a wall
+into an already-open tile or erase its residual partition cost.
+
+```json
+"objective": "minimum-observed-excavation/1",
+"residual_partition": "bounded-original-dig/1"
+```
+
+`survey_room_layout.py` independently rebuilds the selected residual from raw
+wall coordinates and checks its count, mask digest and both partitions against
+the search result. Its evidence retains the original map witness and tick.
+This unpadded observation does not prove remaining-wall halo eligibility.
+
+`survey_room_excavation.py` obtains one complete padded capture and projects the
+planning and final terrain views from those same bytes. Its existing halo
+constraints remain mandatory. The final original terrain survey rechecks the
+selected residual count, digest and partition sizes before the existing
+`RoomExcavationHandoff` can be exported. No second native read, automatic dig,
+replacement key, journal creation or furniture placement occurs.
+
+After setting the example's fortress and map region for the intended source,
+use the existing isolated map-read environment and run:
+
+```sh
+python3 scripts/survey_room_excavation.py --request-file examples/room_residual_capacity_observed.json --require-optimal-layout --emit compilation > compilation.json
+python3 scripts/survey_room_excavation.py --compilation-file compilation.json --require-optimal-layout --emit excavation-handoff > room-excavation-handoff.json
+```
+
+The second command replays saved evidence offline. It is not a fresh observation.
+The handoff is input to the existing explicitly reviewed room-backed dig batch;
+it grants neither placement authority nor permission to repeat uncertain work.
+A complete zero-residual layout has no excavation handoff and remains distinct
+from no feasible layout. The command's `--require-optimal-layout` flag works for
+all nine exports and refuses an unproven incumbent without exporting an artifact.
+It cannot invent an objective, change the selected strategy or renew a budget.
+
+The synthetic 32-furnishing case previously ends in a blocked terrain survey.
+With the constraint it exports an exact 90-target, 28-part original handoff.
+Search assumptions, the raw-map recount, the final padded terrain survey and
+handoff all agree on its mask identity. The same workflow retains all eight
+areas and 32 furnishings in a separate fixed-origin case. Native mineability,
+structural support, aquifers, current safety and completed rooms remain unproven.
+
+Validation uses 105 warnings-denied Python tests: 43 new capacity/raw-source/CLI
+cases and 62 unchanged compiler/connector cases. The new CLI suite performs
+19 joined synthetic TCP sessions with the actual map client and all nine
+request/saved exports. Source loss, changed authorization, exact node/work
+limits, final deadlines and short output do not repeat acquisition or publish a
+stale handoff. All 404 independent legacy result/work-count comparisons remain
+identical to the fetched baseline. These are component results, not real DFHack,
+Rust/native, actual dig dispatch or full-repository qualification.
+
+```sh
+python3 -W error -m unittest discover -s tests -p 'test_room_residual*.py' -v
+```

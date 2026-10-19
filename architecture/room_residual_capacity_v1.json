@@ -21,5 +21,14 @@
   "terrain_observed": false,
   "native_excavation_eligibility_proven": false,
   "mutation_authority_granted": false,
-  "production_admitted": false
+  "production_admitted": false,
+  "observed_objective": "minimum-observed-excavation/1",
+  "observed_cost_source": "raw_map_before_caller_site_permissions",
+  "observed_imported_cost_maps": false,
+  "final_terrain_partition_rechecked": true,
+  "original_handoff_codec": "dfmcp.room-excavation-handoff/1",
+  "padded_command": "scripts/survey_room_excavation.py",
+  "padded_command_optimality_flag": "--require-optimal-layout",
+  "native_acquisition_count": 1,
+  "automatic_dig": false
 }

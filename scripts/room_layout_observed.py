@@ -39,6 +39,14 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
         # Only validate the common request here. Raw observation supplies costs
         # later; no synthetic cost map is invented to authorize the new strategy.
         normalized_input = {**normalized_input, 'connection_strategy': layout.FALLBACK_STRATEGY}
+    if 'residual_partition' in value:
+        from room_residual_capacity import STRATEGY
+        require(excavation and type(value['residual_partition']) is str
+                and value['residual_partition'] == STRATEGY,
+                'observed residual partition requires its exact strategy and excavation objective')
+        # No caller-authored residual cells: defer this option until the actual
+        # original map has supplied the complete cost-one wall mask.
+        normalized_input = {k: v for k, v in normalized_input.items() if k != 'residual_partition'}
     search = value.get('search', {})
     layout._object(search, set(), {'max_nodes', 'max_work'})
     work = layout._Work(search.get('max_work', layout.DEFAULT_WORK), guard)
@@ -49,6 +57,10 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
         work()
     if cost_routing:
         request['connection_strategy'] = layout.COST_CONNECTION_STRATEGY
+        require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
+        work()
+    if 'residual_partition' in value:
+        request['residual_partition'] = value['residual_partition']
         require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
         work()
     return request, work
@@ -173,6 +185,7 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
         selected = found.json()['room_plan']
         optimization = found.json()['optimization']
         wall_targets = floor_targets = None
+        residual_cells = set()
         if selected is not None:
             mask = costs.target_mask(selected, work)
             wall_targets = floor_targets = 0
@@ -184,6 +197,9 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
                 _, shape, depth, magma, _, dig, building, units, *_ = tile.attributes
                 require(shape in (2, 3) and not (depth or magma or dig or building or units),
                         'costed target lacks usable raw terrain evidence')
+                if 'residual_partition' in request and shape == 2:
+                    x, y, z = region.origin
+                    residual_cells.add((x + index % region.size[0], y + index // region.size[0], z))
                 wall_targets += int(shape == 2)
                 floor_targets += int(shape == 3)
             require(wall_targets == optimization['score']['excavation_cost']
@@ -205,6 +221,32 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             body['excavation_evidence']['corridor_cost_routing_enabled'] = True
             body['excavation_evidence']['corridors_rerouted_by_cost'] = (selected is not None and
                 selected['project_connections']['corridors_rerouted_by_cost'])
+        if 'residual_partition' in request:
+            from room_terrain import MAX_PARTS, MAX_NATIVE_STEPS, mask_digest, residual_parts
+            capacity = found.json()['residual_partition']['selected']
+            digest = part_count = native_count = fits = None
+            if selected is not None:
+                # Recount from raw observed wall coordinates, independently of
+                # the search's bitset-derived residual and supplied summaries.
+                residual = frozenset(residual_cells)
+                parts, native_parts = residual_parts(selected, residual, work)
+                digest, part_count, native_count = mask_digest(residual), len(parts), len(native_parts)
+                fits = part_count <= MAX_PARTS and native_count <= MAX_NATIVE_STEPS
+                require(capacity is not None and fits and capacity['within_profile_limits'] is True
+                        and capacity['remaining_tiles'] == len(residual) == wall_targets
+                        and capacity['remaining_mask_digest'] == digest
+                        and capacity['blueprint_parts'] == part_count
+                        and capacity['normal_mining_rectangles'] == native_count,
+                        'selected residual capacity differs from original raw map evidence')
+            else:
+                require(capacity is None, 'no-layout result carries a selected residual')
+            body['residual_capacity_evidence'] = {
+                'strategy': request['residual_partition'], 'epistemic_status': 'certified_derived',
+                'map_witness': capture.witness, 'game_tick': capture.tick,
+                'remaining_mask_digest': digest, 'remaining_wall_tiles': wall_targets,
+                'blueprint_parts': part_count, 'normal_mining_rectangles': native_count,
+                'within_profile_limits': fits, 'remaining_halo_observed': False,
+                'native_excavation_eligibility_proven': False, 'current_terrain_proven': False}
         body['work_units'] = work.used
     result = ObservedLayout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete observed layout exceeds output bound')
