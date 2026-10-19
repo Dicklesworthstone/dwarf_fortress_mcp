@@ -1,0 +1,30 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "capacity-fixture",
+  "site": 7,
+  "region": {
+    "origin": [
+      10,
+      10,
+      2
+    ],
+    "size": [
+      28,
+      9,
+      1
+    ]
+  },
+  "objective": "minimum-excavation-cost/1",
+  "excavation_costs": "101010101010111111111111111101010101010101111111111111111010101010101111111111111111010101010101011111111111111110101010101011111111111111110101010101010111111111111111101010101010111111111111111101010101010101111111111111111010101010101111111111111111",
+  "areas": [
+    {
+      "name": "hall",
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 16,
+        "columns": 4
+      }
+    }
+  ],
+  "residual_partition": "bounded-original-dig/1"
+}

@@ -187,7 +187,7 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
             {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point',
-             'connection_strategy', 'objective', 'excavation_costs'})
+             'connection_strategy', 'objective', 'excavation_costs', 'residual_partition'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     if 'connection_strategy' in value:
         require(type(value['connection_strategy']) is str
@@ -202,6 +202,11 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
                 'cost-aware connections require the cost objective and complete cost map')
     require(('excavation_costs' in value) == (value.get('objective') == COST_OBJECTIVE),
             'cost objective requires exactly one complete tile-cost map')
+    if 'residual_partition' in value:
+        from room_residual_capacity import STRATEGY
+        require(type(value['residual_partition']) is str and value['residual_partition'] == STRATEGY
+                and value.get('objective') == COST_OBJECTIVE,
+                'residual partition requires its exact strategy and a complete binary cost objective')
     domain = _region(value['region'], domain=True)
     if 'excavation_costs' in value:
         from room_layout_costs import TileCosts
@@ -270,6 +275,8 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
         request['objective'] = value['objective']
     if 'excavation_costs' in value:
         request['excavation_costs'] = value['excavation_costs']
+    if 'residual_partition' in value:
+        request['residual_partition'] = value['residual_partition']
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -416,6 +423,7 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
     domains = tuple(_candidates(p, request, forbidden, work, wall_forbidden) for p in profiles)
     require(sum(map(len, domains)) <= MAX_CANDIDATES, 'layout candidate inventory exceeds bound')
     nodes, leaves, rejected, backtracks = 0, 0, 0, 0
+    capacity_tested = capacity_refused = 0
     trace = hashlib.sha256(b'dfmcp-room-layout-search/1\0')
     trace.update(canonical(request))
     chosen: dict[int, _Candidate] = {}
@@ -429,7 +437,7 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         ranking = Ranking(profiles, request['focus'], work)
 
     def search_tree(floors: int, walls: int) -> RoomPlan | None:
-        nonlocal nodes, leaves, rejected, backtracks
+        nonlocal nodes, leaves, rejected, backtracks, capacity_tested, capacity_refused
         work()
         if nodes >= request['search']['max_nodes']:
             raise _NodeLimit()
@@ -477,6 +485,14 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 rejected += 1
                 trace.update(b'compiler_refused\0')
                 return None
+            if 'residual_partition' in request:
+                from room_residual_capacity import assess
+                capacity = assess(plan, ranking.costs, work)
+                capacity_tested += 1
+                trace.update(canonical(['residual_capacity', plan.digest, capacity]))
+                if not capacity['within_profile_limits']:
+                    capacity_refused += 1
+                    return None
             trace.update(bytes.fromhex(plan.digest))
             if ranking is not None:
                 ranking.consider(plan)
@@ -561,6 +577,19 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 solution.json()['project_connections']['corridors_rerouted_by_cost'])
         body['search']['work_units'] = work.used
         body['search']['all_layouts_ranked'] = complete and ranking.pruned == 0
+    if 'residual_partition' in request:
+        from room_residual_capacity import assess
+        body['residual_partition'] = {
+            'strategy': request['residual_partition'],
+            'complete_layouts_tested': capacity_tested,
+            'capacity_refusals': capacity_refused,
+            'selected': None if solution is None else assess(solution, ranking.costs, work),
+            'scope': 'complete_selected_mask_assuming_cost_one_cells_are_remaining_walls',
+            'cost_evidence': 'caller_declared_not_observed',
+            'native_excavation_eligibility_proven': False}
+        body['optimization']['scope'] = (
+            'declared_origins_rotations_connection_compiler_and_complete_residual_partition')
+        body['search']['work_units'] = work.used
     result = Layout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete layout result exceeds output bound')
     guard()

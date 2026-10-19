@@ -121,6 +121,28 @@ def partition(mask: frozenset[Point], span: int, guard: Guard = idle) -> list[di
     return parts
 
 
+def residual_parts(body: dict, remaining_mask: frozenset[Point], guard: Guard = idle
+                   ) -> tuple[list[dict], list[dict]]:
+    """Shared exact cover for an already validated original plan and residual.
+
+    Search and final terrain reduction must apply the SAME global/original-part
+    choice and native partition. This function performs no observation and does
+    not certify that a caller-supplied mask represents walls or is safe to mine.
+    """
+    parts = partition(remaining_mask, 128, guard)
+    # A global greedy cover can need more rectangles than the original room
+    # partition (notably ten bedrooms). Also clip each ORIGINAL disjoint part
+    # to this same residual mask; choose the smaller exact cover deterministically.
+    local_parts = []
+    for part in body['excavation_blueprint']['parts']:
+        clipped = frozenset(points(e.Region.from_json(part['region']), guard)) & remaining_mask
+        local_parts.extend(partition(clipped, 128, guard))
+    local_parts.sort(key=lambda p: (p['region']['origin'][::-1], p['region']['size'][::-1]))
+    parts = min((parts, local_parts), key=lambda group: (len(group), canonical(group)))
+    native_parts = partition(remaining_mask, 8, guard)
+    return parts, native_parts
+
+
 def mask_digest(mask: frozenset[Point]) -> str | None:
     """The existing excavation-blueprint semantic identity, not a dig authority."""
     if not mask:
@@ -223,17 +245,7 @@ def survey(plan: RoomPlan, raw: bytes, manifest: e.Manifest, guard: Guard = idle
         if reason:
             deficit('remaining_halo', reason, point)
     remaining_mask = frozenset(remaining)
-    parts = partition(remaining_mask, 128, guard)
-    # A global greedy cover can need more rectangles than the original room
-    # partition (notably ten bedrooms). Also clip each ORIGINAL disjoint part
-    # to this same residual mask; choose the smaller exact cover deterministically.
-    local_parts = []
-    for part in body['excavation_blueprint']['parts']:
-        clipped = frozenset(points(e.Region.from_json(part['region']), guard)) & remaining_mask
-        local_parts.extend(partition(clipped, 128, guard))
-    local_parts.sort(key=lambda p: (p['region']['origin'][::-1], p['region']['size'][::-1]))
-    parts = min((parts, local_parts), key=lambda group: (len(group), canonical(group)))
-    native_parts = partition(remaining_mask, 8, guard)
+    parts, native_parts = residual_parts(body, remaining_mask, guard)
     if len(parts) > MAX_PARTS:
         deficit('capacity', 'residual_exceeds_32_blueprint_parts')
     if len(native_parts) > MAX_NATIVE_STEPS:
