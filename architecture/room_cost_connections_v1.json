@@ -1,0 +1,19 @@
+{
+  "schema": "dfmcp.room-cost-connections-contract/1",
+  "policy": "dfmcp.cost-aware-room-connections/1",
+  "strategy": "cost-first-with-original-candidate/1",
+  "costs": "complete_binary_same_level_region",
+  "maximum_region_cells": 1024,
+  "maximum_complete_targets": 512,
+  "maximum_remaining_parts": 32,
+  "maximum_shared_work_checks": 100000,
+  "baseline": "existing_connector_with_minimum_tile_fallback",
+  "alternative": "greedy_added_cost_then_tiles_then_cardinal_steps",
+  "comparison": ["corridor_cost", "new_tiles", "parts", "prefer_original_on_tie"],
+  "partial_candidate_exported": false,
+  "resource_failure_returns_baseline": false,
+  "geometric_capacity_failure_may_retain_baseline": true,
+  "costs_establish_observation": false,
+  "global_cost_optimum_proven": false,
+  "native_mutation_authority": false
+}
