@@ -1,0 +1,21 @@
+{
+  "schema": "dfmcp.room-layout-costs-contract/1",
+  "request_schema": "dfmcp.room-layout-request/1",
+  "objective": "minimum-excavation-cost/1",
+  "result_policy": "dfmcp.mrv-costed-room-layout/1",
+  "field": "excavation_costs",
+  "encoding": "complete_binary_string_x_fastest_then_y",
+  "maximum_cells": 1024,
+  "maximum_targets": 512,
+  "costs_are_observations": false,
+  "comparison_order": ["excavation_cost", "target_tiles", "total_entry_distance", "placements_yxz_rotation"],
+  "scope": "declared_origins_rotations_and_selected_deterministic_connection_compiler",
+  "corridors_rerouted_by_cost": false,
+  "hard_constraints_relaxed": false,
+  "budget_renewal": false,
+  "node_limit": "complete_incumbent_without_optimality_or_inconclusive_without_plan",
+  "work_or_cancellation": "no_plan",
+  "legacy_replay_unchanged": true,
+  "mutation_authority_granted": false,
+  "production_admitted": false
+}

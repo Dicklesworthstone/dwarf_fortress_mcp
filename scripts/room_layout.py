@@ -30,6 +30,8 @@ FALLBACK_POLICY = 'dfmcp.mrv-minimum-fallback-room-layout/1'
 FALLBACK_STRATEGY = 'greedy-then-minimum-tiles/1'
 MINIMUM_TARGETS_OBJECTIVE = 'minimum-target-tiles/1'
 OPTIMIZATION_POLICY = 'dfmcp.mrv-ranked-room-layout/1'
+COST_OBJECTIVE = 'minimum-excavation-cost/1'
+COST_POLICY = 'dfmcp.mrv-costed-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
@@ -183,16 +185,22 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     work()
     _object(value, {'schema', 'world_folder', 'site', 'region', 'areas'},
             {'focus', 'excluded_items', 'excluded_regions', 'search', 'site_mask', 'access_point',
-             'connection_strategy', 'objective'})
+             'connection_strategy', 'objective', 'excavation_costs'})
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     if 'connection_strategy' in value:
         require(type(value['connection_strategy']) is str
                 and value['connection_strategy'] == FALLBACK_STRATEGY,
                 'unsupported room connection strategy')
     if 'objective' in value:
-        require(type(value['objective']) is str and value['objective'] == MINIMUM_TARGETS_OBJECTIVE,
+        require(type(value['objective']) is str
+                and value['objective'] in (MINIMUM_TARGETS_OBJECTIVE, COST_OBJECTIVE),
                 'unsupported room layout objective')
+    require(('excavation_costs' in value) == (value.get('objective') == COST_OBJECTIVE),
+            'cost objective requires exactly one complete tile-cost map')
     domain = _region(value['region'], domain=True)
+    if 'excavation_costs' in value:
+        from room_layout_costs import TileCosts
+        TileCosts.parse(value['region'], value['excavation_costs'], work)
     focus = _vector(value.get('focus', list(domain[0])), 1, 32766)
     require(_contains(domain, focus), 'layout focus must be inside the same-level domain')
     areas = value['areas']
@@ -254,7 +262,9 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     if 'connection_strategy' in value:
         request['connection_strategy'] = FALLBACK_STRATEGY
     if 'objective' in value:
-        request['objective'] = MINIMUM_TARGETS_OBJECTIVE
+        request['objective'] = value['objective']
+    if 'excavation_costs' in value:
+        request['excavation_costs'] = value['excavation_costs']
     require(len(canonical(request)) <= MAX_INPUT, 'normalized layout request exceeds 16 KiB')
     work()
     return request, tuple(profiles)
@@ -406,7 +416,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
     chosen: dict[int, _Candidate] = {}
     solution = None
     ranking = None
-    if 'objective' in request:
+    if request.get('objective') == COST_OBJECTIVE:
+        from room_layout_costs import CostRanking
+        ranking = CostRanking(profiles, request, work)
+    elif 'objective' in request:
         from room_layout_rank import Ranking
         ranking = Ranking(profiles, request['focus'], work)
 
@@ -510,7 +523,8 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': OPTIMIZATION_POLICY if ranking is not None
+    body = {'schema': RESULT_SCHEMA, 'policy': COST_POLICY if request.get('objective') == COST_OBJECTIVE
+            else OPTIMIZATION_POLICY if ranking is not None
             else FALLBACK_POLICY if 'connection_strategy' in request
             else ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
             'status': status, 'request': request,
