@@ -51,3 +51,11 @@ eligibility, aquifers, support, pathfinding, construction completion and current
 safety remain unproven. Real DFHack/native/Rust builds, live-game execution and
 full-repository qualification are unexecuted. Native protocols, effect journals,
 mutation authority, original-key recovery and production admission are unchanged.
+
+Final remote-diff review caught a filename collision: the new CLI suite had
+replaced the unrelated existing test_room_layout_excavation_cli.py. That original
+suite is restored byte-for-byte as Git blob
+c0b6d944c8e93b0073b15ef2241a6e5f79fce250. The new suite has the distinct filename
+test_room_layout_observed_costs_cli.py, retaining its tested source bytes. Its
+13 cases were rerun successfully under the new module name. The original restored
+suite is not counted in this increment's 43 tests and was not executed here.

@@ -130,7 +130,8 @@ A separate exact-byte comparison preserves 108 legacy offline layout outcomes,
 
 ```sh
 python3 -W error -m unittest discover -s tests -p 'test_room_layout_costs.py' -v
-python3 -W error -m unittest discover -s tests -p 'test_room_layout_excavation_*.py' -v
+python3 -W error -m unittest discover -s tests -p 'test_room_layout_excavation_observed.py' -v
+python3 -W error -m unittest discover -s tests -p 'test_room_layout_observed_costs_cli.py' -v
 ```
 
 The CLI suite was executed in two completed bounded invocations. An earlier
