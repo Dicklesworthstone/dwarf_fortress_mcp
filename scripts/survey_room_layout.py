@@ -105,6 +105,11 @@ def packet(result: observed.ObservedLayout | None, contacted: bool = False,
         turn['uncertainty'].append(
             'Excavation counts distinguish wall-shaped targets from existing floors in the original capture; '
             'they do not establish mineability or game-time cost. The connection compiler is not cost-rerouted.')
+        if value['excavation_evidence'].get('corridor_cost_routing_enabled'):
+            turn['uncertainty'][-1] = (
+                'Corridor candidates are compared using costs derived from the original capture. '
+                'The tile and rectangle limits remain binding; global network cost optimality, '
+                'mineability and game-time cost are not established.')
     return out
 
 

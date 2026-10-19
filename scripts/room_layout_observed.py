@@ -33,12 +33,22 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
     require('excavation_costs' not in value, 'observed layout cannot import tile costs')
     excavation = value.get('objective') == EXCAVATION_OBJECTIVE
     normalized_input = {**value, 'objective': layout.MINIMUM_TARGETS_OBJECTIVE} if excavation else value
+    cost_routing = value.get('connection_strategy') == layout.COST_CONNECTION_STRATEGY
+    if cost_routing:
+        require(excavation, 'observed cost-aware routing requires the observed excavation objective')
+        # Only validate the common request here. Raw observation supplies costs
+        # later; no synthetic cost map is invented to authorize the new strategy.
+        normalized_input = {**normalized_input, 'connection_strategy': layout.FALLBACK_STRATEGY}
     search = value.get('search', {})
     layout._object(search, set(), {'max_nodes', 'max_work'})
     work = layout._Work(search.get('max_work', layout.DEFAULT_WORK), guard)
     request, _ = layout._normalize(normalized_input, work)
     if excavation:
         request['objective'] = EXCAVATION_OBJECTIVE
+        require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
+        work()
+    if cost_routing:
+        request['connection_strategy'] = layout.COST_CONNECTION_STRATEGY
         require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
         work()
     return request, work
@@ -191,6 +201,10 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             'scope': optimization['scope'], 'corridors_rerouted_by_cost': False,
             'native_mining_eligibility_proven': False, 'actual_mining_work_observed': False,
             'current_terrain_proven': False}
+        if request.get('connection_strategy') == layout.COST_CONNECTION_STRATEGY:
+            body['excavation_evidence']['corridor_cost_routing_enabled'] = True
+            body['excavation_evidence']['corridors_rerouted_by_cost'] = (selected is not None and
+                selected['project_connections']['corridors_rerouted_by_cost'])
         body['work_units'] = work.used
     result = ObservedLayout(canonical(body))
     require(len(result.encode()) <= MAX_OUTPUT, 'complete observed layout exceeds output bound')

@@ -32,6 +32,8 @@ MINIMUM_TARGETS_OBJECTIVE = 'minimum-target-tiles/1'
 OPTIMIZATION_POLICY = 'dfmcp.mrv-ranked-room-layout/1'
 COST_OBJECTIVE = 'minimum-excavation-cost/1'
 COST_POLICY = 'dfmcp.mrv-costed-room-layout/1'
+COST_CONNECTION_STRATEGY = 'cost-first-with-original-candidate/1'
+COST_CONNECTION_POLICY = 'dfmcp.mrv-cost-connected-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
 MAX_NODES = 100_000
@@ -189,12 +191,15 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     if 'connection_strategy' in value:
         require(type(value['connection_strategy']) is str
-                and value['connection_strategy'] == FALLBACK_STRATEGY,
+                and value['connection_strategy'] in (FALLBACK_STRATEGY, COST_CONNECTION_STRATEGY),
                 'unsupported room connection strategy')
     if 'objective' in value:
         require(type(value['objective']) is str
                 and value['objective'] in (MINIMUM_TARGETS_OBJECTIVE, COST_OBJECTIVE),
                 'unsupported room layout objective')
+    if value.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+        require(value.get('objective') == COST_OBJECTIVE,
+                'cost-aware connections require the cost objective and complete cost map')
     require(('excavation_costs' in value) == (value.get('objective') == COST_OBJECTIVE),
             'cost objective requires exactly one complete tile-cost map')
     domain = _region(value['region'], domain=True)
@@ -260,7 +265,7 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
             require(site_mask.permits_floor(access.point), 'access point forbidden by site mask')
         request['access_point'] = list(access.point)
     if 'connection_strategy' in value:
-        request['connection_strategy'] = FALLBACK_STRATEGY
+        request['connection_strategy'] = value['connection_strategy']
     if 'objective' in value:
         request['objective'] = value['objective']
     if 'excavation_costs' in value:
@@ -454,6 +459,9 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 lowered['site_mask'] = request['site_mask']
             if 'access_point' in request:
                 lowered['access'] = {'point': request['access_point'], 'region': request['region']}
+            if request.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+                lowered['corridor_costs'] = {'region': request['region'],
+                                             'cells': request['excavation_costs']}
             try:
                 # New corridor feasibility changes earlier search branches and
                 # work counts, even if a later legacy plan already succeeded.
@@ -523,7 +531,9 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': COST_POLICY if request.get('objective') == COST_OBJECTIVE
+    body = {'schema': RESULT_SCHEMA, 'policy': COST_CONNECTION_POLICY
+            if request.get('connection_strategy') == COST_CONNECTION_STRATEGY
+            else COST_POLICY if request.get('objective') == COST_OBJECTIVE
             else OPTIMIZATION_POLICY if ranking is not None
             else FALLBACK_POLICY if 'connection_strategy' in request
             else ACCESS_POLICY if 'access_point' in request else ORIENTED_POLICY if oriented else POLICY,
@@ -545,6 +555,10 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             'game_effect_performed': False, 'production_admitted': False}
     if ranking is not None:
         body['optimization'] = ranking.summary(complete)
+        if request.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+            body['optimization']['corridor_cost_routing_enabled'] = True
+            body['optimization']['corridors_rerouted_by_cost'] = (solution is not None and
+                solution.json()['project_connections']['corridors_rerouted_by_cost'])
         body['search']['work_units'] = work.used
         body['search']['all_layouts_ranked'] = complete and ranking.pruned == 0
     result = Layout(canonical(body))

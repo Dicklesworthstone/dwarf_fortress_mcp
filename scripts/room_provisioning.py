@@ -198,7 +198,8 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
                      forbidden: list[_Rect], low: Point, extent: Point,
                      guard: Guard, site_mask: SiteMask | None = None,
                      root: Point | None = None, *,
-                     minimum_fallback: bool = True) -> connections.Connections:
+                     minimum_fallback: bool = True, corridor_costs=None,
+                     max_corridor_parts: int = MAX_PARTS) -> connections.Connections:
     """Preserve every required bedroom wall while joining complete area floors."""
     require(extent[2] == 1, 'connected room projects require one level; stairs are not inferred')
     protected = set(targets)
@@ -227,6 +228,13 @@ def _connect_project(compiled, floors: set[Point], targets: set[Point],
             if all(a <= n < b for a, n, b in zip(excluded.origin, p, excluded.end)):
                 protected.add(p)
                 break
+    if corridor_costs is not None:
+        from room_cost_connections import connect as connect_costed
+        require((low, extent) == corridor_costs.region, 'corridor cost routing region changed')
+        return connect_costed(floors - targets, protected,
+            tuple((area['name'], entry) for area, _, _, _, entry in compiled), corridor_costs,
+            max_new_tiles=MAX_TILES - len(floors), max_parts=max_corridor_parts,
+            guard=guard, root=root)
     return connections.connect(floors - targets, protected,
         tuple((area['name'], entry) for area, _, _, _, entry in compiled),
         (low, extent), max_new_tiles=MAX_TILES - len(floors), guard=guard, root=root,
@@ -246,12 +254,21 @@ class RoomPlan:
         # identical with or without fallback. Never use a process-global switch.
         require(type(_connection_fallback) is bool, 'invalid room connection fallback selection')
         guard()
-        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask', 'access'})
+        _object(value, {'schema', 'world_folder', 'site', 'areas'}, {'excluded_items', 'excluded_regions', 'connect_areas', 'site_mask', 'access', 'corridor_costs'})
         require(value['schema'] == INTENT_SCHEMA, 'wrong room-provisioning request generation')
         connect_areas = value.get('connect_areas', False)
         require(type(connect_areas) is bool, 'connect_areas must be an exact Boolean')
+        corridor_costs = None
+        if 'corridor_costs' in value:
+            from room_cost_connections import Costs
+            require(connect_areas and _connection_fallback,
+                    'cost-aware corridors require complete project connection and original baseline')
+            corridor_costs = Costs.parse(value['corridor_costs'], guard)
         entrance_access = Access.from_json(value['access']) if 'access' in value else None
         require(entrance_access is None or connect_areas, 'access requires complete project connection')
+        if corridor_costs is not None and entrance_access is not None:
+            require(corridor_costs.region == (entrance_access.origin, entrance_access.size),
+                    'access and corridor costs must share one exact routing region')
         site_mask = SiteMask.from_json(value['site_mask'], guard) if 'site_mask' in value else None
         areas = value['areas']
         require(type(areas) is list and 1 <= len(areas) <= MAX_AREAS, 'room plan needs 1..8 areas')
@@ -339,6 +356,11 @@ class RoomPlan:
         project_connections = None
         if connect_areas:
             route_low, route_size, root = low, extent, None
+            if corridor_costs is not None:
+                route_low, route_size = corridor_costs.region
+                for cell in sorted(floors):
+                    guard()
+                    corridor_costs.at(cell)  # The cost map never enlarges or shifts an original room.
             if entrance_access is not None:
                 root = entrance_access.point
                 require(root not in targets, 'furniture obstructs the requested access point')
@@ -354,7 +376,8 @@ class RoomPlan:
                     floors.add(root)
             routed = _connect_project(compiled, floors, targets, forbidden,
                                       route_low, route_size, guard, site_mask, root,
-                                      minimum_fallback=_connection_fallback)
+                                      minimum_fallback=_connection_fallback, corridor_costs=corridor_costs,
+                                      max_corridor_parts=MAX_PARTS - len(parts))
             corridors = [_Rect(origin, size, 'project_corridor', '') for origin, size in routed.parts]
             require(len(parts) + len(corridors) <= MAX_PARTS,
                     'connected room project exceeds the existing 32-part excavation limit')
@@ -373,6 +396,7 @@ class RoomPlan:
                     **entrance_access.json(), 'all_areas_connected_to_point': True,
                     'point_is_existing_fortress_entrance_proven': False,
                     'point_floor_observed': False}
+            if entrance_access is not None or corridor_costs is not None:
                 # The existing excavation codec hashes a tight target hull,
                 # not the larger domain that was permitted for corridor search.
                 low = tuple(min(p.origin[i] for p in parts) for i in range(3))
@@ -390,13 +414,16 @@ class RoomPlan:
             intent['site_mask'] = site_mask.json()
         if entrance_access is not None:
             intent['access'] = entrance_access.json()
+        if corridor_costs is not None:
+            intent['corridor_costs'] = corridor_costs.json()
         require(len(canonical(intent)) <= MAX_BYTES, 'normalized room request exceeds input bound')
         # Match the existing read-only blueprint's semantic mask identity. The
         # exact downstream normal-mining partition is still owned by dig_blueprint.
         indices = [(((z - low[2]) * extent[1] + y - low[1]) * extent[0] + x - low[0], 3)
                    for x, y, z in sorted(floors, key=lambda p: p[::-1])]
         mask = {'region': {'origin': list(low), 'size': list(extent)}, 'targets': indices}
-        body = {'schema': PLAN_SCHEMA, 'policy': POLICY, 'intent': intent,
+        body = {'schema': PLAN_SCHEMA, 'policy': POLICY if corridor_costs is None
+                else 'dfmcp.cost-aware-room-furnishings/1', 'intent': intent,
             'excavation_blueprint': blueprint, 'furniture_request': request.json(), 'areas': geometry,
             'excavation_mask_digest': hashlib.sha256(b'dfmcp-excavation-blueprint/1\0' + canonical(mask)).hexdigest(),
             'furniture_request_digest': request.digest, 'target_tiles': len(floors),

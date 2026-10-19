@@ -1,0 +1,45 @@
+{
+  "schema": "dfmcp.room-layout-request/1",
+  "world_folder": "your-save-folder",
+  "site": 7,
+  "areas": [
+    {
+      "name": "a",
+      "origin": [
+        10,
+        12,
+        2
+      ],
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 1
+      }
+    },
+    {
+      "name": "b",
+      "origin": [
+        19,
+        12,
+        2
+      ],
+      "template": {
+        "kind": "dining_hall",
+        "table_count": 1
+      }
+    }
+  ],
+  "region": {
+    "origin": [
+      10,
+      10,
+      2
+    ],
+    "size": [
+      13,
+      5,
+      1
+    ]
+  },
+  "objective": "minimum-observed-excavation/1",
+  "connection_strategy": "cost-first-with-original-candidate/1"
+}
