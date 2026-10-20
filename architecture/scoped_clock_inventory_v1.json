@@ -1,0 +1,25 @@
+{
+  "schema": "dfmcp.scoped-clock-inventory/1",
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"],
+  "command": "recover_route_furniture_clock.py inventory",
+  "scope": "selected_private_directory_only",
+  "native_contact": false,
+  "original_batch_custody_verified": false,
+  "record_identity": "unchanged Scope or FinalScope reproduces exact original intent; filename matches confirmation",
+  "ordering": "confirmation ascending",
+  "selections": ["all", "pending", "terminal", "attention"],
+  "source_lost": "terminal historical evidence that remains unresolved and requires attention",
+  "continuation": "directory identity, every file fingerprint and content hash, selection, batch filter, limit and page offset; integrity cursor, never authority",
+  "custody": "one exclusive directory lock, sequential borrowed readers, complete prepublication revalidation, single output attempt",
+  "limits": {
+    "records": 256,
+    "directory_entries": 768,
+    "page_rows": 32,
+    "output_bytes": 65536,
+    "file_bytes": 8192,
+    "disk_allowance_bytes": 268435456,
+    "work_units": 100000,
+    "deadline_ms": [1, 60000]
+  },
+  "forbidden": ["native query", "clock start", "clock cancel", "repair", "prune", "batch reconstruction", "automatic retry", "current pause claim", "readiness claim", "construction completion claim", "production admission"]
+}

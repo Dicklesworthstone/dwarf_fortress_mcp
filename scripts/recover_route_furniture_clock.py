@@ -94,18 +94,19 @@ class Recovery:
     independently selected scope and intent, not missing original effect files.
     Start-owner ScopeStore, source checks and execution permissions are unchanged.
     """
-    def __init__(self, directory, batch_id, confirmation, budget):
+    def __init__(self, directory, batch_id, confirmation, budget, *, parent_fd=None):
         digest_text(batch_id)
         self.path = record_path(directory, confirmation)
         self.batch_id, self.confirmation, self.budget = batch_id, confirmation, budget
         self.store, self.fd, self.scope, self.data, self.stamp = None, None, None, None, None
         self.authority, self.fenced = None, False
+        self.parent_fd = parent_fd
 
     def __enter__(self):
         try:
             # OutcomeStore checks/syncs at most a bounded set of small files.
             self.budget.reserve('disk_bytes', 8 * storage.MAX_FILE)
-            self.store = storage.OutcomeStore(self.path).__enter__()
+            self.store = storage.OutcomeStore(self.path, parent_fd=self.parent_fd).__enter__()
             self.name = self.path.name + SCOPE_SUFFIX
             self.fd = os.open(self.name, storage.OPEN_READ, dir_fd=self.store.parent)
             self.data = storage._read(self.fd, self.store.parent, self.name)
@@ -266,6 +267,10 @@ def publish(raw):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == 'inventory':
+        import scoped_clock_inventory
+        return scoped_clock_inventory.main(argv)
     operation, attempted = 'unknown', False
     try:
         parser = Parser(description=__doc__)

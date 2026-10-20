@@ -19,7 +19,8 @@ FILES = tuple('scripts/' + name for name in (
     'furniture_allocation.py', 'route_furniture_allocation.py', 'route_furniture_review.py',
     'route_furniture_clock_context.py', 'recover_route_furniture_clock.py',
     'test_scoped_clock_recovery.py', 'scoped_clock_cancel.py',
-    'test_scoped_clock_cancel.py', 'check_scoped_clock_recovery.py'))
+    'test_scoped_clock_cancel.py', 'check_scoped_clock_recovery.py',
+    'scoped_clock_inventory.py', 'test_scoped_clock_inventory.py'))
 PREFIX = 'test_scoped_clock_recovery.'
 MUTATIONS = (
     ('scope_identity_omitted', 'recover_route_furniture_clock.py',
@@ -64,6 +65,19 @@ MUTATIONS += (
 )
 
 
+MUTATIONS += (
+    ('directory_identity_history_omitted', 'scoped_clock_inventory.py',
+     'name, stamp, hashlib.sha256(data).hexdigest()',
+     'name, None, hashlib.sha256(data).hexdigest()',
+     'test_scoped_clock_inventory.InventoryTests.test_same_bytes_replacement_and_membership_changes_fence'),
+    ('inventory_revalidation_omitted', 'scoped_clock_inventory.py',
+     'clock.require(self._scan() == self.entries,', 'clock.require(True,',
+     'test_scoped_clock_inventory.InventoryTests.test_same_bytes_replacement_and_membership_changes_fence'),
+    ('page_query_binding_omitted', 'scoped_clock_inventory.py',
+     'match is not None and match[1] == query,', 'match is not None,',
+     'test_scoped_clock_inventory.InventoryTests.test_pages_cover_each_record_once_and_bind_query_parameters'),
+)
+
 
 def inventory():
     out = {}
@@ -80,7 +94,7 @@ def main():
     args = parser.parse_args()
     before = inventory()
     suite = unittest.defaultTestLoader.loadTestsFromNames(
-        ('test_scoped_clock_recovery', 'test_scoped_clock_cancel'))
+        ('test_scoped_clock_recovery', 'test_scoped_clock_cancel', 'test_scoped_clock_inventory'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     passed = result.wasSuccessful() and not result.skipped
     report = {'schema': 'dfmcp.scoped-clock-recovery-evidence/1',
