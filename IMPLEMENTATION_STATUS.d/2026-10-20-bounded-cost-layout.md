@@ -29,3 +29,44 @@ This increment tests offline Python components with synthetic geometry. Observed
 map integration, native transport, room-backed execution, Rust/DFHack builds,
 full-repository and live qualification are not claimed by this increment.
 No native method, journal, admission or mutation permission changes.
+
+### Observed workflow and whole original-room handoff
+
+The observed normalizer now admits both existing cost strategies and restores
+the EXACT original selection after preflight. Costs still derive solely from
+original decoded map evidence; caller-authored cost maps refuse before contact.
+The selected complete target union is independently recounted, and the original
+padded compiler repeats terrain/capacity validation before handoff creation.
+Neither native reader, CLI implementation, connector nor handoff codec changes.
+
+The synthetic full-project result has 511 observed floor targets and one wall,
+retaining eight bedrooms, both dining halls, all 28 furnishings and 512 total
+targets. Padded compilation, the one-wall/one-part residual and the complete
+RoomExcavationHandoff all replay through their actual existing codecs. A separate
+maximum-eight-area/32-furnishing layout test passes. Explicit entrance and
+cross-level furniture selectors remain unchanged through map-backed lowering.
+
+93 warnings-denied tests pass on the final upload source in completed bounded
+invocations: 15 new layout tests, nine supplied-map/padded-handoff tests, seven
+actual TCP/CLI tests, and 62 unchanged solver/compiler regressions. Fifteen joined
+synthetic peers exercise the actual MapClient and real CLI subprocesses, all
+seven request/saved exports, source failures, closed-before-search lifetime,
+label exhaustion after a valid baseline, authorization replacement after final
+serialization and single-attempt output. No replacement runtime solver, client,
+codec or extracted function body is used. Fault hooks wrap actual boundaries.
+An aggregate rerun hit the execution time limit and is not counted as completed;
+the complete final evidence is retained in three successful bounded runs.
+
+Independent baseline/final interpreters preserve 244 legacy output byte counts
+and SHA-256 values: 84 offline layouts, 64 observed surveys, 64 reports, 16 padded
+compilations and 16 handoff outcomes. These cover trace/work counts and exact
+old strategy behavior. Hash checks compare uploaded runtime/test files with
+executed bytes. The unchanged padded compiler is
+07966157544d15f705599bc1d0caeba4235a8fb1; the surveyed CLI is
+15a1b7658d32bdc1126c4efcec9612426e02d537. No existing tests are replaced.
+
+This adds supplied-map, padded compiler/handoff API and surveyed TCP/CLI evidence.
+Padded excavation CLI, native mutation dispatch, durable room-batch execution,
+real DFHack/Rust builds, physical safety, live fortress and full-repository
+qualification are not claimed. Native methods, journals, original-key recovery,
+mutation authority and production-admission restrictions remain unchanged.

@@ -33,7 +33,7 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
     require('excavation_costs' not in value, 'observed layout cannot import tile costs')
     excavation = value.get('objective') == EXCAVATION_OBJECTIVE
     normalized_input = {**value, 'objective': layout.MINIMUM_TARGETS_OBJECTIVE} if excavation else value
-    cost_routing = value.get('connection_strategy') == layout.COST_CONNECTION_STRATEGY
+    cost_routing = value.get('connection_strategy') in layout.COST_CONNECTION_STRATEGIES
     if cost_routing:
         require(excavation, 'observed cost-aware routing requires the observed excavation objective')
         # Only validate the common request here. Raw observation supplies costs
@@ -56,7 +56,7 @@ def prepare(raw: bytes, guard: layout.Guard = layout._idle) -> tuple[dict, layou
         require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
         work()
     if cost_routing:
-        request['connection_strategy'] = layout.COST_CONNECTION_STRATEGY
+        request['connection_strategy'] = value['connection_strategy']
         require(len(canonical(request)) <= layout.MAX_INPUT, 'normalized observed request exceeds bound')
         work()
     if 'residual_partition' in value:
@@ -217,7 +217,7 @@ def solve(raw: bytes, capture_raw: bytes, manifest: native.Manifest,
             'scope': optimization['scope'], 'corridors_rerouted_by_cost': False,
             'native_mining_eligibility_proven': False, 'actual_mining_work_observed': False,
             'current_terrain_proven': False}
-        if request.get('connection_strategy') == layout.COST_CONNECTION_STRATEGY:
+        if request.get('connection_strategy') in layout.COST_CONNECTION_STRATEGIES:
             body['excavation_evidence']['corridor_cost_routing_enabled'] = True
             body['excavation_evidence']['corridors_rerouted_by_cost'] = (selected is not None and
                 selected['project_connections']['corridors_rerouted_by_cost'])

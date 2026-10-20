@@ -14,5 +14,18 @@
   "partial_room_plan_returned": false,
   "global_network_optimum_proven": false,
   "native_mutation_authority_granted": false,
-  "beads": ["dfmcp-wp-pln01-spatial-blueprint-layout-pwd", "df-dfhack-bridge-plane-c-pic.3", "df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5"]
+  "beads": [
+    "dfmcp-wp-pln01-spatial-blueprint-layout-pwd",
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
+  "observed_objective": "minimum-observed-excavation/1",
+  "observed_cost_source": "original_raw_map_before_site_mask_intersection",
+  "observed_caller_cost_maps_allowed": false,
+  "residual_partition_strategy": "bounded-original-dig/1",
+  "existing_padded_compiler_delegates_same_strategy": true,
+  "additional_native_reads": 0,
+  "saved_replay_native_contact": false,
+  "production_admitted": false
 }
