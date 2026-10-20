@@ -79,3 +79,94 @@ callback interruption, full replay refusal and process hash seeds. The four
 imported implementation modules match their frozen upstream Git blob hashes.
 These execute Python implementations, not DFHack, native TCP, Rust/MCP or a full
 workspace. No production or live-fortress qualification is established.
+
+## Existing allocation and review commands
+
+The original-order mode is now available through both existing read workflows:
+
+```sh
+python3 scripts/allocate_route_furniture.py \
+  --request-file furnishings-request.json --origin 0 0 5 --size 64 64 1 \
+  --fixed-delivery-order --timeout-ms 10000
+
+python3 scripts/review_route_furniture.py create \
+  --request-file furnishings-request.json --origin 0 0 5 --size 64 64 1 \
+  --fixed-delivery-order --timeout-ms 10000
+```
+
+The paths, fortress selectors and coordinates must match the intended capture.
+Use the existing isolated read-only environment:
+
+```text
+DFMCP_ALLOW_UNADMITTED_ROUTE_FURNITURE=1
+DFMCP_ROUTE_FURNITURE_ENDPOINT=127.0.0.1:5000
+DFMCP_MAP_TOKEN=<operator-configured map read token>
+DFMCP_OPERATIONS_PAGED_TOKEN=<operator-configured inventory read token>
+```
+
+Other `DFMCP_` variables remain refused. The unchanged source owner brackets the
+complete released operations inventory with equal paused map endpoints and closes
+before solving. This is not an atomic cross-profile snapshot. The optimizer uses
+the existing solver work reservation; review creation keeps its separate export
+reservation. Current read authority and foreground time are checked before final
+return. No new native methods, connections, credentials, retry or mutation path.
+
+`--fixed-delivery-order` is a separate mode: do not combine it with
+`--sequence-deliveries`, `--search-delivery-items`, `--minimize-delivery-cost`,
+`--require-optimal-delivery` or `--delivery-search-nodes`. Incompatible flags are
+rejected before input/native contact. There is no search-node cap for this
+polynomial matching problem; a successful assignment is optimal for the fixed
+order, while work/time exhaustion refuses instead of exporting an incumbent.
+Existing modes keep their original behavior when the flag is absent.
+
+Room-derived furnishing requests exported by the existing compiler can be used
+without rewriting their dependency graph. This increment does not create a new
+composite room handoff, attach original room geometry to a route batch, or extend
+the native room lifecycle. Retain the parent room artifact separately. Exact
+request preservation alone does not establish terrain completion or room custody.
+
+A successful `create` response exports an ordinary immutable route review with
+the exact selected items and unchanged request. The existing review codec and
+`check` implementation are unchanged. `check` rejects the new allocation flag
+before input/native contact and never invokes a solver or substitutes an item.
+The review binds the allocation digest, not a replayable optimality proof; retain
+the complete create response separately when that historical proof matters.
+Rechecking individual routes is not a new proof of sequential-delivery feasibility.
+The existing batch frontier checks remain required before any later placement.
+Neither command writes a review file or starts a batch automatically.
+
+Exit zero and `ok: true` mean a report exists, not necessarily a plan. Check the
+status and nullable plan/review. `delivery_order_shortage` exports neither a
+partial plan nor a review. Agent Turn briefing states fixed-order assignment
+optimality and unchanged order without claiming optimality over other orders.
+
+## Executed workflow evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -W error -m unittest \
+  test_route_furniture_fixed_order test_route_furniture_fixed_order_runtime -v
+```
+
+All 29 distinct tests pass, zero skips: 15 core and 14 workflow tests. The workflow
+suite loads the complete production runtime/CLI modules, not extracted function
+bodies, and executes the real solver, map decoder, candidate projection, request,
+plan and review codecs, file readers, argument parsing and publication checks.
+It covers full 32-target review export, exact request preservation, no saved-item
+substitution, pre-contact option refusal, source disagreement, failed acquisition,
+shrinking work/export reservations, final authority loss and one-attempt stdout.
+CLI-main subprocesses execute the same complete commands with injected transport.
+
+Acquisition, operations-roster decoding, transport budget and endpoint parsing
+are injected test boundaries. Legacy joint/cost-search modules are trap stubs in
+the focused new-mode tests; their algorithms are not qualified by this run. No
+native TCP/paging/release, real DFHack or standalone real-network import pipeline
+is exercised. This is not a complete private room-parent or placement workflow.
+
+Four deliberately weakened variants are rejected: dropping prior target blockers
+(by independent forward verification), clipping each matching row to one item,
+omitting final authority checks, and accepting allocation flags on saved-review
+checks. The latter three fail regression assertions. Four existing modes (basic
+and sequencing-only allocation and review creation) match their exact predecessor
+packets byte-for-byte for one shared fixture. Five unchanged core/codec modules
+match upstream Git blobs. Rust/MCP, SDK/plugin, live fortress and full-workspace
+qualification remain unexecuted; no production admission is changed.

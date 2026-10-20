@@ -70,6 +70,8 @@ def main(argv=None):
         parser.add_argument('--origin', type=int, nargs=3)
         parser.add_argument('--size', type=int, nargs=3)
         parser.add_argument('--max-route-steps', type=int)
+        parser.add_argument('--fixed-delivery-order', action='store_true',
+                            help='create only: optimize new items without changing the original delivery order')
         parser.add_argument('--sequence-deliveries', action='store_true',
                             help='create only: preserve selected items and add dependencies to avoid modeled route blockage')
         parser.add_argument('--search-delivery-items', action='store_true',
@@ -87,6 +89,10 @@ def main(argv=None):
         operation = args.operation
         budget = inventory.wire.Budget(args.timeout_ms)
         creating = operation == 'create'
+        require(not args.fixed_delivery_order or (creating and not args.sequence_deliveries
+                and not args.search_delivery_items and not args.minimize_delivery_cost
+                and not args.require_optimal_delivery and args.delivery_search_nodes is None),
+                'fixed-order allocation is a distinct new-review mode')
         require(all((value is not None) == creating for value in (args.request_file, args.origin, args.size)),
                 'only create selects request and region')
         require(all((value is not None) != creating for value in (args.review_file, args.expected_review)),
@@ -109,6 +115,8 @@ def main(argv=None):
             region = inventory.Region(tuple(args.origin), tuple(args.size))
             maximum = inventory.routes.MAX_ROUTE_STEPS if args.max_route_steps is None else args.max_route_steps
             options = {'max_route_steps': maximum}
+            if args.fixed_delivery_order:
+                options['fixed_delivery_order'] = True
             if args.sequence_deliveries:
                 options['sequence_deliveries'] = True
             if args.search_delivery_items:

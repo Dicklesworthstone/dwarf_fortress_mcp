@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--origin', nargs=3, type=int, required=True)
         parser.add_argument('--size', nargs=3, type=int, required=True)
         parser.add_argument('--max-route-steps', type=int, default=MAX_ROUTE_STEPS)
+        parser.add_argument('--fixed-delivery-order', action='store_true',
+                            help='optimize new item selections for the original order without changing dependencies')
         parser.add_argument('--sequence-deliveries', action='store_true',
                             help='strengthen dependencies to keep all selected deliveries feasible in the captured route model')
         parser.add_argument('--minimize-delivery-cost', action='store_true',
@@ -79,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
                             help='1..4096 joint search nodes; cost-optimization mode only')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         args = parser.parse_args(argv)
+        require(not args.fixed_delivery_order or (not args.sequence_deliveries
+                and not args.minimize_delivery_cost and not args.require_optimal_delivery
+                and args.delivery_search_nodes is None), 'fixed order does not accept order-search options')
         require(not args.minimize_delivery_cost or args.sequence_deliveries,
                 'delivery optimization requires sequencing')
         require((not args.require_optimal_delivery and args.delivery_search_nodes is None)
@@ -88,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         request = read_request(args.request_file, budget)
         authority = Authority.load()
         options = {'max_route_steps': args.max_route_steps}
+        if args.fixed_delivery_order:
+            options['fixed_delivery_order'] = True
         if args.sequence_deliveries:
             options['sequence_deliveries'] = True
         if args.minimize_delivery_cost:

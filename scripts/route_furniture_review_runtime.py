@@ -15,6 +15,7 @@ import route_furniture_review as review_model
 import route_furniture_sequence as sequencing
 import route_furniture_joint as joint
 import route_furniture_optimal as optimal
+import route_furniture_fixed_order as fixed
 
 # Fixed work reservation for creating/validating/serializing the bounded artifact.
 # It is never borrowed from the already reserved route solver allowance.
@@ -84,7 +85,13 @@ def packet(result=None, request=None, source=None, *, operation='check', review=
         sequence = result['delivery_sequence']
         turn['coverage']['delivery_order_model'] = sequence['model']
         turn['coverage']['delivery_order_checked'] = sequence['candidate_model_sequence_proven']
-        if 'delivery_optimization' in result:
+        if 'fixed_order_delivery' in result:
+            proof = result['fixed_order_delivery']
+            turn['coverage']['fixed_order_assignment_optimality_proven'] = proof['assignment_optimality_proven']
+            turn['coverage']['original_dependencies_unchanged'] = True
+            turn['uncertainty'].append(
+                'Fixed-order matching selects new items before review creation without changing the original request. The review freezes those items; rechecking never reallocates or proves present delivery-order feasibility. Fresh batch frontier checks remain required.')
+        elif 'delivery_optimization' in result:
             proof = result['delivery_optimization']
             turn['coverage']['delivery_cost_policy'] = proof['policy']
             turn['coverage']['delivery_cost_optimality_proven'] = proof['cost_optimality_proven']
@@ -124,7 +131,13 @@ def create(request: Request, region: inventory.Region, authority: inventory.Auth
            budget: inventory.wire.Budget, *, max_route_steps=routes.MAX_ROUTE_STEPS,
            sequence_deliveries: bool = False, search_delivery_items: bool = False,
            max_search_nodes: int = joint.MAX_SEARCH_NODES,
-           minimize_delivery_cost: bool = False, require_optimal_delivery: bool = False) -> bytes:
+           minimize_delivery_cost: bool = False, require_optimal_delivery: bool = False,
+           fixed_delivery_order: bool = False) -> bytes:
+    require(type(fixed_delivery_order) is bool
+            and (not fixed_delivery_order or (not sequence_deliveries and not search_delivery_items
+                 and not minimize_delivery_cost and not require_optimal_delivery
+                 and max_search_nodes == joint.MAX_SEARCH_NODES)),
+            'fixed delivery order cannot change dependencies or use order search')
     require(type(sequence_deliveries) is bool, 'delivery sequencing requires explicit Boolean opt-in')
     require(type(search_delivery_items) is bool and (not search_delivery_items or sequence_deliveries),
             'alternative items require explicit sequencing and item-search opt-in')
@@ -147,7 +160,11 @@ def create(request: Request, region: inventory.Region, authority: inventory.Auth
         budget.remaining()
         authority.guard()
 
-    if minimize_delivery_cost:
+    if fixed_delivery_order:
+        request, result = fixed.allocate_fixed_order_routes(
+            request, candidates, raw, guard,
+            max_route_steps=max_route_steps, maximum_work=allowance)
+    elif minimize_delivery_cost:
         request, result = optimal.allocate_optimal_routes(
             request, candidates, raw, guard, max_route_steps=max_route_steps,
             maximum_work=allowance, max_search_nodes=max_search_nodes,
