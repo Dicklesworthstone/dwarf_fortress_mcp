@@ -1,0 +1,23 @@
+{
+  "schema": "dfmcp.dig-blueprint-stop-recovery-contract/1",
+  "commands": ["inspect", "query", "cancel"],
+  "original_marker": "stopped.json",
+  "maximum_marker_bytes": 1024,
+  "opaque_marker_may_be_empty": true,
+  "marker_must_be_private_single_link_regular_file": true,
+  "marker_bytes_and_inode_pinned": true,
+  "opaque_marker_parsed_as_authority": false,
+  "inventory_binds_marker_digest_and_identity": true,
+  "all_original_semantic_and_journal_validation_required": true,
+  "new_work_default_opening_relaxed": false,
+  "query_requires_designation_enablement": false,
+  "cancel_requires_original_enablement": true,
+  "resolved_receipt_recovery_offline": true,
+  "repair_or_delete_stop": false,
+  "retry_commit": false,
+  "automatic_query": false,
+  "native_quiescence_proven": false,
+  "excavation_completion_proven": false,
+  "production_admitted": false,
+  "beads": ["df-dfhack-bridge-plane-c-pic.4", "df-dfhack-bridge-plane-c-pic.5", "df-cancellation-progress-certificates-vvw"]
+}

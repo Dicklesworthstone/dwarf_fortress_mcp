@@ -187,6 +187,7 @@ class Batch:
         self.id = d.digest(domain, d.canonical(value)).hex()
         self.stopped = False
         self.stop_pin = None
+        self.stop_recovery = None
 
     def room_summary(self):
         self.budget.check()
@@ -272,6 +273,9 @@ class Batch:
         if self.room_handoff:
             state['room_excavation'] = self.room_summary()
             state['batch_format'] = ROOM_FORMAT
+        if self.stop_recovery is not None:
+            state['stop_recovery'] = {**self.stop_recovery,
+                                      'file_identity': list(self.stop_recovery['file_identity'])}
         state['inventory_digest'] = d.digest(b'dfmcp-dig-blueprint-inventory/1', d.canonical(state)).hex()
         serialize_result(state, self.budget)
         store.verify(); self.verify()
@@ -279,13 +283,19 @@ class Batch:
 
 
 @contextmanager
-def open_batch(root, budget):
+def open_batch(root, budget, *, recovery=False):
+    d.flag(recovery)
     with s.open_store(d, root, budget=budget.check) as directory:
         with private_file(directory, MANIFEST, ROOM_MAX_MANIFEST) as (value, pin):
             batch = Batch(directory, pin, value, budget)
             names = set(directory.names())
             d.require(names in ({MANIFEST, EFFECTS}, {MANIFEST, EFFECTS, STOP}), 'incomplete or unexpected batch directory')
-            if STOP in names:
+            if STOP in names and recovery:
+                from dig_blueprint_stop_recovery import open_stop
+                with open_stop(directory, batch.id) as (stop_pin, evidence):
+                    batch.stopped, batch.stop_pin, batch.stop_recovery = True, stop_pin, evidence
+                    batch.verify(); yield batch; batch.verify()
+            elif STOP in names:
                 with private_file(directory, STOP, 1024) as (stopped, stop_pin):
                     d.require(stopped == {'format': 'dfmcp.dig-blueprint-stop/1', 'batch_id': batch.id}, 'wrong batch stop marker')
                     batch.stopped, batch.stop_pin = True, stop_pin
@@ -458,7 +468,7 @@ class CheckedClient:
 
 
 def inspect(root, budget):
-    with open_batch(root, budget) as batch:
+    with open_batch(root, budget, recovery=True) as batch:
         with s.open_store(d, batch.effects, budget=budget.check) as store:
             result = batch.inventory(store)
             result.update(ok=True, native_calls=0, blueprint=batch.layout.blueprint())
@@ -519,7 +529,7 @@ def advance(root, batch_id, index, witness, plan, seal, budget, connect=d.Client
 
 def recover(root, batch_id, index, cancel, budget, connect=d.Client):
     d.flag(cancel)
-    with open_batch(root, budget) as batch:
+    with open_batch(root, budget, recovery=True) as batch:
         d.require(batch_id == batch.id, 'wrong blueprint batch identity')
         with s.open_store(d, batch.effects, True, budget.check) as store:
             state = batch.inventory(store)
@@ -532,7 +542,11 @@ def recover(root, batch_id, index, cancel, budget, connect=d.Client):
                     if not any(e['name'] == owner.path.name for e in store.entries):
                         store.register(owner)
                     credentials = d.environment(cancel, batch.value['endpoint'])
-                    with connect_for(connect, credentials, budget, batch.room_handoff is not None, cancel, batch.verify) as client:
+                    # An unverified stop permits original-key recovery only. Keep
+                    # authority/custody live across all I/O even for legacy batches.
+                    with connect_for(connect, credentials, budget,
+                                     batch.room_handoff is not None or batch.stop_recovery is not None,
+                                     cancel, batch.verify) as client:
                         batch.verify(); store.verify(); owner.verify()
                         d.require(d.environment(cancel, client.address) == credentials, 'operator changed during recovery')
                         budget.check()
