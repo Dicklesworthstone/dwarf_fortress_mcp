@@ -33,6 +33,9 @@ OPTIMIZATION_POLICY = 'dfmcp.mrv-ranked-room-layout/1'
 COST_OBJECTIVE = 'minimum-excavation-cost/1'
 COST_POLICY = 'dfmcp.mrv-costed-room-layout/1'
 COST_CONNECTION_STRATEGY = 'cost-first-with-original-candidate/1'
+BOUNDED_COST_CONNECTION_STRATEGY = 'bounded-cost-with-original-candidate/1'
+COST_CONNECTION_STRATEGIES = (COST_CONNECTION_STRATEGY, BOUNDED_COST_CONNECTION_STRATEGY)
+BOUNDED_COST_CONNECTION_POLICY = 'dfmcp.mrv-bounded-cost-routed-room-layout/1'
 COST_CONNECTION_POLICY = 'dfmcp.mrv-cost-connected-room-layout/1'
 MAX_INPUT = 16 * 1024
 MAX_OUTPUT = 96 * 1024
@@ -191,13 +194,13 @@ def _normalize(value: object, work: _Work) -> tuple[dict, tuple[_Profile, ...]]:
     require(value['schema'] == REQUEST_SCHEMA, 'wrong room layout request generation')
     if 'connection_strategy' in value:
         require(type(value['connection_strategy']) is str
-                and value['connection_strategy'] in (FALLBACK_STRATEGY, COST_CONNECTION_STRATEGY),
+                and value['connection_strategy'] in (FALLBACK_STRATEGY, *COST_CONNECTION_STRATEGIES),
                 'unsupported room connection strategy')
     if 'objective' in value:
         require(type(value['objective']) is str
                 and value['objective'] in (MINIMUM_TARGETS_OBJECTIVE, COST_OBJECTIVE),
                 'unsupported room layout objective')
-    if value.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+    if value.get('connection_strategy') in COST_CONNECTION_STRATEGIES:
         require(value.get('objective') == COST_OBJECTIVE,
                 'cost-aware connections require the cost objective and complete cost map')
     require(('excavation_costs' in value) == (value.get('objective') == COST_OBJECTIVE),
@@ -467,9 +470,13 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
                 lowered['site_mask'] = request['site_mask']
             if 'access_point' in request:
                 lowered['access'] = {'point': request['access_point'], 'region': request['region']}
-            if request.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+            if request.get('connection_strategy') in COST_CONNECTION_STRATEGIES:
                 lowered['corridor_costs'] = {'region': request['region'],
                                              'cells': request['excavation_costs']}
+                if request['connection_strategy'] == BOUNDED_COST_CONNECTION_STRATEGY:
+                    # Keep the exact requested algorithm in the downstream intent.
+                    # Legacy cost-first intents omit this field for byte replay.
+                    lowered['corridor_costs']['strategy'] = BOUNDED_COST_CONNECTION_STRATEGY
             try:
                 # New corridor feasibility changes earlier search branches and
                 # work counts, even if a later legacy plan already succeeded.
@@ -547,8 +554,9 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
         trace.update(b'node_limit\0')
     work()
     oriented = any('rotation' in area or 'rotations' in area for area in request['areas'])
-    body = {'schema': RESULT_SCHEMA, 'policy': COST_CONNECTION_POLICY
-            if request.get('connection_strategy') == COST_CONNECTION_STRATEGY
+    body = {'schema': RESULT_SCHEMA, 'policy': BOUNDED_COST_CONNECTION_POLICY
+            if request.get('connection_strategy') == BOUNDED_COST_CONNECTION_STRATEGY
+            else COST_CONNECTION_POLICY if request.get('connection_strategy') == COST_CONNECTION_STRATEGY
             else COST_POLICY if request.get('objective') == COST_OBJECTIVE
             else OPTIMIZATION_POLICY if ranking is not None
             else FALLBACK_POLICY if 'connection_strategy' in request
@@ -571,7 +579,7 @@ def solve(raw: bytes, guard: Guard = _idle) -> Layout:
             'game_effect_performed': False, 'production_admitted': False}
     if ranking is not None:
         body['optimization'] = ranking.summary(complete)
-        if request.get('connection_strategy') == COST_CONNECTION_STRATEGY:
+        if request.get('connection_strategy') in COST_CONNECTION_STRATEGIES:
             body['optimization']['corridor_cost_routing_enabled'] = True
             body['optimization']['corridors_rerouted_by_cost'] = (solution is not None and
                 solution.json()['project_connections']['corridors_rerouted_by_cost'])
