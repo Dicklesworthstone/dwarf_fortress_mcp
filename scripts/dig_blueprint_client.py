@@ -575,6 +575,56 @@ def stop(root, batch_id, budget):
         return result
 
 
+def publish_stop_recovery(root, result, budget, *, standalone=False):
+    """Acknowledge only under the same original stopped owner; never query here.
+
+    Recovery can durably retain a receipt before later publication fails. That
+    failure is not permission to repeat a designation. Reopen under the SAME
+    deadline/authority, compare the complete inventory and opaque marker witness,
+    and keep root/effects/manifest/marker custody through the sole output attempt.
+    """
+    attempted = False
+    try:
+        d.flag(standalone)
+        expected = result.get('batch', result)
+        d.require('stop_recovery' in expected, 'opaque-stop recovery evidence required')
+        with open_batch(root, budget, recovery=True) as batch:
+            with s.open_store(d, batch.effects, budget=budget.check) as store:
+                def verify():
+                    current = batch.inventory(store)
+                    d.require(current['batch_id'] == expected['batch_id']
+                              and current['inventory_digest'] == expected['inventory_digest']
+                              and all(expected.get(key) == value for key, value in current.items()),
+                              'original recovery inventory changed before publication')
+                verify()
+                data = serialize_result(result, budget)
+                if standalone:
+                    d.require('room_excavation' in result, 'original room plan unavailable')
+                    data = d.canonical(result['room_excavation']['room_plan'])
+                verify()  # Serialization must not outlive its original evidence.
+                batch.verify(); store.verify(); budget.check()
+                text = data.decode('ascii') + ('' if standalone else '\n')
+                attempted = True
+                if sys.stdout.write(text) != len(text):
+                    return 2
+                sys.stdout.flush()
+                batch.verify(); store.verify(); budget.check()
+        return 0
+    except (ValueError, OSError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
+        if not attempted:
+            failure = d.canonical({'ok': False, 'profile': 'dig-blueprint/1',
+                'effect_status': 'unknown', 'error':
+                'Final original recovery custody, authority, budget or output refused. '
+                'A receipt may already be retained; inspect the same batch and never repeat designation.',
+                'retry_commit_permitted': False, 'excavation_completion_proven': False})
+            try:
+                sys.stdout.write(failure.decode('ascii') + '\n')
+                sys.stdout.flush()
+            except (ValueError, OSError, TypeError, KeyboardInterrupt):
+                pass
+        return 2  # No second output, source contact, repair, or budget renewal.
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -627,13 +677,17 @@ def main(argv=None):
                              args.confirm_plan, args.review_seal, budget)
         else:
             result = recover(args.directory, args.batch_id, args.step, args.command == 'cancel', budget)
+        state = result.get('batch', result)
+        if args.command in ('inspect', 'query', 'cancel') and 'stop_recovery' in state:
+            return publish_stop_recovery(args.directory, result, budget,
+                standalone=args.command == 'inspect' and args.emit == 'room-plan')
         data = serialize_result(result, budget)
         if args.command == 'inspect' and args.emit == 'room-plan':
             d.require('room_excavation' in result, 'original room plan unavailable for legacy blueprint')
             data = d.canonical(result['room_excavation']['room_plan'])
         budget.check()
         code = 0
-    except (ValueError, OSError, TypeError, KeyError, RecursionError):
+    except (ValueError, OSError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
         data = d.canonical({'ok': False, 'profile': 'dig-blueprint/1', 'effect_status': 'unknown',
             'error': 'Blueprint identity, custody, source, confirmation, deadline or native evidence refused. Preserve the batch and recover its original step.',
             'retry_commit_permitted': False, 'excavation_completion_proven': False})
@@ -644,7 +698,7 @@ def main(argv=None):
         if sys.stdout.write(text) != len(text):
             return 2
         sys.stdout.flush()
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyboardInterrupt):
         return 2  # Never dispatch again or emit a second JSON object.
     return code
 

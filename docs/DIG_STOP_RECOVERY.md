@@ -59,7 +59,8 @@ roll back a designation. An opaque marker remains in place after any recovery.
 
 The new regression suite was executed locally. Its connector upload was blocked
 twice; the suite is provided separately with the local validation bundle and is
-not included in this initial repository change. No existing suite is removed.
+not included in these repository changes. The CLI suite shares that local fixture
+and is likewise retained in the validation bundle. No existing suite is removed.
 
 The initial 18 tests exercise complete ordinary modules, real private files and
 locks, the existing native TCP client and a joined synthetic peer. They cover a
@@ -68,3 +69,33 @@ every truncated marker prefix, corrupt original evidence, authority replacement,
 malformed receipts, every small-inspection cancellation checkpoint and actual
 stop publication against a locked batch. These are synthetic-source Python
 results, not native DFHack, Rust, live-game or full-repository qualification.
+
+## Final CLI acknowledgment
+
+When the recovered inventory contains an unverified stop signal, the CLI
+reopens the same original batch and effects store under the same operation
+budget. It repeats the whole inventory and marker-witness checks before and
+after serialization, then keeps root/effects/manifest/marker custody through
+the one output attempt. Original query authority remains checked after receipt
+retention. This step has no native connection and cannot renew the deadline.
+
+Changed bytes, a replacement inode with identical bytes, missing original files,
+expired work/deadline or replaced credentials prevent acknowledgment. A receipt
+may already have been durably retained; a publication error never grants another
+designation. A short write, failed flush, interruption or failed post-write check
+returns failure without another query or output object. No file is repaired.
+The original-room export remains the exact complete RoomPlan, without a wrapper
+or extra newline; it is still an intention, not a current completion claim.
+
+The final local run passes 61 warnings-denied cases: 18 stop-recovery API tests,
+16 publication/CLI/room tests and 27 unchanged shared stop-writer tests. The actual
+stop-writer process is killed after its first marker byte while a committed
+synthetic designation loses its reply, then the CLI recovers only the original
+key. Another case retains 512 targets and eight original receipts. Room-backed
+initialization, lost-reply recovery and exact original-goal export use the real
+handoff, terrain, room-plan, registry and receipt codecs and TCP client.
+
+An independent import of the exact pre-change owner over the same files preserves
+32 legacy inventories, 32 serialized responses and all 32 work-count comparisons.
+These are component/Python results with synthetic native sources, not a DFHack
+producer build, Rust qualification, physical drain or live-fortress campaign.
