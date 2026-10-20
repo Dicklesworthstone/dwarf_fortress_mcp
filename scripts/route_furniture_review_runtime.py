@@ -14,6 +14,7 @@ import route_furniture_inventory as inventory
 import route_furniture_review as review_model
 import route_furniture_sequence as sequencing
 import route_furniture_joint as joint
+import route_furniture_optimal as optimal
 
 # Fixed work reservation for creating/validating/serializing the bounded artifact.
 # It is never borrowed from the already reserved route solver allowance.
@@ -83,7 +84,13 @@ def packet(result=None, request=None, source=None, *, operation='check', review=
         sequence = result['delivery_sequence']
         turn['coverage']['delivery_order_model'] = sequence['model']
         turn['coverage']['delivery_order_checked'] = sequence['candidate_model_sequence_proven']
-        if 'delivery_search' in result:
+        if 'delivery_optimization' in result:
+            proof = result['delivery_optimization']
+            turn['coverage']['delivery_cost_policy'] = proof['policy']
+            turn['coverage']['delivery_cost_optimality_proven'] = proof['cost_optimality_proven']
+            turn['uncertainty'].append(
+                'Cost optimization selects new items and order before review creation. The retained review freezes those selections and binds the allocation digest, not a replayable optimality proof. Rechecking never optimizes again.')
+        elif 'delivery_search' in result:
             search = result['delivery_search']
             turn['coverage']['delivery_item_search_policy'] = search['policy']
             turn['coverage']['delivery_search_complete'] = search['search_complete']
@@ -116,13 +123,19 @@ def finish(result, request, source, counts, authority, budget, *, operation, rev
 def create(request: Request, region: inventory.Region, authority: inventory.Authority,
            budget: inventory.wire.Budget, *, max_route_steps=routes.MAX_ROUTE_STEPS,
            sequence_deliveries: bool = False, search_delivery_items: bool = False,
-           max_search_nodes: int = joint.MAX_SEARCH_NODES) -> bytes:
+           max_search_nodes: int = joint.MAX_SEARCH_NODES,
+           minimize_delivery_cost: bool = False, require_optimal_delivery: bool = False) -> bytes:
     require(type(sequence_deliveries) is bool, 'delivery sequencing requires explicit Boolean opt-in')
     require(type(search_delivery_items) is bool and (not search_delivery_items or sequence_deliveries),
             'alternative items require explicit sequencing and item-search opt-in')
+    require(type(minimize_delivery_cost) is bool
+            and (not minimize_delivery_cost or (sequence_deliveries and not search_delivery_items)),
+            'choose sequenced cost optimization or first-feasible item search, not both')
+    require(type(require_optimal_delivery) is bool and (not require_optimal_delivery or minimize_delivery_cost),
+            'strict delivery optimality requires cost optimization')
     integer(max_search_nodes, 1, joint.MAX_SEARCH_NODES)
-    require(search_delivery_items or max_search_nodes == joint.MAX_SEARCH_NODES,
-            'search node limits require alternative-item search')
+    require(search_delivery_items or minimize_delivery_cost or max_search_nodes == joint.MAX_SEARCH_NODES,
+            'search node limits require an explicit item-search mode')
     integer(max_route_steps, 0, routes.MAX_ROUTE_STEPS)
     require(budget.work_steps > EXPORT_WORK, 'review export work must be reserved before native contact')
     raw, source, candidates, types, counts = acquire(request, region, authority, budget)
@@ -134,7 +147,12 @@ def create(request: Request, region: inventory.Region, authority: inventory.Auth
         budget.remaining()
         authority.guard()
 
-    if search_delivery_items:
+    if minimize_delivery_cost:
+        request, result = optimal.allocate_optimal_routes(
+            request, candidates, raw, guard, max_route_steps=max_route_steps,
+            maximum_work=allowance, max_search_nodes=max_search_nodes,
+            require_optimal=require_optimal_delivery)
+    elif search_delivery_items:
         # Only new proposals may change initial selections. The complete result,
         # strengthened request and final selected native types stay together.
         request, result = joint.allocate_joint_routes(

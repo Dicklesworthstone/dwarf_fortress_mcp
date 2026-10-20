@@ -71,8 +71,18 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument('--max-route-steps', type=int, default=MAX_ROUTE_STEPS)
         parser.add_argument('--sequence-deliveries', action='store_true',
                             help='strengthen dependencies to keep all selected deliveries feasible in the captured route model')
+        parser.add_argument('--minimize-delivery-cost', action='store_true',
+                            help='optimize complete captured-model delivery routes; requires --sequence-deliveries')
+        parser.add_argument('--require-optimal-delivery', action='store_true',
+                            help='export no plan unless delivery-cost optimality is proved')
+        parser.add_argument('--delivery-search-nodes', type=int,
+                            help='1..4096 joint search nodes; cost-optimization mode only')
         parser.add_argument('--timeout-ms', type=int, default=10000)
         args = parser.parse_args(argv)
+        require(not args.minimize_delivery_cost or args.sequence_deliveries,
+                'delivery optimization requires sequencing')
+        require((not args.require_optimal_delivery and args.delivery_search_nodes is None)
+                or args.minimize_delivery_cost, 'optimality/search flags require delivery optimization')
         budget = Budget(args.timeout_ms)
         region = Region(tuple(args.origin), tuple(args.size))
         request = read_request(args.request_file, budget)
@@ -80,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
         options = {'max_route_steps': args.max_route_steps}
         if args.sequence_deliveries:
             options['sequence_deliveries'] = True
+        if args.minimize_delivery_cost:
+            options['minimize_delivery_cost'] = True
+            options['require_optimal_delivery'] = args.require_optimal_delivery
+            if args.delivery_search_nodes is not None:
+                options['max_search_nodes'] = args.delivery_search_nodes
         output = run(request, region, authority, budget, **options)
         budget.remaining()
         authority.guard()

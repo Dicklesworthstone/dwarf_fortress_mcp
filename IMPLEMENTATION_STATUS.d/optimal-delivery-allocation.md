@@ -1,14 +1,19 @@
-# Complete furniture delivery-cost optimizer
+# Complete furniture delivery-cost optimization and CLI integration
 
-Source and executed Python component evidence: opt-in joint assignment/order
-branch-and-bound minimizes numeric delivery routes in the existing captured
-floor/stair target-removal model. Dependency-aware matching bounds prove cost
-optimality or expose a gap. Strict mode exports no unproven plan. Existing
-first-feasible joint search, retained original intent and effect paths are unchanged.
+Implemented opt-in branch-and-bound assignment/order planning and integration
+with allocate_route_furniture.py and NEW review_route_furniture.py create. Cost
+accounts for preceding target removal. Matching bounds prove numeric optimality
+or expose an explicit gap; strict mode exports no unproven plan/review. Existing
+first-feasible search, original-review checking and native effect paths remain.
 
-Sixteen actual tests pass with warnings denied, including independent exhaustive
-numeric oracles on 512 obstacle masks/200 random domains, 32 slots, 65,536 items,
-budget/cancellation boundaries and three rejected weakened source variants.
-No native acquisition, live DFHack, Rust/MCP, SDK/plugin, full-workspace or
-production admission is established. Broader owning beads remain open.
-See docs/OPTIMAL_DELIVERY_ALLOCATION.md.
+Executed: 39 actual Python tests with warnings denied, including 512 obstacle
+masks and 200 random domains against independent exhaustive numeric oracles,
+32-target review export, 65,536 candidates, work/cancellation/source/authority
+checks, real input files and CLI-main subprocesses. Three weakened variants fail.
+Five legacy modes match exact predecessor packets for a shared fixture.
+
+Acquisition, operations decoding and the transport budget/endpoint are injected
+in runtime tests. No native TCP/paging, real DFHack, SDK/plugin, Rust/MCP, live
+fortress, full-workspace or production admission is established. The original
+joint planner and review codec remain byte-identical. Broader beads stay open.
+See docs/OPTIMAL_DELIVERY_ALLOCATION.md and docs/OPTIMAL_DELIVERY_WORKFLOW.md.

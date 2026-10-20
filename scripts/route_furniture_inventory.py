@@ -20,6 +20,7 @@ from furniture_allocation import Candidate, Request
 from furniture_plan import canonical, integer, require
 import route_furniture_allocation as routes
 from route_furniture_sequence import allocate_sequenced_routes
+import route_furniture_optimal as optimal
 
 OPT_IN = 'DFMCP_ALLOW_UNADMITTED_ROUTE_FURNITURE'
 ENDPOINT = 'DFMCP_ROUTE_FURNITURE_ENDPOINT'
@@ -258,6 +259,7 @@ def candidates_from(observed, request: Request, work) -> tuple[tuple[Candidate, 
 def packet(result: dict | None, request: Request | None = None, source: dict | None = None) -> dict:
     success = result is not None
     sequence = result.get('delivery_sequence') if success else None
+    optimization = result.get('delivery_optimization') if success else None
     return {'schema': 'dfmcp.route-furniture-inventory-result/1', 'ok': success,
             'result': result, 'request': request.json() if success else None,
             'source': source if success else None,
@@ -270,14 +272,19 @@ def packet(result: dict | None, request: Request | None = None, source: dict | N
                 'continuity': {'status': 'bootstrap' if success else 'indeterminate', 'basis': None, 'gap': None},
                 'profile': 'tactical', 'briefing': {'status': result['status'] if success else 'unestablished',
                     'runtime_admitted': False, 'mutation_admissible': False, 'items_reserved': False,
-                    **({'delivery_sequence': sequence['status']} if sequence is not None else {})},
+                    **({'delivery_sequence': sequence['status']} if sequence is not None else {}),
+                    **({'delivery_cost_optimality_proven': optimization['cost_optimality_proven'],
+                        'delivery_cost_gap': optimization['absolute_cost_gap']}
+                       if optimization is not None else {})},
                 'changes': [], 'attention': [], 'active_work': [], 'affordances': [], 'recommendations': [],
                 'uncertainty': ['Equal paused map endpoints bracket a released inventory, not an atomic cross-profile snapshot or continuous stability.',
                     'Routes use a bounded dry floor/stair model, not native unit pathfinding, danger, or outside-region reachability.',
                     ('Delivery sequencing checks only a captured candidate model, not future routes. Fresh original-selection review remains required.'
                      if sequence is not None else
                      'The exact-item plan does not retain future route constraints. Earlier placements may obstruct later routes; fresh native review remains required.'),
-                    'No placement receipts or active effects were queried. This proposal cannot clear uncertainty, reserve items, or authorize placement.'],
+                    'No placement receipts or active effects were queried. This proposal cannot clear uncertainty, reserve items, or authorize placement.',
+                    *(['Delivery-cost optimality covers only the captured target-removal model. It is not native hauling time; an incomplete search may retain a complete but unproven proposal.']
+                      if optimization is not None else [])],
                 'coverage': {'scope': 'bracketed_bounded_map_and_complete_operations_inventory',
                     'native_acquisition': 'established_by_this_call' if success else 'unestablished',
                     'active_effects': 'not_queried', 'continuous_history': False,
@@ -293,10 +300,19 @@ def bounded_output(value: dict) -> bytes:
 
 
 def run(request: Request, region: Region, authority: Authority, budget: wire.Budget,
-        *, max_route_steps: int = routes.MAX_ROUTE_STEPS, sequence_deliveries: bool = False) -> bytes:
+        *, max_route_steps: int = routes.MAX_ROUTE_STEPS, sequence_deliveries: bool = False,
+        minimize_delivery_cost: bool = False, require_optimal_delivery: bool = False,
+        max_search_nodes: int = optimal.MAX_SEARCH_NODES) -> bytes:
     require(type(request) is Request and type(region) is Region and type(authority) is Authority,
             'closed route inventory inputs required')
     require(type(sequence_deliveries) is bool, 'delivery sequencing requires an explicit boolean')
+    require(type(minimize_delivery_cost) is bool and (not minimize_delivery_cost or sequence_deliveries),
+            'delivery cost optimization requires explicit sequencing opt-in')
+    require(type(require_optimal_delivery) is bool and (not require_optimal_delivery or minimize_delivery_cost),
+            'strict delivery optimality requires cost optimization')
+    integer(max_search_nodes, 1, optimal.MAX_SEARCH_NODES)
+    require(minimize_delivery_cost or max_search_nodes == optimal.MAX_SEARCH_NODES,
+            'delivery search limits require cost optimization')
     request.__post_init__()
     region.__post_init__()
     integer(max_route_steps, 0, routes.MAX_ROUTE_STEPS)
@@ -325,7 +341,12 @@ def run(request: Request, region: Region, authority: Authority, budget: wire.Bud
         budget.remaining()
         authority.guard()
 
-    if sequence_deliveries:
+    if minimize_delivery_cost:
+        request, result = optimal.allocate_optimal_routes(
+            request, selected, map_raw, guard, max_route_steps=max_route_steps,
+            maximum_work=solver_allowance, max_search_nodes=max_search_nodes,
+            require_optimal=require_optimal_delivery)
+    elif sequence_deliveries:
         request, result = allocate_sequenced_routes(
             request, selected, map_raw, guard,
             max_route_steps=max_route_steps, maximum_work=solver_allowance)

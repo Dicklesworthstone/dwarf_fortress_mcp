@@ -167,6 +167,7 @@ class OptimalDeliveryTests(unittest.TestCase):
         absent = allocate_optimal_routes(req, items[:2], raw)[1]
         self.assertEqual(absent['status'], 'delivery_assignment_blocked')
         self.assertTrue(absent['delivery_optimization']['infeasibility_proven_in_supplied_model'])
+        self.assertEqual(absent['delivery_optimization']['proof_basis'],'infeasibility_by_complete_search')
         self.assertFalse(absent['global_absence_proven'])
         self.assertEqual(absent['assignments'], [])
 

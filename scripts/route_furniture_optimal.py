@@ -284,7 +284,9 @@ def allocate_optimal_routes(request: Request, candidates: tuple[Candidate, ...],
         **stats, 'max_search_nodes': max_search_nodes, 'require_optimal': require_optimal,
         'cost_optimality_proven': proven,
         'proof_basis': 'matching_lower_bound_attained' if proven and best_cost == global_lower else
-            'branch_and_bound_complete' if proven else 'incomplete_search', 'best_complete_cost': best_cost, 'cost_lower_bound': lower,
+            'branch_and_bound_complete' if proven else 'infeasibility_by_complete_search'
+            if best_cost is None and stats['search_complete'] else 'incomplete_search',
+        'best_complete_cost': best_cost, 'cost_lower_bound': lower,
         'absolute_cost_gap': None if best_cost is None else best_cost - lower,
         'initial_complete_cost': original_cost, 'initial_decision_digest': initial_decision,
         'infeasibility_proven_in_supplied_model': best_cost is None and stats['search_complete'],

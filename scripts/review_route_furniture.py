@@ -74,8 +74,12 @@ def main(argv=None):
                             help='create only: preserve selected items and add dependencies to avoid modeled route blockage')
         parser.add_argument('--search-delivery-items', action='store_true',
                             help='create with sequencing only: search alternative items before sealing a new review')
+        parser.add_argument('--minimize-delivery-cost', action='store_true',
+                            help='create with sequencing only: minimize complete captured-model route cost')
+        parser.add_argument('--require-optimal-delivery', action='store_true',
+                            help='create no review unless delivery-cost optimality is proved')
         parser.add_argument('--delivery-search-nodes', type=int,
-                            help='alternative-item search bound, 1..4096; never a proof when exhausted')
+                            help='1..4096 nodes for explicit item search or cost optimization')
         parser.add_argument('--review-file')
         parser.add_argument('--expected-review')
         parser.add_argument('--timeout-ms', type=int, default=10000)
@@ -91,8 +95,13 @@ def main(argv=None):
         require(creating or not args.sequence_deliveries, 'check cannot reorder an original review')
         require(not args.search_delivery_items or (creating and args.sequence_deliveries),
                 'alternative items require new sequenced review creation')
-        require(args.delivery_search_nodes is None or args.search_delivery_items,
-                'node bound requires alternative-item search')
+        require(not args.minimize_delivery_cost
+                or (creating and args.sequence_deliveries and not args.search_delivery_items),
+                'cost optimization is a distinct new-review sequencing mode')
+        require(not args.require_optimal_delivery or args.minimize_delivery_cost,
+                'strict optimality requires delivery-cost optimization')
+        require(args.delivery_search_nodes is None or args.search_delivery_items or args.minimize_delivery_cost,
+                'node bound requires explicit delivery search')
         if args.delivery_search_nodes is not None:
             integer(args.delivery_search_nodes, 1, runtime.joint.MAX_SEARCH_NODES)
         if creating:
@@ -104,8 +113,11 @@ def main(argv=None):
                 options['sequence_deliveries'] = True
             if args.search_delivery_items:
                 options['search_delivery_items'] = True
-                if args.delivery_search_nodes is not None:
-                    options['max_search_nodes'] = args.delivery_search_nodes
+            if args.minimize_delivery_cost:
+                options['minimize_delivery_cost'] = True
+                options['require_optimal_delivery'] = args.require_optimal_delivery
+            if args.delivery_search_nodes is not None:
+                options['max_search_nodes'] = args.delivery_search_nodes
             raw = runtime.create(request, region, inventory.Authority.load(), budget, **options)
         else:
             model.digest_text(args.expected_review)
