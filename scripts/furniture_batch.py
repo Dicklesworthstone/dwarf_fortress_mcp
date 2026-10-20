@@ -111,7 +111,13 @@ def validate_handoff_capture(handoff: Handoff, capture, manifest, address: str) 
 class File:
     """One bounded descriptor-pinned batch metadata file, never a native journal."""
     def __init__(self, root: int, name: str, budget: Budget, writable: bool, initial: bytes | None = None,
-                 *, maximum: int = MAX_FILE):
+                 *, maximum: int = MAX_FILE, recovery_stop: bool = False):
+        # Only a read-only stop marker may be empty during explicit recovery.
+        # Manifest, index and native journal validity are never relaxed.
+        require(type(recovery_stop) is bool and (not recovery_stop or
+                (name == 'stop.json' and not writable and initial is None)),
+                'empty-file recovery is restricted to the original stop marker')
+        self.minimum_size = 0 if recovery_stop else 1
         self.root, self.name, self.budget = root, name, budget
         self.maximum = integer(maximum, 1, MAX_TERRAIN_DEFINITION)
         self.fd = None
@@ -138,7 +144,7 @@ class File:
         self.budget.remaining()
         before = os.fstat(self.fd)
         storage.private(before, 0o600)
-        require(identity(self.fd) == self.identity and 0 < before.st_size <= self.maximum, 'invalid batch file identity or extent')
+        require(identity(self.fd) == self.identity and self.minimum_size <= before.st_size <= self.maximum, 'invalid batch file identity or extent')
         raw = bytearray()
         while len(raw) <= before.st_size:
             self.budget.remaining()
@@ -184,7 +190,10 @@ def names(fd: int) -> set[str]:
 
 
 class Batch:
-    def __init__(self, path: str, budget: Budget, writable: bool = False):
+    def __init__(self, path: str, budget: Budget, writable: bool = False, *,
+                 _recovery: bool = False):
+        require(type(_recovery) is bool, 'recovery selection must be Boolean')
+        self._stop_unverified = False
         self.path, self.budget, self.writable = path, budget, writable
         self.files, self.effects, self.fenced = {}, None, False
         self._terrain_context, self._terrain_journal = None, None
@@ -197,7 +206,8 @@ class Batch:
                     and found <= {'batch.json', 'steps.jsonl', 'effects', 'stop.json'}, 'incomplete or foreign batch inventory')
             for name in sorted(found - {'effects'}):
                 self.files[name] = File(self.fd, name, budget, writable and name == 'steps.jsonl',
-                                        maximum=MAX_TERRAIN_DEFINITION if name == 'batch.json' else MAX_FILE)
+                                        maximum=MAX_TERRAIN_DEFINITION if name == 'batch.json' else MAX_FILE,
+                                        recovery_stop=_recovery and name == 'stop.json')
             raw_definition = self.files['batch.json'].raw
             # Bound the containing envelope before general JSON parsing. Each
             # legacy profile still enforces its original byte ceiling below.
@@ -268,8 +278,12 @@ class Batch:
             self.entries = self.decode_index(self.files['steps.jsonl'].raw)
             self.stopped = 'stop.json' in self.files
             if self.stopped:
-                require(unseal(self.files['stop.json'].raw) == {'schema': 'dfmcp.furniture-batch-stop/1',
-                                                              'batch_id': self.id}, 'invalid batch stop')
+                expected = seal({'schema': 'dfmcp.furniture-batch-stop/1', 'batch_id': self.id})
+                self._stop_unverified = self.files['stop.json'].raw != expected
+                # A crashed stop writer can leave zero/partial bytes. Those
+                # bytes NEVER authorize new work, but must not strand an exact
+                # original placement receipt. All other custody was replayed.
+                require(not self._stop_unverified or _recovery, 'invalid batch stop')
             self.audit()
         except BaseException:
             self.close()
@@ -409,8 +423,17 @@ class Batch:
             out['terrain_history_verified_this_call'] = self._terrain_journal is not None
             out['advance_allowed'] &= self._terrain_journal is not None
             out['terrain_history_required_for_new_work'] = True
-        out['inventory_digest'] = sha(canonical({'batch': self.id, 'index': sha(self.files['steps.jsonl'].raw),
-            'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}))
+        inventory = {'batch': self.id, 'index': sha(self.files['steps.jsonl'].raw),
+            'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}
+        if self._stop_unverified:
+            stop_raw = self.files['stop.json'].raw
+            inventory['unverified_stop_sha256'] = sha(stop_raw)
+            out['stop_evidence'] = {
+                'status': 'unverified_marker', 'marker_bytes': len(stop_raw),
+                'marker_sha256': sha(stop_raw), 'marker_validated': False,
+                'new_work_fenced': True, 'recovery_only': True,
+                'marker_modified': False, 'native_quiescence_proven': False}
+        out['inventory_digest'] = sha(canonical(inventory))
         self.check()
         return out
 
@@ -505,6 +528,13 @@ def output_limit(out: dict) -> int:
 
 def encoded(operation: str, out: dict, ok: bool = True) -> bytes:
     value = packet(operation, out, ok)
+    if 'stop_evidence' in out:
+        value['agent_turn']['attention'].append({
+            'kind': 'unverified_stop_marker', 'epistemic_status': 'unknown',
+            **out['stop_evidence']})
+        value['agent_turn']['uncertainty'].append(
+            'The original stop marker is incomplete or invalid and remains unchanged. '
+            'Only original-history inspection and recovery are available; new placement stays fenced.')
     maximum = output_limit(out)
     if 'room_origin' in out:
         turn = value['agent_turn']
@@ -757,7 +787,7 @@ def advance(path: str, expected_id: str, expected_plan: str, confirmation: str, 
 
 def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_ms: int = 10000,
             *, allocation: bool = False, _budget: Budget | None = None) -> dict:
-    with Batch(path, _budget if _budget is not None else Budget(timeout_ms)) as batch:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), _recovery=True) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         out = batch.audit()
         require(type(allocation) is bool and not (allocation and step_name is not None),
@@ -782,7 +812,7 @@ def inspect(path: str, expected_id: str, step_name: str | None = None, timeout_m
 
 def recover(path: str, expected_id: str, step_name: str, cancel: bool = False, timeout_ms: int = 10000,
             *, _budget: Budget | None = None) -> dict:
-    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True) as batch:
+    with Batch(path, _budget if _budget is not None else Budget(timeout_ms), True, _recovery=True) as batch:
         require(batch.id == expected_id, 'batch identity differs')
         step = next((s for s in batch.plan.steps if s.name == step_name), None)
         require(step is not None, 'step outside batch')
@@ -878,6 +908,41 @@ def read_handoff(path: str) -> Handoff:
     return Handoff.decode(read_input(path, MAX_HANDOFF_BYTES))
 
 
+def _publish_stop_recovery(operation: str, path: str, batch_id: str, out: dict,
+                           budget: Budget) -> int:
+    """Keep verified history AND the unverified marker pinned through output.
+
+    Reopen only the original files, never repeat a native query. Failure after
+    the first output attempt is terminal even if a success prefix was written.
+    """
+    require(operation in ('inspect', 'query', 'cancel'), 'stop recovery cannot publish new work')
+    attempted = False
+    try:
+        with Batch(path, budget, _recovery=True) as owner:
+            current = owner.audit()
+            require(owner.id == batch_id == out['batch_id']
+                    and current['inventory_digest'] == out['inventory_digest']
+                    and current.get('stop_evidence') == out['stop_evidence'],
+                    'original stop-recovery inventory changed before publication')
+            raw = encoded(operation, out)
+            owner.check()
+            authority = getattr(budget, 'publication_authority', None)
+            if authority is not None:
+                authority.guard('QueryPlacement')
+            budget.remaining()
+            attempted = True
+            code = write_output(raw)
+            owner.check()
+            if authority is not None:
+                authority.guard('QueryPlacement')
+            budget.remaining()
+            return code
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, KeyboardInterrupt):
+        if attempted:
+            return 2  # No second object, query, repair, or renewed control.
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='operation', required=True)
@@ -950,6 +1015,8 @@ def main(argv: list[str] | None = None) -> int:
             out = recover(args.directory, args.batch_id, args.step, args.operation == 'cancel', _budget=budget)
         else:
             out = {'review': review, 'stop': stop}[args.operation](args.directory, args.batch_id, _budget=budget)
+        if args.operation in ('inspect', 'query', 'cancel') and 'stop_evidence' in out:
+            return _publish_stop_recovery(args.operation, args.directory, args.batch_id, out, budget)
         output = encoded(args.operation, out)
         authority = getattr(budget, 'publication_authority', None)
         if authority is not None:

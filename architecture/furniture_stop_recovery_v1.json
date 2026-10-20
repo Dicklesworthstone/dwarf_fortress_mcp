@@ -1,0 +1,38 @@
+{
+  "schema": "dfmcp.furniture-stop-recovery-contract/1",
+  "owner": "scripts/furniture_batch.py",
+  "operations": [
+    "inspect",
+    "query",
+    "cancel"
+  ],
+  "new_cli_options": [],
+  "original_batch_id_required": true,
+  "original_manifest_index_and_effect_replay_required": true,
+  "stop_marker_only": "stop.json",
+  "marker_maximum_bytes": 32768,
+  "empty_marker_allowed_only_for_recovery": true,
+  "marker_custody": "exact-mode-0600-private-single-link-regular-pinned-original-file",
+  "unverified_marker_binds_inventory_digest": true,
+  "unverified_marker_keeps_new_work_fenced": true,
+  "marker_bytes_echoed": false,
+  "marker_repair_or_removal": false,
+  "native_query_authority_required": true,
+  "placement_permission_required_for_query": false,
+  "native_methods_unchanged": true,
+  "journal_formats_unchanged": true,
+  "orphan_registration": "verify and index already-existing original intent only",
+  "uncertain_receipt_resolution": "append independently verified exact original-attempt Placed evidence",
+  "absence_resolves_uncertainty": false,
+  "cancel_erases_attempt": false,
+  "resolved_receipt_recovery": "offline",
+  "publication": "same-budget original-file revalidation and custody through one output attempt",
+  "output_failure_repeats_query": false,
+  "native_quiescence_proven": false,
+  "production_admitted": false,
+  "beads": [
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5",
+    "df-cancellation-progress-certificates-vvw"
+  ]
+}
