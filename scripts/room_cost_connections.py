@@ -17,6 +17,8 @@ import room_connections as original
 
 POLICY = 'dfmcp.cost-aware-room-connections/1'
 STRATEGY = 'cost-first-with-original-candidate/1'
+BOUNDED_STRATEGY = 'bounded-cost-with-original-candidate/1'
+BOUNDED_POLICY = 'dfmcp.bounded-cost-aware-room-connections/1'
 Point = original.Point
 Region = original.Region
 Guard = original.Guard
@@ -32,12 +34,17 @@ def _canonical(value: object) -> bytes:
 class Costs:
     region: Region
     cells: str
+    strategy: str = STRATEGY
 
     @classmethod
     def parse(cls, value: object, guard: Guard = original.idle) -> Costs:
         guard()
-        require(type(value) is dict and set(value) == {'region', 'cells'},
+        require(type(value) is dict and {'region', 'cells'} <= set(value)
+                and set(value) <= {'region', 'cells', 'strategy'},
                 'corridor costs require one complete region and cell string')
+        strategy = value.get('strategy', STRATEGY)
+        require(type(strategy) is str and strategy in (STRATEGY, BOUNDED_STRATEGY),
+                'unsupported corridor cost strategy')
         region = value['region']
         require(type(region) is dict and set(region) == {'origin', 'size'}
                 and type(region['origin']) is list and type(region['size']) is list
@@ -54,11 +61,14 @@ class Costs:
         for cell in cells:
             guard()
             require(cell in '01', 'corridor costs must be binary characters')
-        return cls((low, size), cells)
+        return cls((low, size), cells, strategy)
 
     def json(self) -> dict:
-        return {'region': {'origin': list(self.region[0]), 'size': list(self.region[1])},
-                'cells': self.cells}
+        value = {'region': {'origin': list(self.region[0]), 'size': list(self.region[1])},
+                 'cells': self.cells}
+        if self.strategy != STRATEGY:
+            value['strategy'] = self.strategy
+        return value
 
     def at(self, point: Point) -> int:
         require(original.point(point), 'corridor lookup requires three exact coordinates')
@@ -83,6 +93,7 @@ class CostConnections:
     baseline_feasible: bool
     weighted_status: str
     selected_strategy: str
+    policy: str = POLICY
 
     @property
     def added(self):
@@ -93,7 +104,7 @@ class CostConnections:
         return self.selected.parts
 
     def summary(self) -> dict:
-        return {'policy': POLICY, 'all_areas_connected': True,
+        return {'policy': self.policy, 'all_areas_connected': True,
                 'new_corridor_tiles': len(self.added), 'corridor_parts': len(self.parts),
                 'connected_walkable_tiles': self.selected.walkable_tiles,
                 'links': [{'start': list(link.start), 'end': list(link.end),
@@ -106,7 +117,7 @@ class CostConnections:
                 'weighted_candidate_status': self.weighted_status,
                 'selected_strategy': self.selected_strategy,
                 'comparison_order': ['corridor_cost', 'new_tiles', 'parts', 'prefer_original_on_tie'],
-                'corridors_rerouted_by_cost': self.selected_strategy == 'cost_first',
+                'corridors_rerouted_by_cost': self.selected_strategy in ('cost_first', 'bounded_cost_first'),
                 'global_minimum_excavation_proven': False, 'terrain_observed': False,
                 'native_pathfinding_proven': False, 'mutation_authority_granted': False}
 
@@ -193,8 +204,13 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
     eligible = len(baseline.parts) <= max_parts
     selected, selected_score, strategy = baseline, baseline_score, 'original'
     status = 'not_needed_zero_cost' if baseline_score[0] == 0 else 'complete'
-    if baseline_score[0]:
-        alternative = _weighted(floors, blocked, entries, costs, root, max_new_tiles, work)
+    bounded = costs.strategy == BOUNDED_STRATEGY
+    if baseline_score[0] or (bounded and not eligible):
+        if bounded:
+            from room_bounded_cost_paths import connect as bounded_connect
+            alternative = bounded_connect(floors, blocked, entries, costs, root, max_new_tiles, work)
+        else:
+            alternative = _weighted(floors, blocked, entries, costs, root, max_new_tiles, work)
         if alternative is None:
             status = 'tile_limit'
         elif len(alternative.parts) > max_parts:
@@ -202,7 +218,8 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
         else:
             alternative_score = score(alternative)
             if not eligible or alternative_score < selected_score:
-                selected, selected_score, strategy = alternative, alternative_score, 'cost_first'
+                selected, selected_score = alternative, alternative_score
+                strategy = 'bounded_cost_first' if bounded else 'cost_first'
     require(len(selected.parts) <= max_parts, 'no compared corridor candidate fits original part allowance')
     expanded = set()
     for (x, y, z), (width, height, levels) in selected.parts:
@@ -219,7 +236,8 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
     walkable = set(floors) | expanded
     require(original._flood(walkable, root, work) == walkable,
             'selected costed corridor is not completely connected')
-    witness = {'policy': POLICY, 'costs': costs.json(), 'entries': entries, 'root': root,
+    policy = BOUNDED_POLICY if bounded else POLICY
+    witness = {'policy': policy, 'costs': costs.json(), 'entries': entries, 'root': root,
                'original_floor': sorted(floors), 'blocked': sorted(blocked),
                'max_new_tiles': max_new_tiles, 'max_parts': max_parts,
                'baseline_digest': baseline.digest, 'baseline_score': baseline_score,
@@ -230,4 +248,4 @@ def connect(floors: set[Point] | frozenset[Point], blocked: set[Point] | frozens
     digest = hashlib.sha256(b'dfmcp-cost-aware-room-connections/1\0' + raw).hexdigest()
     work.charge()
     return CostConnections(selected, work.used, digest, costs.digest, baseline_score[0],
-                           selected_score[0], eligible, status, strategy)
+                           selected_score[0], eligible, status, strategy, policy)

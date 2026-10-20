@@ -1,0 +1,20 @@
+{
+  "schema": "dfmcp.bounded-cost-room-connections-contract/1",
+  "strategy": "bounded-cost-with-original-candidate/1",
+  "policy": "dfmcp.bounded-cost-aware-room-connections/1",
+  "path_policy": "pareto-cost-new-tiles-steps-coordinate/1",
+  "direct_room_field": "corridor_costs.strategy",
+  "maximum_labels_per_link_including_retired": 32768,
+  "maximum_shared_work": 100000,
+  "tile_limit_enforced_during_search": true,
+  "part_limit_enforced_on_complete_candidates": true,
+  "original_baseline_required": true,
+  "immutable_parent_labels": true,
+  "all_original_components_required": true,
+  "resource_refusal_returns_cached_plan": false,
+  "default_strategy_unchanged": true,
+  "global_network_optimum_proven": false,
+  "native_pathfinding_proven": false,
+  "mutation_authority_granted": false,
+  "production_admitted": false
+}
