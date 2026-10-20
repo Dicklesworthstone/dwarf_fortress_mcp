@@ -1,0 +1,21 @@
+{
+  "schema": "dfmcp.scoped-clock-recovery-contract/1",
+  "implementation": "scripts/recover_route_furniture_clock.py",
+  "operations": ["inspect", "query"],
+  "scope_decoder": "route_furniture_clock_context.decode_scope",
+  "receipt_store": "bounded_run_outcomes.OutcomeStore",
+  "transport": "route_furniture_clock_context.Client(query=True)",
+  "selected_identities": ["original batch ID", "original scope confirmation"],
+  "original_batch_opened": false,
+  "selected_clock_files_verified": true,
+  "original_batch_custody_verified": false,
+  "clock_start_permitted": false,
+  "clock_cancel_permitted": false,
+  "placement_permitted": false,
+  "readiness_checked": false,
+  "maximum_calls": 32,
+  "maximum_network_bytes": 3145728,
+  "maximum_reserved_disk_bytes": 67108864,
+  "maximum_output_bytes": 65536,
+  "production_admission_changed": false
+}
