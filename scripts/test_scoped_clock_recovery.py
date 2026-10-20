@@ -155,8 +155,9 @@ def decode(raw):
 
 class Peer:
     """Exactly one joined connection, with independent frame/field assertions."""
-    def __init__(self, phases=('stopped',), *, generation=11, change=None):
+    def __init__(self, phases=('stopped',), *, generation=11, change=None, cancel=False):
         self.phases, self.generation, self.change = phases, generation, change
+        self.cancel = cancel
         self.calls, self.errors, self.intent = [], [], None
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
@@ -199,14 +200,17 @@ class Peer:
                     name = METHODS[method - 2]
                     self.calls.append(name)
                     assert fields[1] == TOKEN.encode() and len(fields[2]) == 32 and fields[3] == 1 and fields[4] == 13
-                    assert name in ('Handshake', 'QueryRun'), 'unexpected native mutation: ' + name
+                    assert name in ('Handshake', 'CancelRun' if self.cancel else 'QueryRun'), 'unexpected native mutation: ' + name
                     if name == 'Handshake':
                         assert set(fields) == {1, 2, 3, 4}
                         phase = None
                     else:
-                        assert {k: v for k, v in fields.items() if k > 4} == {
-                            5: self.intent['idempotency_key'].encode(), 9: bytes.fromhex(self.intent['plan_digest_hex'])}
-                        index = self.calls.count('QueryRun') - 1
+                        expected = {5: self.intent['idempotency_key'].encode(),
+                                    9: bytes.fromhex(self.intent['plan_digest_hex'])}
+                        if self.cancel:
+                            expected[10] = bytes.fromhex(self.intent['prepare_token_hex'])
+                        assert {k: v for k, v in fields.items() if k > 4} == expected
+                        index = len(self.calls) - 2
                         phase = self.phases[min(index, len(self.phases) - 1)]
                         if phase == 'drop':
                             return

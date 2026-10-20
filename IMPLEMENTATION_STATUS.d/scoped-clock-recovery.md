@@ -9,3 +9,10 @@ longer requires opening furniture custody or loading map/placement credentials.
 native values, not a live fortress. No Rust/MCP, real SDK/plugin, full-workspace,
 continuous pause, construction completion or admission claim is established.
 Beads df-dfhack-bridge-plane-c-pic.4/.5 remain in progress.
+
+
+The explicit original-key cancel path is also integrated without adding clock-start
+or placement permission. Combined evidence: 34 real-file/TCP/CLI tests pass and ten
+weakened variants fail assertion checks. Cancellation is one-shot on the original
+incarnation and never auto-polls; a stopping or source-lost record stays unresolved.
+Query's original read-only transport and existing execution owners are unchanged.

@@ -9,7 +9,8 @@ The selected original clock files must still be intact and exclusively held.
 This is a recovery-only alternative to `route_furniture_progress.py query` and
 `route_furniture_final_progress.py query`, not a replacement execution owner.
 It accepts both unchanged next-step Scope and final-construction FinalScope.
-Start, prepare, commit, cancellation, source refresh and retry are not exposed.
+Start, prepare, commit, source refresh and retry are not exposed. Explicit
+original-key cancellation is described below; query itself remains read-only.
 
 ## Inspect and query
 
@@ -93,3 +94,39 @@ was executed. Host-local custody and hashes do not protect against a malicious
 owner replacing all independently selected evidence. Existing start paths,
 protocols, scopes, journals and production admission are unchanged.
 Beads: df-dfhack-bridge-plane-c-pic.4/.5 remain in progress.
+
+## Explicit cancellation when the original clock still needs to stop
+
+```sh
+python3 scripts/recover_route_furniture_clock.py cancel \
+  --clock-directory /absolute/private/clock-records \
+  --batch-id <original-batch-id> --confirm-progress <original-confirmation>
+```
+
+This is an explicit request to the existing CancelRun operation, not a new clock
+start or a firmware/global emergency stop. It requires the same isolated run-only
+credential and the exact retained scope/intent/token. It works without original
+furniture batch custody, but it does NOT bypass another owner's clock-directory
+lock. A historical terminal outcome stays offline even under `cancel`.
+
+The dedicated cancellation transport reuses the unchanged wire codec and shares
+the same counters, deadline and custody checks. After its fixed bindings it permits
+only the initial handshake and one CancelRun. It consumes its attempt before the
+frame and refuses another attempt even after success. A different native generation
+refuses before cancellation; use query-only recovery to retain source-loss evidence.
+The query transport is unchanged and still refuses cancellation.
+
+A stopping response remains unresolved and is not a pause claim. Prepared or running
+responses to CancelRun are contradictory and rejected. Stopped/refused/source-lost
+receipts follow the original terminal-storage semantics; the last remains unresolved.
+A lost reply never triggers another cancel, connection or automatic query. Query the
+original key explicitly afterward. `--wait-ms` is query-only, so cancellation cannot
+silently start a polling loop. No furniture placement is attempted or discharged.
+
+The combined suite now passes **34 tests**: all 23 preceding tests and 11 explicit
+cancellation tests using actual private files and joined TCP peers. Cases cover both
+scope families, one-shot/identity/source guards, stopping and terminal outcomes, lost
+replies, failed sync, revocation and actual cancel CLI subprocesses. Ten weakened
+implementations fail assertion-based regressions. The runner measures all twelve
+production/test inputs and preserves the seven reused upstream source blobs. These
+are not native DFHack/plugin, Rust/MCP or full-workspace qualification.

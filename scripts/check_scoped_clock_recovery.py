@@ -18,7 +18,8 @@ FILES = tuple('scripts/' + name for name in (
     'bounded_run_client.py', 'bounded_run_outcomes.py', 'furniture_plan.py',
     'furniture_allocation.py', 'route_furniture_allocation.py', 'route_furniture_review.py',
     'route_furniture_clock_context.py', 'recover_route_furniture_clock.py',
-    'test_scoped_clock_recovery.py', 'check_scoped_clock_recovery.py'))
+    'test_scoped_clock_recovery.py', 'scoped_clock_cancel.py',
+    'test_scoped_clock_cancel.py', 'check_scoped_clock_recovery.py'))
 PREFIX = 'test_scoped_clock_recovery.'
 MUTATIONS = (
     ('scope_identity_omitted', 'recover_route_furniture_clock.py',
@@ -43,6 +44,26 @@ MUTATIONS = (
      'RecoveryFileTests.test_clock_authority_is_only_loaded_for_online_query'),
 )
 
+MUTATIONS += (
+    ('cancel_attempt_reused', 'scoped_clock_cancel.py',
+     'not self.cancel_attempted and fields == clock.intent_fields(self.intent, True)',
+     'fields == clock.intent_fields(self.intent, True)',
+     'test_scoped_clock_cancel.CancellationTests.test_cancellation_connection_has_one_attempt_even_after_success'),
+    ('cancel_identity_omitted', 'scoped_clock_cancel.py',
+     'not self.cancel_attempted and fields == clock.intent_fields(self.intent, True)',
+     'not self.cancel_attempted',
+     'test_scoped_clock_cancel.CancellationTests.test_key_plan_and_prepare_token_must_be_the_original_exact_tuple'),
+    ('cancel_generation_widened', 'scoped_clock_cancel.py',
+     "result['manifest']['generation'] == self.original['generation']",
+     "result['manifest']['generation'] >= self.original['generation']",
+     'test_scoped_clock_cancel.CancellationTests.test_changed_or_regressed_native_generation_refuses_before_cancel'),
+    ('cancel_prepared_accepted', 'scoped_clock_cancel.py',
+     "result.get('record', {}).get('phase') in\n                              ('stopping', 'stopped', 'refused', 'source_lost')",
+     'True',
+     'test_scoped_clock_cancel.CancellationTests.test_contradictory_prepared_or_running_reply_does_not_acknowledge_stop'),
+)
+
+
 
 def inventory():
     out = {}
@@ -58,7 +79,8 @@ def main():
     parser.add_argument('--mutations', action='store_true')
     args = parser.parse_args()
     before = inventory()
-    suite = unittest.defaultTestLoader.loadTestsFromName('test_scoped_clock_recovery')
+    suite = unittest.defaultTestLoader.loadTestsFromNames(
+        ('test_scoped_clock_recovery', 'test_scoped_clock_cancel'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     passed = result.wasSuccessful() and not result.skipped
     report = {'schema': 'dfmcp.scoped-clock-recovery-evidence/1',
@@ -83,7 +105,8 @@ def main():
                     raise ValueError('mutation site not unique: ' + name)
                 source.write_text(text.replace(old, new))
                 env = dict(os.environ, PYTHONPATH=str(base / 'scripts'), PYTHONDONTWRITEBYTECODE='1')
-                run = subprocess.run([sys.executable, '-B', '-m', 'unittest', PREFIX + test, '-v'],
+                run = subprocess.run([sys.executable, '-B', '-m', 'unittest',
+                     test if test.startswith('test_') else PREFIX + test, '-v'],
                     cwd=base, env=env, capture_output=True, text=True, timeout=15, check=False)
                 killed = (run.returncode != 0 and 'FAIL:' in run.stderr
                           and 'AssertionError' in run.stderr and 'ERROR:' not in run.stderr)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Recover an original construction-clock effect without reopening its batch.
 
-Only inspect/query are exposed. Retained Scope/FinalScope and run intent must
+Only inspect/query/explicit cancel are exposed. Scope/FinalScope and intent must
 agree byte-for-byte; their parent is held through terminal receipt publication.
 No Batch object, furniture/map source, preparation, commit or readiness query.
 Beads: df-dfhack-bridge-plane-c-pic.4/.5.
@@ -19,6 +19,7 @@ import bounded_run_client as clock
 import bounded_run_outcomes as storage
 from route_furniture_clock_context import Client, SCOPE_SUFFIX, decode_scope
 from route_furniture_review import digest_text
+from scoped_clock_cancel import CancelClient
 
 SCHEMA = 'dfmcp.scoped-clock-recovery/1'
 MAX_OUTPUT = 65536
@@ -193,6 +194,33 @@ class Recovery:
         self.check()
         return out
 
+    def cancel(self):
+        """Cancel only the selected original clock effect, at most once this call.
+
+        Terminal history stays offline. A stopping result is not a verified
+        pause; use a separate explicit query to learn its eventual outcome.
+        """
+        self.check()
+        if self.store.load() is not None:
+            return self.inspect()
+        base = self.result({})
+        clock.require(len(encoded('cancel', base)) + storage.MAX_OUTPUT + 1024 <= MAX_OUTPUT,
+                      'complete cancellation outcome cannot fit before native contact')
+        self.authority = Authority.load()
+        clock.require(self.authority.address == clock.endpoint(self.store.intent['endpoint']),
+                      'cancellation endpoint differs from original clock intent')
+        self.check()
+        self.budget.reserve('disk_bytes', 16 * storage.MAX_FILE)
+        with CancelClient(self.authority, self.budget, self.check, self.store.intent) as client:
+            result = client.call('CancelRun', clock.intent_fields(self.store.intent, True))
+        self.check()
+        retained = self.store.retain(result)
+        out = self.result(retained)
+        out['clock_cancel_dispatched'] = client.cancel_attempted
+        encoded('cancel', out)
+        self.check()
+        return out
+
     def close(self):
         if self.fd is not None:
             os.close(self.fd)
@@ -214,6 +242,7 @@ def encoded(operation, result=None):
              'runtime_admitted': False, 'result': result,
              'original_batch_custody_verified': False, 'retry_permitted': False}
     if result is None:
+        value['clock_cancel_may_have_occurred'] = operation == 'cancel'
         value['error'] = {'code': 'SCOPED_CLOCK_RECOVERY_REFUSED',
             'detail': 'Original clock files, authority, source, budget or evidence refused. Preserve the original key and files; do not restart the effect.'}
     raw = clock.canonical(value) + b'\n'
@@ -240,7 +269,7 @@ def main(argv=None):
     operation, attempted = 'unknown', False
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('inspect', 'query'))
+        parser.add_argument('operation', choices=('inspect', 'query', 'cancel'))
         parser.add_argument('--clock-directory', required=True)
         parser.add_argument('--batch-id', required=True)
         parser.add_argument('--confirm-progress', required=True)
@@ -252,7 +281,8 @@ def main(argv=None):
         wait = 0 if args.wait_ms is None else clock.integer(args.wait_ms, 0, 60000)
         budget = Budget(args.timeout_ms)
         with Recovery(args.clock_directory, args.batch_id, args.confirm_progress, budget) as owner:
-            out = owner.inspect() if operation == 'inspect' else owner.query(wait)
+            out = (owner.inspect() if operation == 'inspect' else
+                   owner.query(wait) if operation == 'query' else owner.cancel())
             raw = encoded(operation, out)
             owner.check()
             attempted = True
