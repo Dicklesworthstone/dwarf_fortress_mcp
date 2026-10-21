@@ -55,14 +55,13 @@ Three deliberately weakened variants fail assertion regressions. Three legacy
 scenarios (complete run, route blockage and step cap) produce byte-identical
 review/result packets against the predecessor runner.
 
-The new `test_room_route_run.py` upload was blocked by the tool's safety checks;
-it is supplied as a separate patch/artifact and is NOT included in this commit.
-Its tested Git blob identity is `a38bddd0b16d3a51de21fb28e69d8fc70f84925b`.
-The existing test remains executable with:
+The twelve room-run regressions are now committed as `test_room_route_run.py`.
+Their original tested Git blob remains `a38bddd0b16d3a51de21fb28e69d8fc70f84925b`.
+All 27 runner tests passed again during the room-completion integration:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -W error \
-  -m unittest test_route_furniture_run -v
+  -m unittest test_route_furniture_run test_room_route_run -v
 ```
 
 Tests execute the real run owner, digest validation and plan/progress code, but
