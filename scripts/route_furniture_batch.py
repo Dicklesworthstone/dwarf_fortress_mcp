@@ -122,6 +122,20 @@ def packet(operation: str, result: dict | None, error=False) -> dict:
         value['agent_turn']['briefing']['execution_frontier_status'] = report['status']
         value['agent_turn']['briefing']['predecessor_construction_status'] = construction['status']
         value['agent_turn']['coverage']['construction_prefix_checked'] = True
+    if type(result) is dict and 'room_handoff_digest' in result:
+        turn = value['agent_turn']
+        turn['coverage']['complete_original_room_custody'] = result.get('inventory_verified', False)
+        turn['coverage']['room_constraints_checked_this_call'] = bool(
+            type(report) is dict and report.get('room_constraints_checked_this_call') is True)
+        turn['briefing']['room_completion_proven'] = False
+        turn['briefing']['atomic_room_placement_proven'] = False
+        if type(report) is dict and 'room_terrain' in report:
+            turn['briefing']['room_terrain_status'] = report['room_terrain']['status']
+        turn['references'].append({'room_handoff_digest': result['room_handoff_digest'],
+                                   'room_plan_digest': result['room_plan_digest']})
+        turn['uncertainty'].append(
+            'The whole original room is retained and checked at placement gates. '
+            'These paused samples are not an atomic map lock, room assignment or completion proof.')
     return value
 
 
@@ -201,13 +215,25 @@ def acquire_frontier(batch, before, authority, budget):
     # This consumes the remainder of the SAME reserved analysis allowance.
     result = gate_frontier(result, prefix, operations_raw, guard,
                            maximum_work=ANALYSIS_RESERVATION)
+    if batch.room_handoff is not None:
+        from room_route_frontier import gate_frontier as gate_room
+        # Reuse the exact raw map and unconsumed structural allowance. No
+        # additional native read and no weakening of route/construction gates.
+        result = gate_room(batch.room_handoff, result, raw, guard,
+                           maximum_work=ANALYSIS_RESERVATION)
     batch.check()
     guard()
     return result
 
 
 def initialize(path, review, authority, budget):
-    require(type(review) is Review and type(authority) is Authority, 'closed route initialization inputs required')
+    require(type(authority) is Authority, 'closed route initialization authority required')
+    origin = review
+    if type(origin) is not Review:
+        from room_route_handoff import RoomRouteHandoff
+        require(type(origin) is RoomRouteHandoff, 'closed route initialization origin required')
+        origin = RoomRouteHandoff.decode(origin.raw, origin.digest, budget.work)
+        _, review = origin.unpack(budget.work)
     _, _, source, plan = review.unpack(budget.work)
     require(native.endpoint(source.endpoint) == authority.address, 'route endpoint differs before native contact')
     authority.guard()
@@ -215,13 +241,39 @@ def initialize(path, review, authority, budget):
         reply = client.observe()
     require(not reply.unresolved and reply.capture.eligible, 'initial placement source is unavailable')
     authority.guard()
-    with Batch(path, None, budget, writable=True, initial=(review, reply.manifest, reply.capture)) as batch:
+    with Batch(path, None, budget, writable=True, initial=(origin, reply.manifest, reply.capture)) as batch:
         state = batch.audit()
         reserve(state)
         encoded('init', state)
         authority.guard()
         batch.check()
         return state
+
+
+def validate_room_frontier(batch, report):
+    if batch.room_handoff is None:
+        return
+    from room_route_frontier import POLICY, DOMAIN, MAX_OUTPUT as MAX_ROOM_FRONTIER
+    batch.budget.remaining()
+    room, review = batch.room_handoff.unpack(batch.budget.work)
+    require(type(report) is dict and report.get('policy') == POLICY
+            and report.get('room_handoff_digest') == batch.room_handoff.digest
+            and report.get('room_plan_digest') == room.digest
+            and report.get('review_digest') == review.digest
+            and report.get('room_constraints_checked_this_call') is True,
+            'room-backed placement requires its complete original room gate')
+    require(len(canonical(report)) <= MAX_ROOM_FRONTIER, 'room execution report exceeds bound')
+    payload = {key: value for key, value in report.items()
+               if key not in ('work_units', 'maximum_work', 'evidence_digest')}
+    require(report.get('evidence_digest') == hashlib.sha256(DOMAIN + canonical(payload)).hexdigest(),
+            'room execution report changed after checking')
+    if report.get('status') == 'ready':
+        require(report.get('execution_frontier_status') == 'ready'
+                and type(report.get('room_terrain')) is dict
+                and report['room_terrain'].get('status') == 'matched'
+                and report['room_terrain'].get('all_required_shapes_at_sample') is True,
+                'room geometry or predecessor evidence is not ready')
+    batch.budget.remaining()
 
 
 def review_step(batch, authority, acquire=None):
@@ -235,6 +287,7 @@ def review_step(batch, authority, acquire=None):
     require(not reply.unresolved and reply.retained_records < 256, 'native uncertainty or retention blocks review')
     plan = Plan(batch.key(step), reply.capture)
     report = acquire(batch, plan.before, authority, batch.budget)
+    validate_room_frontier(batch, report)
     require(report['batch_id'] == batch.id and report['native_before_digest'] == plan.before.witness.hex(),
             'route review result bound to another capture')
     reserve(state, report)
@@ -242,6 +295,8 @@ def review_step(batch, authority, acquire=None):
                  confirm_review=confirmation(batch, plan, state['inventory_digest'], report) if report['status'] == 'ready' else None,
                  route_constraints_checked_this_call=True,
                  advance_allowed=report['status'] == 'ready')
+    if batch.room_handoff is not None:
+        state['room_constraints_checked_this_call'] = True
     encoded('review', state)
     authority.guard()
     batch.check()
@@ -272,6 +327,7 @@ def advance(batch, expected_plan, confirmed, authority, acquire=None):
             require(current['inventory_digest'] == state['inventory_digest'] and current['advance_allowed'],
                     'route batch changed since initial selection')
             first = acquire(batch, plan.before, authority, batch.budget)
+            validate_room_frontier(batch, first)
             require(first['status'] == 'ready' and confirmed == confirmation(batch, plan, state['inventory_digest'], first),
                     'stale, unready or changed route confirmation')
             reserve(current, first)
@@ -283,6 +339,7 @@ def advance(batch, expected_plan, confirmed, authority, acquire=None):
                 # Dispatch intent has ALREADY been synced by the original client.
                 # A failure here cannot roll it back or create a retry permit.
                 fresh = acquire(batch, plan.before, authority, batch.budget)
+                validate_room_frontier(batch, fresh)
                 require(fresh['status'] == 'ready' and fresh['evidence_digest'] == first['evidence_digest'],
                         'route constraints or complete evidence changed before commit')
                 with native.Client(authority, batch.budget, selection(step)) as check:
@@ -299,6 +356,8 @@ def advance(batch, expected_plan, confirmed, authority, acquire=None):
     state = batch.audit()
     state.update(placement=native_result, advanced_step=step.name, route_frontier=first,
                  route_constraints_checked_this_call=True)
+    if batch.room_handoff is not None:
+        state['room_constraints_checked_this_call'] = True
     encoded('advance', state)
     authority.guard()
     batch.check()
@@ -321,12 +380,17 @@ def recover(batch, step_name, authority=None, *, cancel=False):
     return state
 
 
-def read_review(path, expected, budget):
+def read_review(path, expected, budget, *, room_backed=False):
     digest_text(expected)
+    require(type(room_backed) is bool, 'explicit room input selection required')
+    maximum = 49152
+    if room_backed:
+        from room_route_handoff import MAX_BYTES, RoomRouteHandoff
+        maximum = MAX_BYTES
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         before = os.fstat(fd)
-        require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= 49152, 'invalid route review input')
+        require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= maximum, 'invalid route review input')
         budget.reserve('disk_bytes', before.st_size + 1)
         raw = bytearray()
         while len(raw) <= before.st_size:
@@ -338,6 +402,8 @@ def read_review(path, expected, budget):
         import build_placement_store as storage
         require(len(raw) == before.st_size and storage.stamp(before) == storage.stamp(os.fstat(fd))
                 == storage.stamp(os.stat(path, follow_symlinks=False)), 'route review input changed')
+        if room_backed:
+            return RoomRouteHandoff.decode(bytes(raw), expected, budget.work)
         return Review.decode(bytes(raw), expected, budget.work)
     finally:
         os.close(fd)
@@ -368,6 +434,8 @@ def main(argv=None):
         parser.add_argument('--batch-id')
         parser.add_argument('--review-file')
         parser.add_argument('--expected-review')
+        parser.add_argument('--room-handoff-file')
+        parser.add_argument('--expected-room-handoff')
         parser.add_argument('--expected-plan')
         parser.add_argument('--confirm-review')
         parser.add_argument('--max-steps', type=int)
@@ -377,8 +445,15 @@ def main(argv=None):
         args = parser.parse_args(argv)
         operation = args.operation
         require((args.batch_id is None) == (operation == 'init'), 'original batch ID is required after initialization')
-        require(all((v is not None) == (operation == 'init') for v in (args.review_file, args.expected_review)),
-                'original review import is initialization-only')
+        route_pair = (args.review_file, args.expected_review)
+        room_pair = (args.room_handoff_file, args.expected_room_handoff)
+        require(all(v is None for v in route_pair) or all(v is not None for v in route_pair),
+                'complete original review and digest required')
+        require(all(v is None for v in room_pair) or all(v is not None for v in room_pair),
+                'complete original room handoff and digest required')
+        origins = int(args.review_file is not None) + int(args.room_handoff_file is not None)
+        require(origins == int(operation == 'init'),
+                'initialize with exactly one complete origin; later operations cannot replace it')
         require(all((v is not None) == (operation == 'advance') for v in (args.expected_plan, args.confirm_review)),
                 'advance requires exact native plan and route confirmation')
         require((args.step is not None) == (operation in ('query', 'cancel')), 'recovery alone selects an original child')
@@ -394,7 +469,9 @@ def main(argv=None):
         else:
             budget = Budget(args.timeout_ms)
         if operation == 'init':
-            saved = read_review(args.review_file, args.expected_review, budget)
+            saved = (read_review(args.room_handoff_file, args.expected_room_handoff, budget, room_backed=True)
+                     if args.room_handoff_file is not None else
+                     read_review(args.review_file, args.expected_review, budget))
             authority = Authority.load()
             state = initialize(args.directory, saved, authority, budget)
             # Reacquire and hold the just-published original through stdout.

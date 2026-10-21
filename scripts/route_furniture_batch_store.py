@@ -20,6 +20,7 @@ from route_furniture_review import Review, digest_text
 from route_furniture_frontier import bind_native_selection, step_key
 
 SCHEMA = 'dfmcp.route-furniture-batch/1'
+ROOM_SCHEMA = 'dfmcp.room-route-furniture-batch/1'
 MAX_DEFINITION = 128 * 1024
 MAX_INDEX = 32768
 HEADER = b'{"schema":"dfmcp.route-furniture-index/1"}\n'
@@ -134,7 +135,18 @@ class Batch:
             self.root_identity = identity(self.fd)
             if initial is not None:
                 require(writable and not self.names(), 'initialization requires an empty private directory')
-                review, manifest, before = initial
+                origin, manifest, before = initial
+                # New room-backed roots retain the COMPLETE parent, not an
+                # optional sidecar that an older owner could silently ignore.
+                # Decode before creating any file or effect directory.
+                room_handoff = None
+                if type(origin) is Review:
+                    review = origin
+                else:
+                    from room_route_handoff import RoomRouteHandoff
+                    require(type(origin) is RoomRouteHandoff, 'unsupported route batch origin')
+                    room_handoff = RoomRouteHandoff.decode(origin.raw, origin.digest, budget.work)
+                    _, review = room_handoff.unpack(budget.work)
                 original, request, source, plan = review.unpack(budget.work)
                 require(bind_native_selection(review, before, budget.work) == plan.ordered[0].name,
                         'initial native capture is not the first original selection')
@@ -145,6 +157,13 @@ class Batch:
                          'review_digest': review.digest, 'root_identity': self.root_identity,
                          'effects_identity': [2**64-1, 2**64-1],
                          'native_manifest': manifest.view(), 'native_before_hex': before.raw.hex()}
+                if room_handoff is not None:
+                    # Do not duplicate the child review or raise storage limits.
+                    value.pop('review')
+                    value.pop('review_digest')
+                    value.update(schema=ROOM_SCHEMA,
+                        room_handoff=room_handoff.json(budget.work),
+                        room_handoff_digest=room_handoff.digest)
                 require(len(seal(value)) <= MAX_DEFINITION, 'complete route batch is too large')
                 budget.remaining()
                 os.mkdir('effects', 0o700, dir_fd=self.fd)
@@ -167,16 +186,25 @@ class Batch:
             self.id = sha(self.files['batch.json'].raw)
             require(expected_id is None or expected_id == self.id, 'selected original batch digest differs')
             value = unseal(self.files['batch.json'].raw, budget)
-            storage.exact_object(value, {'schema', 'nonce', 'review', 'review_digest', 'root_identity',
-                                         'effects_identity', 'native_manifest', 'native_before_hex'})
-            require(value['schema'] == SCHEMA, 'unsupported route batch generation')
+            require(value.get('schema') in (SCHEMA, ROOM_SCHEMA), 'unsupported route batch generation')
+            room_backed = value['schema'] == ROOM_SCHEMA
+            fields = {'room_handoff', 'room_handoff_digest'} if room_backed else {'review', 'review_digest'}
+            storage.exact_object(value, {'schema', 'nonce', 'root_identity', 'effects_identity',
+                                         'native_manifest', 'native_before_hex'} | fields)
             exact_hex(value['nonce'], 24)
             for name in ('root_identity', 'effects_identity'):
                 require(type(value[name]) is list and len(value[name]) == 2, 'invalid directory identity')
                 for number in value[name]:
                     integer(number, 0, 2**64-1)
             require(value['root_identity'] == self.root_identity, 'route batch moved or copied')
-            self.review = Review.decode(canonical(value['review']), value['review_digest'], budget.work)
+            self.room_handoff = None
+            if room_backed:
+                from room_route_handoff import RoomRouteHandoff
+                self.room_handoff = RoomRouteHandoff.decode(canonical(value['room_handoff']),
+                    value['room_handoff_digest'], budget.work)
+                _, self.review = self.room_handoff.unpack(budget.work)
+            else:
+                self.review = Review.decode(canonical(value['review']), value['review_digest'], budget.work)
             _, self.request, self.source, self.plan = self.review.unpack(budget.work)
             self.native = storage.manifest_from(value['native_manifest'])
             self.before = Capture.decode(exact_hex(value['native_before_hex'], maximum=2048))
@@ -301,6 +329,14 @@ class Batch:
             advance_allowed=out['status'] == 'ready' and not self.stopped
                 and all(row.get('registered', True) for row in out['steps']),
             route_constraints_checked_this_call=False, atomic_route_placement_proven=False)
+        if self.room_handoff is not None:
+            room, original_review = self.room_handoff.unpack(self.budget.work)
+            require(original_review.raw == self.review.raw and original_review.digest == self.review.digest,
+                    'room-backed batch changed its original route review')
+            out.update(room_handoff_digest=self.room_handoff.digest, room_plan_digest=room.digest,
+                original_room_plan=room.json(), complete_original_room_intent_retained=True,
+                room_constraints_checked_this_call=False, room_completion_proven=False,
+                atomic_room_placement_proven=False)
         out['inventory_digest'] = sha(canonical({'batch': self.id, 'index': sha(self.files['index.jsonl'].raw),
             'children': [[name, sha(j.raw)] for name, j in sorted(self.effects.journals.items())], 'stopped': self.stopped}))
         self.check()
