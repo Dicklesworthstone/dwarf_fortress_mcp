@@ -13,3 +13,16 @@ room diagnosis, original batch custody and transport are injected test boundarie
 Four mutation variants fail assertion regressions. This does not qualify the
 complete default network/import pipeline, real original-batch directory, DFHack,
 SDK/plugin, Rust/MCP, full workspace or production admission. Beads remain open.
+
+## Generation 2 source increment
+
+Newly created room-route completion goals retain connected-room circulation and
+project-access requirements from the original room intent. Existing DFMRQG01
+monitor bytes keep their prior semantics; v2 uses DFMRQG02 and validates that its
+flags exactly match the regenerated original plan. Circulation shares the existing
+map sample and temporal streak rather than creating another read or proof domain.
+
+Two focused tests are source-present for v1 compatibility and v2 access blocking,
+but were not executed here. Prior 38-test evidence predates these changed bytes.
+No live/native/Rust/MCP/full-workspace or admission claim is added.
+

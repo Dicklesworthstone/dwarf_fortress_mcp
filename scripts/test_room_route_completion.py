@@ -108,7 +108,7 @@ def map_bytes(count=2, tick=2, wall=True, occupied=True, hidden=False, variation
 
 
 @contextmanager
-def environment(count=2, **timing):
+def environment(count=2, connected=False, project_access=False, **timing):
     receipt = ModuleType('construction_receipt')
     receipt.Cursor, receipt.Manifest, receipt.Goal = Cursor, Manifest, Member
     receipt.Assessment, receipt.Guard, receipt.Operations = Finding, object, object
@@ -118,7 +118,7 @@ def environment(count=2, **timing):
     wire.MAX_RECORD_BYTES, wire.field, wire.integer, wire.require = 6144, field, integer, require
     names = ('construction_receipt', 'build_placement_wire', 'construction_plan',
              'room_route_handoff', 'route_furniture_completion', 'route_furniture_frontier',
-             '_room_completion_under_test', '_construction_under_test')
+             'room_readiness', '_room_completion_under_test', '_construction_under_test')
     saved = {n:sys.modules.get(n) for n in names}
     try:
         sys.modules.update(construction_receipt=receipt, build_placement_wire=wire)
@@ -152,7 +152,12 @@ def environment(count=2, **timing):
         class Parent:
             raw = b'complete original room'
             digest = hashlib.sha256(raw).hexdigest()
-            def unpack(self, guard): guard(); return NS(digest='c'*64, json=lambda:{'original':'all'}), review
+            def unpack(self, guard):
+                guard()
+                intent = {'connect_areas': True} if connected else {}
+                if project_access:
+                    intent['access'] = {'point':[1,1,5], 'region':{'origin':[0,0,5], 'size':[count+2,3,1]}}
+                return NS(digest='c'*64, json=lambda:{'original':'all','intent':intent}), review
             def encode(self, guard): self.unpack(guard); return self.raw
             @classmethod
             def decode(cls, raw, expected, guard):
@@ -180,11 +185,20 @@ def environment(count=2, **timing):
         def binding(saved, before, guard):
             guard(); require(saved.digest==review.digest and before.selection.item in range(count),'selected item differs')
         frontier.bind_native_selection = binding
+        circulation = {'clear': True}
+        readiness = ModuleType('room_readiness')
+        def assess_circulation(proxy, capture, guard):
+            guard()
+            return {'all_required_routes_clear': circulation['clear'],
+                    'project_access_required': proxy.require_project_access}
+        readiness._circulation = assess_circulation
         sys.modules.update(room_route_handoff=rooms, route_furniture_completion=child,
-                           route_furniture_frontier=frontier)
+                           route_furniture_frontier=frontier, room_readiness=readiness)
         model = load('_room_completion_under_test', 'room_route_completion.py')
-        goal = model.Goal(Original(condition), Parent())
-        def sample(tick=2, statuses=None, **kw):
+        generation = 2 if connected or project_access else 1
+        goal = model.Goal(Original(condition), Parent(), connected, project_access, generation)
+        def sample(tick=2, statuses=None, access_clear=True, **kw):
+            circulation['clear'] = access_clear
             raw = map_bytes(count,tick,**kw)
             observed = canonical({'folder':'fort','site':1,'paused':True,'tick':tick,
                 'horizons':[1000,1000,1000],'statuses':statuses or {}})
@@ -198,6 +212,25 @@ def environment(count=2, **timing):
 
 
 class CompletionTests(unittest.TestCase):
+    def test_v2_connected_room_requires_access_in_the_same_stability_window(self):
+        with environment(connected=True, stable_samples=1, stable_span=0) as (m,g,s):
+            self.assertEqual(g.encode()[:8], b'DFMRQG02')
+            self.assertTrue(g.require_circulation)
+            p=m.advance(m.begin_read(m.Progress(g.digest)),g,s(access_clear=False))
+            self.assertEqual((p.phase,p.streak),('active',0))
+            self.assertEqual(p.reason,'original_room_access_not_ready')
+            p=m.advance(m.begin_read(p),g,s(3,access_clear=True))
+            self.assertEqual(p.phase,'satisfied')
+            self.assertTrue(p.view()['circulation_required'])
+
+    def test_legacy_goal_generation_remains_byte_compatible_and_cannot_gain_requirements(self):
+        with environment() as (m,g,s):
+            raw=g.encode()
+            self.assertEqual(raw[:8], b'DFMRQG01')
+            self.assertEqual(m.Goal.decode(raw).encode(), raw)
+            with self.assertRaises(ValueError):
+                m.Goal(g.original,g.handoff,True,False,1).encode()
+
     def test_joint_success_requires_all_conditions_on_advancing_ticks(self):
         with environment() as (m,g,s):
             p=m.advance(m.begin_read(m.Progress(g.digest)),g,s())

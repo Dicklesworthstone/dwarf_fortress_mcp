@@ -11,8 +11,10 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 import struct
+from types import SimpleNamespace
 
 from furniture_plan import canonical, integer, require
+import excavation_observer as map_wire
 import construction_plan as construction
 from construction_receipt import Cursor, Manifest
 import route_furniture_completion as original
@@ -21,7 +23,7 @@ from route_furniture_frontier import bind_native_selection
 import room_route_handoff as rooms
 
 POLICY = 'original-room-route-batch-joint-sampled-completion/1'
-MAX_GOAL = original.MAX_GOAL + rooms.MAX_BYTES + 16
+MAX_GOAL = original.MAX_GOAL + rooms.MAX_BYTES + 18
 MAX_SAMPLE = construction.MAX_SAMPLE + 2 * routes.MAX_CAPTURE_BYTES + 1024
 
 
@@ -42,6 +44,9 @@ def _read(reader, maximum):
 class Goal:
     original: original.Goal
     handoff: rooms.RoomRouteHandoff
+    require_circulation: bool = False
+    require_project_access: bool = False
+    generation: int = 1
 
     def validate(self, guard=idle):
         guard()
@@ -50,6 +55,21 @@ class Goal:
         self.original.validate(guard)
         room, review = self.handoff.unpack(guard)
         _, request, source, plan = review.unpack(guard)
+        require(type(self.require_circulation) is bool
+                and type(self.require_project_access) is bool
+                and self.generation in (1, 2),
+                'invalid room completion requirement generation')
+        if self.generation == 1:
+            require(not self.require_circulation and not self.require_project_access,
+                    'legacy room completion goal cannot acquire new requirements')
+        else:
+            intent = room.json()['intent']
+            expected_circulation = bool(intent.get('connect_areas', False))
+            expected_access = 'access' in intent
+            require(self.require_circulation == expected_circulation
+                    and self.require_project_access == expected_access
+                    and (not self.require_project_access or self.require_circulation),
+                    'room completion requirements differ from retained room intent')
         require(review.digest == self.original.review_digest and plan == self.original.plan
                 and source.inventory_generation == self.original.operations_generation
                 and (source.df_version, source.dfhack_version) == self.original.build.software,
@@ -96,7 +116,11 @@ class Goal:
 
     def encode(self, guard=idle):
         self.validate(guard)
-        raw = (b'DFMRQG01' + _blob(self.original.encode(guard), original.MAX_GOAL)
+        if self.generation == 1:
+            prefix = b'DFMRQG01'
+        else:
+            prefix = b'DFMRQG02' + bytes([self.require_circulation, self.require_project_access])
+        raw = (prefix + _blob(self.original.encode(guard), original.MAX_GOAL)
                + _blob(self.handoff.encode(guard), rooms.MAX_BYTES))
         require(len(raw) <= MAX_GOAL, 'complete room goal exceeds bound')
         guard()
@@ -106,11 +130,20 @@ class Goal:
     def decode(cls, raw, guard=idle):
         guard()
         reader = Cursor(raw, MAX_GOAL)
-        require(reader.take(8) == b'DFMRQG01', 'wrong room-route completion generation')
+        magic = reader.take(8)
+        require(magic in (b'DFMRQG01', b'DFMRQG02'),
+                'wrong room-route completion generation')
+        if magic == b'DFMRQG01':
+            circulation, access, generation = False, False, 1
+        else:
+            circulation = bool(integer(reader.number(1), 0, 1))
+            access = bool(integer(reader.number(1), 0, 1))
+            generation = 2
         child = original.Goal.decode(_read(reader, original.MAX_GOAL), guard)
         parent = _read(reader, rooms.MAX_BYTES)
         reader.finish()
-        value = cls(child, rooms.RoomRouteHandoff.decode(parent, rooms.object_digest(parent), guard))
+        value = cls(child, rooms.RoomRouteHandoff.decode(parent, rooms.object_digest(parent), guard),
+                    circulation, access, generation)
         require(value.encode(guard) == raw, 'noncanonical complete room goal')
         return value
 
@@ -122,7 +155,10 @@ class Goal:
 def from_batch(batch, deadline, **timing):
     handoff = getattr(batch, 'room_handoff', None)
     require(type(handoff) is rooms.RoomRouteHandoff, 'room completion requires an original room-backed batch')
-    goal = Goal(original.from_batch(batch, deadline, **timing), handoff)
+    room, _ = handoff.unpack(batch.budget.work)
+    intent = room.json()['intent']
+    goal = Goal(original.from_batch(batch, deadline, **timing), handoff,
+                bool(intent.get('connect_areas', False)), 'access' in intent, 2)
     verify_origin(goal, batch)
     return goal
 
@@ -212,6 +248,19 @@ class Sample:
                 'room sources disagree or predate original intent')
         diagnosis = rooms._terrain_report(room, self.before_capture, guard)
         diagnosis['furniture_occupancy'] = _occupancy(self.before_capture, terrain, plan, guard)
+        if goal.require_circulation:
+            import room_readiness
+            capture = map_wire.decode_capture(
+                self.before_capture,
+                map_wire.Manifest(self.map_before.generation, *self.map_before.software),
+                map_wire.Region(source.origin, source.size),
+            )
+            proxy = SimpleNamespace(
+                room=SimpleNamespace(room_plan=room),
+                require_circulation=True,
+                require_project_access=goal.require_project_access,
+            )
+            diagnosis['circulation'] = room_readiness._circulation(proxy, capture, guard)
         guard()
         return terrain, diagnosis
 
@@ -225,6 +274,8 @@ class Progress(construction.Progress):
     map_witness: str | None = None
     joint_sample_digest: str | None = None
     room_diagnosis: bytes | None = None
+    circulation_required: bool = False
+    project_access_required: bool = False
 
     def view(self):
         out = super().view()
@@ -234,6 +285,8 @@ class Progress(construction.Progress):
                    sampled_whole_room_condition=self.phase == 'satisfied',
                    atomic_cross_profile_snapshot_proven=False, continuous_wall_preservation_proven=False,
                    native_room_assignment_proven=False, current_room_usability_proven=False,
+                   circulation_required=self.circulation_required,
+                   project_access_required=self.project_access_required,
                    room_completion_proven=False)
         return out
 
@@ -257,8 +310,11 @@ def advance(state, goal, sample, guard=idle):
             'invalid room completion transition')
     terrain, diagnosis = sample.validate(goal, guard)
     witness = sample.digest
-    good = (diagnosis['all_required_shapes_at_sample']
-            and diagnosis['furniture_occupancy']['all_targets_have_building_occupancy'])
+    good_room = (diagnosis['all_required_shapes_at_sample']
+                 and diagnosis['furniture_occupancy']['all_targets_have_building_occupancy'])
+    good_access = (not goal.require_circulation
+                   or diagnosis['circulation']['all_required_routes_clear'])
+    good = good_room and good_access
     changed = (state.last_tick == terrain.tick and state.joint_sample_digest is not None
                and state.joint_sample_digest != witness)
     previous = replace(state, goal_digest=goal.condition.digest)
@@ -266,12 +322,15 @@ def advance(state, goal, sample, guard=idle):
         previous = replace(previous, streak=0, first_tick=None, counted_tick=None)
     current = construction.advance(previous, goal.condition, sample.furnishings, guard)
     current = replace(current, goal_digest=goal.digest, map_witness=terrain.digest,
-                      joint_sample_digest=witness, room_diagnosis=canonical(diagnosis))
+                      joint_sample_digest=witness, room_diagnosis=canonical(diagnosis),
+                      circulation_required=goal.require_circulation,
+                      project_access_required=goal.require_project_access)
     if current.phase in ('active', 'candidate', 'satisfied') and (not good or changed):
         exhausted = current.observations >= goal.condition.max_observations
         current = replace(current, phase='expired' if exhausted else 'active',
             reason='sample_budget_exhausted' if exhausted else 'original_room_not_ready'
-                   if not good else 'room_sample_changed_at_same_tick',
+                   if not good_room else 'original_room_access_not_ready'
+                   if not good_access else 'room_sample_changed_at_same_tick',
             reason_building=None, streak=0, first_tick=None, counted_tick=None)
     guard()
     return current

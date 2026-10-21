@@ -137,3 +137,32 @@ The original runner's 27 tests also pass; its 12 previously unpublished room-run
 regressions are included with this integration. No Rust/MCP, SDK/plugin, live
 fortress, broader room/corridor combinations or full-workspace qualification is
 claimed. Existing native protocols and production admission remain unchanged.
+
+## Generation 2: circulation and project access
+
+New monitors created from a room-backed batch now derive two immutable completion
+requirements from the retained RoomPlan itself. A connected project
+(`connect_areas: true`) requires sampled circulation over the exact original
+floor mask, and a retained room `access` point additionally requires the same
+project-access condition. These requirements are not command-line switches and
+cannot be dropped when a monitor is reopened.
+
+Goal bytes use `DFMRQG02` and carry the two Boolean requirements explicitly.
+The decoder still accepts existing `DFMRQG01` goals with both requirements
+disabled, preserving already-created monitor semantics. Old binaries reject v2
+rather than silently reading stronger goals as v1. New v2 construction validates
+the flags against the regenerated original room intent, so callers cannot weaken
+or strengthen them independently of the retained plan.
+
+Circulation is evaluated from the SAME paused map bytes already used for room
+terrain and target occupancy; it performs no extra native read. A failed route,
+uncertain circulation cell, or failed project access resets the same unfinished
+stability streak shared by furniture and terrain. It cannot override failure,
+invalidation, deadlines, or the lifetime sample budget. Progress/output records
+state whether circulation and project access are required.
+
+Two focused reducer regressions were added for v1 byte compatibility and v2
+access-streak behavior. They are source-present but were not executed in the
+authoring environment. The previously recorded 38-test evidence applies to the
+unchanged generation-1 implementation, not these changed bytes.
+
