@@ -88,6 +88,7 @@ def _scope(batch, state, limits):
     require(state['inventory_verified'] and state['batch_id'] == batch.id
             and state['review_digest'] == batch.review.digest
             and state['advance_allowed'], 'original batch is not ready for run review')
+    _room_scope(batch, state)
     count = integer(state['placed'], 0, len(batch.plan.steps) - 1)
     approved = tuple(step.name for step in batch.plan.ordered[count:count + limits.max_steps])
     require(approved and state['next_step'] == approved[0], 'run prefix differs from original canonical order')
@@ -100,9 +101,67 @@ def _scope(batch, state, limits):
 UNREADY_FRONTIERS = frozenset((
     'route_blocked', 'route_unestablished', 'construction_pending',
     'construction_unestablished', 'construction_blocked',
+    'room_blocked', 'room_unestablished',
 ))
+ROOM_FRONTIERS = frozenset(('room_blocked', 'room_unestablished'))
+ROOM_CUSTODY_FIELDS = ('room_handoff_digest', 'room_plan_digest',
+                       'original_room_plan', 'complete_original_room_intent_retained')
 CUSTODY_FIELDS = ('batch_id', 'review_digest', 'inventory_digest', 'plan_digest',
                   'placed', 'next_step', 'pending_step', 'status', 'stopped')
+
+
+def _room_scope(batch, state):
+    """Carry the authenticated parent's identity without inventing room custody.
+
+    Batch.audit owns decoding and file checks. This boundary only preserves its
+    complete parent through the multi-step owner's copies and confirmation.
+    Legacy furniture-only scopes retain their original canonical bytes.
+    """
+    parent = getattr(batch, 'room_handoff', None)
+    if parent is None:
+        require(not any(name in state for name in ROOM_CUSTODY_FIELDS),
+                'furniture-only run cannot adopt a room parent')
+        return {}
+    require(state.get('room_handoff_digest') == parent.digest
+            and state.get('complete_original_room_intent_retained') is True
+            and type(state.get('original_room_plan')) is dict,
+            'run lost the complete original room parent')
+    digest_text(state.get('room_handoff_digest'))
+    digest_text(state.get('room_plan_digest'))
+    require(state['original_room_plan'].get('plan_digest') == state['room_plan_digest'],
+            'run room plan differs from original parent identity')
+    return {name: state[name] for name in ('room_handoff_digest', 'room_plan_digest')}
+
+
+def _room_review(batch, before, observed, after):
+    """A well-formed unready room is an observation, never a transport failure."""
+    scope = _room_scope(batch, before)
+    require(_room_scope(batch, observed) == _room_scope(batch, after) == scope,
+            'room parent changed during run review')
+    report = observed['route_frontier']
+    if not scope:
+        require(report['status'] not in ROOM_FRONTIERS,
+                'room readiness reported without an original room')
+        return
+    require(all(before[key] == observed[key] == after[key] for key in ROOM_CUSTODY_FIELDS),
+            'run readiness omitted or changed original room intent')
+    require(observed.get('room_constraints_checked_this_call') is True
+            and report.get('room_constraints_checked_this_call') is True
+            and all(report.get(key) == value for key, value in scope.items()),
+            'room-backed run requires a current original-room review')
+    terrain = report.get('room_terrain')
+    require(type(terrain) is dict and terrain.get('status') in ('matched', 'contradicted', 'unknown'),
+            'room review omitted its terrain diagnosis')
+    if report['status'] in ROOM_FRONTIERS | {'ready'}:
+        expected = {'ready': 'matched', 'room_blocked': 'contradicted',
+                    'room_unestablished': 'unknown'}[report['status']]
+        require(report.get('execution_frontier_status') == 'ready'
+                and terrain['status'] == expected
+                and terrain.get('all_required_shapes_at_sample') is (expected == 'matched'),
+                'room readiness disagrees with its complete diagnosis')
+    else:
+        require(report.get('execution_frontier_status') == report['status'],
+                'room review replaced an earlier execution blocker')
 
 
 def _review_status(batch, before, observed):
@@ -122,6 +181,7 @@ def _review_status(batch, before, observed):
                 'readiness review differs from original custody')
     require(all(before[key] == observed[key] == after[key] for key in CUSTODY_FIELDS),
             'original inventory changed during readiness review')
+    _room_review(batch, before, observed, after)
     status = observed['route_frontier']['status']
     require(type(status) is str and status in UNREADY_FRONTIERS | {'ready'},
             'unknown execution readiness status')
@@ -145,7 +205,8 @@ def _confirmation(batch, state, limits, approved):
     data = {'schema': SCHEMA, 'policy': POLICY, 'batch_id': batch.id,
             'review_digest': batch.review.digest, 'inventory_digest': state['inventory_digest'],
             'first_native_plan': state['expected_plan'], 'first_step_confirmation': state['confirm_review'],
-            'approved_steps': list(approved), 'limits': limits.json()}
+            'approved_steps': list(approved), 'limits': limits.json(),
+            **_room_scope(batch, state)}
     return data, hashlib.sha256(b'dfmcp-route-run-confirmation/1\0' + canonical(data)).hexdigest()
 
 
@@ -187,6 +248,11 @@ def _finish(steps, batch, authority, scope, outcomes, stop_reason, *, faulted=Fa
     state = batch.audit()
     require(scope is None or (scope['batch_id'] == batch.id
             and scope['review_digest'] == batch.review.digest), 'run origin changed')
+    room_scope = _room_scope(batch, state)
+    if scope is not None:
+        require({key: scope[key] for key in room_scope if key in scope} == room_scope
+                and (bool(room_scope) or not any(key in scope for key in ROOM_CUSTODY_FIELDS)),
+                'run confirmation lost its original room scope')
     if observation is not None:
         status = _review_status(batch, state, observation)
         require(status == stop_reason and status in UNREADY_FRONTIERS,
@@ -197,6 +263,8 @@ def _finish(steps, batch, authority, scope, outcomes, stop_reason, *, faulted=Fa
     state.update(advance_allowed=False, expected_plan=None, confirm_review=None,
                  route_constraints_checked_this_call=observation is not None,
                  execution_review_required=True)
+    if room_scope:
+        state['room_constraints_checked_this_call'] = observation is not None
     state['run'] = {'schema': SCHEMA, 'policy': POLICY, 'scope': scope,
                     'stop_reason': stop_reason, 'outcomes': outcomes,
                     'confirmed_placements_this_call': sum(row['phase'] == 'placed' for row in outcomes),
