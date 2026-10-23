@@ -145,6 +145,16 @@ pub enum DurablePlanSource {
         summary: String,
         raw: String,
     },
+    /// Complete connected-room source, retaining its observed entrance and domain.
+    ConnectedRoom {
+        summary: String,
+        raw: String,
+    },
+    /// New residual access-backed room pursuit; prior exact proofs stay immutable.
+    ConnectedRoomContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl DurablePlanSource {
@@ -160,6 +170,10 @@ impl DurablePlanSource {
                 ("production_continuation", summary, raw)
             }
             Self::RoomContinuation { summary, raw } => ("room_continuation", summary, raw),
+            Self::ConnectedRoom { summary, raw } => ("connected_room", summary, raw),
+            Self::ConnectedRoomContinuation { summary, raw } => {
+                ("connected_room_continuation", summary, raw)
+            }
         }
     }
 
@@ -462,6 +476,14 @@ fn parse_plan(
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
         "room_continuation" => DurablePlanSource::RoomContinuation {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "connected_room" => DurablePlanSource::ConnectedRoom {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "connected_room_continuation" => DurablePlanSource::ConnectedRoomContinuation {
             summary,
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
@@ -3012,6 +3034,139 @@ mod tests {
                     .is_err()
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn connected_room_sources_preserve_original_access_after_retirement_and_compaction()
+    -> Result<()> {
+        let dir = TempDir::new("connected-room-original-access");
+        let sealed = snapshot(55, 1);
+        let root = Digest32::of_bytes(b"original connected room");
+        let child = Digest32::of_bytes(b"residual connected room");
+        let request = r#"{"access":{"entry":[0,2,10],"region":{"max":[12,12,10],"min":[0,0,10]}},"planner":"connected_room_v1","room":{"layout":{"origin":[2,6,10],"room_size":[3,3],"rooms":2,"template":"bedroom_cluster"},"planner":"provisioned_room_v1","template":"provisioned_room"},"template":"connected_room"}"#;
+        let original = DurablePlanSource::ConnectedRoom {
+            summary: "original complete connected room".to_owned(),
+            raw: request.to_owned(),
+        };
+        let residual = DurablePlanSource::ConnectedRoomContinuation {
+            summary: "finish original room and access".to_owned(),
+            raw: format!(
+                "{{\"schema\":\"dfmcp.connected-room-continuation/1\",\"planner\":\"connected_room_residual_v1\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"connected_room\":{request}}}",
+                root.to_hex(),
+                root.to_hex(),
+            ),
+        };
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for (digest, intent, source) in
+                [(root, 9, original.clone()), (child, 10, residual.clone())]
+            {
+                store.persist_objective_commit(
+                    &sealed,
+                    digest,
+                    intent,
+                    source,
+                    SessionId::new(8),
+                    &[],
+                )?;
+                store.retire_commit(sealed.fortress_id, digest)?;
+            }
+            store.compact()?;
+        }
+        for _ in 0..2 {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for (digest, expected) in [(root, &original), (child, &residual)] {
+                let objective = store
+                    .objectives(sealed.fortress_id)
+                    .find(|objective| objective.plan_digest == digest)
+                    .ok_or_else(|| corrupt("connected room source was lost"))?;
+                assert_eq!(&objective.source, expected);
+                assert_eq!(objective.first_satisfied_anchor, None);
+                assert_eq!(objective.restore_abandoned_anchor, None);
+                assert_eq!(store.load_snapshot(objective.sealed_state_hash)?, sealed);
+                assert!(store.commit(sealed.fortress_id, digest).is_none());
+            }
+            store.compact()?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn connected_room_source_tags_are_distinct_and_keep_existing_codec_bounds() -> Result<()> {
+        let digest = Digest32::of_bytes(b"connected room source codec").to_hex();
+        let intent = format!("{:032x}", 1);
+        for (expected, source) in [
+            (
+                "connected_room",
+                DurablePlanSource::ConnectedRoom {
+                    summary: "connected room".to_owned(),
+                    raw: "{}".to_owned(),
+                },
+            ),
+            (
+                "connected_room_continuation",
+                DurablePlanSource::ConnectedRoomContinuation {
+                    summary: "connected pursuit".to_owned(),
+                    raw: "{}".to_owned(),
+                },
+            ),
+        ] {
+            let (kind, summary, raw) = source.fields();
+            assert_eq!(kind, expected);
+            assert_eq!(
+                parse_plan(
+                    "55",
+                    &digest,
+                    &digest,
+                    &intent,
+                    kind,
+                    &hex_text(summary),
+                    &hex_text(raw)
+                )?
+                .source,
+                source
+            );
+            for malformed in [
+                "f".to_owned(),
+                "ff".to_owned(),
+                "78".repeat(MAX_PLAN_REQUEST_BYTES + 1),
+            ] {
+                assert!(
+                    parse_plan(
+                        "55",
+                        &digest,
+                        &digest,
+                        &intent,
+                        kind,
+                        &hex_text(summary),
+                        &malformed
+                    )
+                    .is_err_and(|error| error.code == ErrorCode::CorruptLedger)
+                );
+            }
+        }
+        for source in [
+            DurablePlanSource::ConnectedRoom {
+                summary: "s".repeat(MAX_PLAN_SUMMARY_BYTES + 1),
+                raw: "{}".to_owned(),
+            },
+            DurablePlanSource::ConnectedRoom {
+                summary: "room".to_owned(),
+                raw: "x".repeat(MAX_PLAN_REQUEST_BYTES + 1),
+            },
+            DurablePlanSource::ConnectedRoomContinuation {
+                summary: "s".repeat(MAX_PLAN_SUMMARY_BYTES + 1),
+                raw: "{}".to_owned(),
+            },
+            DurablePlanSource::ConnectedRoomContinuation {
+                summary: "pursuit".to_owned(),
+                raw: "x".repeat(MAX_PLAN_REQUEST_BYTES + 1),
+            },
+        ] {
+            assert!(source.validate_bound().is_err());
+        }
+        assert!(parse_plan("55", &digest, &digest, &intent, "connected_room_v2", "", "").is_err());
         Ok(())
     }
 

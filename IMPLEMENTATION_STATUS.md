@@ -44,6 +44,81 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Plan, furnish and resume entrance-connected laboratory rooms (2026-10-23)
+
+The existing `fortress.plan` blueprint argument accepts a separately versioned
+`connected_room_v1` wrapper around the complete `provisioned_room_v1` request.
+It retains an explicit observed FLOOR entrance and a same-level routing region
+of at most 1,024 tiles. The compiler routes safe connector excavation around
+current qualified building footprints, actual planned workshop sites,
+furnishing targets and protected bedroom wall rings. For the template's fixed
+access endpoint, it minimizes new wall excavation, then path length, then the
+complete `(z, y, x)` path. Only selected missing wall cells become disjoint dig
+regions; no enclosing rectangle may over-excavate. Planned interior circulation
+must provide a cardinal approach to every furnishing.
+
+Production retains its original action identities. New placements wait for all
+required circulation and connector excavation as well as their exact items.
+Work-scaled excavation deadlines support large accepted rooms. The complete
+terminal goal requires every original terrain region, every exact furnishing,
+connector terrain and current `LaboratoryRoomAccess`; a later obstruction can
+make current truth False without rewriting historical achievement. Existing
+ordinary room source bytes, seals and behavior remain unchanged.
+
+`continue_goal` preserves the original entrance, routing domain, layout and
+setup choices in a private `dfmcp.connected-room-continuation/1` source. Its
+fixed `connected_room_residual_v1` compiler retains qualified installed items,
+procures only missing furnishings and can repair access with excavation alone.
+Distinct durable source tags retain the full original request and flat
+parent/root lineage through reopen and compaction. Both normal and residual
+connected plans require reviewed source replay after every changed anchor,
+including excavation-only repairs. Proposal and commit recheck current
+authority, original False evidence and same-root work; another currently
+satisfied pursuit suppresses duplicate continuation. Historical exact goals,
+receipts and first achievement are not reassigned to replacement work.
+
+**Executed evidence:** all 38 focused runtime tests pass on the actual source:
+seven connected compiler/execution cases, five connected continuation source
+cases, two durable connected-source cases, two occupancy witness cases, two
+access-predicate archive integration cases, sixteen existing provisioned-room
+cases and four existing room-continuation cases.
+They include forecast-versus-execution agreement, a 105-tile hall, retained-item
+access-only repair, planned-workshop detours, aliased room/workshop occupancy,
+2,187 independently checked routing graphs and 512 exact excavation masks.
+The final occupancy correction was rebuilt and all twelve connected cases
+passed again. Warning-denied production-module Clippy passes on that final
+source. Scoped pinned-nightly formatting and diff checks also pass.
+
+The temporary validation workspace points directly at the actual
+core/world/intent/adapter/laboratory library sources and real MCP compiler,
+continuation, forecast, progress and witness modules. All five component
+libraries compiled successfully. This harness excludes the FastMCP/server
+facade. The earlier intent/archive type checks and world/intent/laboratory
+production Clippy evidence remain as recorded below; all 119 world unit tests
+also pass on this increment's unchanged world source.
+
+The full locked MCP test-target check resolved the original pinned dependencies
+without modifying manifests or the lockfile, but `asupersync` compilation was
+killed with SIGKILL in the memory-limited environment before any `dfmcp` crate
+was reached. The nine new public MCP lifecycle cases and server/objective
+wiring remain source-reviewed and formatted, not compiled or executed by that
+attempt. Focused component evidence does not establish full MCP,
+full-workspace, native or live qualification.
+
+Required `verify.sh` again passes repository integrity, qualification-receipt,
+implementation-status and release-custody checks before the existing source
+bundle documentation failure (`exact clean git commit`). Ordinary local
+qualification refused the in-progress dirty tree; the explicitly marked
+development run passes its first three gates and then stops at 64 existing
+static-contract failures. Standalone bead coverage cannot run because `br` is
+not installed. No new passed full qualification receipt is produced.
+
+See `docs/LAB_CONNECTED_ROOM_ACCESS.md` for the request and limits. This is
+bounded structural access in the laboratory reference model. Bedroom wall
+protection constrains routing; it is not a terminal claim about all surrounding
+walls. Native pathfinding, hauling, ownership and construction workforce remain
+separate work, and no live admission or mutation capability is added.
+
 ### Current laboratory room-access proof (2026-10-23)
 
 A new bounded `LaboratoryRoomAccess` predicate retains an explicit entrance,

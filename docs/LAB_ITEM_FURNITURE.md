@@ -88,6 +88,12 @@ This wrapper establishes excavation and furniture installation. It does not
 create DF room ownership/assignments or prove connectivity to the existing
 fortress beyond the existing layout's bounded geometry and hazard checks.
 
+To require current access from an explicit entrance, wrap the provisioned room
+in [`connected_room`](LAB_CONNECTED_ROOM_ACCESS.md). That distinct blueprint
+adds bounded connector mining and a current approach proof for every furnishing.
+Ordinary `provisioned_room_v1` requests and their existing seals keep the behavior
+described above; they do not acquire a new access requirement.
+
 ## Resume an interrupted room
 
 The existing `continue_goal` blueprint can name a retained committed

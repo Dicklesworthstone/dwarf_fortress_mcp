@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-23 — Build and resume entrance-connected furnished rooms
+
+- Add `connected_room_v1` through the existing blueprint input, preserving the
+  complete item-backed room request plus an observed entrance and bounded
+  routing domain. Route deterministic safe connectors around current buildings,
+  planned workshops, furniture and bedroom wall rings; excavate only the exact
+  selected cells and order placement after all required circulation.
+- Seal the complete room and current access proof as one terminal goal. Reuse
+  open corridors, retain work-scaled dig deadlines and keep ordinary room
+  compiler sources and seals unchanged.
+- Extend `continue_goal` with fixed `connected_room_residual_v1` source custody.
+  Retain installed furnishings and original access choices through cancellation,
+  durable reopen and compaction, including excavation-only access repair.
+- Recheck authority, original goal truth and same-root work before dispatch;
+  require reviewed replay after changed anchors and keep historical exact goals
+  separate from replacement pursuits.
+- Refuse aliased building occupancy over original room geometry or an actual
+  proposed workshop, while still routing around unrelated aliased buildings.
+- Add seven compiler groups, five source/seal cases, nine public MCP lifecycle
+  cases and two durable cases. All 38 focused connected, archive, durable, witness and
+  existing-room runtime tests pass, along with final production-module Clippy.
+  The full MCP check was killed during dependency compilation before project
+  code; its nine new facade cases remain unexecuted. Exact evidence is recorded
+  in `IMPLEMENTATION_STATUS.md`; this does not change native/live admission.
+
 ## 2026-10-23 — Prove current access to room furnishings
 
 - Add a bounded same-level FLOOR access predicate with an explicit entrance,

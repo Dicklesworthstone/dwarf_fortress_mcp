@@ -212,7 +212,9 @@ fn source_summary(source: &PlanSource) -> &str {
         | PlanSource::Blueprint { summary, .. }
         | PlanSource::Production { summary, .. }
         | PlanSource::ProductionContinuation { summary, .. }
-        | PlanSource::RoomContinuation { summary, .. } => summary,
+        | PlanSource::RoomContinuation { summary, .. }
+        | PlanSource::ConnectedRoom { summary, .. }
+        | PlanSource::ConnectedRoomContinuation { summary, .. } => summary,
     }
 }
 
@@ -225,12 +227,16 @@ fn source_json(source: &PlanSource) -> Value {
         | PlanSource::Blueprint { raw, .. }
         | PlanSource::Production { raw, .. }
         | PlanSource::ProductionContinuation { raw, .. }
-        | PlanSource::RoomContinuation { raw, .. } => json!({
+        | PlanSource::RoomContinuation { raw, .. }
+        | PlanSource::ConnectedRoom { raw, .. }
+        | PlanSource::ConnectedRoomContinuation { raw, .. } => json!({
             "kind": match source {
                 PlanSource::Actions { .. } => "actions",
                 PlanSource::Blueprint { .. } => "blueprint",
                 PlanSource::ProductionContinuation { .. } => "production_continuation",
                 PlanSource::RoomContinuation { .. } => "room_continuation",
+                PlanSource::ConnectedRoom { .. } => "connected_room",
+                PlanSource::ConnectedRoomContinuation { .. } => "connected_room_continuation",
                 _ => "production",
             },
             "request": serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone())),
@@ -297,6 +303,16 @@ pub(super) fn continuation_source(
         PlanSource::RoomContinuation { raw, .. } => {
             GoalContinuation::Room(room_continuation::RoomContinuation::parse(raw)?.next(parent)?)
         }
+        PlanSource::ConnectedRoom { raw, .. } => GoalContinuation::ConnectedRoom(
+            connected_room_continuation::ConnectedRoomContinuation::new(
+                parent,
+                parent,
+                connected_room::ConnectedRoomRequest::parse(raw)?,
+            )?,
+        ),
+        PlanSource::ConnectedRoomContinuation { raw, .. } => GoalContinuation::ConnectedRoom(
+            connected_room_continuation::ConnectedRoomContinuation::parse(raw)?.next(parent)?,
+        ),
         _ => {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,

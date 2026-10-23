@@ -62,6 +62,16 @@ mod room_provisioning;
 #[path = "room_continuation.rs"]
 mod room_continuation;
 
+#[path = "connected_room.rs"]
+mod connected_room;
+
+#[path = "connected_room_continuation.rs"]
+mod connected_room_continuation;
+
+#[cfg(test)]
+#[path = "connected_room_mcp_tests.rs"]
+mod connected_room_mcp_tests;
+
 #[cfg(test)]
 #[path = "room_source_server_tests.rs"]
 mod room_source_server_tests;
@@ -1528,12 +1538,23 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// The complete versioned room plus its immutable entrance and routing domain.
+    ConnectedRoom {
+        summary: String,
+        raw: String,
+    },
+    /// A reviewed residual pursuit retaining the complete original access goal.
+    ConnectedRoomContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum GoalContinuation {
     Production(goal_continuation::ProductionContinuation),
     Room(room_continuation::RoomContinuation),
+    ConnectedRoom(connected_room_continuation::ConnectedRoomContinuation),
 }
 
 impl GoalContinuation {
@@ -1541,6 +1562,7 @@ impl GoalContinuation {
         match self {
             Self::Production(source) => source.parent,
             Self::Room(source) => source.parent,
+            Self::ConnectedRoom(source) => source.parent,
         }
     }
 
@@ -1548,17 +1570,19 @@ impl GoalContinuation {
         match self {
             Self::Production(source) => source.root,
             Self::Room(source) => source.root,
+            Self::ConnectedRoom(source) => source.root,
         }
     }
 
     fn is_room(&self) -> bool {
-        matches!(self, Self::Room(_))
+        matches!(self, Self::Room(_) | Self::ConnectedRoom(_))
     }
 
     fn lineage_json(&self) -> serde_json::Value {
         match self {
             Self::Production(source) => source.lineage_json(),
             Self::Room(source) => source.lineage_json(),
+            Self::ConnectedRoom(source) => source.lineage_json(),
         }
     }
 
@@ -1566,6 +1590,9 @@ impl GoalContinuation {
         match (self, other) {
             (Self::Production(left), Self::Production(right)) => left.same_original_request(right),
             (Self::Room(left), Self::Room(right)) => left.same_original_request(right),
+            (Self::ConnectedRoom(left), Self::ConnectedRoom(right)) => {
+                left.same_original_request(right)
+            }
             _ => false,
         }
     }
@@ -1577,6 +1604,10 @@ impl GoalContinuation {
                 raw: source.canonical_json(),
             },
             Self::Room(source) => PlanSource::RoomContinuation {
+                summary,
+                raw: source.canonical_json(),
+            },
+            Self::ConnectedRoom(source) => PlanSource::ConnectedRoomContinuation {
                 summary,
                 raw: source.canonical_json(),
             },
@@ -1615,6 +1646,14 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::ConnectedRoom { summary, raw } => D::ConnectedRoom {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+            Self::ConnectedRoomContinuation { summary, raw } => D::ConnectedRoomContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1645,6 +1684,14 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            D::ConnectedRoom { summary, raw } => Self::ConnectedRoom {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+            D::ConnectedRoomContinuation { summary, raw } => Self::ConnectedRoomContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1660,6 +1707,10 @@ impl PlanSource {
             }
             Self::RoomContinuation { raw, .. } => room_continuation::RoomContinuation::parse(raw)
                 .map(|source| Some(GoalContinuation::Room(source))),
+            Self::ConnectedRoomContinuation { raw, .. } => {
+                connected_room_continuation::ConnectedRoomContinuation::parse(raw)
+                    .map(|source| Some(GoalContinuation::ConnectedRoom(source)))
+            }
             _ => Ok(None),
         }
     }
@@ -1668,7 +1719,9 @@ impl PlanSource {
         match self {
             Self::Production { .. }
             | Self::ProductionContinuation { .. }
-            | Self::RoomContinuation { .. } => true,
+            | Self::RoomContinuation { .. }
+            | Self::ConnectedRoom { .. }
+            | Self::ConnectedRoomContinuation { .. } => true,
             Self::Blueprint { raw, .. } => room_provisioning::is_provisioned_room(raw),
             _ => false,
         }
@@ -1713,6 +1766,16 @@ impl PlanSource {
             }
             Self::RoomContinuation { summary, raw } => {
                 room_continuation::RoomContinuation::parse(raw)?
+                    .compile(id, snapshot, summary)
+                    .map(|(intent, analysis)| (intent, Some(analysis)))
+            }
+            Self::ConnectedRoom { summary, raw } => {
+                connected_room::ConnectedRoomRequest::parse(raw)?
+                    .compile(id, snapshot, summary)
+                    .map(|(intent, analysis)| (intent, Some(analysis)))
+            }
+            Self::ConnectedRoomContinuation { summary, raw } => {
+                connected_room_continuation::ConnectedRoomContinuation::parse(raw)?
                     .compile(id, snapshot, summary)
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
@@ -3002,6 +3065,17 @@ pub(crate) fn plan_request(
                             raw: request.canonical_json(),
                         }
                     }
+                    (_, _, Some(raw)) if connected_room::is_connected_room(&raw) => {
+                        let request =
+                            match connected_room::ConnectedRoomRequest::parse_current(&raw) {
+                                Ok(request) => request,
+                                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                            };
+                        PlanSource::ConnectedRoom {
+                            summary,
+                            raw: request.canonical_json(),
+                        }
+                    }
                     (_, _, Some(raw)) => {
                         let raw = if room_provisioning::is_provisioned_room(&raw) {
                             match room_provisioning::ProvisionedRoomRequest::parse_current(&raw) {
@@ -3581,6 +3655,8 @@ fn rebase_by_witness(
         PlanSource::Production { .. }
             | PlanSource::ProductionContinuation { .. }
             | PlanSource::RoomContinuation { .. }
+            | PlanSource::ConnectedRoom { .. }
+            | PlanSource::ConnectedRoomContinuation { .. }
     ) || stale
         .plan
         .steps

@@ -106,6 +106,17 @@ pub(crate) struct ProvisionedRoomRequest {
     prerequisites: Option<Json>,
 }
 
+/// Optional work composed before exact furnishing step identities are derived.
+/// Existing room compiler generations never install this hook.
+pub(crate) struct RoomAccessComposition {
+    pub excavations: Vec<MapCuboid>,
+    pub terminal: Predicate,
+    pub analysis: Json,
+}
+
+pub(crate) type RoomAccessBuilder<'a> =
+    dyn Fn(&BlueprintLayout, &[MapCoord], &[RequestedAction]) -> Result<RoomAccessComposition> + 'a;
+
 pub(crate) fn is_provisioned_room(raw: &str) -> bool {
     if raw.len() > MAX_REQUEST_BYTES {
         return false;
@@ -201,7 +212,7 @@ impl ProvisionedRoomRequest {
         snapshot: &WorldSnapshot,
         summary: &str,
     ) -> Result<(Intent, Json)> {
-        self.compile_inner(id, snapshot, summary, false)
+        self.compile_inner(id, snapshot, summary, false, None)
     }
 
     /// A separately versioned pursuit can retain exact completed installations.
@@ -213,7 +224,27 @@ impl ProvisionedRoomRequest {
         snapshot: &WorldSnapshot,
         summary: &str,
     ) -> Result<(Intent, Json)> {
-        self.compile_inner(id, snapshot, summary, true)
+        self.compile_inner(id, snapshot, summary, true, None)
+    }
+
+    pub(crate) fn access_geometry(&self) -> Result<(BlueprintLayout, Vec<MapCoord>)> {
+        let (origin, template) = self.layout.geometry();
+        let layout = BlueprintPlanner.layout(origin, template)?;
+        let targets = furniture_slots(&layout, self.layout.furniture())?
+            .into_iter()
+            .map(|slot| slot.location)
+            .collect();
+        Ok((layout, targets))
+    }
+
+    pub(crate) fn compile_with_access(
+        &self,
+        id: IntentId,
+        snapshot: &WorldSnapshot,
+        residual: bool,
+        access: &RoomAccessBuilder<'_>,
+    ) -> Result<(Intent, Json)> {
+        self.compile_inner(id, snapshot, "", residual, Some(access))
     }
 
     fn compile_inner(
@@ -222,6 +253,7 @@ impl ProvisionedRoomRequest {
         snapshot: &WorldSnapshot,
         summary: &str,
         residual: bool,
+        access_builder: Option<&RoomAccessBuilder<'_>>,
     ) -> Result<(Intent, Json)> {
         if snapshot.graph.entities.len() > MAX_ENTITIES {
             return Err(bounds(
@@ -332,6 +364,12 @@ impl ProvisionedRoomRequest {
             production_analysis = compiled.analysis;
             requested_actions = procurement.requested_actions;
         }
+        let access = access_builder
+            .map(|build| {
+                let targets: Vec<_> = slots.iter().map(|slot| slot.location).collect();
+                build(&layout, &targets, &requested_actions)
+            })
+            .transpose()?;
         let mut production_dependencies = Vec::new();
         for (index, requested) in requested_actions.iter().enumerate() {
             match &requested.action {
@@ -425,6 +463,29 @@ impl ProvisionedRoomRequest {
             }
             excavation_steps.push(steps);
         }
+        let mut access_steps = Vec::new();
+        if let Some(access) = &access {
+            for area in &access.excavations {
+                let postcondition = Predicate::RegionTerrain {
+                    area: *area,
+                    tile_code: effects::dig_target_tile_code(dfmcp_intent::DigMode::Mine),
+                };
+                terminal.push(postcondition.clone());
+                access_steps.push(step_number(requested_actions.len())?);
+                requested_actions.push(RequestedAction {
+                    action: Action::DesignateDig {
+                        area: *area,
+                        mode: dfmcp_intent::DigMode::Mine,
+                    },
+                    preconditions: Vec::new(),
+                    postconditions: vec![postcondition],
+                    compensation: None,
+                    obligation: None,
+                    depends_on: Vec::new(),
+                });
+            }
+            terminal.push(access.terminal.clone());
+        }
         let mut allocation = Vec::new();
         let mut allocated_ids = BTreeSet::new();
         for (slot_index, slot) in slots.into_iter().enumerate() {
@@ -476,6 +537,12 @@ impl ProvisionedRoomRequest {
                 .ok_or_else(|| invariant("room placement excavation is missing"))?;
             let mut depends_on = production_dependencies.clone();
             depends_on.extend_from_slice(room_dependencies);
+            if access.is_some() {
+                // Hauling approaches require the complete intended circulation,
+                // including doorway/spine parts outside the furnishing's room.
+                depends_on.extend(excavation_steps.iter().flatten().copied());
+                depends_on.extend_from_slice(&access_steps);
+            }
             depends_on.sort_unstable();
             depends_on.dedup();
             requested_actions.push(RequestedAction {
@@ -553,6 +620,9 @@ impl ProvisionedRoomRequest {
             analysis["new_placements"] = json!(allocated_ids.len() - retained.len());
             analysis["proves_old_exact_action_goal"] = json!(false);
             analysis["pursuit"] = json!("new reviewed pursuit of every original room target");
+        }
+        if let Some(access) = access {
+            analysis["access"] = access.analysis;
         }
         Ok((intent, analysis))
     }

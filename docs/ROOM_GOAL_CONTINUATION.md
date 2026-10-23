@@ -81,7 +81,15 @@ reviewed pursuit. The original plan's exact terminal condition, action outcomes,
 source and first achievement remain unchanged. Its current exact goal can stay
 False even after the child satisfies the complete room request.
 
-Continuation lineage makes this distinction explicit:
+Connected-room goals use the same public `continue_goal` request and retain the
+original entry and access domain as well as the complete room. They can repair
+a connector while retaining every valid installation. Their distinct
+`connected_room_residual_v1` compiler and private source envelope preserve the
+ordinary `provisioned_room_residual_v1` behavior described here. See
+[connected rooms and access repair](LAB_CONNECTED_ROOM_ACCESS.md#continue-an-interrupted-room-or-repair-access)
+for the request, routing limits and current access proof.
+
+Ordinary provisioned-room continuation lineage makes this distinction explicit:
 
 ```json
 {

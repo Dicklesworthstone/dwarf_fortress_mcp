@@ -223,16 +223,31 @@ item with its original order and ordinal. A shortage or unknown material count
 refuses the plan. See `docs/CARPENTRY_PRODUCTION.md` for a complete example and
 the distinction between manufacturing inventory and furnishing a room.
 
+For furnished rooms with an explicit access requirement, the laboratory
+`connected_room` blueprint wraps the complete `provisioned_room` request and
+adds `access.entry` plus a bounded same-level `access.region`. It plans safe
+connector excavation, waits for circulation before placing furniture and
+proves current FLOOR access from the retained entrance to a cardinal approach
+for every furnishing. Current and planned building occupancy constrain the
+route. The terminal goal combines complete terrain, exact installed furniture
+and current access; later obstructions can invalidate current success.
+See `docs/LAB_CONNECTED_ROOM_ACCESS.md` for the complete JSON example,
+deterministic routing policy and reference-model limits.
+
 The laboratory `blueprint` JSON string also accepts the closed
-`{"template":"continue_goal","plan_digest":"<retained production goal>"}` form.
-It compiles a new reviewed plan from the complete original quotas and setup
-options under current Observe/Plan authority. Original and same-root work must
+`{"template":"continue_goal","plan_digest":"<retained goal digest>"}` form.
+It compiles a new reviewed plan from complete original production quotas or
+furnished-room requests, preserving setup options and any connected-room
+entrance/domain under current Observe/Plan authority. Valid installed furniture
+is retained; a connected continuation can repair access with excavation alone.
+Original and same-root work must
 be proven quiet, and commit repeats the check before effects. Parent/root
 lineage survives durable recovery. A verified reopen binds the retained goal
 to the exact recovered world while preserving its old seal; arbitrary epoch
 changes and checkpoint-abandoned pursuits remain refused. No old grants,
 actions or proof are reused as authority. See `docs/PRODUCTION_GOAL_CONTINUATION.md` for the exact bounds,
-refusals, source-seal binding and explicit commit workflow.
+refusals, source-seal binding and explicit commit workflow; furnished-room
+continuations are detailed in `docs/ROOM_GOAL_CONTINUATION.md`.
 
 ### `fortress.commit`
 
