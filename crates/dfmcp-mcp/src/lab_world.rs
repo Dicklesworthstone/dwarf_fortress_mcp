@@ -15,7 +15,7 @@ use dfmcp_core::{
 };
 use dfmcp_intent::effects;
 use dfmcp_intent::{
-    Action, BuildingKind, DigMode, MaterialSelector, PreparedPlan, RequestedAction,
+    Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, PreparedPlan, RequestedAction,
     WorkOrderCondition,
 };
 use dfmcp_world::terrain::{region_tiles, uniform_chunk, validate_region};
@@ -376,8 +376,7 @@ fn work_order_condition_json(condition: &WorkOrderCondition) -> Json {
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum ActionSpec {
-    Pause {
+enum ActionSpec {    Pause {
         paused: bool,
     },
     DesignateDig {
@@ -392,6 +391,11 @@ enum ActionSpec {
         max: [i32; 3],
         #[serde(default)]
         materials: Vec<String>,
+    },
+    PlaceFurniture {
+        furniture: String,
+        item: String,
+        location: [i32; 3],
     },
     SetLabor {
         units: Vec<String>,
@@ -533,6 +537,17 @@ fn action(spec: ActionSpec) -> Result<Action> {
                 },
             }
         }
+        ActionSpec::PlaceFurniture { furniture, item, location } => Action::PlaceFurniture {
+            kind: match furniture.as_str() {
+                "bed" => FurnitureKind::Bed,
+                "door" => FurnitureKind::Door,
+                "table" => FurnitureKind::Table,
+                "chair" => FurnitureKind::Chair,
+                _ => return Err(invalid("furniture must be bed, door, table or chair")),
+            },
+            item: entity(&item)?,
+            location: coord(location),
+        },
         ActionSpec::SetLabor {
             units,
             labor,
@@ -813,6 +828,7 @@ pub(crate) const fn action_kind(action: &Action) -> &'static str {
         Action::Pause { .. } => "pause",
         Action::DesignateDig { .. } => "designate_dig",
         Action::Build { .. } => "build",
+        Action::PlaceFurniture { .. } => "place_furniture",
         Action::SetLabor { .. } => "set_labor",
         Action::CreateWorkOrder { .. } => "create_work_order",
         Action::ConfigureStockpile { .. } => "configure_stockpile",
@@ -2045,8 +2061,39 @@ fn threat_alerts(snapshot: &WorldSnapshot, units: &[&EntityRecord]) -> Vec<Json>
         .collect()
 }
 
-/// Sealed plan steps with the entities they will create and the exact
-/// predicates that must be observed before they count as done.
+/// Original goal truth with the exact reference identities required for proof.
+///
+/// Field predicates cannot express canonical entity generations. Exact-item
+/// goals additionally establish original identity and reciprocal custody before
+/// publishing True; historical matching fields alone are not that proof.
+pub(crate) fn plan_goal_truth(
+    snapshot: &WorldSnapshot,
+    plan: &PreparedPlan,
+) -> Result<dfmcp_world::PredicateTruth> {
+    let truth =
+        dfmcp_world::PredicateEvidence::laboratory(snapshot)?.evaluate(&plan.terminal_condition)?;
+    if truth == dfmcp_world::PredicateTruth::True {
+        for step in &plan.steps {
+            if let Action::PlaceFurniture {
+                kind,
+                item,
+                location,
+            } = &step.action
+            {
+                effects::validate_furniture_completion(
+                    snapshot,
+                    effects::created_entity_id(&step.idempotency_key, 0),
+                    *kind,
+                    *item,
+                    *location,
+                )?;
+            }
+        }
+    }
+    Ok(truth)
+}
+
+/// Sealed actions and the exact predicates required to prove their effects.
 pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
     Json::Array(
         plan.steps
@@ -2054,7 +2101,10 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
             .map(|step| {
                 let creates = matches!(
                     step.action,
-                    Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
+                    Action::DesignateDig { .. }
+                        | Action::Build { .. }
+                        | Action::PlaceFurniture { .. }
+                        | Action::CreateWorkOrder { .. }
                 )
                 .then(|| effects::created_entity_id(&step.idempotency_key, 0).get().to_string());
                 let mut row = json!({
@@ -2075,6 +2125,11 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                 });
                 if let Action::CreateWorkOrder { conditions, .. } = &step.action {
                     row["conditions"] = Json::Array(conditions.iter().map(work_order_condition_json).collect());
+                }
+                if let Action::PlaceFurniture { kind, item, location } = &step.action {
+                    row["furniture"] = json!(kind.item_token());
+                    row["source_item"] = json!(item.get().to_string());
+                    row["location"] = json!([location.x, location.y, location.z]);
                 }
                 row
             })
@@ -2905,6 +2960,39 @@ mod tests {
             r#"[{"action":{"kind":"build","building":"spaceship","location":[0,0,0],"min":[0,0,0],"max":[0,0,0]}}]"#,
             r#"[{"action":{"kind":"extension"}}]"#,
             r#"[{"action":{"kind":"pause","paused":true},"note":"x"}]"#,
+        ] {
+            assert!(parse_steps(bad).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn furniture_placement_requests_bind_one_exact_item_and_closed_kind() -> Result<()> {
+        for (label, kind) in [
+            ("bed", FurnitureKind::Bed),
+            ("door", FurnitureKind::Door),
+            ("table", FurnitureKind::Table),
+            ("chair", FurnitureKind::Chair),
+        ] {
+            let request = json!([{"action":{
+                "kind":"place_furniture", "furniture":label,
+                "item":"18446744073709551615", "location":[2,4,10],
+            }}]);
+            let steps = parse_steps(&request.to_string())?;
+            assert_eq!(
+                steps[0].action,
+                Action::PlaceFurniture {
+                    kind,
+                    item: EntityId::new(u64::MAX),
+                    location: MapCoord::new(2, 4, 10),
+                }
+            );
+        }
+        for bad in [
+            r#"[{"action":{"kind":"place_furniture","furniture":"cabinet","item":"17","location":[2,4,10]}}]"#,
+            r#"[{"action":{"kind":"place_furniture","furniture":"bed","item":"017","location":[2,4,10]}}]"#,
+            r#"[{"action":{"kind":"place_furniture","furniture":"bed","item":17,"location":[2,4,10]}}]"#,
+            r#"[{"action":{"kind":"place_furniture","furniture":"bed","item":"17","location":[2,4,10],"materials":["WOOD"]}}]"#,
         ] {
             assert!(parse_steps(bad).is_err(), "{bad}");
         }

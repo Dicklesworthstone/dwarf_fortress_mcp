@@ -449,7 +449,7 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
     }
     match action {
         Action::Pause { .. } => {}
-        Action::DesignateDig { .. } => {}
+        Action::DesignateDig { .. } | Action::PlaceFurniture { .. } => {}
         Action::Build {
             kind,
             location,
@@ -552,9 +552,10 @@ fn validate_action_shape(action: &Action, policy: &PlanPolicy) -> Result<()> {
         Action::CreateWorkOrder { conditions, .. } => Some(conditions.len()),
         Action::ConfigureStockpile { accepts, .. } => Some(accepts.len()),
         Action::Extension { parameters, .. } => Some(parameters.len()),
-        Action::Pause { .. } | Action::DesignateDig { .. } | Action::SetStandingOrder { .. } => {
-            Some(0)
-        }
+        Action::Pause { .. }
+        | Action::DesignateDig { .. }
+        | Action::PlaceFurniture { .. }
+        | Action::SetStandingOrder { .. } => Some(0),
     }
     .ok_or_else(|| {
         DfmcpError::new(
@@ -856,7 +857,8 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
         assert!(plan.digest_is_valid());
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(
@@ -888,7 +890,8 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
+        let plan =
+            StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
         let step = &plan.steps[0];
         assert_eq!(
             step.postconditions,
@@ -925,7 +928,8 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
+        let result =
+            StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(result.is_err());
     }
 
@@ -954,7 +958,8 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
+        let result =
+            StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidIntent));
     }
 
@@ -980,7 +985,8 @@ mod tests {
                 depends_on: Vec::new(),
             }],
         };
-        let result = StaticPlanner::new(policy).prepare_laboratory(&snapshot, &intent, &context(&snapshot));
+        let result =
+            StaticPlanner::new(policy).prepare_laboratory(&snapshot, &intent, &context(&snapshot));
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 }

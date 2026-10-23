@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 use dfmcp_core::{Capability, EntityId, MapCoord, MapCuboid, RiskTier};
-use dfmcp_intent::{Action, BuildingKind, DigMode, MaterialSelector, WorkOrderCondition};
+use dfmcp_intent::{
+    Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, WorkOrderCondition,
+};
 use std::collections::BTreeSet;
 use std::error::Error;
 
@@ -18,6 +20,48 @@ fn test_pause_normalization_and_metadata() {
     assert_eq!(pause.capability(), Capability::ControlClock);
     assert_eq!(pause.risk(), RiskTier::Reversible);
     assert!(!pause.naturally_temporal());
+}
+
+#[test]
+fn exact_furniture_action_seals_item_kind_and_tile_without_reinterpreting_build() {
+    let location = MapCoord::new(1, 2, 3);
+    let action = Action::PlaceFurniture {
+        kind: FurnitureKind::Table,
+        item: EntityId::new(17),
+        location,
+    };
+    assert_eq!(action.normalized(), action);
+    assert_eq!(action.capability(), Capability::Construct);
+    assert_eq!(action.risk(), RiskTier::Guarded);
+    assert!(action.naturally_temporal());
+    assert_eq!(action.scope().entity_ids, vec![EntityId::new(17)]);
+    assert_eq!(
+        action.scope().map_area,
+        Some(MapCuboid {
+            min: location,
+            max: location
+        })
+    );
+    assert_eq!(
+        action.canonical_bytes(),
+        vec![
+            10, 2, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3,
+        ]
+    );
+    let origin = MapCoord::new(0, 0, 0);
+    let old_build = Action::Build {
+        kind: BuildingKind::FarmPlot,
+        location: origin,
+        footprint: MapCuboid {
+            min: origin,
+            max: origin,
+        },
+        material: MaterialSelector::default(),
+    };
+    let mut old_bytes = vec![0; 59];
+    old_bytes[0] = 2;
+    old_bytes[1] = 5;
+    assert_eq!(old_build.canonical_bytes(), old_bytes);
 }
 
 #[test]

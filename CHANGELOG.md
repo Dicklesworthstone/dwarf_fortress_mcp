@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-23 — Install and recover exact manufactured furniture
+
+- Add a distinct typed `place_furniture` action for Bed, Door, Table and Chair,
+  binding one canonical item and one tile under existing Construct authority.
+  Preserve original Build semantics and append new canonical/archive tags.
+- Allocate reciprocal item/building custody and debit one loose stock unit
+  atomically. Completion installs the same item; unfinished cancellation
+  releases it and refunds once. Completed furniture remains installed.
+- Validate original producer/ordinal/generation, eligible WOOD singleton data,
+  complete attachment and occupancy scans, and explicit stock evidence. Legacy
+  items without custody are ineligible; ambiguous evidence refuses atomically.
+- Bind action verification, original-goal truth, forecasts, physical-work
+  inspection and historical achievement to exact completion evidence. Retain
+  original allocation through durable restart and fence identity substitution.
+- Expose the closed action grammar and reviewed exact item/tile through the
+  existing MCP tools. Reserve its footprint, retain its physical work and
+  require reviewed stale replay. Native routing explicitly refuses laboratory
+  canonical custody.
+- Include focused conservation, cancellation/reuse, corruption, generation,
+  restart, authority, codec and parser regressions. Component validation is
+  recorded in the implementation status; no native/live admission is changed.
+
 ## 2026-10-23 — Plan and verify complete furniture production goals
 
 - Extend the existing production blueprint with BED, DOOR, TABLE and CHAIR

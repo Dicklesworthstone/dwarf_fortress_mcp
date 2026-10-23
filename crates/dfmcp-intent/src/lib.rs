@@ -17,7 +17,7 @@ pub mod plan_archive;
 mod planner;
 
 pub use action::{
-    Action, ActionScope, BuildingKind, DigMode, MaterialSelector, WorkOrderCondition,
+    Action, ActionScope, BuildingKind, DigMode, FurnitureKind, MaterialSelector, WorkOrderCondition,
 };
 pub use alert_fsm::{
     AlertDecision, AlertObservation, AlertRecoveryPolicy, CivilianAlertFsm, ThreatAssessment,

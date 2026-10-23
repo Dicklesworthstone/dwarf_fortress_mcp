@@ -1,11 +1,15 @@
 //! Original-plan recovery, not dispatch qualification.
-use std::collections::{BTreeMap, BTreeSet};
-use dfmcp_core::{Capability, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick,
-    IntentId, MapCoord, MapCuboid, ObservationCursor, Result, RiskTier, StateAnchor, StepId};
-use dfmcp_intent::{Action, BuildingKind, DigMode, MaterialSelector, ObligationSpec, PlanStep,
-    PreparedPlan, WorkOrderCondition, derive_step_idempotency_key};
+use dfmcp_core::{
+    Capability, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick, IntentId, MapCoord,
+    MapCuboid, ObservationCursor, Result, RiskTier, StateAnchor, StepId,
+};
 use dfmcp_intent::plan_archive::{self as archive, ArchiveLimits, PlanArchiveSeal};
+use dfmcp_intent::{
+    Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, ObligationSpec, PlanStep,
+    PreparedPlan, WorkOrderCondition, derive_step_idempotency_key,
+};
 use dfmcp_world::{CompareOp, EdgeKind, EntityKind, Predicate, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 fn anchor() -> StateAnchor {
     StateAnchor { fortress_id: FortressId::new(42), cursor: ObservationCursor { epoch: 3, sequence: 7 },
@@ -104,6 +108,35 @@ fn all_action_families_and_all_building_and_dig_variants_roundtrip() -> Result<(
     roundtrip(&plan)?;
     assert_eq!(plan.steps.len(), 24);
     assert!(plan.requires_checkpoint);
+    Ok(())
+}
+
+#[test]
+fn exact_item_placement_roundtrips_all_kinds_and_rejects_unknown_tags() -> Result<()> {
+    for kind in [
+        FurnitureKind::Bed,
+        FurnitureKind::Door,
+        FurnitureKind::Table,
+        FurnitureKind::Chair,
+    ] {
+        let plan = make(
+            vec![Action::PlaceFurniture {
+                kind,
+                item: EntityId::new(u64::MAX),
+                location: MapCoord::new(-3, 7, 2),
+            }],
+            Predicate::Paused(false),
+            false,
+        );
+        let (bytes, seal) = roundtrip(&plan)?;
+        // Header, original identities/anchor, summary, goal, step count and ID.
+        let action_offset = 12 + 16 + 16 + 64 + 4 + plan.summary.len() + 2 + 4 + 4;
+        assert_eq!(bytes[action_offset], 10);
+        let mut damaged = bytes;
+        damaged[action_offset + 1] = 255;
+        let (damaged, expected) = resigned(&damaged, seal.plan_digest);
+        assert!(archive::decode(&damaged, expected, ArchiveLimits::default()).is_err());
+    }
     Ok(())
 }
 #[test]

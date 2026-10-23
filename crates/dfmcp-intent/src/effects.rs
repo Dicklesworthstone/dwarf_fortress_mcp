@@ -25,13 +25,23 @@ use dfmcp_world::{
     laboratory_fact_value,
 };
 
-use crate::action::{Action, BuildingKind, DigMode, WorkOrderCondition};
+use crate::action::{Action, BuildingKind, DigMode, FurnitureKind, WorkOrderCondition};
 use crate::plan::ObligationSpec;
 
 #[path = "effects_capacity.rs"]
 mod capacity;
 #[path = "effects_carpentry.rs"]
 mod carpentry;
+#[path = "effects_furniture.rs"]
+mod furniture;
+
+pub use furniture::{
+    FURNITURE_ALLOCATED_TO_FIELD, FURNITURE_ATTACHMENT_STATE_FIELD,
+    FURNITURE_INVENTORY_STATE_FIELD, FURNITURE_PLACEMENT_MODEL, FURNITURE_PLACEMENT_MODEL_FIELD,
+    FURNITURE_SOURCE_ITEM_FIELD, FURNITURE_SOURCE_ITEM_GENERATION_FIELD, furniture_stock_field,
+    loose_furniture_items, occupied_building_footprint, validate_furniture_binding,
+    validate_furniture_completion, validate_furniture_identity, validate_furniture_location,
+};
 
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
 pub const LABOR_FIELD_PREFIX: &str = "labor.";
@@ -463,6 +473,11 @@ pub fn default_postconditions(
             CONSTRUCTION_STAGE_FIELD,
             Value::Text(STAGE_COMPLETE.to_owned()),
         )],
+        Action::PlaceFurniture {
+            kind,
+            item,
+            location,
+        } => furniture::postconditions(*kind, *item, *location, idempotency_key),
         Action::CreateWorkOrder {
             name,
             job_token,
@@ -552,7 +567,7 @@ pub fn default_obligation(
                 .saturating_mul(2)
                 .saturating_add(100)
         }
-        Action::Build { .. } => BUILD_TICKS.saturating_mul(4),
+        Action::Build { .. } | Action::PlaceFurniture { .. } => BUILD_TICKS.saturating_mul(4),
         Action::CreateWorkOrder { amount, .. } => WORK_ORDER_TICKS_PER_UNIT
             .saturating_mul(u64::from(*amount))
             .saturating_mul(2)
@@ -964,6 +979,11 @@ pub fn apply_effect(
             )?;
             Ok(true)
         }
+        Action::PlaceFurniture {
+            kind,
+            item,
+            location,
+        } => furniture::place(snapshot, *kind, *item, *location, idempotency_key),
         Action::CreateWorkOrder {
             name,
             job_token,
@@ -1026,6 +1046,14 @@ pub fn cancel_effect(
     action: &Action,
     idempotency_key: &str,
 ) -> Result<bool> {
+    if let Action::PlaceFurniture {
+        kind,
+        item,
+        location,
+    } = action
+    {
+        return furniture::cancel(snapshot, *kind, *item, *location, idempotency_key);
+    }
     let (field, active, cancelled): (&str, &[&str], &str) = match action {
         Action::DesignateDig { .. } | Action::CreateWorkOrder { .. } => {
             (STATUS_FIELD, &[STATUS_ACTIVE], STATUS_CANCELLED)
@@ -1746,7 +1774,7 @@ fn advance_timeline(
         snapshot.tick = GameTick(snapshot.tick.0 + delta);
         for id in &timeline.buildings {
             if active_building(snapshot, *id)? {
-                changed |= advance_building(snapshot, *id, delta)?;
+                changed |= advance_building(snapshot, *id, delta, budget)?;
             }
         }
         changed |= timeline.advance_digs(snapshot, delta, budget)?;
@@ -2276,8 +2304,16 @@ fn advance_ready_work_order(
     Ok(changed)
 }
 
-fn advance_building(snapshot: &mut WorldSnapshot, id: EntityId, elapsed: u64) -> Result<bool> {
+fn advance_building(
+    snapshot: &mut WorldSnapshot,
+    id: EntityId,
+    elapsed: u64,
+    budget: &mut EffectAdvanceBudget,
+) -> Result<bool> {
     let building = entity(snapshot, id)?;
+    if furniture::has_placement_fields(building) {
+        return furniture::advance(snapshot, id, elapsed, budget);
+    }
     let required = field_u64(building, "required_ticks", snapshot.tick)?;
     if required == 0 {
         return Err(precondition(
@@ -2316,3 +2352,7 @@ mod timeline_tests;
 #[cfg(test)]
 #[path = "effects_carpentry_tests.rs"]
 mod carpentry_tests;
+
+#[cfg(test)]
+#[path = "effects_furniture_tests.rs"]
+mod furniture_tests;

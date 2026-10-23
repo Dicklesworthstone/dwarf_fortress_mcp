@@ -15,8 +15,10 @@ use dfmcp_core::{
 };
 use dfmcp_world::{CompareOp, EdgeKind, EntityKind, Predicate, Value};
 
-use crate::{Action, BuildingKind, DigMode, MaterialSelector, ObligationSpec, PlanStep,
-    PreparedPlan, WorkOrderCondition};
+use crate::{
+    Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, ObligationSpec, PlanStep,
+    PreparedPlan, WorkOrderCondition,
+};
 
 mod codec;
 

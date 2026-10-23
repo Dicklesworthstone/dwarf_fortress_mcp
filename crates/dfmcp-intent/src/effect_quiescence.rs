@@ -67,7 +67,9 @@ pub fn inspect_effect_work(
     }
     let (kind, lifecycle) = match action {
         Action::DesignateDig { .. } => (effects::DIG_DESIGNATION_KIND, effects::STATUS_FIELD),
-        Action::Build { .. } => ("building", effects::CONSTRUCTION_STAGE_FIELD),
+        Action::Build { .. } | Action::PlaceFurniture { .. } => {
+            ("building", effects::CONSTRUCTION_STAGE_FIELD)
+        }
         Action::CreateWorkOrder { .. } => ("work_order", effects::STATUS_FIELD),
         Action::Pause { .. }
         | Action::SetLabor { .. }
@@ -123,6 +125,13 @@ pub fn inspect_effect_work(
                 && field(entity, "building_kind", snapshot.tick)
                     == Some(&Value::Text(effects::building_kind_label(kind)))
         }
+        Action::PlaceFurniture {
+            kind,
+            item,
+            location,
+        } => effects::validate_furniture_identity(snapshot, entity_id, *kind, *item, *location)
+            .and_then(|()| effects::validate_furniture_binding(snapshot, entity_id))
+            .is_ok(),
         Action::CreateWorkOrder {
             name,
             job_token,
@@ -156,10 +165,10 @@ pub fn inspect_effect_work(
             }
         }
         Some(Value::Text(status))
-            if (matches!(action, Action::Build { .. })
+            if (matches!(action, Action::Build { .. } | Action::PlaceFurniture { .. })
                 && (status == effects::STAGE_PLANNED
                     || status == effects::STAGE_UNDER_CONSTRUCTION))
-                || (!matches!(action, Action::Build { .. })
+                || (!matches!(action, Action::Build { .. } | Action::PlaceFurniture { .. })
                     && status == effects::STATUS_ACTIVE) =>
         {
             EffectWorkState::Active { entity_id }

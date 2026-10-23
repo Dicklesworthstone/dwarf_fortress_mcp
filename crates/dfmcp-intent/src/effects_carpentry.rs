@@ -138,6 +138,11 @@ pub(super) fn complete(
                 Value::List(vec![Value::Text("WOOD".to_owned())]),
             ),
             ("stack_size".to_owned(), Value::U64(1)),
+            (
+                FURNITURE_INVENTORY_STATE_FIELD.to_owned(),
+                Value::Text("loose".to_owned()),
+            ),
+            (FURNITURE_ALLOCATED_TO_FIELD.to_owned(), Value::Null),
             ("source_order".to_owned(), Value::Entity(order.id)),
             (
                 "production_ordinal".to_owned(),

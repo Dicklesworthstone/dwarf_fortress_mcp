@@ -7,7 +7,7 @@ use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{ActionId, CommitState, DfmcpError, OperationContext};
 use dfmcp_intent::PreparedPlan;
 use dfmcp_lab::MemoryAdapter;
-use dfmcp_world::{PredicateEvidence, PredicateTruth};
+use dfmcp_world::PredicateTruth;
 use serde_json::json;
 
 /// Most simulated time slices a forecast may take.
@@ -61,7 +61,7 @@ pub(super) fn forecast_plan(
         Ok(quiet)
     };
     let goal_truth = |fork: &MemoryAdapter| -> dfmcp_core::Result<PredicateTruth> {
-        PredicateEvidence::laboratory(fork.snapshot())?.evaluate(&plan.terminal_condition)
+        crate::lab_world::plan_goal_truth(fork.snapshot(), plan)
     };
     let mut quiescent = match work_quiescent(&fork) {
         Ok(quiet) => quiet,

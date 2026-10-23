@@ -80,6 +80,14 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 self.count(parameters.len(), MAX_COLLECTION)?;
                 for (key, value) in parameters { self.text(key, MAX_TEXT)?; self.text(value, MAX_TEXT)?; }
             }
+            Action::PlaceFurniture { kind, item, location } => {
+                self.byte(10)?;
+                self.byte(match kind {
+                    FurnitureKind::Bed => 0, FurnitureKind::Door => 1,
+                    FurnitureKind::Table => 2, FurnitureKind::Chair => 3,
+                })?;
+                self.u64(item.get())?; self.coord(*location)?;
+            }
         }
         Ok(())
     }
@@ -246,6 +254,14 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                 for _ in 0..count { let key = self.text(MAX_TEXT)?; let value = self.text(MAX_TEXT)?; insert(&mut parameters, key, value)?; }
                 Action::Extension { namespace, name, parameters }
             }
+            10 => Action::PlaceFurniture {
+                kind: match self.byte()? {
+                    0 => FurnitureKind::Bed, 1 => FurnitureKind::Door,
+                    2 => FurnitureKind::Table, 3 => FurnitureKind::Chair,
+                    _ => return Err(invalid("unknown archived furniture kind")),
+                },
+                item: EntityId::new(self.u64()?), location: self.coord()?,
+            },
             _ => return Err(invalid("unknown archived action")),
         })
     }

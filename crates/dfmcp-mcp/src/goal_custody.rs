@@ -30,7 +30,10 @@ fn precedes(before: StateAnchor, after: StateAnchor) -> bool {
 pub(super) fn effect_identity_absent(step: &PlanStep, snapshot: &WorldSnapshot) -> bool {
     !matches!(
         step.action,
-        Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
+        Action::DesignateDig { .. }
+            | Action::Build { .. }
+            | Action::PlaceFurniture { .. }
+            | Action::CreateWorkOrder { .. }
     ) || !snapshot
         .graph
         .entities

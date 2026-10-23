@@ -440,6 +440,9 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
         Action::AssignSquad { .. } => refuse("no live squad assignment family exists"),
         Action::SetBurrowMembership { .. } => refuse("no live burrow membership family exists"),
         Action::SetStandingOrder { .. } => refuse("no live standing-order family exists"),
+        Action::PlaceFurniture { .. } => refuse(
+            "item-backed furniture/1 placement uses laboratory canonical item custody; it has no reviewed native identity resolution or live family",
+        ),
         Action::Extension {
             namespace, name, ..
         } => refuse(format!(
@@ -466,7 +469,7 @@ pub fn route_plan(plan: &PreparedPlan) -> Result<PlanRoute> {
 mod tests {
     use super::*;
     use dfmcp_core::{Capability, RiskTier};
-    use dfmcp_intent::MaterialSelector;
+    use dfmcp_intent::{FurnitureKind, MaterialSelector};
 
     fn step(action: Action) -> PlanStep {
         PlanStep {
@@ -638,6 +641,25 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn laboratory_item_custody_cannot_authorize_native_furniture() {
+        for kind in [
+            FurnitureKind::Bed,
+            FurnitureKind::Door,
+            FurnitureKind::Table,
+            FurnitureKind::Chair,
+        ] {
+            let route = route_step(&step(Action::PlaceFurniture {
+                kind,
+                item: EntityId::new(17),
+                location: MapCoord::new(5, 6, 10),
+            }));
+            assert!(route.outcome.is_err_and(|refusal| {
+                refusal.reason.contains("laboratory canonical item custody")
+            }));
+        }
     }
 
     #[test]

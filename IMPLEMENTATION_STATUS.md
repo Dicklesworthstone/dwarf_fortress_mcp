@@ -44,6 +44,48 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Exact item-backed laboratory furniture (2026-10-23)
+
+A distinct `PlaceFurniture` action binds a closed Bed/Door/Table/Chair kind,
+canonical produced item and one target tile. Its scope includes both item and
+map area under Guarded Construct authority. Canonical and archive encodings
+append a new tag; old Build actions, material selectors and seals retain their
+original abstract behavior.
+
+New carpentry items carry explicit loose inventory custody. Placement validates
+the original producer and completion ordinal, item generation, WOOD singleton
+data, complete reciprocal attachments, eligible stock and unoccupied observed
+floor before atomically allocating the exact item and debiting one stock unit.
+The existing 500-tick construction duration installs that same item. Cancelling
+unfinished placement returns the same item, frees the target and refunds once;
+completed placement is not undone. Legacy items without custody remain
+ineligible and unchanged. Bounded global scans and transaction shadows fence
+contradictions, unknown data, collisions, overflow and work-budget exhaustion.
+
+Physical-work inspection, action verification, current goal truth and archived
+first achievement additionally validate exact generation and reciprocal custody,
+which ordinary field predicates cannot express. Durable restart retains the
+allocation without recreating an item or importing old dispatch authority.
+The MCP grammar, step review, leases, physical ownership and forecasts include
+placement; stale anchors require reviewed replay. Native semantic routing
+explicitly refuses these laboratory item identities. See
+`docs/LAB_ITEM_FURNITURE.md` for the executable contract and request form.
+
+**Evidence:** 156 actual-source engine tests pass on the pinned nightly: 132
+intent unit tests, ten action-normalization tests and fourteen plan-archive
+tests. Eight new engine groups cover all four kinds, conservation, exclusivity,
+cancellation/reuse, source and generation refusal, occupancy, budget/overflow
+atomicity, wait partition and snapshot recovery. Current adapter production,
+laboratory production and unit tests, and actual-source MCP module tests all
+pass type checking. Warning-denied production Clippy passes for intent,
+laboratory and MCP modules. Scoped formatting and diff checks pass.
+
+Laboratory/MCP runtime tests remain unexecuted: shared persistent and temporary
+volumes filled during adapter archive creation, after successful code generation.
+The broad adapter test target also exceeded shared memory. Type checking is not
+execution evidence. No full-workspace, MCP host, native or live qualification
+is claimed.
+
 ### Complete furniture production quotas and shared setup (2026-10-23)
 
 The existing production blueprint accepts BED, DOOR, TABLE and CHAIR alongside

@@ -27,8 +27,8 @@ use dfmcp_adapter::{
 };
 use dfmcp_core::{
     ActionId, Capability, CapabilityGrant, CapabilityScope, CheckpointId, CommitState, DfmcpError,
-    Digest32, EntityId, ErrorCode, FortressId, GameTick, IntentId, OperationContext, RequestId,
-    Result, RiskTier, SessionId, StateAnchor, WorkBudget,
+    Digest32, EntityId, ErrorCode, FortressId, GameTick, IntentId, MapCuboid, OperationContext,
+    RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
 };
 use dfmcp_intent::{
     Action, Constraint, EffectWorkState, Intent, ObligationStatus, PreparedPlan,
@@ -3131,7 +3131,7 @@ fn acquire_plan_leases(
     let untracked = if plan.steps.iter().any(|step| {
         matches!(
             step.action,
-            Action::DesignateDig { .. } | Action::Build { .. }
+            Action::DesignateDig { .. } | Action::Build { .. } | Action::PlaceFurniture { .. }
         )
     }) {
         untracked_work(session)?
@@ -3142,6 +3142,7 @@ fn acquire_plan_leases(
         let area = match &step.action {
             Action::DesignateDig { area, .. } => *area,
             Action::Build { footprint, .. } => *footprint,
+            Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
             _ => continue,
         };
         if untracked.iter().any(|work| work.conflicts_with(&area)) {
@@ -3159,11 +3160,12 @@ fn acquire_plan_leases(
                 "a recovered effect has unresolved identity; reconcile or restore before reserving a region",
             ))?;
             let owned_area = match &work.action {
-                Action::DesignateDig { area, .. } => area,
-                Action::Build { footprint, .. } => footprint,
+                Action::DesignateDig { area, .. } => *area,
+                Action::Build { footprint, .. } => *footprint,
+                Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
                 _ => continue,
             };
-            if dfmcp_core::lease::cuboids_intersect(&area, owned_area) {
+            if dfmcp_core::lease::cuboids_intersect(&area, &owned_area) {
                 return Err(DfmcpError::new(
                     ErrorCode::Conflict,
                     "the requested region overlaps unresolved physical work carried across recovery",
@@ -3181,11 +3183,12 @@ fn acquire_plan_leases(
                 )
             })?;
             let owned_area = match &owned.action {
-                Action::DesignateDig { area, .. } => area,
-                Action::Build { footprint, .. } => footprint,
+                Action::DesignateDig { area, .. } => *area,
+                Action::Build { footprint, .. } => *footprint,
+                Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
                 _ => continue,
             };
-            if dfmcp_core::lease::cuboids_intersect(&area, owned_area) {
+            if dfmcp_core::lease::cuboids_intersect(&area, &owned_area) {
                 return Err(DfmcpError::new(
                     ErrorCode::Conflict,
                     format!(
@@ -3335,7 +3338,10 @@ fn untracked_work(session: &LabSession) -> Result<Vec<restore_work::UntrackedWor
         if let Some(step) = &carried.work_step
             && matches!(
                 step.action,
-                Action::DesignateDig { .. } | Action::Build { .. } | Action::CreateWorkOrder { .. }
+                Action::DesignateDig { .. }
+                    | Action::Build { .. }
+                    | Action::PlaceFurniture { .. }
+                    | Action::CreateWorkOrder { .. }
             )
         {
             known.insert(dfmcp_intent::effects::created_entity_id(
@@ -3442,10 +3448,15 @@ fn rebase_by_witness(
     if matches!(
         &stale.source,
         PlanSource::Production { .. } | PlanSource::ProductionContinuation { .. }
-    ) {
+    ) || stale
+        .plan
+        .steps
+        .iter()
+        .any(|step| matches!(step.action, Action::PlaceFurniture { .. }))
+    {
         return Err(json!({
             "accepted": false,
-            "reason": "production planning requires current workload and prerequisite evidence; review a newly sealed intent replay",
+            "reason": "production and item-backed placement require current workload, inventory and occupancy evidence; review a newly sealed intent replay",
         }));
     }
     let base = session

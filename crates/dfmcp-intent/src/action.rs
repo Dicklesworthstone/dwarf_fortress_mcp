@@ -26,6 +26,37 @@ pub enum BuildingKind {
     Custom(String),
 }
 
+/// Closed item-backed furniture family for the reference laboratory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FurnitureKind {
+    Bed,
+    Door,
+    Table,
+    Chair,
+}
+
+impl FurnitureKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bed => "Bed",
+            Self::Door => "Door",
+            Self::Table => "Table",
+            Self::Chair => "Chair",
+        }
+    }
+
+    #[must_use]
+    pub const fn item_token(self) -> &'static str {
+        match self {
+            Self::Bed => "BED",
+            Self::Door => "DOOR",
+            Self::Table => "TABLE",
+            Self::Chair => "CHAIR",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MaterialSelector {
     pub required_tokens: BTreeSet<String>,
@@ -100,6 +131,13 @@ pub enum Action {
         name: String,
         parameters: BTreeMap<String, String>,
     },
+    /// Allocate this exact canonical item to one tile. Legacy `Build` keeps
+    /// its original semantics and canonical encoding.
+    PlaceFurniture {
+        kind: FurnitureKind,
+        item: EntityId,
+        location: MapCoord,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -119,6 +157,7 @@ impl Action {
             | Self::SetBurrowMembership { .. } => RiskTier::Reversible,
             Self::DesignateDig { .. }
             | Self::Build { .. }
+            | Self::PlaceFurniture { .. }
             | Self::AssignSquad { .. }
             | Self::SetStandingOrder { .. }
             | Self::Extension { .. } => RiskTier::Guarded,
@@ -130,7 +169,7 @@ impl Action {
         match self {
             Self::Pause { .. } => Capability::ControlClock,
             Self::DesignateDig { .. } => Capability::Designate,
-            Self::Build { .. } => Capability::Construct,
+            Self::Build { .. } | Self::PlaceFurniture { .. } => Capability::Construct,
             Self::SetLabor { .. } => Capability::ConfigureLabor,
             Self::CreateWorkOrder { .. } => Capability::ConfigureProduction,
             Self::ConfigureStockpile { .. } => Capability::ConfigureLogistics,
@@ -159,6 +198,13 @@ impl Action {
             } => ActionScope {
                 entity_ids: Vec::new(),
                 map_area: Some(*footprint),
+            },
+            Self::PlaceFurniture { item, location, .. } => ActionScope {
+                entity_ids: vec![*item],
+                map_area: Some(MapCuboid {
+                    min: *location,
+                    max: *location,
+                }),
             },
             Self::SetLabor { units, .. } => ActionScope {
                 entity_ids: units.clone(),
@@ -195,7 +241,10 @@ impl Action {
     pub const fn naturally_temporal(&self) -> bool {
         matches!(
             self,
-            Self::DesignateDig { .. } | Self::Build { .. } | Self::CreateWorkOrder { .. }
+            Self::DesignateDig { .. }
+                | Self::Build { .. }
+                | Self::PlaceFurniture { .. }
+                | Self::CreateWorkOrder { .. }
         )
     }
 
@@ -357,6 +406,21 @@ impl Action {
                     put_str(output, key);
                     put_str(output, value);
                 }
+            }
+            Self::PlaceFurniture {
+                kind,
+                item,
+                location,
+            } => {
+                output.push(10);
+                output.push(match kind {
+                    FurnitureKind::Bed => 0,
+                    FurnitureKind::Door => 1,
+                    FurnitureKind::Table => 2,
+                    FurnitureKind::Chair => 3,
+                });
+                put_u64(output, item.get());
+                put_coord(output, *location);
             }
         }
     }

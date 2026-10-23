@@ -25,6 +25,8 @@ pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
 
 #[cfg(test)]
 mod effect_drain_tests;
+#[cfg(test)]
+mod furniture_lifecycle_tests;
 
 use dfmcp_world::{Predicate, PredicateEvidence, WorldGraph, WorldSnapshot, execute_bounded_query};
 
@@ -302,6 +304,7 @@ impl MemoryAdapter {
                         &action.step.action,
                         Action::DesignateDig { .. }
                             | Action::Build { .. }
+                            | Action::PlaceFurniture { .. }
                             | Action::CreateWorkOrder { .. }
                     )
             })
@@ -668,6 +671,7 @@ impl MemoryAdapter {
         } else {
             CommitState::Prepared
         };
+        validate_terminal_action_identity(&self.snapshot, step, state)?;
         let summary = match state {
             CommitState::Prepared => "waiting for dependency verification",
             CommitState::Verified => "semantic postconditions verified",
@@ -798,6 +802,7 @@ impl MemoryAdapter {
             }
         }
 
+        validate_terminal_action_identity(&self.snapshot, &step, state)?;
         let message = if state == CommitState::Verified {
             "semantic postconditions verified"
         } else if state == CommitState::Failed {
@@ -1610,6 +1615,32 @@ fn predicates_established(
         }
     }
     Ok(true)
+}
+
+/// Field predicates cannot express entity generations or exclusive reciprocal
+/// custody. Keep a matching field set from proving completion for a replacement
+/// item/building; a refusal leaves the original pending proof receipt intact.
+fn validate_terminal_action_identity(
+    snapshot: &WorldSnapshot,
+    step: &PlanStep,
+    state: CommitState,
+) -> Result<()> {
+    if state == CommitState::Verified
+        && let Action::PlaceFurniture {
+            kind,
+            item,
+            location,
+        } = &step.action
+    {
+        effects::validate_furniture_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            *kind,
+            *item,
+            *location,
+        )?;
+    }
+    Ok(())
 }
 
 fn action_is_supported(action: &Action) -> bool {

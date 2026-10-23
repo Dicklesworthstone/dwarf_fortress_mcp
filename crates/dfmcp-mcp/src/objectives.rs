@@ -82,8 +82,7 @@ impl Objective {
                 "the original sealed goal is unavailable",
             )
         })?;
-        PredicateEvidence::laboratory(session.adapter.snapshot())?
-            .evaluate(&plan.terminal_condition)
+        crate::lab_world::plan_goal_truth(session.adapter.snapshot(), plan)
     }
 
     fn projection(&self, session: &LabSession) -> (PredicateTruth, Value) {
@@ -697,7 +696,7 @@ pub(super) fn recover_objective(
             let proof = store.load_snapshot(anchor.state_hash)?;
             if proof.anchor() != anchor
                 || anchor.fortress_id != retained.fortress_id
-                || !PredicateEvidence::laboratory(&proof)?.establishes(&plan.terminal_condition)?
+                || crate::lab_world::plan_goal_truth(&proof, &plan)? != PredicateTruth::True
             {
                 return Err(DfmcpError::new(
                     ErrorCode::CorruptLedger,

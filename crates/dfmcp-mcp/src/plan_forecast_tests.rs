@@ -9,7 +9,7 @@ use dfmcp_core::{
 use dfmcp_intent::{
     Action, Constraint, Intent, ObligationSpec, RequestedAction, StaticPlanner, effects,
 };
-use dfmcp_world::{CompareOp, Fact, FactPresence, FactSource, Predicate, Value};
+use dfmcp_world::{CompareOp, Fact, FactPresence, FactSource, Predicate, PredicateEvidence, Value};
 
 fn adapter_at(tick: u64) -> Result<MemoryAdapter> {
     let mut adapter = MemoryAdapter::new(scenario_snapshot(

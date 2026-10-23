@@ -15,6 +15,7 @@ Fortress or DFHack behaviour**; progress rates are a laboratory calibration.
 | `pause` | fortress pause flag | `Paused(p)` | no |
 | `designate_dig` | dig-designation entity; tiles converted over time in z/y/x order | `RegionTerrain{area, target tile}` | yes |
 | `build` | building entity, `planned → under_construction → complete`; footprint must be observed floor | `construction_stage == complete` on the created entity | yes |
+| `place_furniture` | allocates one exact manufactured item, debits loose stock and installs it at one tile | complete building plus exact installed item, geometry and reciprocal custody | yes |
 | `create_work_order` | work-order entity counting `amount_remaining` down | `amount_remaining == 0` | yes |
 | `set_labor` | `labor.<LABOR>` on each unit | field equality per unit | no |
 | `set_burrow_membership` | `burrow.<id>` on each unit | field equality per unit | no |
@@ -25,6 +26,11 @@ Fortress or DFHack behaviour**; progress rates are a laboratory calibration.
 Entities an action creates get an identity derived only from the step's
 idempotency key (`effects::created_entity_id`), so the sealed plan names them
 before dispatch and a retry cannot create a duplicate.
+
+Item-backed beds, doors, tables and chairs use the distinct `place_furniture`
+action. See [item-backed furniture](LAB_ITEM_FURNITURE.md) for the closed request,
+inventory conservation, cancellation and recovery contract. Existing abstract
+`build` actions retain their original interpretation.
 
 The planner fills omitted postconditions, a bounded obligation for temporal
 work (deadline scaled to the work, after every prerequisite's deadline, capped
