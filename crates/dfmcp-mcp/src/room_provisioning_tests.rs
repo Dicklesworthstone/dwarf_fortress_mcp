@@ -8,6 +8,9 @@ use dfmcp_intent::PreparedPlan;
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{Fact, FactPresence, FactSource, PredicateEvidence, PredicateTruth, tile_codes};
 
+#[path = "room_residual_tests.rs"]
+mod residual;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(963), false)
 }

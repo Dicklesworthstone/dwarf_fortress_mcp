@@ -20,6 +20,7 @@ use serde_json::{Value as Json, json};
 use crate::lab_world::{ProductionRequest, parse_steps, spatial_index};
 
 const PLANNER: &str = "provisioned_room_v1";
+const RESIDUAL_PLANNER: &str = "provisioned_room_residual_v1";
 const MAX_REQUEST_BYTES: usize = 64 * 1_024;
 const MAX_SLOTS: usize = 16;
 const MAX_STEPS: usize = 64;
@@ -200,6 +201,28 @@ impl ProvisionedRoomRequest {
         snapshot: &WorldSnapshot,
         summary: &str,
     ) -> Result<(Intent, Json)> {
+        self.compile_inner(id, snapshot, summary, false)
+    }
+
+    /// A separately versioned pursuit can retain exact completed installations.
+    /// The caller owns current authority, original lineage and quiescence checks;
+    /// pure archived reconstruction must not consult a mutable goal book.
+    pub(crate) fn compile_residual(
+        &self,
+        id: IntentId,
+        snapshot: &WorldSnapshot,
+        summary: &str,
+    ) -> Result<(Intent, Json)> {
+        self.compile_inner(id, snapshot, summary, true)
+    }
+
+    fn compile_inner(
+        &self,
+        id: IntentId,
+        snapshot: &WorldSnapshot,
+        summary: &str,
+        residual: bool,
+    ) -> Result<(Intent, Json)> {
         if snapshot.graph.entities.len() > MAX_ENTITIES {
             return Err(bounds(
                 "room provisioning exceeds its complete entity scan bound",
@@ -208,7 +231,12 @@ impl ProvisionedRoomRequest {
         let (origin, template) = self.layout.geometry();
         let layout = BlueprintPlanner.layout(origin, template.clone())?;
         let slots = furniture_slots(&layout, self.layout.furniture())?;
-        reject_occupied_geometry(snapshot, &layout)?;
+        let retained = if residual {
+            retained_installations(snapshot, &layout, &slots)?
+        } else {
+            reject_occupied_geometry(snapshot, &layout)?;
+            BTreeMap::new()
+        };
         let excavations = BlueprintPlanner.compile_blueprint_intent(
             id,
             snapshot.anchor(),
@@ -225,12 +253,27 @@ impl ProvisionedRoomRequest {
         let mut inventory = Vec::new();
         for kind in self.layout.furniture() {
             let token = kind.item_token();
-            let available = effects::loose_furniture_items(snapshot, *kind)?;
             let required = *needed
                 .get(token)
                 .ok_or_else(|| invariant("missing slot count"))?;
-            let selected = available.len().min(required);
-            let missing = required - selected;
+            let retained_count = retained.values().filter(|item| item.kind == *kind).count();
+            let remaining = required.checked_sub(retained_count).ok_or_else(|| {
+                invariant("retained furnishings exceed the complete original slot count")
+            })?;
+            if residual && remaining == 0 {
+                supply.insert(token, VecDeque::new());
+                inventory.push(json!({
+                    "item":token, "required":required, "retained_installations":retained_count,
+                    "remaining_furnishings":0, "observed_aggregate":null,
+                    "inventory_inspected":false, "eligible_items_selected":0,
+                    "new_items_required":0, "procurement_stock_target":null,
+                    "legacy_or_unallocated_stock_is_not_item_credit":true,
+                }));
+                continue;
+            }
+            let available = effects::loose_furniture_items(snapshot, *kind)?;
+            let selected = available.len().min(remaining);
+            let missing = remaining - selected;
             let stock = observed_stock(snapshot, *kind)?;
             let minimum = if missing == 0 {
                 None
@@ -255,12 +298,18 @@ impl ProvisionedRoomRequest {
                     .map(|id| (id, false))
                     .collect(),
             );
-            inventory.push(json!({
+            let mut row = json!({
                 "item":token, "required":required, "observed_aggregate":stock,
                 "eligible_items_selected":selected, "new_items_required":missing,
                 "procurement_stock_target":minimum,
                 "legacy_or_unallocated_stock_is_not_item_credit":true,
-            }));
+            });
+            if residual {
+                row["retained_installations"] = json!(retained_count);
+                row["remaining_furnishings"] = json!(remaining);
+                row["inventory_inspected"] = json!(true);
+            }
+            inventory.push(row);
         }
         let mut requested_actions = Vec::new();
         let mut production_analysis = Json::Null;
@@ -336,24 +385,65 @@ impl ProvisionedRoomRequest {
         }
         let excavation_offset = step_number(requested_actions.len())?;
         let mut terminal = vec![excavations.terminal_condition];
-        for mut requested in excavations.requested_actions {
-            // This compiler generation uses the reference model's work-scaled
-            // dig horizon. StaticPlanner seals the default obligation and then
-            // starts dependent placement horizons after that deadline. Keep
-            // the legacy blueprint compiler's fixed horizon unchanged.
-            if matches!(requested.action, Action::DesignateDig { .. }) {
-                requested.obligation = None;
+        let mut excavation_steps: Vec<Vec<u32>> = Vec::new();
+        for requested in excavations.requested_actions {
+            let parts = if residual {
+                residual_excavations(snapshot, requested, retained.values())?
+            } else {
+                vec![requested]
+            };
+            let mut steps = Vec::new();
+            for mut requested in parts {
+                // This compiler generation uses the reference model's work-scaled
+                // dig horizon. StaticPlanner seals the default obligation and then
+                // starts dependent placement horizons after that deadline. Keep
+                // the legacy blueprint compiler's fixed horizon unchanged.
+                if matches!(requested.action, Action::DesignateDig { .. }) {
+                    requested.obligation = None;
+                }
+                if residual {
+                    let mut dependencies = Vec::new();
+                    for dependency in &requested.depends_on {
+                        dependencies.extend_from_slice(
+                            excavation_steps.get(*dependency as usize).ok_or_else(|| {
+                                invariant("residual excavation dependency is not an earlier part")
+                            })?,
+                        );
+                    }
+                    dependencies.sort_unstable();
+                    dependencies.dedup();
+                    requested.depends_on = dependencies;
+                } else {
+                    for dependency in &mut requested.depends_on {
+                        *dependency = dependency
+                            .checked_add(excavation_offset)
+                            .ok_or_else(|| bounds("room excavation dependency overflow"))?;
+                    }
+                }
+                steps.push(step_number(requested_actions.len())?);
+                requested_actions.push(requested);
             }
-            for dependency in &mut requested.depends_on {
-                *dependency = dependency
-                    .checked_add(excavation_offset)
-                    .ok_or_else(|| bounds("room excavation dependency overflow"))?;
-            }
-            requested_actions.push(requested);
+            excavation_steps.push(steps);
         }
         let mut allocation = Vec::new();
         let mut allocated_ids = BTreeSet::new();
-        for slot in slots {
+        for (slot_index, slot) in slots.into_iter().enumerate() {
+            if let Some(installation) = retained.get(&slot_index) {
+                if !allocated_ids.insert(installation.item) {
+                    return Err(invariant(
+                        "a retained item was allocated to two room targets",
+                    ));
+                }
+                terminal.extend(effects::furniture_completion_predicates(installation));
+                allocation.push(json!({
+                    "kind":slot.kind.as_str(), "item_token":slot.kind.item_token(),
+                    "item":installation.item.get().to_string(),
+                    "building":installation.building.get().to_string(),
+                    "location":[slot.location.x,slot.location.y,slot.location.z],
+                    "supply":"retained_installation", "step":null, "excavation_steps":[],
+                }));
+                continue;
+            }
             let (item, manufactured) = supply
                 .get_mut(slot.kind.item_token())
                 .and_then(VecDeque::pop_front)
@@ -381,11 +471,11 @@ impl ProvisionedRoomRequest {
                 ));
             }
             terminal.extend(postconditions.iter().cloned());
-            let room_dependency = step_number(slot.excavation)?
-                .checked_add(excavation_offset)
-                .ok_or_else(|| bounds("room placement dependency overflow"))?;
+            let room_dependencies = excavation_steps
+                .get(slot.excavation)
+                .ok_or_else(|| invariant("room placement excavation is missing"))?;
             let mut depends_on = production_dependencies.clone();
-            depends_on.push(room_dependency);
+            depends_on.extend_from_slice(room_dependencies);
             depends_on.sort_unstable();
             depends_on.dedup();
             requested_actions.push(RequestedAction {
@@ -396,12 +486,16 @@ impl ProvisionedRoomRequest {
                 obligation: None,
                 depends_on,
             });
-            allocation.push(json!({
+            let mut row = json!({
                 "kind":slot.kind.as_str(), "item_token":slot.kind.item_token(),
                 "item":item.get().to_string(), "location":[slot.location.x,slot.location.y,slot.location.z],
                 "supply":if manufactured { "planned_production" } else { "observed_loose_item" },
-                "step":step, "excavation_step":room_dependency,
-            }));
+                "step":step, "excavation_step":room_dependencies.first(),
+            });
+            if residual {
+                row["excavation_steps"] = json!(room_dependencies);
+            }
+            allocation.push(row);
         }
         if requested_actions.len() > MAX_STEPS {
             return Err(bounds(
@@ -413,7 +507,11 @@ impl ProvisionedRoomRequest {
                 "room procurement produced excess unassigned items",
             ));
         }
-        let mut source_bytes = b"dfmcp-provisioned-room-source/1\0".to_vec();
+        let mut source_bytes = if residual {
+            b"dfmcp-provisioned-room-residual-source/1\0".to_vec()
+        } else {
+            b"dfmcp-provisioned-room-source/1\0".to_vec()
+        };
         source_bytes.extend_from_slice(self.canonical_json().as_bytes());
         let digest = Digest32::of_bytes(&source_bytes);
         let label = if summary.is_empty() {
@@ -439,19 +537,24 @@ impl ProvisionedRoomRequest {
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions,
         };
-        Ok((
-            intent,
-            json!({
-                "template":"provisioned_room", "planner":PLANNER,
-                "source_binding":{"room_source_digest":digest.to_hex(), "original_request_preserved":true},
-                "layout":self.layout.canonical_value(), "inventory":inventory,
-                "production":production_analysis, "allocation":allocation,
-                "excavation":{"parts":layout.excavations().len(), "tiles":layout.tile_count()},
-                "goal":"all original excavation regions and every exact installed furnishing",
-                "intermediate_stock_quotas_are_final_goals":false,
-                "room_assignment_created":false, "native_admission_changed":false,
-            }),
-        ))
+        let mut analysis = json!({
+            "template":"provisioned_room", "planner":if residual { RESIDUAL_PLANNER } else { PLANNER },
+            "source_binding":{"room_source_digest":digest.to_hex(), "original_request_preserved":true},
+            "layout":self.layout.canonical_value(), "inventory":inventory,
+            "production":production_analysis, "allocation":allocation,
+            "excavation":{"parts":layout.excavations().len(), "tiles":layout.tile_count()},
+            "goal":"all original excavation regions and every exact installed furnishing",
+            "intermediate_stock_quotas_are_final_goals":false,
+            "room_assignment_created":false, "native_admission_changed":false,
+        });
+        if residual {
+            analysis["source_planner"] = json!(PLANNER);
+            analysis["retained_placements"] = json!(retained.len());
+            analysis["new_placements"] = json!(allocated_ids.len() - retained.len());
+            analysis["proves_old_exact_action_goal"] = json!(false);
+            analysis["pursuit"] = json!("new reviewed pursuit of every original room target");
+        }
+        Ok((intent, analysis))
     }
 }
 
@@ -459,6 +562,162 @@ struct Slot {
     kind: FurnitureKind,
     location: MapCoord,
     excavation: usize,
+}
+
+/// Retain only complete exact-item furniture at the original requested slots.
+/// An occupied tile is never interpreted as useful inventory by its name alone.
+fn retained_installations(
+    snapshot: &WorldSnapshot,
+    layout: &BlueprintLayout,
+    slots: &[Slot],
+) -> Result<BTreeMap<usize, effects::FurnitureInstallation>> {
+    let mut positions = BTreeMap::new();
+    for (index, slot) in slots.iter().enumerate() {
+        if positions.insert(slot.location, index).is_some() {
+            return Err(invariant(
+                "the original room contains duplicate furnishing slots",
+            ));
+        }
+    }
+    let mut retained = BTreeMap::new();
+    let mut items = BTreeSet::new();
+    for building in snapshot
+        .graph
+        .entities
+        .values()
+        .filter(|record| record.kind == EntityKind::Building)
+    {
+        let Some(area) = effects::occupied_building_footprint(snapshot, building.id)? else {
+            continue;
+        };
+        if !layout
+            .excavations()
+            .iter()
+            .any(|part| overlap(area, part.area))
+        {
+            continue;
+        }
+        let slot_index = positions
+            .get(&area.min)
+            .copied()
+            .filter(|_| area.min == area.max)
+            .ok_or_else(|| {
+                precondition(
+                    "original room geometry is occupied outside an exact requested furnishing slot",
+                )
+            })?;
+        let slot = &slots[slot_index];
+        let installation = effects::inspect_complete_furniture(snapshot, building.id)?;
+        if installation.kind != slot.kind || installation.location != slot.location {
+            return Err(precondition(
+                "occupied room slot does not contain its requested furniture kind and location",
+            ));
+        }
+        let target = effects::dig_target_tile_code(layout.excavations()[slot.excavation].mode);
+        if snapshot.tile_code_at(installation.location) != Some(target) {
+            return Err(precondition(
+                "a retained installation does not stand on its original observed room terrain",
+            ));
+        }
+        if !items.insert(installation.item) || retained.insert(slot_index, installation).is_some() {
+            return Err(precondition(
+                "duplicate furniture occupancy cannot satisfy distinct original room slots",
+            ));
+        }
+    }
+    Ok(retained)
+}
+
+/// Exact retained tiles are holes in the new effect mask. The full original
+/// terrain condition remains in the goal, including every hole and already-dug
+/// part, but no residual designation can change terrain beneath an installation.
+fn residual_excavations<'a>(
+    snapshot: &WorldSnapshot,
+    requested: RequestedAction,
+    retained: impl Iterator<Item = &'a effects::FurnitureInstallation>,
+) -> Result<Vec<RequestedAction>> {
+    let Action::DesignateDig { area, mode } = requested.action else {
+        return Err(invariant(
+            "room excavation escaped its closed action family",
+        ));
+    };
+    let mut holes: Vec<_> = retained
+        .map(|installation| installation.location)
+        .filter(|location| area.contains(*location))
+        .collect();
+    if holes.is_empty() {
+        return Ok(vec![requested]);
+    }
+    if area.min.z != area.max.z {
+        return Err(invariant(
+            "residual room excavation must remain on one level",
+        ));
+    }
+    holes.sort_by_key(|at| (at.z, at.y, at.x));
+    holes.dedup();
+    let mut pieces = vec![area];
+    for hole in holes {
+        let mut next = Vec::new();
+        for piece in pieces {
+            if !piece.contains(hole) {
+                next.push(piece);
+                continue;
+            }
+            if piece.min.y < hole.y {
+                next.push(MapCuboid::new(
+                    piece.min,
+                    MapCoord::new(piece.max.x, hole.y - 1, hole.z),
+                )?);
+            }
+            if hole.y < piece.max.y {
+                next.push(MapCuboid::new(
+                    MapCoord::new(piece.min.x, hole.y + 1, hole.z),
+                    piece.max,
+                )?);
+            }
+            if piece.min.x < hole.x {
+                next.push(MapCuboid::new(
+                    MapCoord::new(piece.min.x, hole.y, hole.z),
+                    MapCoord::new(hole.x - 1, hole.y, hole.z),
+                )?);
+            }
+            if hole.x < piece.max.x {
+                next.push(MapCuboid::new(
+                    MapCoord::new(hole.x + 1, hole.y, hole.z),
+                    MapCoord::new(piece.max.x, hole.y, hole.z),
+                )?);
+            }
+        }
+        if next.len() > MAX_STEPS {
+            return Err(bounds(
+                "residual room excavation exceeds its bounded partition",
+            ));
+        }
+        pieces = next;
+    }
+    pieces.sort_by_key(|part| {
+        (
+            part.min.z, part.min.y, part.min.x, part.max.z, part.max.y, part.max.x,
+        )
+    });
+    let target = effects::dig_target_tile_code(mode);
+    let mut result = Vec::new();
+    for piece in pieces {
+        if dfmcp_world::terrain::region_tiles(piece)
+            .all(|at| snapshot.tile_code_at(at) == Some(target))
+        {
+            continue;
+        }
+        let mut part = requested.clone();
+        part.action = Action::DesignateDig { area: piece, mode };
+        part.postconditions = vec![Predicate::RegionTerrain {
+            area: piece,
+            tile_code: target,
+        }];
+        part.obligation = None;
+        result.push(part);
+    }
+    Ok(result)
 }
 
 fn furniture_slots(layout: &BlueprintLayout, kinds: &[FurnitureKind]) -> Result<Vec<Slot>> {

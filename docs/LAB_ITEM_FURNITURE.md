@@ -88,6 +88,22 @@ This wrapper establishes excavation and furniture installation. It does not
 create DF room ownership/assignments or prove connectivity to the existing
 fortress beyond the existing layout's bounded geometry and hazard checks.
 
+## Resume an interrupted room
+
+The existing `continue_goal` blueprint can name a retained committed
+`provisioned_room` plan. After all earlier same-root work is proven quiet, it
+proposes a new reviewed pursuit of the complete original layout. Valid installed
+furniture keeps its original building/item identity; only missing slots consume
+loose inventory or require manufacturing. New excavation excludes installed
+tiles while the final goal still requires every original terrain region.
+
+The new pursuit has its own exact placement proof. Earlier cancelled actions,
+original receipts and historical achievements remain unchanged. A successful
+same-root pursuit prevents redundant continuation of the old root. Current
+Observe/Plan authority, exact custody, stale-source review and durable lineage
+remain mandatory. See [room goal continuation](ROOM_GOAL_CONTINUATION.md) for
+the request, examples, refusal conditions and recovery contract.
+
 ## Request and authority
 
 Submit a semantic action with one exact canonical item and one target tile:

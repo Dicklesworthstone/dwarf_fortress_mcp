@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-23 — Resume interrupted furnished-room projects
+
+- Extend the existing `continue_goal` request to retained item-backed room
+  goals. Preserve every original layout slot and setup option, retain validated
+  complete installations, reuse released items and manufacture only deficits.
+- Exclude retained furniture tiles from new excavation, remap dependencies to
+  every required residual piece, and keep the full original terrain goal.
+  Retained furniture consumes no new stock or material.
+- Bind a separate fixed residual compiler and flat parent/root lineage into a
+  new private source seal and appended durable `room_continuation` tag. Existing
+  room compiler bytes and historical action outcomes stay unchanged; replacement
+  placements prove the newly reviewed pursuit's complete goal.
+- Recheck current authority, original False evidence and all same-root work at
+  proposal and commit. Require reviewed replay after every anchor change and
+  suppress duplicate continuation when another pursuit currently satisfies the
+  complete room request.
+- Add eighteen room compiler, source, durable and MCP regression cases.
+  Current adapter/laboratory and actual-source room module targets pass type
+  checking; warning-denied laboratory and module production Clippy passes.
+  Runtime execution and the full MCP facade remain unqualified in this
+  resource-constrained session. Document the complete workflow in
+  `docs/ROOM_GOAL_CONTINUATION.md`.
+
 ## 2026-10-23 — Prove retained furniture with exact current custody
 
 - Expose validated completed-installation inspection and reusable exact

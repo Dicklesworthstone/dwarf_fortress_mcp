@@ -59,9 +59,16 @@ mod production_source;
 #[path = "room_provisioning.rs"]
 mod room_provisioning;
 
+#[path = "room_continuation.rs"]
+mod room_continuation;
+
 #[cfg(test)]
 #[path = "room_source_server_tests.rs"]
 mod room_source_server_tests;
+
+#[cfg(test)]
+#[path = "room_continuation_mcp_tests.rs"]
+mod room_continuation_mcp_tests;
 
 #[path = "plan_forecast.rs"]
 mod plan_forecast;
@@ -1515,6 +1522,66 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// A new residual pursuit of the complete original room layout. Its exact
+    /// placement proof is independent of every historical plan in the lineage.
+    RoomContinuation {
+        summary: String,
+        raw: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GoalContinuation {
+    Production(goal_continuation::ProductionContinuation),
+    Room(room_continuation::RoomContinuation),
+}
+
+impl GoalContinuation {
+    fn parent(&self) -> Digest32 {
+        match self {
+            Self::Production(source) => source.parent,
+            Self::Room(source) => source.parent,
+        }
+    }
+
+    fn root(&self) -> Digest32 {
+        match self {
+            Self::Production(source) => source.root,
+            Self::Room(source) => source.root,
+        }
+    }
+
+    fn is_room(&self) -> bool {
+        matches!(self, Self::Room(_))
+    }
+
+    fn lineage_json(&self) -> serde_json::Value {
+        match self {
+            Self::Production(source) => source.lineage_json(),
+            Self::Room(source) => source.lineage_json(),
+        }
+    }
+
+    fn same_original_request(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Production(left), Self::Production(right)) => left.same_original_request(right),
+            (Self::Room(left), Self::Room(right)) => left.same_original_request(right),
+            _ => false,
+        }
+    }
+
+    fn into_source(self, summary: String) -> PlanSource {
+        match self {
+            Self::Production(source) => PlanSource::ProductionContinuation {
+                summary,
+                raw: source.canonical_json(),
+            },
+            Self::Room(source) => PlanSource::RoomContinuation {
+                summary,
+                raw: source.canonical_json(),
+            },
+        }
+    }
 }
 
 impl PlanSource {
@@ -1544,6 +1611,10 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::RoomContinuation { summary, raw } => D::RoomContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1570,6 +1641,10 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            D::RoomContinuation { summary, raw } => Self::RoomContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
         }
     }
 
@@ -1577,13 +1652,33 @@ impl PlanSource {
         self.compile(id, snapshot).map(|(intent, _)| intent)
     }
 
-    fn continuation(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
+    fn continuation(&self) -> Result<Option<GoalContinuation>> {
         match self {
             Self::ProductionContinuation { raw, .. } => {
-                goal_continuation::ProductionContinuation::parse(raw).map(Some)
+                goal_continuation::ProductionContinuation::parse(raw)
+                    .map(|source| Some(GoalContinuation::Production(source)))
             }
+            Self::RoomContinuation { raw, .. } => room_continuation::RoomContinuation::parse(raw)
+                .map(|source| Some(GoalContinuation::Room(source))),
             _ => Ok(None),
         }
+    }
+
+    fn can_continue(&self) -> bool {
+        match self {
+            Self::Production { .. }
+            | Self::ProductionContinuation { .. }
+            | Self::RoomContinuation { .. } => true,
+            Self::Blueprint { raw, .. } => room_provisioning::is_provisioned_room(raw),
+            _ => false,
+        }
+    }
+
+    fn continuation_root(&self, own_digest: Digest32) -> Result<Option<Digest32>> {
+        Ok(match self.continuation()? {
+            Some(source) => Some(source.root()),
+            None => self.can_continue().then_some(own_digest),
+        })
     }
 
     fn continuation_json(&self) -> serde_json::Value {
@@ -1613,6 +1708,11 @@ impl PlanSource {
             }
             Self::ProductionContinuation { summary, raw } => {
                 goal_continuation::ProductionContinuation::parse(raw)?
+                    .compile(id, snapshot, summary)
+                    .map(|(intent, analysis)| (intent, Some(analysis)))
+            }
+            Self::RoomContinuation { summary, raw } => {
+                room_continuation::RoomContinuation::parse(raw)?
                     .compile(id, snapshot, summary)
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
@@ -3164,7 +3264,10 @@ fn acquire_plan_leases(
         let area = match &step.action {
             Action::DesignateDig { area, .. } => *area,
             Action::Build { footprint, .. } => *footprint,
-            Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
+            Action::PlaceFurniture { location, .. } => MapCuboid {
+                min: *location,
+                max: *location,
+            },
             _ => continue,
         };
         if untracked.iter().any(|work| work.conflicts_with(&area)) {
@@ -3184,7 +3287,10 @@ fn acquire_plan_leases(
             let owned_area = match &work.action {
                 Action::DesignateDig { area, .. } => *area,
                 Action::Build { footprint, .. } => *footprint,
-                Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
+                Action::PlaceFurniture { location, .. } => MapCuboid {
+                    min: *location,
+                    max: *location,
+                },
                 _ => continue,
             };
             if dfmcp_core::lease::cuboids_intersect(&area, &owned_area) {
@@ -3207,7 +3313,10 @@ fn acquire_plan_leases(
             let owned_area = match &owned.action {
                 Action::DesignateDig { area, .. } => *area,
                 Action::Build { footprint, .. } => *footprint,
-                Action::PlaceFurniture { location, .. } => MapCuboid { min: *location, max: *location },
+                Action::PlaceFurniture { location, .. } => MapCuboid {
+                    min: *location,
+                    max: *location,
+                },
                 _ => continue,
             };
             if dfmcp_core::lease::cuboids_intersect(&area, &owned_area) {
@@ -3469,7 +3578,9 @@ fn rebase_by_witness(
     // equal action bytes alone cannot certify unchanged sealed deadlines.
     if matches!(
         &stale.source,
-        PlanSource::Production { .. } | PlanSource::ProductionContinuation { .. }
+        PlanSource::Production { .. }
+            | PlanSource::ProductionContinuation { .. }
+            | PlanSource::RoomContinuation { .. }
     ) || stale
         .plan
         .steps

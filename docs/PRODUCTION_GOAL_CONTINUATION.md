@@ -1,5 +1,10 @@
 # Continue a retained original production goal
 
+The same public `continue_goal` request also resumes retained item-backed rooms.
+See [room goal continuation](ROOM_GOAL_CONTINUATION.md) for its exact installation
+retention and separate child-goal proof. The production semantics below remain
+unchanged.
+
 The laboratory can compile a new pursuit of a retained production goal after
 its earlier work is quiet and its original stock requirements no longer hold.
 The new request uses the existing `fortress.plan` tool and `blueprint` argument:

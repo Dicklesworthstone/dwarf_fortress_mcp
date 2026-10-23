@@ -161,10 +161,7 @@ impl Objective {
         if !abandoned
             && truth == PredicateTruth::False
             && quiet == Some(true)
-            && matches!(
-                &self.source,
-                PlanSource::Production { .. } | PlanSource::ProductionContinuation { .. }
-            )
+            && self.source.can_continue()
         {
             // An affordance carries no new authority. Reuse the exact intake
             // gate so active/unknown sibling pursuits are not offered duplicate
@@ -214,7 +211,8 @@ fn source_summary(source: &PlanSource) -> &str {
         | PlanSource::Actions { summary, .. }
         | PlanSource::Blueprint { summary, .. }
         | PlanSource::Production { summary, .. }
-        | PlanSource::ProductionContinuation { summary, .. } => summary,
+        | PlanSource::ProductionContinuation { summary, .. }
+        | PlanSource::RoomContinuation { summary, .. } => summary,
     }
 }
 
@@ -226,11 +224,13 @@ fn source_json(source: &PlanSource) -> Value {
         PlanSource::Actions { raw, .. }
         | PlanSource::Blueprint { raw, .. }
         | PlanSource::Production { raw, .. }
-        | PlanSource::ProductionContinuation { raw, .. } => json!({
+        | PlanSource::ProductionContinuation { raw, .. }
+        | PlanSource::RoomContinuation { raw, .. } => json!({
             "kind": match source {
                 PlanSource::Actions { .. } => "actions",
                 PlanSource::Blueprint { .. } => "blueprint",
                 PlanSource::ProductionContinuation { .. } => "production_continuation",
+                PlanSource::RoomContinuation { .. } => "room_continuation",
                 _ => "production",
             },
             "request": serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone())),
@@ -260,7 +260,7 @@ pub(super) fn continuation_source(
     }
     let objective = session.objectives.iter().find(|goal| goal.plan_digest == parent)
         .ok_or_else(|| DfmcpError::new(ErrorCode::PreconditionsFailed,
-            "the original production goal is not retained; no replacement request can be inferred from action receipts"))?;
+            "the original goal is not retained; no replacement request can be inferred from action receipts"))?;
     if objective.abandoned(session) {
         return Err(DfmcpError::new(
             ErrorCode::PreconditionsFailed,
@@ -277,18 +277,30 @@ pub(super) fn continuation_source(
         )
     })?;
     let continuation = match &objective.source {
-        PlanSource::Production { raw, .. } => goal_continuation::ProductionContinuation::new(
-            parent,
-            parent,
-            crate::lab_world::ProductionRequest::parse(raw)?,
-        )?,
-        PlanSource::ProductionContinuation { raw, .. } => {
-            goal_continuation::ProductionContinuation::parse(raw)?.next(parent)?
+        PlanSource::Production { raw, .. } => {
+            GoalContinuation::Production(goal_continuation::ProductionContinuation::new(
+                parent,
+                parent,
+                crate::lab_world::ProductionRequest::parse(raw)?,
+            )?)
+        }
+        PlanSource::ProductionContinuation { raw, .. } => GoalContinuation::Production(
+            goal_continuation::ProductionContinuation::parse(raw)?.next(parent)?,
+        ),
+        PlanSource::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
+            GoalContinuation::Room(room_continuation::RoomContinuation::new(
+                parent,
+                parent,
+                room_provisioning::ProvisionedRoomRequest::parse(raw)?,
+            )?)
+        }
+        PlanSource::RoomContinuation { raw, .. } => {
+            GoalContinuation::Room(room_continuation::RoomContinuation::parse(raw)?.next(parent)?)
         }
         _ => {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
-                "continue_goal supports retained production objectives; legacy action, pause and room sources contain no inferred production quotas",
+                "continue_goal supports retained production and provisioned-room objectives; legacy action, pause and abstract room sources do not establish a resumable request",
             ));
         }
     };
@@ -319,30 +331,32 @@ pub(super) fn continuation_source(
         if other.plan_digest == parent || Some(other.plan_digest) == exclude_candidate {
             continue;
         }
-        let root = match &other.source {
-            PlanSource::Production { .. } => Some(other.plan_digest),
-            PlanSource::ProductionContinuation { raw, .. } => {
-                Some(goal_continuation::ProductionContinuation::parse(raw)?.root)
+        let root = other.source.continuation_root(other.plan_digest)?;
+        if root == Some(continuation.root()) {
+            if !goal_work_quiescent(session, other)? {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    format!(
+                        "original goal lineage still has unresolved work in plan {}; observe or explicitly drain that pursuit before continuing",
+                        other.plan_digest.to_hex()
+                    ),
+                ));
             }
-            _ => None,
-        };
-        if root == Some(continuation.root) && !goal_work_quiescent(session, other)? {
-            return Err(DfmcpError::new(
-                ErrorCode::PreconditionsFailed,
-                format!(
-                    "original goal lineage still has unresolved work in plan {}; observe or explicitly drain that pursuit before continuing",
-                    other.plan_digest.to_hex()
-                ),
-            ));
+            if continuation.is_room() && other.current_truth(session)? == PredicateTruth::True {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidIntent,
+                    format!(
+                        "the retained room request is already satisfied by pursuit {}; historical exact goal proofs remain unchanged",
+                        other.plan_digest.to_hex()
+                    ),
+                ));
+            }
         }
     }
-    Ok(PlanSource::ProductionContinuation {
-        summary: summary.map_or_else(
-            || source_summary(&objective.source).to_owned(),
-            |summary| summary,
-        ),
-        raw: continuation.canonical_json(),
-    })
+    Ok(continuation.into_source(summary.map_or_else(
+        || source_summary(&objective.source).to_owned(),
+        |summary| summary,
+    )))
 }
 
 /// A proposal can become unsafe without changing its own original action IDs.
@@ -359,7 +373,7 @@ pub(super) fn validate_continuation(
     };
     let current = continuation_source(
         session,
-        continuation.parent,
+        continuation.parent(),
         Some(source_summary(source).to_owned()),
         exclude_candidate,
     )?;

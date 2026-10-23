@@ -44,6 +44,62 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Continue interrupted furnished-room projects (2026-10-23)
+
+The existing `continue_goal` blueprint now accepts retained item-backed room
+goals. Its separately sealed `provisioned_room_residual_v1` compiler retains
+complete installations only at their original requested kinds and tiles with
+qualified exact generation/provenance/custody evidence. Only missing slots use
+loose inventory or manufacturing, so completed furnishings require no additional
+item, stock debit or WOOD. Cancelled placements can supply their released items.
+Residual excavation splits around retained installation tiles and remaps every
+placement dependency to all unfinished pieces of its original room. The final
+goal still requires every original terrain region and furnishing. Existing
+sixteen-slot, sixty-four-action and source/evidence bounds remain enforced.
+
+The private `dfmcp.room-continuation/1` envelope preserves the complete original
+`provisioned_room_v1` request, including unused setup permissions/sites, plus
+flat parent/root lineage and a fixed residual compiler identity. A distinct
+appended durable source tag supports pure reconstruction at the archived
+snapshot and intent ID. Original normal-room source bytes and seals remain
+unchanged. New placement keys prove only the new pursuit; old action receipts,
+exact original terminal conditions and first achievement are never rewritten.
+A currently satisfied same-root pursuit prevents duplicate continuation of an
+old False root and suppresses its continuation affordance.
+
+Proposal and commit require current Observe/Plan authority, verified active
+observation continuity, a False parent goal and physical/deferred quiescence
+across the complete retained lineage. Every changed anchor requires reviewed
+source replay, including when all furnishings are retained and only excavation
+remains. Durable reopen uses the existing verified recovery frontier; restore
+abandonment remains terminal. No new MCP tool or native mutation is introduced.
+See `docs/ROOM_GOAL_CONTINUATION.md` for the complete request and proof contract.
+
+**Evidence:** eighteen new regressions cover six residual compiler/execution
+scenarios, four private source/seal cases, two durable source/compaction cases
+and six full MCP lifecycle/recovery scenarios. The current adapter production
+library, laboratory production library and unit-test target, and actual-source
+MCP module test target pass pinned-nightly type checking. This includes the
+earlier large-room deadline regression that could not be recompiled in its
+original increment. Warning-denied production Clippy passes for the laboratory
+and actual-source modules; the intent library check is recorded below.
+
+The actual-source harness imports the real room, production, continuation,
+forecast, progress and laboratory-world modules. It does not compile the
+FastMCP/server facade: the six new public lifecycle tests and server/objective
+wiring are source-reviewed and formatted, but not compiled or executed here.
+All 693 inventoried source inputs remained unchanged during the final module
+checks. No new runtime execution pass is claimed; the attempted fresh engine
+test build was killed before a runnable binary was produced. Full-workspace,
+native and live qualification remain unestablished.
+
+Required `verify.sh` passes repository integrity, qualification-receipt,
+implementation-status and release-custody checks before the existing source
+bundle documentation failure (`exact clean git commit`). Required local
+qualification aborts with `No space left on device` before its full gates,
+including after one retry following removal of this task's inactive failed
+compiler fragments. No full qualification receipt is produced.
+
 ### Exact proof for retained installed furniture (2026-10-23)
 
 Completed-installation inspection exposes the exact building, item, kind and
@@ -65,9 +121,9 @@ Warning-denied production Clippy passes. All 123 inventoried core/world/intent
 Rust inputs stayed unchanged through the metadata checks. Scoped formatting
 and diff checks pass. The fresh intent test build was terminated with SIGKILL
 before producing a runnable binary; no new runtime execution is claimed. The
-MCP call-site change is source-reviewed here and awaits the complete room
-continuation component checks. No full-workspace or native/live qualification
-is established.
+MCP call-site change also passes the subsequent actual-source module checks
+recorded in the room continuation section above. No full-workspace or
+native/live qualification is established.
 
 ### Complete provisioned-room goals (2026-10-23)
 

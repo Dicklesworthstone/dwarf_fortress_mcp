@@ -139,6 +139,12 @@ pub enum DurablePlanSource {
         summary: String,
         raw: String,
     },
+    /// A separately reviewed residual room pursuit. The original layout and
+    /// flat lineage stay distinct from historical exact placement proofs.
+    RoomContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 impl DurablePlanSource {
@@ -153,6 +159,7 @@ impl DurablePlanSource {
             Self::ProductionContinuation { summary, raw } => {
                 ("production_continuation", summary, raw)
             }
+            Self::RoomContinuation { summary, raw } => ("room_continuation", summary, raw),
         }
     }
 
@@ -451,6 +458,10 @@ fn parse_plan(
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
         "production_continuation" => DurablePlanSource::ProductionContinuation {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "room_continuation" => DurablePlanSource::RoomContinuation {
             summary,
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
@@ -2883,6 +2894,124 @@ mod tests {
         assert_eq!(objective.source, source);
         assert!(store.commit(sealed.fortress_id, plan).is_none());
         assert_eq!(store.load_snapshot(objective.sealed_state_hash)?, sealed);
+        Ok(())
+    }
+
+    #[test]
+    fn room_continuation_retains_both_original_and_residual_history_after_compaction() -> Result<()>
+    {
+        let dir = TempDir::new("room-continuation-objective");
+        let sealed = snapshot(54, 1);
+        let root = Digest32::of_bytes(b"original room plan");
+        let child = Digest32::of_bytes(b"residual room plan");
+        let room = r#"{"layout":{"height":5,"origin":[2,6,10],"template":"dining_hall","width":5},"planner":"provisioned_room_v1","template":"provisioned_room"}"#;
+        let original = DurablePlanSource::Blueprint {
+            summary: "original complete room".to_owned(),
+            raw: room.to_owned(),
+        };
+        let residual = DurablePlanSource::RoomContinuation {
+            summary: "finish missing furniture".to_owned(),
+            raw: format!(
+                "{{\"schema\":\"dfmcp.room-continuation/1\",\"planner\":\"provisioned_room_residual_v1\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"room\":{room}}}",
+                root.to_hex(),
+                root.to_hex(),
+            ),
+        };
+        {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for (digest, intent, source) in
+                [(root, 7, original.clone()), (child, 8, residual.clone())]
+            {
+                store.persist_objective_commit(
+                    &sealed,
+                    digest,
+                    intent,
+                    source,
+                    SessionId::new(8),
+                    &[],
+                )?;
+                store.retire_commit(sealed.fortress_id, digest)?;
+            }
+            store.compact()?;
+        }
+        for _ in 0..2 {
+            let mut store = DurableLabStore::open(&dir.0)?;
+            for (digest, expected) in [(root, &original), (child, &residual)] {
+                let objective = store
+                    .objectives(sealed.fortress_id)
+                    .find(|objective| objective.plan_digest == digest)
+                    .ok_or_else(|| corrupt("room goal history was lost"))?;
+                assert_eq!(&objective.source, expected);
+                assert_eq!(objective.first_satisfied_anchor, None);
+                assert_eq!(objective.restore_abandoned_anchor, None);
+                assert_eq!(store.load_snapshot(objective.sealed_state_hash)?, sealed);
+                assert!(store.commit(sealed.fortress_id, digest).is_none());
+            }
+            store.compact()?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn room_continuation_source_tag_is_distinct_and_obeys_existing_record_bounds() -> Result<()> {
+        let source = DurablePlanSource::RoomContinuation {
+            summary: "room pursuit".to_owned(),
+            raw: "{\"room\":{}}".to_owned(),
+        };
+        let (kind, summary, raw) = source.fields();
+        assert_eq!(kind, "room_continuation");
+        let digest = Digest32::of_bytes(b"room source codec").to_hex();
+        let intent = format!("{:032x}", 1);
+        let decoded = parse_plan(
+            "54",
+            &digest,
+            &digest,
+            &intent,
+            kind,
+            &hex_text(summary),
+            &hex_text(raw),
+        )?;
+        assert_eq!(decoded.source, source);
+        assert!(
+            parse_plan(
+                "54",
+                &digest,
+                &digest,
+                &intent,
+                "room_continuation_v2",
+                &hex_text(summary),
+                &hex_text(raw),
+            )
+            .is_err()
+        );
+        for malformed in [
+            "f".to_owned(),
+            "ff".to_owned(),
+            "78".repeat(MAX_PLAN_REQUEST_BYTES + 1),
+        ] {
+            assert!(
+                parse_plan(
+                    "54",
+                    &digest,
+                    &digest,
+                    &intent,
+                    kind,
+                    &hex_text(summary),
+                    &malformed,
+                )
+                .is_err_and(|error| error.code == ErrorCode::CorruptLedger)
+            );
+        }
+        for (summary, raw) in [
+            ("s".repeat(MAX_PLAN_SUMMARY_BYTES + 1), "{}".to_owned()),
+            ("room".to_owned(), "x".repeat(MAX_PLAN_REQUEST_BYTES + 1)),
+        ] {
+            assert!(
+                DurablePlanSource::RoomContinuation { summary, raw }
+                    .validate_bound()
+                    .is_err()
+            );
+        }
         Ok(())
     }
 

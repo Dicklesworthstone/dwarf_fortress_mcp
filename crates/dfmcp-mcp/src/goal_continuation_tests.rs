@@ -9,7 +9,7 @@ use dfmcp_core::{
 };
 use dfmcp_intent::{Action, effects};
 use dfmcp_lab::MemoryAdapter;
-use dfmcp_world::{FactPresence, Value as WorldValue};
+use dfmcp_world::{FactPresence, PredicateEvidence, Value as WorldValue};
 
 fn world() -> Result<WorldSnapshot> {
     scenario_snapshot("starter_fortress", FortressId::new(741), false)

@@ -11,7 +11,7 @@ use dfmcp_core::{
     StateAnchor,
 };
 use dfmcp_intent::{Constraint, Intent, PreparedPlan, StaticPlanner};
-use dfmcp_world::{PredicateEvidence, PredicateTruth, WorldSnapshot};
+use dfmcp_world::{PredicateTruth, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -349,7 +349,7 @@ pub(crate) fn validate_goal_evidence_in_active_lineage(
             "continuation evidence does not advance the original goal's verified active observation lineage",
         ));
     }
-    match PredicateEvidence::laboratory(snapshot)?.evaluate(&original.terminal_condition)? {
+    match crate::lab_world::plan_goal_truth(snapshot, original)? {
         PredicateTruth::True => {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
@@ -380,7 +380,7 @@ pub(crate) fn request_json(session_id: &str, parent: Digest32) -> Value {
             "session_id": session_id,
             "blueprint": json!({"template": "continue_goal", "plan_digest": parent.to_hex()}).to_string(),
         },
-        "note": "compile the complete retained original production goal at current evidence, review the new seal, then explicitly commit it",
+        "note": "compile a new pursuit of the complete retained production or room request at current evidence, review the new seal, then explicitly commit it; original historical outcomes remain unchanged",
     })
 }
 
