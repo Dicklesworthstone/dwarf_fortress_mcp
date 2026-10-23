@@ -32,6 +32,8 @@ pub(crate) struct ReadWitness {
     edges: BTreeSet<EdgeId>,
     regions: Vec<MapCuboid>,
     pause: bool,
+    /// Complete building-kind domain, including absence of future occupants.
+    building_domain: bool,
     /// Set when some read cannot be bounded; the witness then proves nothing.
     unbounded: bool,
 }
@@ -71,6 +73,10 @@ impl ReadWitness {
             }
             Predicate::Paused(_) => self.pause = true,
             Predicate::RegionTerrain { area, .. } => self.region(*area),
+            Predicate::LaboratoryRoomAccess { area, .. } => {
+                self.region(*area);
+                self.building_domain = true;
+            }
             Predicate::All(children) | Predicate::Any(children) => {
                 for child in children {
                     self.predicate(child);
@@ -116,6 +122,28 @@ impl ReadWitness {
                 json!({"read": "lineage", "note": "the fortress or observation epoch changed"}),
             );
         }
+        if self.building_domain {
+            // A new entity can obstruct a route without changing any previously
+            // named entity. Compare the complete domain, not just known IDs.
+            if base.graph.entities.len() > 65_536 || now.graph.entities.len() > 65_536 {
+                return Some(
+                    json!({"read":"building_domain", "note":"building census exceeds its bound"}),
+                );
+            }
+            let base_buildings = base
+                .graph
+                .entities
+                .iter()
+                .filter(|(_, entity)| entity.kind.as_str() == "building");
+            let current_buildings = now
+                .graph
+                .entities
+                .iter()
+                .filter(|(_, entity)| entity.kind.as_str() == "building");
+            if base_buildings.ne(current_buildings) {
+                return Some(json!({"read":"building_domain"}));
+            }
+        }
         if self.pause && base.paused != now.paused {
             return Some(json!({"read": "pause"}));
         }
@@ -141,12 +169,18 @@ impl ReadWitness {
 
     /// Canonical description, for certificates.
     pub(crate) fn to_json(&self) -> Value {
-        json!({
+        let mut value = json!({
             "entities": self.entities.iter().map(|id| id.get().to_string()).collect::<Vec<_>>(),
             "edges": self.edges.iter().map(|id| id.get().to_string()).collect::<Vec<_>>(),
             "regions": self.regions.iter().map(|r| json!({"min": [r.min.x, r.min.y, r.min.z], "max": [r.max.x, r.max.y, r.max.z]})).collect::<Vec<_>>(),
             "pause": self.pause,
-        })
+        });
+        // Existing witness certificates keep their exact bytes.
+        if self.building_domain {
+            value["building_domain"] =
+                json!({"kind":"building", "coverage":"complete", "max_entities":65_536});
+        }
+        value
     }
 }
 
@@ -182,4 +216,71 @@ pub(crate) fn certificate(
     });
     let digest = Digest32::of_bytes(body.to_string().as_bytes()).to_hex();
     json!({"certificate": body, "certificate_digest": digest})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dfmcp_core::{FortressId, GameTick, ObservationCursor, Result};
+    use dfmcp_world::{EntityKind, EntityRecord, WorldGraph};
+
+    #[test]
+    fn room_access_witness_detects_phantom_buildings_and_kind_aliases() -> Result<()> {
+        let base = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(0),
+            ObservationCursor {
+                epoch: 1,
+                sequence: 0,
+            },
+            false,
+            WorldGraph::default(),
+        );
+        let mut witness = ReadWitness::default();
+        witness.predicate(&Predicate::LaboratoryRoomAccess {
+            area: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(3, 3, 0))?,
+            entry: MapCoord::new(0, 0, 0),
+            targets: vec![MapCoord::new(3, 3, 0)],
+        });
+        assert!(witness.first_change(&base, &base).is_none());
+        for kind in [
+            EntityKind::Building,
+            EntityKind::Other("building".to_owned()),
+        ] {
+            let mut now = base.clone();
+            let id = EntityId::new(900);
+            now.graph.entities.insert(
+                id,
+                EntityRecord {
+                    id,
+                    generation: 1,
+                    revision: 1,
+                    kind,
+                    label: "new obstruction".to_owned(),
+                    fields: Default::default(),
+                },
+            );
+            now.refresh_hash();
+            assert_eq!(
+                witness.first_change(&base, &now),
+                Some(json!({"read":"building_domain"}))
+            );
+            assert_eq!(
+                witness.first_change(&now, &base),
+                Some(json!({"read":"building_domain"}))
+            );
+        }
+        assert_eq!(witness.to_json()["building_domain"]["coverage"], "complete");
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_witness_certificate_does_not_acquire_an_empty_building_domain() {
+        assert_eq!(
+            ReadWitness::default().to_json(),
+            json!({
+                "entities":[], "edges":[], "regions":[], "pause":false,
+            })
+        );
+    }
 }

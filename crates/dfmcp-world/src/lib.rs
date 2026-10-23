@@ -12,6 +12,7 @@ pub mod franken_fs;
 pub mod graph_query;
 pub mod inventory_allocation;
 pub mod journal_delta;
+pub mod laboratory_access;
 mod ledger;
 pub mod map_connectivity;
 pub mod map_reachability;
@@ -65,6 +66,7 @@ pub use evidence::{
     EvidenceCoverage, EvidencePolicy, EvidenceSource, PredicateEvidence, lab_fact_is_eligible,
     laboratory_fact_value,
 };
+pub use laboratory_access::{laboratory_building_footprints, laboratory_room_access_truth};
 pub use ledger::{DurableLedger, EffectJournalRecord, ObservationCapsule, WitnessSet};
 pub use model::{
     ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence, FactSource,

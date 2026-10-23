@@ -141,6 +141,11 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
             Predicate::RegionTerrain { area, tile_code } => {
                 self.byte(10)?; self.area(*area)?; self.u32(*tile_code)?;
             }
+            Predicate::LaboratoryRoomAccess { area, entry, targets } => {
+                self.byte(11)?; self.area(*area)?; self.coord(*entry)?;
+                self.count(targets.len(), dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS)?;
+                for target in targets { self.coord(*target)?; }
+            }
         }
         Ok(())
     }
@@ -315,6 +320,13 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
             }
             9 => Predicate::Not(Box::new(self.predicate(depth + 1)?)),
             10 => Predicate::RegionTerrain { area: self.area()?, tile_code: self.u32()? },
+            11 => {
+                let area = self.area()?; let entry = self.coord()?;
+                let count = self.count(dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS, 12)?;
+                let mut targets = Vec::with_capacity(count);
+                for _ in 0..count { targets.push(self.coord()?); }
+                Predicate::LaboratoryRoomAccess { area, entry, targets }
+            }
             _ => return Err(invalid("unknown archived predicate")),
         })
     }

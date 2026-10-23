@@ -40,7 +40,13 @@ pub fn execute_bounded_query(
         .len()
         .max(1)
         .saturating_add(query.predicate.as_ref().map_or(1, Predicate::complexity));
-    if snapshot.graph.entities.len().saturating_mul(per_entity) > MAX_QUERY_WORK {
+    let access_work = query.predicate.as_ref().map_or(0, |predicate| {
+        predicate.laboratory_access_work(snapshot.graph.entities.len())
+    });
+    if (snapshot.graph.entities.len() as u64)
+        .saturating_mul((per_entity as u64).saturating_add(access_work))
+        > MAX_QUERY_WORK as u64
+    {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
             "query scan and predicate work exceed the conservative operation budget",
@@ -196,6 +202,26 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
                 bytes.extend_from_slice(&value.to_be_bytes());
             }
             bytes.extend_from_slice(&tile_code.to_be_bytes());
+        }
+        Predicate::LaboratoryRoomAccess {
+            area,
+            entry,
+            targets,
+        } => {
+            bytes.push(11);
+            for at in [area.min, area.max, *entry] {
+                bytes.extend_from_slice(&at.x.to_be_bytes());
+                bytes.extend_from_slice(&at.y.to_be_bytes());
+                bytes.extend_from_slice(&at.z.to_be_bytes());
+            }
+            let mut targets = targets.clone();
+            targets.sort_unstable_by_key(|target| (target.z, target.y, target.x));
+            put_u64(bytes, targets.len() as u64);
+            for at in targets {
+                bytes.extend_from_slice(&at.x.to_be_bytes());
+                bytes.extend_from_slice(&at.y.to_be_bytes());
+                bytes.extend_from_slice(&at.z.to_be_bytes());
+            }
         }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {

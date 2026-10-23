@@ -44,6 +44,31 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Current laboratory room-access proof (2026-10-23)
+
+A new bounded `LaboratoryRoomAccess` predicate retains an explicit entrance,
+a same-level region of at most 1,024 tiles and up to sixteen furnishing targets.
+It proves a current cardinal FLOOR approach to every target while treating
+building footprints and all furnishing tiles as blocked. Complete qualified
+occupancy, conservative missing-terrain truth, combined work bounds and
+laboratory-only evidence authority prevent a stored floor route from being
+mistaken for current accessible space. Canonical/archive tags are appended;
+old predicate bytes remain unchanged. MCP projections expose the policy and
+read witnesses include the complete negative building domain.
+
+**Evidence:** all 119 world unit tests pass on the actual current source,
+including ten new access/authority/budget groups with exhaustive small-map and
+rectangle-union comparisons. The world library and unit-test target pass
+pinned-nightly type checking and warning-denied production Clippy. The intent
+library, unit-test target and archive integration-test target also type-check;
+intent production Clippy passes. Two new archive cases and two MCP witness
+cases cover appended serialization and phantom building insertion. These
+checks do not establish latest-nightly full-workspace or native/live qualification.
+
+The contract is documented in `docs/LAB_CONNECTED_ROOM_ACCESS.md`. This is a
+reference-model proof; native pathfinding, ownership and live admission are
+unchanged.
+
 ### Continue interrupted furnished-room projects (2026-10-23)
 
 The existing `continue_goal` blueprint now accepts retained item-backed room

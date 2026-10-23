@@ -376,7 +376,8 @@ fn work_order_condition_json(condition: &WorkOrderCondition) -> Json {
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum ActionSpec {    Pause {
+enum ActionSpec {
+    Pause {
         paused: bool,
     },
     DesignateDig {
@@ -537,7 +538,11 @@ fn action(spec: ActionSpec) -> Result<Action> {
                 },
             }
         }
-        ActionSpec::PlaceFurniture { furniture, item, location } => Action::PlaceFurniture {
+        ActionSpec::PlaceFurniture {
+            furniture,
+            item,
+            location,
+        } => Action::PlaceFurniture {
             kind: match furniture.as_str() {
                 "bed" => FurnitureKind::Bed,
                 "door" => FurnitureKind::Door,
@@ -781,6 +786,16 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             "min": [area.min.x, area.min.y, area.min.z],
             "max": [area.max.x, area.max.y, area.max.z],
             "tile": tile_name(*tile_code),
+        }}),
+        Predicate::LaboratoryRoomAccess {
+            area,
+            entry,
+            targets,
+        } => json!({"laboratory_room_access": {
+            "policy":dfmcp_world::laboratory_access::LABORATORY_ACCESS_POLICY,
+            "region":{"min":[area.min.x,area.min.y,area.min.z],"max":[area.max.x,area.max.y,area.max.z]},
+            "entry":[entry.x,entry.y,entry.z],
+            "targets":targets.iter().map(|at| [at.x,at.y,at.z]).collect::<Vec<_>>(),
         }}),
         Predicate::All(children) => {
             json!({"all": children.iter().map(predicate_json).collect::<Vec<_>>()})

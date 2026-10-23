@@ -161,6 +161,53 @@ fn literal_variants_and_nested_boolean_predicates_roundtrip() -> Result<()> {
     { roundtrip(&make(vec![Action::Pause { paused: false }], goal, false))?; }
     Ok(())
 }
+
+#[test]
+fn laboratory_room_access_appends_a_lossless_predicate_tag() -> Result<()> {
+    let region = MapCuboid { min: MapCoord::new(-4, -2, 3), max: MapCoord::new(1, 2, 3) };
+    let access = Predicate::LaboratoryRoomAccess {
+        area: region, entry: region.min,
+        targets: vec![MapCoord::new(1, 2, 3), MapCoord::new(-1, 0, 3)],
+    };
+    let plan = make(vec![Action::Pause { paused: false }], access, false);
+    let (bytes, _) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    assert_eq!(bytes[predicate], 11);
+    assert_eq!(&bytes[predicate + 37..predicate + 41], &2u32.to_be_bytes());
+    assert_eq!(plan.steps[0].postconditions, vec![plan.terminal_condition.normalized()]);
+    Ok(())
+}
+
+#[test]
+fn laboratory_room_access_archive_rejects_oversized_or_invalid_targets() -> Result<()> {
+    let access = Predicate::LaboratoryRoomAccess {
+        area: area(), entry: area().min,
+        targets: vec![MapCoord::new(1, 3, 3), MapCoord::new(2, 3, 3)],
+    };
+    let plan = make(vec![Action::Pause { paused: false }], access, false);
+    let (bytes, seal) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    for count in [0u32, 17, u32::MAX] {
+        let mut changed = bytes.clone();
+        changed[predicate + 37..predicate + 41].copy_from_slice(&count.to_be_bytes());
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    for duplicate in [false, true] {
+        let mut changed = bytes.clone();
+        let start = predicate + 41;
+        if duplicate {
+            let first = changed[start..start + 12].to_vec();
+            changed[start + 12..start + 24].copy_from_slice(&first);
+        } else {
+            changed[start..start + 4].copy_from_slice(&i32::MAX.to_be_bytes());
+        }
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    Ok(())
+}
+
 #[test]
 fn reserved_kind_aliases_do_not_collapse_in_lossless_archive_identity() -> Result<()> {
     let ordinary = make(vec![Action::Pause { paused: false }], Predicate::EntityKind {

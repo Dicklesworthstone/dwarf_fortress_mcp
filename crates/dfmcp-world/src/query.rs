@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCuboid, Result};
+use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCoord, MapCuboid, Result};
 
 use crate::{EdgeKind, EntityKind, EntityRecord, Fact, Value, WorldSnapshot};
 
@@ -13,6 +13,7 @@ const MAX_QUERY_VALUE_DEPTH: usize = 64;
 const MAX_QUERY_VALUE_NODES: usize = 4_096;
 const MAX_QUERY_VALUE_BYTES: usize = 64 * 1_024;
 const MAX_QUERY_SCAN_ENTITIES: usize = 1_000_000;
+const MAX_QUERY_ACCESS_SCAN_WORK: u64 = 4_000_000;
 /// Total terrain tiles all region predicates in one predicate tree may visit.
 pub const MAX_PREDICATE_REGION_TILES: u64 = 262_144;
 
@@ -55,6 +56,13 @@ pub enum Predicate {
     All(Vec<Predicate>),
     Any(Vec<Predicate>),
     Not(Box<Predicate>),
+    /// Same-level cardinal FLOOR access to every furnishing approach in the
+    /// registered laboratory model. This does not establish native pathfinding.
+    LaboratoryRoomAccess {
+        area: MapCuboid,
+        entry: MapCoord,
+        targets: Vec<MapCoord>,
+    },
 }
 
 impl Predicate {
@@ -90,6 +98,28 @@ impl Predicate {
         }
     }
 
+    /// Additional bounded occupancy/terrain work beyond ordinary node visits.
+    /// Callers validate the complete predicate shape before estimating work.
+    pub(crate) fn laboratory_access_work(&self, entities: usize) -> u64 {
+        let mut pending = vec![self];
+        let mut work = 0u64;
+        while let Some(predicate) = pending.pop() {
+            match predicate {
+                Self::All(children) | Self::Any(children) => pending.extend(children),
+                Self::Not(child) => pending.push(child),
+                Self::LaboratoryRoomAccess { area, targets, .. } => {
+                    work = work.saturating_add(crate::laboratory_access::work_bound(
+                        *area,
+                        targets.len(),
+                        entities,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        work
+    }
+
     #[must_use]
     pub fn normalized(&self) -> Self {
         match self {
@@ -101,6 +131,20 @@ impl Predicate {
                 Self::Not(inner) => *inner,
                 normalized => Self::Not(Box::new(normalized)),
             },
+            Self::LaboratoryRoomAccess {
+                area,
+                entry,
+                targets,
+            } => {
+                let mut targets = targets.clone();
+                targets.sort_unstable_by_key(|target| (target.z, target.y, target.x));
+                // Keep duplicates so normalization cannot erase invalid input.
+                Self::LaboratoryRoomAccess {
+                    area: *area,
+                    entry: *entry,
+                    targets,
+                }
+            }
             other => other.clone(),
         }
     }
@@ -185,6 +229,25 @@ impl Predicate {
                     put_i32(output, value);
                 }
                 put_u32(output, *tile_code);
+            }
+            Self::LaboratoryRoomAccess {
+                area,
+                entry,
+                targets,
+            } => {
+                use crate::canonical::put_i32;
+                output.push(11);
+                for at in [area.min, area.max, *entry] {
+                    put_i32(output, at.x);
+                    put_i32(output, at.y);
+                    put_i32(output, at.z);
+                }
+                put_u64(output, targets.len() as u64);
+                for at in targets {
+                    put_i32(output, at.x);
+                    put_i32(output, at.y);
+                    put_i32(output, at.z);
+                }
             }
         }
     }
@@ -316,6 +379,12 @@ fn evaluate_truth(
                 crate::terrain::RegionTruth::Unknown => PredicateTruth::Unknown,
             }
         }
+        Predicate::LaboratoryRoomAccess {
+            area,
+            entry,
+            targets,
+        } => crate::laboratory_room_access_truth(snapshot, *area, *entry, targets)
+            .map_or(PredicateTruth::Unknown, |truth| truth),
         Predicate::All(predicates) => {
             let mut result = PredicateTruth::True;
             for predicate in predicates {
@@ -344,7 +413,7 @@ fn evaluate_truth(
 
 #[must_use]
 pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
-    evaluate_truth(snapshot, None, predicate).is_true()
+    predicate.validate_shape().is_ok() && evaluate_truth(snapshot, None, predicate).is_true()
 }
 
 /// Evaluate `predicate` with `candidate` standing in for every unanchored
@@ -365,6 +434,9 @@ pub fn evaluate_truth_for(
     candidate: EntityId,
     predicate: &Predicate,
 ) -> PredicateTruth {
+    if predicate.validate_shape().is_err() {
+        return PredicateTruth::Unknown;
+    }
     evaluate_truth(snapshot, Some(candidate), predicate)
 }
 
@@ -507,6 +579,7 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
     let mut pending = vec![(root, 1usize)];
     let mut nodes = 0usize;
     let mut region_tiles = 0u64;
+    let mut access_work = 0u64;
     while let Some((predicate, depth)) = pending.pop() {
         nodes = nodes.checked_add(1).ok_or_else(|| {
             DfmcpError::new(
@@ -559,6 +632,24 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                     return Err(DfmcpError::new(
                         ErrorCode::BudgetExceeded,
                         "predicate terrain regions exceed their combined tile bound",
+                    ));
+                }
+            }
+            Predicate::LaboratoryRoomAccess {
+                area,
+                entry,
+                targets,
+            } => {
+                crate::laboratory_access::validate_request(*area, *entry, targets)?;
+                access_work = access_work.saturating_add(crate::laboratory_access::work_bound(
+                    *area,
+                    targets.len(),
+                    crate::laboratory_access::MAX_LABORATORY_ACCESS_ENTITIES,
+                ));
+                if access_work > crate::laboratory_access::MAX_PREDICATE_LABORATORY_ACCESS_WORK {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "laboratory access predicates exceed their combined work bound",
                     ));
                 }
             }
@@ -671,6 +762,24 @@ pub fn execute_bounded_query(
             ErrorCode::BudgetExceeded,
             "query snapshot exceeds the implementation scan safety bound",
         ));
+    }
+    // A global access predicate is reevaluated for each candidate. Its complete
+    // building census and terrain traversal must not hide behind a single
+    // ordinary predicate-node charge in this direct reference entry point.
+    if let Some(predicate) = &query.predicate {
+        let access_work = predicate.laboratory_access_work(snapshot.graph.entities.len());
+        let row_work = (query.kinds.len().max(1) as u64)
+            .saturating_add(predicate.complexity() as u64)
+            .saturating_add(access_work);
+        if access_work > 0
+            && (snapshot.graph.entities.len() as u64).saturating_mul(row_work)
+                > MAX_QUERY_ACCESS_SCAN_WORK
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "query laboratory access work exceeds the conservative operation budget",
+            ));
+        }
     }
 
     let offset = if let Some(ref cont) = query.continuation {

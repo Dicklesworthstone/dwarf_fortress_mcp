@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-23 — Prove current access to room furnishings
+
+- Add a bounded same-level FLOOR access predicate with an explicit entrance,
+  routing domain and every furnishing target. Require a reachable cardinal
+  approach while accounting for current building occupancy and planned targets.
+- Preserve Unknown for missing route evidence or incomplete qualified occupancy;
+  only the laboratory evidence owner can certify this reference-model policy.
+- Append canonical and archive encodings without changing older predicate bytes,
+  charge bounded census/search work, and include phantom building insertions in
+  complete-domain read witnesses.
+- Add focused access, authority, bounds, archive and witness regressions. All 119
+  current world unit tests pass; world/intent production Clippy and actual
+  library/test-target type checks pass. See `IMPLEMENTATION_STATUS.md` for scope.
+
 ## 2026-10-23 — Resume interrupted furnished-room projects
 
 - Extend the existing `continue_goal` request to retained item-backed room
