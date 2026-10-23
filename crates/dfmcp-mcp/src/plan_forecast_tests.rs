@@ -295,3 +295,87 @@ fn paused_work_and_invalid_future_inputs_do_not_become_completion_predictions() 
     assert_eq!(result["epistemic_state"], "predicted");
     Ok(())
 }
+
+#[test]
+fn mixed_furniture_forecast_and_actual_execution_prove_the_same_original_goal() -> Result<()> {
+    let mut adapter = adapter_at(1)?;
+    let plan = production(
+        &adapter,
+        r#"{"template":"production","quotas":[{"item":"BED","minimum":1},{"item":"DOOR","minimum":1},{"item":"TABLE","minimum":1},{"item":"CHAIR","minimum":1},{"item":"DRINK","minimum":45},{"item":"FOOD","minimum":65}]}"#,
+        true,
+    )?;
+    let before = adapter.snapshot().clone();
+    let forecast = forecast_plan(&adapter, &plan, &context(&adapter));
+    assert_eq!(forecast["available"], true, "{forecast}");
+    assert_eq!(forecast["predicted_complete"], true, "{forecast}");
+    assert_eq!(forecast["predicted_goal_truth"], "true");
+    assert_eq!(forecast["predicted_physical_quiescent"], true);
+    assert_eq!(
+        adapter.snapshot(),
+        &before,
+        "forecast consumed real wood or published items"
+    );
+    assert_eq!(forecast_plan(&adapter, &plan, &context(&adapter)), forecast);
+    let completion = forecast["predicted_completion_tick"]
+        .as_u64()
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "forecast completion missing",
+            )
+        })?;
+    let slice = forecast["resolution_ticks"].as_u64().ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "forecast resolution missing",
+        )
+    })?;
+    let prepared = adapter.prepare(&plan, &context(&adapter))?;
+    let receipt = adapter.commit(&plan, &prepared, &context(&adapter))?;
+    while adapter.snapshot().tick.0 < completion {
+        adapter.advance_ticks(slice.min(completion - adapter.snapshot().tick.0))?;
+        for action in &receipt.actions {
+            adapter.poll_action(action.action_id, &context(&adapter))?;
+        }
+    }
+    for action in &receipt.actions {
+        assert_eq!(
+            adapter
+                .poll_action(action.action_id, &context(&adapter))?
+                .state,
+            CommitState::Verified,
+        );
+        assert!(adapter.action_work_state(action.action_id)?.is_quiescent());
+    }
+    assert_eq!(
+        PredicateEvidence::laboratory(adapter.snapshot())?.evaluate(&plan.terminal_condition)?,
+        PredicateTruth::True,
+    );
+    let items: Vec<_> = adapter
+        .snapshot()
+        .graph
+        .entities
+        .values()
+        .filter(|entity| entity.kind == dfmcp_world::EntityKind::Item)
+        .collect();
+    assert_eq!(items.len(), 4);
+    let stock = adapter
+        .snapshot()
+        .graph
+        .entities
+        .get(&starter::STOCK_LEDGER)
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "fixture stock missing",
+            )
+        })?;
+    assert_eq!(
+        dfmcp_world::laboratory_fact_value(
+            &stock.fields[effects::STOCK_WOOD_FIELD],
+            adapter.snapshot().tick
+        ),
+        Some(&Value::U64(16)),
+    );
+    Ok(())
+}

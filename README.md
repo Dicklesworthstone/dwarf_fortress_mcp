@@ -187,6 +187,14 @@ dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>  # score idle | follow_r
 
 Laboratory results are semantics and calibration, never Dwarf Fortress evidence.
 
+Production goals can combine DRINK, FOOD, BED, DOOR, TABLE and CHAIR quotas.
+Furniture orders consume finite wood, share finite worker/workshop
+capacity, and create inspectable items. The planner budgets all requested
+outputs together, includes food/drink consumption during the work, and can add
+explicitly authorized labor and workshop setup. See the
+[furniture production walkthrough](docs/CARPENTRY_PRODUCTION.md) and
+[production reserve planning](docs/PRODUCTION_RESERVE_PLANNING.md).
+
 ### Durable whole-room readiness
 
 The development room workflow can monitor every original floor, required wall

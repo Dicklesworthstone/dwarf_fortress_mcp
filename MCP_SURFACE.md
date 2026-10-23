@@ -204,7 +204,8 @@ capabilities, checkpoint policy, predicted diff, cost, invalidators, alternative
 explanation. The executable laboratory supports every non-extension semantic
 action family and furnished blueprint objectives; see `docs/LAB_SEMANTIC_ACTIONS.md`.
 
-The laboratory production template compiles original DRINK/FOOD quotas with the
+The laboratory production template compiles original DRINK/FOOD and wooden
+BED/DOOR/TABLE/CHAIR quotas with the
 fixed `consumption_aware_v1` generation on new intake. It budgets observed
 population consumption through the complete sealed schedule, including setup,
 queued work, shared-worker dependencies and originally satisfied quotas. Reports
@@ -213,6 +214,14 @@ their exact compiler generation and modern seals bind the complete request.
 The discarded-fork forecast requires Verified actions, a True original goal and
 physically quiet work together before `predicted_complete` is true. See
 `docs/PRODUCTION_RESERVE_PLANNING.md` for inputs, reports and limits.
+
+Furniture quotas share a finite WOOD supply and completed carpenter workshops.
+The planner accounts for existing orders, assigns up to six output jobs jointly,
+and serializes work sharing a selected citizen or workshop. Each completed
+carpentry unit consumes one modeled log and produces one canonical inventory
+item with its original order and ordinal. A shortage or unknown material count
+refuses the plan. See `docs/CARPENTRY_PRODUCTION.md` for a complete example and
+the distinction between manufacturing inventory and furnishing a room.
 
 The laboratory `blueprint` JSON string also accepts the closed
 `{"template":"continue_goal","plan_digest":"<retained production goal>"}` form.

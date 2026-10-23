@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-23 — Plan and verify complete furniture production goals
+
+- Extend the existing production blueprint with BED, DOOR, TABLE and CHAIR
+  quotas, including mixed requests with FOOD and DRINK. Seal the original
+  stock goals, preserve canonical source replay and include them in forecasts
+  and real completion checks.
+- Budget one shared finite WOOD supply across all requested furniture and
+  outstanding marked carpentry orders. Never count future production as stock;
+  refuse unknown inputs, overlapping producers and insufficient material.
+- Select workers jointly across three workshop/labor capacity families. Reuse
+  one carpenter across serialized furniture outputs, avoid unnecessary labor
+  enables, and deduplicate explicitly requested workshop/labor setup. Shared
+  workers and workshops create ordinary completion dependencies.
+- Include a carpenter workshop and explicit wood/furniture stocks in the
+  starter scenario; expose the new quota grammar and document complete usage.
+  Historical FOOD/DRINK requests retain their original source/seal behavior.
+- Pass all 125 actual-source MCP component tests and warning-denied production
+  module Clippy, including 12 furniture planner groups, seven joint-staffing
+  groups, source replay and forecast-versus-execution regressions. The final
+  engine also passes all 124 unit tests and production-library Clippy.
+- Full-workspace qualification remains blocked by existing static gates;
+  component evidence does not establish MCP facade, native or live admission.
+
 ## 2026-10-23 — Manufacture wooden furniture from finite laboratory inventory
 
 - Close the reference-model carpentry loop for beds, doors, tables and chairs:

@@ -219,3 +219,37 @@ fn full_source_seal_obeys_summary_bounds_without_changing_legacy_summaries() -> 
     assert!(compile(&current, IntentId::new(7), &snapshot, "bad\0summary").is_err());
     Ok(())
 }
+
+#[test]
+fn mixed_furniture_and_food_source_replays_the_identical_sealed_original_goal() -> Result<()> {
+    let snapshot = world()?;
+    let request = ProductionRequest::parse_current(
+        r#"{"template":"production","quotas":[{"item":"BED","minimum":2},{"item":"DOOR","minimum":2},{"item":"TABLE","minimum":1},{"item":"CHAIR","minimum":1},{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":60}]}"#,
+    )?;
+    let archived = request.canonical_json();
+    let reopened = ProductionRequest::parse(&archived)?;
+    let first = compile(&request, IntentId::new(74), &snapshot, "supply four rooms")?;
+    let replay = compile(&reopened, IntentId::new(74), &snapshot, "supply four rooms")?;
+    assert_eq!(first, replay);
+    assert_eq!(
+        prepared(&snapshot, &first.0)?,
+        prepared(&snapshot, &replay.0)?
+    );
+    assert_eq!(archived, reopened.canonical_json());
+    let terminal = format!("{:?}", first.0.terminal_condition);
+    for field in [
+        effects::STOCK_BED_FIELD,
+        effects::STOCK_DOOR_FIELD,
+        effects::STOCK_TABLE_FIELD,
+        effects::STOCK_CHAIR_FIELD,
+        effects::STOCK_DRINK_FIELD,
+        effects::STOCK_FOOD_FIELD,
+    ] {
+        assert!(terminal.contains(field), "original quota missing: {field}");
+    }
+    assert_ne!(
+        prepared(&snapshot, &first.0)?.digest,
+        dfmcp_core::Digest32::ZERO
+    );
+    Ok(())
+}

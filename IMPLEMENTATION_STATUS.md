@@ -44,6 +44,48 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete furniture production quotas and shared setup (2026-10-23)
+
+The existing production blueprint accepts BED, DOOR, TABLE and CHAIR alongside
+DRINK and FOOD. Compilation sizes finite orders from explicit qualified stock,
+budgets a shared WOOD supply across all requested outputs and current marked
+carpentry orders, and preserves every original stock minimum in the sealed
+terminal predicate. Furniture has zero metabolic consumption; mixed food/drink
+goals retain reserves through the complete shared production horizon.
+
+Joint staffing uses bounded exact selection across the three actual
+workshop/labor capacity families. All furniture outputs reuse one selected
+carpenter and workshop, avoiding labor enables that could not increase
+throughput. Explicit prerequisites can establish one carpenter workshop and
+enable an observed disabled labor under ordinary action authority. Shared
+setup actions are deduplicated, and shared workers or workshops serialize
+orders through ordinary verified-completion dependencies. The compiler remains
+conservative: it selects one canonical workshop per family rather than
+distributing work over every existing workshop.
+
+Starter scenarios now establish carpenter capacity, twenty logs and explicit
+zero furniture stocks. Original request round trips retain exact quotas and
+seals; historical food/drink sources preserve their interpretation of unmarked
+abstract furniture work. Discarded-fork forecasts and actual execution must
+prove the original stock goals as well as verified actions and physical
+quiescence. See `docs/CARPENTRY_PRODUCTION.md` and
+`docs/PRODUCTION_RESERVE_PLANNING.md` for complete usage and boundaries.
+
+**Evidence:** all 125 actual-source MCP component tests pass, including 12 new
+furniture planner/execution groups, seven joint-staffing groups, exact source
+replay, mixed-goal forecasts and existing consumption, workload, continuation,
+projection and progression regressions. Production-module Clippy passes with
+warnings denied and the repository deny policy. The harness references the
+actual repository modules and exact compiled dependencies; no replacement
+implementations are used. When the shared disk filled during code generation,
+only test/compiler output moved to a task-specific memory filesystem.
+
+This is component evidence. The MCP facade/FastMCP runtime and native/live
+DFHack path are not qualified by that harness. `verify.sh` stops at the existing
+source-bundle documentation contract. A development `qualify_local.sh` attempt
+passes its first three gates, then stops at 64 existing static-contract failures
+outside this feature across 5,190 checks. No production admission changes.
+
 ### Material-backed laboratory carpentry (2026-10-23)
 
 The reference effect timeline now manufactures beds, doors, tables and chairs
@@ -68,12 +110,16 @@ belong to the laboratory world; this does not allocate native items, change
 construction semantics, or admit a DFHack protocol. The broader production and
 semantic execution beads remain in progress.
 
-**Evidence:** all 239 actual-source intent component tests pass on the pinned
-nightly compiler (124 unit and 115 integration tests, zero failures), including
-12 new carpentry regression groups. These cover all nine recipe aliases, exact
-input/output conservation, 512 three-family capacity configurations, partial
-work, conditions, cancellation, partition parity, snapshot recovery,
-provenance and transactional bounds. Scoped Rust formatting passes. This does
+**Evidence:** all 124 actual-source intent unit tests pass on the final engine
+source, including 12 new carpentry regression groups. These cover all nine
+recipe aliases, exact input/output conservation, 512 three-family capacity
+configurations, partial work, conditions, cancellation, partition parity,
+snapshot recovery, provenance and transactional bounds. The 115 integration
+tests also passed before the final one-line completion ledger-scan budget
+charge; the final unit suite and focused carpentry group were rerun afterward.
+The pinned nightly compiler, doc-test phase, scoped formatting and
+warning-denied production-library Clippy pass. Whole test-target Clippy stops
+at an existing forbidden `expect_err` in `blueprint_layout_tests.rs`. This does
 not establish full-workspace, MCP runtime, native-build or live qualification.
 
 ### Recover original native work-order goal achievement durably (2026-10-11)

@@ -33,6 +33,9 @@ use production_workload::ProductionWorkload;
 #[path = "production_consumption.rs"]
 mod production_consumption;
 
+#[path = "production_staffing.rs"]
+mod production_staffing;
+
 #[cfg(test)]
 #[path = "production_workload_tests.rs"]
 mod production_workload_tests;
@@ -40,6 +43,10 @@ mod production_workload_tests;
 #[cfg(test)]
 #[path = "production_consumption_tests.rs"]
 mod production_consumption_tests;
+
+#[cfg(test)]
+#[path = "production_carpentry_tests.rs"]
+mod production_carpentry_tests;
 
 /// Largest semantic action request accepted by `fortress.plan`.
 pub(crate) const MAX_ACTIONS_JSON_BYTES: usize = 16 * 1024;
@@ -66,6 +73,7 @@ pub(crate) mod starter {
     /// The fortress's working still and kitchen, built at the hall's far end.
     pub const STILL: EntityId = EntityId::new(7_001);
     pub const KITCHEN: EntityId = EntityId::new(7_002);
+    pub const CARPENTERS: EntityId = EntityId::new(7_003);
     /// The raider of `besieged_fortress`.
     pub const RAIDER: EntityId = EntityId::new(6_001);
     pub const RAIDER_ARRIVES_AT: u64 = 1_500;
@@ -73,6 +81,8 @@ pub(crate) mod starter {
     /// Opening drink and food: a few days for seven dwarves.
     pub const OPENING_DRINK: u64 = 40;
     pub const OPENING_FOOD: u64 = 60;
+    /// Source-qualified logs shared by every wooden furniture order.
+    pub const OPENING_WOOD: u64 = 20;
     /// Excavation level of the starter fortress.
     pub const LEVEL_Z: i32 = 10;
 }
@@ -208,6 +218,7 @@ fn starter_graph() -> Result<WorldGraph> {
         match profession {
             "brewer" => fields.push(("labor.BREW", Value::Bool(true))),
             "farmer" => fields.push(("labor.COOK", Value::Bool(true))),
+            "carpenter" => fields.push(("labor.CARPENTRY", Value::Bool(true))),
             _ => {}
         }
         graph
@@ -217,6 +228,7 @@ fn starter_graph() -> Result<WorldGraph> {
     for (id, kind, x) in [
         (starter::STILL, "workshop:Still", 8),
         (starter::KITCHEN, "workshop:Kitchen", 9),
+        (starter::CARPENTERS, "workshop:Carpenters", 7),
     ] {
         let at = MapCoord::new(x, 0, starter::LEVEL_Z);
         graph.entities.insert(
@@ -270,6 +282,11 @@ fn starter_graph() -> Result<WorldGraph> {
                     Value::U64(starter::OPENING_DRINK),
                 ),
                 (effects::STOCK_FOOD_FIELD, Value::U64(starter::OPENING_FOOD)),
+                (effects::STOCK_WOOD_FIELD, Value::U64(starter::OPENING_WOOD)),
+                (effects::STOCK_BED_FIELD, Value::U64(0)),
+                (effects::STOCK_DOOR_FIELD, Value::U64(0)),
+                (effects::STOCK_TABLE_FIELD, Value::U64(0)),
+                (effects::STOCK_CHAIR_FIELD, Value::U64(0)),
                 (effects::METABOLISM_TICKS_FIELD, Value::U64(0)),
             ],
         ),
@@ -812,24 +829,47 @@ pub(crate) fn is_production_objective(raw: &str) -> bool {
         && serde_json::from_str::<Json>(raw).is_ok_and(|v| v["template"] == "production")
 }
 
-/// The laboratory recipe catalog, matching the reference effects exactly:
-/// a brewing batch yields 5 drink and a meal batch 5 food, from no modeled
-/// material inputs. Completed workshops and eligible workers are required.
+/// Closed reference recipe catalog. These quantities describe the simulator,
+/// never inferred native DF recipes or bridge execution authority.
 fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
     let mut compiler = dfmcp_intent::ProductionLogisticsCompiler::without_recipes();
-    for (output, job, workshop) in [
-        ("DRINK", "BREW_DRINK", "Still"),
-        ("FOOD", "PREPARE_MEAL", "Kitchen"),
+    for (output, job, workshop, yield_units) in [
+        ("DRINK", "BREW_DRINK", "Still", 5),
+        ("FOOD", "PREPARE_MEAL", "Kitchen", 5),
+        ("BED", "CONSTRUCT_BED", "Carpenters", 1),
+        ("DOOR", "CONSTRUCT_DOOR", "Carpenters", 1),
+        ("TABLE", "CONSTRUCT_TABLE", "Carpenters", 1),
+        ("CHAIR", "CONSTRUCT_THRONE", "Carpenters", 1),
     ] {
         compiler.register_recipe(dfmcp_intent::ProductionRecipe {
             output_token: output.to_owned(),
-            output_batch_size: 5,
-            input_tokens: Vec::new(),
+            output_batch_size: yield_units,
+            input_tokens: if is_carpentry_output(output) {
+                vec![("WOOD".to_owned(), 1)]
+            } else {
+                Vec::new()
+            },
             workshop: BuildingKind::Workshop(workshop.to_owned()),
             job_token: job.to_owned(),
         });
     }
     compiler
+}
+
+fn is_carpentry_output(item: &str) -> bool {
+    matches!(item, "BED" | "DOOR" | "TABLE" | "CHAIR")
+}
+
+fn production_stock_field(item: &str) -> Option<&'static str> {
+    match item {
+        "DRINK" => Some(effects::STOCK_DRINK_FIELD),
+        "FOOD" => Some(effects::STOCK_FOOD_FIELD),
+        "BED" => Some(effects::STOCK_BED_FIELD),
+        "DOOR" => Some(effects::STOCK_DOOR_FIELD),
+        "TABLE" => Some(effects::STOCK_TABLE_FIELD),
+        "CHAIR" => Some(effects::STOCK_CHAIR_FIELD),
+        _ => None,
+    }
 }
 
 /// The complete original production request, before stock-dependent lowering.
@@ -864,7 +904,8 @@ struct ProductionWorkshopSite {
     footprint: MapCuboid,
 }
 
-const MAX_PRODUCTION_WORKSHOP_SITES: usize = 2;
+const MAX_PRODUCTION_WORKSHOP_SITES: usize = 3;
+const MAX_PRODUCTION_JOBS: usize = 6;
 const MAX_PRODUCTION_WORKSHOP_TILES: u64 = 64;
 const MAX_PRODUCTION_SETUP_ENTITIES: usize = 65_536;
 
@@ -905,7 +946,7 @@ impl ProductionRequest {
         }
         let objective: Objective = serde_json::from_str(raw).map_err(|error| {
             invalid(format!(
-                "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD\",\"minimum\":n}}]}}: {error}"
+                "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}}]}}: {error}"
             ))
         })?;
         if objective.template != "production" {
@@ -920,9 +961,9 @@ impl ProductionRequest {
         }
         let mut quotas = BTreeMap::<String, u32>::new();
         for quota in objective.quotas {
-            if !matches!(quota.item.as_str(), "DRINK" | "FOOD") {
+            if production_stock_field(&quota.item).is_none() {
                 return Err(invalid(format!(
-                    "production quota token {:?} is outside the laboratory DRINK/FOOD model",
+                    "production quota token {:?} is outside the closed laboratory production model",
                     quota.item
                 )));
             }
@@ -934,20 +975,21 @@ impl ProductionRequest {
             .map(|setup| -> Result<ProductionPrerequisites> {
                 // Bound submitted sites before canonical ordering or duplicate checks.
                 if setup.workshops.len() > MAX_PRODUCTION_WORKSHOP_SITES {
-                    return Err(invalid("production accepts at most two workshop sites"));
+                    return Err(invalid("production accepts at most three workshop sites"));
                 }
                 let mut workshops = BTreeMap::<String, ProductionWorkshopSite>::new();
                 for site in setup.workshops {
-                    let output = match site.building.as_str() {
-                        "workshop:Still" => "DRINK",
-                        "workshop:Kitchen" => "FOOD",
+                    let serves_quota = match site.building.as_str() {
+                        "workshop:Still" => quotas.contains_key("DRINK"),
+                        "workshop:Kitchen" => quotas.contains_key("FOOD"),
+                        "workshop:Carpenters" => quotas.keys().any(|item| is_carpentry_output(item)),
                         _ => {
                             return Err(invalid(
-                                "production workshop sites require workshop:Still or workshop:Kitchen",
+                                "production workshop sites require workshop:Still, workshop:Kitchen or workshop:Carpenters",
                             ));
                         }
                     };
-                    if !quotas.contains_key(output) {
+                    if !serves_quota {
                         return Err(invalid(
                             "a workshop site must serve a quota in the original request",
                         ));
@@ -1046,7 +1088,11 @@ impl ProductionRequest {
     /// Work-order completion and the original stock goal remain separate.
     pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
         match self.planner {
-            None => self.compile_targets(snapshot, &self.quotas, false),
+            None => self.compile_targets(
+                snapshot,
+                &self.quotas,
+                self.quotas.keys().any(|item| is_carpentry_output(item)),
+            ),
             Some(ProductionPlanner::ConsumptionAwareV1) => {
                 production_consumption::compile(self, snapshot)
             }
@@ -1069,11 +1115,8 @@ impl ProductionRequest {
             effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
         let mut terminal = Vec::with_capacity(self.quotas.len());
         for (token, minimum) in &self.quotas {
-            let field = match token.as_str() {
-                "DRINK" => effects::STOCK_DRINK_FIELD,
-                "FOOD" => effects::STOCK_FOOD_FIELD,
-                _ => return Err(invalid("production quota escaped its closed model")),
-            };
+            let field = production_stock_field(token)
+                .ok_or_else(|| invalid("production quota escaped its closed model"))?;
             let held = ledger
                 .and_then(|ledger| ledger.fields.get(field))
                 .and_then(|fact| laboratory_fact_value(fact, snapshot.tick));
@@ -1105,6 +1148,28 @@ impl ProductionRequest {
                 value: Value::U64(u64::from(*minimum)),
             });
         }
+        let needs_wood = targets
+            .iter()
+            .any(|(item, target)| is_carpentry_output(item) && *target > inventory.get_stock(item));
+        if needs_wood {
+            let held = ledger.and_then(|record| {
+                production_fact(record, effects::STOCK_WOOD_FIELD, snapshot.tick)
+            });
+            let Some(Value::U64(held)) = held else {
+                return Err(production_setup_refusal(
+                    "wooden furniture production requires a source-qualified stock.material.WOOD count; missing material is unknown, not zero",
+                ));
+            };
+            inventory.set_stock(
+                "WOOD",
+                u32::try_from(*held).map_err(|_| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "observed wood exceeds the exact u32 production bound",
+                    )
+                })?,
+            );
+        }
         let quotas: Vec<dfmcp_intent::ProductionQuota> = targets
             .iter()
             .map(|(item, minimum)| dfmcp_intent::ProductionQuota {
@@ -1112,32 +1177,68 @@ impl ProductionRequest {
                 minimum_stock: *minimum,
             })
             .collect();
-        let plan = lab_recipes().plan_quotas(
+        let mut plan = lab_recipes().plan_quotas(
             &quotas,
             &inventory,
             dfmcp_intent::ProductionPlanningLimits::default(),
         )?;
+        if plan.steps().is_empty() {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "observed stock already meets every quota; nothing to produce",
+            ));
+        }
+        // Existing physical work consumes service and potentially the same raw
+        // logs even when its original request/action handle has retired.
+        let workload = {
+            let jobs: Vec<(&str, &str)> = plan
+                .steps()
+                .iter()
+                .map(|step| (step.output_token.as_str(), step.job_token.as_str()))
+                .collect();
+            ProductionWorkload::capture(snapshot, &jobs)?
+        };
+        let observed_wood = inventory.get_stock("WOOD");
+        if needs_wood && workload.reserved_wood_units() > 0 {
+            let available = u64::from(observed_wood).saturating_sub(workload.reserved_wood_units());
+            inventory.set_stock(
+                "WOOD",
+                u32::try_from(available).map_err(|_| {
+                    invalid("conservative wood availability escaped its observed bound")
+                })?,
+            );
+            plan = lab_recipes().plan_quotas(
+                &quotas,
+                &inventory,
+                dfmcp_intent::ProductionPlanningLimits::default(),
+            )?;
+        }
         let mut analysis = json!({
-            "model": "laboratory recipes (5 units per batch, no modeled inputs; each job needs its completed workshop and a living worker with the labor); stock read from the stock ledger",
+            "model": "closed laboratory recipes: DRINK/FOOD yield 5 without modeled inputs; BED/DOOR/TABLE/CHAIR yield one item per WOOD log; each job shares finite completed workshops and living labor-enabled workers",
             "feasible": plan.model_feasible(),
             "requirements": plan.requirements().iter().map(|r| json!({
                 "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
                 "planned": r.planned_units, "missing": r.missing_units,
+                "consumed_units": r.consumed_units,
             })).collect::<Vec<_>>(),
             "shortages": plan.shortages().iter().map(|s| json!({
                 "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
             })).collect::<Vec<_>>(),
         });
+        if needs_wood {
+            analysis["materials"] = json!({
+                "WOOD": {
+                    "observed_stock": observed_wood,
+                    "reserved_for_existing_orders": workload.reserved_wood_units(),
+                    "available_for_new_plan": inventory.get_stock("WOOD"),
+                    "reservation_is_model_only": true,
+                },
+            });
+        }
         if !plan.model_feasible() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!("production quotas are infeasible in the laboratory model: {analysis}"),
-            ));
-        }
-        if plan.steps().is_empty() {
-            return Err(DfmcpError::new(
-                ErrorCode::InvalidIntent,
-                "observed stock already meets every quota; nothing to produce",
             ));
         }
         let jobs: Vec<(&str, &str)> = plan
@@ -1145,10 +1246,6 @@ impl ProductionRequest {
             .iter()
             .map(|step| (step.output_token.as_str(), step.job_token.as_str()))
             .collect();
-        // Existing physical work belongs to the shared fortress, including
-        // work whose original process/action handles no longer exist. Its
-        // observed remaining service cannot disappear from a new deadline.
-        let workload = ProductionWorkload::capture(snapshot, &jobs)?;
         let setup = match &self.prerequisites {
             Some(options) => compile_production_prerequisites(snapshot, &jobs, options)?,
             None => {
@@ -1197,11 +1294,13 @@ impl ProductionRequest {
                 .get(&step.job_token)
                 .cloned()
                 .unwrap_or_default();
-            if let Some(previous_job) = setup.serial_after.get(&step.job_token) {
-                let previous = order_indices.get(previous_job).ok_or_else(|| {
-                    invalid("production staffing dependency does not precede its consumer")
-                })?;
-                dependencies.insert(*previous);
+            if let Some(previous_jobs) = setup.serial_after.get(&step.job_token) {
+                for previous_job in previous_jobs {
+                    let previous = order_indices.get(previous_job).ok_or_else(|| {
+                        invalid("production resource dependency does not precede its consumer")
+                    })?;
+                    dependencies.insert(*previous);
+                }
             }
             for dependency in &step.depends_on {
                 let dependency = u32::try_from(*dependency)
@@ -1217,17 +1316,23 @@ impl ProductionRequest {
                 u32::try_from(steps.len())
                     .map_err(|_| invalid("production order step index overflow"))?,
             );
+            let mut conditions = vec![json!({
+                "kind": "item_count_below",
+                "item_token": step.output_token,
+                "threshold": step.inventory_threshold,
+            })];
+            if is_carpentry_output(&step.output_token) {
+                conditions.push(json!({
+                    "kind": "material_available", "material_token": "WOOD", "minimum": 1,
+                }));
+            }
             steps.push(json!({
                 "action": {
                     "kind": "create_work_order",
                     "name": format!("{} for quota", step.output_token.to_lowercase()),
                     "job_token": step.job_token,
                     "amount": step.batches,
-                    "conditions": [{
-                        "kind": "item_count_below",
-                        "item_token": step.output_token,
-                        "threshold": step.inventory_threshold,
-                    }],
+                    "conditions": conditions,
                 },
                 "depends_on": dependencies,
             }));
@@ -1243,8 +1348,8 @@ impl ProductionRequest {
                 "steps_added": setup_count,
                 "workshops": setup.workshops,
                 "staffing": setup.staffing,
-                "selection_policy": "reuse eligible complete workshops; maximize distinct eligible living workers, minimize labor enables, then prefer known non-military, unknown, assigned workers and canonical per-job entity IDs",
-                "scope": "reference laboratory only; generated setup requires its own action capabilities; jobs sharing one selected worker are serialized through completion dependencies",
+                "selection_policy": "reuse eligible complete workshops; maximize distinct eligible living workers across workshop/labor families, minimize labor enables, then prefer known non-military, unknown, assigned workers and canonical per-family entity IDs",
+                "scope": "reference laboratory only; generated setup requires its own action capabilities; jobs sharing a selected worker or workshop are serialized through completion dependencies",
             });
             analysis["required_action_capabilities"] = json!(
                 parsed
@@ -1256,7 +1361,7 @@ impl ProductionRequest {
             analysis["staffing"] = json!({
                 "workers": setup.staffing,
                 "workshops": setup.workshops,
-                "selection_policy": "maximize distinct observed eligible workers, then military preference and canonical per-job entity IDs; serialize jobs sharing a worker",
+                "selection_policy": "maximize distinct observed eligible workers across workshop/labor families, then military preference and canonical per-family entity IDs; serialize jobs sharing a worker or workshop",
                 "setup_actions_authorized": false,
             });
         }
@@ -1274,7 +1379,7 @@ impl ProductionRequest {
 struct ProductionSetup {
     actions: Vec<Json>,
     dependencies: BTreeMap<String, BTreeSet<u32>>,
-    serial_after: BTreeMap<String, String>,
+    serial_after: BTreeMap<String, BTreeSet<String>>,
     workshops: Vec<Json>,
     staffing: Vec<Json>,
 }
@@ -1402,86 +1507,14 @@ fn production_military_rank(unit: &EntityRecord, tick: GameTick) -> u8 {
     }
 }
 
-/// Select both jobs jointly: distinct workers first, then fewest new labor
-/// enables, then military preference and canonical per-job entity identities.
-/// For a fixed worker on the other job, at most one identity is excluded.
-/// Its best counterpart is therefore among that role's first two candidates.
-/// Four pairs suffice even for a complete 65,536-entity input.
+/// Bounded shared staffing, preserving the established one/two-job tie-breaks.
 fn select_production_workers<'a>(
     tick: GameTick,
     living: &[&'a EntityRecord],
     fields: &[&str],
     assign_labor: bool,
 ) -> Result<Vec<&'a EntityRecord>> {
-    if fields.is_empty() || fields.len() > MAX_PRODUCTION_WORKSHOP_SITES {
-        return Err(invalid(
-            "production staffing requires one or two closed jobs",
-        ));
-    }
-    let change_cost = |unit: &EntityRecord, field: &str| {
-        u8::from(production_fact(unit, field, tick) != Some(&Value::Bool(true)))
-    };
-    let mut candidates = Vec::<Vec<&EntityRecord>>::with_capacity(fields.len());
-    for field in fields {
-        let mut best = Vec::with_capacity(3);
-        for unit in living {
-            match production_fact(unit, field, tick) {
-                Some(Value::Bool(true)) => {}
-                Some(Value::Bool(false)) if assign_labor => {}
-                _ => continue,
-            }
-            best.push(*unit);
-            best.sort_by_key(|unit| {
-                (
-                    change_cost(unit, field),
-                    production_military_rank(unit, tick),
-                    unit.id,
-                )
-            });
-            best.truncate(2);
-        }
-        if best.is_empty() {
-            return Err(production_setup_refusal(format!(
-                "production requires a known living worker with {field}=true, or an explicitly false field and prerequisites.assign_labor=true; unavailable labor cannot establish staffing or compensation"
-            )));
-        }
-        candidates.push(best);
-    }
-    let Some(first) = candidates.first() else {
-        return Err(invalid("production staffing lost its first job"));
-    };
-    if fields.len() == 1 {
-        return first
-            .first()
-            .copied()
-            .map(|unit| vec![unit])
-            .ok_or_else(|| invalid("production staffing lost its first candidate"));
-    }
-    let Some(second) = candidates.get(1) else {
-        return Err(invalid("production staffing lost its second job"));
-    };
-    let mut best_pair = None;
-    for left in first {
-        for right in second {
-            let left_military = production_military_rank(left, tick);
-            let right_military = production_military_rank(right, tick);
-            let key = (
-                left.id == right.id,
-                change_cost(left, fields[0]) + change_cost(right, fields[1]),
-                left_military + right_military,
-                left_military,
-                right_military,
-                left.id,
-                right.id,
-            );
-            if best_pair.as_ref().is_none_or(|(prior, _, _)| key < *prior) {
-                best_pair = Some((key, *left, *right));
-            }
-        }
-    }
-    best_pair
-        .map(|(_, left, right)| vec![left, right])
-        .ok_or_else(|| invalid("production staffing found no bounded candidate pair"))
+    production_staffing::select(tick, living, fields, assign_labor)
 }
 
 fn compile_production_prerequisites(
@@ -1490,7 +1523,7 @@ fn compile_production_prerequisites(
     options: &ProductionPrerequisites,
 ) -> Result<ProductionSetup> {
     if snapshot.graph.entities.len() > MAX_PRODUCTION_SETUP_ENTITIES
-        || jobs.len() > MAX_PRODUCTION_WORKSHOP_SITES
+        || jobs.len() > MAX_PRODUCTION_JOBS
     {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
@@ -1512,19 +1545,45 @@ fn compile_production_prerequisites(
                 && production_fact(unit, "alive", snapshot.tick) == Some(&Value::Bool(true))
         })
         .collect();
-    let fields: Vec<&str> = requirements
-        .iter()
-        .map(|(_, _, _, field, _)| field.as_str())
-        .collect();
+    // One selected workshop can service only one output of its family at a
+    // time. Select labor jointly for those actual concurrent capacity slots,
+    // not separately for every output that will be serialized on one slot.
+    // First-appearance ordering preserves historical FOOD/DRINK tie-breaks.
+    let mut families = Vec::new();
+    let mut fields = Vec::new();
+    let mut family_for_job = Vec::with_capacity(requirements.len());
+    for (_, _, workshop, field, labor) in &requirements {
+        let family = (*workshop, *labor);
+        let index = match families.iter().position(|candidate| *candidate == family) {
+            Some(index) => index,
+            None => {
+                let index = families.len();
+                families.push(family);
+                fields.push(field.as_str());
+                index
+            }
+        };
+        family_for_job.push(index);
+    }
     let workers = select_production_workers(snapshot.tick, &living, &fields, options.assign_labor)?;
     let mut worker_jobs = BTreeMap::<EntityId, String>::new();
+    let mut workshop_jobs = BTreeMap::<String, String>::new();
+    let mut labor_actions = BTreeMap::<(EntityId, String), u32>::new();
+    let mut workshop_actions = BTreeMap::<String, u32>::new();
     let mut setup = ProductionSetup::default();
-    for ((output, job, workshop, field, labor), worker) in requirements.iter().zip(workers) {
+    for ((output, job, workshop, field, labor), family) in requirements.iter().zip(family_for_job) {
+        let worker = workers
+            .get(family)
+            .copied()
+            .ok_or_else(|| invalid("production staffing lost a selected capacity family"))?;
         let mut dependencies = BTreeSet::new();
         let already_enabled =
             production_fact(worker, field, snapshot.tick) == Some(&Value::Bool(true));
         let labor_action = if already_enabled {
             None
+        } else if let Some(index) = labor_actions.get(&(worker.id, (*labor).to_owned())) {
+            dependencies.insert(*index);
+            Some(*index)
         } else {
             // The default inverse disables this same labor. It is an exact
             // restoration only because the eligible prior value is false.
@@ -1545,6 +1604,7 @@ fn compile_production_prerequisites(
                 "depends_on": [],
             }));
             dependencies.insert(index);
+            labor_actions.insert((worker.id, (*labor).to_owned()), index);
             Some(index)
         };
         let previous_job = worker_jobs.insert(worker.id, (*job).to_owned());
@@ -1554,7 +1614,20 @@ fn compile_production_prerequisites(
             // predecessor's horizon, so queue time cannot consume its own.
             setup
                 .serial_after
-                .insert((*job).to_owned(), previous_job.clone());
+                .entry((*job).to_owned())
+                .or_default()
+                .insert(previous_job.clone());
+        }
+        // This plan selects one canonical existing or newly built workshop
+        // for each recipe family. Its finite slot is shared across outputs,
+        // independently of how many eligible workers the roster contains.
+        let previous_workshop_job = workshop_jobs.insert((*workshop).to_owned(), (*job).to_owned());
+        if let Some(previous) = &previous_workshop_job {
+            setup
+                .serial_after
+                .entry((*job).to_owned())
+                .or_default()
+                .insert(previous.clone());
         }
         setup.staffing.push(json!({
             "job_token": job,
@@ -1564,6 +1637,7 @@ fn compile_production_prerequisites(
             "action_index": labor_action,
             "reused_across_jobs": previous_job.is_some(),
             "serial_after_job": previous_job,
+            "serial_after_workshop_job": previous_workshop_job,
             "prior_labor": match production_fact(worker, field, snapshot.tick) {
                 Some(Value::Bool(true)) => "enabled",
                 Some(Value::Bool(false)) => "disabled",
@@ -1596,19 +1670,25 @@ fn compile_production_prerequisites(
                     "{output} requires {workshop}; supply its explicit prerequisites.workshops site"
                 ))
             })?;
-            production_site_is_eligible(snapshot, site)?;
-            let index = u32::try_from(setup.actions.len())
-                .map_err(|_| invalid("production setup step index overflow"))?;
-            setup.actions.push(json!({
-                "action": {
-                    "kind": "build",
-                    "building": workshop,
-                    "location": [site.location.x, site.location.y, site.location.z],
-                    "min": [site.footprint.min.x, site.footprint.min.y, site.footprint.min.z],
-                    "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
-                },
-                "depends_on": [],
-            }));
+            let index = if let Some(index) = workshop_actions.get(*workshop) {
+                *index
+            } else {
+                production_site_is_eligible(snapshot, site)?;
+                let index = u32::try_from(setup.actions.len())
+                    .map_err(|_| invalid("production setup step index overflow"))?;
+                setup.actions.push(json!({
+                    "action": {
+                        "kind": "build",
+                        "building": workshop,
+                        "location": [site.location.x, site.location.y, site.location.z],
+                        "min": [site.footprint.min.x, site.footprint.min.y, site.footprint.min.z],
+                        "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
+                    },
+                    "depends_on": [],
+                }));
+                workshop_actions.insert((*workshop).to_owned(), index);
+                index
+            };
             dependencies.insert(index);
             setup.workshops.push(json!({
                 "job_token": job,
@@ -2802,7 +2882,7 @@ mod tests {
             Some(tile_codes::SOLID_WALL)
         );
         assert_eq!(snapshot.tile_code_at(MapCoord::new(0, 0, 12)), None);
-        assert_eq!(snapshot.graph.entities.len(), 13);
+        assert_eq!(snapshot.graph.entities.len(), 14);
         assert!(scenario_snapshot("moon_base", FortressId::new(3), true).is_err());
         Ok(())
     }

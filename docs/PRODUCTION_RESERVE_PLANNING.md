@@ -1,6 +1,7 @@
 # Plan production that survives consumption
 
-The deterministic laboratory compiles original DRINK and FOOD quotas into
+The deterministic laboratory compiles original DRINK, FOOD, BED, DOOR, TABLE
+and CHAIR quotas into
 ordinary sealed work orders, with optional explicitly authorized labor and
 workshop setup. New `fortress.plan` requests use the fixed
 `consumption_aware_v1` compiler. The existing `blueprint` JSON string accepts:
@@ -125,3 +126,72 @@ result instead of inventing a maintenance horizon.
 
 This functionality is the executable reference laboratory. It does not claim
 DFHack recipe behavior, native mutation admission or compatibility evidence.
+
+## Produce furniture from a shared supply of logs
+
+Furniture quotas use the same `fortress.plan` production request and sealed
+plan → commit → wait → prove workflow. A request can mix all six supported
+outputs. For example:
+
+```json
+{
+  "template": "production",
+  "quotas": [
+    {"item": "BED", "minimum": 4},
+    {"item": "DOOR", "minimum": 4},
+    {"item": "TABLE", "minimum": 1},
+    {"item": "CHAIR", "minimum": 1}
+  ]
+}
+```
+
+The closed reference carpentry recipes each produce one item and consume one
+log from `stock.material.WOOD`. Output counts are explicit qualified facts at
+`stock.item.BED`, `stock.item.DOOR`, `stock.item.TABLE` and `stock.item.CHAIR`.
+An absent or unavailable count is unknown; it is not a zero starting stock.
+All outputs share the same log supply, so the example needs ten logs when all
+four output counts start at zero. Already held output is credited once. The
+planner refuses a material deficit before producing a candidate program.
+
+The starter fortress now has a completed `workshop:Carpenters`, an enabled
+carpenter, twenty observed logs and explicit zero furniture counts. Each
+reference completion creates a source-order-linked item as well as increasing
+the corresponding stock count. The original terminal predicate requires the
+requested stocks, independently of the individual work-order counters.
+Furniture has zero metabolism consumption allowance; DRINK/FOOD in the same
+request retain their consumption reserves through the complete shared horizon.
+
+Current finite workshop and worker capacity still apply. All four furniture
+recipes share one selected `CARPENTRY` worker and workshop capacity slot.
+Joint selection compares the three workshop/labor families across all six
+outputs. It maximizes distinct eligible workers across those slots, then
+minimizes labor-enable cost, military preference and canonical IDs. Adding more
+furniture output types does not enable more carpenters. The compiler selects
+one canonical workshop per family and serializes jobs sharing that workshop or a selected worker through
+verified-completion dependencies. This is conservative even when extra
+carpentry workshops could permit more parallelism. Dependency horizons account
+for that serialization instead of expiring later orders while they wait.
+
+When setup is necessary, the existing explicit `prerequisites` object may name
+`workshop:Carpenters` in addition to Still and Kitchen, with at most one site
+per family and three sites total. Its footprint, support and safety halo must
+be observed. A shared workshop is built only once, and a selected citizen's
+same disabled labor is enabled only once. Every generated step retains its own
+ordinary capability requirement; missing or unknown labor does not grant
+permission to configure it.
+
+Existing marked carpentry work contributes both remaining service and a
+conservative debit of one log per unfinished unit. This debit is reported in
+`production.materials.WOOD` as observed stock, the amount reserved in the model
+for older work, and the amount left for the new candidate. It is not a native
+reservation or future stock. An active producer for an output requested by the
+new plan refuses overlapping quota work; the caller must first observe,
+reconcile or explicitly stop the original work. New furniture planning also
+refuses legacy carpentry without the qualified `carpentry/1` marker. Historical
+food/drink-only requests preserve their old treatment of unmarked abstract
+carpentry and reproduce the original program.
+
+The bounded model does not harvest logs, infer missing inventory, establish
+native recipe semantics, build rooms from those items automatically, or admit
+a live mutation profile. Concurrent interference can invalidate the prediction;
+actual qualified stock and item evidence determine completion.

@@ -14,7 +14,7 @@ const MAX_WORKLOAD_ROWS: usize = 16;
 
 struct ExistingOrder {
     id: EntityId,
-    job: &'static str,
+    job: String,
     remaining: u64,
     partial: u64,
 }
@@ -26,6 +26,7 @@ pub(super) struct ProductionWorkload {
     /// allowance used to absorb service competition and settlement boundaries.
     service_ticks: u64,
     allowance_ticks: u64,
+    wood_units: u64,
 }
 
 fn unavailable(record: &EntityRecord, field: &str) -> DfmcpError {
@@ -73,6 +74,7 @@ impl ProductionWorkload {
             orders: Vec::new(),
             service_ticks: 0,
             allowance_ticks: 0,
+            wood_units: 0,
         };
         for record in snapshot.graph.entities.values() {
             if record.kind != EntityKind::WorkOrder {
@@ -88,15 +90,37 @@ impl ProductionWorkload {
                 Value::Text(status) if status == effects::STATUS_ACTIVE => {}
                 _ => return Err(unavailable(record, effects::STATUS_FIELD)),
             }
-            let (job, output) = match value(record, "job_token", snapshot.tick)? {
-                Value::Text(job) if job == "BREW_DRINK" => ("BREW_DRINK", "DRINK"),
-                Value::Text(job) if job == "PREPARE_MEAL" => ("PREPARE_MEAL", "FOOD"),
-                Value::Text(job) if job == "COOK_MEAL" => ("COOK_MEAL", "FOOD"),
-                // No shared worker/workshop capacity is registered for other
-                // job tokens, so their unmodeled resource use is not invented.
-                Value::Text(_) => continue,
-                _ => return Err(unavailable(record, "job_token")),
+            let Value::Text(job) = value(record, "job_token", snapshot.tick)? else {
+                return Err(unavailable(record, "job_token"));
             };
+            let Some(output) = effects::work_order_output_item(job) else {
+                // Other jobs have no registered capacity/material semantics.
+                continue;
+            };
+            if is_carpentry_output(output) {
+                if !record
+                    .fields
+                    .contains_key(effects::WORK_ORDER_PRODUCTION_MODEL_FIELD)
+                    && !jobs.iter().any(|(item, _)| is_carpentry_output(item))
+                {
+                    // Historical economy sources treated unmarked carpentry as
+                    // abstract work with no shared capacity. Preserve their
+                    // original program; never use that omission to authorize
+                    // new furniture against unknown material history.
+                    continue;
+                }
+                if value(
+                    record,
+                    effects::WORK_ORDER_PRODUCTION_MODEL_FIELD,
+                    snapshot.tick,
+                )? != &Value::Text(effects::CARPENTRY_PRODUCTION_MODEL.to_owned())
+                {
+                    return Err(unavailable(
+                        record,
+                        effects::WORK_ORDER_PRODUCTION_MODEL_FIELD,
+                    ));
+                }
+            }
             let remaining = unsigned(record, effects::AMOUNT_REMAINING_FIELD, snapshot.tick)?;
             let partial = unsigned(record, "work_ticks", snapshot.tick)?;
             if remaining == 0 || partial >= effects::WORK_ORDER_TICKS_PER_UNIT {
@@ -122,6 +146,12 @@ impl ProductionWorkload {
                     ),
                 ));
             }
+            if is_carpentry_output(output) {
+                result.wood_units = result
+                    .wood_units
+                    .checked_add(remaining)
+                    .ok_or_else(horizon_error)?;
+            }
             if result.orders.len() >= MAX_WORKLOAD_ORDERS {
                 return Err(DfmcpError::new(
                     ErrorCode::BudgetExceeded,
@@ -139,7 +169,7 @@ impl ProductionWorkload {
                 .ok_or_else(horizon_error)?;
             result.orders.push(ExistingOrder {
                 id: record.id,
-                job,
+                job: job.clone(),
                 remaining,
                 partial,
             });
@@ -152,6 +182,12 @@ impl ProductionWorkload {
             .checked_mul(2)
             .ok_or_else(horizon_error)?;
         Ok(result)
+    }
+
+    /// Conservatively retain one log for each unfinished preexisting unit.
+    /// This is a planning debit only; it reserves no actual game resource.
+    pub(super) const fn reserved_wood_units(&self) -> u64 {
+        self.wood_units
     }
 
     pub(super) fn analysis(&self) -> Option<Json> {
@@ -175,6 +211,7 @@ impl ProductionWorkload {
             "existing_orders_omitted": self.orders.len().saturating_sub(MAX_WORKLOAD_ROWS),
             "remaining_registered_service_ticks": self.service_ticks,
             "queued_service_allowance_ticks": self.allowance_ticks,
+            "wood_units_reserved_for_existing_orders": self.wood_units,
             "allowance_factor": 2,
             "completion_guaranteed": false,
             "future_output_counted_as_stock": false,

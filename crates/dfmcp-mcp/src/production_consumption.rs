@@ -65,6 +65,9 @@ impl ConsumptionModel {
     }
 
     fn allowance(&self, item: &str, horizon: u64) -> Result<u64> {
+        if is_carpentry_output(item) || item == "WOOD" {
+            return Ok(0);
+        }
         let interval = match item {
             "DRINK" => effects::DRINK_INTERVAL_TICKS,
             "FOOD" => effects::FOOD_INTERVAL_TICKS,
@@ -155,13 +158,20 @@ fn annotate(
             .as_str()
             .ok_or_else(|| invalid("consumption planning lost its resource identity"))?
             .to_owned();
-        let minimum = request
-            .quotas
-            .get(&item)
-            .ok_or_else(|| invalid("consumption report contains an unrequested resource"))?;
-        let target = targets
-            .get(&item)
-            .ok_or_else(|| invalid("consumption report lost its planning stock target"))?;
+        let minimum = match request.quotas.get(&item) {
+            Some(minimum) => *minimum,
+            None if item == "WOOD" => 0,
+            None => {
+                return Err(invalid(
+                    "consumption report contains an unrequested resource",
+                ));
+            }
+        };
+        let target = match targets.get(&item) {
+            Some(target) => *target,
+            None if item == "WOOD" => 0,
+            None => return Err(invalid("consumption report lost its planning stock target")),
+        };
         row["minimum_stock"] = json!(minimum);
         row["planning_stock_target"] = json!(target);
         row["consumption_allowance"] = json!(target - minimum);
