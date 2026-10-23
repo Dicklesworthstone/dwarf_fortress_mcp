@@ -16,6 +16,17 @@ const ALLOCATED: &str = "allocated";
 const INSTALLED: &str = "installed";
 const ATTACHED: &str = "attached";
 const RELEASED: &str = "released";
+const MAX_FURNITURE_GOAL_BINDINGS: usize = 64;
+
+/// Exact installed furniture identity. The descriptor is an expectation, not
+/// authority; inspecting or proving it still requires current eligible state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FurnitureInstallation {
+    pub building: EntityId,
+    pub kind: FurnitureKind,
+    pub item: EntityId,
+    pub location: MapCoord,
+}
 
 #[derive(Clone, Copy)]
 struct Placement {
@@ -344,6 +355,84 @@ pub fn validate_furniture_completion(
     validate_furniture_binding(snapshot, building)
 }
 
+fn complete_installation(
+    snapshot: &WorldSnapshot,
+    building: EntityId,
+    attached: &BTreeMap<EntityId, EntityId>,
+) -> Result<FurnitureInstallation> {
+    let actual = placement(snapshot, building)?;
+    if actual.phase != PlacementPhase::Complete {
+        return Err(precondition("furniture installation is not complete"));
+    }
+    if attached.get(&actual.item) != Some(&building) {
+        return Err(precondition("furniture attachment is not established"));
+    }
+    Ok(FurnitureInstallation {
+        building,
+        kind: actual.kind,
+        item: actual.item,
+        location: actual.location,
+    })
+}
+
+/// Inspect one completed installation with the same original generation,
+/// producer, material and reciprocal-custody requirements as action proof.
+pub fn inspect_complete_furniture(
+    snapshot: &WorldSnapshot,
+    building: EntityId,
+) -> Result<FurnitureInstallation> {
+    complete_installation(snapshot, building, &attachments(snapshot)?)
+}
+
+/// Strengthen mandatory completed-furniture claims with the identity and
+/// custody checks unavailable to field predicates. The caller first establishes
+/// the complete terminal predicate as True using its ordinary evidence scope.
+/// Only root/nested All claims are mandatory; Any and Not branches add none.
+pub fn validate_furniture_goal(snapshot: &WorldSnapshot, terminal: &Predicate) -> Result<()> {
+    terminal.validate_shape()?;
+    let mut mandatory = BTreeMap::<EntityId, (bool, bool)>::new();
+    let mut pending = vec![terminal];
+    while let Some(predicate) = pending.pop() {
+        match predicate {
+            Predicate::All(children) => pending.extend(children.iter()),
+            Predicate::FieldCompare {
+                entity_id,
+                field,
+                op: CompareOp::Eq,
+                value: Value::Text(value),
+            } => {
+                if field == FURNITURE_PLACEMENT_MODEL_FIELD && value == FURNITURE_PLACEMENT_MODEL {
+                    mandatory.entry(*entity_id).or_default().0 = true;
+                } else if field == CONSTRUCTION_STAGE_FIELD && value == STAGE_COMPLETE {
+                    mandatory.entry(*entity_id).or_default().1 = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    let completed = mandatory
+        .values()
+        .filter(|required| **required == (true, true))
+        .count();
+    if completed > MAX_FURNITURE_GOAL_BINDINGS {
+        return Err(advance_budget_error(
+            "furniture goal exceeds 64 mandatory completed installations",
+        ));
+    }
+    if completed == 0 {
+        return Ok(());
+    }
+    // One bounded global custody scan serves all required installations. A
+    // large terminal cannot multiply complete-world scans by its claim count.
+    let attached = attachments(snapshot)?;
+    for (building, required) in mandatory {
+        if required == (true, true) {
+            complete_installation(snapshot, building, &attached)?;
+        }
+    }
+    Ok(())
+}
+
 /// Read the complete eligible loose-item census for one closed kind in canonical
 /// identity order. Legacy carpentry items with no custody fields are ineligible;
 /// partial or unavailable custody is never interpreted as loose inventory.
@@ -481,7 +570,25 @@ pub(super) fn postconditions(
     location: MapCoord,
     key: &str,
 ) -> Vec<Predicate> {
-    let building = created_entity_id(key, 0);
+    furniture_completion_predicates(&FurnitureInstallation {
+        building: created_entity_id(key, 0),
+        kind,
+        item,
+        location,
+    })
+}
+
+/// Expected completion proof for an exact existing or prospective installation.
+/// This preserves the original placement predicate order and canonical bytes;
+/// constructing predicates does not establish that the installation exists.
+#[must_use]
+pub fn furniture_completion_predicates(installation: &FurnitureInstallation) -> Vec<Predicate> {
+    let FurnitureInstallation {
+        building,
+        kind,
+        item,
+        location,
+    } = *installation;
     let mut predicates = vec![
         Predicate::EntityKind {
             entity_id: building,

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-23 — Prove retained furniture with exact current custody
+
+- Expose validated completed-installation inspection and reusable exact
+  completion predicates, preserving every existing placement predicate byte.
+- Strengthen current and archived goal proof for mandatory completed-furniture
+  claims even when a plan does not dispatch that furnishing again. Revalidate
+  original generations, production provenance and exclusive reciprocal custody
+  through one bounded attachment census; optional predicate branches remain
+  optional.
+- Add five regression groups, including canonical fingerprints for all four
+  furniture kinds, completion/reopen reuse, contradictory custody and generation
+  substitution, optional branches and bounds. The actual intent library and
+  unit-test target pass type checking; warning-denied production Clippy passes.
+  The environment terminated the fresh test build before execution, so no new
+  runtime test pass or full-workspace qualification is claimed.
+
 ## 2026-10-23 — Provision complete furnished-room goals
 
 - Add the existing blueprint argument's versioned `provisioned_room` wrapper

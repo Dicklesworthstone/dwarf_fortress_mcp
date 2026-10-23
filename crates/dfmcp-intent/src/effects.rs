@@ -38,9 +38,11 @@ mod furniture;
 pub use furniture::{
     FURNITURE_ALLOCATED_TO_FIELD, FURNITURE_ATTACHMENT_STATE_FIELD,
     FURNITURE_INVENTORY_STATE_FIELD, FURNITURE_PLACEMENT_MODEL, FURNITURE_PLACEMENT_MODEL_FIELD,
-    FURNITURE_SOURCE_ITEM_FIELD, FURNITURE_SOURCE_ITEM_GENERATION_FIELD, furniture_stock_field,
+    FURNITURE_SOURCE_ITEM_FIELD, FURNITURE_SOURCE_ITEM_GENERATION_FIELD, FurnitureInstallation,
+    furniture_completion_predicates, furniture_stock_field, inspect_complete_furniture,
     loose_furniture_items, occupied_building_footprint, validate_furniture_binding,
-    validate_furniture_completion, validate_furniture_identity, validate_furniture_location,
+    validate_furniture_completion, validate_furniture_goal, validate_furniture_identity,
+    validate_furniture_location,
 };
 
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.

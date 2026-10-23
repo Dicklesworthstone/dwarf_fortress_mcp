@@ -145,6 +145,14 @@ position and backlink. Physical-work inspection independently revalidates
 original identity and custody before reporting quiescence. A matching
 `construction_stage` word alone cannot establish placement completion.
 
+A later goal can retain an existing completed installation without placing it
+again. Mandatory completed-furniture claims still undergo the same original
+generation, production provenance and reciprocal-custody checks, even when the
+new plan contains no placement action for that building. One bounded attachment
+census serves at most sixty-four mandatory installations; optional `Any` and
+`Not` branches do not become unconditional requirements. Reusable predicates
+preserve the original exact placement proof bytes.
+
 ## Cancellation, conflicts and recovery
 
 Cancelling unfinished construction returns the same item to loose inventory,

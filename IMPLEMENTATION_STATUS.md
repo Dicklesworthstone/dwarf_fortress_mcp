@@ -44,6 +44,31 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Exact proof for retained installed furniture (2026-10-23)
+
+Completed-installation inspection exposes the exact building, item, kind and
+tile only after validating original generations, production provenance and
+exclusive reciprocal custody. Reusable completion predicates preserve the
+original nineteen-predicate templates and canonical fingerprints for all four
+furniture kinds.
+
+Current, forecast and archived goal proof additionally validate mandatory
+completed-furniture claims even when a plan has no new placement action for
+that furnishing. Only root/nested `All` claims qualify; `Any` and `Not` branches
+do not become mandatory. Predicate shape validation and a sixty-four-binding
+limit precede one shared bounded attachment census. Existing per-action
+completion checks remain in place.
+
+**Evidence:** the actual intent production library and unit-test target pass
+pinned-nightly type checking, including five new regression groups.
+Warning-denied production Clippy passes. All 123 inventoried core/world/intent
+Rust inputs stayed unchanged through the metadata checks. Scoped formatting
+and diff checks pass. The fresh intent test build was terminated with SIGKILL
+before producing a runnable binary; no new runtime execution is claimed. The
+MCP call-site change is source-reviewed here and awaits the complete room
+continuation component checks. No full-workspace or native/live qualification
+is established.
+
 ### Complete provisioned-room goals (2026-10-23)
 
 The existing `fortress.plan` blueprint input accepts a versioned

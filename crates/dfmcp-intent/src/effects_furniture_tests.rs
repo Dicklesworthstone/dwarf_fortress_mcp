@@ -185,6 +185,260 @@ fn physical(snapshot: &WorldSnapshot) -> WorldGraph {
     graph
 }
 
+fn installed(kind: FurnitureKind) -> Result<(WorldSnapshot, FurnitureInstallation)> {
+    let mut snapshot = world()?;
+    let item = produce(&mut snapshot, kind, 1, "supply")?[0];
+    apply(&mut snapshot, &place(kind, item, TARGET), "place")?;
+    advance(&mut snapshot, BUILD_TICKS)?;
+    Ok((
+        snapshot,
+        FurnitureInstallation {
+            building: created_entity_id("place", 0),
+            kind,
+            item,
+            location: TARGET,
+        },
+    ))
+}
+
+#[test]
+fn reusable_completion_predicates_preserve_original_canonical_bytes() {
+    // Fingerprints of the original ordered 19-predicate template, encoded
+    // independently before its extraction into the reusable public helper.
+    for (kind, expected) in [
+        (
+            FurnitureKind::Bed,
+            "17ccbf91ef71372aad431b9aa703a921719518e6b4320ff4c90842341f3ffd49",
+        ),
+        (
+            FurnitureKind::Door,
+            "c144fe2aa44d41cf6a122d9c89a22105bdd43f06a46ed8cbe9795f41a1cf950f",
+        ),
+        (
+            FurnitureKind::Table,
+            "53985fdcf8758afb5902838a9be7a294cb1d085fedd4d1615ded80c2b963223a",
+        ),
+        (
+            FurnitureKind::Chair,
+            "abcbd87e013f4b92a6d06c1f981cdff1d3639c4d87805e36b3d0e8b809d008e5",
+        ),
+    ] {
+        let item = EntityId::new(17);
+        let predicates =
+            default_postconditions(&place(kind, item, TARGET), "place", FortressId::new(9));
+        assert_eq!(predicates.len(), 19);
+        let bytes: Vec<_> = predicates
+            .iter()
+            .flat_map(Predicate::canonical_bytes)
+            .collect();
+        assert_eq!(Digest32::of_bytes(&bytes).to_hex(), expected);
+        assert_eq!(
+            predicates,
+            furniture_completion_predicates(&FurnitureInstallation {
+                building: created_entity_id("place", 0),
+                kind,
+                item,
+                location: TARGET,
+            })
+        );
+    }
+}
+
+#[test]
+fn completed_installations_can_be_reused_without_placement_or_inventory_changes() -> Result<()> {
+    for kind in [
+        FurnitureKind::Bed,
+        FurnitureKind::Door,
+        FurnitureKind::Table,
+        FurnitureKind::Chair,
+    ] {
+        let (snapshot, expected) = installed(kind)?;
+        let before = snapshot.clone();
+        let actual = inspect_complete_furniture(&snapshot, expected.building)?;
+        assert_eq!(actual, expected);
+        let terminal = Predicate::All(vec![
+            Predicate::RegionTerrain {
+                area: MapCuboid::new(TARGET, TARGET)?,
+                tile_code: tile_codes::FLOOR,
+            },
+            Predicate::All(furniture_completion_predicates(&actual)),
+        ]);
+        assert!(evaluate(&snapshot, &terminal));
+        validate_furniture_goal(&snapshot, &terminal)?;
+        assert_eq!(count(&snapshot, furniture_stock_field(kind))?, 0);
+        assert_eq!(snapshot, before);
+        let reopened = WorldSnapshot::from_canonical_bytes(&snapshot.canonical_bytes())?;
+        assert_eq!(
+            inspect_complete_furniture(&reopened, actual.building)?,
+            actual
+        );
+        validate_furniture_goal(&reopened, &terminal)?;
+        assert!(inspect_complete_furniture(&snapshot, WORKSHOP).is_err());
+    }
+    let mut pending = world()?;
+    let item = produce(&mut pending, FurnitureKind::Bed, 1, "supply")?[0];
+    let action = place(FurnitureKind::Bed, item, TARGET);
+    apply(&mut pending, &action, "place")?;
+    assert!(inspect_complete_furniture(&pending, created_entity_id("place", 0)).is_err());
+    cancel(&mut pending, &action, "place")?;
+    assert!(inspect_complete_furniture(&pending, created_entity_id("place", 0)).is_err());
+    Ok(())
+}
+
+#[test]
+fn reused_terminal_claims_reject_replaced_generations_and_conflicting_custody() -> Result<()> {
+    let (source, installation) = installed(FurnitureKind::Bed)?;
+    let terminal = Predicate::All(furniture_completion_predicates(&installation));
+    let order = created_entity_id("supply", 0);
+    for variant in 0..7 {
+        let mut snapshot = source.clone();
+        match variant {
+            0 => record_mut(&mut snapshot, installation.building)?.generation = 2,
+            1 => record_mut(&mut snapshot, installation.item)?.generation = 2,
+            2 => record_mut(&mut snapshot, order)?.generation = 2,
+            3 => {
+                let duplicate = EntityId::new(12_345);
+                let mut building = entity(&snapshot, installation.building)?.clone();
+                building.id = duplicate;
+                snapshot.graph.entities.insert(duplicate, building);
+            }
+            4 => set(
+                &mut snapshot,
+                installation.building,
+                "progress_ticks",
+                Value::U64(BUILD_TICKS - 1),
+            )?,
+            5 => set(
+                &mut snapshot,
+                installation.item,
+                "source_order",
+                Value::Entity(WORKSHOP),
+            )?,
+            _ => set(
+                &mut snapshot,
+                installation.item,
+                "production_ordinal",
+                Value::U64(2),
+            )?,
+        }
+        snapshot.refresh_hash();
+        let before = snapshot.clone();
+        assert!(
+            evaluate(&snapshot, &terminal),
+            "variant {variant} retains the ordinary proof fields"
+        );
+        assert!(
+            validate_furniture_goal(&snapshot, &terminal).is_err(),
+            "variant {variant} cannot inherit exact installation completion"
+        );
+        assert!(inspect_complete_furniture(&snapshot, installation.building).is_err());
+        assert_eq!(snapshot, before);
+    }
+    Ok(())
+}
+
+#[test]
+fn furniture_goal_guard_requires_both_mandatory_fields_and_ignores_other_branches() -> Result<()> {
+    let (mut snapshot, installation) = installed(FurnitureKind::Bed)?;
+    record_mut(&mut snapshot, installation.item)?.generation = 2;
+    snapshot.refresh_hash();
+    let model = field_eq(
+        installation.building,
+        FURNITURE_PLACEMENT_MODEL_FIELD,
+        Value::Text(FURNITURE_PLACEMENT_MODEL.to_owned()),
+    );
+    let complete = field_eq(
+        installation.building,
+        CONSTRUCTION_STAGE_FIELD,
+        Value::Text(STAGE_COMPLETE.to_owned()),
+    );
+    let full = Predicate::All(furniture_completion_predicates(&installation));
+    for terminal in [
+        model.clone(),
+        complete.clone(),
+        Predicate::Any(vec![Predicate::True, full.clone()]),
+        Predicate::Not(Box::new(Predicate::All(vec![Predicate::False, full]))),
+        Predicate::All(vec![
+            model.clone(),
+            Predicate::Any(vec![Predicate::True, complete.clone()]),
+        ]),
+        Predicate::All(vec![
+            model.clone(),
+            field_eq(
+                WORKSHOP,
+                CONSTRUCTION_STAGE_FIELD,
+                Value::Text(STAGE_COMPLETE.to_owned()),
+            ),
+        ]),
+    ] {
+        assert!(evaluate(&snapshot, &terminal));
+        validate_furniture_goal(&snapshot, &terminal)?;
+    }
+    let mandatory = Predicate::All(vec![
+        model,
+        Predicate::All(vec![Predicate::All(vec![complete])]),
+    ]);
+    assert!(evaluate(&snapshot, &mandatory));
+    assert!(validate_furniture_goal(&snapshot, &mandatory).is_err());
+    Ok(())
+}
+
+#[test]
+fn furniture_goal_guard_bounds_shape_and_distinct_bindings_before_inspection() -> Result<()> {
+    let snapshot = world()?;
+    let markers = |count: u64| {
+        Predicate::All(
+            (1..=count)
+                .flat_map(|id| {
+                    [
+                        field_eq(
+                            EntityId::new(id + 50_000),
+                            FURNITURE_PLACEMENT_MODEL_FIELD,
+                            Value::Text(FURNITURE_PLACEMENT_MODEL.to_owned()),
+                        ),
+                        field_eq(
+                            EntityId::new(id + 50_000),
+                            CONSTRUCTION_STAGE_FIELD,
+                            Value::Text(STAGE_COMPLETE.to_owned()),
+                        ),
+                    ]
+                })
+                .collect(),
+        )
+    };
+    assert_eq!(
+        validate_furniture_goal(&snapshot, &markers(65))
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::BudgetExceeded)
+    );
+    assert!(
+        validate_furniture_goal(&snapshot, &markers(64))
+            .is_err_and(|error| error.code != ErrorCode::BudgetExceeded)
+    );
+    let mut deep = Predicate::True;
+    for _ in 0..64 {
+        deep = Predicate::All(vec![deep]);
+    }
+    for oversized in [deep, Predicate::All(vec![Predicate::True; 4_096])] {
+        assert_eq!(
+            validate_furniture_goal(&snapshot, &oversized)
+                .err()
+                .map(|error| error.code),
+            Some(ErrorCode::BudgetExceeded)
+        );
+    }
+    let (completed, installation) = installed(FurnitureKind::Bed)?;
+    let duplicate_claims = Predicate::All(vec![
+        Predicate::All(furniture_completion_predicates(
+            &installation
+        ));
+        65
+    ]);
+    validate_furniture_goal(&completed, &duplicate_claims)?;
+    Ok(())
+}
+
 #[test]
 fn every_closed_furniture_kind_consumes_one_exact_item_and_proves_installation() -> Result<()> {
     for kind in [

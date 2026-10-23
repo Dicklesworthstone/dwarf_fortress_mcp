@@ -2089,6 +2089,10 @@ pub(crate) fn plan_goal_truth(
                 )?;
             }
         }
+        // A continuation can retain an installed furnishing without dispatching
+        // another placement action. Its mandatory terminal bindings still need
+        // exact generation and reciprocal custody evidence.
+        effects::validate_furniture_goal(snapshot, &plan.terminal_condition)?;
     }
     Ok(truth)
 }
