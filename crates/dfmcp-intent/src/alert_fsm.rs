@@ -346,7 +346,7 @@ fn canonical_units(units: &[EntityId]) -> Result<Vec<EntityId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dfmcp_core::{ObservationCursor, sha256};
+    use dfmcp_core::ObservationCursor;
 
     fn fsm() -> Result<CivilianAlertFsm> {
         CivilianAlertFsm::with_recovery_policy(
@@ -366,9 +366,9 @@ mod tests {
                 fortress_id: FortressId::new(1),
                 cursor: ObservationCursor { epoch: 1, sequence },
                 tick: GameTick(tick),
-                state_hash: sha256(&sequence.to_le_bytes()),
+                state_hash: Digest32::of_bytes(&sequence.to_le_bytes()),
             },
-            source_scope: sha256(b"test threat scope"),
+            source_scope: Digest32::of_bytes(b"test threat scope"),
             threat,
             complete_civilian_roster: true,
         }
@@ -452,7 +452,7 @@ mod tests {
             match mutation {
                 0 => next.anchor.cursor.sequence = 3,
                 1 => next.anchor.cursor.epoch = 2,
-                2 => next.source_scope = sha256(b"new source scope"),
+                2 => next.source_scope = Digest32::of_bytes(b"new source scope"),
                 3 => changed_civilians.push(EntityId::new(2)),
                 _ => next.anchor.tick = GameTick(11),
             }
@@ -485,7 +485,7 @@ mod tests {
             let mut bad = good;
             match mutation {
                 0 => bad.anchor.cursor.sequence = 1,
-                1 => bad.anchor.state_hash = sha256(b"fork"),
+                1 => bad.anchor.state_hash = Digest32::of_bytes(b"fork"),
                 2 => bad.threat = ThreatAssessment::Present,
                 3 => bad.anchor.fortress_id = FortressId::new(2),
                 _ => bad.source_scope = Digest32::ZERO,

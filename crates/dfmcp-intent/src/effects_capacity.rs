@@ -1,4 +1,4 @@
-//! Finite, shared production capacity for the two registered laboratory recipes.
+//! Finite, shared production capacity for the registered laboratory recipes.
 //!
 //! A completed workshop and a living labor-enabled unit each service one order
 //! during an interval. These assignments reserve neither game resources nor
@@ -9,15 +9,17 @@ use std::collections::VecDeque;
 
 use super::*;
 
-const FAMILIES: [(&str, &str); 2] = [
+const FAMILIES: [(&str, &str); 3] = [
     ("workshop:Still", "BREW"),
     ("workshop:Kitchen", "COOK"),
+    ("workshop:Carpenters", "CARPENTRY"),
 ];
 
 fn family(job: &str) -> Option<usize> {
     match job {
         "BREW_DRINK" => Some(0),
         "PREPARE_MEAL" | "COOK_MEAL" => Some(1),
+        token if carpentry::recipe(token).is_some() => Some(2),
         _ => None,
     }
 }
@@ -52,17 +54,23 @@ impl Capacity {
         }
         // Reserve every fixed family/field visit before building the bounded
         // eligibility lists. Both lists refer to one shared set of unit IDs.
-        budget.charge(snapshot.graph.entities.len() as u64 * 8 + 1)?;
+        budget
+            .charge(snapshot.graph.entities.len() as u64 * (2 * FAMILIES.len() as u64 + 4) + 1)?;
         let mut capacity = Self {
             workers: 0,
-            eligible: [Vec::new(), Vec::new()],
-            workshops: [0, 0],
+            eligible: std::array::from_fn(|_| Vec::new()),
+            workshops: [0; FAMILIES.len()],
         };
         for record in snapshot.graph.entities.values() {
             if record.kind == EntityKind::Unit && is_alive(record, snapshot.tick) {
                 let eligibility = FAMILIES.map(|(_, labor)| {
-                    field_value(record, &format!("{LABOR_FIELD_PREFIX}{labor}"), snapshot.tick)
-                        == Some(&Value::Bool(true))
+                    (labor != "CARPENTRY"
+                        || field_value(record, "alive", snapshot.tick) == Some(&Value::Bool(true)))
+                        && field_value(
+                            record,
+                            &format!("{LABOR_FIELD_PREFIX}{labor}"),
+                            snapshot.tick,
+                        ) == Some(&Value::Bool(true))
                 });
                 if eligibility.iter().any(|eligible| *eligible) {
                     for (index, eligible) in eligibility.into_iter().enumerate() {
@@ -151,7 +159,9 @@ pub(super) fn select(
 ) -> Result<Selection> {
     budget.charge(ready.len() as u64 * 4 + 1)?;
     if snapshot.graph.entities.len() > MAX_EFFECT_ADVANCE_PRODUCTION_ENTITIES
-        && ready.iter().any(|index| family(&orders[*index].job).is_some())
+        && ready
+            .iter()
+            .any(|index| family(&orders[*index].job).is_some())
     {
         return Err(advance_budget_error(
             "production capacity exceeds its explicit canonical entity bound",
@@ -185,9 +195,7 @@ pub(super) fn select(
     let capacity = Capacity::capture(snapshot, budget)?;
     let depth = usize::BITS - candidates.len().leading_zeros();
     budget.charge(candidates.len() as u64 * (u64::from(depth) + 1))?;
-    candidates.sort_by_key(|candidate| {
-        (Reverse(candidate.partial), orders[candidate.order].id)
-    });
+    candidates.sort_by_key(|candidate| (Reverse(candidate.partial), orders[candidate.order].id));
     budget.charge(capacity.workers as u64 + candidates.len() as u64 + 1)?;
     let mut owner = vec![None; capacity.workers];
     let mut assigned = vec![None; candidates.len()];
@@ -214,7 +222,8 @@ pub(super) fn select(
             selected.push(candidate.order);
         } else {
             let (workshop, labor) = FAMILIES[candidate.family];
-            let reason = if used_workshops[candidate.family] == capacity.workshops[candidate.family] {
+            let reason = if used_workshops[candidate.family] == capacity.workshops[candidate.family]
+            {
                 format!(
                     "production capacity busy: every established {workshop} is assigned to another work order"
                 )

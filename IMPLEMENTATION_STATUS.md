@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Material-backed laboratory carpentry (2026-10-23)
+
+The reference effect timeline now manufactures beds, doors, tables and chairs
+from explicitly observed finite WOOD inventory. Each 50 eligible service ticks
+completes one unit, consumes one log, increments its exact aggregate stock and
+creates one canonical item. Item identity derives from the original work order
+and completion ordinal, retaining identical output across partitioned waits and
+snapshot recovery. The closed aliases share one recipe definition.
+
+Carpentry joins brewing and cooking in the bounded shared worker/workshop
+allocator. One living citizen cannot supply simultaneous service to several
+orders, and one completed carpenter workshop services one order at a time.
+Conditions and material availability gate service; blocked time is not banked.
+Canonical item growth updates scan charges and remains within the existing
+entity bound. Duplicate output identities, stock overflow and budget exhaustion
+refuse within the existing atomic advance shadow.
+
+New carpentry orders carry an explicit `carpentry/1` production marker. Missing
+or unqualified input/output counts remain unknown, and legacy abstract orders
+cannot gain fabricated physical production history after reopen. Produced items
+belong to the laboratory world; this does not allocate native items, change
+construction semantics, or admit a DFHack protocol. The broader production and
+semantic execution beads remain in progress.
+
+**Evidence:** all 239 actual-source intent component tests pass on the pinned
+nightly compiler (124 unit and 115 integration tests, zero failures), including
+12 new carpentry regression groups. These cover all nine recipe aliases, exact
+input/output conservation, 512 three-family capacity configurations, partial
+work, conditions, cancellation, partition parity, snapshot recovery,
+provenance and transactional bounds. Scoped Rust formatting passes. This does
+not establish full-workspace, MCP runtime, native-build or live qualification.
+
 ### Recover original native work-order goal achievement durably (2026-10-11)
 
 `SemanticWorkOrderSession` now supports an operator-owned `GoalHistoryStore`

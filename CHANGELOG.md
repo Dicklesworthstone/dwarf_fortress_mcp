@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-23 — Manufacture wooden furniture from finite laboratory inventory
+
+- Close the reference-model carpentry loop for beds, doors, tables and chairs:
+  each completed unit consumes one explicit WOOD log, increments its stock
+  counter and creates a canonical item with stable original-order identity.
+- Share finite citizen and completed-workshop capacity across carpentry,
+  brewing and cooking. Preserve conditional gates, partial work, cancellation
+  and causal timing without double-counting a multi-skilled citizen.
+- Require source-qualified input/output counts and a new `carpentry/1` order
+  marker. Legacy abstract orders cannot retroactively create inventory; item
+  collisions, overflow and bounded-world exhaustion refuse transactionally.
+- Correct four existing alert-state-machine test fixtures to construct typed
+  digests, enabling the actual intent regression suite to compile.
+- Pass all 239 actual-source intent tests (124 unit and 115 integration),
+  including 12 new carpentry groups and 512 three-family worker configurations;
+  scoped formatting passes. This is laboratory behavior; native item allocation
+  and live admission are unchanged. Full-workspace qualification is not claimed.
+
 ## 2026-10-11 — Recover original native work-order goals across restart
 
 - Add a bounded, operator-owned private goal-history store and exclusive durable

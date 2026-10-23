@@ -30,6 +30,8 @@ use crate::plan::ObligationSpec;
 
 #[path = "effects_capacity.rs"]
 mod capacity;
+#[path = "effects_carpentry.rs"]
+mod carpentry;
 
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
 pub const LABOR_FIELD_PREFIX: &str = "labor.";
@@ -71,6 +73,16 @@ pub const MAX_WORK_ORDER_CONDITION_BYTES: usize = 256;
 /// Exact generic inventory token namespaces on the reference stock ledger.
 pub const STOCK_ITEM_FIELD_PREFIX: &str = "stock.item.";
 pub const STOCK_MATERIAL_FIELD_PREFIX: &str = "stock.material.";
+/// Explicit log inventory consumed by the closed reference carpentry recipes.
+pub const STOCK_WOOD_FIELD: &str = "stock.material.WOOD";
+pub const STOCK_BED_FIELD: &str = "stock.item.BED";
+pub const STOCK_DOOR_FIELD: &str = "stock.item.DOOR";
+pub const STOCK_TABLE_FIELD: &str = "stock.item.TABLE";
+pub const STOCK_CHAIR_FIELD: &str = "stock.item.CHAIR";
+/// New carpentry orders opt into physical inventory semantics. Legacy abstract
+/// orders without this field cannot manufacture material or output history.
+pub const WORK_ORDER_PRODUCTION_MODEL_FIELD: &str = "production_model";
+pub const CARPENTRY_PRODUCTION_MODEL: &str = "carpentry/1";
 
 /// Entity kind of a created dig designation.
 pub const DIG_DESIGNATION_KIND: &str = "dig_designation";
@@ -118,8 +130,25 @@ pub fn work_order_product(job_token: &str) -> Option<(&'static str, u64)> {
     match job_token {
         "BREW_DRINK" => Some((STOCK_DRINK_FIELD, 5)),
         "PREPARE_MEAL" | "COOK_MEAL" => Some((STOCK_FOOD_FIELD, 5)),
-        _ => None,
+        _ => carpentry::recipe(job_token).map(|recipe| (recipe.stock_field, 1)),
     }
+}
+
+/// Closed canonical output token, shared by quota planning and physical effects.
+#[must_use]
+pub fn work_order_output_item(job_token: &str) -> Option<&'static str> {
+    match job_token {
+        "BREW_DRINK" => Some("DRINK"),
+        "PREPARE_MEAL" | "COOK_MEAL" => Some("FOOD"),
+        _ => carpentry::recipe(job_token).map(|recipe| recipe.item_token),
+    }
+}
+
+/// Explicit consumed material per completed unit. Conditions remain gates and
+/// never imply an additional consumption or a resource reservation.
+#[must_use]
+pub fn work_order_material(job_token: &str) -> Option<(&'static str, u64)> {
+    carpentry::recipe(job_token).map(|_| (STOCK_WOOD_FIELD, 1))
 }
 /// Workshop kind label and labor a laboratory job needs before it makes any
 /// progress. Jobs without an entry have no modeled requirement.
@@ -146,6 +175,8 @@ pub fn work_order_blocker(snapshot: &WorldSnapshot, job_token: &str) -> Option<S
     let has_worker = entities.clone().any(|entity| {
         entity.kind == EntityKind::Unit
             && is_alive(entity, snapshot.tick)
+            && (labor != "CARPENTRY"
+                || field_value(entity, "alive", snapshot.tick) == Some(&Value::Bool(true)))
             && field_value(entity, &labor_field, snapshot.tick) == Some(&Value::Bool(true))
     });
     match (has_workshop, has_worker) {
@@ -192,6 +223,15 @@ pub fn created_entity_id(idempotency_key: &str, ordinal: u32) -> EntityId {
     let mut payload = idempotency_key.as_bytes().to_vec();
     payload.extend_from_slice(&ordinal.to_be_bytes());
     namespaced(b"dfmcp-created-entity-v1", &payload)
+}
+
+/// Identity of one produced reference item, stable across wait partitioning and
+/// recovery. Ordinals are one-based and belong to the exact original order.
+#[must_use]
+pub fn produced_item_id(order: EntityId, ordinal: u32) -> EntityId {
+    let mut payload = order.get().to_be_bytes().to_vec();
+    payload.extend_from_slice(&ordinal.to_be_bytes());
+    namespaced(b"dfmcp-produced-item-v1", &payload)
 }
 
 /// Identity of the fortress-wide settings entity that holds standing orders.
@@ -939,26 +979,33 @@ pub fn apply_effect(
             validate_condition_text(name)?;
             validate_condition_text(job_token)?;
             let conditions = work_order_conditions_value(conditions)?;
+            let mut fields = vec![
+                (WORK_ORDER_NAME_FIELD.to_owned(), Value::Text(name.clone())),
+                (WORK_ORDER_CONDITIONS_FIELD.to_owned(), conditions),
+                ("job_token".to_owned(), Value::Text(job_token.clone())),
+                ("amount_total".to_owned(), Value::U64(u64::from(*amount))),
+                (
+                    AMOUNT_REMAINING_FIELD.to_owned(),
+                    Value::U64(u64::from(*amount)),
+                ),
+                ("work_ticks".to_owned(), Value::U64(0)),
+                (
+                    STATUS_FIELD.to_owned(),
+                    Value::Text(STATUS_ACTIVE.to_owned()),
+                ),
+            ];
+            if carpentry::recipe(job_token).is_some() {
+                fields.push((
+                    WORK_ORDER_PRODUCTION_MODEL_FIELD.to_owned(),
+                    Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
+                ));
+            }
             create_entity(
                 snapshot,
                 created_entity_id(idempotency_key, 0),
                 EntityKind::WorkOrder,
                 name.clone(),
-                vec![
-                    (WORK_ORDER_NAME_FIELD.to_owned(), Value::Text(name.clone())),
-                    (WORK_ORDER_CONDITIONS_FIELD.to_owned(), conditions),
-                    ("job_token".to_owned(), Value::Text(job_token.clone())),
-                    ("amount_total".to_owned(), Value::U64(u64::from(*amount))),
-                    (
-                        AMOUNT_REMAINING_FIELD.to_owned(),
-                        Value::U64(u64::from(*amount)),
-                    ),
-                    ("work_ticks".to_owned(), Value::U64(0)),
-                    (
-                        STATUS_FIELD.to_owned(),
-                        Value::Text(STATUS_ACTIVE.to_owned()),
-                    ),
-                ],
+                fields,
             )?;
             Ok(true)
         }
@@ -1450,11 +1497,14 @@ impl EffectTimeline {
             }
         };
         budget.charge(
-            self.entity_count
-                .saturating_mul(conditions.len() as u64 + 3)
+            (snapshot.graph.entities.len() as u64)
+                .saturating_mul(conditions.len() as u64 + 4)
                 .saturating_add(conditions.len() as u64 + 1),
         )?;
         if let Some(blocker) = work_order_blocker(snapshot, &order.job) {
+            return Ok(ProductionGate::Blocked(blocker));
+        }
+        if let Some(blocker) = carpentry::blocker(snapshot, order)? {
             return Ok(ProductionGate::Blocked(blocker));
         }
         Ok(production_gate(
@@ -1472,7 +1522,10 @@ impl EffectTimeline {
     ) -> Result<TimelineProduction> {
         budget.charge(self.orders.len() as u64 + 1)?;
         if snapshot.graph.entities.len() > MAX_EFFECT_ADVANCE_PRODUCTION_ENTITIES
-            && self.orders.iter().any(|order| work_order_requirements(&order.job).is_some())
+            && self
+                .orders
+                .iter()
+                .any(|order| work_order_requirements(&order.job).is_some())
         {
             return Err(advance_budget_error(
                 "production capacity exceeds its explicit canonical entity bound",
@@ -1706,6 +1759,9 @@ fn advance_timeline(
                 budget,
             )?;
         }
+        // Production may add canonical item records. Later scans and capacity
+        // admission charge the current domain, not the original smaller world.
+        timeline.entity_count = snapshot.graph.entities.len() as u64;
         if timeline.ledger.is_some() {
             timeline.charge_population(budget, false)?;
             changed |= advance_metabolism(snapshot, delta)?;
@@ -2189,6 +2245,9 @@ fn advance_ready_work_order(
         )
     })?;
     let mut changed = false;
+    if carpentry::recipe(&order.job).is_some() {
+        changed |= carpentry::complete(snapshot, order, remaining, budget)?;
+    }
     if let Some((stock_field, per_unit)) = order.product
         && let Some(ledger) = timeline.ledger
     {
@@ -2253,3 +2312,7 @@ mod tests;
 #[cfg(test)]
 #[path = "effects_timeline_tests.rs"]
 mod timeline_tests;
+
+#[cfg(test)]
+#[path = "effects_carpentry_tests.rs"]
+mod carpentry_tests;
