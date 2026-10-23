@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-23 — Provision complete furnished-room goals
+
+- Add the existing blueprint argument's versioned `provisioned_room` wrapper
+  for bedroom clusters and dining halls. Reuse eligible exact furniture first;
+  manufacture only missing items, then excavate and install them with ordinary
+  verified-completion dependencies.
+- Derive future item identities from the original work-order step and ordinal.
+  Legacy aggregate stock cannot stand in for eligible items; procurement adds
+  the real missing count to the observed aggregate target.
+- Seal every original terrain region and exact installed furnishing as the
+  final goal. Intermediate stock quotas are discharged before installation
+  consumes inventory; already-excavated rooms can still be furnished.
+- Retain complete canonical layout, compiler marker and optional prerequisite
+  choices for durable source replay. Bound compilation to sixteen furnishing
+  slots and sixty-four combined actions; refuse unknown supply, unsafe or
+  occupied geometry, inadequate logs and overlapping workshop setup.
+- Scale excavation deadlines with actual tile work, allowing accepted large
+  rooms to finish while preserving legacy blueprint seals.
+- Add ten actual-source compiler/execution regression groups, including
+  forecast parity, source immutability, released-item reuse, generation
+  substitution and a 105-tile room. Nine groups and the room-inclusive module
+  passed type checking and production Clippy before the final deadline fix;
+  that narrow fix and tenth regression are source-reviewed and formatted but
+  not recompiled. Runtime execution remains blocked by shared-storage exhaustion.
+
 ## 2026-10-23 — Install and recover exact manufactured furniture
 
 - Add a distinct typed `place_furniture` action for Bed, Door, Table and Chair,

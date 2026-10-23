@@ -44,6 +44,63 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete provisioned-room goals (2026-10-23)
+
+The existing `fortress.plan` blueprint input accepts a versioned
+`provisioned_room` wrapper around bedroom-cluster or dining-hall geometry.
+The compiler selects eligible exact loose items in canonical order, plans only
+missing carpentry output, preserves all original excavation regions and emits
+exact item-backed placements after production and excavation verification.
+Excavation deadlines use the reference model's work-scaled defaults; dependent
+placements retain their own completion horizon after prerequisite deadlines.
+Future item IDs derive from the original production step key and completion
+ordinal. Legacy aggregate stock grants no item identity credit; procurement
+uses the current aggregate plus the missing eligible count.
+
+The final original goal contains every excavation region and every installed
+furnishing. Procurement stock minima are intermediate conditions because
+placement spends that inventory. Already-excavated rooms and released cancelled
+placements can be reused, and wholly stocked rooms need no WOOD input evidence.
+Optional production setup retains all original permissions and supplied sites,
+including unused choices. Sixteen furniture slots, sixty-four combined actions,
+bounded source/geometry domains and exact occupancy checks bound the compiler.
+Existing occupied rooms, unknown supply, material shortage, overlapping workshop
+setup and unsafe excavation refuse without mutation.
+
+New intake canonicalizes `provisioned_room_v1` before source custody. Durable
+Blueprint replay requires that exact marker and retains the complete original
+layout/setup request. Changed anchors require reviewed source replay under the
+new placement rule. Historical direct room blueprints keep their abstract Build
+semantics. The feature establishes laboratory excavation and installation;
+room ownership, fortress connectivity and native/live mutation remain separate.
+See `docs/LAB_ITEM_FURNITURE.md` for complete request examples.
+
+**Evidence:** before the final excavation-deadline correction, the actual-source
+room compiler and nine regression groups passed type checking, and the
+room-inclusive production module passed Clippy with warnings denied. Cases
+cover full-room execution logic, partial existing supply, already-excavated
+geometry, legacy stock, cancellation/reuse, exact source replay,
+shortage/unknown/occupancy refusals, closed bounds and generation replacement.
+The full-room regression also compares discarded-fork forecasting with real
+execution and requires the original source world to remain unchanged.
+
+A tenth regression covers an accepted 105-tile hall whose 1,050 ticks of dig
+work exceed the inherited 1,000-tick deadline. The new compiler now delegates
+excavation obligations to the existing work-scaled default, giving this case
+2,200 ticks and propagating the deadline into dependent placements. This narrow
+final correction and tenth test are source-reviewed and formatted but were not
+recompiled; exhausted storage prevented recreating required adapter metadata.
+None of the new room regressions were executed: shared storage filled while
+linking the fresh adapter library. The underlying engine has 156 passing
+executed tests as recorded below. Three additional server-boundary regressions
+cover durable PlanSource round trips, compiler-marker/tag refusal and reviewed
+stale replay; they are source-reviewed and formatted but neither compiled nor
+executed against the full server. Required repository verification stops at
+the existing source-bundle documentation gate (`exact clean git commit`); local
+qualification passes its first three gates and then reports 64 existing static
+failures, including nine unrelated room-schema examples. This is not MCP-host,
+full-workspace, native or live qualification.
+
 ### Exact item-backed laboratory furniture (2026-10-23)
 
 A distinct `PlaceFurniture` action binds a closed Bed/Door/Table/Chair kind,

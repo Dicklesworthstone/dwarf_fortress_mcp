@@ -56,6 +56,13 @@ use objectives::{Objective, objective_history_roots};
 #[path = "production_source.rs"]
 mod production_source;
 
+#[path = "room_provisioning.rs"]
+mod room_provisioning;
+
+#[cfg(test)]
+#[path = "room_source_server_tests.rs"]
+mod room_source_server_tests;
+
 #[path = "plan_forecast.rs"]
 mod plan_forecast;
 use plan_forecast::forecast_plan;
@@ -1610,6 +1617,11 @@ impl PlanSource {
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
             Self::Blueprint { summary, raw } => {
+                if room_provisioning::is_provisioned_room(raw) {
+                    return room_provisioning::ProvisionedRoomRequest::parse(raw)?
+                        .compile(id, snapshot, summary)
+                        .map(|(intent, analysis)| (intent, Some(analysis)));
+                }
                 let (origin, template) = crate::lab_world::parse_blueprint(raw)?;
                 let index = crate::lab_world::spatial_index(snapshot)?;
                 let mut intent = dfmcp_intent::BlueprintPlanner
@@ -2890,7 +2902,17 @@ pub(crate) fn plan_request(
                             raw: request.canonical_json(),
                         }
                     }
-                    (_, _, Some(raw)) => PlanSource::Blueprint { summary, raw },
+                    (_, _, Some(raw)) => {
+                        let raw = if room_provisioning::is_provisioned_room(&raw) {
+                            match room_provisioning::ProvisionedRoomRequest::parse_current(&raw) {
+                                Ok(request) => request.canonical_json(),
+                                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                            }
+                        } else {
+                            raw
+                        };
+                        PlanSource::Blueprint { summary, raw }
+                    }
                     (_, Some(raw), None) => PlanSource::Actions { summary, raw },
                     (None, None, None) => PlanSource::Pause {
                         summary,
