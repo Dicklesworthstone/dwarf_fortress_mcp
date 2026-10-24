@@ -16,6 +16,7 @@ pub mod obligation;
 mod plan;
 pub mod plan_archive;
 mod planner;
+mod provisions_planning;
 pub mod workforce_planning;
 
 pub use action::{

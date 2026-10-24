@@ -1631,6 +1631,11 @@ fn validate_terminal_action_identity(
             effects::created_entity_id(&step.idempotency_key, 0),
             &step.action,
         )?;
+        effects::validate_provisions_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
     }
     if state == CommitState::Verified
         && let Action::PlaceFurniture {

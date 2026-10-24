@@ -681,6 +681,11 @@ impl MutationDispatcher {
             effects::created_entity_id(&step.idempotency_key, 0),
             &step.action,
         )?;
+        effects::validate_provisions_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
         Ok(action_receipt(
             plan,
             step,
@@ -712,6 +717,11 @@ impl MutationDispatcher {
             // material-ledger census. Validate current original custody before
             // publishing proof or retiring the obligation monitor.
             effects::validate_construction_material_completion(
+                snapshot,
+                effects::created_entity_id(&step.idempotency_key, 0),
+                &step.action,
+            )?;
+            effects::validate_provisions_completion(
                 snapshot,
                 effects::created_entity_id(&step.idempotency_key, 0),
                 &step.action,
@@ -923,6 +933,10 @@ fn adapter_token(
 #[cfg(test)]
 #[path = "dispatcher_construction_tests.rs"]
 mod construction_material_tests;
+
+#[cfg(test)]
+#[path = "dispatcher_provisions_tests.rs"]
+mod provisions_tests;
 
 #[cfg(test)]
 mod tests {

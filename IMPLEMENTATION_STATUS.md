@@ -44,6 +44,40 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Finite shared ingredients for laboratory food production (2026-10-23)
+
+The separately declared `plant-provisions/1` model composes with shared labor
+and charges one qualified PLANT for each completed brewing or cooking batch.
+Both families share the same original stock ledger. Input gates precede worker
+selection and are rechecked during simultaneous completion; an exhausted input
+cannot produce another batch. Partial work and cancellation neither consume
+an unfinished batch nor refund already produced supplies. Original orders
+retain consumed-input history through canonical recovery. Legacy worlds and
+active-history upgrade/downgrade boundaries remain explicit.
+
+Action planning budgets all new food/drink batches against existing active
+finite-food demand, binds the original ledger and input quantity, and seals
+mandatory consumed-input proof. Caller-supplied predicates cannot turn an
+unfinished order into completion. Dispatcher and laboratory proof boundaries
+validate current original identity, generations and the complete input domain.
+
+Executed development validation: all 197 actual-source intent tests passed,
+including 16 new engine groups and four planner tests; all 17 dispatcher tests
+passed, including two new current-provisions proof groups; and all 83 laboratory
+tests passed. The engine regressions cover shared-input contention, retained
+partial work, exact original cancellation identity, source/custody refusals,
+partition/recovery invariance, failure atomicity and exact legacy bytes.
+Production Clippy passed for the changed core libraries with the three
+previously recorded world-crate baseline allowances and all other warnings
+and prohibited methods denied.
+
+Required repository verification still stops at the pre-existing source-bundle
+documentation check; development local qualification still stops at the same
+64 pre-existing static-contract failures. Focused actual-source checks are not
+full-workspace, native or live qualification. This is a bounded reference
+model; gathering, agriculture, barrels, native recipe calibration and live
+admission remain separate. See `docs/LAB_FINITE_PROVISIONS.md`.
+
 ### Material-backed laboratory workshop construction (2026-10-23)
 
 The separately selected `wooden-workshops/1` model composes with the existing

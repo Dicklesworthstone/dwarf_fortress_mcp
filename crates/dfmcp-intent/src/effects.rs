@@ -36,6 +36,8 @@ mod carpentry;
 mod construction_materials;
 #[path = "effects_furniture.rs"]
 mod furniture;
+#[path = "effects_provisions.rs"]
+mod provisions;
 #[path = "effects_workforce.rs"]
 mod workforce;
 
@@ -49,6 +51,13 @@ pub use construction_materials::{
     construction_completion_predicates, construction_material_model, construction_material_report,
     construction_wood_cost, validate_construction_material_completion,
     validate_construction_material_identity,
+};
+
+pub use provisions::{
+    LABORATORY_PROVISIONS_MODEL, LABORATORY_PROVISIONS_MODEL_FIELD, PROVISIONS_CONSUMED_FIELD,
+    PROVISIONS_LEDGER_FIELD, PROVISIONS_LEDGER_GENERATION_FIELD, ProvisionsOrder, ProvisionsReport,
+    STOCK_PLANT_FIELD, provisions_completion_predicates, provisions_input_cost, provisions_model,
+    provisions_report, validate_provisions_completion, validate_provisions_identity,
 };
 
 pub use workforce::{
@@ -803,6 +812,7 @@ pub fn apply_effect(
 ) -> Result<bool> {
     let staffed = laboratory_workforce_model(snapshot)?.is_some();
     construction_material_model(snapshot)?;
+    provisions_model(snapshot)?;
     let mut changed = apply_effect_inner(snapshot, action, idempotency_key)?;
     if staffed && workforce::registered_action(action) {
         changed |= workforce::stamp(snapshot, created_entity_id(idempotency_key, 0))?;
@@ -1063,6 +1073,7 @@ fn apply_effect_inner(
                     Value::Text(CARPENTRY_PRODUCTION_MODEL.to_owned()),
                 ));
             }
+            fields.extend(provisions::dispatch_fields(snapshot, job_token)?);
             create_entity(
                 snapshot,
                 created_entity_id(idempotency_key, 0),
@@ -1102,6 +1113,9 @@ fn cancel_effect_inner(
     action: &Action,
     idempotency_key: &str,
 ) -> Result<bool> {
+    if let Some(changed) = provisions::cancel(snapshot, action, idempotency_key)? {
+        return Ok(changed);
+    }
     if matches!(action, Action::Build { .. })
         && let Some(changed) = construction_materials::cancel(snapshot, action, idempotency_key)?
     {
@@ -1398,6 +1412,7 @@ struct TimelineDig {
 
 struct EffectTimeline {
     staffed: bool,
+    provisions: Option<provisions::Model>,
     orders: Vec<TimelineOrder>,
     buildings: Vec<EntityId>,
     digs: BTreeMap<EntityId, TimelineDig>,
@@ -1450,6 +1465,7 @@ impl EffectTimeline {
         )?;
         let staffed = laboratory_workforce_model(snapshot)?.is_some();
         construction_materials::validate_model(snapshot, budget)?;
+        let provisions = provisions::validate_model(snapshot, budget)?;
         require_progress_selectors(snapshot)?;
         // Count complete requested footprints before allocating even the first
         // cache. This also refuses oversized overlapping regions before terrain
@@ -1473,6 +1489,7 @@ impl EffectTimeline {
         }
         let mut timeline = Self {
             staffed,
+            provisions,
             orders: Vec::new(),
             buildings: Vec::new(),
             digs: BTreeMap::new(),
@@ -1629,6 +1646,12 @@ impl EffectTimeline {
         }
         if let Some(blocker) = carpentry::blocker(snapshot, order)? {
             return Ok(ProductionGate::Blocked(blocker));
+        }
+        if self.provisions.is_some() && provisions::recipe(&order.job).is_some() {
+            budget.charge(32)?;
+            if let Some(blocker) = provisions::blocker(snapshot, order, self.provisions.as_ref())? {
+                return Ok(ProductionGate::Blocked(blocker));
+            }
         }
         Ok(production_gate(
             snapshot,
@@ -2425,6 +2448,13 @@ fn advance_ready_work_order(
     if carpentry::recipe(&order.job).is_some() {
         changed |= carpentry::complete(snapshot, order, remaining, budget)?;
     }
+    changed |= provisions::complete(
+        snapshot,
+        order,
+        timeline.provisions.as_ref(),
+        remaining,
+        budget,
+    )?;
     if let Some((stock_field, per_unit)) = order.product
         && let Some(ledger) = timeline.ledger
     {
@@ -2516,3 +2546,7 @@ mod workforce_tests;
 #[cfg(test)]
 #[path = "effects_construction_materials_tests.rs"]
 mod construction_materials_tests;
+
+#[cfg(test)]
+#[path = "effects_provisions_tests.rs"]
+mod provisions_tests;

@@ -141,6 +141,10 @@ impl StaticPlanner {
                 snapshot,
                 &intent.requested_actions,
             )?;
+        let provisions = crate::provisions_planning::ProvisionsPlanning::capture(
+            snapshot,
+            &intent.requested_actions,
+        )?;
         let workforce = if intent
             .requested_actions
             .iter()
@@ -185,6 +189,9 @@ impl StaticPlanner {
             )?;
             if let Some(materials) = &construction_materials {
                 materials.bind(snapshot, &mut normalized, &idempotency_key)?;
+            }
+            if let Some(provisions) = &provisions {
+                provisions.bind(snapshot, &mut normalized, &idempotency_key)?;
             }
             if let Some(workforce) = &workforce
                 && normalized.action.naturally_temporal()

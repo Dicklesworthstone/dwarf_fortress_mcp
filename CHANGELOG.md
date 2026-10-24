@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-23 — Consume finite ingredients for brewing and cooking
+
+- Add explicit `plant-provisions/1` food-order semantics over the shared
+  workforce. Each completed brewing or cooking batch consumes one qualified
+  PLANT and produces five existing output units; both families share stock.
+- Gate input before worker selection and again at causal completion. Preserve
+  earned partial work through shortages, cancellation and recovery without
+  inventing refunds or output. Retain original per-order consumption history.
+- Budget new and already queued food/drink batches jointly, bind original
+  inventory in sealed steps, and require full consumption proof at action
+  completion. Preserve legacy worlds and explicit caller deadlines. Document
+  the bounded model in `docs/LAB_FINITE_PROVISIONS.md`.
+- Pass 197 intent, 17 dispatcher and 83 laboratory unit tests, including
+  wrong-family cancellation ownership, material conservation and original
+  generation proof. Production Clippy passes under recorded baseline
+  allowances; existing repository static gates still block full qualification.
+
 ## 2026-10-23 — Run complete room and production goals with finite workshop inputs
 
 - Add the opt-in `starter_fortress_economy` scenario, composing finite shared

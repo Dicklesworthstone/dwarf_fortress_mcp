@@ -149,6 +149,7 @@ pub fn inspect_effect_work(
                     == Some(&Value::U64(u64::from(*amount)))
                 && field(entity, effects::WORK_ORDER_CONDITIONS_FIELD, snapshot.tick)
                     == Some(&expected_conditions)
+                && effects::validate_provisions_identity(snapshot, entity_id, action).is_ok()
         }
         _ => false,
     };
