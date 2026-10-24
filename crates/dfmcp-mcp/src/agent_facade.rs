@@ -1246,7 +1246,7 @@ fn base_attention(
 }
 
 fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
-    json!({
+    let mut view = json!({
         "implementation_phase": LAB_IMPLEMENTATION_PHASE,
         "adapter": state.adapter,
         "compatibility": state.compatibility,
@@ -1257,7 +1257,17 @@ fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
         "mutation_admissible": has_grant(state, "plan") && has_grant(state, "control_clock"),
         "last_checkpoint_id": state.last_checkpoint_id,
         "highest_unresolved_uncertainty": "no live DFHack observation or mutation path is implemented",
-    })
+    });
+    // Use only the current authorized response. A prior scheduling decision
+    // cannot be carried into a newer anchor as if it were observed there.
+    if let Some(workforce) = payload.get("workforce").or_else(|| {
+        payload
+            .get("world")
+            .and_then(|world| world.get("workforce"))
+    }) {
+        view["workforce"] = workforce.clone();
+    }
+    view
 }
 
 fn coverage(payload: &Value) -> Value {
@@ -1627,7 +1637,7 @@ fn project_response(
 }
 
 #[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default) or \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad). Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
+    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default), \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad), \"besieged_fortress\" (starter plus an approaching raider), or \"starter_fortress_workforce\" (starter with an explicit finite shared pool for mining, construction, brewing, cooking and carpentry). The workforce scenario reports current assignments and blockers; existing connected_room and provisioned_room plans use that reference labor model. Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -2074,6 +2084,10 @@ mod tests {
 #[cfg(test)]
 #[path = "lab_actions_mcp_tests.rs"]
 mod lab_actions_tests;
+
+#[cfg(test)]
+#[path = "laboratory_workforce_mcp_tests.rs"]
+mod laboratory_workforce_mcp_tests;
 
 #[cfg(test)]
 #[path = "durable_lab_tests.rs"]

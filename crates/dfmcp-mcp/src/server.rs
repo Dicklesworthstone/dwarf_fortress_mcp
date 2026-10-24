@@ -2651,18 +2651,25 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
-    let (untracked, goal_status) = with_session_admitted(
+    let (untracked, goal_status, workforce) = with_session_admitted(
         &session,
         || {
             (
                 json!({"state": "unknown", "quiescent": false, "items": null,
             "reason": "session observation unavailable"}),
                 serde_json::Value::Null,
+                None,
             )
         },
-        |guard| (untracked_work_json(guard), objectives_json(guard)),
+        |guard| {
+            (
+                untracked_work_json(guard),
+                objectives_json(guard),
+                session_workforce_json(guard),
+            )
+        },
     );
-    json!({
+    let mut payload = json!({
         "ok": true,
         "session_id": format!("{session_id}"),
         "adapter": identity.name,
@@ -2711,8 +2718,11 @@ pub(crate) fn open_session_in_scenario(
             "note": "one canonical world, clock and lease book; your grants, budget, plans and receipts stay your own",
         })),
         "note": "session_id is required for all subsequent tool calls; transport identity grants nothing",
-    })
-    .to_string()
+    });
+    if let Some(workforce) = workforce {
+        payload["workforce"] = workforce;
+    }
+    payload.to_string()
 }
 
 // ============================================================================
@@ -3181,7 +3191,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
             "action_id": format!("{action_id}"),
             "step": receipt.map(|r| r.step_id.get()),
             "state": receipt.map(|r| format!("{:?}", r.state)),
-            "work_state": action_work_json(&session.adapter, action_id),
+            "work_state": action_work_json(session, action_id),
             "risk": step.map(|s| s.risk.as_str()),
             "capability": step.map(|s| s.required_capability.as_str()),
             "obligation": step.and_then(|s| s.obligation.as_ref()).map(|o| json!({
@@ -3454,15 +3464,45 @@ fn effect_work_json(state: &EffectWorkState) -> serde_json::Value {
     })
 }
 
-fn action_work_json(adapter: &MemoryAdapter, action_id: ActionId) -> serde_json::Value {
-    let mut view = match adapter.action_work_state(action_id) {
-        Ok(state) => effect_work_json(&state),
-        Err(error) => effect_work_json(&EffectWorkState::Unknown {
-            entity_id: None,
-            reason: format!("{}: {}", error.code.as_str(), error.message),
-        }),
+fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Value {
+    let adapter = &session.adapter;
+    let (mut view, entity_id) = match adapter.action_work_state(action_id) {
+        Ok(state) => {
+            let entity_id = match &state {
+                EffectWorkState::NeverDispatched => None,
+                EffectWorkState::Active { entity_id } => Some(*entity_id),
+                EffectWorkState::Quiescent { entity_id }
+                | EffectWorkState::Unknown { entity_id, .. } => *entity_id,
+            };
+            (effect_work_json(&state), entity_id)
+        }
+        Err(error) => (
+            effect_work_json(&EffectWorkState::Unknown {
+                entity_id: None,
+                reason: format!("{}: {}", error.code.as_str(), error.message),
+            }),
+            None,
+        ),
     };
     view["observed_anchor"] = anchor_json(&adapter.snapshot().anchor());
+    let ctx = context_for(session, session.next_request_id);
+    if let Some(entity_id) = entity_id
+        && authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_ok()
+    {
+        match lab_world::workforce_action_json(adapter.snapshot(), entity_id) {
+            Ok(Some(workforce)) => view["workforce"] = workforce,
+            Ok(None) => {}
+            Err(error) => {
+                view["workforce"] = json!({
+                    "available": false,
+                    "epistemic_state": "unknown",
+                    "reason": error.message,
+                    "code": error.code.as_str(),
+                    "source_anchor": anchor_json(&adapter.snapshot().anchor()),
+                });
+            }
+        }
+    }
     view
 }
 
@@ -3518,7 +3558,7 @@ fn cancel_action_error_payload(
         serde_json::from_str(&dfmcp_error_payload("fortress.cancel", error))
             .unwrap_or_else(|_| json!({"ok": false}));
     let receipt = session.adapter.action_receipt(action_id);
-    let work = action_work_json(&session.adapter, action_id);
+    let work = action_work_json(session, action_id);
     let remaining_nonterminal = usize::from(!receipt.is_some_and(|row| row.state.is_terminal()));
     let remaining_work = usize::from(work["quiescent"] != true);
     payload["scope"] = json!("last_action");
@@ -3579,6 +3619,25 @@ fn untracked_work_json(session: &LabSession) -> serde_json::Value {
             "observed_anchor": anchor,
             "reason": format!("{}: {}", error.code.as_str(), error.message),
         }),
+    }
+}
+
+/// Current scheduling information is observation, not an effect receipt.
+/// Check authority before even inspecting whether this world selected a model.
+fn session_workforce_json(session: &LabSession) -> Option<serde_json::Value> {
+    let ctx = context_for(session, session.next_request_id);
+    if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
+        return None;
+    }
+    match lab_world::workforce_json(session.adapter.snapshot()) {
+        Ok(workforce) => workforce,
+        Err(error) => Some(json!({
+            "available": false,
+            "epistemic_state": "unknown",
+            "reason": error.message,
+            "code": error.code.as_str(),
+            "source_anchor": anchor_json(&session.adapter.snapshot().anchor()),
+        })),
     }
 }
 
@@ -3645,6 +3704,12 @@ fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
+    if dfmcp_intent::workforce_planning::plan_uses_shared_workforce(&stale.plan) {
+        return Err(json!({
+            "accepted": false,
+            "reason": "shared workforce deadlines read the complete current workload; review a newly sealed intent replay",
+        }));
+    }
     // Quota lowering reads the complete production domain, including absence
     // of competing orders, current service and setup candidates. The current
     // action/predicate witness does not cover those range and negative reads.
@@ -4172,7 +4237,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                     "action_id": format!("{}", action.action_id),
                                     "step": action.step_id.get(),
                                     "state": format!("{:?}", action.state),
-                                    "work_state": action_work_json(&guard.adapter, action.action_id),
+                                    "work_state": action_work_json(guard, action.action_id),
                                     "message": action.message,
                                 })).collect::<Vec<_>>(),
                                 "observed_anchor": anchor_json(&receipt.observed_anchor),
@@ -4240,7 +4305,7 @@ fn wait_progress_json(requested: u64, advanced: u64, rounds: u64) -> serde_json:
 }
 
 fn wait_receipt_json(
-    adapter: &MemoryAdapter,
+    session: &LabSession,
     receipt: &dfmcp_adapter::ActionReceipt,
 ) -> serde_json::Value {
     json!({
@@ -4249,7 +4314,7 @@ fn wait_receipt_json(
         "state": format!("{:?}", receipt.state),
         "message": receipt.message,
         "observed_anchor": anchor_json(&receipt.observed_anchor),
-        "work_state": action_work_json(adapter, receipt.action_id),
+        "work_state": action_work_json(session, receipt.action_id),
     })
 }
 
@@ -4289,14 +4354,14 @@ fn wait_progress_error(
         payload["polled_actions"] = json!(
             receipts
                 .values()
-                .map(|receipt| wait_receipt_json(&session.adapter, receipt))
+                .map(|receipt| wait_receipt_json(session, receipt))
                 .collect::<Vec<_>>()
         );
         payload["open_actions_remaining"] = json!(session.open_actions.len());
         payload["durability_pending"] = json!(session.durability_fault.is_some());
         if let Some(action_id) = session.last_action {
             payload["action_id"] = json!(action_id.to_string());
-            payload["work_state"] = action_work_json(&session.adapter, action_id);
+            payload["work_state"] = action_work_json(session, action_id);
             if let Some(receipt) = session.adapter.action_receipt(action_id) {
                 payload["commit_state"] = json!(format!("{:?}", receipt.state));
             }
@@ -4443,7 +4508,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             let polled_actions: Vec<_> = tracked_order
                 .iter()
                 .filter_map(|id| latest_receipts.get(id))
-                .map(|receipt| wait_receipt_json(&guard.adapter, receipt))
+                .map(|receipt| wait_receipt_json(guard, receipt))
                 .collect();
             // Formatting cannot perform another poll (and potentially dispatch
             // a deferred effect) outside the persisted progression frontier.
@@ -4479,7 +4544,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                     "status": task.status.as_str(),
                     "commit_state": format!("{:?}", task.commit_state),
                     "summary": task.summary,
-                    "work_state": action_work_json(&guard.adapter, action_id),
+                    "work_state": action_work_json(guard, action_id),
                     "observed_anchor": anchor_json(&snapshot.anchor()),
                 }),
                 _ => json!({
@@ -4700,7 +4765,7 @@ pub(crate) fn cancel_in_scope(
                             "requested_state": format!("{:?}", receipt.state),
                             "final_state": format!("{:?}", receipt.state),
                             "physical_drain": effect_drain_json(&drain),
-                            "work_state": action_work_json(&guard.adapter, action_id),
+                            "work_state": action_work_json(guard, action_id),
                             "paused": guard.adapter.snapshot().paused,
                             "observed_anchor": anchor_json(&guard.adapter.snapshot().anchor()),
                         })
@@ -4726,7 +4791,7 @@ pub(crate) fn cancel_in_scope(
                     "action_id": format!("{}", finalized.action_id),
                     "requested_state": format!("{:?}", request.state),
                     "final_state": format!("{:?}", finalized.state),
-                    "work_state": action_work_json(&guard.adapter, action_id),
+                    "work_state": action_work_json(guard, action_id),
                     "paused": guard.adapter.snapshot().paused,
                     "note": "cancellation is request/drain/compensate/finalize; records are never deleted",
                 })
@@ -4799,7 +4864,7 @@ fn drain_actions(
                 break;
             }
         };
-        let work_before = action_work_json(&guard.adapter, action_id);
+        let work_before = action_work_json(guard, action_id);
         let mut cleanup = None;
         let mut drained = false;
         let outcome = if before.state.is_terminal() {
@@ -4846,7 +4911,7 @@ fn drain_actions(
             "proof_receipt_digest": after.map(|receipt| receipt.adapter_receipt_digest.to_hex()),
             "proof_anchor": after.map(|receipt| anchor_json(&receipt.observed_anchor)),
             "work_before": work_before,
-            "work_after": action_work_json(&guard.adapter, action_id),
+            "work_after": action_work_json(guard, action_id),
             "physical_drain": cleanup,
             "drained": drained,
         }));

@@ -8,6 +8,9 @@ use dfmcp_intent::{BuildingKind, MaterialSelector, PreparedPlan, effects};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{PredicateEvidence, PredicateTruth, Value, laboratory_fact_value};
 
+#[path = "connected_room_workforce_tests.rs"]
+mod workforce;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(981), false)
 }

@@ -295,7 +295,7 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
         let receipt = session.adapter.action_receipt(id).ok_or_else(|| DfmcpError::new(
             ErrorCode::Conflict, "original task action no longer exists; refresh after restore and do not retry its effect",
         ))?;
-        let work = action_work_json(&session.adapter, id);
+        let work = action_work_json(session, id);
         progress.observe(receipt.state, &work);
         let fully_drained = receipt.state.is_terminal() && work["quiescent"] == true;
         let step = session.adapter.action_step(id);
@@ -476,7 +476,7 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
                     "original task action is missing during drain",
                 )
             })?;
-            let before_work = action_work_json(&session.adapter, id);
+            let before_work = action_work_json(session, id);
             let mut effect_drain = Value::Null;
             if !before.state.is_terminal() {
                 let (_, ctx) = next_context(session)?;
@@ -522,7 +522,7 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
                 .adapter
                 .action_receipt(id)
                 .ok_or_else(session_error)?;
-            let after_work = action_work_json(&session.adapter, id);
+            let after_work = action_work_json(session, id);
             progress.observe(after.state, &after_work);
             row["after"] = json!(format!("{:?}", after.state));
             row["receipt_digest"] = json!(after.adapter_receipt_digest.to_hex());

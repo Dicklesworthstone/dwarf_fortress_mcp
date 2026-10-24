@@ -44,6 +44,58 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Usable shared-workforce room and production workflows (2026-10-24)
+
+The opt-in `starter_fortress_workforce` scenario exposes the shared service
+model through the existing eleven-tool laboratory surface. Existing connected
+and provisioned room requests now exercise finite excavation, production and
+construction together. Current Observe authority gates the bounded opening,
+observation and per-action assignment/blocker reports. The orientation briefing
+uses only a current returned report; predicted workforce assignments remain
+explicitly forecast evidence from the isolated simulation.
+
+Production reserve solving and sealed obligations use the same complete
+workforce horizon, including queued construction. This prevents food/drink
+reserves from being sized against an earlier, unrealistically short service
+schedule. Temporal plans that read the common workload always require reviewed
+source replay after an anchor change; a narrow per-action witness cannot
+silently reuse old workload-derived deadlines. Original scenarios and their
+optional-field shapes remain unchanged when the model is absent.
+
+**Executed evidence:** all 167 tests in the actual-source focused MCP module
+workspace pass. Seven new cases cover additive scenario identity and legacy
+canonical bytes, unavailable source evidence, blockers beyond the briefing row
+cap, connected-room forecast/execution agreement, authorized construction-labor
+removal and restoration without banked service, canonical reconstruction with
+carried proof, and a single worker sharing queued construction with consumption-
+aware production. The latter verifies the exact reserve/sealed horizon and the
+original food/drink quotas through that horizon. Existing room, continuation,
+production, witness and forecast tests in the same module workspace also pass.
+Focused production Clippy passes with the same three pre-existing world-source
+allowances recorded below; scoped pinned-nightly formatting and diff checks
+pass. The earlier 157 intent tests remain the core engine/planner evidence.
+
+The focused harness compiles the actual core, world, intent, adapter and
+laboratory libraries and actual MCP semantic modules. It excludes the full
+FastMCP server/facade/task-session surface. The two new public-facade tests for
+Observe redaction and reviewed stale-plan replay are source-reviewed and
+formatted, not compiled or executed. The prior complete MCP dependency check
+was killed while compiling `asupersync` under the environment memory limit;
+this increment does not claim to resolve that full-build limitation. No new
+full Rust, native or live qualification or registry admission is asserted.
+
+Required `verify.sh` passes the first four checks, then stops at the existing
+source-bundle documentation gate (`exact clean git commit`). The explicitly
+marked development qualification run passes repository integrity, receipt
+custody and implementation status, then stops at the existing static-contract
+failures. It produces no passed full qualification receipt. These baseline
+release-gate failures were not expanded into unrelated cleanup work.
+
+Usage, current report fields and scope limits are documented in
+`docs/LAB_SHARED_WORKFORCE.md`. This implementation adds finite reference labor;
+native hauling, pathfinding, ownership, skill calibration and general building
+material consumption remain separate work.
+
 ### Finite shared laboratory service for excavation and construction (2026-10-23)
 
 An explicit `shared-workforce/1` model now shares qualified living workers

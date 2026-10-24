@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-24 — Run room and reserve goals through the shared workforce
+
+- Add the opt-in `starter_fortress_workforce` scenario while preserving the
+  canonical legacy starter. Existing connected/provisioned room and production
+  requests use its finite mining, construction and production workers.
+- Expose bounded current assignments and shortages at session opening,
+  observation and per-action progress, gated by current Observe authority.
+  Keep forecast scheduling explicitly predicted and avoid carrying an old
+  workforce report into a later orientation packet.
+- Include queued construction in consumption-aware production reserves and
+  bind the exact same horizon into sealed obligations. Require reviewed replay
+  after changed anchors for every plan using global workforce reads.
+- Execute all 167 focused MCP module tests, including seven new whole-workflow,
+  shortage/resume, reconstruction, authority and consumption-horizon cases.
+  Production Clippy passes with the documented existing world-source allowances.
+  Two new full-facade tests remain unexecuted; exact validation limits are in
+  `IMPLEMENTATION_STATUS.md`.
+- Document the scenario, report semantics and authorized labor remedy in
+  `docs/LAB_SHARED_WORKFORCE.md` without adding a top-level tool.
+
 ## 2026-10-23 — Share finite labor across construction and production
 
 - Add the explicit `shared-workforce/1` laboratory model. Mining, building,

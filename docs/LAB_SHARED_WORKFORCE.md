@@ -5,6 +5,64 @@ compete for a finite common set of living workers. It extends the reference
 laboratory's causal timeline and existing semantic actions. It adds no native
 mutation capability and makes no claim about Dwarf Fortress's actual job AI.
 
+## Use the workforce scenario
+
+Open the existing `fortress.open_session` tool with
+`scenario: "starter_fortress_workforce"`. The original `starter_fortress`,
+`besieged_fortress` and `empty` scenarios retain their previous semantics.
+For a complete room workflow, request the ordinary observation, planning,
+clock, designation, construction, production, labor and checkpoint capabilities:
+
+```json
+{
+  "scenario": "starter_fortress_workforce",
+  "paused": false,
+  "requested_capabilities": [
+    ["observe", "read_only"],
+    ["query", "read_only"],
+    ["plan", "read_only"],
+    ["control_clock", "reversible"],
+    ["designate", "guarded"],
+    ["construct", "guarded"],
+    ["configure_labor", "reversible"],
+    ["configure_production", "reversible"],
+    ["checkpoint", "guarded"]
+  ]
+}
+```
+
+The scenario supplies two miners, one constructor, a brewer, a carpenter and a
+cook among the starter's seven living dwarves. All five labor columns are
+explicit qualified booleans. Existing `connected_room`, `provisioned_room` and
+production requests run through this same workforce; no replacement blueprint
+grammar or additional tool is required. For a complete connected-room request,
+see [LAB_CONNECTED_ROOM_ACCESS.md](LAB_CONNECTED_ROOM_ACCESS.md).
+
+With current Observe authority, session opening returns a bounded `workforce`
+report. `fortress.observe` includes it under `world.workforce`; the orientation
+briefing copies only a report returned at the current frontier. Reports include
+the model, source anchor, eligible workers, active activities, remaining
+service, assignments, blockers and explicit omitted-row counts. They are
+`certified_derived` within the laboratory evidence scope. They are omitted when
+the caller lacks observation authority. An unavailable model reports Unknown
+instead of displaying retained values as established current knowledge.
+
+Action `work_state.workforce` reports the selected worker or current blocker for
+that exact effect. It filters the complete selection before applying output
+bounds, so later work cannot disappear behind the global briefing's row cap.
+The existing `work_state` remains the authority for physical quiescence.
+Forecasts expose the same selection on the isolated simulated world as
+`predicted_workforce`, explicitly marked predicted and bound to its predicted
+anchor; they never reserve workers in the source fortress.
+
+If construction is blocked because no living unit has `CONSTRUCTION` enabled,
+an ordinary reviewed and authorized `SetLabor` plan can restore that capacity.
+Subsequent foreground waits resume the original physical work without granting
+service for the time it spent unstaffed. Unknown facts do not authorize implicit
+labor changes. If the original obligation has already expired, its historical
+failure remains immutable; use the established drain/reconcile/continuation
+workflow rather than treating restored capacity as a new success receipt.
+
 ## Explicit model identity
 
 The canonical fortress-settings entity has a qualified
@@ -78,6 +136,14 @@ The workload inspection includes a complete domain and absence reads. A shell
 must therefore obtain a reviewed source replay after an anchor change for a
 plan marked by `plan_uses_shared_workforce`; the ordinary per-action witness
 cannot silently certify that the queue and its sealed deadline remain valid.
+
+The current production compiler uses this same complete horizon while solving
+its food/drink consumption reserves. Queued construction can therefore raise
+the planning stock target before the plan is sealed. The reserve calculation
+and the actual sealed maximum obligation deadline must agree exactly. Actual
+future output is never counted as observed inventory. An anchor change requires
+an explicitly reviewed replay for workforce plans, including plain excavation
+requests that would otherwise have a narrower action witness.
 
 ## Boundaries
 

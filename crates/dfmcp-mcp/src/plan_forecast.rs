@@ -135,7 +135,7 @@ pub(super) fn forecast_plan(
         .all(|(_, _, state, _)| *state == CommitState::Verified);
     let goal_complete = goal == PredicateTruth::True;
     let completes = actions_complete && goal_complete && quiescent;
-    json!({
+    let mut forecast = json!({
         "epistemic_state": "predicted",
         "available": true,
         "method": "deterministic_laboratory_simulation_on_a_discarded_fork",
@@ -159,7 +159,24 @@ pub(super) fn forecast_plan(
         "blocked_by_pause": blocked_by_pause,
         "steps": steps,
         "assumes": "the fortress stays as it is now and no other agent acts; a prediction is not evidence",
-    })
+    });
+    match crate::lab_world::workforce_json(fork.snapshot()) {
+        Ok(Some(mut workforce)) => {
+            // A fork's scheduler is a prediction, even though it follows the
+            // same exact model as execution. Its anchor is never canonical.
+            workforce["epistemic_state"] = json!("predicted");
+            workforce["evidence_scope"] = json!("discarded_laboratory_forecast");
+            if let Some(fields) = workforce.as_object_mut()
+                && let Some(anchor) = fields.remove("source_anchor")
+            {
+                fields.insert("predicted_anchor".to_owned(), anchor);
+            }
+            forecast["predicted_workforce"] = workforce;
+        }
+        Ok(None) => {}
+        Err(error) => return unavailable(&error),
+    }
+    forecast
 }
 
 #[cfg(test)]

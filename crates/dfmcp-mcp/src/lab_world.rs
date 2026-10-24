@@ -36,6 +36,14 @@ mod production_consumption;
 #[path = "production_staffing.rs"]
 mod production_staffing;
 
+#[path = "laboratory_workforce_view.rs"]
+mod laboratory_workforce_view;
+pub(crate) use laboratory_workforce_view::{workforce_action_json, workforce_json};
+
+#[cfg(test)]
+#[path = "laboratory_workforce_scenario_tests.rs"]
+mod laboratory_workforce_scenario_tests;
+
 #[cfg(test)]
 #[path = "production_workload_tests.rs"]
 mod production_workload_tests;
@@ -60,7 +68,12 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 3] = ["empty", "starter_fortress", "besieged_fortress"];
+pub(crate) const SCENARIOS: [&str; 4] = [
+    "empty",
+    "starter_fortress",
+    "besieged_fortress",
+    "starter_fortress_workforce",
+];
 
 /// Starter-fortress entity identities.
 pub(crate) mod starter {
@@ -123,6 +136,7 @@ pub(crate) fn scenario_snapshot(
     let graph = match scenario {
         "empty" => WorldGraph::default(),
         "starter_fortress" => starter_graph()?,
+        "starter_fortress_workforce" => workforce_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -161,6 +175,47 @@ pub(crate) fn scenario_snapshot(
         paused,
         graph,
     ))
+}
+
+/// The finite workforce is an explicit new scenario. The original starter
+/// graph and its sealed snapshots retain their established interpretation.
+fn workforce_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
+    let mut graph = starter_graph()?;
+    for index in 0..7 {
+        let id = EntityId::new(starter::FIRST_DWARF + index);
+        let unit = graph
+            .entities
+            .get_mut(&id)
+            .ok_or_else(|| invalid("starter workforce unit is missing"))?;
+        for labor in ["MINING", "CONSTRUCTION", "BREW", "COOK", "CARPENTRY"] {
+            let enabled = matches!(
+                (index, labor),
+                (0 | 6, "MINING")
+                    | (1, "CONSTRUCTION")
+                    | (2, "BREW")
+                    | (3, "CARPENTRY")
+                    | (5, "COOK")
+            );
+            unit.fields.insert(
+                format!("{}{labor}", effects::LABOR_FIELD_PREFIX),
+                lab_fact(Value::Bool(enabled)),
+            );
+        }
+    }
+    let settings = effects::fortress_settings_entity_id(fortress_id);
+    graph.entities.insert(
+        settings,
+        record(
+            settings,
+            EntityKind::Other(effects::FORTRESS_SETTINGS_KIND.to_owned()),
+            "Laboratory workforce settings",
+            vec![(
+                effects::LABORATORY_WORKFORCE_MODEL_FIELD,
+                Value::Text(effects::LABORATORY_WORKFORCE_MODEL.to_owned()),
+            )],
+        ),
+    );
+    Ok(graph)
 }
 
 /// Three 48x48 rock levels (z 9..11) with a carved 10x3 entrance hall on
@@ -2170,6 +2225,8 @@ fn text_field<'a>(entity: &'a EntityRecord, name: &str) -> Option<&'a str> {
 /// by kind (complete), active work with progress, and the dwarves. Lists are
 /// capped and say how many were omitted; counts are always complete.
 pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
+    let workforce = workforce_json(snapshot);
+    let finite_workforce = matches!(&workforce, Ok(Some(_)));
     let mut counts: BTreeMap<&str, u64> = BTreeMap::new();
     for entity in snapshot.graph.entities.values() {
         *counts.entry(entity.kind.as_str()).or_insert(0) += 1;
@@ -2200,10 +2257,12 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
                 "required_ticks",
             ]
             .iter()
+            .copied()
+            .chain(["work_ticks"].into_iter().filter(|_| finite_workforce))
             .filter_map(|name| {
-                entity.fields.get(*name).map(|fact| {
+                entity.fields.get(name).map(|fact| {
                     (
-                        (*name).to_owned(),
+                        name.to_owned(),
                         crate::observation_projection::fact_value(fact),
                     )
                 })
@@ -2245,7 +2304,7 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
             })
         })
         .collect();
-    json!({
+    let mut view = json!({
         "counts_by_kind": counts,
         "terrain_chunks_observed": snapshot.graph.chunks.len(),
         "active_work": active_work,
@@ -2253,7 +2312,21 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
         "dwarves": dwarves,
         "dwarves_omitted": units.len().saturating_sub(MAX_BRIEFING_ITEMS),
         "drill_down": "fortress.query with {\"mode\":\"entities\",\"kind\":...} or {\"mode\":\"terrain\",...}",
-    })
+    });
+    match workforce {
+        Ok(Some(report)) => view["workforce"] = report,
+        Ok(None) => {}
+        Err(error) => {
+            view["workforce"] = json!({
+                "available": false,
+                "epistemic_state": "unknown",
+                "evidence_scope": "laboratory_reference_world",
+                "source_anchor": crate::observation_projection::anchor_json(&snapshot.anchor()),
+                "reason": {"code": error.code.as_str(), "message": error.message},
+            });
+        }
+    }
+    view
 }
 
 /// A page always names exactly one collection of a profiled observation.

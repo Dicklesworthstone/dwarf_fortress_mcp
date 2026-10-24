@@ -7,6 +7,7 @@
 
 use super::*;
 use dfmcp_core::{GameTick, StateAnchor, StepId};
+use dfmcp_intent::workforce_planning::LaboratoryWorkforcePlanning;
 use dfmcp_intent::{Intent, ObligationSpec, derive_step_idempotency_key};
 
 const MAX_WORKLOAD_ORDERS: usize = 128;
@@ -27,6 +28,7 @@ pub(super) struct ProductionWorkload {
     service_ticks: u64,
     allowance_ticks: u64,
     wood_units: u64,
+    workforce: Option<LaboratoryWorkforcePlanning>,
 }
 
 fn unavailable(record: &EntityRecord, field: &str) -> DfmcpError {
@@ -75,6 +77,7 @@ impl ProductionWorkload {
             service_ticks: 0,
             allowance_ticks: 0,
             wood_units: 0,
+            workforce: LaboratoryWorkforcePlanning::capture(snapshot)?,
         };
         for record in snapshot.graph.entities.values() {
             if record.kind != EntityKind::WorkOrder {
@@ -220,7 +223,7 @@ impl ProductionWorkload {
     }
 
     pub(super) fn apply_horizon(&self, actions: &str, intent: &mut Intent) -> Result<()> {
-        if self.allowance_ticks == 0 {
+        if self.allowance_ticks == 0 && self.workforce.is_none() {
             // Preserve the exact established uncontended plan, including
             // omitted default obligation fields before ordinary preparation.
             return Ok(());
@@ -312,6 +315,11 @@ impl ProductionWorkload {
             .checked_add(effects::MAX_DEFAULT_OBLIGATION_TICKS)
             .ok_or_else(horizon_error)?;
         let mut obligations: Vec<Option<ObligationSpec>> = Vec::with_capacity(actions.len());
+        let workforce_floor = self
+            .workforce
+            .as_ref()
+            .map(|workforce| workforce.deadline_floor(actions))
+            .transpose()?;
         for (index, requested) in actions.iter().enumerate() {
             let mut start = self.anchor.tick;
             for dependency in &requested.depends_on {
@@ -343,8 +351,11 @@ impl ProductionWorkload {
                     .ok_or_else(horizon_error)?;
             }
             let key = key(index, &action)?;
-            let obligation =
+            let mut obligation =
                 effects::default_obligation(&action, &key, self.anchor.fortress_id, start)?;
+            if let (Some(floor), Some(obligation)) = (workforce_floor, &mut obligation) {
+                obligation.deadline_tick = obligation.deadline_tick.max(floor);
+            }
             if obligation
                 .as_ref()
                 .is_some_and(|obligation| obligation.deadline_tick > horizon_limit)
