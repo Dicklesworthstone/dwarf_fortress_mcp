@@ -124,6 +124,8 @@ pub fn inspect_effect_work(
                     == Some(&Value::Coord(footprint.max))
                 && field(entity, "building_kind", snapshot.tick)
                     == Some(&Value::Text(effects::building_kind_label(kind)))
+                && effects::validate_construction_material_identity(snapshot, entity_id, action)
+                    .is_ok()
         }
         Action::PlaceFurniture {
             kind,

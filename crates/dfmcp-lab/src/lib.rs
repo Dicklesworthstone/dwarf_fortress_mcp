@@ -1625,6 +1625,13 @@ fn validate_terminal_action_identity(
     step: &PlanStep,
     state: CommitState,
 ) -> Result<()> {
+    if state == CommitState::Verified {
+        effects::validate_construction_material_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
+    }
     if state == CommitState::Verified
         && let Action::PlaceFurniture {
             kind,

@@ -32,10 +32,24 @@ use crate::plan::ObligationSpec;
 mod capacity;
 #[path = "effects_carpentry.rs"]
 mod carpentry;
+#[path = "effects_construction_materials.rs"]
+mod construction_materials;
 #[path = "effects_furniture.rs"]
 mod furniture;
 #[path = "effects_workforce.rs"]
 mod workforce;
+
+pub use construction_materials::{
+    CONSTRUCTION_MATERIAL_FORBIDDEN_FIELD, CONSTRUCTION_MATERIAL_LEDGER_FIELD,
+    CONSTRUCTION_MATERIAL_LEDGER_GENERATION_FIELD, CONSTRUCTION_MATERIAL_MODEL_FIELD,
+    CONSTRUCTION_MATERIAL_NEAREST_FIELD, CONSTRUCTION_MATERIAL_RESERVE_FIELD,
+    CONSTRUCTION_MATERIAL_STATE_FIELD, CONSTRUCTION_MATERIAL_WOOD_FIELD,
+    ConstructionMaterialAllocation, ConstructionMaterialReport,
+    LABORATORY_CONSTRUCTION_MATERIAL_MODEL, LABORATORY_CONSTRUCTION_MATERIAL_MODEL_FIELD,
+    construction_completion_predicates, construction_material_model, construction_material_report,
+    construction_wood_cost, validate_construction_material_completion,
+    validate_construction_material_identity,
+};
 
 pub use workforce::{
     LABORATORY_WORKFORCE_MODEL, LABORATORY_WORKFORCE_MODEL_FIELD,
@@ -788,6 +802,7 @@ pub fn apply_effect(
     idempotency_key: &str,
 ) -> Result<bool> {
     let staffed = laboratory_workforce_model(snapshot)?.is_some();
+    construction_material_model(snapshot)?;
     let mut changed = apply_effect_inner(snapshot, action, idempotency_key)?;
     if staffed && workforce::registered_action(action) {
         changed |= workforce::stamp(snapshot, created_entity_id(idempotency_key, 0))?;
@@ -949,6 +964,10 @@ fn apply_effect_inner(
             footprint,
             material,
         } => {
+            if let Some(changed) = construction_materials::build(snapshot, action, idempotency_key)?
+            {
+                return Ok(changed);
+            }
             if !footprint.contains(*location) {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidRequest,
@@ -1083,6 +1102,11 @@ fn cancel_effect_inner(
     action: &Action,
     idempotency_key: &str,
 ) -> Result<bool> {
+    if matches!(action, Action::Build { .. })
+        && let Some(changed) = construction_materials::cancel(snapshot, action, idempotency_key)?
+    {
+        return Ok(changed);
+    }
     if let Action::PlaceFurniture {
         kind,
         item,
@@ -1425,6 +1449,7 @@ impl EffectTimeline {
                 .saturating_add(snapshot.graph.edges.len() as u64),
         )?;
         let staffed = laboratory_workforce_model(snapshot)?.is_some();
+        construction_materials::validate_model(snapshot, budget)?;
         require_progress_selectors(snapshot)?;
         // Count complete requested footprints before allocating even the first
         // cache. This also refuses oversized overlapping regions before terrain
@@ -2435,6 +2460,9 @@ fn advance_building(
     budget: &mut EffectAdvanceBudget,
 ) -> Result<bool> {
     let building = entity(snapshot, id)?;
+    if construction_materials::has_material_fields(building) {
+        return construction_materials::advance(snapshot, id, elapsed, budget);
+    }
     if furniture::has_placement_fields(building) {
         return furniture::advance(snapshot, id, elapsed, budget);
     }
@@ -2484,3 +2512,7 @@ mod furniture_tests;
 #[cfg(test)]
 #[path = "effects_workforce_tests.rs"]
 mod workforce_tests;
+
+#[cfg(test)]
+#[path = "effects_construction_materials_tests.rs"]
+mod construction_materials_tests;

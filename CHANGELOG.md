@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-23 — Allocate finite materials for workshop construction
+
+- Add an explicit `wooden-workshops/1` model composed with finite shared labor.
+  Still, Kitchen and Carpenters construction allocates one qualified WOOD log
+  at dispatch, consumes that held allocation on completion and refunds it
+  exactly once on unfinished cancellation.
+- Preserve legacy Build semantics and reject unsupported material selectors,
+  missing or ambiguous stock, malformed custody and implicit history upgrades.
+  Bind physical ownership and completion proof to the original allocation.
+- Check joint workshop, new furniture and queued carpentry demand before
+  sealing an action program. Require material completion in sealed Build proof
+  while preserving explicit deadlines. Document the bounded model in
+  `docs/LAB_WORKSHOP_MATERIALS.md`.
+- Validate original material custody at dispatcher and laboratory proof
+  publication, including generations and the unique stock-ledger domain.
+  Pass 177 intent, 15 dispatcher and 83 laboratory unit tests; focused intent
+  production Clippy is clean under the recorded baseline allowances. Full
+  repository qualification remains blocked by the existing static gates.
+
 ## 2026-10-24 — Run room and reserve goals through the shared workforce
 
 - Add the opt-in `starter_fortress_workforce` scenario while preserving the

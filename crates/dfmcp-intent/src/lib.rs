@@ -4,6 +4,7 @@ mod action;
 pub mod alert_fsm;
 pub mod blueprint;
 pub mod civilian_protection;
+mod construction_planning;
 pub mod effect_quiescence;
 pub mod effects;
 pub mod execution;

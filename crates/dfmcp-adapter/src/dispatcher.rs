@@ -676,6 +676,11 @@ impl MutationDispatcher {
                 ),
             ));
         }
+        effects::validate_construction_material_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
         Ok(action_receipt(
             plan,
             step,
@@ -702,6 +707,16 @@ impl MutationDispatcher {
             )
         })?;
         let state = obligation_commit_state(runtime, action_id, observation)?;
+        if state == CommitState::Verified {
+            // Field predicates do not encode generations or the unique
+            // material-ledger census. Validate current original custody before
+            // publishing proof or retiring the obligation monitor.
+            effects::validate_construction_material_completion(
+                snapshot,
+                effects::created_entity_id(&step.idempotency_key, 0),
+                &step.action,
+            )?;
+        }
         let message = match state {
             CommitState::Verified => "obligation terminal proven on stable scheduled observations",
             CommitState::Failed => "obligation failed or exhausted its deadline without stable proof",
@@ -904,6 +919,10 @@ fn adapter_token(
     token.extend_from_slice(&plan.expires_at_tick.0.to_be_bytes());
     token
 }
+
+#[cfg(test)]
+#[path = "dispatcher_construction_tests.rs"]
+mod construction_material_tests;
 
 #[cfg(test)]
 mod tests {

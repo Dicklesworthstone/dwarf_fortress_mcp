@@ -136,6 +136,11 @@ impl StaticPlanner {
         }
 
         let max_allowed_risk = intent.max_risk();
+        let construction_materials =
+            crate::construction_planning::ConstructionMaterialPlanning::capture(
+                snapshot,
+                &intent.requested_actions,
+            )?;
         let workforce = if intent
             .requested_actions
             .iter()
@@ -178,6 +183,9 @@ impl StaticPlanner {
                 intent.anchor.fortress_id,
                 earliest_start,
             )?;
+            if let Some(materials) = &construction_materials {
+                materials.bind(snapshot, &mut normalized, &idempotency_key)?;
+            }
             if let Some(workforce) = &workforce
                 && normalized.action.naturally_temporal()
             {

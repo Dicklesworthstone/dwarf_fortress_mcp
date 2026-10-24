@@ -44,6 +44,40 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Material-backed laboratory workshop construction (2026-10-23)
+
+The separately selected `wooden-workshops/1` model composes with the existing
+shared workforce and requires one qualified WOOD log for each supported Still,
+Kitchen or Carpenters Build. Dispatch removes that log from free inventory and
+holds it for the original building. Completion consumes the same allocation;
+unfinished cancellation releases it once. Original model, ledger generation,
+quantity and allocation state remain in canonical history through recovery.
+Unsupported Build kinds and material selectors refuse in this opt-in model.
+Existing marker-free worlds retain their original effects and plan semantics.
+
+Joint action planning includes new workshop setup, new furniture demand and
+remaining existing carpentry demand before producing a candidate. Per-action
+availability guards and mandatory material-completion predicates are sealed
+into supported Build steps. Explicit deadlines remain unchanged. Physical-work
+and proof boundaries independently validate current material identity/custody.
+
+Executed development validation: 177 actual-source intent unit tests passed,
+including 16 new material-lifecycle groups and four resource-planning tests;
+15 dispatcher tests passed, including two new current-custody proof groups;
+and all 83 laboratory unit tests passed. The dispatcher regressions refuse
+replaced building/ledger generations, duplicate ledgers and removed model
+declarations even when ordinary completion field predicates remain true.
+Intent production Clippy passed with the three previously recorded world-crate
+baseline allowances and all other warnings/prohibited methods denied.
+
+The required repository verification still stops at the pre-existing source
+bundle documentation check; development local qualification still stops at
+the same 64 pre-existing static-contract failures. These focused actual-source
+tests are not full workspace/server, native or live qualification. The one-log
+recipe is laboratory calibration; individual log hauling, native material
+costs and unsupported building families remain outside this model. See
+`docs/LAB_WORKSHOP_MATERIALS.md`.
+
 ### Usable shared-workforce room and production workflows (2026-10-24)
 
 The opt-in `starter_fortress_workforce` scenario exposes the shared service
