@@ -190,9 +190,27 @@ pub(super) fn forecast_plan(
         Ok(None) => {}
         Err(error) => return unavailable(&error),
     }
+    match crate::lab_world::provisions_json(fork.snapshot()) {
+        Ok(Some(mut provisions)) => {
+            provisions["epistemic_state"] = json!("predicted");
+            provisions["evidence_scope"] = json!("discarded_laboratory_forecast");
+            if let Some(fields) = provisions.as_object_mut()
+                && let Some(anchor) = fields.remove("source_anchor")
+            {
+                fields.insert("predicted_anchor".to_owned(), anchor);
+            }
+            forecast["predicted_provisions"] = provisions;
+        }
+        Ok(None) => {}
+        Err(error) => return unavailable(&error),
+    }
     forecast
 }
 
 #[cfg(test)]
 #[path = "plan_forecast_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "provisions_control_loop_tests.rs"]
+mod provisions_tests;

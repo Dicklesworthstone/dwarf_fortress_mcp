@@ -28,6 +28,7 @@ pub(super) struct ProductionWorkload {
     service_ticks: u64,
     allowance_ticks: u64,
     wood_units: u64,
+    plant_units: Option<u64>,
     workforce: Option<LaboratoryWorkforcePlanning>,
 }
 
@@ -77,6 +78,8 @@ impl ProductionWorkload {
             service_ticks: 0,
             allowance_ticks: 0,
             wood_units: 0,
+            plant_units: effects::provisions_report(snapshot)?
+                .map(|report| report.remaining_demand_plants),
             workforce: LaboratoryWorkforcePlanning::capture(snapshot)?,
         };
         for record in snapshot.graph.entities.values() {
@@ -193,11 +196,18 @@ impl ProductionWorkload {
         self.wood_units
     }
 
+    /// The qualified census includes every still-active original producer,
+    /// independent of the lifetime of its process-local handle. This is a
+    /// conservative planning debit, not an actual reservation of ingredients.
+    pub(super) fn reserved_plant_units(&self) -> u64 {
+        self.plant_units.unwrap_or(0)
+    }
+
     pub(super) fn analysis(&self) -> Option<Json> {
         if self.orders.is_empty() {
             return None;
         }
-        Some(json!({
+        let mut analysis = json!({
             "epistemic_state": "predicted",
             "method": "conservative_registered_production_service_allowance",
             "source_state_hash": self.anchor.state_hash.to_hex(),
@@ -219,7 +229,12 @@ impl ProductionWorkload {
             "completion_guaranteed": false,
             "future_output_counted_as_stock": false,
             "assumptions": "all prior registered production is counted conservatively as queued service, including currently blocked work; actual completion still requires current eligible workers/workshops, conditions, authorized foreground observations and no interfering new work",
-        }))
+        });
+        if let Some(plants) = self.plant_units {
+            analysis["plant_units_reserved_for_existing_orders"] = json!(plants);
+            analysis["ingredient_reservation_is_model_only"] = json!(true);
+        }
+        Some(analysis)
     }
 
     pub(super) fn apply_horizon(&self, actions: &str, intent: &mut Intent) -> Result<()> {

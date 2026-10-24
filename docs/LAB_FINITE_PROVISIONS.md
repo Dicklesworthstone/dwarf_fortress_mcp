@@ -8,6 +8,51 @@ their workers and completed workshops retain the existing shared-capacity
 requirements. These quantities are reference-simulator calibration, not native
 Dwarf Fortress recipes or compatibility evidence.
 
+## Use the provisions scenario
+
+Open the existing `fortress.open_session` tool with
+`scenario: "starter_fortress_provisions"`. A production session with explicitly
+authorized workshop setup can request:
+
+```json
+{
+  "scenario": "starter_fortress_provisions",
+  "paused": false,
+  "requested_capabilities": [
+    ["observe", "read_only"],
+    ["query", "read_only"],
+    ["plan", "read_only"],
+    ["control_clock", "reversible"],
+    ["construct", "guarded"],
+    ["configure_labor", "reversible"],
+    ["configure_production", "reversible"],
+    ["checkpoint", "guarded"]
+  ]
+}
+```
+
+The scenario adds exactly the provisions marker and 20 observed PLANT units to
+the existing economy starter. Shared workers, finite workshop WOOD and the
+starter's other inventory remain in place. Earlier scenarios and saved-source
+generations keep their original recipe interpretation. The ordinary production
+blueprint works without a new tool or action grammar:
+
+```json
+{
+  "template": "production",
+  "quotas": [
+    {"item": "DRINK", "minimum": 60},
+    {"item": "FOOD", "minimum": 65}
+  ]
+}
+```
+
+Pass that object as the existing `fortress.plan` blueprint JSON string, then
+use the normal reviewed plan, commit, wait and proof workflow. Optional
+prerequisites can authorize existing labor/workshop setup; their separate
+capabilities and finite WOOD costs still apply. See
+[PRODUCTION_RESERVE_PLANNING.md](PRODUCTION_RESERVE_PLANNING.md).
+
 ## Explicit model and original order history
 
 The canonical fortress-settings record selects
@@ -80,6 +125,79 @@ The shared workforce already seals the complete-workload replay guard. An
 anchor change therefore requires reviewed replay before the shell can commit
 the plan. Planning from a narrow geometry or output witness cannot silently
 authorize changed ingredient demand.
+
+## Consumption-aware ingredient budgets
+
+The quota compiler selects its recipe catalog from the qualified snapshot.
+Under this model, FOOD and DRINK each have a PLANT input, so their ingredient
+demand is solved jointly. Before considering new production, the compiler
+subtracts the complete active original-order demand. Possible future output
+from those orders is never counted as current stock.
+
+The consumption-reserve fixed point recalculates ingredients for every added
+batch. More construction, queued work or shared-worker waiting can lengthen
+the sealed horizon, require more food/drink reserve, and therefore require
+more plants. A plan that funds its immediate stock deficit can still refuse
+because it cannot fund its full reserve. The integration fixture with new
+Still and Kitchen setup needs seven plants for its reviewed reserve, although
+two would cover the initial food/drink deficits.
+
+`production.materials.PLANT` reports the observed quantity, the conservative
+debit for existing orders and the quantity left for new production. These
+debits are explicitly model-only. The PLANT requirement is a raw recipe input
+with zero direct metabolism allowance; its recipe consumption still includes
+every reserve batch. Workshop/furniture WOOD and provisions PLANT remain
+separate finite supplies in a mixed production program.
+
+Original stock goals retain the requested minima. A stock goal may become
+true before all reserve work finishes, or before a deferred order starts.
+Current goal proof validates the provisions census and the identity/history
+of any existing original order without confusing current stock truth with
+action completion. Whole-plan completion still requires verified action
+proofs, the true original goal and physical quiescence at the same frontier.
+
+## Current reports and forecast results
+
+With current Observe authority, session opening exposes `provisions`, and
+observation exposes `world.provisions`. The orientation briefing copies only
+the current response's report. It includes the exact source anchor and ledger,
+available plants, consumed history, active remaining demand and bounded order
+rows with an explicit omitted count. Remaining demand is not reserved stock
+and must not be added to availability.
+
+Per-action `work_state.provisions` looks up the exact original order from the
+full qualified census before presentation bounds. Its row includes current
+input-shortage information. Missing or unqualified evidence is displayed as
+unknown; it cannot become a zero or a retained current quantity. Ingredient
+shortages remain separate from worker/workshop capacity blockers.
+
+Low-stock alerts screen recommendations that need new production against the
+qualified ingredient supply after existing orders' remaining demand. When
+necessary ingredients are short, the alert names that blocker and suppresses
+the proposed production or labor remedy. Missing evidence remains unknown,
+without invented stock counts. This is only a necessary-input screen: the
+production compiler still determines the full consumption-reserve budget.
+Retained hunger or thirst flags do not invent an ingredient requirement when
+the proposed stock target is already met.
+
+Forecasts return `predicted_provisions` with a predicted anchor and discarded
+simulation scope. They retain separate action, goal and quiescence outcomes.
+The source inventory and order history remain unchanged by forecasting.
+
+## Continue an interrupted reserve plan
+
+If an order is cancelled after producing some batches, those outputs and
+consumed-input records remain. Recovery preserves the exact remaining plant
+stock and cancelled history while invalidating retired process-local action
+handles. An explicit production continuation pursues the unchanged original
+quotas from the current source; it does not restart the original batch amount
+or refund completed food.
+
+The integration tests exercise this cancellation, canonical reopening and
+continuation path. They also cover external ingredient depletion after commit:
+the original physical work stalls, and later qualified replenishment resumes
+the retained partial batch. Recovery cannot reinterpret missing ingredients
+as free production. Gathering and agriculture remain outside this model.
 
 ## Scope
 

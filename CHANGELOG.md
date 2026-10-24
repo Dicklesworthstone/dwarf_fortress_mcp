@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-24 — Complete food and drink reserve plans with finite ingredients
+
+- Add `starter_fortress_provisions`, combining twenty observed PLANT inputs
+  with the existing shared workforce and finite workshop WOOD. Preserve the
+  prior scenarios and saved-source interpretation.
+- Budget new FOOD/DRINK production jointly after active original orders, then
+  include every batch added for consumption reserves and workshop setup. Keep
+  ingredient use separate from direct metabolism and finite construction logs.
+- Expose current Observe-gated session, world and original-action ingredient
+  reports, plus separate predicted forecast accounting. Suppress low-stock
+  remedies whose necessary inputs are short or unknown, without inventing a
+  shortage when a target is already met.
+- Preserve independent stock-goal truth, completed-action proof and physical
+  quiescence. Continue interrupted reserve plans after canonical reopening
+  without refunding consumed inputs or repeating completed output. Document
+  the complete workflow in `docs/LAB_FINITE_PROVISIONS.md`.
+- Pass all 191 focused MCP semantic-module tests, including 15 new provisions
+  cases; the complete focused set has 488 passing tests. Production Clippy
+  passes under the three recorded baseline allowances. Full server/facade
+  compilation and repository qualification retain the recorded limitations.
+
 ## 2026-10-23 — Consume finite ingredients for brewing and cooking
 
 - Add explicit `plant-provisions/1` food-order semantics over the shared

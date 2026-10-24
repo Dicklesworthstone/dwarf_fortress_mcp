@@ -2651,26 +2651,29 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
-    let (untracked, goal_status, workforce, construction_materials) = with_session_admitted(
-        &session,
-        || {
-            (
-                json!({"state": "unknown", "quiescent": false, "items": null,
+    let (untracked, goal_status, workforce, construction_materials, provisions) =
+        with_session_admitted(
+            &session,
+            || {
+                (
+                    json!({"state": "unknown", "quiescent": false, "items": null,
             "reason": "session observation unavailable"}),
-                serde_json::Value::Null,
-                None,
-                None,
-            )
-        },
-        |guard| {
-            (
-                untracked_work_json(guard),
-                objectives_json(guard),
-                session_workforce_json(guard),
-                session_construction_material_json(guard),
-            )
-        },
-    );
+                    serde_json::Value::Null,
+                    None,
+                    None,
+                    None,
+                )
+            },
+            |guard| {
+                (
+                    untracked_work_json(guard),
+                    objectives_json(guard),
+                    session_workforce_json(guard),
+                    session_construction_material_json(guard),
+                    session_provisions_json(guard),
+                )
+            },
+        );
     let mut payload = json!({
         "ok": true,
         "session_id": format!("{session_id}"),
@@ -2726,6 +2729,9 @@ pub(crate) fn open_session_in_scenario(
     }
     if let Some(materials) = construction_materials {
         payload["construction_materials"] = materials;
+    }
+    if let Some(provisions) = provisions {
+        payload["provisions"] = provisions;
     }
     payload.to_string()
 }
@@ -3520,6 +3526,19 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
                 });
             }
         }
+        match lab_world::provisions_action_json(adapter.snapshot(), entity_id) {
+            Ok(Some(provisions)) => view["provisions"] = provisions,
+            Ok(None) => {}
+            Err(error) => {
+                view["provisions"] = json!({
+                    "available": false,
+                    "epistemic_state": "unknown",
+                    "reason": error.message,
+                    "code": error.code.as_str(),
+                    "source_anchor": anchor_json(&adapter.snapshot().anchor()),
+                });
+            }
+        }
     }
     view
 }
@@ -3666,6 +3685,23 @@ fn session_construction_material_json(session: &LabSession) -> Option<serde_json
     }
     match lab_world::construction_material_json(session.adapter.snapshot()) {
         Ok(materials) => materials,
+        Err(error) => Some(json!({
+            "available": false,
+            "epistemic_state": "unknown",
+            "reason": error.message,
+            "code": error.code.as_str(),
+            "source_anchor": anchor_json(&session.adapter.snapshot().anchor()),
+        })),
+    }
+}
+
+fn session_provisions_json(session: &LabSession) -> Option<serde_json::Value> {
+    let ctx = context_for(session, session.next_request_id);
+    if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
+        return None;
+    }
+    match lab_world::provisions_json(session.adapter.snapshot()) {
+        Ok(provisions) => provisions,
         Err(error) => Some(json!({
             "available": false,
             "epistemic_state": "unknown",

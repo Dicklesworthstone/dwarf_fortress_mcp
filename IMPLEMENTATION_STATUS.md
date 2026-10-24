@@ -44,7 +44,7 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
-### Finite shared ingredients for laboratory food production (2026-10-23)
+### Finite shared ingredients for laboratory food and reserve plans (2026-10-24)
 
 The separately declared `plant-provisions/1` model composes with shared labor
 and charges one qualified PLANT for each completed brewing or cooking batch.
@@ -61,22 +61,50 @@ mandatory consumed-input proof. Caller-supplied predicates cannot turn an
 unfinished order into completion. Dispatcher and laboratory proof boundaries
 validate current original identity, generations and the complete input domain.
 
+The opt-in `starter_fortress_provisions` scenario composes this model with
+shared workers and finite workshop WOOD, adding twenty observed PLANT inputs.
+The quota compiler budgets all new FOOD/DRINK batches jointly after debiting
+active original food orders, and recomputes ingredient demand through the
+consumption-reserve fixed point and explicit workshop setup. Raw PLANT has no
+direct metabolism allowance; its recipe demand includes every reserve batch.
+Earlier scenarios and historical source interpretation remain unchanged.
+
+Observe-gated opening, observation and per-action reports distinguish current
+available inputs, consumed history and remaining demand. Forecast accounting
+is explicitly predicted on a discarded fork. Ingredient shortages remain
+separate from worker capacity, and low-stock recommendations requiring new
+production are suppressed when necessary input is short or unqualified.
+Retained need flags cannot invent a plant deficit for an already-met target.
+Original goal truth, action completion and physical quiescence remain distinct:
+stock may meet the requested goal before all reserve batches finish. Canonical
+reopening preserves cancelled consumption history, and an explicit continuation
+replans from current stock without refunding or repeating completed output.
+
 Executed development validation: all 197 actual-source intent tests passed,
 including 16 new engine groups and four planner tests; all 17 dispatcher tests
-passed, including two new current-provisions proof groups; and all 83 laboratory
-tests passed. The engine regressions cover shared-input contention, retained
-partial work, exact original cancellation identity, source/custody refusals,
-partition/recovery invariance, failure atomicity and exact legacy bytes.
-Production Clippy passed for the changed core libraries with the three
-previously recorded world-crate baseline allowances and all other warnings
-and prohibited methods denied.
+passed, including two new current-provisions proof groups; all 83 laboratory
+tests passed; and all 191 focused MCP semantic-module tests passed, including
+15 new provisions cases. This is 488 passing tests, with 37 new cases across
+the two increments. The engine regressions cover shared-input contention,
+retained partial work, exact original cancellation identity, source/custody
+refusals, partition/recovery invariance, failure atomicity and exact legacy
+bytes. Integration cases cover exact shared budgets, pending demand, reserve
+and setup costs, early goal truth, input exhaustion/replenishment, canonical
+reopening, continuation, current/predicted reports and ingredient-aware alerts.
+Production Clippy passed for the changed core libraries and actual-source MCP
+semantic modules with the three previously recorded world-crate baseline
+allowances and all other warnings and prohibited methods denied. These
+focused Rust checks used nightly-2026-08-31.
 
 Required repository verification still stops at the pre-existing source-bundle
 documentation check; development local qualification still stops at the same
 64 pre-existing static-contract failures. Focused actual-source checks are not
-full-workspace, native or live qualification. This is a bounded reference
-model; gathering, agriculture, barrels, native recipe calibration and live
-admission remain separate. See `docs/LAB_FINITE_PROVISIONS.md`.
+full-workspace, native or live qualification. The focused MCP harness imports
+the actual semantic modules but excludes the full FastMCP server, facade and
+task-session shell; their changed plumbing was source-reviewed and formatted,
+not compiled in this evidence set. This is a bounded reference model;
+gathering, agriculture, barrels, native recipe calibration and live admission
+remain separate. See `docs/LAB_FINITE_PROVISIONS.md`.
 
 ### Material-backed laboratory workshop construction (2026-10-23)
 

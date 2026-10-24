@@ -195,3 +195,21 @@ The bounded model does not harvest logs, infer missing inventory, establish
 native recipe semantics, build rooms from those items automatically, or admit
 a live mutation profile. Concurrent interference can invalidate the prediction;
 actual qualified stock and item evidence determine completion.
+
+## Fund food and drink reserves with finite ingredients
+
+The opt-in `starter_fortress_provisions` scenario adds the explicit
+`plant-provisions/1` model over the existing shared workforce and workshop
+materials. Brewing and cooking each consume one shared PLANT per completed
+five-unit batch. Earlier scenarios keep their original food recipes.
+
+Every consumption-reserve iteration budgets the ingredients for the complete
+planning stock targets, after retaining pending demand from older physical
+orders. New workshop setup can therefore increase both WOOD requirements and
+the PLANT needed to sustain the longer horizon. `production.materials.PLANT`
+separates observed supply, model-only pending demand and the supply available
+for the new candidate. A raw PLANT row has zero direct metabolism allowance;
+it still pays for every added production batch.
+
+See [LAB_FINITE_PROVISIONS.md](LAB_FINITE_PROVISIONS.md) for scenario selection,
+current allocation history, forecast semantics and interrupted-goal recovery.

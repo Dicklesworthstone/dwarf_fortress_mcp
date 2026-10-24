@@ -46,6 +46,14 @@ pub(crate) use laboratory_material_view::{
     construction_material_action_json, construction_material_json,
 };
 
+#[path = "laboratory_provisions_view.rs"]
+mod laboratory_provisions_view;
+pub(crate) use laboratory_provisions_view::{provisions_action_json, provisions_json};
+
+#[cfg(test)]
+#[path = "laboratory_provisions_tests.rs"]
+pub(crate) mod laboratory_provisions_tests;
+
 #[cfg(test)]
 #[path = "laboratory_material_tests.rs"]
 mod laboratory_material_tests;
@@ -78,12 +86,13 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 5] = [
+pub(crate) const SCENARIOS: [&str; 6] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
     "starter_fortress_workforce",
     "starter_fortress_economy",
+    "starter_fortress_provisions",
 ];
 
 /// Starter-fortress entity identities.
@@ -107,6 +116,8 @@ pub(crate) mod starter {
     pub const OPENING_FOOD: u64 = 60;
     /// Source-qualified logs shared by every wooden furniture order.
     pub const OPENING_WOOD: u64 = 20;
+    /// Shared raw ingredients for explicitly modeled brewing and cooking.
+    pub const OPENING_PLANTS: u64 = 20;
     /// Excavation level of the starter fortress.
     pub const LEVEL_Z: i32 = 10;
 }
@@ -149,6 +160,7 @@ pub(crate) fn scenario_snapshot(
         "starter_fortress" => starter_graph()?,
         "starter_fortress_workforce" => workforce_starter_graph(fortress_id)?,
         "starter_fortress_economy" => economy_starter_graph(fortress_id)?,
+        "starter_fortress_provisions" => provisions_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -243,6 +255,29 @@ fn economy_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
         lab_fact(Value::Text(
             effects::LABORATORY_CONSTRUCTION_MATERIAL_MODEL.to_owned(),
         )),
+    );
+    Ok(graph)
+}
+
+/// Finite brewing and cooking ingredients are opt-in. Removing exactly this
+/// declaration and plant inventory reproduces the prior economy scenario.
+fn provisions_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
+    let mut graph = economy_starter_graph(fortress_id)?;
+    let settings = graph
+        .entities
+        .get_mut(&effects::fortress_settings_entity_id(fortress_id))
+        .ok_or_else(|| invalid("starter provisions settings are missing"))?;
+    settings.fields.insert(
+        effects::LABORATORY_PROVISIONS_MODEL_FIELD.to_owned(),
+        lab_fact(Value::Text(effects::LABORATORY_PROVISIONS_MODEL.to_owned())),
+    );
+    let ledger = graph
+        .entities
+        .get_mut(&starter::STOCK_LEDGER)
+        .ok_or_else(|| invalid("starter provisions ledger is missing"))?;
+    ledger.fields.insert(
+        effects::STOCK_PLANT_FIELD.to_owned(),
+        lab_fact(Value::U64(starter::OPENING_PLANTS)),
     );
     Ok(graph)
 }
@@ -946,7 +981,7 @@ pub(crate) fn is_production_objective(raw: &str) -> bool {
 
 /// Closed reference recipe catalog. These quantities describe the simulator,
 /// never inferred native DF recipes or bridge execution authority.
-fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
+fn lab_recipes(provisions: bool) -> dfmcp_intent::ProductionLogisticsCompiler {
     let mut compiler = dfmcp_intent::ProductionLogisticsCompiler::without_recipes();
     for (output, job, workshop, yield_units) in [
         ("DRINK", "BREW_DRINK", "Still", 5),
@@ -961,6 +996,8 @@ fn lab_recipes() -> dfmcp_intent::ProductionLogisticsCompiler {
             output_batch_size: yield_units,
             input_tokens: if is_carpentry_output(output) {
                 vec![("WOOD".to_owned(), 1)]
+            } else if provisions {
+                vec![("PLANT".to_owned(), 1)]
             } else {
                 Vec::new()
             },
@@ -1226,6 +1263,8 @@ impl ProductionRequest {
         let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
         let snapshot = evidence.snapshot();
         let construction_model = effects::construction_material_model(snapshot)?;
+        let provisions = effects::provisions_report(snapshot)?;
+        let recipes = lab_recipes(provisions.is_some());
         let mut inventory = dfmcp_intent::InventoryStockpile::new();
         let ledger =
             effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
@@ -1286,6 +1325,21 @@ impl ProductionRequest {
                 })?,
             );
         }
+        let needs_plants = provisions.is_some()
+            && targets.iter().any(|(item, target)| {
+                matches!(item.as_str(), "FOOD" | "DRINK") && *target > inventory.get_stock(item)
+            });
+        if needs_plants && let Some(report) = &provisions {
+            inventory.set_stock(
+                "PLANT",
+                u32::try_from(report.available_plants).map_err(|_| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "observed plant ingredients exceed the exact u32 production bound",
+                    )
+                })?,
+            );
+        }
         let quotas: Vec<dfmcp_intent::ProductionQuota> = targets
             .iter()
             .map(|(item, minimum)| dfmcp_intent::ProductionQuota {
@@ -1293,7 +1347,7 @@ impl ProductionRequest {
                 minimum_stock: *minimum,
             })
             .collect();
-        let mut plan = lab_recipes().plan_quotas(
+        let mut plan = recipes.plan_quotas(
             &quotas,
             &inventory,
             dfmcp_intent::ProductionPlanningLimits::default(),
@@ -1304,8 +1358,8 @@ impl ProductionRequest {
                 "observed stock already meets every quota; nothing to produce",
             ));
         }
-        // Existing physical work consumes service and potentially the same raw
-        // logs even when its original request/action handle has retired.
+        // Existing physical work consumes service and raw inputs even when its
+        // original request/action handle has retired.
         let workload = {
             let jobs: Vec<(&str, &str)> = plan
                 .steps()
@@ -1323,7 +1377,21 @@ impl ProductionRequest {
                     invalid("conservative wood availability escaped its observed bound")
                 })?,
             );
-            plan = lab_recipes().plan_quotas(
+        }
+        if needs_plants {
+            let available = u64::from(inventory.get_stock("PLANT"))
+                .saturating_sub(workload.reserved_plant_units());
+            inventory.set_stock(
+                "PLANT",
+                u32::try_from(available).map_err(|_| {
+                    invalid("conservative plant availability escaped its observed bound")
+                })?,
+            );
+        }
+        if (needs_wood && workload.reserved_wood_units() > 0)
+            || (needs_plants && workload.reserved_plant_units() > 0)
+        {
+            plan = recipes.plan_quotas(
                 &quotas,
                 &inventory,
                 dfmcp_intent::ProductionPlanningLimits::default(),
@@ -1340,6 +1408,13 @@ impl ProductionRequest {
                 },
             });
         }
+        annotate_production_provisions(
+            &mut analysis,
+            provisions.as_ref(),
+            needs_plants,
+            inventory.get_stock("PLANT"),
+            workload.reserved_plant_units(),
+        );
         if !plan.model_feasible() && construction_model.is_none() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
@@ -1421,7 +1496,7 @@ impl ProductionRequest {
                         invalid("construction wood availability escaped its observed bound")
                     })?,
                 );
-                plan = lab_recipes().plan_quotas(
+                plan = recipes.plan_quotas(
                     &quotas,
                     &inventory,
                     dfmcp_intent::ProductionPlanningLimits::default(),
@@ -1447,6 +1522,13 @@ impl ProductionRequest {
                     },
                 });
             }
+            annotate_production_provisions(
+                &mut analysis,
+                provisions.as_ref(),
+                needs_plants,
+                inventory.get_stock("PLANT"),
+                workload.reserved_plant_units(),
+            );
             if !construction_fits || !plan.model_feasible() {
                 return Err(production_setup_refusal(format!(
                     "production and workshop setup exceed the shared laboratory material supply: {analysis}"
@@ -1495,6 +1577,10 @@ impl ProductionRequest {
                 conditions.push(json!({
                     "kind": "material_available", "material_token": "WOOD", "minimum": 1,
                 }));
+            } else if provisions.is_some() {
+                conditions.push(json!({
+                    "kind": "material_available", "material_token": "PLANT", "minimum": 1,
+                }));
             }
             steps.push(json!({
                 "action": {
@@ -1542,6 +1628,32 @@ impl ProductionRequest {
             workload,
             consumption_horizon: None,
         })
+    }
+}
+
+fn annotate_production_provisions(
+    analysis: &mut Json,
+    report: Option<&effects::ProvisionsReport>,
+    needs_plants: bool,
+    available_for_new_plan: u32,
+    pending_plants: u64,
+) {
+    let Some(report) = report else { return };
+    analysis["model"] = json!(
+        "closed laboratory recipes: DRINK/FOOD yield 5 per PLANT ingredient; BED/DOOR/TABLE/CHAIR yield one item per WOOD log; each job shares finite completed workshops and living labor-enabled workers"
+    );
+    analysis["provisions_model"] = json!(report.model);
+    if needs_plants {
+        if analysis["materials"].is_null() {
+            analysis["materials"] = json!({});
+        }
+        analysis["materials"]["PLANT"] = json!({
+            "observed_stock": report.available_plants,
+            "reserved_for_existing_orders": pending_plants,
+            "available_for_new_plan": available_for_new_plan,
+            "reservation_is_model_only": true,
+            "input_rule": "one shared PLANT ingredient per completed brewing or cooking batch; pending physical orders are budgeted before all new FOOD and DRINK quotas jointly",
+        });
     }
 }
 
@@ -1945,7 +2057,8 @@ impl ProductionCompilation {
 }
 
 /// Observed economy alerts: stocks that will run out soon, are exhausted, or
-/// dwarves left thirsty or hungry. Each names a concrete remedy plan.
+/// dwarves left thirsty or hungry. Remedies require usable current inputs;
+/// unavailable ingredients retain an explicit blocker instead of a false plan.
 pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
     let Some(ledger) =
         effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
@@ -1965,6 +2078,7 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
         return Vec::new();
     }
     let mut alerts = Vec::new();
+    let provisions = effects::provisions_report(snapshot);
     for (stock, interval, need, deprived, noun) in [
         (
             effects::STOCK_DRINK_FIELD,
@@ -2052,7 +2166,7 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
         } else {
             continue;
         };
-        alerts.push(json!({
+        let mut alert = json!({
             "alert": format!("{noun}_supply"),
             "severity": severity,
             "finding": finding,
@@ -2061,7 +2175,20 @@ pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
             "deprived_units": starving,
             "production_blocked_by": blocker,
             "remedy": remedy,
-        }));
+        });
+        // This necessary input check is additive only for the explicit model.
+        // The actual quota compiler still establishes reserve/horizon demand.
+        let minimum_batches = (living * 4).saturating_sub(held).div_ceil(5);
+        if let Some((reason, readiness)) =
+            laboratory_provisions_view::alert_input_blocker(snapshot, &provisions, minimum_batches)
+        {
+            alert["finding"] = json!(format!("{finding}; {reason}"));
+            alert["capacity_blocked_by"] = json!(blocker);
+            alert["production_blocked_by"] = json!(reason);
+            alert["ingredient_readiness"] = readiness;
+            alert["remedy"] = Json::Null;
+        }
+        alerts.push(alert);
     }
     alerts.extend(threat_alerts(snapshot, &units));
     alerts.extend(civilian_alert(snapshot, &units));
@@ -2272,7 +2399,16 @@ pub(crate) fn plan_goal_truth(
     let truth =
         dfmcp_world::PredicateEvidence::laboratory(snapshot)?.evaluate(&plan.terminal_condition)?;
     if truth == dfmcp_world::PredicateTruth::True {
+        let provisions = effects::provisions_report(snapshot)?;
         for step in &plan.steps {
+            let original_order = effects::created_entity_id(&step.idempotency_key, 0);
+            if provisions.is_some() && snapshot.graph.entities.contains_key(&original_order) {
+                // Current stock can satisfy the goal before the original
+                // reserve order finishes, or before a deferred order starts.
+                // Validate retained identity without conflating stock truth
+                // with the independent action proof and quiescence checks.
+                effects::validate_provisions_identity(snapshot, original_order, &step.action)?;
+            }
             if matches!(step.action, Action::Build { .. }) {
                 effects::validate_construction_material_completion(
                     snapshot,
@@ -2467,6 +2603,19 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
         Ok(None) => {}
         Err(error) => {
             view["construction_materials"] = json!({
+                "available": false,
+                "epistemic_state": "unknown",
+                "evidence_scope": "laboratory_reference_world",
+                "source_anchor": crate::observation_projection::anchor_json(&snapshot.anchor()),
+                "reason": {"code": error.code.as_str(), "message": error.message},
+            });
+        }
+    }
+    match provisions_json(snapshot) {
+        Ok(Some(report)) => view["provisions"] = report,
+        Ok(None) => {}
+        Err(error) => {
+            view["provisions"] = json!({
                 "available": false,
                 "epistemic_state": "unknown",
                 "evidence_scope": "laboratory_reference_world",
