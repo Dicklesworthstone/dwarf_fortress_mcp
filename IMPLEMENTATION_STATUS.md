@@ -44,6 +44,48 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Finite shared laboratory service for excavation and construction (2026-10-23)
+
+An explicit `shared-workforce/1` model now shares qualified living workers
+between mining, construction, brewing, cooking and carpentry. Exact furniture
+installation uses the construction family. Deterministic maximum-cardinality
+matching preserves earned work priority, requires completed production
+workshops, and assigns one activity to each worker per causal interval.
+Unstaffed work earns no service. Workshop completion, cancellation, worker
+death and changed labor facts take effect at the next selection boundary.
+
+The canonical settings marker and per-task stamps preserve this model through
+snapshots and refuse implicit migration or downgrade of active/history-bearing
+work. Marker-free worlds retain the previous model. A pure report exposes
+current assignments, blockers and remaining service using the same selector.
+Bounded planning accounts for queued and peer service, retains explicit
+deadlines and seals a model guard into temporal steps. These global queue reads
+require reviewed source replay after an anchor change.
+
+**Executed evidence:** all 157 actual-source intent unit tests pass, including
+15 new workforce groups, five planning groups and the existing timeline,
+carpentry, furniture, proof and planning regressions. The independent workforce
+cases include all 512 three-worker eligibility graphs against a brute-force
+oracle, shared service across five families, real-item installation/cancellation,
+workshop completion, source refusals, worker death, overlap settlement,
+partition/reconstruction invariance and atomic budget exhaustion. Planning
+cases cover queued service, dependent work, explicit deadlines, authority,
+legacy obligations and hard bounds. Intent production Clippy passes with
+warnings denied and the three previously recorded world-source lint allowances
+(`map_or_identity`, `manual_unwrap_or`, `unnecessary_option_map_or_else`); panic,
+unwrap, expect, todo and unimplemented remain denied. The pinned toolchain is
+`nightly-2026-08-31`; the isolated workspace compiles actual repository sources
+without the FastMCP/server dependency graph. Scoped formatting and diff checks
+pass. No full-workspace, native or live qualification is asserted.
+Required `verify.sh` passes its first four checks and then stops at the existing
+source-bundle documentation gate (`exact clean git commit`). The development
+qualification attempt refused a concurrent source change during its initial
+snapshot; it produced no passed receipt.
+The model remains a laboratory
+calibration without movement, hauling, skill-dependent rates or room ownership;
+general building material semantics remain unchanged. See
+`docs/LAB_SHARED_WORKFORCE.md`.
+
 ### Plan, furnish and resume entrance-connected laboratory rooms (2026-10-23)
 
 The existing `fortress.plan` blueprint argument accepts a separately versioned

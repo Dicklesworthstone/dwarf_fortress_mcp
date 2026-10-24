@@ -34,6 +34,15 @@ mod capacity;
 mod carpentry;
 #[path = "effects_furniture.rs"]
 mod furniture;
+#[path = "effects_workforce.rs"]
+mod workforce;
+
+pub use workforce::{
+    LABORATORY_WORKFORCE_MODEL, LABORATORY_WORKFORCE_MODEL_FIELD,
+    LABORATORY_WORKFORCE_TASK_MODEL_FIELD, LaboratoryWorkforceAssignment,
+    LaboratoryWorkforceBlocker, LaboratoryWorkforceReport, laboratory_workforce_model,
+    laboratory_workforce_remaining_ticks, laboratory_workforce_report,
+};
 
 pub use furniture::{
     FURNITURE_ALLOCATED_TO_FIELD, FURNITURE_ATTACHMENT_STATE_FIELD,
@@ -778,6 +787,19 @@ pub fn apply_effect(
     action: &Action,
     idempotency_key: &str,
 ) -> Result<bool> {
+    let staffed = laboratory_workforce_model(snapshot)?.is_some();
+    let mut changed = apply_effect_inner(snapshot, action, idempotency_key)?;
+    if staffed && workforce::registered_action(action) {
+        changed |= workforce::stamp(snapshot, created_entity_id(idempotency_key, 0))?;
+    }
+    Ok(changed)
+}
+
+fn apply_effect_inner(
+    snapshot: &mut WorldSnapshot,
+    action: &Action,
+    idempotency_key: &str,
+) -> Result<bool> {
     match action {
         Action::Pause { paused } => {
             let changed = snapshot.paused != *paused;
@@ -1044,6 +1066,19 @@ pub fn apply_effect(
 /// progress already made (excavated tiles stay excavated). Immediate actions
 /// have no ongoing work. Returns whether canonical state changed.
 pub fn cancel_effect(
+    snapshot: &mut WorldSnapshot,
+    action: &Action,
+    idempotency_key: &str,
+) -> Result<bool> {
+    let mut changed = cancel_effect_inner(snapshot, action, idempotency_key)?;
+    if changed {
+        changed |=
+            workforce::clear_stamped_blocker(snapshot, created_entity_id(idempotency_key, 0))?;
+    }
+    Ok(changed)
+}
+
+fn cancel_effect_inner(
     snapshot: &mut WorldSnapshot,
     action: &Action,
     idempotency_key: &str,
@@ -1315,6 +1350,12 @@ struct TimelineProduction {
     blockers: BTreeMap<usize, Option<String>>,
 }
 
+struct TimelineInterval {
+    ticks: u64,
+    ready: Vec<usize>,
+    workforce: Option<workforce::Selection>,
+}
+
 struct TimelineOrder {
     id: EntityId,
     job: String,
@@ -1332,6 +1373,7 @@ struct TimelineDig {
 }
 
 struct EffectTimeline {
+    staffed: bool,
     orders: Vec<TimelineOrder>,
     buildings: Vec<EntityId>,
     digs: BTreeMap<EntityId, TimelineDig>,
@@ -1375,7 +1417,14 @@ impl EffectTimeline {
         budget: &mut EffectAdvanceBudget,
     ) -> Result<Self> {
         let entity_count = snapshot.graph.entities.len() as u64;
-        budget.charge(entity_count.saturating_mul(3))?;
+        // Include complete model/stamp discovery before selecting either
+        // interpretation; absence must not hide stamped or misplaced history.
+        budget.charge(
+            entity_count
+                .saturating_mul(6)
+                .saturating_add(snapshot.graph.edges.len() as u64),
+        )?;
+        let staffed = laboratory_workforce_model(snapshot)?.is_some();
         require_progress_selectors(snapshot)?;
         // Count complete requested footprints before allocating even the first
         // cache. This also refuses oversized overlapping regions before terrain
@@ -1398,6 +1447,7 @@ impl EffectTimeline {
             }
         }
         let mut timeline = Self {
+            staffed,
             orders: Vec::new(),
             buildings: Vec::new(),
             digs: BTreeMap::new(),
@@ -1424,6 +1474,14 @@ impl EffectTimeline {
                     if work >= WORK_ORDER_TICKS_PER_UNIT || remaining == 0 {
                         return Err(precondition(
                             "active work order has noncanonical progress counters",
+                        ));
+                    }
+                    if staffed
+                        && work_order_requirements(job).is_some()
+                        && remaining > field_u64(record, "amount_total", snapshot.tick)?
+                    {
+                        return Err(precondition(
+                            "staffed production has noncanonical amount counters",
                         ));
                     }
                     let conditions = match field_value(record, WORK_ORDER_CONDITIONS_FIELD, snapshot.tick) {
@@ -1457,6 +1515,14 @@ impl EffectTimeline {
                 {
                     let area = designation_area(record, snapshot.tick)?;
                     let tiles = validate_region(area)?;
+                    if staffed
+                        && (field_u64(record, "tiles_total", snapshot.tick)? != tiles
+                            || field_u64(record, TILES_REMAINING_FIELD, snapshot.tick)? > tiles)
+                    {
+                        return Err(precondition(
+                            "staffed excavation has noncanonical tile counters",
+                        ));
+                    }
                     budget.charge(tiles)?;
                     let target =
                         u32::try_from(field_u64(record, "target_tile_code", snapshot.tick)?)
@@ -1531,7 +1597,9 @@ impl EffectTimeline {
                 .saturating_mul(conditions.len() as u64 + 4)
                 .saturating_add(conditions.len() as u64 + 1),
         )?;
-        if let Some(blocker) = work_order_blocker(snapshot, &order.job) {
+        if !self.staffed
+            && let Some(blocker) = work_order_blocker(snapshot, &order.job)
+        {
             return Ok(ProductionGate::Blocked(blocker));
         }
         if let Some(blocker) = carpentry::blocker(snapshot, order)? {
@@ -1590,14 +1658,24 @@ impl EffectTimeline {
         snapshot: &WorldSnapshot,
         remaining: u64,
         budget: &mut EffectAdvanceBudget,
-    ) -> Result<(u64, Vec<usize>)> {
+    ) -> Result<TimelineInterval> {
         budget.charge(
             (self.orders.len() + self.buildings.len() + self.digs.len() + self.hostiles.len())
                 as u64
                 + 1,
         )?;
         let mut delta = remaining;
-        let ready = self.production_schedule(snapshot, budget)?.ready;
+        let workforce = if self.staffed {
+            Some(workforce::select(snapshot, self, budget)?)
+        } else {
+            None
+        };
+        let ready = if let Some(selection) = &workforce {
+            budget.charge(selection.ready.len() as u64)?;
+            selection.ready.clone()
+        } else {
+            self.production_schedule(snapshot, budget)?.ready
+        };
         for index in &ready {
             let work = field_u64(
                 entity(snapshot, self.orders[*index].id)?,
@@ -1607,7 +1685,11 @@ impl EffectTimeline {
             delta = delta.min(WORK_ORDER_TICKS_PER_UNIT - work);
         }
         for id in &self.buildings {
-            if active_building(snapshot, *id)? {
+            if active_building(snapshot, *id)?
+                && workforce
+                    .as_ref()
+                    .is_none_or(|selection| selection.buildings.contains(id))
+            {
                 let building = entity(snapshot, *id)?;
                 delta = delta.min(
                     field_u64(building, "required_ticks", snapshot.tick)?
@@ -1616,6 +1698,13 @@ impl EffectTimeline {
             }
         }
         for (id, dig) in &self.digs {
+            if !dig.pending.is_empty()
+                && workforce
+                    .as_ref()
+                    .is_some_and(|selection| !selection.digs.contains(id))
+            {
+                continue;
+            }
             let work = field_u64(entity(snapshot, *id)?, "work_ticks", snapshot.tick)?;
             delta = delta.min(if dig.pending.is_empty() {
                 1
@@ -1644,13 +1733,18 @@ impl EffectTimeline {
                 COMBAT_ROUND_TICKS - (snapshot.tick.0 - arrival) % COMBAT_ROUND_TICKS
             });
         }
-        Ok((delta, ready))
+        Ok(TimelineInterval {
+            ticks: delta,
+            ready,
+            workforce,
+        })
     }
 
     fn advance_digs(
         &mut self,
         snapshot: &mut WorldSnapshot,
         elapsed: u64,
+        selected: Option<&BTreeSet<EntityId>>,
         budget: &mut EffectAdvanceBudget,
     ) -> Result<bool> {
         budget.charge(self.digs.len() as u64 * 2)?;
@@ -1658,7 +1752,12 @@ impl EffectTimeline {
         let mut changed = false;
         let ids: Vec<EntityId> = self.digs.keys().copied().collect();
         for id in ids {
-            let work = field_u64(entity(snapshot, id)?, "work_ticks", snapshot.tick)? + elapsed;
+            let work = field_u64(entity(snapshot, id)?, "work_ticks", snapshot.tick)?
+                + if selected.is_none_or(|ids| ids.contains(&id)) {
+                    elapsed
+                } else {
+                    0
+                };
             earned.push((id, work));
             if work < DIG_TICKS_PER_TILE {
                 continue;
@@ -1713,6 +1812,9 @@ impl EffectTimeline {
                     STATUS_FIELD.to_owned(),
                     Value::Text(STATUS_COMPLETE.to_owned()),
                 ));
+                if self.staffed {
+                    fields.push((BLOCKED_BY_FIELD.to_owned(), Value::Null));
+                }
             }
             changed |= write_fields(snapshot, id, fields)?;
         }
@@ -1741,6 +1843,13 @@ impl EffectTimeline {
         budget: &mut EffectAdvanceBudget,
     ) -> Result<bool> {
         let mut changed = false;
+        if self.staffed {
+            let schedule = workforce::select(snapshot, self, budget)?;
+            for (id, blocker) in schedule.blockers {
+                changed |= write_production_blocker(snapshot, id, blocker)?;
+            }
+            return Ok(changed);
+        }
         let schedule = self.production_schedule(snapshot, budget)?;
         for (index, blocker) in schedule.blockers {
             changed |= write_production_blocker(snapshot, self.orders[index].id, blocker)?;
@@ -1765,8 +1874,8 @@ fn advance_timeline(
     }
     while snapshot.tick < destination {
         budget.event()?;
-        let (delta, ready) =
-            timeline.next_interval(snapshot, destination.0 - snapshot.tick.0, budget)?;
+        let interval = timeline.next_interval(snapshot, destination.0 - snapshot.tick.0, budget)?;
+        let delta = interval.ticks;
         if delta == 0 {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
@@ -1775,12 +1884,25 @@ fn advance_timeline(
         }
         snapshot.tick = GameTick(snapshot.tick.0 + delta);
         for id in &timeline.buildings {
-            if active_building(snapshot, *id)? {
+            if active_building(snapshot, *id)?
+                && interval
+                    .workforce
+                    .as_ref()
+                    .is_none_or(|selection| selection.buildings.contains(id))
+            {
                 changed |= advance_building(snapshot, *id, delta, budget)?;
+                if timeline.staffed && !active_building(snapshot, *id)? {
+                    changed |= workforce::clear_stamped_blocker(snapshot, *id)?;
+                }
             }
         }
-        changed |= timeline.advance_digs(snapshot, delta, budget)?;
-        for index in ready {
+        changed |= timeline.advance_digs(
+            snapshot,
+            delta,
+            interval.workforce.as_ref().map(|selection| &selection.digs),
+            budget,
+        )?;
+        for index in interval.ready {
             changed |= advance_ready_work_order(
                 snapshot,
                 &timeline,
@@ -2358,3 +2480,7 @@ mod carpentry_tests;
 #[cfg(test)]
 #[path = "effects_furniture_tests.rs"]
 mod furniture_tests;
+
+#[cfg(test)]
+#[path = "effects_workforce_tests.rs"]
+mod workforce_tests;

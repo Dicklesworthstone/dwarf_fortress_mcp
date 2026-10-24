@@ -136,6 +136,19 @@ impl StaticPlanner {
         }
 
         let max_allowed_risk = intent.max_risk();
+        let workforce = if intent
+            .requested_actions
+            .iter()
+            .any(|requested| requested.action.naturally_temporal())
+        {
+            crate::workforce_planning::LaboratoryWorkforcePlanning::capture(snapshot)?
+        } else {
+            None
+        };
+        let workforce_floor = workforce
+            .as_ref()
+            .map(|workforce| workforce.deadline_floor(&intent.requested_actions))
+            .transpose()?;
         let mut steps = Vec::with_capacity(intent.requested_actions.len());
         let mut required_capabilities = BTreeSet::new();
         for (index, requested) in intent.requested_actions.iter().enumerate() {
@@ -147,6 +160,7 @@ impl StaticPlanner {
             })?;
             let step_id = StepId::new(step_number);
             let mut normalized = normalize_requested(requested);
+            let explicit_obligation = normalized.obligation.is_some();
             let idempotency_key =
                 derive_step_idempotency_key(intent.id, intent.anchor, step_id, &normalized.action);
             // A synthesized deadline starts after every prerequisite's
@@ -164,6 +178,26 @@ impl StaticPlanner {
                 intent.anchor.fortress_id,
                 earliest_start,
             )?;
+            if let Some(workforce) = &workforce
+                && normalized.action.naturally_temporal()
+            {
+                normalized
+                    .preconditions
+                    .push(workforce.model_precondition());
+                normalized.preconditions = normalize_predicates(&normalized.preconditions);
+                if normalized.preconditions.len() > MAX_PREDICATES_PER_ACTION {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "workforce model guard exceeds the action precondition bound",
+                    ));
+                }
+                if !explicit_obligation && let Some(obligation) = &mut normalized.obligation {
+                    if let Some(floor) = workforce_floor {
+                        obligation.deadline_tick = obligation.deadline_tick.max(floor);
+                    }
+                    workforce.validate_deadline(obligation.deadline_tick)?;
+                }
+            }
             validate_action(&normalized.action, &self.policy, context)?;
             validate_constraints(intent, &normalized.action)?;
             if normalized.action.risk() > max_allowed_risk {

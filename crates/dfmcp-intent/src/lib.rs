@@ -15,6 +15,7 @@ pub mod obligation;
 mod plan;
 pub mod plan_archive;
 mod planner;
+pub mod workforce_planning;
 
 pub use action::{
     Action, ActionScope, BuildingKind, DigMode, FurnitureKind, MaterialSelector, WorkOrderCondition,

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-23 — Share finite labor across construction and production
+
+- Add the explicit `shared-workforce/1` laboratory model. Mining, building,
+  exact-item furniture installation and registered production now compete for
+  one qualified living-worker pool, with deterministic maximum matching and
+  completed-workshop limits. Unstaffed work cannot accumulate elapsed service.
+- Preserve original world semantics without the marker. Stamp new activities
+  and refuse unknown model versions, misplaced declarations, implicit migration
+  of active work and removal of a model with surviving task history.
+- Expose pure current assignments, labor/capacity blockers and bounded remaining
+  service. Retain causal completion, cancellation, restart and budget behavior.
+- Account for queued and peer work in synthesized plan deadlines; retain exact
+  caller obligations and bind the model into temporal preconditions. Document
+  the complete-domain replay requirement and reference-model limits in
+  `docs/LAB_SHARED_WORKFORCE.md`.
+- Execute all 157 actual-source intent unit tests, including 20 new workforce
+  and planning groups. Intent production Clippy passes with the documented
+  existing world-source lint allowances. Exact scope and limits are recorded
+  in `IMPLEMENTATION_STATUS.md`.
+
 ## 2026-10-23 — Build and resume entrance-connected furnished rooms
 
 - Add `connected_room_v1` through the existing blueprint input, preserving the
