@@ -153,6 +153,8 @@ runtime, background job, dependency or MCP tool is introduced.
 
 This model does not simulate movement, hauling, skill-dependent speed, worker
 preferences, equipment, room ownership or native construction behavior.
-General `Build` retains its previous material model; actual furniture placement
-continues to require and hold its exact produced item. Live qualification and
-admission remain separate evidence requirements.
+Workforce-only scenarios retain the previous general `Build` material model;
+the separate `starter_fortress_economy` scenario adds finite workshop inputs
+through [LAB_WORKSHOP_MATERIALS.md](LAB_WORKSHOP_MATERIALS.md). Actual furniture
+placement continues to require and hold its exact produced item. Live
+qualification and admission remain separate evidence requirements.

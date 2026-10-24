@@ -7,6 +7,40 @@ from the same inventory used by carpentry. It composes with
 living constructor. These are reference-simulator rules, not native Dwarf
 Fortress construction costs or compatibility claims.
 
+## Use the economy scenario
+
+Open the existing `fortress.open_session` tool with
+`scenario: "starter_fortress_economy"`. For a complete connected-room or
+production workflow, request the usual scoped capabilities:
+
+```json
+{
+  "scenario": "starter_fortress_economy",
+  "paused": false,
+  "requested_capabilities": [
+    ["observe", "read_only"],
+    ["query", "read_only"],
+    ["plan", "read_only"],
+    ["control_clock", "reversible"],
+    ["designate", "guarded"],
+    ["construct", "guarded"],
+    ["configure_labor", "reversible"],
+    ["configure_production", "reversible"],
+    ["checkpoint", "guarded"]
+  ]
+}
+```
+
+The scenario composes the exact shared-workforce starter with one explicit
+material-model declaration. It retains the starter's completed workshops and
+inventory; existing workshops can be reused without charging a new input.
+The `starter_fortress_workforce`, `starter_fortress`, `besieged_fortress` and
+`empty` scenarios retain their prior declarations and behavior. Ordinary
+production, `provisioned_room` and `connected_room` requests use this model
+without a new MCP tool or blueprint grammar. See
+[LAB_CONNECTED_ROOM_ACCESS.md](LAB_CONNECTED_ROOM_ACCESS.md) for the connected
+room request and [LAB_SHARED_WORKFORCE.md](LAB_SHARED_WORKFORCE.md) for workers.
+
 ## Model and material lifecycle
 
 The canonical fortress-settings record selects
@@ -67,6 +101,55 @@ The material model requires the shared-workforce model, so temporal plans
 already carry the complete-workload replay guard. Changed anchors require a
 freshly reviewed plan; historical inventory and a narrow geometry witness do
 not authorize a different material allocation.
+
+The production compiler first determines the actual deduplicated workshop
+setup, including reuse of completed workshops. It subtracts those new inputs
+and pending carpentry demand before admitting furniture quotas. The same
+accounting applies to food/drink requests that need a new Still or Kitchen.
+Analysis reports `construction_materials.new_workshop_wood` and the WOOD
+quantities reserved for existing orders, new workshops and new production.
+These are planning calculations; only authorized dispatch allocates inventory.
+
+## Current reports and forecasts
+
+With current Observe authority, session opening returns
+`construction_materials`; observations expose it under
+`world.construction_materials`, and the orientation briefing forwards that
+current report. The report binds the exact source anchor and stock ledger and
+separates available, held, consumed and released quantities. Allocation rows
+are bounded with an explicit omitted count. Per-action
+`work_state.construction_materials` selects the original building from the full
+qualified census before rendering, so a global row limit cannot hide that
+action's allocation. Unavailable model or inventory evidence is reported as
+unknown rather than a current quantity. Reports grant no mutation authority.
+
+`consumed_wood` and `released_wood` describe retained workshop-allocation
+history. They are not extra available stock, and they do not include furniture
+recipe consumption. Releasing and later reusing the same log can therefore
+leave both a historical released row and a later consumed row.
+
+Forecasts expose `predicted_construction_materials` on the discarded simulation
+with a predicted anchor and explicit predicted evidence. They do not allocate
+real logs or certify future completion. Current goal proof independently
+checks completed construction custody; replacement generations or a changed
+allocation state cannot pass solely because ordinary field predicates do.
+
+## Interrupted projects
+
+An unfinished workshop cancellation releases its input and retains the exact
+released receipt. Repeating cancellation cannot return another log. After
+canonical recovery, the receipt remains visible, while retired process-local
+action handles remain retired. A freshly reviewed room continuation can
+reuse that original site only after the released allocation has been
+validated, and its new Build must acquire available material again. A
+completed workshop retains consumed material and is reused as capacity.
+
+The focused connected-room test exercises a two-bedroom project with a missing
+carpenter's workshop: two logs refuse before dispatch; three logs complete the
+new workshop and two beds. Forecast and execution agree on material totals and
+completion time at the same cadence. The cancellation/recovery test refunds
+the unfinished workshop, reopens the canonical world and completes that same
+room goal from the recovered inventory and original site.
 
 ## Scope
 

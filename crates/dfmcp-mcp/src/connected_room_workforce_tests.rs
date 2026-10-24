@@ -5,6 +5,9 @@ use super::*;
 use dfmcp_adapter::ActionReceipt;
 use dfmcp_intent::Constraint;
 
+#[path = "connected_room_material_tests.rs"]
+mod materials;
+
 fn workforce_source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress_workforce", FortressId::new(985), false)
 }

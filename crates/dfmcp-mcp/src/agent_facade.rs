@@ -1267,6 +1267,13 @@ fn briefing(state: &SessionOrientation, payload: &Value) -> Value {
     }) {
         view["workforce"] = workforce.clone();
     }
+    if let Some(materials) = payload.get("construction_materials").or_else(|| {
+        payload
+            .get("world")
+            .and_then(|world| world.get("construction_materials"))
+    }) {
+        view["construction_materials"] = materials.clone();
+    }
     view
 }
 
@@ -1637,7 +1644,7 @@ fn project_response(
 }
 
 #[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default), \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad), \"besieged_fortress\" (starter plus an approaching raider), or \"starter_fortress_workforce\" (starter with an explicit finite shared pool for mining, construction, brewing, cooking and carpentry). The workforce scenario reports current assignments and blockers; existing connected_room and provisioned_room plans use that reference labor model. Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
+    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default), \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad), \"besieged_fortress\" (starter plus an approaching raider), \"starter_fortress_workforce\" (starter with an explicit finite shared pool for mining, construction, brewing, cooking and carpentry), or \"starter_fortress_economy\" (the shared workforce plus one WOOD input per new Still, Kitchen or Carpenters workshop). The workforce scenarios report current assignments and blockers; the economy also reports available, held, consumed and released construction wood. Existing connected_room and provisioned_room plans use these explicit reference models, budget workshop setup jointly with furniture, and release held wood once when unfinished setup is cancelled. Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(

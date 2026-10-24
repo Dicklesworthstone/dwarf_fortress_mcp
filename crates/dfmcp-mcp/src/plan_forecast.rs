@@ -176,6 +176,20 @@ pub(super) fn forecast_plan(
         Ok(None) => {}
         Err(error) => return unavailable(&error),
     }
+    match crate::lab_world::construction_material_json(fork.snapshot()) {
+        Ok(Some(mut materials)) => {
+            materials["epistemic_state"] = json!("predicted");
+            materials["evidence_scope"] = json!("discarded_laboratory_forecast");
+            if let Some(fields) = materials.as_object_mut()
+                && let Some(anchor) = fields.remove("source_anchor")
+            {
+                fields.insert("predicted_anchor".to_owned(), anchor);
+            }
+            forecast["predicted_construction_materials"] = materials;
+        }
+        Ok(None) => {}
+        Err(error) => return unavailable(&error),
+    }
     forecast
 }
 

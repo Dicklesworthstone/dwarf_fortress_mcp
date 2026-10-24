@@ -61,19 +61,36 @@ availability guards and mandatory material-completion predicates are sealed
 into supported Build steps. Explicit deadlines remain unchanged. Physical-work
 and proof boundaries independently validate current material identity/custody.
 
+The additive `starter_fortress_economy` scenario composes finite materials and
+shared labor through the existing room and production workflows. The compiler
+budgets actual deduplicated setup before furniture feasibility, including
+queued carpentry when food/drink requests need new workshops. Current material
+and per-action allocation reports are Observe-gated and source-anchored;
+forecasts expose a separate predicted report. A cancelled workshop site is
+reusable only with validated released custody. Recovery retains that receipt,
+and a newly reviewed room continuation allocates its refunded input again.
+
 Executed development validation: 177 actual-source intent unit tests passed,
 including 16 new material-lifecycle groups and four resource-planning tests;
 15 dispatcher tests passed, including two new current-custody proof groups;
-and all 83 laboratory unit tests passed. The dispatcher regressions refuse
+83 laboratory unit tests passed; and 176 focused MCP module tests passed,
+including nine new economy integration cases (451 total passing tests).
+The two-bedroom integration refuses two logs, completes with exactly three,
+matches forecast and execution, and recovers an interrupted workshop at its
+original site without duplicating its refund. The dispatcher regressions refuse
 replaced building/ledger generations, duplicate ledgers and removed model
 declarations even when ordinary completion field predicates remain true.
-Intent production Clippy passed with the three previously recorded world-crate
+Focused production Clippy passed for the changed intent, adapter, laboratory
+and MCP semantic modules with the three previously recorded world-crate
 baseline allowances and all other warnings/prohibited methods denied.
 
 The required repository verification still stops at the pre-existing source
 bundle documentation check; development local qualification still stops at
-the same 64 pre-existing static-contract failures. These focused actual-source
-tests are not full workspace/server, native or live qualification. The one-log
+the same 64 pre-existing static-contract failures. The focused MCP harness
+does not compile the full FastMCP server, facade or task-session layer; the
+opening, observation and briefing wiring was independently source-reviewed
+and formatted. These actual-source tests are not full workspace/server,
+native or live qualification. The one-log
 recipe is laboratory calibration; individual log hauling, native material
 costs and unsupported building families remain outside this model. See
 `docs/LAB_WORKSHOP_MATERIALS.md`.

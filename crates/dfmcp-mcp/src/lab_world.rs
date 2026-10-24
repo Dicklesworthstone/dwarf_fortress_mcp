@@ -40,6 +40,16 @@ mod production_staffing;
 mod laboratory_workforce_view;
 pub(crate) use laboratory_workforce_view::{workforce_action_json, workforce_json};
 
+#[path = "laboratory_material_view.rs"]
+mod laboratory_material_view;
+pub(crate) use laboratory_material_view::{
+    construction_material_action_json, construction_material_json,
+};
+
+#[cfg(test)]
+#[path = "laboratory_material_tests.rs"]
+mod laboratory_material_tests;
+
 #[cfg(test)]
 #[path = "laboratory_workforce_scenario_tests.rs"]
 mod laboratory_workforce_scenario_tests;
@@ -68,11 +78,12 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 4] = [
+pub(crate) const SCENARIOS: [&str; 5] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
     "starter_fortress_workforce",
+    "starter_fortress_economy",
 ];
 
 /// Starter-fortress entity identities.
@@ -137,6 +148,7 @@ pub(crate) fn scenario_snapshot(
         "empty" => WorldGraph::default(),
         "starter_fortress" => starter_graph()?,
         "starter_fortress_workforce" => workforce_starter_graph(fortress_id)?,
+        "starter_fortress_economy" => economy_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -214,6 +226,23 @@ fn workforce_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
                 Value::Text(effects::LABORATORY_WORKFORCE_MODEL.to_owned()),
             )],
         ),
+    );
+    Ok(graph)
+}
+
+/// Material consumption is a separate opt-in generation over the finite
+/// workforce. Earlier scenarios retain their exact model declarations.
+fn economy_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
+    let mut graph = workforce_starter_graph(fortress_id)?;
+    let settings = graph
+        .entities
+        .get_mut(&effects::fortress_settings_entity_id(fortress_id))
+        .ok_or_else(|| invalid("starter economy settings are missing"))?;
+    settings.fields.insert(
+        effects::LABORATORY_CONSTRUCTION_MATERIAL_MODEL_FIELD.to_owned(),
+        lab_fact(Value::Text(
+            effects::LABORATORY_CONSTRUCTION_MATERIAL_MODEL.to_owned(),
+        )),
     );
     Ok(graph)
 }
@@ -1196,6 +1225,7 @@ impl ProductionRequest {
     ) -> Result<ProductionCompilation> {
         let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
         let snapshot = evidence.snapshot();
+        let construction_model = effects::construction_material_model(snapshot)?;
         let mut inventory = dfmcp_intent::InventoryStockpile::new();
         let ledger =
             effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id));
@@ -1284,7 +1314,7 @@ impl ProductionRequest {
                 .collect();
             ProductionWorkload::capture(snapshot, &jobs)?
         };
-        let observed_wood = inventory.get_stock("WOOD");
+        let mut observed_wood = inventory.get_stock("WOOD");
         if needs_wood && workload.reserved_wood_units() > 0 {
             let available = u64::from(observed_wood).saturating_sub(workload.reserved_wood_units());
             inventory.set_stock(
@@ -1299,18 +1329,7 @@ impl ProductionRequest {
                 dfmcp_intent::ProductionPlanningLimits::default(),
             )?;
         }
-        let mut analysis = json!({
-            "model": "closed laboratory recipes: DRINK/FOOD yield 5 without modeled inputs; BED/DOOR/TABLE/CHAIR yield one item per WOOD log; each job shares finite completed workshops and living labor-enabled workers",
-            "feasible": plan.model_feasible(),
-            "requirements": plan.requirements().iter().map(|r| json!({
-                "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
-                "planned": r.planned_units, "missing": r.missing_units,
-                "consumed_units": r.consumed_units,
-            })).collect::<Vec<_>>(),
-            "shortages": plan.shortages().iter().map(|s| json!({
-                "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
-            })).collect::<Vec<_>>(),
-        });
+        let mut analysis = production_plan_analysis(&plan);
         if needs_wood {
             analysis["materials"] = json!({
                 "WOOD": {
@@ -1321,7 +1340,7 @@ impl ProductionRequest {
                 },
             });
         }
-        if !plan.model_feasible() {
+        if !plan.model_feasible() && construction_model.is_none() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!("production quotas are infeasible in the laboratory model: {analysis}"),
@@ -1369,6 +1388,71 @@ impl ProductionRequest {
                 }
             }
         };
+        if let Some(model) = construction_model {
+            // Determine the actual deduplicated setup before admitting any
+            // material feasibility. Existing complete workshops cost nothing;
+            // every new workshop and furniture item shares the same wood pool.
+            let construction_wood = construction_setup_wood(snapshot, &setup)?;
+            let needs_material = needs_wood || construction_wood > 0;
+            if construction_wood > 0 && !needs_wood {
+                let held = ledger.and_then(|record| {
+                    production_fact(record, effects::STOCK_WOOD_FIELD, snapshot.tick)
+                });
+                let Some(Value::U64(held)) = held else {
+                    return Err(production_setup_refusal(
+                        "workshop construction requires a source-qualified stock.material.WOOD count; missing material is unknown, not zero",
+                    ));
+                };
+                observed_wood = u32::try_from(*held).map_err(|_| {
+                    DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "observed workshop material exceeds the exact u32 production bound",
+                    )
+                })?;
+            }
+            let after_existing =
+                u64::from(observed_wood).saturating_sub(workload.reserved_wood_units());
+            let construction_fits = construction_wood <= after_existing;
+            if needs_material {
+                let for_production = after_existing.saturating_sub(construction_wood);
+                inventory.set_stock(
+                    "WOOD",
+                    u32::try_from(for_production).map_err(|_| {
+                        invalid("construction wood availability escaped its observed bound")
+                    })?,
+                );
+                plan = lab_recipes().plan_quotas(
+                    &quotas,
+                    &inventory,
+                    dfmcp_intent::ProductionPlanningLimits::default(),
+                )?;
+            }
+            analysis = production_plan_analysis(&plan);
+            analysis["feasible"] = json!(plan.model_feasible() && construction_fits);
+            analysis["construction_materials"] = json!({
+                "model": model,
+                "new_workshop_wood": construction_wood,
+                "missing_workshop_wood": construction_wood.saturating_sub(after_existing),
+                "existing_workshops_are_reused": true,
+                "reservation_is_model_only": true,
+            });
+            if needs_material {
+                analysis["materials"] = json!({
+                    "WOOD": {
+                        "observed_stock": observed_wood,
+                        "reserved_for_existing_orders": workload.reserved_wood_units(),
+                        "reserved_for_new_workshops": construction_wood,
+                        "available_for_new_plan": inventory.get_stock("WOOD"),
+                        "reservation_is_model_only": true,
+                    },
+                });
+            }
+            if !construction_fits || !plan.model_feasible() {
+                return Err(production_setup_refusal(format!(
+                    "production and workshop setup exceed the shared laboratory material supply: {analysis}"
+                )));
+            }
+        }
         let setup_count = setup.actions.len();
         let offset = u32::try_from(setup_count)
             .map_err(|_| invalid("production setup step index overflow"))?;
@@ -1461,6 +1545,21 @@ impl ProductionRequest {
     }
 }
 
+fn production_plan_analysis(plan: &dfmcp_intent::ProductionPlan) -> Json {
+    json!({
+        "model": "closed laboratory recipes: DRINK/FOOD yield 5 without modeled inputs; BED/DOOR/TABLE/CHAIR yield one item per WOOD log; each job shares finite completed workshops and living labor-enabled workers",
+        "feasible": plan.model_feasible(),
+        "requirements": plan.requirements().iter().map(|r| json!({
+            "item": r.item_token, "minimum_stock": r.minimum_stock, "stock": r.stock_units,
+            "planned": r.planned_units, "missing": r.missing_units,
+            "consumed_units": r.consumed_units,
+        })).collect::<Vec<_>>(),
+        "shortages": plan.shortages().iter().map(|s| json!({
+            "item": s.item_token, "required": s.required_units, "stock": s.stock_units, "missing": s.missing_units,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 #[derive(Default)]
 struct ProductionSetup {
     actions: Vec<Json>,
@@ -1468,6 +1567,25 @@ struct ProductionSetup {
     serial_after: BTreeMap<String, BTreeSet<String>>,
     workshops: Vec<Json>,
     staffing: Vec<Json>,
+}
+
+fn construction_setup_wood(snapshot: &WorldSnapshot, setup: &ProductionSetup) -> Result<u64> {
+    if setup.actions.is_empty() {
+        return Ok(0);
+    }
+    let actions = parse_steps(&Json::Array(setup.actions.clone()).to_string())?;
+    let mut total = 0u64;
+    for requested in &actions {
+        if let Some(cost) = effects::construction_wood_cost(snapshot, &requested.action)? {
+            total = total.checked_add(cost).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "workshop construction material budget overflow",
+                )
+            })?;
+        }
+    }
+    Ok(total)
 }
 
 fn production_fact<'a>(entity: &'a EntityRecord, field: &str, tick: GameTick) -> Option<&'a Value> {
@@ -1511,6 +1629,12 @@ fn production_site_is_eligible(
     snapshot: &WorldSnapshot,
     site: &ProductionWorkshopSite,
 ) -> Result<()> {
+    let released: BTreeSet<EntityId> = effects::construction_material_report(snapshot)?
+        .into_iter()
+        .flat_map(|report| report.allocations)
+        .filter(|allocation| allocation.state == "released")
+        .map(|allocation| allocation.building)
+        .collect();
     for at in region_tiles(site.footprint) {
         if snapshot.tile_code_at(at) != Some(tile_codes::FLOOR) {
             return Err(production_setup_refusal(format!(
@@ -1561,6 +1685,11 @@ fn production_site_is_eligible(
         .values()
         .filter(|entity| entity.kind == EntityKind::Building)
     {
+        // Only a validated released material receipt establishes that a
+        // cancelled economy workshop no longer occupies this original site.
+        if released.contains(&building.id) {
+            continue;
+        }
         let (Some(Value::Coord(min)), Some(Value::Coord(max))) = (
             production_fact(building, "footprint_min", snapshot.tick),
             production_fact(building, "footprint_max", snapshot.tick),
@@ -2144,6 +2273,13 @@ pub(crate) fn plan_goal_truth(
         dfmcp_world::PredicateEvidence::laboratory(snapshot)?.evaluate(&plan.terminal_condition)?;
     if truth == dfmcp_world::PredicateTruth::True {
         for step in &plan.steps {
+            if matches!(step.action, Action::Build { .. }) {
+                effects::validate_construction_material_completion(
+                    snapshot,
+                    effects::created_entity_id(&step.idempotency_key, 0),
+                    &step.action,
+                )?;
+            }
             if let Action::PlaceFurniture {
                 kind,
                 item,
@@ -2318,6 +2454,19 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
         Ok(None) => {}
         Err(error) => {
             view["workforce"] = json!({
+                "available": false,
+                "epistemic_state": "unknown",
+                "evidence_scope": "laboratory_reference_world",
+                "source_anchor": crate::observation_projection::anchor_json(&snapshot.anchor()),
+                "reason": {"code": error.code.as_str(), "message": error.message},
+            });
+        }
+    }
+    match construction_material_json(snapshot) {
+        Ok(Some(report)) => view["construction_materials"] = report,
+        Ok(None) => {}
+        Err(error) => {
+            view["construction_materials"] = json!({
                 "available": false,
                 "epistemic_state": "unknown",
                 "evidence_scope": "laboratory_reference_world",

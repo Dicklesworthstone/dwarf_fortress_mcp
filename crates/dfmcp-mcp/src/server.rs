@@ -2651,13 +2651,14 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
-    let (untracked, goal_status, workforce) = with_session_admitted(
+    let (untracked, goal_status, workforce, construction_materials) = with_session_admitted(
         &session,
         || {
             (
                 json!({"state": "unknown", "quiescent": false, "items": null,
             "reason": "session observation unavailable"}),
                 serde_json::Value::Null,
+                None,
                 None,
             )
         },
@@ -2666,6 +2667,7 @@ pub(crate) fn open_session_in_scenario(
                 untracked_work_json(guard),
                 objectives_json(guard),
                 session_workforce_json(guard),
+                session_construction_material_json(guard),
             )
         },
     );
@@ -2721,6 +2723,9 @@ pub(crate) fn open_session_in_scenario(
     });
     if let Some(workforce) = workforce {
         payload["workforce"] = workforce;
+    }
+    if let Some(materials) = construction_materials {
+        payload["construction_materials"] = materials;
     }
     payload.to_string()
 }
@@ -3502,6 +3507,19 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
                 });
             }
         }
+        match lab_world::construction_material_action_json(adapter.snapshot(), entity_id) {
+            Ok(Some(materials)) => view["construction_materials"] = materials,
+            Ok(None) => {}
+            Err(error) => {
+                view["construction_materials"] = json!({
+                    "available": false,
+                    "epistemic_state": "unknown",
+                    "reason": error.message,
+                    "code": error.code.as_str(),
+                    "source_anchor": anchor_json(&adapter.snapshot().anchor()),
+                });
+            }
+        }
     }
     view
 }
@@ -3631,6 +3649,23 @@ fn session_workforce_json(session: &LabSession) -> Option<serde_json::Value> {
     }
     match lab_world::workforce_json(session.adapter.snapshot()) {
         Ok(workforce) => workforce,
+        Err(error) => Some(json!({
+            "available": false,
+            "epistemic_state": "unknown",
+            "reason": error.message,
+            "code": error.code.as_str(),
+            "source_anchor": anchor_json(&session.adapter.snapshot().anchor()),
+        })),
+    }
+}
+
+fn session_construction_material_json(session: &LabSession) -> Option<serde_json::Value> {
+    let ctx = context_for(session, session.next_request_id);
+    if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
+        return None;
+    }
+    match lab_world::construction_material_json(session.adapter.snapshot()) {
+        Ok(materials) => materials,
         Err(error) => Some(json!({
             "available": false,
             "epistemic_state": "unknown",

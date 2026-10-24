@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-23 — Run complete room and production goals with finite workshop inputs
+
+- Add the opt-in `starter_fortress_economy` scenario, composing finite shared
+  labor and workshop materials while preserving earlier scenario bytes.
+- Budget actual new workshop setup and queued carpentry before admitting
+  furniture or food/drink production. Reuse completed workshops without a new
+  input, and charge shared setup once.
+- Expose current Observe-gated construction inventory and exact per-action
+  allocations, plus separate predicted forecast reports. Require completed
+  material custody before certifying the original plan goal.
+- Recover cancelled workshop allocations and permit a newly reviewed room
+  continuation to reuse the released site and refunded input exactly once.
+  Document scenario selection, reports and interrupted projects in
+  `docs/LAB_WORKSHOP_MATERIALS.md`.
+- Pass all 176 focused MCP tests, including nine new material-economy cases;
+  the complete focused set has 451 passing tests. Production Clippy passes
+  under the existing baseline allowances. Full server/facade compilation and
+  repository qualification retain the recorded limits.
+
 ## 2026-10-23 — Allocate finite materials for workshop construction
 
 - Add an explicit `wooden-workshops/1` model composed with finite shared labor.

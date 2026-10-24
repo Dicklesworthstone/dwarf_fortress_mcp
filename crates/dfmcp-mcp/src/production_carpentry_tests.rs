@@ -11,6 +11,9 @@ use dfmcp_intent::{Constraint, Intent, StaticPlanner};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{FactPresence, PredicateEvidence, PredicateTruth};
 
+#[path = "production_material_tests.rs"]
+mod materials;
+
 fn context(snapshot: &WorldSnapshot) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(1),
