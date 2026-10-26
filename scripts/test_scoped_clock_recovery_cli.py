@@ -22,7 +22,7 @@ import recover_scoped_clocks as cli
 from scoped_clock_recovery import Recovery
 from test_route_furniture_clock_inventory import setup, save, bytes_in
 from test_route_furniture_clock_inventory_workflow import Budget
-from test_scoped_clock_recovery import QueryPeer, configured, expected, final_save
+from test_scoped_clock_reconciliation import QueryPeer, configured, expected, final_save
 
 
 class Output:
