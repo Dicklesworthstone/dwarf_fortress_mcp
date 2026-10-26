@@ -1,0 +1,17 @@
+{
+  "schema": "dfmcp.unified-construction-progress-contract/1",
+  "entrypoint": "scripts/route_furniture_progress.py",
+  "new_work_family": "held original batch all_placed selects final owner; otherwise existing next-step owner",
+  "recovery_family": "validated retained Scope or FinalScope, never current placement count",
+  "final_review_confirmation": "progress_review aliases exact final_progress_review after output reservation",
+  "read_only_final_operation": "observe-final",
+  "read_only_final_authority": "existing isolated route Authority; no run token",
+  "read_only_final_clock_contact": false,
+  "read_only_final_clock_files": false,
+  "automatic_retries": false,
+  "automatic_clock_loop": false,
+  "placement_confirmation_from_inspection": false,
+  "stable_completion_from_sampled_quiescence": false,
+  "scope_receipt_formats_changed": false,
+  "production_admission_changed": false
+}

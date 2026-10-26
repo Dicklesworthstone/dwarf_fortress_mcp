@@ -325,6 +325,24 @@ def query_progress(batch, authority: ProgressAuthority | None, confirmation: str
             return output
 
 
+def observe_final(batch, authority):
+    """Read all original construction without clock authority or a clock record."""
+    require(type(authority) is route.Authority and not batch.writable,
+            'final inspection requires the isolated original read authority')
+    authority.guard('QueryPlacement')
+    import route_furniture_final as final
+    state, report = final.read_frontier(batch, authority)
+    require(report['batch_id'] == batch.id and report['phase'] == 'final_construction',
+            'final inspection returned another original batch or phase')
+    state.update(advance_allowed=False, expected_plan=None, confirm_review=None,
+                 execution_review_required=True)
+    encoded('observe-final', state)
+    authority.guard('QueryPlacement')
+    batch.check()
+    batch.budget.remaining()
+    return state
+
+
 def inventory_state(batch, history: Inventory, *, selection='all', limit=16, continuation=None):
     """Offline handoff of original clock identities; no execution permission."""
     page = history.page(selection=selection, limit=limit, continuation=continuation)
@@ -339,6 +357,13 @@ def inventory_state(batch, history: Inventory, *, selection='all', limit=16, con
 def packet(operation, state=None, error=False):
     value = route.packet('progress-' + operation, state, error)
     value['schema'] = 'dfmcp.route-furniture-progress-result/2'
+    if operation == 'observe-final' and state is not None:
+        report = state['route_frontier']
+        value['agent_turn']['phase'] = 'inspect'
+        value['agent_turn']['briefing'].update(
+            final_construction_status=report['status'],
+            all_original_furnishings_quiescent_now=report['all_original_furnishings_quiescent_now'],
+            clock_commit_invoked_this_call=False, construction_completion_proven=False)
     if state is not None and 'clock_inventory' in state:
         inventory = state['clock_inventory']
         turn = value['agent_turn']
@@ -394,7 +419,7 @@ def main(argv=None):
     batch, history, operation, output_attempted = None, None, 'unknown', False
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('operation', choices=('review', 'progress', 'query', 'inventory'))
+        parser.add_argument('operation', choices=('review', 'progress', 'query', 'inventory', 'observe-final'))
         parser.add_argument('--directory', required=True)
         parser.add_argument('--batch-id', required=True)
         parser.add_argument('--ticks', type=int)
@@ -435,11 +460,14 @@ def main(argv=None):
         wait_ms = 0 if args.wait_ms is None else integer(args.wait_ms, 0, 60000)
         budget = route.Budget(args.timeout_ms)
         # Offline terminal query needs no credentials or native connection.
-        authority = (None if operation == 'inventory' or (operation == 'query'
+        authority = (route.Authority.load() if operation == 'observe-final' else
+                     None if operation == 'inventory' or (operation == 'query'
                      and not args.refresh_frontier and not any(key in os.environ for key in RUN_ENV))
                      else ProgressAuthority.load())
         batch = Batch(args.directory, args.batch_id, budget, writable=False)
-        if operation == 'inventory':
+        if operation == 'observe-final':
+            state = observe_final(batch, authority)
+        elif operation == 'inventory':
             # Keep both directory and original batch custody through stdout.
             history = Inventory(Path(args.clock_directory), batch).__enter__()
             state = inventory_state(batch, history, selection=args.selection or 'all',
@@ -456,7 +484,10 @@ def main(argv=None):
         if history is not None:
             history.check()
         if authority is not None:
-            authority.clock_guard()
+            if operation == 'observe-final':
+                authority.guard('QueryPlacement')
+            else:
+                authority.clock_guard()
         batch.check()
         budget.remaining()
         output_attempted = True
