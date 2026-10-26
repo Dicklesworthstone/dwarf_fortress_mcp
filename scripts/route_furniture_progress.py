@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicitly advance the game between original furniture placements.
+"""Dwarf Fortress game-clock progress for original furniture construction.
 
 One independently confirmed, exact-clock-bound burst; no automatic placement,
 clock loop or blind retry. Native run/1.13 and its intent/receipt codecs remain
@@ -21,7 +21,7 @@ import route_furniture_batch as route
 import route_furniture_run as runner
 from route_furniture_review import Source, digest_text
 from route_furniture_batch_store import Batch
-from route_furniture_clock_context import Client, POLICY, SCHEMA, Scope, ScopeStore
+from route_furniture_clock_context import Client, POLICY, SCHEMA, Scope, FinalScope, ScopeStore
 from route_furniture_clock_inventory import Inventory
 
 MAX_OUTPUT = 256 * 1024
@@ -118,6 +118,17 @@ def review_progress(batch, authority, ticks: int, wall_ms: int):
     require(type(authority) is ProgressAuthority and not batch.writable,
             'clock-aware review requires read-only original custody')
     authority.clock_guard()
+    if batch.audit()['status'] == 'all_placed':
+        # All registered placements have no next item to review. Use the full
+        # original-receipt frontier, not an invented next step or empty prefix.
+        import route_furniture_final_progress as final_progress
+        state = final_progress.review_final_progress(batch, authority, ticks, wall_ms)
+        state['progress_review'] = dict(state['final_progress_review'])
+        _reserve(state)  # Include the common handoff in the complete byte bound.
+        authority.clock_guard()
+        batch.check()
+        batch.budget.remaining()
+        return state
     state, report = _frontier(batch, authority)
     _reserve(state)
     scope, reason = None, 'frontier_not_construction_pending'
@@ -180,6 +191,13 @@ def _post_review(batch, authority, scope, retained, requested):
 
 
 def _result(batch, authority, scope, retained, *, contacted, committed, refresh):
+    # Recovery follows the retained scope, NEVER today's placement count. An
+    # old next-step receipt remains next-step history after the batch finishes.
+    if type(scope) is FinalScope:
+        import route_furniture_final_progress as final_progress
+        return final_progress._result(batch, authority, scope, retained,
+            contacted=contacted, committed=committed, refresh=refresh)
+    require(type(scope) is Scope, 'unsupported retained progress scope')
     after, status = _post_review(batch, authority, scope, retained, refresh)
     output = batch.audit()
     # Original journal eligibility is not a fresh execution confirmation.
@@ -213,6 +231,13 @@ def progress(batch, authority: ProgressAuthority, ticks: int, wall_ms: int,
     integer(ticks, 1, 1200)
     integer(wall_ms, 1, 60000)
     path = _record_path(clock_directory, confirmation)
+    authority.clock_guard()
+    if batch.audit()['status'] == 'all_placed':
+        # The final owner independently reacquires and validates final consent;
+        # a historical next-step confirmation is not converted or auto-approved.
+        import route_furniture_final_progress as final_progress
+        return final_progress.progress_final(batch, authority, ticks, wall_ms,
+                                              confirmation, clock_directory)
     initial = review_progress(batch, authority, ticks, wall_ms)
     require(initial['progress_review']['confirm_progress'] == confirmation,
             'progress confirmation differs from the current clock or construction frontier')
@@ -335,6 +360,12 @@ def packet(operation, state=None, error=False):
         value['agent_turn']['briefing'].update(
             clock_commit_invoked_this_call=progress['clock_commit_invoked_this_call'],
             next_step_ready=progress['next_step_ready'], construction_completion_proven=False)
+    if state is not None and 'final_construction_progress' in state:
+        progress = state['final_construction_progress']
+        value['agent_turn']['briefing'].update(
+            clock_commit_invoked_this_call=progress['clock_commit_invoked_this_call'],
+            all_original_furnishings_quiescent_now=progress['all_original_furnishings_quiescent_now'],
+            construction_completion_proven=False)
     return value
 
 
@@ -442,4 +473,7 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    # The final owner imports this module's exact ProgressAuthority class. Keep
+    # direct script execution from loading a second, incompatible class copy.
+    sys.modules['route_furniture_progress'] = sys.modules[__name__]
     raise SystemExit(main())
