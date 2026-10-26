@@ -38,24 +38,97 @@ success. Invocation counts are per-record attempts, not a claim that bytes reach
 the peer. Full output is reserved before any native connection. The embedding
 owner must retain both original batch and Recovery custody through stdout.
 
-## Executed core evidence
+## Executable discovery-to-recovery workflow
+
+First inspect the existing original batch and scoped-clock directory offline:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest \
-  test_route_furniture_clock_inventory test_scoped_clock_recovery -v
+python3 scripts/route_furniture_progress.py inventory \
+  --directory /absolute/private/route-batch --batch-id "$BATCH_ID" \
+  --clock-directory /absolute/private/clock-records --selection pending --limit 16
 ```
 
-All 46 tests pass: 27 unchanged inventory cases and 19 recovery tests. They execute
-actual native clock framing and codecs over TCP to bounded, joined synthetic
-peers, plus real private scope/intent/outcome files, locks and synchronization.
-Coverage includes mixed scope families, exact 16-query caps, stale inventory,
-source loss, absent/prepared/running replies, lost second replies, wrong receipts,
-byte-identical file replacement, membership changes, revocation, budget/output
-refusal, sync failure and no mutation method availability. Existing inventory
-cases cover all 256 records. Every imported production file matched its exact
-GitHub blob before execution.
+Retain `result.clock_inventory.inventory_digest` independently as
+`INVENTORY_DIGEST`. It covers the complete local directory, not just the displayed
+page. No remembered per-clock confirmation is required for the following pass:
 
-Original route-batch custody and budget are explicit test ports, not complete
-private-batch or live acquisition evidence. There is no DFHack SDK/game, Rust/MCP,
-full-workspace or production-admission qualification. No native protocol or stored
-scope/intent/receipt format changes. The CLI integration is a separate increment.
+```sh
+python3 scripts/recover_scoped_clocks.py \
+  --directory /absolute/private/route-batch --batch-id "$BATCH_ID" \
+  --clock-directory /absolute/private/clock-records \
+  --expected-inventory "$INVENTORY_DIGEST" --max-queries 8 --timeout-ms 10000
+```
+
+Paths and shell variables are operator-supplied examples. For an actual native
+query, run in the isolated environment containing only these DFMCP variables:
+
+```text
+DFMCP_ALLOW_UNADMITTED_RUN_V1_13=1
+DFMCP_RUN_ENDPOINT=127.0.0.1:5000
+DFMCP_RUN_TOKEN=<existing run/1.13 credential>
+```
+
+Other DFMCP authority variables, including route and placement settings, are
+refused. The existing native plugin must already be configured; this command
+does not install or configure a game. If there are no queryable original records,
+the pass is offline and needs no credentials, network connection or synchronization.
+That does not resolve foreign, unassociated, scope-only or source-lost work.
+
+The command validates arguments before opening custody, then checks the supplied
+inventory digest before loading native credentials. Changed membership, bytes,
+file identity or original batch inventory makes the selection stale. It uses the
+existing route-batch budget and read-only Batch opening interface, and keeps both
+batch and clock-directory owners open through exactly one final output attempt.
+A short or failed stdout write never triggers a second object or another query.
+
+`--max-queries` is 1..16 (default 8); the whole-operation timeout is 1..60,000 ms
+(default 10,000). These are caps, not a guarantee that every selected query fits.
+The original shared call/network/work/storage limits are not renewed. Output is
+at most 256 KiB and retains the full original audited batch, compact per-attempt
+outcomes, complete current counts, initial/final inventory identities, and Agent
+Turn pending-work/retained-evidence summaries. Placement confirmations remain null.
+
+Exit zero means a complete report, not that all history is resolved. Inspect
+`result.clock_recovery.counts.unresolved`, `counts.query_supported`, `stop_reason`
+and `directory_history_reconciled`. A transport/codec failure stops the pass with
+exit two and `ok: false`; previously synchronized results remain visible if current
+custody/authority permit. Otherwise a sanitized null-result refusal is returned,
+with original files preserved. After any retained outcome, old pagination tokens
+and old inventory digests are stale: inspect again before another explicit pass.
+
+The reader never automatically repeats a query in one pass or refreshes current
+routes/construction. Prepared/running/absent replies remain pending. SourceLost
+requires operator investigation; deleting evidence or changing directories is
+not a valid resolution. Guarantees are local cooperative custody, not a global
+controller lease or malicious-owner rollback protection. A retained pause remains
+historical and grants no effect retry, placement or construction-completion proof.
+
+## Executed evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_scoped_clock_recovery.py --mutations
+```
+
+All 58 tests pass: 27 unchanged inventory cases, 19 recovery tests and 12 CLI
+cases. All eight deliberately weakened implementations fail assertion-based
+regressions, not syntax/import checks. They cover stale inventory, query caps,
+source loss, continuing after failure, ambiguous-publication fencing, pre-contact
+output reservation, premature lock release and failed-pass exit status. The runner
+syntax-checks and hashes all 15 executed production/test/runner inputs before and
+after testing; none changed during execution.
+
+Tests execute actual native clock framing and codecs over TCP to bounded, joined
+synthetic peers, plus real private scope/intent/outcome files, locks and sync.
+Coverage includes mixed scope families, exact 16-query caps, 256-record inventory,
+absent/prepared/running replies, lost second replies with first outcome retained,
+wrong receipts, byte-identical file replacement, membership changes, revocation,
+budget/output refusal, sync failure and no mutation-method availability. Complete
+CLI/main/runpy entrypoints and actual Agent Turn rendering execute, including
+partial-failure packets, credential isolation, original read-only opening, and
+custody held through single/short/failed output attempts.
+
+Original route-batch custody and aggregate budget construction are explicit test
+ports; clock files, native clients/codecs, recovery algorithms and output packets
+are not substituted. This is not a real private route-batch, DFHack SDK/game,
+Rust/MCP, full-workspace or production-admission qualification. No existing native
+protocol or stored scope/intent/receipt format changes. Broader beads remain open.
