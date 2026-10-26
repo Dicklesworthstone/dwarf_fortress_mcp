@@ -16,7 +16,7 @@ import re
 
 import bounded_run_outcomes as storage
 from furniture_plan import canonical, decode_json, integer, require
-from route_furniture_clock_context import FinalScope, Scope, SCOPE_SUFFIX, decode_scope
+from route_furniture_clock_context import FinalScope, Scope, SCOPE_SUFFIX, decode_scope, _is_scope
 from route_furniture_review import digest_text
 
 POLICY = 'complete-private-scoped-clock-history-before-new-effect/1'
@@ -163,7 +163,7 @@ class Inventory:
                         require(store.source_stat == self._files[files['']].stamp
                                 and store.source_data == raw[''], 'intent changed between reads')
                         expected_key = scope.clock_key if scope is not None else store.intent['idempotency_key']
-                        require(expected_key in ('frp-' + identity, 'frf-' + identity)
+                        require(expected_key in ('frp-' + identity, 'frf-' + identity, 'frv-' + identity)
                                 and store.intent['idempotency_key'] == expected_key,
                                 'clock intent key differs from its record name')
                         if scope is not None:
@@ -191,6 +191,9 @@ class Inventory:
                              'query_supported': queryable and association == 'original_batch',
                              'receipt_digest': None if saved is None else saved['record']['receipt_digest_hex'],
                              'retry_permitted': False})
+                if scope is not None and scope.clock_key.startswith('frv-'):
+                    rows[-1]['recovery_entrypoint'] = 'recover_route_furniture_clock.py'
+                    rows[-1]['completion_goal_digest'] = scope.value()['completion']['goal_digest']
             self._rows, self._groups = tuple(rows), len(groups)
             require(self._names() == names, 'clock directory membership changed during discovery')
             self.check()
@@ -240,7 +243,7 @@ class Inventory:
         Unknown/unassociated/foreign-source-loss history cannot be hidden by a
         caller's page filter. A different directory is outside this local claim.
         """
-        require(type(scope) in (Scope, FinalScope) and not self._allowed_new, 'new clock scope already selected')
+        require(_is_scope(scope) and not self._allowed_new, 'new clock scope already selected')
         self.check()
         scope.bind(self.batch, current=True)
         require(self._groups < MAX_RECORDS and all(r['resolved'] for r in self._rows),

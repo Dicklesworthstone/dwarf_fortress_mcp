@@ -62,7 +62,7 @@ def _entry(owner):
     scope = owner.scope.value()
     row = {'confirmation': owner.confirmation, 'batch_id': owner.batch_id,
            'clock_key': owner.scope.clock_key,
-           'phase': 'final_construction' if type(owner.scope) is FinalScope else 'between_placements',
+           'phase': scope.get('phase', 'between_placements'),
            'endpoint': scope['source']['endpoint'],
            'generation': scope['clock_manifest']['generation'],
            'prepared_tick': clock.snapshot(bytes.fromhex(owner.store.intent['observation_hex']))['tick'],

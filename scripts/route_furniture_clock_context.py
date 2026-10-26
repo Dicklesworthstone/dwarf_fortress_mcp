@@ -192,10 +192,20 @@ def decode_scope(raw):
         scope = Scope(raw)
     elif value['schema'] == FINAL_SCHEMA:
         scope = FinalScope(raw)
+    elif value['schema'] == 'dfmcp.route-furniture-completion-clock/1':
+        from completion_clock_scope import CompletionScope
+        scope = CompletionScope(raw)
     else:
         raise ValueError('unsupported clock scope generation')
     scope.value()
     return scope
+
+
+def _is_scope(value):
+    if type(value) in (Scope, FinalScope):
+        return True
+    from completion_clock_scope import CompletionScope
+    return type(value) is CompletionScope
 
 
 class ScopeStore:
@@ -225,7 +235,7 @@ class ScopeStore:
             self.batch.budget.remaining()
             self._parent()
             if self.create is not None:
-                require(type(self.create) in (Scope, FinalScope) and self.create.digest == self.expected,
+                require(_is_scope(self.create) and self.create.digest == self.expected,
                         'scope differs from independently confirmed identity')
                 self.create.bind(self.batch, current=True)
                 data = self.create.raw + b'\n'
