@@ -213,15 +213,15 @@ fn receipts(
     method: i16,
     token: &[u8],
     nonce: &[u8; 32],
-    goal: &Goal,
+    original_records: &[BuildRecord],
     original: &Manifest,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Vec<Vec<u8>>> {
-    let mut records = Vec::with_capacity(goal.records().len());
-    for record in goal.records() {
+    let mut records = Vec::with_capacity(original_records.len());
+    for record in original_records {
         let (summary, raw) = build_read(link, method, token, nonce, Some(record), original, check)?;
         require(
-            usize::from(summary.retained_records()) >= goal.records().len(),
+            usize::from(summary.retained_records()) >= original_records.len(),
             "native receipt retention does not cover the complete goal",
         )?;
         records.push(raw.ok_or_else(|| invalid("original receipt response is absent"))?);
@@ -237,6 +237,59 @@ fn receipts(
 pub fn acquire_trusted(
     original: &BuildBinding,
     goal: &Goal,
+    operations_token: Vec<u8>,
+    build_token: Vec<u8>,
+    nonce: [u8; 32],
+    context: &OperationContext,
+    cancellation: BuildCancellation,
+    permission: ReadPermission,
+) -> Result<LinkedSample> {
+    acquire_records_trusted(
+        original,
+        goal.records(),
+        operations_token,
+        build_token,
+        nonce,
+        context,
+        cancellation,
+        permission,
+    )
+}
+
+/// Acquire the exact original placement's construction evidence without
+/// inventing a replacement deadline or stability window. The semantic owner
+/// retains and evaluates those requirements on its original PreparedPlan.
+#[allow(clippy::too_many_arguments)]
+pub fn acquire_receipt_trusted(
+    original: &BuildBinding,
+    receipt: &BuildRecord,
+    operations_token: Vec<u8>,
+    build_token: Vec<u8>,
+    nonce: [u8; 32],
+    context: &OperationContext,
+    cancellation: BuildCancellation,
+    permission: ReadPermission,
+) -> Result<LinkedSample> {
+    require(
+        receipt.phase() == crate::build_placement::BuildPhase::Placed,
+        "construction acquisition requires the original Placed receipt",
+    )?;
+    acquire_records_trusted(
+        original,
+        std::slice::from_ref(receipt),
+        operations_token,
+        build_token,
+        nonce,
+        context,
+        cancellation,
+        permission,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn acquire_records_trusted(
+    original: &BuildBinding,
+    records: &[BuildRecord],
     operations_token: Vec<u8>,
     build_token: Vec<u8>,
     nonce: [u8; 32],
@@ -269,10 +322,10 @@ pub fn acquire_trusted(
     };
     work.check()?;
     require(
-        goal.records().len() <= context.budget.max_entities as usize,
+        records.len() <= context.budget.max_entities as usize,
         "construction goal exceeds the entity allowance",
     )?;
-    for record in goal.records() {
+    for record in records {
         work.check()?;
         require(
             original.capture_matches(record.plan().before()),
@@ -315,7 +368,7 @@ pub fn acquire_trusted(
         methods[1],
         &build_token,
         &nonce,
-        goal,
+        records,
         &before,
         &check,
     )?;
@@ -347,7 +400,7 @@ pub fn acquire_trusted(
         methods[1],
         &build_token,
         &nonce,
-        goal,
+        records,
         &before,
         &check,
     )?;

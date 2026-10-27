@@ -44,6 +44,44 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original construction goals and durable proof (2026-10-27)
+
+The original furniture owner now has process-local and durable goal monitors.
+They reuse the strict receipt-linked construction assessor and fixed native
+query/capture/query transport, without substituting a new goal or deadline.
+Fresh evidence must name the original fortress, software and furniture source,
+a separately pinned operations generation, and the original building, item and
+construction job. Completion requires the installed original item, maximum
+construction stage, and no outstanding construction/removal or item-job links.
+The selected canonical building is the identity derived from the original action
+key. Its construction fact is explicitly a certified derivation, requiring
+independent policy; the projection grants no global absence or terrain coverage.
+
+The monitor preserves original postconditions, plan and obligation terminal
+predicates, failure predicate, game deadline, cadence and sampled stability.
+Duplicate game ticks cannot accumulate stability. Unknown facts remain unknown;
+a later contradiction clears current completion while historical first
+achievement remains separately visible. A monitor is exclusive and cannot be
+cloned to discard an observed contradiction. Source incarnation, allocation,
+stage, retired-identity, tick and consumed-cursor floors survive policy denial
+and monitor replacement.
+
+Durable history is limited to 64 MiB and 512 events, with all possible current
+poll records prepaid before source contact. It synchronizes Started before the
+read, complete LinkedSample evidence before qualification, and Published before
+acknowledging proof. Recovery verifies exact original native custody and issues
+historical policy twice independently; stored fingerprints cannot reconstruct
+policy. Restart exposes historical achievement only, clears the current result
+and breaks unfinished streaks while keeping the original cadence/deadline.
+Interrupted or ambiguous acquisitions and publication failures fail closed.
+
+The actual adapter source compiles and all 28 focused tests pass: 23 joined
+coordinator, construction and history integration cases plus five concrete
+spatial wire-codec cases. This does not establish a live DFHack campaign,
+automatic construction clock advancement, multi-step furnishing, production
+qualification or compatibility admission. The broader mutation bead remains in
+progress.
+
 ### Original canonical furniture placement and recovery (2026-10-27)
 
 `SemanticFurnitureSession` now owns one original canonical `Build` for a

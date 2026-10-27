@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-27 — Prove original furniture construction and retain its history
+
+- Assess current construction from the exact original Placed receipt and one
+  complete bracketed operations/1.4 capture, including original building/item
+  identity, installed-item state and construction/removal/job-link evidence.
+- Project a narrowly scoped certified derivation onto the original action's
+  canonical building identity; require independently issued evidence policy.
+- Evaluate all original postconditions, terminal/failure predicates and temporal
+  requirements, preserving the original deadline, cadence and stability. Current
+  truth, historical first achievement and physical completion remain distinct.
+- Persist read intent, complete samples and proof publication in a bounded
+  owner-private history. Restart independently reauthorizes history, clears
+  current proof and breaks unfinished stability without replaying placement.
+- Retain consumed source, clock, allocation and retired-identity floors across
+  denied proof and monitor replacement. Failed publication cannot expose a new
+  current-goal result.
+- Actual adapter compilation and 28 focused tests pass: 23 joined placement,
+  goal and recovery cases plus five concrete spatial wire-codec cases. Native,
+  live and compatibility admission remain unqualified.
+
 ## 2026-10-27 — Execute original furniture plans with durable placement recovery
 
 - Carry one original canonical single-tile bed, chair or table `Build` through

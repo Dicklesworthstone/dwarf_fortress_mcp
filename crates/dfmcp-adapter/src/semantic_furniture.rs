@@ -5,6 +5,7 @@
 //! completion still needs the original goal and fresh independent evidence.
 //! No source grant, admission, checkpoint or canonical identity is issued here.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dfmcp_core::{
@@ -25,7 +26,19 @@ use crate::control_effect_journal::EffectJournalStorage;
 use crate::live_routing::{LiveRoutingEvidence, resolve_furniture_step};
 
 pub mod evidence_owner;
+pub mod goal_history;
+pub mod goal_monitor;
+pub mod goal_projection;
 pub mod store;
+pub use goal_history::{
+    DurableFurnitureGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
+    open_private_goal_history_store,
+};
+pub use goal_monitor::{
+    FurnitureGoalMonitor, FurnitureGoalProgress, FurnitureGoalResult, FurnitureGoalSource,
+    NativeFurnitureGoalSource,
+};
+pub use goal_projection::FurnitureGoalProjection;
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};
 
@@ -479,6 +492,8 @@ pub struct SemanticFurnitureSession<S, B, N> {
     associations: AssociationStore<B>,
     attached: Option<SemanticFurnitureReview>,
     floor: SourceFloor,
+    goal_owner: Option<Arc<()>>,
+    goal_floor: goal_monitor::FurnitureSourceFloor,
 }
 impl<S: EffectJournalStorage, B: EffectJournalStorage, N: BuildSource>
     SemanticFurnitureSession<S, B, N>
@@ -493,6 +508,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: BuildSource>
             associations,
             attached: None,
             floor: SourceFloor::default(),
+            goal_owner: None,
+            goal_floor: goal_monitor::FurnitureSourceFloor::default(),
         };
         out.view(&mut Call::new(c)?)?;
         Ok(out)
@@ -721,6 +738,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: BuildSource>
             final_context.budget.max_wall_millis = call.current()?.budget.max_wall_millis;
             self.view(&mut Call::new(&final_context)?)?;
             authorize_original(&review.original, &call.current()?)?;
+            self.goal_owner = None;
             self.attached = Some(review.clone());
             Ok(review)
         })();
@@ -763,6 +781,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: BuildSource>
             native,
             association,
         };
+        self.goal_owner = None;
         self.attached = Some(review.clone());
         Ok(review)
     }

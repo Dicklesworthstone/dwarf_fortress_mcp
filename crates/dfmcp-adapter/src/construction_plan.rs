@@ -102,6 +102,60 @@ pub struct Assessment {
     pub condition: Condition,
 }
 
+/// One current receipt-linked construction assessment, without a replacement
+/// temporal goal. The embedding owner must independently authorize the source
+/// and evaluate its original predicates and obligation before claiming proof.
+#[derive(Clone, Debug)]
+pub struct ReceiptAssessment {
+    pub operations: LiveOperationsObservation,
+    pub condition: Condition,
+    pub source: SourceIdentity,
+    pub source_digest: Digest32,
+    pub receipt: Digest32,
+}
+
+/// Conservative whole-call allowance for the bounded decode, exact receipt
+/// bracket and canonical source digest. It is accounting, not eager allocation.
+pub const RECEIPT_ASSESSMENT_BYTES: u64 = 4 * MAX_SAMPLE as u64 + 256 * 1024;
+
+/// Assess the exact historical placement against one complete, bracketed
+/// operations sample. This is the same construction condition used by the
+/// whole-plan monitor, with no new deadline or stability policy imposed on the
+/// caller's original semantic goal. It grants no observation authority.
+pub fn assess_receipt(
+    record: &BuildRecord,
+    sample: &LinkedSample,
+    context: &OperationContext,
+) -> Result<ReceiptAssessment> {
+    if context.budget.max_bytes < RECEIPT_ASSESSMENT_BYTES {
+        return Err(bounded(
+            "receipt assessment exceeds the caller's work allowance",
+        ));
+    }
+    require(
+        record.phase() == crate::build_placement::BuildPhase::Placed,
+        "construction assessment requires the exact original Placed receipt",
+    )?;
+    let records = std::slice::from_ref(record);
+    let mut work = Work::for_records(records, context, 0)?;
+    let operations = sample.validate_records(records, &mut work)?;
+    let condition = assess(record, &operations, &mut work)?;
+    let canonical = sample.canonical_bytes()?;
+    let mut source = b"dfmcp.receipt-construction-assessment/1\0".to_vec();
+    source.extend_from_slice(&canonical);
+    work.charge(canonical.len().div_ceil(64 * 1024) as u64)?;
+    Ok(ReceiptAssessment {
+        operations,
+        condition,
+        source: SourceIdentity {
+            furniture_generation: sample.before.generation,
+            operations: sample.operations.clone(),
+        },
+        source_digest: Digest32::of_bytes(&source),
+        receipt: record.receipt(),
+    })
+}
+
 /// The two independently numbered plugin generations must remain distinct.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
@@ -224,8 +278,14 @@ struct Work {
 }
 impl Work {
     fn new(goal: &Goal, context: &OperationContext, floor: u64) -> Result<Self> {
-        let original = goal
-            .records
+        Self::for_records(&goal.records, context, floor)
+    }
+    fn for_records(
+        records: &[BuildRecord],
+        context: &OperationContext,
+        floor: u64,
+    ) -> Result<Self> {
+        let original = records
             .first()
             .ok_or_else(|| invalid("empty construction goal"))?;
         if context.anchor.fortress_id != original.plan().before().fortress_id() {
@@ -235,8 +295,7 @@ impl Work {
             ));
         }
         let mut current = context.clone();
-        let original_floor = goal
-            .records
+        let original_floor = records
             .iter()
             .map(|record| record.plan().before().tick())
             .max()

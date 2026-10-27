@@ -264,6 +264,13 @@ impl LinkedSample {
         goal: &Goal,
         work: &mut Work,
     ) -> Result<LiveOperationsObservation> {
+        self.validate_records(&goal.records, work)
+    }
+    pub(super) fn validate_records(
+        &self,
+        records: &[BuildRecord],
+        work: &mut Work,
+    ) -> Result<LiveOperationsObservation> {
         work.charge(1)?;
         let size = self.check_shape()?;
         if size as u64 > work.context.budget.max_bytes {
@@ -271,17 +278,17 @@ impl LinkedSample {
         }
         require(
             self.before_records == self.after_records
-                && self.before_records.len() == goal.records.len()
+                && self.before_records.len() == records.len()
                 && self
                     .before_records
                     .iter()
-                    .zip(&goal.records)
+                    .zip(records)
                     .all(|(raw, record)| raw == record.canonical_bytes()),
             "every original construction receipt must be retained in canonical order",
         )?;
         require(
             self.before == self.after
-                && goal.records.first().is_some_and(|record| {
+                && records.first().is_some_and(|record| {
                     self.before.generation == record.plan().before().generation()
                 }),
             "construction placement source changed across observation",
