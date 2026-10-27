@@ -125,6 +125,26 @@ pub trait BuildGuard {
         selection: BuildSelection,
         context: &OperationContext,
     ) -> Result<()>;
+
+    /// Final pre-writer check, after DispatchStarted has been synchronized.
+    /// Distinguishing this edge lets a semantic owner refresh the original
+    /// canonical evidence without requiring the pre-placement world to remain
+    /// unchanged after a successful insertion. Existing guards retain exactly
+    /// their Commit policy checks through the default implementation.
+    fn before_dispatch(
+        &mut self,
+        binding: &BuildBinding,
+        plan: &BuildPlan,
+        context: &OperationContext,
+    ) -> Result<()> {
+        self.check(
+            BuildStage::Commit,
+            binding,
+            Some(plan),
+            plan.before().selection(),
+            context,
+        )
+    }
 }
 
 /// Non-cloneable proof of write-ahead ordering. Only this module can construct it.
@@ -832,13 +852,20 @@ impl<S: EffectJournalStorage> BuildJournal<S> {
             self.high_tick().max(plan.before().tick()),
             stage,
         )?;
-        guard.check(
-            stage,
-            &self.binding,
-            Some(plan),
-            plan.before().selection(),
-            &current,
-        )?;
+        if stage == BuildStage::Commit {
+            guard.before_dispatch(&self.binding, plan, &current)?;
+            // A semantic refresh can perform bounded I/O. The synchronized
+            // marker must still have exact custody when that refresh returns.
+            self.verify(work)?;
+        } else {
+            guard.check(
+                stage,
+                &self.binding,
+                Some(plan),
+                plan.before().selection(),
+                &current,
+            )?;
+        }
         let mut current = current;
         current.budget.max_wall_millis = work.remaining()?.as_millis() as u64;
         Ok(current)

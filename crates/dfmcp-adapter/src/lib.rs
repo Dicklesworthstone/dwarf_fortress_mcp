@@ -66,6 +66,7 @@ pub mod order_progress;
 pub mod order_run;
 pub mod pause_reconciliation;
 pub mod plan_archive;
+pub mod semantic_furniture;
 pub mod semantic_work_orders;
 pub mod semantic_workforce;
 pub mod shelter_analysis;

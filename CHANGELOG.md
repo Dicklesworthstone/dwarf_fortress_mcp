@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-27 — Execute original furniture plans with durable placement recovery
+
+- Carry one original canonical single-tile bed, chair or table `Build` through
+  paired native review, explicit confirmation, preparation and one placement.
+- Retain the full original plan archive identity, action key, native journal,
+  source witness, predicates and obligation; native insertion remains historical
+  evidence and does not establish original construction completion.
+- Add exact association custody and restart/query/cancel recovery. Lost replies,
+  missing native records and repeated calls cannot create redispatch permission.
+- Reacquire complete spatial/1.8 evidence after durable Intent and immediately
+  after DispatchStarted, before the native writer; keep independent source
+  generations, caller policy and consumed source floors across refusals.
+- Add focused lifecycle/fault coverage and a concrete bounded spatial RPC owner.
+  Production adapter compilation and 20 focused tests pass: 15 coordinator/guard
+  cases and five concrete spatial wire-codec cases.
+  Native/live qualification and compatibility admission remain unverified.
+
 ## 2026-10-27 — Expose separately confirmed labor clock runs through MCP
 
 - Add explicit zero-default tick negotiation, closed run planning, distinct

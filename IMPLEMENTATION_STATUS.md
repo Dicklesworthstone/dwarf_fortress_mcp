@@ -44,6 +44,36 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original canonical furniture placement and recovery (2026-10-27)
+
+`SemanticFurnitureSession` now owns one original canonical `Build` for a
+single-tile bed, chair or table, using the existing closed furniture resolver
+and native coordinator. Its paired review binds the lossless original archive
+object as well as semantic digest, stable action key, source witness, exact
+native plan and original native journal. The immutable association store must
+be synchronized before native Intent. Complete original spatial/1.8 evidence
+is refreshed after Intent and at the final pre-writer boundary after
+DispatchStarted; independent caller policy and exact file custody are checked
+again after refresh. Furniture and spatial generation counters remain separate.
+
+Preparation and historical placement are distinct from the original
+construction goal. The placement result deliberately reports that the original
+goal is unproven and retains its original predicates and temporal obligation.
+Read-only reattachment, original-key query, preparation retirement and lost-reply
+recovery cannot create a dispatch permit. Repeated calls return exact retained
+state without repeating placement. Unsupported selectors, dependencies,
+compensation, unprotected preconditions and mandatory checkpoints are refused
+without weakening the original plan.
+
+Production adapter source compiles. New focused tests exercise lifecycle,
+durable-before-effect ordering, stale evidence, revoked authority, replaced
+custody, insufficient budgets, source generation separation and exact restart.
+All 20 focused tests pass: 15 coordinator/native-guard integration cases on the
+actual production adapter and five concrete spatial wire-codec cases.
+The broader live mutation bead remains in progress; source/component evidence
+does not establish native or live qualification, compatibility admission, a
+multi-step dispatcher, or original construction completion.
+
 ### Explicit labor clock control through the MCP loop (2026-10-27)
 
 The frozen eleven-tool semantic workforce server now exposes the bounded clock
