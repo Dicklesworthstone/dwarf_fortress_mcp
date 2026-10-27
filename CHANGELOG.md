@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-27 — Carry original labor goals through the complete MCP loop
+
+- Register the dedicated eleven-tool semantic workforce development server:
+  canonical citizen pages, original labor planning, paired confirmation, single
+  assignment, fresh goal verification and exact offline/reconcile recovery.
+- Keep new recovery identities and history presence through partial-operation
+  failures, close and output overflow without promoting cached proof or authority.
+- Exercise the full 32-citizen goal against a 128-citizen roster and correct its
+  bounded archive profile to 1,024 nodes; the 64 KiB byte limit stays unchanged.
+- Support explicit bounded replay allowances for long histories while retaining
+  the 2 GiB ordinary default. A 64-sample goal recovers with an 8 GiB logical-work
+  allowance; insufficient allowance refuses safely, and no assignment is replayed.
+- Pass 114 distinct current-feature tests, including 43 actual-source runtime,
+  presentation and facade-boundary cases. Full FastMCP executable/stdio, native
+  and live qualification remain outside this component evidence.
+- Document configuration, closed tool inputs, the separate proof claims,
+  fixed custody, loss recovery, capacity and explicit work-budget negotiation.
+
 ## 2026-10-27 — Execute and recover original native labor goals
 
 - Join canonical citizen acquisition, a closed `SetLabor` compiler, paired native

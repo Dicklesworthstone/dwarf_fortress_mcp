@@ -35,12 +35,16 @@ Offline reopening performs no native contact. A Control opening made without lab
 authority cannot acquire it later merely because the environment changes.
 
 The concrete source bounds complete citizen acquisition to 128 citizens, foreground
-selection to 32, and citizen pages to 32 identities. Maximum per-call logical work
-is 2 GiB and 60 seconds with zero game-clock budget. Original custody and current
+selection to 32, and citizen pages to 32 identities. Logical work defaults to 2 GiB per call; an explicit allowance up to 32 GiB
+supports longer history replay within the same 60-second wall ceiling and zero
+game-clock budget. Original custody and current
 authority are rechecked after DispatchStarted synchronization, immediately before
 native assignment. Uncertain effects retain their original keys and never repeat.
-The dedicated MCP facade is a separate integration increment; this core API does
-not imply transport, DFHack, live-game or compatibility qualification.
+The dedicated `dfmcp-live-semantic-workforce-dev-server` now exposes this owner
+through the frozen eleven tools; see [SEMANTIC_WORKFORCE_MCP.md](SEMANTIC_WORKFORCE_MCP.md)
+for the complete configuration, closed requests and exact recovery handoff.
+The component tests do not imply full transport, DFHack, live-game or compatibility
+qualification.
 
 ## Supported semantics
 

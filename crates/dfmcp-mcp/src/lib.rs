@@ -37,6 +37,7 @@ pub mod live_operations_server;
 pub mod live_order_run_server;
 pub mod live_run_server;
 pub mod live_semantic_work_orders_server;
+pub mod live_semantic_workforce_server;
 mod live_server;
 mod live_server_v1_1;
 pub mod live_spatial_citizens_server;

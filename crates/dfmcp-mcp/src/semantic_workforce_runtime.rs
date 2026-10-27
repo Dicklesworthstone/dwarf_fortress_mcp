@@ -38,7 +38,11 @@ use identity::CapsuleStore;
 pub use native::{Config, NativeRuntime};
 pub use request::Request;
 
-pub const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const DEFAULT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+// Retained goal observations are independently reprojected and reauthorized.
+// Their logical byte-work reservations accumulate on recovery, so the bounded
+// full history may require an explicit allowance above the ordinary default.
+pub const MAX_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 pub const MAX_WALL_MILLIS: u64 = 60_000;
 pub const MAX_OUTPUT_TOKENS: u32 = 32_768;
 const MIB: u64 = 1024 * 1024;
@@ -73,7 +77,10 @@ pub fn archive_limits() -> ArchiveLimits {
     ArchiveLimits {
         max_bytes: 64 * 1024,
         max_steps: 1,
-        max_nodes: 512,
+        // Archive accounting includes collection members and repeated predicate
+        // values. A complete 32-citizen goal exceeds 512 archive nodes while
+        // remaining below the adapter's separate 512-predicate complexity cap.
+        max_nodes: 1024,
         max_depth: 16,
     }
 }

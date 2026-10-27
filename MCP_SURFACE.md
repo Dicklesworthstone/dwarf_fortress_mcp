@@ -173,6 +173,28 @@ seals, separate current/historical proof, clock receipts and physical quiescence
 Native clock receipts remain separate from original-goal proof. The runtime
 requires explicit operator development source acceptance and remains unadmitted.
 
+The dedicated `dfmcp-live-semantic-workforce-dev-server` uses the same eleven
+names for [original native labor goals](docs/SEMANTIC_WORKFORCE_MCP.md).
+`observe` acquires a complete bounded canonical citizen source. Optional closed
+`query` mode `citizens` pages identities under that exact observation seal;
+omitting the query inspects retained goal evidence. `plan` accepts canonical
+`units`, one `labor`, `enabled`, the observation seal and original deadline,
+cadence and stability. It prepares one paired semantic/native review without
+assigning labor. `commit` requires that review and explicit confirmation;
+`wait` reconciles the same assignment and samples fresh original labor facts.
+Historical assignment, current goal proof and durable first achievement remain
+separate. `cancel` retires preparation or releases the session without undoing
+applied membership. Every error and handoff retains exact original journal,
+plan and citizen identity references without granting authority.
+
+This isolated runtime supports 1–32 selected citizens from a complete source of
+at most 128, one original goal and zero game-clock advancement. Its logical
+byte-work default is 2 GiB; `open_session(max_bytes=...)` can explicitly request
+up to 32 GiB to replay a longer retained history, within the unchanged 60-second
+wall ceiling. Recovery preserves the original absolute deadline and resets
+unfinished stability. Operator source acceptance remains unadmitted development
+acceptance, and no endpoint, path, native ID or effect key is a client input.
+
 The furniture development server also accepts a `furniture_request` JSON string
 as an alternative `open_session` input. One complete operations/1.4 inventory
 feeds an immutable exact batch preserving its original selection constraints

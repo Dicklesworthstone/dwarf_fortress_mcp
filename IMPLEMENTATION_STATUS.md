@@ -44,6 +44,64 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original native labor goals through MCP (2026-10-27)
+
+The dedicated `dfmcp-live-semantic-workforce-dev-server` exposes the original
+labor-goal runtime through the frozen eleven tools. A caller observes canonical
+citizens, selects 1–32 identities, prepares one exact labor enable/disable goal,
+reviews its paired semantic/native seal, confirms one assignment and obtains
+fresh original-goal evidence through bounded foreground waits. Citizen discovery
+uses complete acquisition of at most 128 citizens and observation-bound pages of
+at most 32 identities. Clients cannot supply native IDs, detail indices, effect
+keys, source endpoints, credentials, paths or evidence grants.
+
+Agent Turns retain the complete original goal and exact recovery identities.
+Historical native Applied, current labor predicates, temporal fulfillment and
+first achievement remain distinct. A permanent Unknown outcome cannot become
+semantic completion merely because current labor values are true. Current
+operator authority and an exact retained observation are required before commit
+is recommended. Failed calls merge the owner's newest pure recovery references
+before rendering, so a published original archive or newly initialized history
+cannot disappear behind an older cached response. Those references remain
+unverified, cannot authorize control and survive close and bounded overflow.
+
+Capacity testing now executes a complete 32-citizen assignment from a 128-citizen
+roster. It found that this plan uses 557 aggregate archive nodes, so the narrow
+archive profile now permits 1,024 nodes while retaining 64 KiB, one step, depth 16
+and the existing native predicate limits. The measured original archive is 4,824
+bytes. The supported 64-sample stability history also survives offline restart:
+its 192 retained events exceed the default 2 GiB logical replay allowance, so
+`open_session` accepts an explicit allowance up to 32 GiB. The ordinary default
+remains 2 GiB. A real 64-sample case verifies safe default-budget refusal and
+successful 8 GiB recovery with no native contact or history mutation. These are
+logical work ceilings, not eager allocations; native cardinality, history file
+and event limits, original deadlines, and the 60-second wall ceiling stay fixed.
+
+Final executed validation passes 114 distinct current-feature tests: 24 ordinary
+adapter workforce-control tests, 47 public semantic-workforce integration tests
+and 43 combined actual-source tests. The combined target contains 13 joined
+runtime cases, four native/configuration/custody cases, 13 presentation cases,
+seven verbatim facade-boundary cases and six shared Agent Turn cases. It checks
+single dispatch, lost replies, post-marker archive/authority failure, immutable
+modes, exact restart, unfinished-stability reset, later false current truth,
+32-citizen capacity, 64-sample recovery and complete failure handoffs. Actual
+Action dispatch, closed parsers, the live callback constructor signature and
+`NativeRuntime: Send` compile. The final run has no warnings and no source drift
+across 352 inventoried source/dependency files. Its task log is
+`workforce-43-tests.log`, SHA-256
+`ae8d2f3a3785b9c52bb32aa0ac4d21245ec045e6ad7fd268197b253c3e3281d5`.
+
+This is actual-source component evidence using complete real adapter dependencies;
+it does not compile FastMCP macros, full handler composition/registration, the
+executable or stdio. The unchanged full MCP graph was not blindly retried after
+the recorded upstream compiler SIGKILL: the shared memory ceiling remains 8 GiB.
+No full-workspace, DFHack native or live-game qualification is claimed. The empty
+registry and production runner map remain unchanged. Native labor control still
+requires one existing exact single-labor selected-only work detail, supplies no
+job/tool/path/productivity guarantee, and does not fence other controllers.
+See `docs/SEMANTIC_WORKFORCE_MCP.md` for setup, all tool transitions, bounded
+recovery and the limits of incomplete original-file publication.
+
 ### Original native labor-goal execution core (2026-10-27)
 
 A new `semantic_workforce_runtime` joins the existing native workforce coordinator,

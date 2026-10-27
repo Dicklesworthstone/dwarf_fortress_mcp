@@ -155,7 +155,7 @@ fn runtime_fixture() -> Result<(Runtime<MockShell>, MockShell)> {
         archive_failure: Rc::new(Cell::new(false)),
     };
     let mut budget = f.context.budget;
-    budget.max_bytes = super::MAX_BYTES;
+    budget.max_bytes = super::DEFAULT_BYTES;
     budget.max_output_tokens = super::MAX_OUTPUT_TOKENS;
     budget.max_entities = 8192;
     let runtime = Runtime::from_shell(shell.clone(), Mode::Control, SessionId::new(11), budget)?;
@@ -525,5 +525,289 @@ fn authority_revocation_after_dispatch_sync_cannot_reach_native_assignment() -> 
     assert_eq!(view.to_json()["native_state"], "dispatch_started");
     assert_eq!(view.to_json()["effect_uncertain"], true);
     assert!(!runtime.labor_control_enabled());
+    Ok(())
+}
+
+#[test]
+fn thirty_two_citizen_goal_uses_exact_paged_128_citizen_source_and_normalized_review() -> Result<()>
+{
+    let (runtime, mut shell) = runtime_fixture()?;
+    let budget = runtime.budget();
+    drop(runtime);
+    let ids: Vec<i32> = (0..128).collect();
+    shell.capsule = observation(&ids)?.0;
+    shell.native.data.borrow_mut().fixture.citizens = (0..32)
+        .map(|id| CitizenFixture {
+            id,
+            eligible: true,
+            labors: vec![0, 0],
+        })
+        .collect();
+    let mut runtime =
+        Runtime::from_shell(shell.clone(), Mode::Control, SessionId::new(31), budget)?;
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(&c)?;
+    let source = observed.to_json();
+    assert_eq!(source["observation"]["citizens"], 128);
+    assert_eq!(
+        source["observation"]["units"].as_array().map(Vec::len),
+        Some(32)
+    );
+    assert_eq!(source["observation"]["complete"], false);
+    let observation_seal = source["observation"]["seal"]
+        .as_str()
+        .ok_or_else(|| invalid("observation seal"))?;
+    let seal = super::digest(observation_seal)?;
+    let acquisitions = shell.acquisitions.get();
+    let mut canonical_ids = Vec::new();
+    for offset in [0, 32, 64, 96] {
+        let c = runtime.context(false)?;
+        let page = runtime.citizens_page(seal, offset, 32, &c)?.to_json();
+        assert_eq!(page["anchor"], source["anchor"]);
+        let page = &page["observation"];
+        assert_eq!(page["seal"], observation_seal);
+        assert_eq!(page["returned"], 32);
+        assert_eq!(page["complete"], offset == 96);
+        let rows = page["units"]
+            .as_array()
+            .ok_or_else(|| invalid("citizen rows"))?;
+        for row in rows {
+            canonical_ids.push(
+                row["entity_id"]
+                    .as_str()
+                    .ok_or_else(|| invalid("canonical ID"))?
+                    .to_owned(),
+            );
+        }
+        if offset < 96 {
+            assert_eq!(page["next_query"]["offset"], offset + 32);
+            assert_eq!(page["next_query"]["expected_observation"], observation_seal);
+        } else {
+            assert!(page["next_query"].is_null());
+        }
+    }
+    assert_eq!(
+        canonical_ids,
+        (1..=128).map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+    assert_eq!(shell.acquisitions.get(), acquisitions);
+    assert_eq!(shell.native.data.borrow().calls, [0; 5]);
+    let mut request = Request {
+        expected_observation: observation_seal.to_owned(),
+        units: canonical_ids[..32].iter().rev().cloned().collect(),
+        labor: "MINE".into(),
+        enabled: true,
+        deadline_tick: 220,
+        poll_interval_ticks: 5,
+        stable_samples: 1,
+    };
+    let c = runtime.context(false)?;
+    let prepared = runtime.plan(request.clone(), &c)?;
+    let paired = prepared
+        .review
+        .as_ref()
+        .ok_or_else(|| invalid("review"))?
+        .seal();
+    assert_eq!(
+        prepared
+            .review
+            .as_ref()
+            .map(|r| r.native_plan().before().citizens().len()),
+        Some(32)
+    );
+    let original = prepared
+        .original
+        .as_ref()
+        .ok_or_else(|| invalid("original"))?;
+    assert!(original.steps[0].compensation.is_none());
+    let Action::SetLabor { units, .. } = &original.steps[0].action else {
+        return Err(invalid("SetLabor expected"));
+    };
+    assert_eq!(units, &(1..=32).map(EntityId::new).collect::<Vec<_>>());
+    let before = shell.native.data.borrow().calls;
+    request.units.reverse();
+    let c = runtime.context(false)?;
+    let reordered = runtime.plan(request, &c)?;
+    assert_eq!(reordered.review.as_ref().map(|r| r.seal()), Some(paired));
+    assert_eq!(shell.native.data.borrow().calls, before);
+    let c = runtime.context(false)?;
+    let assigned = runtime.commit(paired, true, &c)?;
+    assert_eq!(assigned.to_json()["action_result"]["verified"], true);
+    {
+        let mut native = shell.native.data.borrow_mut();
+        native.fixture.sequence = 4;
+        native.fixture.tick = 125;
+        for citizen in &mut native.fixture.citizens {
+            citizen.labors = vec![1, 0];
+        }
+        native.fixture.details[0].members = (0..32).collect();
+    }
+    let c = runtime.context(false)?;
+    let done = runtime.wait(&c)?;
+    assert_eq!(
+        done.to_json()["current_goal"]["semantic_completion_proven"],
+        true
+    );
+    assert_eq!(shell.native.data.borrow().calls[2], 1);
+    Ok(())
+}
+
+#[test]
+fn restart_discards_unfinished_stability_and_cannot_renew_original_deadline() -> Result<()> {
+    let (mut runtime, mut shell) = runtime_fixture()?;
+    let prepared = prepare_runtime(&mut runtime)?;
+    let paired = prepared
+        .review
+        .as_ref()
+        .ok_or_else(|| invalid("review"))?
+        .seal();
+    let original = prepared
+        .original
+        .clone()
+        .ok_or_else(|| invalid("original"))?;
+    let c = runtime.context(false)?;
+    runtime.commit(paired, true, &c)?;
+    capture_after(&shell, 125, true);
+    let c = runtime.context(false)?;
+    let interrupted = runtime.wait(&c)?;
+    assert_eq!(
+        interrupted.to_json()["current_goal"]["current_truth"],
+        "true"
+    );
+    assert_eq!(
+        interrupted.to_json()["current_goal"]["original_goal_proven"],
+        false
+    );
+    assert!(interrupted.first_satisfied_anchor.is_none());
+    let before = shell.native.data.borrow().calls;
+    let reads = shell.acquisitions.get();
+    let budget = runtime.budget();
+    shell.recovery = Some(recovery(&interrupted)?);
+    drop(runtime);
+    let mut recovered =
+        Runtime::from_shell(shell.clone(), Mode::Reconcile, SessionId::new(32), budget)?;
+    assert_eq!(shell.native.data.borrow().calls, before);
+    assert_eq!(shell.acquisitions.get(), reads);
+    let c = recovered.context(false)?;
+    let opening = recovered.inspect(&c)?;
+    assert!(opening.goal.is_none());
+    assert!(opening.first_satisfied_anchor.is_none());
+    assert_eq!(opening.original, Some(original.clone()));
+    capture_after(&shell, 130, true);
+    let c = recovered.context(false)?;
+    let first_after_restart = recovered.wait(&c)?;
+    assert_eq!(
+        first_after_restart.to_json()["current_goal"]["current_truth"],
+        "true"
+    );
+    assert_eq!(
+        first_after_restart.to_json()["current_goal"]["original_goal_proven"],
+        false
+    );
+    let c = recovered.context(false)?;
+    let duplicate = recovered.wait(&c)?;
+    assert_eq!(
+        duplicate.to_json()["current_goal"]["original_goal_proven"],
+        false
+    );
+    capture_after(&shell, 221, true);
+    let c = recovered.context(false)?;
+    let expired = recovered.wait(&c)?;
+    assert_eq!(expired.original, Some(original));
+    assert_eq!(expired.to_json()["current_goal"]["current_truth"], "true");
+    assert_eq!(
+        expired.to_json()["current_goal"]["semantic_completion_proven"],
+        false
+    );
+    assert!(matches!(
+        expired.historical_obligation,
+        Some(dfmcp_intent::ObligationStatus::Failed { .. })
+    ));
+    assert!(expired.first_satisfied_anchor.is_none());
+    assert_eq!(
+        expired
+            .original
+            .as_ref()
+            .and_then(|p| p.steps[0].obligation.as_ref())
+            .map(|o| o.deadline_tick),
+        Some(GameTick(220))
+    );
+    assert_eq!(shell.native.data.borrow().calls[2], 1);
+    Ok(())
+}
+
+#[test]
+fn full_sixty_four_sample_goal_recovers_with_explicit_allowance_without_native_replay() -> Result<()>
+{
+    let (mut runtime, mut shell) = runtime_fixture()?;
+    assert_eq!(runtime.budget().max_bytes, super::DEFAULT_BYTES);
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(&c)?;
+    let mut request = request_for(&observed)?;
+    request.deadline_tick = 600;
+    request.stable_samples = 64;
+    let c = runtime.context(false)?;
+    let prepared = runtime.plan(request, &c)?;
+    let paired = prepared
+        .review
+        .as_ref()
+        .ok_or_else(|| invalid("review"))?
+        .seal();
+    let c = runtime.context(false)?;
+    runtime.commit(paired, true, &c)?;
+    let mut completed = None;
+    for sample in 1..=64 {
+        capture_after(&shell, 120 + sample * 5, true);
+        let c = runtime.context(false)?;
+        let view = runtime.wait(&c)?;
+        assert_eq!(
+            view.to_json()["current_goal"]["original_goal_proven"],
+            sample == 64
+        );
+        completed = Some(view);
+    }
+    let completed = completed.ok_or_else(|| invalid("completed goal"))?;
+    assert_eq!(completed.history_events, 64 * 3);
+    assert_eq!(
+        completed.first_satisfied_anchor.map(|a| a.tick),
+        Some(GameTick(440))
+    );
+    let original = completed.original.clone();
+    shell.recovery = Some(recovery(&completed)?);
+    let budget = runtime.budget();
+    let calls = shell.native.data.borrow().calls;
+    let acquisitions = shell.acquisitions.get();
+    let history = shell.history.0.borrow().file.get_ref().clone();
+    drop(runtime);
+    let refusal = Runtime::from_shell(shell.clone(), Mode::Offline, SessionId::new(41), budget);
+    assert_eq!(
+        refusal.err().map(|e| e.code),
+        Some(ErrorCode::BudgetExceeded)
+    );
+    assert_eq!(shell.native.data.borrow().calls, calls);
+    assert_eq!(shell.acquisitions.get(), acquisitions);
+    assert_eq!(shell.history.0.borrow().file.get_ref(), &history);
+    let mut explicit = budget;
+    explicit.max_bytes = 8 * 1024 * 1024 * 1024;
+    let mut recovered =
+        Runtime::from_shell(shell.clone(), Mode::Offline, SessionId::new(42), explicit)?;
+    let c = recovered.context(false)?;
+    let view = recovered.inspect(&c)?;
+    assert_eq!(view.original, original);
+    assert_eq!(view.history_events, completed.history_events);
+    assert_eq!(
+        view.first_satisfied_anchor,
+        completed.first_satisfied_anchor
+    );
+    assert!(matches!(
+        view.historical_obligation,
+        Some(dfmcp_intent::ObligationStatus::Fulfilled { .. })
+    ));
+    assert!(view.goal.is_none());
+    assert_eq!(view.to_json()["current_goal_available"], false);
+    assert_eq!(shell.native.data.borrow().calls, calls);
+    assert_eq!(shell.acquisitions.get(), acquisitions);
+    assert_eq!(shell.history.0.borrow().file.get_ref(), &history);
+    assert_eq!(calls[2], 1);
     Ok(())
 }
