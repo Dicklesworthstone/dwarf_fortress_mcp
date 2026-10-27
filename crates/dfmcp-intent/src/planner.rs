@@ -65,7 +65,12 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
-        self.prepare_with_evidence(&PredicateEvidence::laboratory(snapshot)?, intent, context)
+        self.prepare_scoped(
+            &PredicateEvidence::laboratory(snapshot)?,
+            intent,
+            context,
+            true,
+        )
     }
 
     /// Prepare only from the source and completeness scope supplied by the shell.
@@ -74,6 +79,16 @@ impl StaticPlanner {
         evidence: &PredicateEvidence<'_>,
         intent: &Intent,
         context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.prepare_scoped(evidence, intent, context, false)
+    }
+
+    fn prepare_scoped(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        intent: &Intent,
+        context: &OperationContext,
+        laboratory: bool,
     ) -> Result<PreparedPlan> {
         let snapshot = evidence.snapshot();
         validate_policy(&self.policy)?;
@@ -108,10 +123,28 @@ impl StaticPlanner {
             ));
         }
         validate_intent_shape(intent, &self.policy, context)?;
-        if evidence.establishes(&intent.terminal_condition)? {
+        let reserve_until = laboratory_reserve_horizon(intent, evidence, laboratory)?;
+        if reserve_until.is_none() && evidence.establishes(&intent.terminal_condition)? {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
                 "intent terminal condition is already satisfied",
+            ));
+        }
+
+        // This normalization is driven only by the typed constraint. A
+        // caller-supplied lookalike summary cannot enable reserve admission.
+        // PreparedPlan already seals and archives this exact bounded summary.
+        let summary = match reserve_until {
+            Some(until) => format!(
+                "{} [laboratory production reserve until {}]",
+                intent.summary, until.0,
+            ),
+            None => intent.summary.clone(),
+        };
+        if summary.len() > self.policy.max_string_bytes {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "intent summary plus its laboratory reserve seal exceeds the configured byte limit",
             ));
         }
 
@@ -296,7 +329,7 @@ impl StaticPlanner {
         let plan = PreparedPlan::builder(
             intent.id,
             intent.anchor,
-            intent.summary.clone(),
+            summary,
             intent.terminal_condition.clone(),
         )
         .steps(steps)
@@ -307,6 +340,125 @@ impl StaticPlanner {
         .build();
         validate_plan(&plan, &self.policy)?;
         Ok(plan)
+    }
+}
+
+/// A narrow admission rule for explicitly requested laboratory production.
+/// It leaves the original goal and every action's authority/proof rules intact.
+fn laboratory_reserve_horizon(
+    intent: &Intent,
+    evidence: &PredicateEvidence<'_>,
+    laboratory: bool,
+) -> Result<Option<GameTick>> {
+    let source_tick = evidence.snapshot().tick;
+    let mut horizon = None;
+    for constraint in &intent.constraints {
+        if let Constraint::LaboratoryProductionReserveUntil(until) = constraint {
+            if !laboratory || horizon.is_some() {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidIntent,
+                    "production reserve admission requires one explicit laboratory-only horizon",
+                ));
+            }
+            let ticks = until
+                .0
+                .checked_sub(source_tick.0)
+                .filter(|ticks| *ticks > 0);
+            if ticks.is_none_or(|ticks| ticks > crate::effects::MAX_DEFAULT_OBLIGATION_TICKS) {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidIntent,
+                    "laboratory production reserve horizon must be future and within one game year",
+                ));
+            }
+            horizon = Some(*until);
+        }
+    }
+    if horizon.is_some() {
+        if !production_stock_minima(&intent.terminal_condition, evidence.snapshot())
+            || !evidence.establishes(&intent.terminal_condition)?
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "laboratory reserve admission requires qualified established original production stock minima",
+            ));
+        }
+        let mut production = false;
+        for requested in &intent.requested_actions {
+            let allowed = match &requested.action {
+                Action::CreateWorkOrder { job_token, .. }
+                    if crate::effects::work_order_product(job_token).is_some() =>
+                {
+                    production = true;
+                    true
+                }
+                Action::Build {
+                    kind: BuildingKind::Workshop(kind),
+                    ..
+                } => {
+                    matches!(kind.as_str(), "Still" | "Kitchen" | "Carpenters")
+                }
+                Action::SetLabor {
+                    labor,
+                    enabled: true,
+                    ..
+                } => {
+                    matches!(labor.as_str(), "BREW" | "COOK" | "CARPENTRY")
+                }
+                _ => false,
+            };
+            if !allowed {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidIntent,
+                    "laboratory production reserve permits only registered production and its explicit workshop/labor setup",
+                ));
+            }
+        }
+        if !production {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "laboratory production reserve requires registered production work",
+            ));
+        }
+    }
+    Ok(horizon)
+}
+
+/// Shape/depth/node bounds have already been checked by
+/// `validate_intent_shape`. A reserve exception cannot turn unrelated already
+/// satisfied predicates into a general license to perform work.
+fn production_stock_minima(predicate: &Predicate, snapshot: &WorldSnapshot) -> bool {
+    use dfmcp_world::{CompareOp, EntityKind, Value};
+    match predicate {
+        Predicate::FieldCompare {
+            entity_id,
+            field,
+            op: CompareOp::Ge,
+            value: Value::U64(_),
+        } => {
+            matches!(
+                field.as_str(),
+                crate::effects::STOCK_DRINK_FIELD
+                    | crate::effects::STOCK_FOOD_FIELD
+                    | crate::effects::STOCK_BED_FIELD
+                    | crate::effects::STOCK_DOOR_FIELD
+                    | crate::effects::STOCK_TABLE_FIELD
+                    | crate::effects::STOCK_CHAIR_FIELD
+            ) && snapshot
+                .graph
+                .entities
+                .get(entity_id)
+                .is_some_and(|entity| {
+                    matches!(&entity.kind, EntityKind::Other(kind)
+                    if kind == crate::effects::STOCK_LEDGER_KIND)
+                })
+        }
+        Predicate::All(predicates) => {
+            !predicates.is_empty()
+                && predicates
+                    .iter()
+                    .all(|predicate| production_stock_minima(predicate, snapshot))
+        }
+        _ => false,
     }
 }
 
@@ -685,7 +837,8 @@ fn validate_constraints(intent: &Intent, action: &Action) -> Result<()> {
             Constraint::MaxRisk(_)
             | Constraint::Deadline(_)
             | Constraint::RequireCheckpoint
-            | Constraint::MaxSteps(_) => {}
+            | Constraint::MaxSteps(_)
+            | Constraint::LaboratoryProductionReserveUntil(_) => {}
         }
     }
     Ok(())
@@ -1039,3 +1192,7 @@ mod tests {
         assert!(matches!(result, Err(ref error) if error.code == ErrorCode::InvalidRequest));
     }
 }
+
+#[cfg(test)]
+#[path = "planner_reserve_tests.rs"]
+mod reserve_tests;

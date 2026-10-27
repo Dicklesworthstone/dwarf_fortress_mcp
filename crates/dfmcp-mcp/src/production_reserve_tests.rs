@@ -360,3 +360,90 @@ fn already_funded_reserves_do_not_invent_work_and_legacy_no_work_stays_unchanged
     }
     Ok(())
 }
+
+#[test]
+fn reserve_admission_binds_only_true_original_goals_and_refuses_atomically() -> Result<()> {
+    let source = provisions(20)?;
+    let unmet = reserve(json!([{"item":"DRINK","minimum":45}]), 2401)?.compile(&source)?;
+    assert_eq!(
+        PredicateEvidence::laboratory(&source)?.evaluate(&unmet.terminal)?,
+        PredicateTruth::False
+    );
+    let mut ordinary = intent(&source, &unmet, 9570)?;
+    unmet.apply_capacity_horizon(&mut ordinary)?;
+    assert!(
+        !ordinary.constraints.iter().any(|constraint| matches!(
+            constraint,
+            Constraint::LaboratoryProductionReserveUntil(_)
+        ))
+    );
+    let prior_compatible =
+        StaticPlanner::default().prepare_laboratory(&source, &ordinary, &context(&source))?;
+    assert_eq!(
+        prior_compatible.summary, ordinary.summary,
+        "previously executable false-goal reserve plans retain the exact old summary/seal normalization"
+    );
+    assert_eq!(prior_compatible.terminal_condition, unmet.terminal);
+
+    let satisfied = reserve(json!([{"item":"DRINK","minimum":40}]), 2401)?.compile(&source)?;
+    let mut bound = intent(&source, &satisfied, 9571)?;
+    satisfied.apply_capacity_horizon(&mut bound)?;
+    assert!(
+        bound
+            .constraints
+            .contains(&Constraint::LaboratoryProductionReserveUntil(GameTick(
+                2401
+            )))
+    );
+    for changed_goal in [false, true] {
+        let mut unrelated = intent(&source, &satisfied, 9572)?;
+        if changed_goal {
+            unrelated.terminal_condition = Predicate::Paused(true);
+        } else {
+            unrelated
+                .constraints
+                .push(Constraint::LaboratoryProductionReserveUntil(GameTick(2501)));
+        }
+        let before = unrelated.clone();
+        assert!(satisfied.apply_capacity_horizon(&mut unrelated).is_err());
+        assert_eq!(unrelated, before);
+    }
+    Ok(())
+}
+
+#[test]
+fn satisfied_original_reserve_executes_explicit_workshop_setup_before_production() -> Result<()> {
+    let mut source = provisions(20)?;
+    source.graph.entities.remove(&starter::STILL);
+    source.graph.entities.remove(&starter::KITCHEN);
+    write(
+        &mut source,
+        starter::STOCK_LEDGER,
+        effects::STOCK_WOOD_FIELD,
+        Value::U64(2),
+    )?;
+    let raw = json!({"template":"production","reserve_until_tick":2401,
+    "quotas":[{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":60}],
+    "prerequisites":{"assign_labor":false,"workshops":[
+        {"building":"workshop:Still","location":[0,0,10]},
+        {"building":"workshop:Kitchen","location":[2,0,10]}
+    ]}});
+    let compiled = ProductionRequest::parse_current(&raw.to_string())?.compile(&source)?;
+    assert_eq!(
+        PredicateEvidence::laboratory(&source)?.evaluate(&compiled.terminal)?,
+        PredicateTruth::True
+    );
+    let plan = seal(&source, &compiled, 9573)?;
+    assert_eq!(
+        plan.steps
+            .iter()
+            .filter(|step| matches!(step.action, Action::Build { .. }))
+            .count(),
+        2
+    );
+    let (adapter, states) = execute(source.clone(), &plan)?;
+    assert!(states.iter().all(|state| *state == CommitState::Verified));
+    assert_eq!(stock(adapter.snapshot(), effects::STOCK_WOOD_FIELD)?, 0);
+    assert_through_horizon(adapter, &source, &compiled)?;
+    Ok(())
+}

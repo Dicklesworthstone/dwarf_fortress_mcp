@@ -1678,6 +1678,7 @@ impl ProductionRequest {
             terminal: Predicate::All(terminal).normalized(),
             workload,
             consumption_horizon: None,
+            satisfied_goal_reserve_until: None,
         })
     }
 }
@@ -2090,6 +2091,10 @@ pub(crate) struct ProductionCompilation {
     pub(crate) terminal: Predicate,
     workload: ProductionWorkload,
     consumption_horizon: Option<u64>,
+    // Only newly executable reserve requests whose exact original goal is
+    // already true need the typed admission rule. Earlier valid plans retain
+    // their original summary and prepared seal.
+    satisfied_goal_reserve_until: Option<GameTick>,
 }
 
 impl ProductionCompilation {
@@ -2098,12 +2103,40 @@ impl ProductionCompilation {
     /// This only describes a reference-model allowance, never future proof or
     /// permission to dispatch existing or new work.
     pub(crate) fn apply_capacity_horizon(&self, intent: &mut dfmcp_intent::Intent) -> Result<()> {
-        match self.consumption_horizon {
-            Some(horizon) => self
-                .workload
-                .apply_complete_horizon(&self.actions, intent, horizon),
-            None => self.workload.apply_horizon(&self.actions, intent),
+        let mut proposed = intent.clone();
+        if self.satisfied_goal_reserve_until.is_some()
+            && proposed.terminal_condition != self.terminal
+        {
+            return Err(invalid(
+                "reserve admission belongs to a different original terminal goal",
+            ));
         }
+        if proposed.constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(_)
+            )
+        }) {
+            return Err(invalid(
+                "production horizon binding already carries a reserve admission marker",
+            ));
+        }
+        match self.consumption_horizon {
+            Some(horizon) => {
+                self.workload
+                    .apply_complete_horizon(&self.actions, &mut proposed, horizon)?
+            }
+            None => self.workload.apply_horizon(&self.actions, &mut proposed)?,
+        }
+        if let Some(until) = self.satisfied_goal_reserve_until {
+            proposed
+                .constraints
+                .push(dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(
+                    until,
+                ));
+        }
+        *intent = proposed;
+        Ok(())
     }
 }
 

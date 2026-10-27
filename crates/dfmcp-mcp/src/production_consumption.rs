@@ -178,6 +178,14 @@ pub(super) fn compile_reserve(
             // sealed into obligations. A far-future reserve must not let an
             // otherwise stalled short action remain active for an extra year.
             candidate.consumption_horizon = Some(work_ticks);
+            // Earlier reserve requests with a false original goal already
+            // produced valid plans. Keep those exact bytes; only an already
+            // established original goal needs this new typed admission rule.
+            if dfmcp_world::PredicateEvidence::laboratory(snapshot)?
+                .establishes(&candidate.terminal)?
+            {
+                candidate.satisfied_goal_reserve_until = Some(GameTick(requested_tick));
+            }
             annotate(
                 request,
                 snapshot,

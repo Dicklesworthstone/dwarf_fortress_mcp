@@ -22,6 +22,10 @@ pub enum Constraint {
     Deadline(GameTick),
     RequireCheckpoint,
     MaxSteps(u32),
+    /// Explicit laboratory reserve work may be needed while the original stock
+    /// goal is already true. This bounded horizon is sealed by the planner; it
+    /// neither extends action deadlines nor supplies future proof or authority.
+    LaboratoryProductionReserveUntil(GameTick),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
