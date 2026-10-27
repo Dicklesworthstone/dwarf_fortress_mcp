@@ -21,7 +21,9 @@ use dfmcp_core::{
 
 mod private_file;
 pub mod session;
-pub use private_file::{PrivateWorkOrderFile, open_private_work_orders};
+pub use private_file::{
+    PrivateWorkOrderFile, open_private_work_orders, open_private_work_orders_exact,
+};
 
 const MAGIC: &[u8; 8] = b"DFMWOJ10";
 const FRAME: &[u8; 8] = b"DFMWOR10";

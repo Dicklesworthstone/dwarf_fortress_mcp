@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-27 — Execute and recover original native work-order goals through MCP
+
+- Add a dedicated eleven-tool development server joining exact canonical
+  observation, finite furniture-order compilation, paired semantic/native
+  review, one confirmed insertion and durable original-goal monitoring.
+- Preserve original deadlines, cadence, stability and action identity across
+  exact archive recovery. Separate insertion certainty, historical achievement,
+  current goal truth and physical quiescence; unknown outcomes never redispatch.
+- Add closed operator source acceptance with independent profile incarnations,
+  four separate credentials and fixed minimal evidence scopes. Keep paths,
+  source policy and production authority outside MCP arguments; reject ambient
+  production admission and unrelated profile state.
+- Expose bounded complete Agent Turn handoffs, authority-aware next steps,
+  explicit offline/reconcile/control modes and resource release after fencing.
+  Retain recovery identities even when cancellation follows successful work.
+- Pass 28 focused tests across the actual runtime, Agent Turn projection and
+  verbatim facade-boundary helpers. Verify concrete session ownership is Send.
+  The full MCP check was killed while compiling upstream `asupersync`, before
+  reaching the server; exact evidence scope is in `IMPLEMENTATION_STATUS.md`.
+- Document configuration, review/commit/polling and restart in
+  `docs/SEMANTIC_WORK_ORDER_MCP.md`; retain the existing wire and custody formats.
+
 ## 2026-10-26 — Execute semantic actions across independent native profiles
 
 - Stop equating canonical-read and mutation-plugin incarnation numbers during

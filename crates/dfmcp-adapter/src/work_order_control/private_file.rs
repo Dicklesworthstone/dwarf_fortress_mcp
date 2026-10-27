@@ -119,6 +119,27 @@ pub fn open_private_work_orders(
     context: &OperationContext,
     mode: JournalMode,
 ) -> Result<WorkOrderJournal<PrivateWorkOrderFile>> {
+    open_private_work_orders_inner(path, context, mode, None)
+}
+
+/// Open operator-owned custody with an explicit create-versus-reopen decision.
+/// A fresh session must find no existing file; recovery must find an existing
+/// file even in Control mode. This never recreates a missing recovery journal.
+pub fn open_private_work_orders_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: JournalMode,
+    initialize: bool,
+) -> Result<WorkOrderJournal<PrivateWorkOrderFile>> {
+    open_private_work_orders_inner(path, context, mode, Some(initialize))
+}
+
+fn open_private_work_orders_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: JournalMode,
+    initialize: Option<bool>,
+) -> Result<WorkOrderJournal<PrivateWorkOrderFile>> {
     authorize(context, context.anchor.fortress_id, false)?;
     if mode == JournalMode::Control {
         authorize(context, context.anchor.fortress_id, true)?;
@@ -164,6 +185,12 @@ pub fn open_private_work_orders(
             Err(cause) => return Err(storage_error(cause)),
         };
         let created = before.is_none();
+        if initialize.is_some_and(|expected| expected != created) {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "creation journal does not match explicit create or recovery mode",
+            ));
+        }
         if created && mode != JournalMode::Control {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -212,7 +239,7 @@ pub fn open_private_work_orders(
     }
     #[cfg(not(unix))]
     {
-        let _ = path;
+        let _ = (path, initialize);
         Err(error(
             ErrorCode::CapabilityDenied,
             "private work-order journals are currently Unix-only",

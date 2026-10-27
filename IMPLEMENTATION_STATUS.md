@@ -44,6 +44,62 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Native original-goal MCP execution (2026-10-27)
+
+The new `dfmcp-live-semantic-work-orders-dev-server` connects the existing
+canonical citizen source, semantic work-order handoff, native creation journal,
+original-plan archive and durable goal monitor through the frozen eleven-tool
+MCP interface. One closed request compiles a finite wooden bed/door/table/chair
+order, prepares its paired original/native review, permits one explicit confirmed
+insertion and performs bounded foreground reconciliation and original-goal
+sampling. The original absolute deadline, cadence, stable samples and action key
+survive exact restart; first achievement, current truth, insertion certainty and
+physical quiescence remain distinct.
+
+The operator supplies immutable exact source pins, separate credentials and a
+private custody directory outside MCP. Independent citizen, creation, progress
+and operations generations are accepted only within their own namespaces.
+The fixed development evidence policy exposes only the required canonical
+identity/pause, linked order counters/status and complete global job-count
+sources. This explicit development acceptance is not compatibility admission.
+Offline recovery performs no bridge contact; reconcile mode has Query/Observe
+only. Exact creation-versus-reopen storage modes cannot replace missing recovery
+custody with a fresh journal.
+
+Complete Agent Turn packets expose the retained goal and recovery seals, require
+current operator authority before suggesting commit, preserve uncertain effects
+and mark cached state unverified after failure. A complete newly returned view
+is retained before response-publication cancellation checks, preserving recovery
+identities even when the outer call fails. Every response is reserved before
+work and bounded to 128 KiB without JSON truncation. Session close releases
+resources after cancellation or fencing without deleting evidence or cancelling
+game effects.
+
+The final combined focused target passes 28 tests: ten real-runtime groups,
+nine new presentation regressions, six shared Agent Turn cases and three facade
+boundary tests. Runtime tests execute the actual compiler, semantic coordinator,
+wire clients, durable monitor and private-file modes with injected native
+sources. Presentation tests use the actual Agent Turn implementation and
+unchanged production-provenance accessor closure. The three facade tests execute
+verbatim extracted production budget, session-identity and error helpers; they
+do not compile the MCP macros or handler composition. The real `NativeRuntime`
+also satisfies the compile-time `Send` assertion required by owned session
+storage. The concrete TCP/private-file resource shell is compiled by the runtime
+harness. Full MCP compilation and
+transport remain unverified: the real locked/offline full-library and dedicated
+binary check fetched the exact FastMCP pin successfully, then upstream
+`asupersync` compilation was terminated by SIGKILL before reaching `dfmcp-mcp`.
+This produced no Rust source diagnostic for the new server and supplies no
+server-build evidence. Scoped source formatting and diff checks passed. These
+component results do not establish full-workspace, native or live qualification.
+
+The implemented goal is completion of the exact retained native order, with
+qualified global job quiescence; item quantities, inventory quotas, material
+and workshop feasibility, generic multi-goal execution and automatic clock
+control remain outside this slice. Operator source acceptance, the empty
+compatibility registry and the production protocol runner map remain separate.
+See `docs/SEMANTIC_WORK_ORDER_MCP.md` for the complete operator/client workflow.
+
 ### Independent native profile incarnations (2026-10-26)
 
 Semantic labor, finite work-order and exact-item furniture routing now accepts

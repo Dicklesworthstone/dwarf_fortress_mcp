@@ -13,6 +13,14 @@ progress/1.12 reads. The generic
 MCP route remains advisory, and this module supplies no compatibility admission,
 source-policy issuer, bridge method or new production runner.
 
+The dedicated, explicitly unadmitted
+`dfmcp-live-semantic-work-orders-dev-server` now composes this API into a complete
+eleven-tool MCP workflow with narrow operator source acceptance, original-plan
+archive custody and durable goal history. See
+[`SEMANTIC_WORK_ORDER_MCP.md`](SEMANTIC_WORK_ORDER_MCP.md) for configuration,
+review/commit/polling and exact restart. This does not make the generic MCP
+route executable or grant production compatibility admission.
+
 ## Supported original plans
 
 The original plan contains exactly one unconditional work-order action, for

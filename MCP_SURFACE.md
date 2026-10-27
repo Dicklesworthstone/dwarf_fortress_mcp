@@ -158,6 +158,15 @@ and examples are in `docs/LAB_SEMANTIC_ACTIONS.md` and `docs/WORLD_MODEL.md`.
 
 ## Tools
 
+The dedicated `dfmcp-live-semantic-work-orders-dev-server` uses the same eleven
+names for [original native furniture-order goals](docs/SEMANTIC_WORK_ORDER_MCP.md).
+Its closed `plan` request compiles one finite order under an exact canonical
+observation; `commit` confirms the paired semantic/native review once, and
+`wait` reconciles insertion and polls the original goal with durable history.
+`query`, `explain` and `doctor` expose complete retained custody, exact restart
+seals, separate current/historical proof and physical quiescence. It requires
+explicit operator development source acceptance and remains unadmitted.
+
 The furniture development server also accepts a `furniture_request` JSON string
 as an alternative `open_session` input. One complete operations/1.4 inventory
 feeds an immutable exact batch preserving its original selection constraints
