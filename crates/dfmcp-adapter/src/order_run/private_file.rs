@@ -117,6 +117,32 @@ pub fn open_private_order_journal(
     mode: OrderRunMode,
     binding: Option<OrderRunBinding>,
 ) -> Result<OrderRunJournal<PrivateOrderRunFile>> {
+    open_private_order_journal_inner(path, fortress, c, mode, binding, None)
+}
+
+/// Open with an explicit creation-versus-recovery decision. Initialization must
+/// find a missing file, while every recovery mode requires existing custody.
+/// In particular, Control recovery cannot replace a missing clock journal with
+/// a fresh empty history that would forget an uncertain unpause.
+pub fn open_private_order_journal_exact(
+    path: &Path,
+    fortress: &FortressIdentity,
+    c: &OperationContext,
+    mode: OrderRunMode,
+    binding: Option<OrderRunBinding>,
+    initialize: bool,
+) -> Result<OrderRunJournal<PrivateOrderRunFile>> {
+    open_private_order_journal_inner(path, fortress, c, mode, binding, Some(initialize))
+}
+
+fn open_private_order_journal_inner(
+    path: &Path,
+    fortress: &FortressIdentity,
+    c: &OperationContext,
+    mode: OrderRunMode,
+    binding: Option<OrderRunBinding>,
+    initialize: Option<bool>,
+) -> Result<OrderRunJournal<PrivateOrderRunFile>> {
     authorize(c, fortress, mode == OrderRunMode::Control)?;
     #[cfg(all(
         target_os = "linux",
@@ -166,6 +192,12 @@ pub fn open_private_order_journal(
             Err(e) => return Err(failed(e)),
         };
         let created = before.is_none();
+        if initialize.is_some_and(|expected| expected != created) {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "conditional-run journal does not match explicit creation or recovery mode",
+            ));
+        }
         if created && (mode != OrderRunMode::Control || binding.is_none()) {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -227,7 +259,7 @@ pub fn open_private_order_journal(
         any(target_arch = "x86_64", target_arch = "aarch64")
     )))]
     {
-        let _ = (path, binding);
+        let _ = (path, binding, initialize);
         Err(error(
             ErrorCode::CapabilityDenied,
             "conditional-run journal custody supports Linux x86_64/aarch64 only",

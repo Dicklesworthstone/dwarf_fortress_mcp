@@ -9,6 +9,8 @@ use dfmcp_adapter::live_jobs_rpc::{
     DeadlineStream,
     operations::{OperationsLimits, OperationsRpcClient},
 };
+use dfmcp_adapter::order_run::journal::OrderRunJournal;
+use dfmcp_adapter::order_run::private_file::PrivateOrderRunFile;
 use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan_archive};
 use dfmcp_adapter::semantic_work_orders::{
     open_private_association_store, open_private_goal_history_store,
@@ -32,14 +34,21 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
+#[path = "native_clock.rs"]
+mod clock;
+pub use clock::PinnedClock;
+use clock::{ClockConfig, ClockInput};
+
 const OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORK_ORDERS";
 const CONFIG: &str = "DFMCP_SEMANTIC_WORK_ORDER_CONFIG";
 const PRODUCTION: &str = "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION";
+const CLOCK_AUTHORITY: &str = "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK";
+const CLOCK_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN";
 const CITIZEN_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_CITIZEN_TOKEN";
 const ORDER_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_ORDER_TOKEN";
 const PROGRESS_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN";
 const OPERATIONS_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN";
-const ALLOWED: [&str; 7] = [
+const ALLOWED: [&str; 9] = [
     OPT_IN,
     CONFIG,
     PRODUCTION,
@@ -47,6 +56,8 @@ const ALLOWED: [&str; 7] = [
     ORDER_TOKEN,
     PROGRESS_TOKEN,
     OPERATIONS_TOKEN,
+    CLOCK_AUTHORITY,
+    CLOCK_TOKEN,
 ];
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 
@@ -87,6 +98,7 @@ struct RecoveryInput {
     anchor: AnchorInput,
     #[serde(default)]
     history_present: bool,
+    clock_journal_id: Option<String>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,6 +109,7 @@ struct ConfigInput {
     initialize: bool,
     sources: SourceAcceptance,
     recovery: Option<RecoveryInput>,
+    clock: Option<ClockInput>,
 }
 #[derive(Clone)]
 pub struct Config {
@@ -105,6 +118,7 @@ pub struct Config {
     initialize: bool,
     sources: SourceAcceptance,
     recovery: Option<Recovery>,
+    clock: Option<ClockConfig>,
     environment_digest: Digest32,
 }
 impl Config {
@@ -140,6 +154,13 @@ impl Config {
         if endpoint.port() == 0 {
             return Err(invalid("native endpoint requires a nonzero port"));
         }
+        let recovery_clock = input
+            .recovery
+            .as_ref()
+            .and_then(|recovery| recovery.clock_journal_id.as_deref())
+            .map(digest)
+            .transpose()?;
+        let has_recovery = input.recovery.is_some();
         let recovery = input
             .recovery
             .map(|r| {
@@ -158,12 +179,28 @@ impl Config {
                 "external archive handoff belongs to another operator fortress",
             ));
         }
+        let clock = input
+            .clock
+            .map(|clock| clock.validate(input.initialize))
+            .transpose()?;
+        if has_recovery {
+            match (&clock, recovery_clock) {
+                (Some(clock), Some(identity)) if clock.journal_id() == Some(identity) => {}
+                (None, None) => {}
+                _ => {
+                    return Err(denied(
+                        "original-goal handoff and configured clock journal identity must agree exactly",
+                    ));
+                }
+            }
+        }
         Ok(Self {
             directory: input.directory,
             endpoint,
             initialize: input.initialize,
             sources: input.sources,
             recovery,
+            clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
         })
     }
@@ -180,6 +217,13 @@ impl Config {
                 ));
             }
         }
+        if let Some(value) = std::env::var_os(CLOCK_AUTHORITY) {
+            if value.to_str() != Some("1") {
+                return Err(denied(
+                    "operator clock enablement must be absent or exactly 1",
+                ));
+            }
+        }
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy();
             if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
@@ -192,6 +236,9 @@ impl Config {
     }
     pub fn production_enabled() -> bool {
         std::env::var(PRODUCTION).ok().as_deref() == Some("1")
+    }
+    pub fn clock_enabled() -> bool {
+        std::env::var(CLOCK_AUTHORITY).ok().as_deref() == Some("1")
     }
     fn current(&self) -> Result<()> {
         Self::validate_environment()?;
@@ -380,6 +427,8 @@ impl Shell for NativeShell {
     type Evidence = NativeEvidence;
     type Progress = ProgressRpcClient<ProgressTcpStream>;
     type Operations = OperationsRpcClient<DeadlineStream>;
+    type ClockJournal = PrivateOrderRunFile;
+    type ClockSource = PinnedClock;
     fn acceptance(&self) -> &SourceAcceptance {
         &self.config.sources
     }
@@ -392,6 +441,19 @@ impl Shell for NativeShell {
     fn production_enabled(&self) -> bool {
         Config::production_enabled()
     }
+    fn clock_enabled(&self) -> bool {
+        self.config.clock.is_some() && Config::clock_enabled()
+    }
+    fn open_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<OrderRunJournal<Self::ClockJournal>>> {
+        clock::open(&self.config, mode, c)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource> {
+        clock::connect(&self.config, c)
+    }
     fn open_control(
         &self,
         mode: Mode,
@@ -402,9 +464,18 @@ impl Shell for NativeShell {
         Digest32,
     )> {
         self.config.current()?;
-        if self.config.initialize && mode != Mode::Control {
+        let journal_mode = match mode {
+            Mode::Control if !Config::production_enabled() => JournalMode::Reconcile,
+            _ => mode.journal(),
+        };
+        if self.config.initialize && journal_mode != JournalMode::Control {
             return Err(denied(
-                "initialization requires explicit operator control mode",
+                "initialization requires explicit operator production control",
+            ));
+        }
+        if self.config.initialize && self.config.clock.is_some() && !Config::clock_enabled() {
+            return Err(denied(
+                "initializing clock custody requires separate operator clock authority",
             ));
         }
         let mut work = Work::new(c)?;
@@ -427,7 +498,7 @@ impl Shell for NativeShell {
         let journal = open_private_work_orders_exact(
             &self.config.path("creation.journal"),
             &work.reserve(68 * MIB)?,
-            mode.journal(),
+            journal_mode,
             self.config.initialize,
         )?;
         let native = WorkOrderSession::new(journal, native_source, &work.reserve(MIB)?)?;
@@ -436,7 +507,7 @@ impl Shell for NativeShell {
             &self.config.path("semantic.associations"),
             identity,
             self.config.initialize,
-            mode != Mode::Control,
+            journal_mode != JournalMode::Control,
             &work.reserve(4 * MIB)?,
         )?;
         Ok((native, associations, identity))

@@ -595,3 +595,124 @@ fn private_file_ownership_reopen_links_and_same_length_corruption() -> Result<()
     // Keep artifacts for inspection; no recursive deletion or evidence repair.
     Ok(())
 }
+
+#[test]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+fn exact_private_open_never_recreates_recovery_or_adopts_existing_custody() -> Result<()> {
+    use crate::order_run::private_file::open_private_order_journal_exact;
+    use std::fs::{self, OpenOptions};
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| corrupt())?
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "dfmcp-order-run-exact-{}-{stamp}",
+        std::process::id()
+    ));
+    fs::create_dir(&dir).map_err(storage_error)?;
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(storage_error)?;
+    let dir = dir.canonicalize().map_err(storage_error)?;
+    let path = dir.join("clock.journal");
+    let native = Native::new(Memory::default())?;
+    let c = context()?;
+    let binding = OrderRunBinding::from_source(&native)?;
+    for mode in [
+        OrderRunMode::Offline,
+        OrderRunMode::Recover,
+        OrderRunMode::Control,
+    ] {
+        assert!(
+            open_private_order_journal_exact(
+                &path,
+                native.fortress(),
+                &c,
+                mode,
+                Some(binding.clone()),
+                false,
+            )
+            .is_err()
+        );
+        assert!(!path.exists());
+    }
+    for mode in [OrderRunMode::Offline, OrderRunMode::Recover] {
+        assert!(
+            open_private_order_journal_exact(
+                &path,
+                native.fortress(),
+                &c,
+                mode,
+                Some(binding.clone()),
+                true,
+            )
+            .is_err()
+        );
+        assert!(!path.exists());
+    }
+    let mut original = open_private_order_journal_exact(
+        &path,
+        native.fortress(),
+        &c,
+        OrderRunMode::Control,
+        Some(binding.clone()),
+        true,
+    )?;
+    let id = original.view(&c)?.id;
+    drop(original);
+    let original_bytes = fs::read(&path).map_err(storage_error)?;
+    for mode in [
+        OrderRunMode::Offline,
+        OrderRunMode::Recover,
+        OrderRunMode::Control,
+    ] {
+        assert!(
+            open_private_order_journal_exact(
+                &path,
+                native.fortress(),
+                &c,
+                mode,
+                Some(binding.clone()),
+                true,
+            )
+            .is_err()
+        );
+        let mut reopened = open_private_order_journal_exact(
+            &path,
+            native.fortress(),
+            &c,
+            mode,
+            Some(binding.clone()),
+            false,
+        )?;
+        assert_eq!(reopened.view(&c)?.id, id);
+        drop(reopened);
+        assert_eq!(fs::read(&path).map_err(storage_error)?, original_bytes);
+    }
+
+    let empty = dir.join("empty.journal");
+    drop(
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&empty)
+            .map_err(storage_error)?,
+    );
+    assert!(
+        open_private_order_journal_exact(
+            &empty,
+            native.fortress(),
+            &c,
+            OrderRunMode::Control,
+            Some(binding),
+            false,
+        )
+        .is_err()
+    );
+    assert!(fs::read(&empty).map_err(storage_error)?.is_empty());
+    Ok(())
+}

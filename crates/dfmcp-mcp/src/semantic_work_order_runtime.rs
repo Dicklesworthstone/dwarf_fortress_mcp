@@ -26,9 +26,13 @@ use dfmcp_world::{PredicateEvidence, PredicateTruth};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+pub mod clock;
 pub mod native;
 pub mod policy;
 pub mod request;
+use clock::{Clock, ClockTarget, ClockView, RunRequest};
+use dfmcp_adapter::order_run::journal::OrderRunJournal;
+use dfmcp_adapter::order_run::rpc::OrderRunSource;
 pub use native::{Config, NativeRuntime};
 pub use request::Request;
 
@@ -36,7 +40,8 @@ pub const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_WALL_MILLIS: u64 = 60_000;
 pub const MAX_OUTPUT_TOKENS: u32 = 32_768;
 const MIB: u64 = 1024 * 1024;
-const VIEW_BYTES: u64 = 16 * MIB;
+const VIEW_BYTES: u64 = 32 * MIB;
+pub const MAX_GAME_TICKS: u64 = 1200;
 const ARCHIVE_BYTES: u64 = 4 * MIB;
 
 pub(crate) fn invalid(message: &str) -> DfmcpError {
@@ -118,6 +123,15 @@ pub trait Shell {
     type Evidence: WorkOrderEvidenceOwner;
     type Progress: ProgressSource;
     type Operations: OperationsGoalSource;
+    type ClockJournal: EffectJournalStorage;
+    type ClockSource: OrderRunSource;
+    fn clock_enabled(&self) -> bool;
+    fn open_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<OrderRunJournal<Self::ClockJournal>>>;
+    fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource>;
     fn acceptance(&self) -> &policy::SourceAcceptance;
     fn recovery(&self) -> Option<Recovery>;
     fn check_environment(&self) -> Result<()>;
@@ -185,6 +199,8 @@ pub struct Runtime<S: Shell> {
     review: Option<SemanticWorkOrderReview>,
     monitor: Option<DurableWorkOrderGoalMonitor<S::History>>,
     history_initialized: bool,
+    clock: Option<Clock<S::ClockJournal>>,
+    production_at_open: bool,
 }
 
 /// Compact complete view of this one retained goal. Historical proof and current
@@ -206,6 +222,8 @@ pub struct View {
     pub history_bytes: usize,
     pub history_present: bool,
     pub history_fenced: bool,
+    pub clock: Option<ClockView>,
+    pub clock_control_enabled: bool,
 }
 fn anchor_json(a: StateAnchor) -> Value {
     json!({"fortress_id":a.fortress_id.get().to_string(),"epoch":a.cursor.epoch,
@@ -244,24 +262,34 @@ impl View {
             "continuous":p.continuous,
             "semantic_completion_proven":p.current_goal_proven() && p.receipt_linked && p.physical_work.is_quiescent()
         }));
+        let recovery = self.archive.zip(self.original.as_ref()).map(|(seal, p)| {
+            let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),
+                "object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(p.anchor),
+                "history_present":self.history_present});
+            if let Some(clock) = &self.clock {
+                value["clock_journal_id"] = json!(clock.journal_id.to_hex());
+            }
+            value
+        });
         json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "runtime_admitted":false,"source_acceptance":policy::ACCEPTANCE_KIND,
-            "source_acceptance_is_compatibility_admission":false,"clock_advanced":false,
+            "source_acceptance_is_compatibility_admission":false,
+            "clock_advanced":if self.clock.as_ref().is_some_and(|v|v.has_runs()) { Value::Null } else {json!(false)},
+            "clock":self.clock.as_ref().map(ClockView::to_json),
+            "development_clock_enabled":self.clock_control_enabled,
             "observation":self.observation.map(|(seal,source,count)|json!({"seal":seal.to_hex(),
                 "source_digest":source.to_hex(),"citizens":count,"paused":true})),
             "original_plan":original,"review":self.review.as_ref().map(|r|json!({
                 "paired_seal":r.seal().to_hex(),"native_plan_digest":r.native_plan().digest().to_hex(),
                 "semantic_plan_digest":r.original_plan().digest.to_hex()})),
-            "recovery":self.archive.zip(self.original.as_ref()).map(|(seal,p)|json!({
-                "plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
-                "anchor":anchor_json(p.anchor),"history_present":self.history_present})),
+            "recovery":recovery,
             "native_state":self.native.as_ref().map(|n|n.state().as_str()),"insertion":insertion,
             "current_goal":goal,"current_goal_available":self.goal.is_some(),
             "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
             "historical_obligation":self.historical_obligation.as_ref().map(|s|format!("{s:?}")),
             "history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},
             "one_goal_limit":1,"automatic_redispatch":false,
-            "coverage_omissions":["item output quantities","material and workshop feasibility","automatic clock control"]})
+            "coverage_omissions":["item output quantities","material and workshop feasibility","automatic chaining of clock runs","continuous goal truth"]})
     }
 }
 
@@ -315,10 +343,21 @@ impl Work {
         Ok(c)
     }
 }
-fn grants(mode: Mode, fortress: dfmcp_core::FortressId, enabled: bool) -> Vec<CapabilityGrant> {
+fn grants(
+    mode: Mode,
+    fortress: dfmcp_core::FortressId,
+    enabled: bool,
+    clock: bool,
+) -> Vec<CapabilityGrant> {
     let mut capabilities = vec![Capability::Query, Capability::Observe];
     if mode == Mode::Control && enabled {
         capabilities.extend([Capability::Plan, Capability::ConfigureProduction]);
+    }
+    if mode == Mode::Control && clock {
+        if !capabilities.contains(&Capability::Plan) {
+            capabilities.push(Capability::Plan);
+        }
+        capabilities.push(Capability::ControlClock);
     }
     capabilities
         .into_iter()
@@ -350,14 +389,16 @@ impl<S: Shell> Runtime<S> {
             || budget.max_entities < 4096
             || budget.max_actions != 1
             || budget.max_output_tokens > MAX_OUTPUT_TOKENS
-            || budget.max_game_ticks != 0
+            || budget.max_game_ticks > MAX_GAME_TICKS
         {
             return Err(exhausted(
-                "runtime requires bounded no-clock context, 4096 entities and one action",
+                "runtime requires at most 1200 game ticks, 4096 entities and one action",
             ));
         }
-        if mode == Mode::Control && !shell.production_enabled() {
-            return Err(denied("operator production authority is disabled"));
+        if mode == Mode::Control && !shell.production_enabled() && !shell.clock_enabled() {
+            return Err(denied(
+                "operator production and clock authority are disabled",
+            ));
         }
         let recovery = shell.recovery();
         let anchor = recovery.map(|r| r.anchor).unwrap_or(StateAnchor {
@@ -376,13 +417,24 @@ impl<S: Shell> Runtime<S> {
             request_id: RequestId::new(1),
             anchor,
             budget,
-            grants: grants(mode, anchor.fortress_id, shell.production_enabled()),
+            grants: grants(
+                mode,
+                anchor.fortress_id,
+                shell.production_enabled(),
+                shell.clock_enabled(),
+            ),
             cancellation_requested: false,
         };
         let mut work = Work::new(&context)?;
+        let clock_validation = work.reserve(32 * MIB)?;
         let (native, associations, journal) = shell.open_control(mode, &work.reserve(80 * MIB)?)?;
+        let production_at_open = mode == Mode::Control
+            && native.summary(&work.reserve(MIB)?)?.mode == JournalMode::Control;
         let semantic =
             SemanticWorkOrderSession::new(native, associations, &work.reserve(VIEW_BYTES)?)?;
+        let clock = shell
+            .open_clock(mode, &work.reserve(32 * MIB)?)?
+            .map(Clock::new);
         let mut result = Self {
             shell,
             mode,
@@ -399,6 +451,8 @@ impl<S: Shell> Runtime<S> {
             review: None,
             monitor: None,
             history_initialized: recovery.is_some_and(|r| r.history_present),
+            clock,
+            production_at_open,
         };
         let records = result.semantic.inventory(&work.reserve(VIEW_BYTES)?)?;
         for record in &records {
@@ -437,6 +491,11 @@ impl<S: Shell> Runtime<S> {
             }
         }
         result.raise_monitor_floor();
+        // Verify the optional clock history against the externally retained
+        // original goal before publishing this recovered owner.
+        let mut validation = work.narrow(&clock_validation)?;
+        validation.anchor = result.anchor;
+        result.inspect_clock(&validation)?;
         Ok(result)
     }
     pub fn anchor(&self) -> StateAnchor {
@@ -466,7 +525,8 @@ impl<S: Shell> Runtime<S> {
             grants: grants(
                 self.mode,
                 self.anchor.fortress_id,
-                self.shell.production_enabled(),
+                self.production_control_enabled(),
+                self.clock_control_enabled(),
             ),
             cancellation_requested: cancelled,
         })
@@ -480,7 +540,7 @@ impl<S: Shell> Runtime<S> {
             || c.budget.max_actions > self.budget.max_actions
             || c.budget.max_entities > self.budget.max_entities
             || c.budget.max_output_tokens > self.budget.max_output_tokens
-            || c.budget.max_game_ticks != 0
+            || c.budget.max_game_ticks > self.budget.max_game_ticks
         {
             return Err(denied(
                 "runtime context differs from retained session or widens its allowance",
@@ -488,7 +548,7 @@ impl<S: Shell> Runtime<S> {
         }
         c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if control {
-            if self.mode != Mode::Control || !self.shell.production_enabled() {
+            if !self.production_control_enabled() {
                 return Err(denied(
                     "runtime is not currently operator-authorized for production",
                 ));
@@ -571,6 +631,11 @@ impl<S: Shell> Runtime<S> {
                 return Err(denied("original archive differs from retained plan"));
             }
         }
+        let clock_budget = self
+            .clock
+            .as_ref()
+            .map(|_| work.reserve(8 * MIB))
+            .transpose()?;
         let inventory = self.semantic.inventory(&work.reserve(4 * MIB)?)?;
         if inventory.len() > 1 {
             return Err(denied(
@@ -585,6 +650,21 @@ impl<S: Shell> Runtime<S> {
             return Err(denied(
                 "retained native record has no exact original review",
             ));
+        };
+        let clock = if self.clock.is_some() {
+            let target = self.clock_target(result.as_ref().map(|r| r.creation_result()))?;
+            self.clock
+                .as_mut()
+                .ok_or_else(|| invalid("clock owner absent"))?
+                .inspect(
+                    target.as_ref(),
+                    &work.narrow(
+                        &clock_budget.ok_or_else(|| exhausted("clock view reservation absent"))?,
+                    )?,
+                )?
+                .into()
+        } else {
+            None
         };
         self.shell.check_environment()?;
         Ok(View {
@@ -613,6 +693,8 @@ impl<S: Shell> Runtime<S> {
             history_bytes: self.monitor.as_ref().map_or(0, |m| m.history_byte_len()),
             history_present: self.history_initialized,
             history_fenced: self.monitor.as_ref().is_some_and(|m| m.is_fenced()),
+            clock,
+            clock_control_enabled: self.clock_control_enabled(),
         })
     }
     pub fn inspect(&mut self, c: &OperationContext) -> Result<View> {
@@ -800,6 +882,26 @@ impl<S: Shell> Runtime<S> {
         ) {
             return self.view(&work.narrow(&output)?);
         }
+        if self.clock.is_some() {
+            let target = self.clock_target(Some(current.creation_result()))?;
+            let clock = self
+                .clock
+                .as_mut()
+                .ok_or_else(|| invalid("clock owner absent"))?;
+            let view = clock.inspect(target.as_ref(), &work.reserve(8 * MIB)?)?;
+            if view.needs_reconciliation() {
+                let target = target
+                    .as_ref()
+                    .ok_or_else(|| denied("clock history lacks verified original insertion"))?;
+                let mut source = self.shell.clock_source(&work.reserve(4 * MIB)?)?;
+                let view = clock.reconcile(target, &mut source, &work.reserve(96 * MIB)?)?;
+                if !view.can_sample_goal() {
+                    return self.view(&work.narrow(&output)?);
+                }
+            } else if !view.can_sample_goal() {
+                return self.view(&work.narrow(&output)?);
+            }
+        }
         c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if self.monitor.is_none() {
             // Recovery without a history may initialize a new monitor, but never
@@ -841,6 +943,245 @@ impl<S: Shell> Runtime<S> {
         }
         work.context.anchor = self.anchor;
         result?;
+        self.view(&work.narrow(&output)?)
+    }
+    pub fn production_control_enabled(&self) -> bool {
+        self.production_at_open && self.mode == Mode::Control && self.shell.production_enabled()
+    }
+    pub fn clock_control_enabled(&self) -> bool {
+        self.mode == Mode::Control
+            && self.shell.clock_enabled()
+            && self.clock.as_ref().is_some_and(Clock::is_control)
+    }
+    fn clock_target(&self, creation: Option<&NativeOrderCreation>) -> Result<Option<ClockTarget>> {
+        let Some(creation @ NativeOrderCreation::Inserted { .. }) = creation else {
+            return Ok(None);
+        };
+        let original = self
+            .original
+            .as_ref()
+            .ok_or_else(|| denied("original goal is absent"))?;
+        let archive = self
+            .archive
+            .as_ref()
+            .ok_or_else(|| denied("original archive is absent"))?;
+        let review = self
+            .review
+            .as_ref()
+            .ok_or_else(|| denied("original review is absent"))?;
+        ClockTarget::new(original, archive.seal(), self.journal, review, creation).map(Some)
+    }
+    fn inspect_clock(&mut self, c: &OperationContext) -> Result<Option<ClockView>> {
+        if self.clock.is_none() {
+            return Ok(None);
+        }
+        let mut work = Work::new(c)?;
+        let created = if let Some(review) = &self.review {
+            Some(
+                self.semantic
+                    .inspect(review.seal(), &work.reserve(16 * MIB)?)?,
+            )
+        } else {
+            None
+        };
+        let target = self.clock_target(created.as_ref().map(|v| v.creation_result()))?;
+        self.clock
+            .as_mut()
+            .ok_or_else(|| invalid("clock owner absent"))?
+            .inspect(target.as_ref(), &work.reserve(8 * MIB)?)
+            .map(Some)
+    }
+    fn check_clock(&self, c: &OperationContext) -> Result<()> {
+        self.check(c, false)?;
+        if !self.clock_control_enabled() {
+            return Err(denied("this owner has no current operator clock authority"));
+        }
+        c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+        c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)
+    }
+    fn sample_for_clock(&mut self, work: &mut Work) -> Result<ClockTarget> {
+        // This reserves a distinct share of the caller's operation. It does not
+        // renew the deadline or spend the same native/read budget twice.
+        let sample = self.wait(&work.reserve(1024 * MIB)?)?;
+        work.context.anchor = self.anchor;
+        if sample.clock.as_ref().is_some_and(|v| !v.can_sample_goal()) {
+            return Err(denied("reconcile the retained clock before another run"));
+        }
+        let goal = sample
+            .goal
+            .as_ref()
+            .filter(|g| g.anchor == self.anchor && g.receipt_linked)
+            .ok_or_else(|| {
+                denied("clock control requires a fresh receipt-linked original-goal sample")
+            })?;
+        if goal.current_goal_proven() && goal.physical_work.is_quiescent() {
+            return Err(denied(
+                "the original goal is already proved and physically quiet",
+            ));
+        }
+        self.clock_target(sample.creation.as_ref())?
+            .ok_or_else(|| denied("clock control requires verified original insertion"))
+    }
+    fn verify_clock_custody(
+        shell: &S,
+        archive: &mut PlanArchiveStore<S::Archive>,
+        semantic: &mut Semantic<S>,
+        original: &PreparedPlan,
+        review: &SemanticWorkOrderReview,
+        target: &ClockTarget,
+        journal: Digest32,
+        c: &OperationContext,
+    ) -> Result<()> {
+        shell.check_environment()?;
+        if !shell.clock_enabled() {
+            return Err(denied("operator clock authority was revoked"));
+        }
+        let mut work = Work::new(c)?;
+        if archive.recover(&work.reserve(ARCHIVE_BYTES)?)? != *original {
+            return Err(denied(
+                "original archive changed before native clock effect",
+            ));
+        }
+        let retained = semantic.inspect(review.seal(), &work.reserve(16 * MIB)?)?;
+        let current = ClockTarget::new(
+            original,
+            archive.seal(),
+            journal,
+            review,
+            retained.creation_result(),
+        )?;
+        if current.digest() != target.digest() {
+            return Err(denied(
+                "original insertion identity changed before native clock effect",
+            ));
+        }
+        shell.check_environment()?;
+        work.current()?;
+        Ok(())
+    }
+    pub fn plan_run(&mut self, request: RunRequest, c: &OperationContext) -> Result<View> {
+        self.check_clock(c)?;
+        let mut work = Work::new(c)?;
+        let output = work.reserve(VIEW_BYTES)?;
+        self.verify_archive(&mut work)?;
+        let target = self.sample_for_clock(&mut work)?;
+        let mut source = self.shell.clock_source(&work.reserve(4 * MIB)?)?;
+        let mut guard_budget = Some(work.reserve(64 * MIB)?);
+        let run_budget = work.reserve(96 * MIB)?;
+        let archive = self
+            .archive
+            .as_mut()
+            .ok_or_else(|| denied("original archive absent"))?;
+        let original = self
+            .original
+            .as_ref()
+            .ok_or_else(|| denied("original plan absent"))?;
+        let review = self
+            .review
+            .as_ref()
+            .ok_or_else(|| denied("original review absent"))?;
+        let shell = &self.shell;
+        let semantic = &mut self.semantic;
+        let journal = self.journal;
+        self.clock
+            .as_mut()
+            .ok_or_else(|| denied("operator clock source is not configured"))?
+            .prepare_guarded(&target, &request, &mut source, &run_budget, |edge| {
+                let mut reserved = guard_budget
+                    .take()
+                    .ok_or_else(|| denied("clock guard cannot repeat"))?;
+                reserved.anchor = edge.anchor;
+                reserved.budget.max_wall_millis = reserved
+                    .budget
+                    .max_wall_millis
+                    .min(edge.budget.max_wall_millis);
+                Self::verify_clock_custody(
+                    shell, archive, semantic, original, review, &target, journal, &reserved,
+                )
+            })?;
+        self.view(&work.narrow(&output)?)
+    }
+    pub fn commit_run(
+        &mut self,
+        seal: Digest32,
+        confirmed: bool,
+        c: &OperationContext,
+    ) -> Result<View> {
+        self.check_clock(c)?;
+        if !confirmed {
+            return Err(denied("confirm the exact original-bound clock review"));
+        }
+        let mut work = Work::new(c)?;
+        let output = work.reserve(VIEW_BYTES)?;
+        self.verify_archive(&mut work)?;
+        let target = self.sample_for_clock(&mut work)?;
+        let mut source = self.shell.clock_source(&work.reserve(4 * MIB)?)?;
+        let mut guard_budget = Some(work.reserve(64 * MIB)?);
+        let run_budget = work.reserve(96 * MIB)?;
+        let archive = self
+            .archive
+            .as_mut()
+            .ok_or_else(|| denied("original archive absent"))?;
+        let original = self
+            .original
+            .as_ref()
+            .ok_or_else(|| denied("original plan absent"))?;
+        let review = self
+            .review
+            .as_ref()
+            .ok_or_else(|| denied("original review absent"))?;
+        let shell = &self.shell;
+        let semantic = &mut self.semantic;
+        let journal = self.journal;
+        // The original paused planning observation cannot describe the world
+        // after an attempted unpause. Retained goal samples keep their anchors.
+        self.basis = None;
+        self.evidence = None;
+        self.clock
+            .as_mut()
+            .ok_or_else(|| denied("operator clock source is not configured"))?
+            .commit_guarded(&target, seal, true, &mut source, &run_budget, |edge| {
+                let mut reserved = guard_budget
+                    .take()
+                    .ok_or_else(|| denied("clock guard cannot repeat"))?;
+                reserved.anchor = edge.anchor;
+                reserved.budget.max_wall_millis = reserved
+                    .budget
+                    .max_wall_millis
+                    .min(edge.budget.max_wall_millis);
+                Self::verify_clock_custody(
+                    shell, archive, semantic, original, review, &target, journal, &reserved,
+                )
+            })?;
+        self.view(&work.narrow(&output)?)
+    }
+    pub fn cancel_run(&mut self, c: &OperationContext) -> Result<View> {
+        self.check_clock(c)?;
+        let mut work = Work::new(c)?;
+        let output = work.reserve(VIEW_BYTES)?;
+        self.verify_archive(&mut work)?;
+        let current = self
+            .inspect_clock(&work.reserve(32 * MIB)?)?
+            .ok_or_else(|| denied("operator clock source is not configured"))?;
+        let review = self
+            .review
+            .as_ref()
+            .ok_or_else(|| denied("original review absent"))?;
+        let created = self
+            .semantic
+            .inspect(review.seal(), &work.reserve(16 * MIB)?)?;
+        let target = self
+            .clock_target(Some(created.creation_result()))?
+            .ok_or_else(|| denied("clock cancellation requires its original insertion identity"))?;
+        let mut source = if current.cancellation_needs_source() {
+            Some(self.shell.clock_source(&work.reserve(4 * MIB)?)?)
+        } else {
+            None
+        };
+        self.clock
+            .as_mut()
+            .ok_or_else(|| denied("clock owner absent"))?
+            .cancel(&target, source.as_mut(), &work.reserve(96 * MIB)?)?;
         self.view(&work.narrow(&output)?)
     }
     pub fn cancel(&mut self, c: &OperationContext) -> Result<View> {

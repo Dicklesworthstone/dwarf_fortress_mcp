@@ -44,6 +44,49 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original-order bounded simulation execution core (2026-10-27)
+
+The original native work-order runtime now composes the existing order-run/1.14
+coordinator with its exact original plan, archive, creation journal and verified
+Created receipt. Separately sealed finite runs retain the original native order,
+recipe, amount and absolute deadline. One unsettled run and at most 32 retained
+runs are permitted; a durable dispatch marker prevents another unpause after a
+lost reply or restart. Native stop receipts remain historical clock evidence,
+separate from fresh original-goal samples and physical quiescence.
+
+Incomplete orders stop on observed zero remaining. A completed, validated,
+inactive order can receive another explicit finite run for temporal stability
+or independent job quiescence, stopping early if it unexpectedly reactivates.
+Neither trigger substitutes for original-goal proof. Reconciliation precedes
+fresh paused goal acquisition; no run automatically starts another. Original
+archive and insertion custody are rechecked after the clock dispatch marker,
+immediately before the native effect.
+
+Clock configuration, credential, independent generation and authority are
+optional and separate from production authority. Exact external journal identity
+and fixed private custody are required on reopen. Omitting configuration cannot
+hide an existing clock journal. Offline opens require no native credential or
+contact. Immutable creation/clock modes cannot regain authority from later
+environment changes. Existing native wire and journal formats are unchanged.
+
+The execution API, concrete resource shell and Agent Turn presentation are
+implemented. The public MCP tool dispatch does not yet expose run requests in
+this checkpoint. Executed validation: the complete real adapter library check,
+28 order-run unit tests, 58 public semantic work-order integration tests and 59
+actual-source runtime/presentation tests pass (145 distinct tests). Six joined
+runtime cases exercise insertion, confirmed runs, pending reconciliation,
+subsequent stable samples, lost replies, recovery, independent authority and
+post-marker custody/gate failure. Concrete NativeRuntime ownership is Send.
+The combined target uses the actual Runtime, NativeShell, clock, Agent Turn and
+presentation with the full real adapter dependency graph and unchanged admission
+accessor closure; it does not compile FastMCP macros or the complete facade.
+
+The unchanged locked full MCP build was attempted again and stopped in upstream
+asupersync 0.5.0 with SIGKILL before compiling dfmcp-mcp; the shared cgroup OOM
+counter increased during that attempt. No dependency pin or feature was changed.
+Full MCP/executable, native DFHack and live-game qualification remain unverified.
+The empty compatibility registry and production runner map remain unchanged.
+
 ### Native original-goal MCP execution (2026-10-27)
 
 The new `dfmcp-live-semantic-work-orders-dev-server` connects the existing

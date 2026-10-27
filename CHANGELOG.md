@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-27 — Bind bounded simulation runs to retained native order goals
+
+- Compose the real conditional-run coordinator with exact original plan,
+  archive, insertion receipt and deadline; separately seal and confirm each
+  finite run, retain uncertainty and forbid repeated unpause after dispatch.
+- Support further finite samples for completed inactive orders when original
+  stability or independent physical quiescence still needs evidence.
+- Add optional independent clock authority, exact private-journal reopening,
+  source pins and offline recovery without native credentials.
+- Pass 145 distinct real-adapter and actual-source component tests, including
+  six complete joined runtime scenarios. Full MCP compilation remains blocked
+  by upstream compiler SIGKILL; no native or live qualification is claimed.
+- Stage clock-aware Agent Turn projection; public MCP run dispatch follows in
+  the next integration increment.
+
 ## 2026-10-27 — Execute and recover original native work-order goals through MCP
 
 - Add a dedicated eleven-tool development server joining exact canonical

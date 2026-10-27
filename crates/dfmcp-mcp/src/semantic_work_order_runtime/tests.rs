@@ -1,5 +1,7 @@
 //! Complete runtime paths use strict native fixtures, actual canonical citizen
 //! acquisition, real semantic/native journals, exact archives and goal history.
+#[path = "clock_runtime_tests.rs"]
+mod clock_runtime_tests;
 use super::*;
 use dfmcp_adapter::live_jobs::{LiveJob, LiveJobObservation};
 use dfmcp_adapter::live_operations::{LiveItem, LiveOperationsObservation};
@@ -640,6 +642,22 @@ impl Resources {
     }
 }
 impl Shell for Resources {
+    type ClockJournal = Memory;
+    type ClockSource =
+        dfmcp_adapter::order_run::rpc::OrderRunRpc<dfmcp_adapter::order_run::rpc::OrderRunTcp>;
+    fn clock_enabled(&self) -> bool {
+        false
+    }
+    fn open_clock(
+        &self,
+        _: Mode,
+        _: &OperationContext,
+    ) -> Result<Option<OrderRunJournal<Self::ClockJournal>>> {
+        Ok(None)
+    }
+    fn clock_source(&self, _: &OperationContext) -> Result<Self::ClockSource> {
+        Err(rejected())
+    }
     type Journal = Memory;
     type Association = Memory;
     type Native = Native;
@@ -1037,7 +1055,7 @@ fn source_policy_is_exact_minimal_and_never_treats_independent_generations_as_eq
         request_id: RequestId::new(1),
         anchor: projection.snapshot.anchor(),
         budget: budget(),
-        grants: grants(Mode::Control, q.fortress_id(), true),
+        grants: grants(Mode::Control, q.fortress_id(), true, false),
         cancellation_requested: false,
     };
     let policy = resources.pins.citizens(&capsule, &projection, &c)?;
@@ -1145,7 +1163,7 @@ fn typed_native_opener_never_creates_on_recovery_or_reinitializes_existing_custo
             state_hash: Digest32::ZERO,
         },
         budget: budget(),
-        grants: grants(Mode::Control, q.fortress_id(), true),
+        grants: grants(Mode::Control, q.fortress_id(), true, false),
         cancellation_requested: false,
     };
     assert!(open_private_work_orders_exact(&path, &c, JournalMode::Control, false).is_err());
