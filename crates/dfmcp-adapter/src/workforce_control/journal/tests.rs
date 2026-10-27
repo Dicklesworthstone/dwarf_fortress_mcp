@@ -468,3 +468,70 @@ fn real_private_file_lock_readonly_and_mode_custody()
     // Retain artifacts for inspection; no automatic removal or evidence repair.
     Ok(())
 }
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[test]
+fn exact_private_open_never_recreates_or_adopts_an_existing_journal()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use crate::workforce_control::private_file::open_private_workforce_exact;
+    use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "dfmcp-workforce-exact-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir(&dir)?;
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    let path = dir.join("journal.bin");
+    let ctx = context()?;
+    for mode in [
+        WorkforceMode::Control,
+        WorkforceMode::Recover,
+        WorkforceMode::Offline,
+    ] {
+        assert!(open_private_workforce_exact(&path, &ctx, mode, Some(binding()?), false).is_err());
+        assert!(!path.exists(), "reopening must not create missing custody");
+    }
+    for mode in [WorkforceMode::Recover, WorkforceMode::Offline] {
+        assert!(open_private_workforce_exact(&path, &ctx, mode, Some(binding()?), true).is_err());
+        assert!(
+            !path.exists(),
+            "read/recovery modes cannot initialize custody"
+        );
+    }
+    let mut journal =
+        open_private_workforce_exact(&path, &ctx, WorkforceMode::Control, Some(binding()?), true)?;
+    let identity = journal.view(&ctx)?.id;
+    drop(journal);
+    let bytes = fs::read(&path)?;
+    assert!(
+        open_private_workforce_exact(&path, &ctx, WorkforceMode::Control, Some(binding()?), true,)
+            .is_err()
+    );
+    assert_eq!(fs::read(&path)?, bytes);
+    for mode in [
+        WorkforceMode::Control,
+        WorkforceMode::Recover,
+        WorkforceMode::Offline,
+    ] {
+        let mut journal = open_private_workforce_exact(&path, &ctx, mode, Some(binding()?), false)?;
+        assert_eq!(journal.view(&ctx)?.id, identity);
+        drop(journal);
+        assert_eq!(fs::read(&path)?, bytes);
+    }
+    let link = dir.join("linked.bin");
+    symlink(&path, &link)?;
+    assert!(
+        open_private_workforce_exact(&link, &ctx, WorkforceMode::Control, Some(binding()?), false,)
+            .is_err()
+    );
+    assert_eq!(fs::read(&path)?, bytes);
+    // Retain bounded test evidence without repairing or deleting journal files.
+    Ok(())
+}

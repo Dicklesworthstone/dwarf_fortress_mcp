@@ -56,6 +56,41 @@ fn stale() -> DfmcpError {
     )
 }
 
+/// Open bounded custody for one original citizen identity capsule. This shell
+/// only supplies the existing locked private-file boundary; its caller must
+/// validate the versioned capsule, external digest and exact historical source.
+/// Paths are operator configuration, never MCP input. Initialization creates a
+/// missing file exclusively; reopening is read-only and cannot create a file.
+pub fn open_private_citizen_identity_storage(
+    path: &std::path::Path,
+    context: &OperationContext,
+    initialize: bool,
+) -> Result<(
+    crate::build_placement::journal::private_file::PrivateBuildFile,
+    OperationContext,
+)> {
+    use crate::build_placement::journal::BuildMode;
+    use crate::build_placement::journal::private_file::open_private_storage;
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if initialize {
+        context.authorize(Capability::Plan, RiskTier::ReadOnly, &[], None)?;
+    }
+    let mode = if initialize {
+        BuildMode::Control
+    } else {
+        BuildMode::Offline
+    };
+    let (storage, created, remaining) =
+        open_private_storage(path, context, mode, initialize, 4 * 1024 * 1024)?;
+    if created != initialize {
+        return Err(error(
+            ErrorCode::Conflict,
+            "original citizen identity initialization/reopening differs from existing custody",
+        ));
+    }
+    Ok((storage, remaining))
+}
+
 /// A bounded full-roster read. Larger limits need correspondingly larger byte
 /// allowances; they never truncate the original roster into a partial scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

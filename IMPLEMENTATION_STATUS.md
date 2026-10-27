@@ -44,6 +44,54 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original native labor-goal execution core (2026-10-27)
+
+A new `semantic_workforce_runtime` joins the existing native workforce coordinator,
+original-plan archive, canonical citizen identity and durable original-goal monitor.
+Its closed request compiles one `SetLabor` goal for 1–32 canonical citizen IDs,
+one exact labor key and desired value, with an unchanged absolute deadline,
+cadence and stability requirement. The native profile cannot execute an inverse
+compensation, so this compiler explicitly seals a noncompensating original plan
+before publishing or reviewing it. It does not drop a caller-supplied compensation.
+
+The runtime archives the original complete citizen capsule as immutable historical
+identity and independently reauthorizes it on exact recovery. Native and citizen
+incarnations remain separately pinned. A paired review binds original semantics
+to the exact native work-detail assignment; one explicit confirmed dispatch is
+followed by fresh selected-citizen labor observations. Historical native Applied,
+current original-goal proof and first achievement remain separate. A true goal
+cannot repair an Unknown native action. No clock advancement or background polling
+is added.
+
+Fixed private custody distinguishes initialization from reopening. External journal,
+plan archive and citizen identity digests are required on recovery; omitted original
+files or a mismatched history-presence flag cannot hide retained work. Offline opens
+use no native connection or credential. Read-only recovery cannot regain labor
+authority. Original plan and identity custody, current operator authority and the
+live runtime cancellation/I/O hook are checked at the native effect boundary after
+the durable dispatch marker. Partial publication retains identity for exact retry;
+corrupt or uncertain custody is never repaired by replacing it.
+
+At this core checkpoint, the generic owner and concrete resource shell are exported
+through the Rust API; dedicated MCP facade registration follows in the next increment.
+Executed verification passes 71 ordinary adapter tests and 14 actual-source
+core tests. The latter include ten joined lifecycle/fault cases and four concrete
+configuration/custody/checkpoint cases. Exact custody openers also execute real
+private-file checks. The component harness compiles the actual runtime, native shell,
+archive codec, original goal monitor and complete real adapter dependencies. It does
+not compile FastMCP macros, the complete handler composition or stdio. The existing
+full MCP dependency graph remains unqualified after the previously recorded upstream
+compiler SIGKILL; its unchanged memory limit was checked and no blind retry was made.
+No native DFHack, live-game, full-workspace or production admission is claimed.
+
+The concrete source acquires at most 128 citizens completely and selects at most 32
+for a goal. Work must map to one existing exact single-labor selected-only work
+detail. Other labor columns must retain their captured values for semantic action
+verification. This does not create details, allocate jobs/tools, guarantee productivity,
+fence other controllers or prove continuous truth. Existing native wire, workforce
+journal, plan formats, the empty registry and production map remain unchanged.
+See `docs/SEMANTIC_WORKFORCE_HANDOFF.md` for the new runtime API and retained limits.
+
 ### Reviewed native goal advancement through MCP (2026-10-27)
 
 The semantic work-order development server now exposes the bounded execution

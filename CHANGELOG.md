@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-27 — Execute and recover original native labor goals
+
+- Join canonical citizen acquisition, a closed `SetLabor` compiler, paired native
+  review, exact original-plan custody and durable goal history in one Rust owner.
+- Preserve original canonical identities, deadline, cadence and stability across
+  restart; keep historical assignment evidence separate from current labor truth.
+- Require exact journal and capsule identities, explicit creation/reopen modes,
+  complete retained-file discovery and independent native source pins.
+- Revalidate original custody and current authority after dispatch intent and
+  before native assignment. Lost replies and Unknown outcomes never redispatch.
+- Pass 85 distinct adapter/core tests, including ten joined runtime fault and
+  lifecycle cases. Dedicated MCP dispatch is the next increment; full server,
+  native and live qualification remain unverified.
+
 ## 2026-10-27 — Advance native work-order goals through reviewed MCP runs
 
 - Expose finite run planning, separate confirmation, reconciliation and safety

@@ -49,6 +49,7 @@ mod output_budget;
 pub mod replay;
 pub mod resources;
 mod semantic_work_order_runtime;
+pub mod semantic_workforce_runtime;
 pub mod server;
 mod task_service;
 mod task_store;

@@ -114,6 +114,63 @@ type Authorizer = Box<
 >;
 type EvidenceOwner = CitizenWorkforceEvidenceOwner<Factory, Authorizer>;
 
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[test]
+fn original_citizen_storage_is_exclusive_exact_and_read_only_on_reopen()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    use crate::semantic_workforce::evidence_owner::open_private_citizen_identity_storage;
+    use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (capsule, projection) = observation(&[0])?;
+    let c = context(&projection.snapshot);
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "dfmcp-original-citizen-{}-{unique}",
+        std::process::id(),
+    ));
+    fs::create_dir(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let path = directory.join("original.capsule");
+    assert!(open_private_citizen_identity_storage(&path, &c, false).is_err());
+    assert!(!path.exists());
+    let mut query = c.clone();
+    query
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    assert!(open_private_citizen_identity_storage(&path, &query, true).is_err());
+    assert!(!path.exists());
+    let (mut storage, remaining) = open_private_citizen_identity_storage(&path, &c, true)?;
+    assert!(remaining.budget.max_wall_millis <= c.budget.max_wall_millis);
+    storage.write_all(&capsule.canonical_bytes)?;
+    storage.flush()?;
+    storage.sync()?;
+    assert!(open_private_citizen_identity_storage(&path, &query, false).is_err());
+    drop(storage);
+    assert!(open_private_citizen_identity_storage(&path, &c, true).is_err());
+    assert_eq!(fs::read(&path)?, capsule.canonical_bytes);
+    let (mut recovered, _) = open_private_citizen_identity_storage(&path, &query, false)?;
+    assert!(recovered.write_all(b"cannot modify history").is_err());
+    assert!(recovered.flush().is_err());
+    assert!(recovered.sync().is_err());
+    recovered.seek(SeekFrom::Start(0))?;
+    let mut raw = Vec::new();
+    recovered.read_to_end(&mut raw)?;
+    assert_eq!(raw, capsule.canonical_bytes);
+    drop(recovered);
+    let link = directory.join("linked.capsule");
+    symlink(&path, &link)?;
+    assert!(open_private_citizen_identity_storage(&link, &query, false).is_err());
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644))?;
+    assert!(open_private_citizen_identity_storage(&path, &query, false).is_err());
+    // Keep this bounded failed-custody fixture for inspection; never repair it.
+    Ok(())
+}
+
 fn evidence_owner(
     capsule: LiveObservationCapsule,
     c: &OperationContext,

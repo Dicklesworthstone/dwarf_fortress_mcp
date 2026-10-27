@@ -7,6 +7,41 @@ and restart. It uses the existing workforce wire protocol and native journal;
 it adds no bridge method, generic executor, MCP route, evidence issuer, source
 field grant, or admitted live compatibility profile.
 
+## Original-goal runtime composition
+
+`dfmcp_mcp::semantic_workforce_runtime` now supplies one owner over this adapter,
+the original plan archive, a separately retained complete citizen capsule and the
+durable goal monitor. `NativeRuntime::open_with_runtime_check` accepts immutable
+operator `Config`, offline/reconcile/control mode, one session, a bounded allowance
+and an owned runtime cancellation/I/O callback. Sources, policies, credentials and
+paths remain constructor configuration, outside client requests.
+
+`observe` returns an exact observation seal and the first bounded page of canonical
+citizen identities. `citizens_page` reads later pages from that same retained seal;
+it makes no native call. The closed `Request` contains `expected_observation`,
+`units` (1–32 canonical decimal IDs), `labor`, `enabled`, `deadline_tick`, optional
+`poll_interval_ticks` and `stable_samples`. `plan` archives the original identities
+and noncompensating original plan, then prepares a paired native review. `commit`
+requires that exact seal and explicit confirmation. `wait` reconciles the original
+native key and samples the original predicates without advancing game time.
+`cancel` retires preparation when supported and never undoes applied membership.
+
+The complete original citizen capsule is retained because a plan digest and native
+unit IDs alone cannot recreate historical canonical identity. Every reopen requires
+external exact journal, plan archive and capsule seals. Historical identity is
+independently reauthorized; no persisted field becomes fresh evidence. Durable first
+achievement survives recovery, while current goal truth requires another sample.
+Offline reopening performs no native contact. A Control opening made without labor
+authority cannot acquire it later merely because the environment changes.
+
+The concrete source bounds complete citizen acquisition to 128 citizens, foreground
+selection to 32, and citizen pages to 32 identities. Maximum per-call logical work
+is 2 GiB and 60 seconds with zero game-clock budget. Original custody and current
+authority are rechecked after DispatchStarted synchronization, immediately before
+native assignment. Uncertain effects retain their original keys and never repeat.
+The dedicated MCP facade is a separate integration increment; this core API does
+not imply transport, DFHack, live-game or compatibility qualification.
+
 ## Supported semantics
 
 The original plan must contain exactly one normalized `SetLabor` step, at most

@@ -123,6 +123,29 @@ pub fn open_private_workforce(
     mode: WorkforceMode,
     expected: Option<WorkforceBinding>,
 ) -> Result<WorkforceJournal<PrivateWorkforceFile>> {
+    open_private_workforce_inner(path, context, mode, expected, None)
+}
+
+/// Open custody with an explicit create-versus-reopen decision. Reopening never
+/// creates a missing journal, including in Control mode; initialization refuses
+/// an existing file without touching its bytes.
+pub fn open_private_workforce_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: WorkforceMode,
+    expected: Option<WorkforceBinding>,
+    initialize: bool,
+) -> Result<WorkforceJournal<PrivateWorkforceFile>> {
+    open_private_workforce_inner(path, context, mode, expected, Some(initialize))
+}
+
+fn open_private_workforce_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: WorkforceMode,
+    expected: Option<WorkforceBinding>,
+    initialize: Option<bool>,
+) -> Result<WorkforceJournal<PrivateWorkforceFile>> {
     authorize(
         context,
         context.anchor.fortress_id,
@@ -192,6 +215,12 @@ pub fn open_private_workforce(
             Err(e) => return Err(failure(e)),
         };
         let created = before.is_none();
+        if initialize.is_some_and(|initialize| initialize != created) {
+            return Err(error(
+                ErrorCode::Conflict,
+                "workforce journal initialization/reopening differs from existing custody",
+            ));
+        }
         if created && (mode != WorkforceMode::Control || expected.is_none()) {
             return Err(error(
                 ErrorCode::CapabilityDenied,
@@ -262,7 +291,7 @@ pub fn open_private_workforce(
         any(target_arch = "x86_64", target_arch = "aarch64")
     )))]
     {
-        let _ = (path, expected);
+        let _ = (path, expected, initialize);
         Err(error(
             ErrorCode::CapabilityDenied,
             "workforce private journals require Linux x86_64/aarch64",
