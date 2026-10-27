@@ -690,3 +690,25 @@ fn revoked_clock_after_dispatch_sync_retains_uncertainty_without_unpausing() -> 
     assert!(resources.base.native.borrow().queue.paused());
     Ok(())
 }
+
+#[test]
+fn opening_reference_keeps_exact_clock_identity_after_first_inspection_fails() -> Result<()> {
+    let resources = ClockResources::new()?;
+    let mut runtime = start_clock(&resources, Mode::Control, 88)?;
+    let reference = runtime.opening_recovery_reference();
+    let id = digest(
+        reference["clock"]["journal_id"]
+            .as_str()
+            .ok_or_else(rejected)?,
+    )?;
+    assert_ne!(id, Digest32::ZERO);
+    assert_eq!(reference["ok"], false);
+    assert_eq!(reference["retained_state_currently_verified"], false);
+    resources.storage.inner.data.borrow_mut().valid = false;
+    let c = runtime.context(false)?;
+    assert!(runtime.inspect(&c).is_err());
+    assert_eq!(runtime.opening_recovery_reference(), reference);
+    assert_eq!(resources.state.borrow().commits, 0);
+    assert_eq!(resources.state.borrow().queries, 0);
+    Ok(())
+}

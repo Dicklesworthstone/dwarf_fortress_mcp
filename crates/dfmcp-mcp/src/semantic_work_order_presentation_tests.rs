@@ -438,6 +438,38 @@ fn prepared_clock_exposes_separate_review_and_confirmation_scope() {
 }
 
 #[test]
+fn completed_order_clock_proposals_preserve_original_stability_cadence() {
+    for (tick, budget, expected) in [(40, 1200, 10), (50, 1200, 10), (60, 7, 7), (135, 1200, 5)] {
+        let mut view = clock_retained(false);
+        view["anchor"]["tick"] = json!(tick);
+        view["clock"]["high_tick"] = json!(tick);
+        view["current_goal"]["anchor"]["tick"] = json!(tick);
+        view["current_goal"]["current_truth"] = json!("true");
+        view["original_plan"]["steps"][0]["obligation"]["poll_interval_ticks"] = json!(10);
+        view["original_plan"]["steps"][0]["obligation"]["stable_samples"] = json!(4);
+        let p = clock_output("control", clock_success(), view, budget, false);
+        assert!(clock_enabled(&p, "fortress.plan"));
+        let recommendation = &p["agent_turn"]["recommendations"][0];
+        assert_eq!(recommendation["tool"], "fortress.plan");
+        let request: Value = serde_json::from_str(
+            recommendation["arguments"]["request"]
+                .as_str()
+                .expect("closed run request"),
+        )
+        .expect("run proposal");
+        assert_eq!(
+            request["game_ticks"], expected,
+            "tick {tick}, budget {budget}"
+        );
+        assert_eq!(request["original_paired_seal"], "c".repeat(64));
+        assert_eq!(
+            p["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"],
+            false
+        );
+    }
+}
+
+#[test]
 fn clock_grant_budget_source_and_mode_are_required_for_commit_affordance() {
     for case in 0..7 {
         let mut view = clock_retained(true);
@@ -538,6 +570,65 @@ fn cached_clock_failure_and_session_close_keep_handoff_without_authority() {
                 p["agent_turn"]["recommendations"][0]["tool"],
                 "fortress.query"
             );
+        }
+    }
+}
+
+#[test]
+fn opening_clock_reference_survives_error_close_and_overflow_before_a_goal_exists() {
+    let mut clock = clock_retained(false)["clock"].clone();
+    clock["target_digest"] = Value::Null;
+    clock["original_paired_seal"] = Value::Null;
+    clock["high_tick"] = json!(0);
+    let view = json!({"ok":false,"retained_state_currently_verified":false,
+        "clock":clock,"review":null,"original_plan":null,"recovery":null,
+        "current_goal":null,"current_goal_available":false});
+    for closed in [false, true] {
+        for overflow in [false, true] {
+            let mut result = json!({"ok":closed,"closed":closed,"effects_cancelled":false,
+                "retained_state_currently_verified":false});
+            if overflow {
+                result["huge"] = json!("x".repeat(2 * RESPONSE_RESERVE as usize));
+            }
+            let raw = packet(
+                if closed {
+                    "fortress.cancel"
+                } else {
+                    "fortress.open_session"
+                },
+                Some(SessionId::new(9)),
+                None,
+                Some("control"),
+                None,
+                Some(WorkBudget::default()),
+                result,
+                Some(view.clone()),
+                false,
+            );
+            assert!(raw.len() as u64 <= RESPONSE_RESERVE);
+            let p: Value = serde_json::from_str(&raw).expect("complete bootstrap clock handoff");
+            assert_eq!(p["retained_state"]["clock"]["journal_id"], "1".repeat(64));
+            assert_eq!(p["retained_state"]["clock"]["head"], "4".repeat(64));
+            assert!(p["retained_state"]["clock"]["active_run"].is_null());
+            assert!(p["retained_state"]["recovery"].is_null());
+            assert_eq!(p["retained_state_currently_verified"], false);
+            assert_eq!(p["agent_turn"]["active_work"]["state_known"], false);
+            assert!(!clock_enabled(&p, "fortress.plan"));
+            assert!(!clock_enabled(&p, "fortress.commit"));
+            assert!(!clock_enabled(&p, "fortress.cancel"));
+            if closed {
+                assert!(
+                    p["agent_turn"]["recommendations"]
+                        .as_array()
+                        .expect("recommendations")
+                        .is_empty()
+                );
+            } else {
+                assert_eq!(
+                    p["agent_turn"]["recommendations"][0]["tool"],
+                    "fortress.query"
+                );
+            }
         }
     }
 }

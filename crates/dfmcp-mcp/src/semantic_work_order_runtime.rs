@@ -201,6 +201,7 @@ pub struct Runtime<S: Shell> {
     history_initialized: bool,
     clock: Option<Clock<S::ClockJournal>>,
     production_at_open: bool,
+    opening_clock: Option<ClockView>,
 }
 
 /// Compact complete view of this one retained goal. Historical proof and current
@@ -453,6 +454,7 @@ impl<S: Shell> Runtime<S> {
             history_initialized: recovery.is_some_and(|r| r.history_present),
             clock,
             production_at_open,
+            opening_clock: None,
         };
         let records = result.semantic.inventory(&work.reserve(VIEW_BYTES)?)?;
         for record in &records {
@@ -495,8 +497,37 @@ impl<S: Shell> Runtime<S> {
         // original goal before publishing this recovered owner.
         let mut validation = work.narrow(&clock_validation)?;
         validation.anchor = result.anchor;
-        result.inspect_clock(&validation)?;
+        result.opening_clock = result.inspect_clock(&validation)?;
         Ok(result)
+    }
+    /// Recovery identities validated during open, retained without further I/O.
+    /// This reference cannot certify current custody, source truth or authority.
+    pub fn opening_recovery_reference(&self) -> Value {
+        let recovery = self
+            .archive
+            .as_ref()
+            .zip(self.original.as_ref())
+            .map(|(archive, plan)| {
+                let seal = archive.seal();
+                let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),
+                "object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(plan.anchor),
+                "history_present":self.history_initialized});
+                if let Some(clock) = &self.opening_clock {
+                    value["clock_journal_id"] = json!(clock.journal_id.to_hex());
+                }
+                value
+            });
+        json!({"ok":false,"retained_state_currently_verified":false,
+            "mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
+            "clock":self.opening_clock.as_ref().map(ClockView::to_json),
+            "review":self.review.as_ref().map(|review|json!({
+                "paired_seal":review.seal().to_hex(),
+                "native_plan_digest":review.native_plan().digest().to_hex(),
+                "semantic_plan_digest":review.original_plan().digest.to_hex()})),
+            "original_plan":self.original.as_ref().map(|plan|json!({
+                "plan_digest":plan.digest.to_hex(),"anchor":anchor_json(plan.anchor)})),
+            "recovery":recovery,"current_goal":null,"current_goal_available":false,
+            "runtime_admitted":false,"automatic_redispatch":false})
     }
     pub fn anchor(&self) -> StateAnchor {
         self.anchor

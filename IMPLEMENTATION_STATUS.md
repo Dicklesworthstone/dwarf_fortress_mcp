@@ -44,6 +44,56 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Reviewed native goal advancement through MCP (2026-10-27)
+
+The semantic work-order development server now exposes the bounded execution
+core through the existing eleven tools. `open_session` negotiates an explicit
+0–1200 game-tick allowance (zero by default). After verified insertion,
+`plan` accepts the closed `kind: "run"` request and derives the native order
+from the original Created receipt. `commit(scope="run")` confirms the separate
+clock review; `wait` reconciles that same run before attempting fresh paused
+original-goal proof, and `cancel(scope="run")` retires preparation or requests
+the native owner's safety pause. No tool chains another run automatically.
+
+Production and clock authority remain independent. Clock-only Control recovery
+cannot regain insertion authority. Every native source boundary rechecks an
+injected live runtime cancellation/I/O checkpoint; in the concrete MCP facade
+this is the owned Asupersync context, including after a durable dispatch marker
+and before unpause. Closed request parsers cannot choose an order ID, predicate,
+key, endpoint or replacement deadline. A native stop receipt remains separate
+from the exact original goal, sampled temporal proof and physical quiescence.
+
+Clock-aware Agent Turns expose the active review and exact recovery identities.
+Recommendations for an already-true goal preserve the original polling cadence
+so multiple stable samples can fit before its unchanged deadline. The validated
+opening identity is retained as an explicitly unverified reference before the
+first inspection; failure, close and bounded overflow cannot discard a newly
+created clock journal ID. Current custody must still be verified before control.
+The opening inspection reserves 32 MiB and the complete response 128 KiB.
+
+Final executed verification passes 155 distinct tests: 28 ordinary adapter
+order-run tests, 58 public semantic work-order integration tests and 69 combined
+actual-source tests. The combined target includes 17 Runtime tests (seven joined
+clock lifecycle/fault cases), 16 clock-owner tests, five concrete native/config
+checkpoint tests, 19 presentation tests, six shared Agent Turn tests and six
+verbatim facade-boundary tests. The actual Action dispatch implementation and
+closed parsers compile against concrete NativeRuntime; its Send and checked
+opening constructor signatures also compile. Complete adapter library checking,
+scoped formatting and diff checks pass. All operator documentation JSON examples
+parse. The combined test log is `semantic-facade-final.log` in task evidence.
+
+The focused harness uses the actual Runtime, native resource shell, presentation
+and complete real adapter dependencies. It does not compile FastMCP macros,
+complete handler composition or stdio. The full unchanged locked MCP build still
+stops in upstream asupersync with SIGKILL before reaching dfmcp-mcp, as recorded
+below. No full-server, full-workspace, DFHack native or live-game qualification is
+claimed. Native stop bounds are callback triggers and can overshoot; other
+controllers are not globally fenced. Inventory quotas, material/workshop
+feasibility and generic multi-goal execution remain outside this native slice.
+Existing wire/storage formats, the empty registry and production map are unchanged.
+See `docs/SEMANTIC_WORK_ORDER_MCP.md` for the complete configuration, two review
+boundaries, bounded runs and exact original/clock recovery workflow.
+
 ### Original-order bounded simulation execution core (2026-10-27)
 
 The original native work-order runtime now composes the existing order-run/1.14
@@ -69,9 +119,9 @@ hide an existing clock journal. Offline opens require no native credential or
 contact. Immutable creation/clock modes cannot regain authority from later
 environment changes. Existing native wire and journal formats are unchanged.
 
-The execution API, concrete resource shell and Agent Turn presentation are
-implemented. The public MCP tool dispatch does not yet expose run requests in
-this checkpoint. Executed validation: the complete real adapter library check,
+At this core checkpoint, the execution API, concrete resource shell and Agent
+Turn presentation were implemented; public MCP run dispatch was pending. The
+newer entry above records its completed integration. Executed validation: the complete real adapter library check,
 28 order-run unit tests, 58 public semantic work-order integration tests and 59
 actual-source runtime/presentation tests pass (145 distinct tests). Six joined
 runtime cases exercise insertion, confirmed runs, pending reconciliation,

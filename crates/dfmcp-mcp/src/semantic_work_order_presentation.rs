@@ -254,6 +254,17 @@ fn render(
         .zip(c.budget)
         .map(|(remaining, b)| remaining.min(b.max_game_ticks).min(1200))
         .filter(|n| *n > 0);
+    // A completed order no longer has remaining work to stop a run early.
+    // Preserve room for the original distinct stability samples instead of
+    // recommending that its Active guard consume the whole remaining deadline.
+    let proposed_ticks = if goal.is_some_and(|g| g["current_truth"] == "true") {
+        allowed_ticks
+            .zip(obligation(view).and_then(|o| o["poll_interval_ticks"].as_u64()))
+            .map(|(ticks, cadence)| ticks.min(cadence))
+            .filter(|n| *n > 0)
+    } else {
+        allowed_ticks
+    };
     let clock_linked = clock.as_ref().is_some_and(|v| {
         digest(&v["target_digest"]).is_some()
             && digest(&v["original_paired_seal"]).is_some()
@@ -285,7 +296,7 @@ fn render(
         && clock_linked
         && !uncertain
         && completion != Some(true)
-        && allowed_ticks.is_some()
+        && proposed_ticks.is_some()
         && state == Some("created")
         && view["insertion"]["verified"] == true
         && clock.as_ref().is_some_and(|v| {
@@ -370,7 +381,7 @@ fn render(
                 json!({"session_id":session.to_string(),"paired_seal":digest(&view["review"]["paired_seal"]),"confirmed":true}), true));
         } else if run_proposal {
             let request = json!({"kind":"run","original_paired_seal":digest(&view["review"]["paired_seal"]),
-                "game_ticks":allowed_ticks,"wall_millis":c.budget.map(|b|b.max_wall_millis.min(5000)).unwrap_or(0)});
+                "game_ticks":proposed_ticks,"wall_millis":c.budget.map(|b|b.max_wall_millis.min(5000)).unwrap_or(0)});
             recommendations.push(next_clock("fortress.plan","prepare a finite clock slice for the retained goal, then review its separate seal before unpausing",
                 json!({"session_id":session.to_string(),"request":request.to_string()}),false));
         } else if state == Some("created") && completion != Some(true) && c.mode != Some("offline")

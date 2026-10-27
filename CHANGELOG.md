@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-27 — Advance native work-order goals through reviewed MCP runs
+
+- Expose finite run planning, separate confirmation, reconciliation and safety
+  cancellation through the existing eleven tools. Keep explicit game-tick
+  budgets and independent production/clock authority.
+- Recheck live runtime cancellation and I/O capability at native source/effect
+  boundaries, including after durable dispatch intent and before unpause.
+- Retain original and clock identities through opening failure, close and
+  overflow. Recommend cadence-sized continuation for already-true goals that
+  still need stable samples or physical quiescence.
+- Document complete operator setup, both review seals, lost-reply recovery and
+  callback-bound limits in the native goal guide and MCP surface.
+- Pass 155 distinct ordinary adapter and actual-source tests, including seven
+  joined runtime scenarios and six verbatim facade-boundary cases. Full FastMCP
+  handler/stdio, native and live qualification remain unverified; see status.
+
 ## 2026-10-27 — Bind bounded simulation runs to retained native order goals
 
 - Compose the real conditional-run coordinator with exact original plan,

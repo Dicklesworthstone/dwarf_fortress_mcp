@@ -120,6 +120,7 @@ pub struct Config {
     recovery: Option<Recovery>,
     clock: Option<ClockConfig>,
     environment_digest: Digest32,
+    runtime_check: Option<fn() -> Result<()>>,
 }
 impl Config {
     /// Bounded JSON in operator environment, not an MCP parameter or path to a
@@ -202,6 +203,7 @@ impl Config {
             recovery,
             clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
+            runtime_check: None,
         })
     }
     pub fn validate_environment() -> Result<()> {
@@ -241,6 +243,9 @@ impl Config {
         std::env::var(CLOCK_AUTHORITY).ok().as_deref() == Some("1")
     }
     fn current(&self) -> Result<()> {
+        if let Some(check) = self.runtime_check {
+            check()?;
+        }
         Self::validate_environment()?;
         let raw = std::env::var(CONFIG)
             .map_err(|_| denied("operator source configuration was removed"))?;
@@ -377,6 +382,19 @@ pub struct NativeShell {
 }
 pub type NativeRuntime = Runtime<NativeShell>;
 impl NativeRuntime {
+    /// The concrete MCP owner supplies its live cancellation and I/O checkpoint.
+    /// It is retained through source clones and rechecked at every native edge,
+    /// including after a durable dispatch marker. Operator JSON cannot set it.
+    pub fn open_with_runtime_check(
+        mut config: Config,
+        mode: Mode,
+        session: SessionId,
+        budget: WorkBudget,
+        runtime_check: fn() -> Result<()>,
+    ) -> Result<Self> {
+        config.runtime_check = Some(runtime_check);
+        Self::open(config, mode, session, budget)
+    }
     pub fn open(
         config: Config,
         mode: Mode,
@@ -391,6 +409,109 @@ impl NativeRuntime {
             session,
             budget,
         )
+    }
+}
+
+#[cfg(test)]
+mod runtime_checkpoint_tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CHECKS: AtomicUsize = AtomicUsize::new(0);
+    fn reject_runtime() -> Result<()> {
+        CHECKS.fetch_add(1, Ordering::SeqCst);
+        Err(DfmcpError::new(
+            ErrorCode::CancellationRequested,
+            "installed runtime checkpoint rejected native access",
+        ))
+    }
+    fn rejected<T>(result: Result<T>) {
+        let cause = match result {
+            Ok(_) => panic!("installed runtime checkpoint was bypassed"),
+            Err(cause) => cause,
+        };
+        assert_eq!(cause.code, ErrorCode::CancellationRequested);
+        assert_eq!(
+            cause.message,
+            "installed runtime checkpoint rejected native access"
+        );
+    }
+
+    #[test]
+    fn installed_runtime_checkpoint_precedes_environment_credentials_and_native_io() -> Result<()> {
+        CHECKS.store(0, Ordering::SeqCst);
+        let listener = TcpListener::bind("127.0.0.1:0").expect("fixture listener");
+        listener.set_nonblocking(true).expect("nonblocking fixture");
+        let directory = std::env::temp_dir().join(format!(
+            "dfmcp-runtime-check-{}-{}",
+            std::process::id(),
+            listener.local_addr().expect("fixture address").port(),
+        ));
+        assert!(!directory.exists());
+        let mut raw = json!({
+            "schema":"dfmcp.semantic-work-order-development/1",
+            "directory":directory,
+            "endpoint":listener.local_addr().expect("fixture address").to_string(),
+            "initialize":true,
+            "clock":{"generation":50},
+            "sources":{
+                "kind":"operator-development-source-acceptance/1",
+                "world_folder":"region1","site_id":7,
+                "df_version":"df","dfhack_version":"dfhack",
+                "citizen_bridge_version":"citizens","citizen_generation":10,
+                "work_order_generation":20,"progress_generation":30,"operations_generation":40
+            }
+        });
+        let config = Config::parse(&raw.to_string())?;
+        assert!(config.runtime_check.is_none());
+        raw["runtime_check"] = json!("client-selected");
+        assert!(Config::parse(&raw.to_string()).is_err());
+        let c = OperationContext {
+            session_id: SessionId::new(901),
+            request_id: RequestId::new(902),
+            anchor: StateAnchor {
+                fortress_id: config.sources.fortress(),
+                cursor: ObservationCursor::ORIGIN,
+                tick: GameTick(0),
+                state_hash: Digest32::ZERO,
+            },
+            budget: WorkBudget {
+                max_bytes: MAX_BYTES,
+                max_entities: 4096,
+                max_actions: 1,
+                max_wall_millis: 5000,
+                max_output_tokens: MAX_OUTPUT_TOKENS,
+                max_game_ticks: 1200,
+            },
+            grants: vec![],
+            cancellation_requested: false,
+        };
+        rejected(NativeRuntime::open_with_runtime_check(
+            config.clone(),
+            Mode::Control,
+            c.session_id,
+            c.budget,
+            reject_runtime,
+        ));
+        let mut installed = config;
+        installed.runtime_check = Some(reject_runtime);
+        let shell = NativeShell {
+            config: Arc::new(installed.clone()),
+        };
+        rejected(shell.check_environment());
+        rejected(shell.open_control(Mode::Control, &c));
+        rejected(shell.open_clock(Mode::Control, &c));
+        rejected(shell.clock_source(&c));
+        rejected(shell.acquire(&c));
+        rejected(shell.progress(&c));
+        rejected(shell.operations(&c));
+        assert_eq!(CHECKS.load(Ordering::SeqCst), 8);
+        assert!(!directory.exists(), "no private custody was created");
+        assert!(
+            matches!(listener.accept(), Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock)
+        );
+        Ok(())
     }
 }
 struct Pages<'a> {

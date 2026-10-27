@@ -163,9 +163,15 @@ names for [original native furniture-order goals](docs/SEMANTIC_WORK_ORDER_MCP.m
 Its closed `plan` request compiles one finite order under an exact canonical
 observation; `commit` confirms the paired semantic/native review once, and
 `wait` reconciles insertion and polls the original goal with durable history.
+Optional order-run/1.14 control uses `plan` with `kind: "run"`, a separate
+review confirmed through `commit` with `scope: "run"`, and `cancel` with
+`scope: "run"`. Each bounded run targets the exact original Created receipt;
+it cannot extend the original deadline or replace its cadence and stability.
+`wait` first reconciles retained clock uncertainty and never starts a run.
 `query`, `explain` and `doctor` expose complete retained custody, exact restart
-seals, separate current/historical proof and physical quiescence. It requires
-explicit operator development source acceptance and remains unadmitted.
+seals, separate current/historical proof, clock receipts and physical quiescence.
+Native clock receipts remain separate from original-goal proof. The runtime
+requires explicit operator development source acceptance and remains unadmitted.
 
 The furniture development server also accepts a `furniture_request` JSON string
 as an alternative `open_session` input. One complete operations/1.4 inventory
@@ -193,6 +199,15 @@ Negotiates fortress, versions, compatibility, requested capability scopes, obser
 and hard budgets. Returns a concrete initial anchor, grants, bootstrap briefing, supported
 profiles, current affordances, implementation uncertainty, and the safest first inspection step.
 
+The semantic work-order development server accepts optional `max_game_ticks`,
+defaulting to zero and capped at 1200; opening never unpauses. Original-order
+insertion and optional clock control have separate operator gates and
+credentials. Optional operator `clock` configuration pins its own generation
+and private `clock.journal`; every reopen requires the externally retained
+exact journal identity. These are operator configuration, not client tool
+arguments. See `docs/SEMANTIC_WORK_ORDER_MCP.md` for initialization and the
+complete recovery handoff for the original goal and clock.
+
 ### `fortress.observe`
 
 Accepts an exact cursor or no cursor, interest set, profile/projection, freshness, and limits.
@@ -212,6 +227,16 @@ DAG, affected scopes, assumptions, witnessed preconditions, postconditions, obli
 capabilities, checkpoint policy, predicted diff, cost, invalidators, alternatives, and
 explanation. The executable laboratory supports every non-extension semantic
 action family and furnished blueprint objectives; see `docs/LAB_SEMANTIC_ACTIONS.md`.
+
+After verified insertion, the semantic work-order development server also
+accepts a closed `request` JSON string with `kind: "run"`,
+`original_paired_seal`, `game_ticks` and `wall_millis`. It acquires fresh
+original-goal evidence and prepares a separate review without unpausing. The
+runtime chooses the receipt-linked native order and stop guard. Bounds are
+1–1200 ticks within the negotiated allowance and original deadline, and
+1–60000 milliseconds for the native stop bound. A complete inactive order can
+receive another reviewed slice for original sampled stability or global job
+quiescence, with unexpected activation as its safety stop.
 
 The laboratory production template compiles original DRINK/FOOD and wooden
 BED/DOOR/TABLE/CHAIR quotas with the
@@ -265,6 +290,14 @@ Revalidates before effects. Returns per-step action states, checkpoint receipt, 
 evidence, observed delta, and prediction-versus-observation comparison. Timeout may produce
 `indeterminate`.
 
+In the semantic work-order development server, omitted `scope` or
+`scope: "goal"` confirms the original paired review for insertion. `scope: "run"`
+instead confirms `clock.active_run.review_seal` through the existing
+`paired_seal` argument. Both require `confirmed: true` and current authority
+for that effect. The original archive and Created receipt remain bound to
+every run; durable dispatch intent precedes the native effect. Lost replies
+require exact reconciliation and cannot authorize another insertion or unpause.
+
 The laboratory modern stdio registration accepts optional `as_task: true` with
 an explicit session ID and sealed plan digest. A client must negotiate the
 Tasks extension. This returns a real modern task handle whose original plan is
@@ -277,6 +310,14 @@ same. See `docs/LAB_MCP_TASKS.md` for the exact bounded implementation.
 Polls or follows plans/actions/obligations under bounded wall/game time. Returns meaningful
 progress only and may provide continuation. Stable no-change progress becomes a compact
 heartbeat.
+
+The semantic work-order development server first queries a retained clock run,
+then attempts a fresh paused original-goal sample only when the clock state
+permits it. Running or unresolved clock effects remain visible and prevent
+that sample. This `wait` never starts a run or advances time itself. Original
+cadence, absolute deadline and stability remain authoritative; a native stop
+or historical pause receipt cannot satisfy them. Further runs each require
+another explicit plan and confirmation.
 
 In the reference laboratory, a positive `max_game_ticks` request requires
 current `ControlClock` authority. An unpaused advance must remain within both
@@ -301,6 +342,13 @@ See `docs/LAB_FOREGROUND_PROGRESS.md` for the bounded implementation and evidenc
 
 Starts or advances request/drain/compensate/finalize. It never means “delete the record.” Active
 work remains visible throughout the drain.
+
+The semantic work-order development server uses `scope: "goal"` by default to
+retire a prepared insertion. `scope: "run"` retires a prepared clock run or
+requests the dispatched native owner's safety pause under current clock
+authority. It retains the manager order and original goal. `scope: "session"`
+releases resources without cancelling game effects; preserve the complete
+recovery handoff, including `clock_journal_id` when configured, before closing.
 
 The laboratory supports `scope: "last_action"` (default), `"plan"` (the latest
 committed plan), `"oldest_open_plan"` (the oldest retained plan with unfinished
