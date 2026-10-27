@@ -1699,6 +1699,37 @@ impl PlanSource {
         self.compile(id, snapshot).map(|(intent, _)| intent)
     }
 
+    fn forecast(
+        &self,
+        adapter: &MemoryAdapter,
+        plan: &PreparedPlan,
+        context: &OperationContext,
+    ) -> serde_json::Value {
+        let reserve_until = match self {
+            Self::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)
+                .map(|request| request.reserve_until_tick()),
+            Self::ProductionContinuation { raw, .. } => {
+                goal_continuation::ProductionContinuation::parse(raw)
+                    .map(|source| source.reserve_until_tick())
+            }
+            _ => Ok(None),
+        };
+        match reserve_until {
+            Ok(Some(until)) => plan_forecast::forecast_plan_with_reserve(
+                adapter,
+                plan,
+                context,
+                Some(until),
+            ),
+            Ok(None) => forecast_plan(adapter, plan, context),
+            Err(error) => json!({
+                "epistemic_state": "predicted",
+                "available": false,
+                "reason": {"code": error.code.as_str(), "message": error.message},
+            }),
+        }
+    }
+
     fn continuation(&self) -> Result<Option<GoalContinuation>> {
         match self {
             Self::ProductionContinuation { raw, .. } => {
@@ -3136,7 +3167,7 @@ pub(crate) fn plan_request(
                         "requires_checkpoint": plan.requires_checkpoint,
                         "expires_at_tick": plan.expires_at_tick.0,
                         "steps": crate::lab_world::plan_steps_json(&plan),
-                        "forecast": forecast_plan(&guard.adapter, &plan, &ctx),
+                        "forecast": source.forecast(&guard.adapter, &plan, &ctx),
                         "live_routing": live_routing_json(&plan),
                         "production": production_analysis,
                         "continuation": source.continuation_json(),
@@ -3870,7 +3901,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         Ok((plan, production_analysis)) => {
             let digest = plan.digest.to_string();
             payload["rebased_plan"] = json!({
-                "forecast": forecast_plan(&session.adapter, &plan, &ctx),
+                "forecast": stale.source.forecast(&session.adapter, &plan, &ctx),
                 "live_routing": live_routing_json(&plan),
                 "plan_digest": digest,
                 "expires_at_tick": plan.expires_at_tick.0,

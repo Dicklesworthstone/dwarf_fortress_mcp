@@ -3,8 +3,9 @@
 The deterministic laboratory compiles original DRINK, FOOD, BED, DOOR, TABLE
 and CHAIR quotas into
 ordinary sealed work orders, with optional explicitly authorized labor and
-workshop setup. New `fortress.plan` requests use the fixed
-`consumption_aware_v1` compiler. The existing `blueprint` JSON string accepts:
+workshop setup. New `fortress.plan` requests without an explicit future reserve
+horizon use the fixed `consumption_aware_v1` compiler. The existing `blueprint`
+JSON string accepts:
 
 ```json
 {
@@ -88,7 +89,8 @@ snapshots never become canonical evidence or dispatch authority.
 ## Exact saved-plan behavior
 
 Compiler selection is retained with the original source. New production intake
-adds `"planner":"consumption_aware_v1"` to canonical source JSON. Historical
+without a future reserve horizon adds `"planner":"consumption_aware_v1"` to
+canonical source JSON. Historical
 production sources without that field retain their previous compiler, canonical
 bytes, summary, action program and prepared-plan seal when reconstructed at their
 original snapshot. Parsing an archive does not choose today's compiler.
@@ -99,7 +101,8 @@ all original quotas, permissions and site choices, even when some setup fields
 are unused at the current anchor. Custom summaries must leave space for that
 seal within the existing 256-byte bound.
 
-New explicit continuations select `dfmcp.production-continuation/2`, retaining
+New explicit continuations without a future reserve horizon select
+`dfmcp.production-continuation/2`, retaining
 the complete original request unchanged while choosing the consumption-aware
 compiler for the new pursuit. Historical `/1` continuations retain their exact
 compiler, bytes and digest domain. Ordinary archived reconstruction and exact
@@ -120,9 +123,10 @@ planning. Existing workload and setup admission remains conservative. Checked
 quantities, the 65,536-entity bound, the 64-round limit and the one-game-year
 obligation bound prevent unbounded planning. Refusal means this bounded model
 could not establish the requested plan; it does not prove every possible
-production strategy infeasible. If every original quota already holds and
-there is no production work, the compiler preserves the existing no-work
-result instead of inventing a maintenance horizon.
+production strategy infeasible. Without an explicit future reserve horizon,
+if every original quota already holds and there is no production work, the
+compiler preserves the existing no-work result instead of inventing a
+maintenance horizon.
 
 This functionality is the executable reference laboratory. It does not claim
 DFHack recipe behavior, native mutation admission or compatibility evidence.
@@ -213,3 +217,98 @@ it still pays for every added production batch.
 
 See [LAB_FINITE_PROVISIONS.md](LAB_FINITE_PROVISIONS.md) for scenario selection,
 current allocation history, forecast semantics and interrupted-goal recovery.
+
+## Request reserves for an explicit future tick
+
+Add `reserve_until_tick` to a production request to budget consumption beyond
+the work's own completion horizon. For example, pass this JSON object as the
+`fortress.plan` `blueprint` string:
+
+```json
+{
+  "template": "production",
+  "quotas": [
+    {"item": "DRINK", "minimum": 40},
+    {"item": "FOOD", "minimum": 60}
+  ],
+  "reserve_until_tick": 2401
+}
+```
+
+The field is an absolute game tick, not a duration. It must be an integer
+strictly after the current source tick and at most 403,200 ticks, one reference
+game year, ahead. A source at tick 1 therefore budgets 2,400 ticks in this
+example. Past or equal ticks, excessive horizons, malformed values and checked
+arithmetic overflow refuse planning. The existing bounds on the work schedule
+still apply independently.
+
+Current intake selects `consumption_reserve_v1` and includes that planner name
+with the exact tick in canonical source JSON. The reserve field cannot be
+combined with an older planner generation. Saved sources retain the explicit
+generation; reconstruction never interprets an old request using today's
+compiler. The source seal covers the tick even when changing it would produce
+the same rounded batches and action program.
+
+The compiler jointly budgets FOOD and DRINK through the later of the work
+completion horizon and the requested tick. It starts with consumption through
+the requested tick before calculating work, then increases targets until the
+work schedule and consumption allowance agree. This allows production when the
+original minima already hold but projected future consumption would exhaust
+the reserve. If current stocks already fund the complete reserve and there is
+no work, planning returns the existing no-work result.
+
+Every iteration retains the finite worker, workshop and input checks. In
+`starter_fortress_provisions`, FOOD and DRINK draw from the same finite PLANT
+supply, after conservative pending demand from older physical work. Authorized
+workshop setup also consumes WOOD and takes time; shared workers and queued
+service can extend the work horizon and increase required ingredients. A
+deficit refuses the candidate before dispatch. Future production is not
+credited as observed inventory.
+
+The original terminal predicates remain the exact requested stock minima.
+Action obligations keep deadlines based on their work schedule; a distant
+reserve tick does not prolong them. Conversely, an early reserve tick does
+not require work to finish by that tick. Inspect the separate future forecast
+to see whether the original quotas are predicted to hold at that point.
+
+`production.consumption` reports `reserve_until_tick`, `reserve_horizon_ticks`,
+`work_completion_horizon_tick` and `work_completion_horizon_ticks`. Its existing
+`planning_horizon_tick` and `planning_horizon_ticks` describe the later horizon
+used for consumption. The report marks `reserve_stock_is_planning_target` true,
+`requested_tick_is_action_deadline` false and
+`continuous_maintenance_proven` false.
+
+### Review the separate future forecast
+
+The ordinary `forecast` continues to report action completion, original-goal
+truth and physical quiescence at the work forecast's frontier. When that
+forecast is available, horizon-bearing requests additionally return
+`forecast.reserve_forecast` with:
+
+- `available`, and a reason when the requested frontier cannot be evaluated;
+- `reserve_until_tick` and, when available, the exact `predicted_tick` and
+  `predicted_state_hash`;
+- `predicted_goal_truth` for the original quotas and
+  `predicted_physical_quiescent` at that same future tick;
+- `continuous_maintenance_proven: false` and `changes_action_deadlines: false`.
+
+If the requested tick falls during work, the simulation inspects that exact
+frontier rather than borrowing stock produced later. If it follows the work
+forecast, a separate discarded fork advances to it, preserving the ordinary
+completion fields and workforce/material/provisions reports. A paused or
+unavailable simulation cannot establish future stock; an unavailable report
+does not mean the future goal is false. The complete simulation stays bounded
+by 400 time slices.
+
+Read both the ordinary completion report and the future report. A true future
+quota prediction is one simulated endpoint, not proof that stock stays above
+the minimum throughout the intervening interval, that real future supplies are
+guaranteed, or that any action has actually completed. No new background
+maintenance loop or live mutation admission is introduced.
+
+An eligible later pursuit preserves the same absolute tick in continuation
+source `/3`; it cannot renew an expired horizon. When the current original
+minima are still True but more reserve work is needed, submit a fresh explicit
+production request rather than `continue_goal`. See
+[future reserve continuations](PRODUCTION_GOAL_CONTINUATION.md#continue-an-explicit-future-reserve-with-3)
+for the eligibility and replay rules.

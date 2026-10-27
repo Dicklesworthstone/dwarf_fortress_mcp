@@ -44,6 +44,40 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Explicit future food and drink reserves (2026-10-26)
+
+The existing laboratory production request accepts an absolute
+`reserve_until_tick` through the separate `consumption_reserve_v1` compiler.
+It budgets consumption through the later of that tick and the actual work
+horizon, including currently satisfied stock minima, shared finite PLANT,
+queued work, workforce contention and explicitly authorized workshop setup.
+Action obligations keep their work-based deadlines. Original current-stock
+predicates remain unchanged; predicted reserves are not continuous maintenance
+proof or future observed stock.
+
+Canonical production sources seal the exact requested tick and compiler.
+The distinct `dfmcp.production-continuation/3` preserves both across flat
+lineage and exact reopening; expired horizons cannot silently renew. Historical
+sources and horizon-free requests retain their prior compiler and bytes. A
+True current-stock goal still requires a fresh explicit reserve request after
+interrupted reserve work, rather than bypassing the existing continuation gate.
+
+The production forecast now separately samples the exact requested future
+frontier on a discarded reference-world fork. A tick before work completion
+cannot borrow later output, and a later reserve simulation does not change
+action deadlines or the work-completion report. Paused or unavailable future
+state remains unavailable. Public planning and reviewed stale-plan replay use
+the retained source to select this forecast.
+
+Focused compiler, source, continuation, forecast and public-facade regressions
+are included. Scoped pinned-nightly formatting and source review passed;
+focused runtime validation is in progress. The shared environment exhausted
+disk capacity and subsequently stalled filesystem I/O during compilation.
+The required repository checks retain their pre-existing source-bundle and
+static-contract failures. No full-workspace, native or live qualification is
+claimed. See `docs/PRODUCTION_RESERVE_PLANNING.md` and
+`docs/PRODUCTION_GOAL_CONTINUATION.md`.
+
 ### Finite shared ingredients for laboratory food and reserve plans (2026-10-24)
 
 The separately declared `plant-provisions/1` model composes with shared labor

@@ -8,6 +8,9 @@ use serde_json::Value as Json;
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "production_reserve_mcp_tests.rs"]
+mod reserve;
+
 fn parsed(raw: &str) -> TestResult<Json> {
     Ok(serde_json::from_str(raw)?)
 }

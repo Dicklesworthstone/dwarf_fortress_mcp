@@ -24,6 +24,29 @@ pub(super) fn forecast_plan(
     plan: &PreparedPlan,
     template: &OperationContext,
 ) -> serde_json::Value {
+    forecast_inner(adapter, plan, template, None)
+}
+
+/// Keep the production completion forecast separate from the explicitly
+/// requested future stock frontier. Neither establishes continuous maintenance.
+pub(super) fn forecast_plan_with_reserve(
+    adapter: &MemoryAdapter,
+    plan: &PreparedPlan,
+    template: &OperationContext,
+    reserve_until_tick: Option<u64>,
+) -> serde_json::Value {
+    match reserve_until_tick {
+        Some(tick) => forecast_inner(adapter, plan, template, Some(tick)),
+        None => forecast_plan(adapter, plan, template),
+    }
+}
+
+fn forecast_inner(
+    adapter: &MemoryAdapter,
+    plan: &PreparedPlan,
+    template: &OperationContext,
+    reserve_until_tick: Option<u64>,
+) -> serde_json::Value {
     let mut fork = adapter.clone();
     let context = |fork: &MemoryAdapter| OperationContext {
         anchor: fork.snapshot().anchor(),
@@ -37,6 +60,14 @@ pub(super) fn forecast_plan(
             "reason": {"code": reason.code.as_str(), "message": reason.message},
         })
     };
+    if reserve_until_tick.is_some_and(|until| {
+        until <= start.0 || until - start.0 > dfmcp_intent::effects::MAX_DEFAULT_OBLIGATION_TICKS
+    }) {
+        return unavailable(&DfmcpError::new(
+            dfmcp_core::ErrorCode::InvalidRequest,
+            "reserve forecast requires a future tick within one bounded game year",
+        ));
+    }
     let prepared = match fork.prepare(plan, &context(&fork)) {
         Ok(prepared) => prepared,
         Err(error) => return unavailable(&error),
@@ -82,9 +113,17 @@ pub(super) fn forecast_plan(
             || !quiescent
             || goal != PredicateTruth::True);
     let span = horizon.saturating_sub(start.0);
+    // Reserve one extra slice for an exact in-work frontier and one for the
+    // later reserve fork, keeping the complete forecast within the same bound.
+    let work_slices = if reserve_until_tick.is_some() {
+        MAX_FORECAST_SLICES - 2
+    } else {
+        MAX_FORECAST_SLICES
+    };
     let slice = span
-        .div_ceil(MAX_FORECAST_SLICES)
+        .div_ceil(work_slices)
         .max(dfmcp_intent::effects::DEFAULT_POLL_INTERVAL_TICKS);
+    let mut reserve = None;
     if !blocked_by_pause && span > 0 {
         let mut elapsed = 0u64;
         while elapsed < span
@@ -92,7 +131,15 @@ pub(super) fn forecast_plan(
                 || !quiescent
                 || goal != PredicateTruth::True)
         {
-            let advance = slice.min(span - elapsed);
+            let mut advance = slice.min(span - elapsed);
+            if let Some(until) = reserve_until_tick
+                && until > fork.snapshot().tick.0
+            {
+                // Inspect the requested frontier exactly, including when work
+                // is still outstanding. Never report a later stock as if it
+                // had already existed at the requested tick.
+                advance = advance.min(until - fork.snapshot().tick.0);
+            }
             if let Err(error) = fork.advance_ticks(advance) {
                 return unavailable(&error);
             }
@@ -118,6 +165,9 @@ pub(super) fn forecast_plan(
                 Ok(truth) => truth,
                 Err(error) => return unavailable(&error),
             };
+            if reserve_until_tick == Some(fork.snapshot().tick.0) {
+                reserve = Some(reserve_frontier(&fork, goal, quiescent));
+            }
         }
     }
     let steps: Vec<serde_json::Value> = outcomes
@@ -160,6 +210,35 @@ pub(super) fn forecast_plan(
         "steps": steps,
         "assumes": "the fortress stays as it is now and no other agent acts; a prediction is not evidence",
     });
+    if let Some(until) = reserve_until_tick {
+        if reserve.is_none() && !fork.snapshot().paused && fork.snapshot().tick.0 < until {
+            // Preserve the work-forecast frontier above and all of its reports.
+            // Later consumption runs on another discarded fork; it never
+            // prolongs action obligations or changes their proof.
+            let mut future = fork.clone();
+            reserve = Some(
+                match future.advance_ticks(until - future.snapshot().tick.0) {
+                    Ok(()) => match (goal_truth(&future), work_quiescent(&future)) {
+                        (Ok(truth), Ok(quiet)) => reserve_frontier(&future, truth, quiet),
+                        (Err(error), _) | (_, Err(error)) => unavailable(&error),
+                    },
+                    Err(error) => unavailable(&error),
+                },
+            );
+        }
+        let mut report = reserve.unwrap_or_else(|| json!({
+            "epistemic_state": "predicted",
+            "available": false,
+            "reason": "the requested future frontier was not reached; a paused or unavailable simulation cannot establish future stock",
+        }));
+        report["reserve_until_tick"] = json!(until);
+        report["continuous_maintenance_proven"] = json!(false);
+        report["changes_action_deadlines"] = json!(false);
+        report["scope"] = json!(
+            "original stock quotas at one predicted future frontier; intervening stock minima and real future availability are not proved"
+        );
+        forecast["reserve_forecast"] = report;
+    }
     match crate::lab_world::workforce_json(fork.snapshot()) {
         Ok(Some(mut workforce)) => {
             // A fork's scheduler is a prediction, even though it follows the
@@ -207,6 +286,22 @@ pub(super) fn forecast_plan(
     forecast
 }
 
+fn reserve_frontier(fork: &MemoryAdapter, truth: PredicateTruth, quiet: bool) -> serde_json::Value {
+    json!({
+        "epistemic_state": "predicted",
+        "available": true,
+        "method": "deterministic_laboratory_simulation_on_a_discarded_fork",
+        "predicted_tick": fork.snapshot().tick.0,
+        "predicted_state_hash": fork.snapshot().state_hash.to_hex(),
+        "predicted_goal_truth": match truth {
+            PredicateTruth::True => "true",
+            PredicateTruth::False => "false",
+            PredicateTruth::Unknown => "unknown",
+        },
+        "predicted_physical_quiescent": quiet,
+    })
+}
+
 #[cfg(test)]
 #[path = "plan_forecast_tests.rs"]
 mod tests;
@@ -214,3 +309,7 @@ mod tests;
 #[cfg(test)]
 #[path = "provisions_control_loop_tests.rs"]
 mod provisions_tests;
+
+#[cfg(test)]
+#[path = "reserve_forecast_tests.rs"]
+mod reserve_tests;

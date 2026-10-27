@@ -141,6 +141,101 @@ pub(super) fn compile(
     ))
 }
 
+/// Budget an explicitly requested reserve without turning it into an action
+/// deadline or a promise of continuous maintenance. The original stock minima
+/// remain the terminal goal; the extra stock is a predicted planning quantity.
+/// This is a distinct compiler so historical source keeps its exact program.
+pub(super) fn compile_reserve(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<ProductionCompilation> {
+    let requested_tick = request
+        .reserve_until_tick
+        .ok_or_else(|| invalid("reserve planning requires reserve_until_tick"))?;
+    let reserve_ticks = requested_tick
+        .checked_sub(snapshot.tick.0)
+        .filter(|ticks| *ticks > 0)
+        .ok_or_else(|| {
+            invalid("reserve_until_tick must be strictly after the current source game tick; an expired original horizon cannot be extended by replay")
+        })?;
+    if reserve_ticks > effects::MAX_DEFAULT_OBLIGATION_TICKS {
+        return Err(exhausted(
+            "reserve_until_tick exceeds the bounded one-game-year planning horizon",
+        ));
+    }
+    let model = ConsumptionModel::capture(snapshot)?;
+    // Seed demand with the explicit horizon BEFORE lowering. Otherwise the
+    // historical no-work refusal would hide consumption that will exhaust a
+    // currently satisfied quota later in the requested interval.
+    let mut targets = reserve_targets(request, &model, reserve_ticks, &request.quotas)?;
+    let mut candidate = request.compile_targets(snapshot, &targets, true)?;
+    for round in 1..=MAX_CONSUMPTION_ROUNDS {
+        let work_ticks = candidate.workload.horizon_ticks(&candidate.actions)?;
+        let horizon = work_ticks.max(reserve_ticks);
+        let next = reserve_targets(request, &model, horizon, &targets)?;
+        if next == targets {
+            // Only the actual program's default service/dependency horizon is
+            // sealed into obligations. A far-future reserve must not let an
+            // otherwise stalled short action remain active for an extra year.
+            candidate.consumption_horizon = Some(work_ticks);
+            annotate(
+                request,
+                snapshot,
+                &model,
+                &targets,
+                horizon,
+                round,
+                &mut candidate,
+            )?;
+            let work_end = snapshot
+                .tick
+                .checked_add(work_ticks)
+                .ok_or_else(|| exhausted("production work horizon overflows the game clock"))?;
+            let report = &mut candidate.analysis["consumption"];
+            report["planner"] = json!("consumption_reserve_v1");
+            report["method"] = json!("monotone_reserve_through_work_and_explicit_horizon");
+            report["reserve_until_tick"] = json!(requested_tick);
+            report["reserve_horizon_ticks"] = json!(reserve_ticks);
+            report["work_completion_horizon_ticks"] = json!(work_ticks);
+            report["work_completion_horizon_tick"] = json!(work_end.0);
+            report["requested_tick_is_action_deadline"] = json!(false);
+            report["continuous_maintenance_proven"] = json!(false);
+            report["reserve_stock_is_planning_target"] = json!(true);
+            return Ok(candidate);
+        }
+        targets = next;
+        if round < MAX_CONSUMPTION_ROUNDS {
+            candidate = request.compile_targets(snapshot, &targets, true)?;
+        }
+    }
+    Err(exhausted(
+        "explicit consumption reserve did not converge within 64 bounded rounds; this conservative model cannot establish this plan, not that every possible production strategy is infeasible",
+    ))
+}
+
+fn reserve_targets(
+    request: &ProductionRequest,
+    model: &ConsumptionModel,
+    horizon: u64,
+    previous: &BTreeMap<String, u32>,
+) -> Result<BTreeMap<String, u32>> {
+    let mut targets = previous.clone();
+    for (item, minimum) in &request.quotas {
+        let target = model
+            .allowance(item, horizon)?
+            .checked_add(u64::from(*minimum))
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| {
+                exhausted("explicit consumption reserve exceeds the exact u32 quantity bound")
+            })?;
+        let previous = targets
+            .get_mut(item)
+            .ok_or_else(|| invalid("reserve planning lost an original quota"))?;
+        *previous = (*previous).max(target);
+    }
+    Ok(targets)
+}
+
 fn annotate(
     request: &ProductionRequest,
     snapshot: &WorldSnapshot,

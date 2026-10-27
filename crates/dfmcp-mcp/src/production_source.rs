@@ -26,7 +26,10 @@ pub(super) fn compile(
     let mut analysis = compiled.analysis.clone();
     let summary = match request.planner() {
         None => summary.to_owned(),
-        Some(ProductionPlanner::ConsumptionAwareV1) => {
+        Some(
+            planner @ (ProductionPlanner::ConsumptionAwareV1
+            | ProductionPlanner::ConsumptionReserveV1),
+        ) => {
             let digest = source_digest(request);
             let sealed = format!("{summary} [production source {}]", digest.to_hex());
             if sealed.len() > StaticPlanner::default().policy.max_string_bytes
@@ -38,7 +41,7 @@ pub(super) fn compile(
                 ));
             }
             analysis["source_binding"] = json!({
-                "planner": "consumption_aware_v1",
+                "planner": planner.as_str(),
                 "production_source_digest": digest.to_hex(),
                 "original_request_preserved": true,
             });

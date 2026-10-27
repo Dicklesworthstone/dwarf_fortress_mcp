@@ -14,6 +14,9 @@ use dfmcp_world::{FactPresence, PredicateEvidence, PredicateTruth};
 #[path = "laboratory_workforce_consumption_tests.rs"]
 mod workforce;
 
+#[path = "production_reserve_tests.rs"]
+mod reserve;
+
 fn world_at(tick: u64) -> Result<WorldSnapshot> {
     let mut snapshot = scenario_snapshot("starter_fortress", FortressId::new(953), false)?;
     let elapsed = tick - snapshot.tick.0;

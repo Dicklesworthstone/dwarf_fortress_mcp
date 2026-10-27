@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-26 — Plan explicit future food and drink reserves
+
+- Accept `reserve_until_tick` in the existing production blueprint. Budget
+  consumption through the requested future tick and actual work horizon,
+  including currently satisfied minima, finite ingredients, queued work,
+  shared labor and authorized workshop setup.
+- Keep action deadlines tied to work. Seal the absolute tick into a distinct
+  compiler generation and `/3` continuation source while preserving historical
+  request bytes and refusing implicit renewal of expired horizons.
+- Expose a separate forecast at the exact requested tick. Preserve action
+  completion, current stock truth and predicted future stock as distinct results.
+  Wire the forecast through ordinary planning and reviewed stale-plan replay.
+- Add compiler, real reference-effect, source replay, continuation, forecast and
+  public-facade regressions. Exact executed validation is recorded in
+  `IMPLEMENTATION_STATUS.md`; no native compatibility claim is introduced.
+
 ## 2026-10-24 — Complete food and drink reserve plans with finite ingredients
 
 - Add `starter_fortress_provisions`, combining twenty observed PLANT inputs

@@ -253,3 +253,124 @@ fn mixed_furniture_and_food_source_replays_the_identical_sealed_original_goal() 
     );
     Ok(())
 }
+
+#[test]
+fn exact_future_reserve_tick_is_sealed_even_when_the_action_program_is_identical() -> Result<()> {
+    let snapshot = world()?;
+    let make = |until| {
+        ProductionRequest::parse_current(
+            &json!({
+                "template":"production", "quotas":[{"item":"DRINK","minimum":60}],
+                "reserve_until_tick":until,
+            })
+            .to_string(),
+        )
+    };
+    let first_request = make(2401)?;
+    let second_request = make(2501)?;
+    let (first, first_analysis) = compile(
+        &first_request,
+        IntentId::new(74),
+        &snapshot,
+        "future reserve",
+    )?;
+    let (second, _) = compile(
+        &second_request,
+        IntentId::new(74),
+        &snapshot,
+        "future reserve",
+    )?;
+    assert_eq!(first.requested_actions, second.requested_actions);
+    assert_eq!(first.terminal_condition, second.terminal_condition);
+    assert_ne!(
+        source_digest(&first_request),
+        source_digest(&second_request)
+    );
+    assert_ne!(
+        prepared(&snapshot, &first)?.digest,
+        prepared(&snapshot, &second)?.digest
+    );
+    assert_eq!(
+        first_analysis["source_binding"]["planner"],
+        "consumption_reserve_v1"
+    );
+    assert_eq!(
+        first_analysis["source_binding"]["production_source_digest"],
+        source_digest(&first_request).to_hex()
+    );
+    assert_eq!(first_analysis["consumption"]["reserve_until_tick"], 2401);
+    Ok(())
+}
+
+#[test]
+fn archived_reserve_source_recreates_the_exact_intent_analysis_and_prepared_seal() -> Result<()> {
+    let snapshot = world()?;
+    let request = ProductionRequest::parse_current(
+        r#"{"template":"production","quotas":[{"item":"DRINK","minimum":40},{"item":"FOOD","minimum":60},{"item":"BED","minimum":2}],"reserve_until_tick":2401,"prerequisites":{"assign_labor":false,"workshops":[{"building":"workshop:Still","location":[0,0,10]}]}}"#,
+    )?;
+    let original_bytes = request.canonical_json();
+    let reopened = ProductionRequest::parse(&original_bytes)?;
+    assert_eq!(reopened, request);
+    assert_eq!(reopened.canonical_json(), original_bytes);
+    let before = snapshot.clone();
+    let first = compile(
+        &request,
+        IntentId::new(75),
+        &snapshot,
+        "original future reserve",
+    )?;
+    let again = compile(
+        &reopened,
+        IntentId::new(75),
+        &snapshot,
+        "original future reserve",
+    )?;
+    assert_eq!(first, again);
+    assert_eq!(
+        prepared(&snapshot, &first.0)?,
+        prepared(&snapshot, &again.0)?
+    );
+    assert_eq!(snapshot, before);
+    assert_eq!(request.reserve_until_tick(), Some(2401));
+    Ok(())
+}
+
+#[test]
+fn explicit_reserve_is_a_separate_generation_without_altering_historical_source_bytes() -> Result<()>
+{
+    let snapshot = world()?;
+    let legacy = ProductionRequest::parse(ORIGINAL)?;
+    let previous = ProductionRequest::parse_current(ORIGINAL)?;
+    let reserve = ProductionRequest::parse_current(
+        r#"{"template":"production","quotas":[{"item":"DRINK","minimum":60}],"reserve_until_tick":100}"#,
+    )?;
+    assert_eq!(legacy.canonical_json(), ORIGINAL);
+    assert_eq!(
+        previous.canonical_json(),
+        r#"{"planner":"consumption_aware_v1","quotas":[{"item":"DRINK","minimum":60}],"template":"production"}"#
+    );
+    assert_eq!(previous.reserve_until_tick(), None);
+    assert_eq!(
+        reserve.planner(),
+        Some(ProductionPlanner::ConsumptionReserveV1)
+    );
+    let old = compile(&previous, IntentId::new(76), &snapshot, "reserve")?;
+    let new = compile(&reserve, IntentId::new(76), &snapshot, "reserve")?;
+    assert_eq!(old.0.requested_actions, new.0.requested_actions);
+    assert_eq!(old.0.terminal_condition, new.0.terminal_condition);
+    assert_ne!(
+        prepared(&snapshot, &old.0)?.digest,
+        prepared(&snapshot, &new.0)?.digest
+    );
+    assert!(old.1["consumption"].get("reserve_until_tick").is_none());
+    assert_eq!(
+        compile(
+            &ProductionRequest::parse(&previous.canonical_json())?,
+            IntentId::new(76),
+            &snapshot,
+            "reserve"
+        )?,
+        old,
+    );
+    Ok(())
+}

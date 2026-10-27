@@ -1032,6 +1032,7 @@ pub(crate) struct ProductionRequest {
     quotas: BTreeMap<String, u32>,
     prerequisites: Option<ProductionPrerequisites>,
     planner: Option<ProductionPlanner>,
+    reserve_until_tick: Option<u64>,
 }
 
 /// A fixed compiler generation retained in the original request. Missing
@@ -1040,6 +1041,16 @@ pub(crate) struct ProductionRequest {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProductionPlanner {
     ConsumptionAwareV1,
+    ConsumptionReserveV1,
+}
+
+impl ProductionPlanner {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ConsumptionAwareV1 => "consumption_aware_v1",
+            Self::ConsumptionReserveV1 => "consumption_reserve_v1",
+        }
+    }
 }
 
 /// Original permission to synthesize setup, independent of the current stock.
@@ -1063,6 +1074,10 @@ const MAX_PRODUCTION_SETUP_ENTITIES: usize = 65_536;
 
 impl ProductionRequest {
     pub(crate) fn parse(raw: &str) -> Result<Self> {
+        Self::parse_generation(raw, false)
+    }
+
+    fn parse_generation(raw: &str, current: bool) -> Result<Self> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Quota {
@@ -1092,6 +1107,7 @@ impl ProductionRequest {
             quotas: Vec<Quota>,
             prerequisites: Option<Prerequisites>,
             planner: Option<ProductionPlanner>,
+            reserve_until_tick: Option<u64>,
         }
         if raw.len() > MAX_ACTIONS_JSON_BYTES {
             return Err(invalid("production objective exceeds its byte bound"));
@@ -1104,6 +1120,23 @@ impl ProductionRequest {
         if objective.template != "production" {
             return Err(invalid("production objective requires template=production"));
         }
+        let planner = match (objective.reserve_until_tick, objective.planner, current) {
+            (Some(_), Some(ProductionPlanner::ConsumptionReserveV1), _) | (Some(_), None, true) => {
+                Some(ProductionPlanner::ConsumptionReserveV1)
+            }
+            (Some(_), _, _) => {
+                return Err(invalid(
+                    "reserve_until_tick requires the fixed consumption_reserve_v1 compiler",
+                ));
+            }
+            (None, Some(ProductionPlanner::ConsumptionReserveV1), _) => {
+                return Err(invalid(
+                    "consumption_reserve_v1 requires an explicit reserve_until_tick",
+                ));
+            }
+            (None, _, true) => Some(ProductionPlanner::ConsumptionAwareV1),
+            (None, generation, false) => generation,
+        };
         // Bound submitted records before normalization: duplicates must not
         // bypass the same input allowance as distinct requested goals.
         if objective.quotas.is_empty() || objective.quotas.len() > MAX_LIST_ITEMS {
@@ -1192,14 +1225,15 @@ impl ProductionRequest {
         Ok(Self {
             quotas,
             prerequisites,
-            planner: objective.planner,
+            planner,
+            reserve_until_tick: objective.reserve_until_tick,
         })
     }
 
     /// New intake selects a named, immutable generation. Archived source uses
     /// `parse` so upgrading the server cannot silently change an old seal.
     pub(crate) fn parse_current(raw: &str) -> Result<Self> {
-        Ok(Self::parse(raw)?.with_planner(ProductionPlanner::ConsumptionAwareV1))
+        Self::parse_generation(raw, true)
     }
 
     pub(crate) fn with_planner(mut self, planner: ProductionPlanner) -> Self {
@@ -1209,6 +1243,10 @@ impl ProductionRequest {
 
     pub(crate) fn planner(&self) -> Option<ProductionPlanner> {
         self.planner
+    }
+
+    pub(crate) const fn reserve_until_tick(&self) -> Option<u64> {
+        self.reserve_until_tick
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -1230,8 +1268,11 @@ impl ProductionRequest {
                 })).collect::<Vec<_>>(),
             });
         }
-        if self.planner == Some(ProductionPlanner::ConsumptionAwareV1) {
-            request["planner"] = json!("consumption_aware_v1");
+        if let Some(planner) = self.planner {
+            request["planner"] = json!(planner.as_str());
+        }
+        if let Some(tick) = self.reserve_until_tick {
+            request["reserve_until_tick"] = json!(tick);
         }
         request.to_string()
     }
@@ -1239,6 +1280,13 @@ impl ProductionRequest {
     /// Recompile from the original quotas at this one observed snapshot.
     /// Work-order completion and the original stock goal remain separate.
     pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
+        if self.reserve_until_tick.is_some()
+            != (self.planner == Some(ProductionPlanner::ConsumptionReserveV1))
+        {
+            return Err(invalid(
+                "production reserve horizon and compiler generation must agree",
+            ));
+        }
         match self.planner {
             None => self.compile_targets(
                 snapshot,
@@ -1247,6 +1295,9 @@ impl ProductionRequest {
             ),
             Some(ProductionPlanner::ConsumptionAwareV1) => {
                 production_consumption::compile(self, snapshot)
+            }
+            Some(ProductionPlanner::ConsumptionReserveV1) => {
+                production_consumption::compile_reserve(self, snapshot)
             }
         }
     }

@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 const LEGACY_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/1";
 const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
+const RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/3";
 
 /// Archive parsing selects the historical algorithm; new planning selects one
 /// fixed generation without editing the original retained quota/setup request.
@@ -24,6 +25,7 @@ const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
 enum SourceVersion {
     Legacy,
     ConsumptionAwareV1,
+    ConsumptionReserveV1,
 }
 
 impl SourceVersion {
@@ -31,6 +33,7 @@ impl SourceVersion {
         match self {
             Self::Legacy => LEGACY_SOURCE_SCHEMA,
             Self::ConsumptionAwareV1 => SOURCE_SCHEMA,
+            Self::ConsumptionReserveV1 => RESERVE_SOURCE_SCHEMA,
         }
     }
 
@@ -38,6 +41,7 @@ impl SourceVersion {
         match self {
             Self::Legacy => b"dfmcp-production-continuation-source/1\0",
             Self::ConsumptionAwareV1 => b"dfmcp-production-continuation-source/2\0",
+            Self::ConsumptionReserveV1 => b"dfmcp-production-continuation-source/3\0",
         }
     }
 }
@@ -149,7 +153,12 @@ impl ProductionContinuation {
         root: Digest32,
         request: ProductionRequest,
     ) -> Result<Self> {
-        Self::from_parts(parent, root, request, SourceVersion::ConsumptionAwareV1)
+        let version = if request.reserve_until_tick().is_some() {
+            SourceVersion::ConsumptionReserveV1
+        } else {
+            SourceVersion::ConsumptionAwareV1
+        };
+        Self::from_parts(parent, root, request, version)
     }
 
     fn from_parts(
@@ -161,6 +170,19 @@ impl ProductionContinuation {
         if parent == Digest32::ZERO || root == Digest32::ZERO {
             return Err(invalid(
                 "goal continuation lineage cannot contain a zero digest",
+            ));
+        }
+        let reserve_planner = request.planner() == Some(ProductionPlanner::ConsumptionReserveV1);
+        let reserve_horizon = request.reserve_until_tick().is_some();
+        let valid_reserve = match version {
+            SourceVersion::ConsumptionReserveV1 => reserve_planner && reserve_horizon,
+            SourceVersion::Legacy | SourceVersion::ConsumptionAwareV1 => {
+                !reserve_planner && !reserve_horizon
+            }
+        };
+        if !valid_reserve {
+            return Err(invalid(
+                "reserve continuation requires its exact compiler generation and original absolute reserve horizon",
             ));
         }
         let source = Self {
@@ -188,6 +210,7 @@ impl ProductionContinuation {
         let version = match source.schema.as_str() {
             LEGACY_SOURCE_SCHEMA => SourceVersion::Legacy,
             SOURCE_SCHEMA => SourceVersion::ConsumptionAwareV1,
+            RESERVE_SOURCE_SCHEMA => SourceVersion::ConsumptionReserveV1,
             _ => return Err(invalid("unknown retained goal continuation schema")),
         };
         let request = ProductionRequest::parse(&source.production.to_string())?;
@@ -208,6 +231,10 @@ impl ProductionContinuation {
     /// request and root remain unchanged, including for a legacy parent.
     pub(crate) fn next(&self, parent: Digest32) -> Result<Self> {
         Self::new(parent, self.root, self.request.clone())
+    }
+
+    pub(crate) const fn reserve_until_tick(&self) -> Option<u64> {
+        self.request.reserve_until_tick()
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -239,6 +266,12 @@ impl ProductionContinuation {
         if self.version == SourceVersion::ConsumptionAwareV1 {
             lineage["source_schema"] = json!(SOURCE_SCHEMA);
             lineage["planner"] = json!("consumption_aware_v1");
+        } else if self.version == SourceVersion::ConsumptionReserveV1 {
+            lineage["source_schema"] = json!(RESERVE_SOURCE_SCHEMA);
+            lineage["planner"] = json!("consumption_reserve_v1");
+            lineage["reserve_until_tick"] = json!(self.request.reserve_until_tick());
+            lineage["original_absolute_horizon_preserved"] = json!(true);
+            lineage["continuous_maintenance_proven"] = json!(false);
         }
         lineage
     }
@@ -276,6 +309,11 @@ impl ProductionContinuation {
                 .request
                 .clone()
                 .with_planner(ProductionPlanner::ConsumptionAwareV1)
+                .compile(snapshot)?,
+            SourceVersion::ConsumptionReserveV1 => self
+                .request
+                .clone()
+                .with_planner(ProductionPlanner::ConsumptionReserveV1)
                 .compile(snapshot)?,
         };
         let requested_actions = parse_steps(&compiled.actions)?;
@@ -387,3 +425,7 @@ pub(crate) fn request_json(session_id: &str, parent: Digest32) -> Value {
 #[cfg(test)]
 #[path = "goal_continuation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "goal_reserve_continuation_tests.rs"]
+mod reserve_tests;
