@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-27 — Expose separately confirmed labor clock runs through MCP
+
+- Add explicit zero-default tick negotiation, closed run planning, distinct
+  clock confirmation and safety cancellation through the frozen eleven tools.
+- Recommend cadence-sized intervals within the unchanged goal deadline and
+  negotiated allowance; reconcile unsettled clocks before paused labor reads.
+- Preserve clock uncertainty and exact recovery identities through failed calls,
+  bounded response overflow and session close without restoring control grants.
+- Document the complete operator setup, run workflow and exact restart,
+  including the new stability samples required after an unfinished streak resets.
+- Pass 146 actual-source runtime/presentation/facade tests, including the full
+  Action dispatch and nine facade boundaries, plus 97 core/adapter/bounded-run
+  tests. Full FastMCP, native/live qualification and admission remain unverified.
+
 ## 2026-10-27 — Advance original labor goals with separately reviewed finite runs
 
 - Compose original labor proof with the existing run/1.13 coordinator, preserving

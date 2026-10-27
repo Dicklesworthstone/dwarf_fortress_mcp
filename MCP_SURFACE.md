@@ -182,18 +182,30 @@ omitting the query inspects retained goal evidence. `plan` accepts canonical
 cadence and stability. It prepares one paired semantic/native review without
 assigning labor. `commit` requires that review and explicit confirmation;
 `wait` reconciles the same assignment and samples fresh original labor facts.
+Optional bounded-run/1.13 control adds `plan` with `kind:"run"`, its distinct
+review confirmed by `commit(scope="run")`, and `cancel(scope="run")` for the
+native owner's safety pause. Run preparation requires a historical Verified
+assignment and a fresh true unfinished original goal. `wait` reconciles any
+unsettled run before a paused goal sample and never starts or chains runs.
 Historical assignment, current goal proof and durable first achievement remain
-separate. `cancel` retires preparation or releases the session without undoing
-applied membership. Every error and handoff retains exact original journal,
-plan and citizen identity references without granting authority.
+separate from clock coordination receipts. `cancel` retires preparation or
+releases the session without undoing applied membership or elapsed game time.
+Every error and handoff retains exact original journal, plan, citizen identity
+and optional clock journal references without granting authority.
 
 This isolated runtime supports 1–32 selected citizens from a complete source of
-at most 128, one original goal and zero game-clock advancement. Its logical
+at most 128 and one original goal. Game-time permission defaults to zero;
+`open_session(max_game_ticks=...)` can negotiate at most 1200 ticks for each
+separately reviewed interval within the unchanged original deadline. Its logical
 byte-work default is 2 GiB; `open_session(max_bytes=...)` can explicitly request
 up to 32 GiB to replay a longer retained history, within the unchanged 60-second
 wall ceiling. Recovery preserves the original absolute deadline and resets
 unfinished stability. Operator source acceptance remains unadmitted development
 acceptance, and no endpoint, path, native ID or effect key is a client input.
+The independent clock gate supplies source-bound authority. Run/1.13 identifies
+an incarnation, endpoint and software versions, not a named fortress lineage;
+matching ticks and historical pause receipts do not establish current fortress
+identity, current pause or original-goal proof.
 
 The furniture development server also accepts a `furniture_request` JSON string
 as an alternative `open_session` input. One complete operations/1.4 inventory
@@ -230,6 +242,15 @@ exact journal identity. These are operator configuration, not client tool
 arguments. See `docs/SEMANTIC_WORK_ORDER_MCP.md` for initialization and the
 complete recovery handoff for the original goal and clock.
 
+The semantic workforce development server accepts the same optional
+`max_game_ticks` range and never unpauses on opening. Labor and clock control
+have independent operator gates and credentials. Optional `clock` configuration
+pins the run/1.13 generation and fixed private `clock.journal`; each reopen
+requires its externally retained identity, including `recovery.clock_journal_id`
+when an original goal exists. A clock-only Control reopen cannot regain labor
+authority. See `docs/SEMANTIC_WORKFORCE_MCP.md` for the complete workflow and
+`docs/SEMANTIC_WORKFORCE_CLOCK.md` for the source-identity limit.
+
 ### `fortress.observe`
 
 Accepts an exact cursor or no cursor, interest set, profile/projection, freshness, and limits.
@@ -259,6 +280,16 @@ runtime chooses the receipt-linked native order and stop guard. Bounds are
 1–60000 milliseconds for the native stop bound. A complete inactive order can
 receive another reviewed slice for original sampled stability or global job
 quiescence, with unexpected activation as its safety stop.
+
+After a Verified labor assignment, the semantic workforce development server
+accepts the same four-field closed run request, bounded to 2 KiB. It requires
+fresh true original labor predicates and an unfinished original goal. The run
+is bound to the unchanged plan, original citizen capsule and assignment receipt;
+it cannot substitute another citizen or work detail. Game ticks are 1–1200
+within the negotiated allowance and original deadline; the native wall stop
+bound is 1–60000 ms. Suggested intervals respect the original cadence. Native
+callbacks may overshoot either stop bound, and each interval needs separate
+confirmation. No native preparation unpauses the game.
 
 The laboratory production template compiles original DRINK/FOOD and wooden
 BED/DOOR/TABLE/CHAIR quotas with the
@@ -320,6 +351,13 @@ for that effect. The original archive and Created receipt remain bound to
 every run; durable dispatch intent precedes the native effect. Lost replies
 require exact reconciliation and cannot authorize another insertion or unpause.
 
+The semantic workforce development server uses the same `goal`/`run` scopes:
+the default confirms the original labor review, while `scope:"run"` confirms
+`clock.active_run.review_seal`. The exact original archive, citizen capsule,
+Verified assignment receipt and current true labor evidence are checked again
+at the durable clock effect boundary. Assignment and clock grants are
+independent. Lost replies never permit another assignment or unpause attempt.
+
 The laboratory modern stdio registration accepts optional `as_task: true` with
 an explicit session ID and sealed plan digest. A client must negotiate the
 Tasks extension. This returns a real modern task handle whose original plan is
@@ -333,9 +371,9 @@ Polls or follows plans/actions/obligations under bounded wall/game time. Returns
 progress only and may provide continuation. Stable no-change progress becomes a compact
 heartbeat.
 
-The semantic work-order development server first queries a retained clock run,
-then attempts a fresh paused original-goal sample only when the clock state
-permits it. Running or unresolved clock effects remain visible and prevent
+The semantic work-order and workforce development servers first reconcile a
+retained clock run, then attempt a fresh paused original-goal sample only when
+the clock state permits it. Running or unresolved clock effects remain visible and prevent
 that sample. This `wait` never starts a run or advances time itself. Original
 cadence, absolute deadline and stability remain authoritative; a native stop
 or historical pause receipt cannot satisfy them. Further runs each require
@@ -371,6 +409,13 @@ requests the dispatched native owner's safety pause under current clock
 authority. It retains the manager order and original goal. `scope: "session"`
 releases resources without cancelling game effects; preserve the complete
 recovery handoff, including `clock_journal_id` when configured, before closing.
+
+The semantic workforce development server likewise uses `goal`, `run` and
+`session` scopes. Clock cancellation preserves the original labor assignment and
+goal. It requires current clock authority, but no true labor predicate, labor
+control grant or unexpired original deadline. It cannot undo elapsed time, and
+a historical stop receipt does not prove present pause. Session close retains
+both original and clock identities without cancelling game effects.
 
 The laboratory supports `scope: "last_action"` (default), `"plan"` (the latest
 committed plan), `"oldest_open_plan"` (the oldest retained plan with unfinished

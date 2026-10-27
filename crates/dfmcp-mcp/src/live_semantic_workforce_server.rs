@@ -2,9 +2,10 @@
 //! Explicitly unadmitted, one-goal native labor MCP composition root.
 //! All planning, effect custody and completion decisions remain in the runtime
 //! and adapter. MCP arguments cannot choose sources, credentials or paths.
+use crate::semantic_workforce_runtime::clock::RunRequest;
 use crate::semantic_workforce_runtime::{
-    Config, DEFAULT_BYTES, MAX_BYTES, MAX_OUTPUT_TOKENS, MAX_WALL_MILLIS, Mode, NativeRuntime,
-    Request, View, digest,
+    Config, DEFAULT_BYTES, MAX_BYTES, MAX_GAME_TICKS, MAX_OUTPUT_TOKENS, MAX_WALL_MILLIS, Mode,
+    NativeRuntime, Request, View, digest,
 };
 use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId, WorkBudget,
@@ -35,6 +36,7 @@ struct State {
     // recovery reference until the caller asks for a new bounded inspection.
     last_view: Option<Value>,
     assignment_uncertain: bool,
+    clock_uncertain: bool,
 }
 
 enum Action {
@@ -46,17 +48,26 @@ enum Action {
         limit: usize,
     },
     Plan(Request),
+    PlanRun(RunRequest),
     Commit {
+        seal: Digest32,
+        confirmed: bool,
+    },
+    CommitRun {
         seal: Digest32,
         confirmed: bool,
     },
     Wait,
     Cancel,
+    CancelRun,
     Unavailable,
 }
 impl Action {
     fn may_assign(&self) -> bool {
         matches!(self, Self::Commit { .. })
+    }
+    fn may_control_clock(&self) -> bool {
+        matches!(self, Self::CommitRun { .. } | Self::CancelRun)
     }
     fn perform(self, runtime: &mut NativeRuntime, c: &OperationContext) -> Result<View> {
         match self {
@@ -68,9 +79,12 @@ impl Action {
                 limit,
             } => runtime.citizens_page(seal, offset, limit, c),
             Self::Plan(request) => runtime.plan(request, c),
+            Self::PlanRun(request) => runtime.prepare_run(request, c),
             Self::Commit { seal, confirmed } => runtime.commit(seal, confirmed, c),
+            Self::CommitRun { seal, confirmed } => runtime.commit_run(seal, confirmed, c),
             Self::Wait => runtime.wait(c),
             Self::Cancel => runtime.cancel(c),
+            Self::CancelRun => runtime.cancel_run(c),
             Self::Unavailable => Err(error(
                 ErrorCode::CapabilityDenied,
                 "this semantic workforce runtime does not implement checkpoint or restore",
@@ -83,15 +97,17 @@ fn error(code: ErrorCode, message: &str) -> DfmcpError {
     DfmcpError::new(code, message)
 }
 
-fn failure(cause: &DfmcpError, attempted_assignment: bool) -> Value {
+fn failure(cause: &DfmcpError, attempted_assignment: bool, attempted_clock: bool) -> Value {
     json!({
         "ok":false,
         "error":{"code":cause.code.as_str(),"message":cause.message,"retryable":false},
         "runtime_admitted":false,"automatic_redispatch":false,
-        "game_mutation_dispatched":if attempted_assignment { Value::Null } else { json!(false) },
+        "game_mutation_dispatched":if attempted_assignment || attempted_clock { Value::Null } else { json!(false) },
+        "assignment_may_have_started":attempted_assignment,
+        "clock_effect_may_have_started":attempted_clock,
         "retained_state_currently_verified":false,
         "current_goal_available":false,
-        "recovery_guidance":"Inspect retained custody and reconcile the original assignment. Never replace the original goal or repeat assignment to resolve uncertainty."
+        "recovery_guidance":"Inspect retained custody and reconcile the original assignment and any clock run. Never replace the original goal, repeat assignment or repeat unpause to resolve uncertainty."
     })
 }
 
@@ -103,7 +119,7 @@ fn unbound(operation: &str, cause: &DfmcpError) -> String {
         None,
         None,
         None,
-        failure(cause, false),
+        failure(cause, false, false),
         None,
         false,
     )
@@ -189,6 +205,7 @@ fn opening_budgets(
     wall: Option<u64>,
     bytes: Option<u64>,
     output: Option<u32>,
+    game_ticks: Option<u64>,
 ) -> Result<(WorkBudget, WorkBudget)> {
     let display = WorkBudget {
         max_wall_millis: wall.unwrap_or(5000),
@@ -196,17 +213,18 @@ fn opening_budgets(
         max_output_tokens: output.unwrap_or(MAX_OUTPUT_TOKENS),
         max_entities: 8192,
         max_actions: 1,
-        max_game_ticks: 0,
+        max_game_ticks: game_ticks.unwrap_or(0),
     };
     display.validate()?;
-    if display.max_wall_millis > MAX_WALL_MILLIS
+    if display.max_game_ticks > MAX_GAME_TICKS
+        || display.max_wall_millis > MAX_WALL_MILLIS
         || display.max_bytes > MAX_BYTES
         || display.max_output_tokens > MAX_OUTPUT_TOKENS
         || u64::from(display.max_output_tokens) * 4 < RESPONSE_RESERVE
     {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            "semantic limits require at most 60000ms and 32GiB logical byte-work (2GiB default), with 32768 output proxy units reserved for a complete response",
+            "semantic limits require at most 1200 game ticks, 60000ms and 32GiB logical byte-work (2GiB default), with 32768 output proxy units reserved for a complete response",
         ));
     }
     let mut work = display;
@@ -253,6 +271,7 @@ fn retain_failure_reference(last: Option<Value>, reference: Value) -> Value {
         "identity_digest",
         "review",
         "recovery",
+        "clock",
     ] {
         if let Some(value) = reference.get(key) {
             retained[key] = value.clone();
@@ -268,6 +287,7 @@ fn retain_failure_reference(last: Option<Value>, reference: Value) -> Value {
     retained["ok"] = json!(false);
     retained["retained_state_currently_verified"] = json!(false);
     retained["development_labor_enabled"] = json!(false);
+    retained["development_clock_enabled"] = json!(false);
     retained["current_goal"] = Value::Null;
     retained["current_goal_available"] = json!(false);
     retained
@@ -279,24 +299,32 @@ fn render(
     request: Option<RequestId>,
     outcome: Result<View>,
     attempted_assignment: bool,
+    attempted_clock: bool,
 ) -> String {
     let result = match outcome {
         Ok(view) => {
             let mut value = view.to_json();
             state.assignment_uncertain = value["effect_uncertain"] == true;
+            state.clock_uncertain =
+                value["clock"]["unresolved"] == true || value["clock"]["may_be_running"] == true;
             value["session_id"] = json!(state.runtime.session_id().to_string());
             value["retained_state_currently_verified"] = json!(true);
             value["development_labor_enabled"] = json!(state.runtime.labor_control_enabled());
+            value["development_clock_enabled"] = json!(state.runtime.clock_control_enabled());
             state.last_view = Some(value.clone());
             value
         }
         Err(cause) => {
             state.assignment_uncertain |= attempted_assignment;
+            state.clock_uncertain |= attempted_clock;
             state.last_view = Some(retain_failure_reference(
                 state.last_view.take(),
                 state.runtime.opening_recovery_reference(),
             ));
-            failure(&cause, attempted_assignment)
+            if let Some(reference) = state.last_view.as_mut() {
+                reference["clock_effect_may_have_started"] = json!(state.clock_uncertain);
+            }
+            failure(&cause, attempted_assignment, attempted_clock)
         }
     };
     packet(
@@ -308,7 +336,7 @@ fn render(
         Some(state.display_budget),
         result,
         state.last_view.clone(),
-        state.assignment_uncertain,
+        state.assignment_uncertain || state.clock_uncertain,
     )
 }
 
@@ -333,6 +361,7 @@ fn with_session(
             })?;
         let mut request = None;
         let mut attempted_assignment = false;
+        let mut attempted_clock = false;
         let outcome = (|| -> Result<View> {
             runtime_io()?;
             validate_environment()?;
@@ -359,6 +388,7 @@ fn with_session(
                 .max_wall_millis
                 .min(remaining_millis(started, total)?);
             attempted_assignment = action.may_assign();
+            attempted_clock = action.may_control_clock();
             let view = action.perform(&mut state.runtime, &context)?;
             // Preserve newly published recovery seals even if the caller is
             // cancelled before response publication. The error projection will
@@ -377,26 +407,33 @@ fn with_session(
             request,
             outcome,
             attempted_assignment,
+            attempted_clock,
         ))
     })();
     result.unwrap_or_else(|cause| unbound(operation, &cause))
 }
 
 #[tool(
-    description = "Open one unadmitted semantic labor goal. Default offline reads existing custody; reconcile can acquire evidence without labor authority; control additionally requires operator labor enablement. Byte-work defaults to 2GiB; max_bytes can explicitly request up to 32GiB for replaying long retained histories, without increasing native cardinality or the 60s wall ceiling. Sources and private custody are operator configuration. No game time is advanced."
+    description = "Open one unadmitted semantic labor goal. Default offline reads existing custody; reconcile can acquire evidence without control; labor and optional clock control require separate operator enablement. Byte-work defaults to 2GiB; max_bytes can request up to 32GiB for retained-history replay within unchanged native and 60s wall limits. Optional max_game_ticks defaults to zero and is capped at 1200. Sources and private custody are operator configuration. Opening never unpauses."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
 ) -> String {
     let result = (|| -> Result<String> {
         let started = Instant::now();
         runtime_io()?;
         validate_environment()?;
         let mode = Mode::parse(mode.as_deref().unwrap_or("offline"))?;
-        let (display, mut work) = opening_budgets(max_wall_millis, max_bytes, max_output_tokens)?;
+        let (display, mut work) = opening_budgets(
+            max_wall_millis,
+            max_bytes,
+            max_output_tokens,
+            max_game_ticks,
+        )?;
         let config = Config::from_environment()?;
         let mut guard = session_lock()?;
         if guard.is_some() {
@@ -426,6 +463,7 @@ pub fn fortress_open_session(
             display_budget: display,
             last_view: Some(opening_reference),
             assignment_uncertain: false,
+            clock_uncertain: false,
         });
         let state = guard.as_mut().ok_or_else(|| {
             error(
@@ -456,6 +494,7 @@ pub fn fortress_open_session(
             "fortress.open_session",
             request,
             outcome,
+            false,
             false,
         ))
     })();
@@ -521,44 +560,69 @@ fn query_action(raw: Option<&str>) -> Result<Action> {
 }
 
 fn plan_action(raw: &str) -> Result<Action> {
-    Request::parse(raw).map(Action::Plan)
+    if raw.len() > 4096 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "semantic request exceeds 4096 bytes",
+        ));
+    }
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|_| error(ErrorCode::InvalidRequest, "invalid semantic request JSON"))?;
+    // Typed parsing repeats deserialization so duplicate fields are rejected
+    // instead of inheriting this discriminator's last-value behavior.
+    if value.get("kind").and_then(Value::as_str) == Some("run") {
+        RunRequest::parse(raw).map(Action::PlanRun)
+    } else {
+        Request::parse(raw).map(Action::Plan)
+    }
 }
 
-fn commit_action(paired_seal: &str, confirmed: bool) -> Result<Action> {
-    Ok(Action::Commit {
-        seal: digest(paired_seal)?,
-        confirmed,
-    })
+fn commit_action(scope: Option<&str>, paired_seal: &str, confirmed: bool) -> Result<Action> {
+    let seal = digest(paired_seal)?;
+    match scope {
+        None | Some("goal") => Ok(Action::Commit { seal, confirmed }),
+        Some("run") => Ok(Action::CommitRun { seal, confirmed }),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "commit scope must be goal or run",
+        )),
+    }
 }
 
 fn cancel_action(scope: Option<&str>) -> Result<Action> {
     match scope {
         None | Some("goal") => Ok(Action::Cancel),
+        Some("run") => Ok(Action::CancelRun),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "cancel scope must be goal or session",
+            "cancel scope must be goal, run or session",
         )),
     }
 }
 
 #[tool(
-    description = "Compile and durably prepare one original labor goal. Request is closed JSON: expected_observation, units, labor, enabled, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Selected canonical citizen identities and one exact labor are retained. Returns the paired review seal without assigning labor. Repeating the request cannot replace its goal or renew its deadline."
+    description = "Compile and durably prepare one original labor goal. Closed request JSON: expected_observation, units, labor, enabled, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Returns the paired review seal without assigning labor or renewing the goal. After verified assignment, kind=run with original_paired_seal, game_ticks and wall_millis separately prepares finite game-time exposure for original labor stability within its unchanged deadline. Preparation never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
 }
 
 #[tool(
-    description = "Confirm and apply the exact paired semantic/native labor review once. Requires paired_seal and confirmed=true plus current operator labor authority. Historical assignment verification is separate from current labor-goal proof. A lost reply requires wait/reconciliation, never redispatch or a new goal."
+    description = "scope=goal (default) confirms the original paired labor review once under current labor authority. scope=run confirms a separate clock review in paired_seal under current clock authority. Both require confirmed=true and exact original custody. Historical assignment and clock receipts are separate from original-goal proof. Lost replies require exact reconciliation, never another assignment or unpause attempt."
 )]
-pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool) -> String {
+pub fn fortress_commit(
+    session_id: String,
+    paired_seal: String,
+    confirmed: bool,
+    scope: Option<String>,
+) -> String {
     with_session(session_id, "fortress.commit", None, || {
-        commit_action(&paired_seal, confirmed)
+        commit_action(scope.as_deref(), &paired_seal, confirmed)
     })
 }
 
 #[tool(
-    description = "Perform one bounded receipt reconciliation and original-goal sample. Preserves the original absolute deadline, cadence and stability requirement; retains durable first achievement separately from current truth and exact native action verification. No assignment retry, background polling or time advancement. Offline returns retained evidence only."
+    description = "Reconcile retained clock uncertainty before attempting one fresh paused original labor-goal sample. Preserve the original absolute deadline, cadence, stability and durable first achievement. A running or unresolved clock returns pending evidence without a paused goal read. Wait never starts a run, retries assignment or unpause, or starts background polling. Offline returns retained evidence only."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id, "fortress.wait", max_wall_millis, || {
@@ -590,7 +654,7 @@ fn close(raw: String) -> String {
                 "custody_deleted":false,"native_calls":0,"runtime_admitted":false,
                 "automatic_redispatch":false,"retained_state_currently_verified":false}),
             state.last_view.clone(),
-            state.assignment_uncertain,
+            state.assignment_uncertain || state.clock_uncertain,
         );
         // Release held sockets and file locks even after cancellation, revoked
         // configuration or fenced custody. No native query or mutation runs.
@@ -601,7 +665,7 @@ fn close(raw: String) -> String {
 }
 
 #[tool(
-    description = "scope=goal (default) retires a still-prepared original assignment under current labor authority; it never undoes applied membership or erases history. scope=session releases owned resources even after cancellation or fencing, without cancelling game effects. Preserve the recovery handoff before closing."
+    description = "scope=goal (default) retires a still-prepared original assignment under labor authority without undoing applied membership or erasing history. scope=run retires undispatched clock intent or requests its native owner's safety pause under separate clock authority. scope=session releases resources even after cancellation or fencing without cancelling game effects. Preserve all original and clock recovery identities before closing."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref() == Some("session") {
@@ -650,7 +714,7 @@ pub fn run_stdio() {
         .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore)
         .tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Explicitly unadmitted native semantic labor development runtime. Open, observe, plan, review the paired seal, commit once, then wait for original-goal evidence. One retained goal; no automatic clock advancement or redispatch. Keep the complete recovery handoff, including the original citizen identity digest, outside private custody. Historical assignment is not current goal completion and operator source acceptance is not compatibility admission.")
+        .instructions("Explicitly unadmitted native semantic labor development runtime. Open, observe, plan, review the paired seal, commit once, then wait for original-goal evidence. Optional bounded runs require negotiated ticks, separate clock authority, plan(kind=run), and confirmation of the distinct clock review with scope=run. Wait never starts a run. One retained goal; no automatic chaining or redispatch. Keep the complete recovery handoff, including original citizen and clock journal identities, outside private custody. Historical assignment or clock receipts are not current goal completion; the clock source does not identify a named fortress. Operator source acceptance is not compatibility admission.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -661,7 +725,7 @@ mod tests {
 
     #[test]
     fn full_output_and_opening_inspection_are_reserved_before_io() -> Result<()> {
-        let (display, work) = opening_budgets(None, None, None)?;
+        let (display, work) = opening_budgets(None, None, None, None)?;
         assert_eq!(
             display.max_bytes,
             work.max_bytes + RESPONSE_RESERVE + OPEN_INSPECTION_BYTES
@@ -669,19 +733,30 @@ mod tests {
         assert_eq!(display.max_game_ticks, 0);
         assert_eq!(display.max_bytes, DEFAULT_BYTES);
         assert_eq!(work.max_actions, 1);
-        assert!(opening_budgets(None, None, Some(MAX_OUTPUT_TOKENS - 1)).is_err());
+        assert!(opening_budgets(None, None, Some(MAX_OUTPUT_TOKENS - 1), None).is_err());
         assert!(
-            opening_budgets(None, Some(RESPONSE_RESERVE + OPEN_INSPECTION_BYTES), None).is_err()
+            opening_budgets(
+                None,
+                Some(RESPONSE_RESERVE + OPEN_INSPECTION_BYTES),
+                None,
+                None
+            )
+            .is_err()
         );
-        assert!(opening_budgets(Some(0), None, None).is_err());
-        assert!(opening_budgets(Some(MAX_WALL_MILLIS + 1), None, None).is_err());
-        assert!(opening_budgets(None, Some(MAX_BYTES + 1), None).is_err());
+        assert!(opening_budgets(Some(0), None, None, None).is_err());
+        assert!(opening_budgets(Some(MAX_WALL_MILLIS + 1), None, None, None).is_err());
+        assert!(opening_budgets(None, Some(MAX_BYTES + 1), None, None).is_err());
         let (recovery_display, recovery_work) =
-            opening_budgets(None, Some(8 * 1024 * 1024 * 1024), None)?;
+            opening_budgets(None, Some(8 * 1024 * 1024 * 1024), None, None)?;
         assert_eq!(recovery_display.max_bytes, 8 * 1024 * 1024 * 1024);
         assert_eq!(recovery_work.max_game_ticks, 0);
         assert_eq!(recovery_work.max_entities, 8192);
         assert_eq!(recovery_work.max_wall_millis, display.max_wall_millis);
+        let (clock_display, clock_work) = opening_budgets(None, None, None, Some(MAX_GAME_TICKS))?;
+        assert_eq!(clock_display.max_game_ticks, MAX_GAME_TICKS);
+        assert_eq!(clock_work.max_game_ticks, MAX_GAME_TICKS);
+        assert_eq!(clock_work.max_bytes, work.max_bytes);
+        assert!(opening_budgets(None, None, None, Some(MAX_GAME_TICKS + 1)).is_err());
         Ok(())
     }
 
@@ -699,11 +774,22 @@ mod tests {
 
     #[test]
     fn failed_commit_never_claims_no_dispatch_or_safe_retry() {
-        let value = failure(&error(ErrorCode::AdapterFailure, "reply lost"), true);
+        let value = failure(&error(ErrorCode::AdapterFailure, "reply lost"), true, false);
         assert!(value["game_mutation_dispatched"].is_null());
         assert_eq!(value["automatic_redispatch"], false);
         assert_eq!(value["retained_state_currently_verified"], false);
         assert_eq!(value["current_goal_available"], false);
+        assert_eq!(value["assignment_may_have_started"], true);
+        assert_eq!(value["clock_effect_may_have_started"], false);
+        let value = failure(
+            &error(ErrorCode::AdapterFailure, "clock reply lost"),
+            false,
+            true,
+        );
+        assert!(value["game_mutation_dispatched"].is_null());
+        assert_eq!(value["assignment_may_have_started"], false);
+        assert_eq!(value["clock_effect_may_have_started"], true);
+        assert_eq!(value["automatic_redispatch"], false);
     }
 
     #[test]
@@ -767,8 +853,9 @@ mod tests {
             value[field] = json!(1);
             assert!(plan_action(&value.to_string()).is_err(), "{field}");
         }
-        let action = commit_action(&"b".repeat(64), false)?;
+        let action = commit_action(None, &"b".repeat(64), false)?;
         assert!(action.may_assign());
+        assert!(!action.may_control_clock());
         assert!(matches!(
             action,
             Action::Commit {
@@ -776,11 +863,83 @@ mod tests {
                 ..
             }
         ));
-        assert!(commit_action("bad", true).is_err());
+        assert!(commit_action(None, "bad", true).is_err());
         assert!(matches!(cancel_action(None)?, Action::Cancel));
         assert!(matches!(cancel_action(Some("goal"))?, Action::Cancel));
-        for scope in ["run", "all", "session", ""] {
+        for scope in ["all", "session", ""] {
             assert!(cancel_action(Some(scope)).is_err());
+            assert!(commit_action(Some(scope), &"b".repeat(64), true).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn clock_intake_is_closed_original_bound_and_separately_confirmed() -> Result<()> {
+        let request = json!({"kind":"run","original_paired_seal":"a".repeat(64),
+            "game_ticks":10,"wall_millis":1000});
+        let action = plan_action(&request.to_string())?;
+        assert!(matches!(action, Action::PlanRun(_)));
+        assert!(!action.may_assign());
+        assert!(!action.may_control_clock());
+        for field in [
+            "idempotency_key",
+            "endpoint",
+            "token",
+            "path",
+            "source_generation",
+            "native_unit_ids",
+            "stop_predicate",
+            "deadline_tick",
+            "authority",
+        ] {
+            let mut value = request.clone();
+            value[field] = json!(1);
+            assert!(plan_action(&value.to_string()).is_err(), "{field}");
+        }
+        for (field, value) in [
+            ("kind", json!("clock")),
+            ("kind", json!(true)),
+            ("game_ticks", json!(0)),
+            ("game_ticks", json!(1201)),
+            ("game_ticks", json!(true)),
+            ("game_ticks", json!(-1)),
+            ("wall_millis", json!(0)),
+            ("wall_millis", json!(60001)),
+            ("original_paired_seal", json!("bad")),
+        ] {
+            let mut invalid = request.clone();
+            invalid[field] = value;
+            assert!(plan_action(&invalid.to_string()).is_err(), "{field}");
+        }
+        let duplicate = format!(
+            "{{\"kind\":\"run\",\"kind\":\"run\",\"original_paired_seal\":\"{}\",\"game_ticks\":10,\"wall_millis\":1000}}",
+            "a".repeat(64)
+        );
+        assert!(plan_action(&duplicate).is_err());
+        assert!(plan_action(&format!("{}{}", request, " ".repeat(2049))).is_err());
+        let commit = commit_action(Some("run"), &"b".repeat(64), false)?;
+        assert!(matches!(
+            commit,
+            Action::CommitRun {
+                confirmed: false,
+                ..
+            }
+        ));
+        assert!(!commit.may_assign());
+        assert!(commit.may_control_clock());
+        let cancel = cancel_action(Some("run"))?;
+        assert!(matches!(cancel, Action::CancelRun));
+        assert!(!cancel.may_assign());
+        assert!(cancel.may_control_clock());
+        for action in [
+            Action::Observe,
+            Action::Inspect,
+            Action::Wait,
+            Action::Cancel,
+            Action::Unavailable,
+        ] {
+            assert!(!action.may_assign());
+            assert!(!action.may_control_clock());
         }
         Ok(())
     }
@@ -828,5 +987,25 @@ mod tests {
         assert!(partial["recovery"].is_null());
         assert_eq!(partial["identity_digest"], "b".repeat(64));
         assert_eq!(partial["retained_state_currently_verified"], false);
+    }
+
+    #[test]
+    fn failed_clock_call_keeps_new_custody_without_cached_control_or_goal_truth() {
+        let old = json!({"ok":true,"development_labor_enabled":true,
+            "development_clock_enabled":true,"clock":{"journal_id":"a".repeat(64),"active_run":null},
+            "recovery":{"history_present":false},"current_goal":{"original_goal_proven":true}});
+        let reference = json!({"journal_id":"b".repeat(64),"identity_digest":"c".repeat(64),
+            "original_plan":{"plan_digest":"d".repeat(64)},
+            "recovery":{"history_present":true,"clock_journal_id":"a".repeat(64)},
+            "clock":{"journal_id":"a".repeat(64),"head":"e".repeat(64),
+                "active_run":{"key":"retained-run","state":"dispatch_started",
+                    "review_seal":"f".repeat(64)},"unresolved":true}});
+        let retained = retain_failure_reference(Some(old), reference.clone());
+        assert_eq!(retained["clock"], reference["clock"]);
+        assert_eq!(retained["recovery"], reference["recovery"]);
+        assert_eq!(retained["development_clock_enabled"], false);
+        assert_eq!(retained["development_labor_enabled"], false);
+        assert_eq!(retained["retained_state_currently_verified"], false);
+        assert!(retained["current_goal"].is_null());
     }
 }

@@ -44,6 +44,41 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Explicit labor clock control through the MCP loop (2026-10-27)
+
+The frozen eleven-tool semantic workforce server now exposes the bounded clock
+owner. `open_session` keeps a zero game-time default and accepts an explicit
+`max_game_ticks` allowance up to 1,200. Closed `plan(kind="run")` binds one finite
+interval to the original paired labor review; `commit(scope="run")` confirms
+the separate clock review; `cancel(scope="run")` uses independent clock
+authority for the native owner's safety pause. `wait` reconciles the retained
+run before a paused labor sample and never starts or chains intervals.
+
+Agent Turns recommend only a bounded interval within the original cadence,
+remaining deadline and negotiated allowance, after verified assignment and
+fresh true unfinished labor predicates. Current control authority, clock source
+identity and original custody remain explicit. Uncertain effects and the newest
+clock journal identity survive failed calls, bounded overflow and session close
+without turning cached evidence into current proof or permission. Clock-only
+recovery cannot regain labor authority; no original deadline or unfinished
+stability streak is renewed by a run or restart.
+
+Focused validation passes 146 distinct actual-source component tests: the
+137-test combined runtime/presentation/Agent Turn target and nine verbatim
+workforce facade boundary cases. The complete facade Action dispatch compiles
+against the real runtime. The target includes 49 workforce runtime cases and
+25 workforce presentation cases, plus existing work-order and shared regressions.
+The ordinary core28, workforce-integration47 and bounded-run22 suites also pass.
+These checks exclude FastMCP macro expansion/transport, the complete executable,
+DFHack SDK compilation, live gameplay and compatibility admission. The required
+repository verifier passes its first four contract checks, then stops at the
+unchanged source-bundle documentation phrase check; both that guide and checker
+are byte-identical to the initial main revision. No full qualification is claimed.
+
+The complete operator configuration, closed tool requests, exact recovery and
+restart-cadence example are in
+[`docs/SEMANTIC_WORKFORCE_MCP.md`](docs/SEMANTIC_WORKFORCE_MCP.md).
+
 ### Original labor goals with reviewed clock advancement (2026-10-27)
 
 The original workforce runtime now composes its retained `SetLabor` goal with
