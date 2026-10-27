@@ -46,7 +46,11 @@ evidence cannot resolve a live identity.
 `resolve_workforce_step` accepts the original sealed `PreparedPlan`, selected
 `StepId`, `LiveRoutingEvidence`, and strict `WorkforceCapture`. It validates the
 plan and its original preconditions and requires the native capture to name the
-same fortress, bridge generation and observed paused tick. The selected native
+same fortress and observed paused tick. Canonical read and mutation plugins
+initialize independent generation namespaces; their numbers need not agree.
+The original canonical generation remains sealed by its source digest and
+anchor, while the native plan retains its own generation and exact witness.
+Replacement of either source still refuses later control. The selected native
 citizens must exactly equal the resolved canonical selection; additional,
 missing, ineligible or substituted citizens are refused.
 
@@ -126,8 +130,8 @@ non-default selector. An advisory family route still reports the retained
 constraints so the caller can see exactly what remains unresolved.
 
 For a default selector, furniture resolution requires an exact spatial/1.8 item
-projection and a matching eligible `BuildCapture`. Source generation, fortress,
-paused tick, map dimensions, furniture kind and target must agree. The selected
+projection and a matching eligible `BuildCapture`. The canonical source and native plugin incarnation remain independently bound.
+Fortress, paused tick, map dimensions, furniture kind and target must agree. The selected
 canonical item's native identity, type, subtype, numeric material IDs, raw
 position, on-ground flag and unassigned job flag must all have eligible exact
 source evidence matching the native capture. This creates a `BuildPlan` candidate

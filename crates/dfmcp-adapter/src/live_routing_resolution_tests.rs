@@ -30,18 +30,28 @@ fn unhex(value: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
+const CITIZEN_GENERATION: u64 = 701;
+const SPATIAL_GENERATION: u64 = 801;
+
 fn observation(ids: &[i32]) -> Result<(LiveObservationCapsule, LiveWorldProjection)> {
+    observation_with_generation(ids, CITIZEN_GENERATION)
+}
+
+fn observation_with_generation(
+    ids: &[i32],
+    generation: u64,
+) -> Result<(LiveObservationCapsule, LiveWorldProjection)> {
     let mut assembler = ObservationAssembler::new(BridgeManifest {
         bridge_version: "0.1.0".to_owned(),
         df_version: "0.51.11".to_owned(),
         dfhack_version: "0.51.11-r1".to_owned(),
         world_loaded: true,
         fortress_mode: true,
-        bridge_generation: 7,
+        bridge_generation: generation,
         supported_methods: BTreeSet::from(["Handshake".to_owned(), "ReadObservation".to_owned()]),
     });
     assembler.push_page(ObservationPage {
-        bridge_generation: 7,
+        bridge_generation: generation,
         world_loaded: true,
         fortress_mode: true,
         paused: true,
@@ -336,12 +346,12 @@ fn spatial_state_with(
     )?;
     let mut operations = base.operations().clone();
     let mut terrain = base.terrain().clone();
+    terrain.bridge_generation = SPATIAL_GENERATION;
     operations.jobs.jobs.clear();
     operations.buildings.clear();
     operations.attachments.clear();
     operations.items.clear();
     if let Some(capture) = build {
-        terrain.bridge_generation = capture.generation();
         terrain.year = (capture.tick() / 403_200) as u32;
         terrain.year_tick = (capture.tick() % 403_200) as u32;
         terrain.site_id = capture.site();
@@ -507,6 +517,11 @@ fn workforce_candidate_keeps_semantic_anchor_key_and_exact_native_units() -> Res
         &WorkforceFixture::default().capture()?,
     )?;
     assert_eq!(resolved.native_plan().before().ids(), vec![42]);
+    assert_eq!(evidence.source_generation(), CITIZEN_GENERATION);
+    assert_ne!(
+        evidence.source_generation(),
+        resolved.native_plan().before().generation()
+    );
     assert_eq!(resolved.native_plan().spec().detail(), 0);
     assert_eq!(resolved.native_plan().key(), plan.steps[0].idempotency_key);
     assert_eq!(resolved.anchor(), plan.anchor);
@@ -531,7 +546,6 @@ fn spatial_namespaced_citizen_is_resolved_through_its_source_schema() -> Result<
         .ok_or_else(|| invalid("fixture observation"))?;
     let terrain = source.spatial().terrain();
     let fixture = WorkforceFixture {
-        generation: terrain.bridge_generation,
         tick: snapshot.tick.get(),
         site: terrain.site_id,
         folder: terrain.world_folder.clone(),
@@ -541,6 +555,11 @@ fn spatial_namespaced_citizen_is_resolved_through_its_source_schema() -> Result<
     let resolved = resolve_workforce_step(&plan, StepId::new(0), &evidence, &fixture.capture()?)?;
     assert_eq!(resolved.native_plan().before().ids(), vec![42]);
     assert_eq!(resolved.units()[0].canonical_id, canonical);
+    assert_eq!(evidence.source_generation(), SPATIAL_GENERATION);
+    assert_ne!(
+        evidence.source_generation(),
+        resolved.native_plan().before().generation()
+    );
     assert_eq!(evidence.schema(), LiveIdentitySchema::SpatialV1_8);
     assert!(evidence.resolve_units(&[EntityId::new(42)]).is_err());
     assert!(evidence.resolve_units(&[EntityId::new(43)]).is_err());
@@ -565,10 +584,6 @@ fn changed_native_capture_identity_selection_or_eligibility_is_refused() -> Resu
     let mut ineligible = base.clone();
     ineligible.citizens[0].eligible = false;
     for fixture in [
-        WorkforceFixture {
-            generation: 8,
-            ..base.clone()
-        },
         WorkforceFixture {
             tick: 121,
             ..base.clone()
@@ -740,6 +755,12 @@ fn furniture_resolution_binds_exact_observed_item_and_original_target() -> Resul
         BuildKind::Bed
     );
     assert_eq!(resolved.native_plan().before().witness(), capture.witness());
+    assert_eq!(evidence.source_generation(), SPATIAL_GENERATION);
+    assert_ne!(evidence.source_generation(), capture.generation());
+    assert_eq!(
+        resolved.native_plan().before().generation(),
+        capture.generation()
+    );
     assert_eq!(resolved.native_plan().key(), plan.steps[0].idempotency_key);
     assert_eq!(resolved.semantic_plan_digest(), plan.digest);
     assert_eq!(resolved.anchor(), plan.anchor);
@@ -905,5 +926,84 @@ fn canonical_furniture_material_identity_flags_and_map_dimensions_must_match_nat
         );
         assert!(resolve_furniture_step(&plan, StepId::new(0), &evidence, &capture).is_err());
     }
+    Ok(())
+}
+
+#[test]
+fn work_order_resolution_keeps_independent_canonical_and_native_incarnations() -> Result<()> {
+    let (capsule, projection) = observation(&[42])?;
+    let evidence =
+        LiveRoutingEvidence::citizens_v1(observed(&projection.snapshot)?, &projection, &capsule)?;
+    let original = plan(
+        &projection.snapshot,
+        Action::CreateWorkOrder {
+            name: "independent source fixture".to_owned(),
+            job_token: "CONSTRUCT_BED".to_owned(),
+            amount: 3,
+            conditions: Vec::new(),
+        },
+    );
+    let mut bytes =
+        unhex(include_str!("../tests/fixtures/work_order_observation_v1_10.hex").trim())?;
+    bytes[24..32].copy_from_slice(&120u64.to_be_bytes());
+    bytes[36..40].copy_from_slice(&4u32.to_be_bytes());
+    let mut digests = BTreeSet::new();
+    for generation in [7u64, 1_001, CITIZEN_GENERATION] {
+        bytes[8..16].copy_from_slice(&generation.to_be_bytes());
+        let capture = WorkOrderObservation::decode(&bytes)?;
+        let resolved = resolve_work_order_step(&original, StepId::ZERO, &evidence, &capture)?;
+        assert_eq!(evidence.source_generation(), CITIZEN_GENERATION);
+        assert_eq!(resolved.native_plan().observation(), &capture);
+        assert_eq!(resolved.source_digest(), capsule.content_digest);
+        assert_eq!(resolved.anchor(), original.anchor);
+        assert_eq!(resolved.semantic_plan_digest(), original.digest);
+        assert_eq!(
+            resolved.native_plan().key(),
+            original.steps[0].idempotency_key
+        );
+        assert!(digests.insert(resolved.native_plan().digest()));
+    }
+    Ok(())
+}
+
+#[test]
+fn canonical_read_reload_cannot_replace_the_original_labor_or_furniture_plan() -> Result<()> {
+    let (capsule, projection) = observation(&[42])?;
+    let original = plan(&projection.snapshot, labor(vec![EntityId::new(43)], true));
+    // Even changing the read source to equal the native generation is a reload,
+    // not a source match that can authorize the original plan.
+    let (replacement, changed) = observation_with_generation(&[42], 7)?;
+    let evidence =
+        LiveRoutingEvidence::citizens_v1(observed(&changed.snapshot)?, &changed, &replacement)?;
+    assert_ne!(capsule.content_digest, replacement.content_digest);
+    assert!(
+        resolve_workforce_step(
+            &original,
+            StepId::ZERO,
+            &evidence,
+            &WorkforceFixture::default().capture()?
+        )
+        .is_err()
+    );
+
+    let capture = build_capture()?;
+    let state = spatial_state(Some(&capture))?;
+    let snapshot = state
+        .snapshot()
+        .ok_or_else(|| invalid("fixture snapshot"))?;
+    let original = plan(
+        snapshot,
+        bed(capture.selection().target(), MaterialSelector::default()),
+    );
+    let replacement = spatial_state_with(Some(&capture), |operations, terrain| {
+        terrain.bridge_generation += 1;
+        operations.jobs.bridge_generation = terrain.bridge_generation;
+    })?;
+    let changed = replacement
+        .snapshot()
+        .ok_or_else(|| invalid("fixture snapshot"))?;
+    let evidence = LiveRoutingEvidence::spatial_v1_8(observed(changed)?, &replacement)?;
+    assert_ne!(evidence.anchor(), original.anchor);
+    assert!(resolve_furniture_step(&original, StepId::ZERO, &evidence, &capture).is_err());
     Ok(())
 }

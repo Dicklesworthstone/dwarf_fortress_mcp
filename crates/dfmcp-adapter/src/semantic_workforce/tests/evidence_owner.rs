@@ -190,6 +190,10 @@ fn replace_capsule(
 #[test]
 fn acquired_citizen_owner_drives_actual_semantic_prepare_and_commit() -> Result<()> {
     let mut f = fixture()?;
+    assert_ne!(
+        f.observer.capsule.bridge.bridge_generation,
+        f.native.data.borrow().fixture.generation
+    );
     let (mut evidence, state) =
         evidence_owner(f.observer.capsule.clone(), &f.context, small_limits())?;
     let review = f
@@ -432,8 +436,13 @@ fn mismatching_native_capture_refuses_before_canonical_source_connection() -> Re
     for case in 0..6 {
         let f = fixture()?;
         let (mut owner, state) = evidence_owner(f.observer.capsule, &f.context, small_limits())?;
-        let before = state.borrow().opens;
         let mut native = WorkforceFixture::default();
+        owner.refresh_after_capture(&native.capture()?, &f.context)?;
+        assert_ne!(
+            owner.routing_evidence()?.source_generation(),
+            native.generation
+        );
+        let before = state.borrow().opens;
         match case {
             0 => native.generation += 1,
             1 => native.tick += 1,
@@ -768,5 +777,179 @@ fn actual_wire_io_retains_distinct_configured_read_and_write_caps() -> Result<()
     assert!(values.contains(&config.read_timeout));
     assert!(values.contains(&config.write_timeout));
     assert!(values.iter().all(|value| *value <= config.read_timeout));
+    Ok(())
+}
+
+#[test]
+fn native_incarnation_pin_survives_failed_acquisition_and_explicit_invalidation() -> Result<()> {
+    for fail_first in [false, true] {
+        let f = fixture()?;
+        let (mut owner, state) = evidence_owner(f.observer.capsule, &f.context, small_limits())?;
+        let native = WorkforceFixture::default();
+        if fail_first {
+            let next = state.borrow().reads + 1;
+            state.borrow_mut().fail_read = Some(next);
+            assert!(
+                owner
+                    .refresh_after_capture(&native.capture()?, &f.context)
+                    .is_err()
+            );
+        } else {
+            owner.refresh_after_capture(&native.capture()?, &f.context)?;
+        }
+        owner.invalidate();
+        state.borrow_mut().fail_read = None;
+        // A canonical-only refresh must not forget a separately pinned mutation
+        // incarnation, even when its first acquisition never published evidence.
+        owner.refresh(&f.context)?;
+        let before = state.borrow().opens;
+        let replacement = WorkforceFixture {
+            generation: CITIZEN_GENERATION,
+            ..native.clone()
+        };
+        assert!(
+            owner
+                .refresh_after_capture(&replacement.capture()?, &f.context)
+                .is_err()
+        );
+        assert!(owner.routing_evidence().is_err());
+        assert_eq!(state.borrow().opens, before);
+        assert_eq!(state.borrow().active, 0);
+        owner.refresh_after_capture(&native.capture()?, &f.context)?;
+        assert_eq!(
+            owner.routing_evidence()?.source_generation(),
+            CITIZEN_GENERATION
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn either_original_profile_reload_blocks_prepared_labor_before_the_setter() -> Result<()> {
+    for canonical_reload in [true, false] {
+        let mut f = fixture()?;
+        let (mut evidence, state) =
+            evidence_owner(f.observer.capsule.clone(), &f.context, small_limits())?;
+        let review = f
+            .owner
+            .observe(f.plan.clone(), &mut evidence, &f.context, |binding, c| {
+                f.native.connect(binding, c)
+            })?;
+        let native_generation = review.native_plan().before().generation();
+        assert_ne!(native_generation, CITIZEN_GENERATION);
+        f.owner
+            .prepare(review.seal(), &mut evidence, &f.context, |binding, c| {
+                f.native.connect(binding, c)
+            })?;
+        if canonical_reload {
+            replace_capsule(&state, |manifest, page| {
+                manifest.bridge_generation = native_generation;
+                page.bridge_generation = native_generation;
+            })?;
+        } else {
+            f.native.data.borrow_mut().fixture.generation = CITIZEN_GENERATION;
+        }
+        assert!(
+            f.owner
+                .commit(
+                    review.seal(),
+                    true,
+                    &mut evidence,
+                    &f.context,
+                    |binding, c| { f.native.connect(binding, c) }
+                )
+                .is_err()
+        );
+        assert_eq!(f.native.data.borrow().calls[2], 0);
+        assert_eq!(state.borrow().active, 0);
+        let retained = f.owner.inspect(review.seal(), &f.context)?;
+        assert_eq!(retained.review().original_plan(), &f.plan);
+        assert_eq!(retained.review().native_plan(), review.native_plan());
+        assert_eq!(retained.native_record().state(), AssignmentState::Prepared);
+    }
+    Ok(())
+}
+
+#[test]
+fn independent_profile_generations_survive_lost_labor_reply_and_query_only_reopen() -> Result<()> {
+    let mut f = fixture()?;
+    let (mut evidence, state) =
+        evidence_owner(f.observer.capsule.clone(), &f.context, small_limits())?;
+    let review = f
+        .owner
+        .observe(f.plan.clone(), &mut evidence, &f.context, |binding, c| {
+            f.native.connect(binding, c)
+        })?;
+    assert_ne!(
+        review.native_plan().before().generation(),
+        CITIZEN_GENERATION
+    );
+    f.owner
+        .prepare(review.seal(), &mut evidence, &f.context, |binding, c| {
+            f.native.connect(binding, c)
+        })?;
+    f.native.data.borrow_mut().lose_commit = true;
+    assert!(
+        f.owner
+            .commit(
+                review.seal(),
+                true,
+                &mut evidence,
+                &f.context,
+                |binding, c| { f.native.connect(binding, c) }
+            )
+            .is_err()
+    );
+    assert_eq!(f.native.data.borrow().calls[2], 1);
+    let canonical_reads = state.borrow().opens;
+    drop(f.owner);
+
+    let mut current = f.context.clone();
+    current.session_id = SessionId::new(2);
+    current.anchor.tick = f.plan.expires_at_tick;
+    current
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    let journal = WorkforceJournal::open(
+        f.native.journal.clone(),
+        &current,
+        WorkforceMode::Recover,
+        None,
+    )?;
+    let (session, view) = WorkforceSession::new(journal, &current)?;
+    let associations = AssociationStore::open(
+        f.native.associations.clone(),
+        view.id,
+        false,
+        true,
+        &current,
+    )?;
+    let mut recovered = SemanticWorkforceSession::new(session, associations, &current)?;
+    let attached = recovered.reattach(f.plan.clone(), &current)?;
+    assert_eq!(attached.seal(), review.seal());
+    assert_eq!(attached.native_plan(), review.native_plan());
+    let result = recovered.reconcile(attached.seal(), &current, |binding, c| {
+        assert!(
+            c.grants
+                .iter()
+                .all(|grant| grant.capability == Capability::Query)
+        );
+        f.native.connect(binding, c)
+    })?;
+    assert!(matches!(
+        result.action_result(),
+        SingleLaborResult::Verified { .. }
+    ));
+    assert!(!result.original_goal_proven());
+    assert_eq!(result.review().original_plan(), &f.plan);
+    assert_eq!(f.native.data.borrow().calls[2], 1);
+    assert_eq!(f.native.data.borrow().calls[3], 1);
+    assert_eq!(state.borrow().opens, canonical_reads);
+    assert!(
+        recovered
+            .commit(attached.seal(), true, &mut evidence, &current, never)
+            .is_err()
+    );
+    assert_eq!(f.native.data.borrow().calls[2], 1);
     Ok(())
 }

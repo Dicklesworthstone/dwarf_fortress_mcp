@@ -75,6 +75,14 @@ original source and selected native identities. Changed observations require a
 new original plan and owner; the acquisition owner cannot advance or invent a
 cursor to make an old seal valid.
 
+The citizen and workforce plugins have independent incarnation numbers. The
+owner pins the first matching workforce incarnation separately from its exact
+original citizen manifest and capsule. Failed acquisition, invalidation and
+canonical-only refresh do not erase that native pin. A later workforce reload
+is refused before another citizen connection, even if its number happens to
+equal the original citizen generation. Native sessions and durable associations
+continue to retain their original native witness and journal incarnation.
+
 The authorizer independently checks compatibility and returns the exact
 `EvidencePolicy` for the fresh capsule and projection. The owner verifies that
 the policy establishes paused state and canonical/native unit identities, then

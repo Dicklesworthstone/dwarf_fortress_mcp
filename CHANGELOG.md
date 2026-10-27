@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-26 — Execute semantic actions across independent native profiles
+
+- Stop equating canonical-read and mutation-plugin incarnation numbers during
+  labor, work-order and furniture resolution. Preserve both exact identities,
+  source witnesses and original sealed plans independently.
+- Pin the workforce incarnation across failed citizen reads and invalidation;
+  reject replacement of either original source before native effects.
+- Exercise distinct generations throughout prepare, commit, original-goal
+  monitoring and durable recovery. Pass 20 routing, 58 semantic work-order and
+  46 semantic workforce tests, including reload and no-redispatch regressions.
+- Retain the recorded component-only evidence scope and existing native wire,
+  journal, plan and production-admission boundaries.
+
 ## 2026-10-26 — Inspect citizen welfare and elevated stress
 
 - Add `mode: "welfare"` and `citizen_welfare` to the existing spatial/1.8 query

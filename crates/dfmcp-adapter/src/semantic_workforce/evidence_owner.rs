@@ -421,6 +421,10 @@ pub struct CitizenWorkforceEvidenceOwner<F, A> {
     limits: CitizenEvidenceLimits,
     factory: F,
     authorizer: A,
+    // Workforce and citizen plugins have independent incarnation namespaces.
+    // Retain the first matching native incarnation even if a later canonical
+    // acquisition fails; invalidation must never authorize a replacement source.
+    workforce_generation: Option<u64>,
     current: Option<Publication>,
 }
 impl<F, A> CitizenWorkforceEvidenceOwner<F, A> {
@@ -449,6 +453,7 @@ impl<F, A> CitizenWorkforceEvidenceOwner<F, A> {
             limits,
             factory,
             authorizer,
+            workforce_generation: None,
             current: None,
         };
         out.refresh(context)?;
@@ -519,7 +524,9 @@ impl<F, A> CitizenWorkforceEvidenceOwner<F, A> {
             && (capture.fortress_id() != self.anchor.fortress_id
                 || capture.folder() != self.original.world_folder
                 || capture.site() != native_site
-                || capture.generation() != self.original.bridge.bridge_generation
+                || self
+                    .workforce_generation
+                    .is_some_and(|generation| generation != capture.generation())
                 || capture.tick() != self.anchor.tick.get()
                 || !capture.paused()
                 || capture.ids().iter().any(|id| {
@@ -530,6 +537,9 @@ impl<F, A> CitizenWorkforceEvidenceOwner<F, A> {
                 }))
         {
             return Err(stale());
+        }
+        if let Some(capture) = capture {
+            self.workforce_generation = Some(capture.generation());
         }
         work.current()?;
         let source_context = work.reserve(CONNECTION_BYTES)?;

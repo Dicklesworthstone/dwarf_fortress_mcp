@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Independent native profile incarnations (2026-10-26)
+
+Semantic labor, finite work-order and exact-item furniture routing now accepts
+independently generated canonical-read and mutation-plugin incarnations. The
+plugins initialize their clocks separately; comparing those numbers previously
+rejected otherwise matching native captures. Resolution still requires the same
+fortress, exact paused tick and qualified selected identities or item facts.
+The original canonical manifest/generation/digest/anchor and the native
+generation/witness/plan/journal remain independently bound.
+
+The concrete citizen evidence owner separately pins its first matching workforce
+incarnation. Failed reads, invalidation and canonical-only refresh retain this
+pin. Replacing either profile after review or preparation cannot authorize the
+original effect, including when the replacement number aliases the other
+profile's original number. Existing exact reattachment, indeterminate-effect
+reconciliation and Query-only recovery retain the original semantic/native
+association without another insertion or assignment.
+
+Executed focused validation: 20 routing/resolution tests, all 58 public
+semantic work-order lifecycle tests and all 46 public semantic workforce
+lifecycle tests passed (124 total, zero failures). Default lifecycle fixtures
+now use deliberately distinct profile generations. New cases cover independent
+labor/order/furniture resolution, original-source reload, native reload after
+preparation, retained pins after failed acquisition, lost replies and read-only
+reopen without redispatch. The harness compiles the actual 27-root adapter
+dependency closure and original public integration targets; unrelated bounded
+run tests were filtered from the routing target. No wire, journal or plan format
+changed. These synthetic-native and real-storage component results do not
+establish full adapter/workspace, MCP transport, DFHack or live qualification.
+See `docs/LIVE_SEMANTIC_ROUTING.md` and
+`docs/SEMANTIC_WORKFORCE_HANDOFF.md`.
+
 ### Citizen welfare inspection and stress attention (2026-10-26)
 
 The existing spatial/1.8 `fortress.query` now accepts `mode: "welfare"` and the

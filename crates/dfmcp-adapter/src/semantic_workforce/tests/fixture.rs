@@ -56,6 +56,10 @@ fn text(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
+// The read bridge and workforce plugin are separately loaded native sources.
+// All lifecycle fixtures must exercise independent incarnation namespaces.
+const CITIZEN_GENERATION: u64 = 701;
+
 fn observation(ids: &[i32]) -> Result<(LiveObservationCapsule, LiveWorldProjection)> {
     let mut assembler = ObservationAssembler::new(BridgeManifest {
         bridge_version: "0.1.0".to_owned(),
@@ -63,11 +67,11 @@ fn observation(ids: &[i32]) -> Result<(LiveObservationCapsule, LiveWorldProjecti
         dfhack_version: "0.51.11-r1".to_owned(),
         world_loaded: true,
         fortress_mode: true,
-        bridge_generation: 7,
+        bridge_generation: CITIZEN_GENERATION,
         supported_methods: BTreeSet::from(["Handshake".to_owned(), "ReadObservation".to_owned()]),
     });
     assembler.push_page(ObservationPage {
-        bridge_generation: 7,
+        bridge_generation: CITIZEN_GENERATION,
         world_loaded: true,
         fortress_mode: true,
         paused: true,

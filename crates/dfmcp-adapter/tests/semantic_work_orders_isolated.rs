@@ -339,6 +339,10 @@ impl WorkOrderSource for Native {
     }
 }
 
+// The canonical read profile is independent of work-orders/1.10. Keep this
+// different in every prepare/commit/recovery and original-goal lifecycle test.
+const CITIZEN_GENERATION: u64 = 701;
+
 fn capsule(
     o: &WorkOrderObservation,
 ) -> Result<(LiveObservationCapsule, LiveWorldProjection, ObservationPage)> {
@@ -346,13 +350,13 @@ fn capsule(
         bridge_version: "0.1.0".into(),
         df_version: "0.51.11".into(),
         dfhack_version: "0.51.11-r1".into(),
-        bridge_generation: o.generation(),
+        bridge_generation: CITIZEN_GENERATION,
         world_loaded: true,
         fortress_mode: true,
         supported_methods: BTreeSet::from(["Handshake".into(), "ReadObservation".into()]),
     };
     let page = ObservationPage {
-        bridge_generation: o.generation(),
+        bridge_generation: CITIZEN_GENERATION,
         world_loaded: true,
         fortress_mode: true,
         paused: true,
@@ -620,6 +624,10 @@ fn exact_original_plan_reaches_native_insertion_but_never_becomes_goal_proof() -
     let mut s = f.session(true, JournalMode::Control, false)?;
     let r = s.observe(f.original.clone(), &mut f.observer, &f.context)?;
     assert_eq!(r.original_plan(), &f.original);
+    assert_ne!(
+        f.observer.capsule.bridge.bridge_generation,
+        r.native_plan().observation().generation()
+    );
     assert_eq!(r.native_plan().key(), f.original.steps[0].idempotency_key);
     assert_ne!(r.seal(), r.native_plan().digest());
     assert_eq!(f.native.borrow().prepares, 0);
@@ -728,6 +736,12 @@ fn lost_created_reply_reconciles_after_restart_without_another_insertion() -> Re
     let mut recovered = f.session(false, JournalMode::Reconcile, true)?;
     let attached = recovered.reattach(f.original.clone(), &f.context)?;
     assert_eq!(attached.seal(), r.seal());
+    assert_eq!(attached.native_plan(), r.native_plan());
+    assert_eq!(attached.original_plan(), &f.original);
+    assert_ne!(
+        f.observer.capsule.bridge.bridge_generation,
+        attached.native_plan().observation().generation()
+    );
     let result = recovered.reconcile(attached.seal(), &f.context)?;
     assert!(matches!(
         result.creation_result(),
@@ -1395,5 +1409,127 @@ fn created_native_sequence_survives_restart_and_rejects_replayed_or_reincarnated
             NativeOrderCreation::Inserted { .. }
         ));
     }
+    Ok(())
+}
+
+#[test]
+fn independent_citizen_reload_after_order_prepare_preserves_dispatch_uncertainty() -> Result<()> {
+    use dfmcp_adapter::semantic_workforce::evidence_owner::{
+        CitizenEvidenceLimits, CitizenEvidenceSource, CitizenWorkforceEvidenceOwner,
+    };
+    struct Source(Rc<RefCell<(BridgeManifest, ObservationPage)>>);
+    impl CitizenEvidenceSource for Source {
+        fn bridge_manifest(&self) -> BridgeManifest {
+            self.0.borrow().0.clone()
+        }
+        fn read_page(
+            &mut self,
+            offset: u32,
+            maximum: u32,
+            _: bool,
+            c: &OperationContext,
+        ) -> Result<ObservationPage> {
+            c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            assert_eq!(offset, 0);
+            assert_eq!(maximum, 1);
+            Ok(self.0.borrow().1.clone())
+        }
+    }
+    let f = Fixture::new()?;
+    let (_, _, page) = capsule(&queue()?)?;
+    let source = Rc::new(RefCell::new((f.observer.capsule.bridge.clone(), page)));
+    let reads = Rc::clone(&source);
+    let factory = move |c: &OperationContext| {
+        c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        Ok(Source(Rc::clone(&reads)))
+    };
+    let authorizer =
+        |_: &LiveObservationCapsule, projection: &LiveWorldProjection, c: &OperationContext| {
+            c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            Ok(policy(&projection.snapshot))
+        };
+    let mut evidence = CitizenWorkforceEvidenceOwner::new::<Source>(
+        f.observer.capsule.clone(),
+        CitizenEvidenceLimits {
+            page_size: 1,
+            max_citizens: 1,
+        },
+        factory,
+        authorizer,
+        &f.context,
+    )?;
+    let mut session = f.session(true, JournalMode::Control, false)?;
+    let review = session.observe(f.original.clone(), &mut evidence, &f.context)?;
+    let native_generation = review.native_plan().observation().generation();
+    assert_ne!(native_generation, CITIZEN_GENERATION);
+    session.prepare(review.seal(), &mut evidence, &f.context)?;
+    // Numeric equality with the native source cannot make a replaced read
+    // profile eligible for the original semantic source and review.
+    source.borrow_mut().0.bridge_generation = native_generation;
+    source.borrow_mut().1.bridge_generation = native_generation;
+    assert_eq!(
+        session
+            .commit(review.seal(), true, &mut evidence, &f.context)
+            .err()
+            .ok_or_else(rejected)?
+            .code,
+        ErrorCode::EffectIndeterminate
+    );
+    assert_eq!(f.native.borrow().commits, 0);
+    let retained = session.inspect(review.seal(), &f.context)?;
+    assert_eq!(
+        retained.native_record().state(),
+        CreationState::DispatchStarted
+    );
+    assert_eq!(retained.review().original_plan(), &f.original);
+    assert_eq!(retained.review().native_plan(), review.native_plan());
+    assert!(
+        session
+            .commit(review.seal(), true, &mut evidence, &f.context)
+            .is_err()
+    );
+    assert_eq!(f.native.borrow().commits, 0);
+    Ok(())
+}
+
+#[test]
+fn native_profile_reload_during_prepared_reopen_never_inserts() -> Result<()> {
+    let mut f = Fixture::new()?;
+    let mut session = f.session(true, JournalMode::Control, false)?;
+    let review = session.observe(f.original.clone(), &mut f.observer, &f.context)?;
+    session.prepare(review.seal(), &mut f.observer, &f.context)?;
+    drop(session);
+
+    let original = queue()?;
+    assert_ne!(original.generation(), CITIZEN_GENERATION);
+    f.native.borrow_mut().queue = changed_clock(
+        &original,
+        CITIZEN_GENERATION,
+        original.sequence(),
+        original.tick(),
+    )?;
+    let mut recovered = f.session(false, JournalMode::Control, false)?;
+    let attached = recovered.reattach(f.original.clone(), &f.context)?;
+    assert_eq!(attached.seal(), review.seal());
+    assert_eq!(attached.native_plan(), review.native_plan());
+    assert!(
+        recovered
+            .refresh_prepared(attached.seal(), &mut f.observer, &f.context)
+            .is_err()
+    );
+    assert!(
+        recovered
+            .commit(attached.seal(), true, &mut f.observer, &f.context)
+            .is_err()
+    );
+    assert_eq!(f.native.borrow().prepares, 1);
+    assert_eq!(f.native.borrow().commits, 0);
+    assert_eq!(
+        recovered
+            .inspect(attached.seal(), &f.context)?
+            .native_record()
+            .state(),
+        CreationState::Prepared
+    );
     Ok(())
 }

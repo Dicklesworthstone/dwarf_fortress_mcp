@@ -167,6 +167,13 @@ impl<'a> LiveRoutingEvidence<'a> {
         self.source_digest
     }
 
+    /// Incarnation of the canonical read profile. Mutation profiles have their
+    /// own independent generations, retained in their exact native plans.
+    #[must_use]
+    pub const fn source_generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Resolve only observed canonical unit entities from this exact schema.
     /// Identity includes the retained canonical generation, not only native ID.
     pub fn resolve_units(&self, units: &[EntityId]) -> Result<Vec<NativeUnitIdentity>> {
@@ -287,15 +294,21 @@ impl<'a> LiveRoutingEvidence<'a> {
         tick: u64,
         paused: bool,
     ) -> Result<()> {
+        // Each separately loaded read/mutation plugin initializes and advances
+        // its own incarnation. Equality across those namespaces is neither
+        // required nor evidence of shared custody. The canonical incarnation
+        // stays bound above to its exact projection/source; the native plan
+        // retains this capture's generation and witness for family revalidation.
         if folder != self.folder
             || site != self.site
-            || generation != self.generation
+            || generation == 0
+            || generation == u64::MAX
             || tick != self.anchor().tick.get()
             || !paused
             || !self.evidence.establishes(&Predicate::Paused(true))?
         {
             return Err(stale(
-                "native resolution requires the same fortress, generation and observed paused tick",
+                "native resolution requires a valid native incarnation and the same fortress and observed paused tick",
             ));
         }
         Ok(())
