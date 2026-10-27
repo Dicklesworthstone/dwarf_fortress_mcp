@@ -9,6 +9,10 @@ use dfmcp_adapter::plan_archive::PlanArchiveStore;
 use dfmcp_adapter::semantic_workforce::GoalHistoryStore;
 use std::cell::Cell;
 
+#[path = "runtime_clock_tests.rs"]
+mod runtime_clock_tests;
+use runtime_clock_tests::{ClockNative, ClockResources};
+
 #[derive(Clone)]
 struct MockShell {
     native: Native,
@@ -21,6 +25,7 @@ struct MockShell {
     enabled: Rc<Cell<bool>>,
     acquisitions: Rc<Cell<usize>>,
     archive_failure: Rc<Cell<bool>>,
+    clock: Option<ClockResources>,
 }
 impl Shell for MockShell {
     type Journal = Storage;
@@ -30,6 +35,33 @@ impl Shell for MockShell {
     type Identity = Storage;
     type History = Storage;
     type Evidence = Observer;
+    type ClockJournal = Storage;
+    type ClockSource = ClockNative;
+    fn clock_enabled(&self) -> bool {
+        self.clock.as_ref().is_some_and(ClockResources::enabled)
+    }
+    fn open_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::journal::RunJournal<Storage>>> {
+        self.clock
+            .as_ref()
+            .map(|clock| clock.open(mode, c))
+            .transpose()
+    }
+    fn clock_context(&self, c: &OperationContext, control: bool) -> Result<OperationContext> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| invalid("clock fixture absent"))?
+            .context(c, control)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<ClockNative> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| invalid("clock fixture absent"))?
+            .source(c)
+    }
     fn acceptance(&self) -> &SourceAcceptance {
         &self.acceptance
     }
@@ -153,6 +185,7 @@ fn runtime_fixture() -> Result<(Runtime<MockShell>, MockShell)> {
         enabled: Rc::new(Cell::new(true)),
         acquisitions: Rc::new(Cell::new(0)),
         archive_failure: Rc::new(Cell::new(false)),
+        clock: None,
     };
     let mut budget = f.context.budget;
     budget.max_bytes = super::DEFAULT_BYTES;

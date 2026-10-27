@@ -44,6 +44,45 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original labor goals with reviewed clock advancement (2026-10-27)
+
+The original workforce runtime now composes its retained `SetLabor` goal with
+the existing bounded-run/1.13 coordinator. Each finite run has a distinct review,
+explicit confirmation and durable dispatch marker. Exact original plan, citizen
+identity, verified assignment, absolute deadline and current same-tick labor
+evidence are rechecked after that marker before native unpause. Lost replies,
+source loss and restart preserve the original run without another unpause.
+
+Clock authority is independent of labor authority. Run/1.13 supplies source
+incarnation identity rather than named-fortress lineage; the shell explicitly
+issues separate source-scoped authority under the clock gate while retaining
+independent named-fortress checks. Optional exact private clock custody reopens
+without recreating missing files or adopting substituted identities. Offline
+recovery needs no native credentials. Clock-only recovery cannot regain labor
+control, and safety cancellation does not require fresh labor truth or Plan.
+
+The owner retains at most 64 runs, one unsettled at a time. `wait` reconciles
+clock uncertainty before a paused goal read; new goal projections older than
+retained clock evidence are rejected before proof publication. A pre-run sample
+is suppressed as a current goal while a run may still be active. Historical
+assignment, clock receipts, original sampled goal proof and first achievement
+remain separate. No run chains automatically or changes the original deadline.
+
+Executed validation passes all 49 actual-source workforce runtime tests: 17
+clock-owner, six native clock/configuration/custody, nine joined clock/goal,
+13 original runtime and four existing native-shell cases. The joined cases
+include 64 original samples through 63 finite runs, exact offline restart,
+clock-only control, lost replies, post-marker custody/authority changes and
+stop-tick rejection before goal publication. Reopening correctly resets an
+unfinished stability streak and still requires later cadence-qualified samples.
+The existing core suite also passes 28 tests, ordinary semantic-workforce
+integration passes 47, and actual bounded-run codec/RPC/journal tests pass 22.
+The actual-source component target compiles the real runtime and adapters with
+injected native/storage edges; it does not compile full FastMCP transport/macros.
+No full-server, native, live or admission qualification is claimed. Explicit MCP
+run dispatch follows in the next checkpoint. See
+[`docs/SEMANTIC_WORKFORCE_CLOCK.md`](docs/SEMANTIC_WORKFORCE_CLOCK.md).
+
 ### Original native labor goals through MCP (2026-10-27)
 
 The dedicated `dfmcp-live-semantic-workforce-dev-server` exposes the original

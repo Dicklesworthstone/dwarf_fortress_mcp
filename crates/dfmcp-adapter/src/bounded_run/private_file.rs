@@ -116,6 +116,28 @@ pub fn open_private_run_journal(
     mode: RunMode,
     binding: Option<RunBinding>,
 ) -> Result<RunJournal<PrivateRunFile>> {
+    open_private_run_journal_inner(path, context, mode, binding, None)
+}
+
+/// Open with an explicit initialization decision. A Control recovery never
+/// recreates missing custody, and initialization never adopts an existing file.
+pub fn open_private_run_journal_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: RunMode,
+    binding: Option<RunBinding>,
+    initialize: bool,
+) -> Result<RunJournal<PrivateRunFile>> {
+    open_private_run_journal_inner(path, context, mode, binding, Some(initialize))
+}
+
+fn open_private_run_journal_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: RunMode,
+    binding: Option<RunBinding>,
+    initialize: Option<bool>,
+) -> Result<RunJournal<PrivateRunFile>> {
     authorize(context, mode == RunMode::Control)?;
     #[cfg(all(
         target_os = "linux",
@@ -167,6 +189,12 @@ pub fn open_private_run_journal(
             Err(e) => return Err(storage_error(e)),
         };
         let created = before.is_none();
+        if initialize.is_some_and(|expected| expected != created) {
+            return Err(error(
+                ErrorCode::Conflict,
+                "run initialization requires absent custody; recovery requires the existing journal",
+            ));
+        }
         if created && mode != RunMode::Control {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -229,7 +257,7 @@ pub fn open_private_run_journal(
         any(target_arch = "x86_64", target_arch = "aarch64")
     )))]
     {
-        let _ = (path, binding);
+        let _ = (path, binding, initialize);
         Err(error(
             ErrorCode::CapabilityDenied,
             "run journal custody currently supports Linux x86_64/aarch64 only",

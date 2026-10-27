@@ -30,12 +30,27 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
+#[path = "native_clock.rs"]
+mod clock;
+pub use clock::PinnedClock;
+use clock::{ClockConfig, ClockInput};
+
 const OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORKFORCE";
 const CONFIG: &str = "DFMCP_SEMANTIC_WORKFORCE_CONFIG";
 const LABOR: &str = "DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR";
 const CITIZEN_TOKEN: &str = "DFMCP_SEMANTIC_WORKFORCE_CITIZEN_TOKEN";
 const WORKFORCE_TOKEN: &str = "DFMCP_SEMANTIC_WORKFORCE_TOKEN";
-const ALLOWED: [&str; 5] = [OPT_IN, CONFIG, LABOR, CITIZEN_TOKEN, WORKFORCE_TOKEN];
+const CLOCK_AUTHORITY: &str = "DFMCP_SEMANTIC_WORKFORCE_ALLOW_CLOCK";
+const CLOCK_TOKEN: &str = "DFMCP_SEMANTIC_WORKFORCE_CLOCK_TOKEN";
+const ALLOWED: [&str; 7] = [
+    OPT_IN,
+    CONFIG,
+    LABOR,
+    CITIZEN_TOKEN,
+    WORKFORCE_TOKEN,
+    CLOCK_AUTHORITY,
+    CLOCK_TOKEN,
+];
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Deserialize)]
@@ -80,6 +95,7 @@ struct RecoveryInput {
     anchor: AnchorInput,
     #[serde(default)]
     history_present: bool,
+    clock_journal_id: Option<String>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -91,6 +107,7 @@ struct ConfigInput {
     journal_id: Option<String>,
     sources: SourceAcceptance,
     recovery: Option<RecoveryInput>,
+    clock: Option<ClockInput>,
 }
 #[derive(Clone)]
 pub struct Config {
@@ -100,6 +117,7 @@ pub struct Config {
     journal_id: Option<Digest32>,
     sources: SourceAcceptance,
     recovery: Option<Recovery>,
+    clock: Option<ClockConfig>,
     environment_digest: Digest32,
     runtime_check: Option<fn() -> Result<()>>,
 }
@@ -137,6 +155,13 @@ impl Config {
             return Err(invalid("native workforce endpoint requires a nonzero port"));
         }
         let journal_id = input.journal_id.as_deref().map(digest).transpose()?;
+        let recovery_clock = input
+            .recovery
+            .as_ref()
+            .and_then(|r| r.clock_journal_id.as_deref())
+            .map(digest)
+            .transpose()?;
+        let has_recovery = input.recovery.is_some();
         let recovery = input.recovery.map(|recovery| {
             if Some(digest(&recovery.journal_id)?) != journal_id {
                 return Err(denied("original workforce recovery and configured journal identity must agree exactly"));
@@ -157,6 +182,21 @@ impl Config {
                 "original workforce recovery belongs to another operator fortress",
             ));
         }
+        let clock = input
+            .clock
+            .map(|clock| clock.validate(input.initialize))
+            .transpose()?;
+        if has_recovery {
+            match (&clock, recovery_clock) {
+                (Some(clock), Some(identity)) if clock.journal_id() == Some(identity) => {}
+                (None, None) => {}
+                _ => {
+                    return Err(denied(
+                        "original labor handoff and configured clock journal must agree exactly",
+                    ));
+                }
+            }
+        }
         Ok(Self {
             directory: input.directory,
             endpoint,
@@ -164,6 +204,7 @@ impl Config {
             journal_id,
             sources: input.sources,
             recovery,
+            clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
             runtime_check: None,
         })
@@ -181,6 +222,13 @@ impl Config {
                 "operator labor enablement must be absent or exactly 1",
             ));
         }
+        if let Some(value) = std::env::var_os(CLOCK_AUTHORITY)
+            && value.to_str() != Some("1")
+        {
+            return Err(denied(
+                "operator clock enablement must be absent or exactly 1",
+            ));
+        }
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy();
             if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
@@ -193,6 +241,9 @@ impl Config {
     }
     pub fn labor_enabled() -> bool {
         std::env::var(LABOR).ok().as_deref() == Some("1")
+    }
+    pub fn clock_enabled() -> bool {
+        std::env::var(CLOCK_AUTHORITY).ok().as_deref() == Some("1")
     }
     fn current(&self) -> Result<()> {
         if let Some(check) = self.runtime_check {
@@ -442,6 +493,24 @@ impl Shell for NativeShell {
     type Identity = PrivateBuildFile;
     type History = PrivateBuildFile;
     type Evidence = NativeEvidence;
+    type ClockJournal = dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
+    type ClockSource = PinnedClock;
+    fn clock_enabled(&self) -> bool {
+        self.config.clock.is_some() && Config::clock_enabled()
+    }
+    fn clock_context(&self, c: &OperationContext, control: bool) -> Result<OperationContext> {
+        clock::context(&self.config, c, control)
+    }
+    fn open_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::journal::RunJournal<Self::ClockJournal>>> {
+        clock::open(&self.config, mode, c)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource> {
+        clock::connect(&self.config, c)
+    }
     fn acceptance(&self) -> &SourceAcceptance {
         &self.config.sources
     }

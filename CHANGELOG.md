@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-27 — Advance original labor goals with separately reviewed finite runs
+
+- Compose original labor proof with the existing run/1.13 coordinator, preserving
+  original citizen identity, assignment receipt, deadline, cadence and stability.
+- Separate clock permission and source scope from labor permission and named
+  fortress evidence; recheck original custody and fresh labor after dispatch intent.
+- Keep one unsettled run, at most 64 retained runs, exact offline recovery and
+  independent safety cancellation. Never repeat unpause after an uncertain reply.
+- Reject labor observations older than retained clock evidence before publishing
+  goal proof, and suppress current-goal display while the clock may be running.
+- Add exact create-versus-reopen clock-file custody and pass all 49 actual-source
+  workforce runtime tests, including 64 samples through 63 finite runs and exact
+  offline recovery. Existing suites also pass 28 core, 47 workforce integration
+  and 22 bounded-run cases. Full FastMCP, native and live remain unqualified.
+
 ## 2026-10-27 — Carry original labor goals through the complete MCP loop
 
 - Register the dedicated eleven-tool semantic workforce development server:

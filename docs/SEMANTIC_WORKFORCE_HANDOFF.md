@@ -46,6 +46,18 @@ for the complete configuration, closed requests and exact recovery handoff.
 The component tests do not imply full transport, DFHack, live-game or compatibility
 qualification.
 
+## Optional reviewed clock advancement
+
+The same owner now accepts optional independent clock custody and a separately
+negotiated game-time allowance. `prepare_run` and `commit_run` bind one reviewed
+run/1.13 effect to the retained original labor goal; `cancel_run` requests safety
+retirement or pause. `wait` reconciles retained clock uncertainty before sampling.
+The original assignment is never replayed and the original deadline never renews.
+The default clock allowance remains zero. Run/1.13 source scope remains distinct
+from named-fortress identity and labor authority. See
+[SEMANTIC_WORKFORCE_CLOCK.md](SEMANTIC_WORKFORCE_CLOCK.md) for the complete
+authority, custody, finite-run and recovery contract.
+
 ## Supported semantics
 
 The original plan must contain exactly one normalized `SetLabor` step, at most
