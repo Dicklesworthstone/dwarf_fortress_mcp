@@ -478,7 +478,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
     let variants = result["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .ok_or_else(|| error(ErrorCode::InvalidRequest, "schema variants"))?;
-    assert_eq!(variants.len(), 21);
+    assert_eq!(variants.len(), 22);
     for kind in [
         "historical_changes",
         "historical_series",
@@ -487,6 +487,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
         "item_quantity",
         "production_portfolio",
         "condition_evaluation",
+        "citizen_welfare",
     ] {
         assert!(
             variants
@@ -498,7 +499,7 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
         result["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(16)
+        Some(17)
     );
     for variant in variants {
         assert_ne!(variant["properties"]["kind"]["const"], "watch");

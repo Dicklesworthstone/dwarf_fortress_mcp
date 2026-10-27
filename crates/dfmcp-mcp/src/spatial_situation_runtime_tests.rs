@@ -261,7 +261,7 @@ fn live_bootstrap_and_query_attention_drill_into_exact_observed_entities() -> Re
         explained["situation_policy"]["rules"]
             .as_array()
             .map(Vec::len),
-        Some(7)
+        Some(8)
     );
     assert_eq!(decode(&fortress_observe(s.handle()))?["ok"], true);
     assert_eq!(
@@ -500,6 +500,25 @@ fn historical_queries_and_offline_sessions_never_inherit_current_attention() -> 
     assert_eq!(old["historical"], true);
     assert_eq!(old["agent_turn"]["attention"], json!([]));
     assert!(old["agent_turn"]["briefing"].get("situation").is_none());
+    let welfare = ask(
+        &s,
+        json!({"kind":"historical_query","record":first.number,
+        "record_digest":first.record_digest.to_string(),
+        "query":{"kind":"citizen_welfare","max_stress_category":6,"limit":2}}),
+    )?;
+    assert_eq!(welfare["ok"], true, "{welfare}");
+    assert_eq!(welfare["historical"], true);
+    assert_eq!(welfare["agent_turn"]["attention"], json!([]));
+    let inspection = welfare["rows"][0]["inspect_query"].clone();
+    assert_eq!(inspection["query"]["record"], first.number);
+    assert_eq!(
+        inspection["query"]["record_digest"],
+        first.record_digest.to_string()
+    );
+    assert_eq!(
+        decode(&fortress_query(s.handle(), None, Some(inspection)))?["ok"],
+        true
+    );
     drop(s);
     let bytes = fs::read(&files.path).map_err(io_error)?;
     let id = next_id()?;
@@ -520,6 +539,19 @@ fn historical_queries_and_offline_sessions_never_inherit_current_attention() -> 
     assert_eq!(old["ok"], true);
     assert_eq!(old["archive_only"], true);
     assert_eq!(old["agent_turn"]["attention"], json!([]));
+    let welfare = decode(&fortress_query(s.handle(), Some("welfare".into()), None))?;
+    assert_eq!(welfare["ok"], true, "{welfare}");
+    assert_eq!(welfare["archive_only"], true);
+    assert_eq!(welfare["coverage"]["injuries"], "unknown");
+    let selected = ask(
+        &s,
+        json!({"kind":"citizen_welfare","max_stress_category":6,"limit":1}),
+    )?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(
+        selected["rows"][0]["inspect_query"]["query"]["kind"],
+        "historical_query"
+    );
     assert_eq!(
         decode(&fortress_query(s.handle(), Some("situation".into()), None))?["error"]["code"],
         "capability_denied"

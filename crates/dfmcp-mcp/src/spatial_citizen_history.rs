@@ -11,7 +11,7 @@ use dfmcp_core::Digest32;
 use std::path::{Path, PathBuf};
 
 pub(super) type Journal = SpatialCitizenJournal<PrivateJournalFile>;
-const STATELESS: [&str; 14] = [
+const STATELESS: [&str; 15] = [
     "entities",
     "inspect",
     "traverse",
@@ -26,6 +26,7 @@ const STATELESS: [&str; 14] = [
     "production_portfolio",
     "condition_evaluation",
     "map_connectivity",
+    "citizen_welfare",
 ];
 
 pub(super) fn configuration() -> Result<Option<(PathBuf, TailRecovery)>> {
@@ -408,12 +409,15 @@ pub(super) fn execute(
             let envelope = json!({"schema":"dfmcp.query/1","query":query});
             let mut value = if production::handles(&envelope) {
                 production::execute(&state, &qc, &envelope)?
+            } else if workforce_queries::handles(&envelope) {
+                workforce_queries::execute(&state, &qc, &envelope)?
             } else if spatial_queries::handles(&envelope) {
                 spatial_queries::execute(&state, &qc, &envelope)?
             } else {
                 semantic_query::execute(snapshot, &qc, &envelope)?
             };
             production::pin_historical(&mut value, record, digest)?;
+            workforce_queries::pin_historical(&mut value, record, digest)?;
             if let Some(rows) = value.get_mut("rows").and_then(Value::as_array_mut) {
                 for row in rows {
                     if let Some(route) = row.get("route_query") {

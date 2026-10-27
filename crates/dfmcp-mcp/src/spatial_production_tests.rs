@@ -522,13 +522,13 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
         schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(16)
+        Some(17)
     );
     assert_eq!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(21)
+        Some(22)
     );
     for definition in ["archive_stateless", "query"] {
         assert!(

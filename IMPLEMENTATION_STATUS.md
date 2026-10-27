@@ -44,6 +44,55 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Citizen welfare inspection and stress attention (2026-10-26)
+
+The existing spatial/1.8 `fortress.query` now accepts `mode: "welfare"` and the
+structured `citizen_welfare` query over the complete strict-citizen roster from
+one coherent capture. It reports observed stress categories, source-qualified
+current job assignments and availability under preserve-social and
+interrupt-social policies. Filtering and whole-row pagination rank lower stress-category
+numbers first, with unestablished stress disclosed separately. Each row carries
+an exact entity-generation inspection request.
+
+The same query works against selected historical records and offline archives.
+Its inspection drilldowns retain the exact record number and digest, so later
+live observations cannot redirect them to a different citizen generation or
+source. Historical responses retain their historical scope and do not inherit
+current situation attention. Reads use existing captured data and perform no
+additional native capture or game mutation.
+
+The separately versioned `dfmcp.spatial-situation/2` policy adds attention for
+living strict citizens observed in DFHack stress categories 0 through 2.
+The finding is an inspection priority, not a diagnosis or evidence of danger.
+Welfare coverage explicitly leaves needs, physical health, hunger, thirst and
+injuries unknown. Category 3 may include DFHack's no-soul fallback. The strict
+roster does not cover every resident, visitor, dead or insane unit; an empty
+filtered page cannot establish that the population is well.
+
+Current Query authority, source health/fencing and observation-journal custody
+remain enforced. Request shape, complete-roster/entity scans, work, wall time,
+response bytes and whole-row pages are bounded. Continuations bind the session,
+source anchor/digest, normalized filters and work allowance. Inspecting welfare
+confers no labor permission, reservations or effect authority.
+
+Executed focused validation: all 189 actual-source MCP semantic-module tests
+passed, with zero failures or ignored tests. This includes all nine new welfare
+tests, all twelve pure situation tests and four workforce schema/pagination
+tests. The welfare cases execute source qualification, uncertainty disclosure,
+complete-roster filtering, authority and work/output bounds, continuation
+identity, coherent job-worker links and exact historical inspection pinning.
+Independent source/integration review, request-schema checks and scoped
+formatting/diff checks also passed.
+
+The harness uses the actual GameAdapter API, eight original native-read source
+modules and the complete laboratory MemoryAdapter. It excludes unrelated adapter
+transport/bootstrap/mutation modules and the full MCP server, facade and stdio
+runtime. Corresponding runtime-test children, including the new current,
+historical and offline facade integration cases, remain unexecuted. DFHack and
+live-game execution were not performed. These focused results do not establish
+full-workspace, native or live qualification; the compatibility registry and
+production runner map remain unchanged. See `docs/CITIZEN_WELFARE.md`.
+
 ### Explicit future food and drink reserves (2026-10-26)
 
 The existing laboratory production request accepts an absolute
@@ -54,6 +103,15 @@ queued work, workforce contention and explicitly authorized workshop setup.
 Action obligations keep their work-based deadlines. Original current-stock
 predicates remain unchanged; predicted reserves are not continuous maintenance
 proof or future observed stock.
+
+When the exact qualified original minima are already True, a typed
+laboratory-only reserve constraint admits the generated production work. It
+requires a unique bounded future horizon, established stock minima on actual
+stock-ledger records, registered recipes and explicitly allowed setup. Generic
+preparation and unrelated goal predicates cannot use this exception. The typed
+horizon is independently sealed into the bounded prepared-plan summary without
+changing the plan archive format. Previously valid False-goal reserve plans
+retain their exact summary and seal.
 
 Canonical production sources seal the exact requested tick and compiler.
 The distinct `dfmcp.production-continuation/3` preserves both across flat
@@ -69,13 +127,27 @@ action deadlines or the work-completion report. Paused or unavailable future
 state remains unavailable. Public planning and reviewed stale-plan replay use
 the retained source to select this forecast.
 
-Focused compiler, source, continuation, forecast and public-facade regressions
-are included. Scoped pinned-nightly formatting and source review passed;
-focused runtime validation is in progress. The shared environment exhausted
-disk capacity and subsequently stalled filesystem I/O during compilation.
-The required repository checks retain their pre-existing source-bundle and
-static-contract failures. No full-workspace, native or live qualification is
-claimed. See `docs/PRODUCTION_RESERVE_PLANNING.md` and
+Final focused validation passed all 203 actual `dfmcp-intent` library tests and
+all 189 MCP semantic-module tests, with zero failures or ignored tests. Six new
+intent groups cover typed admission, qualified stock-goal restrictions,
+registered action families, exact seals/archive roundtrip and unchanged
+source/authority/risk/budget boundaries. Twenty reserve-specific module cases
+cover nine compiler/execution groups, three source-seal/replay groups, four
+continuation groups and four forecast groups. They execute real prepare,
+commit, advance and poll behavior, including initially satisfied minima, exact
+shared ingredient budgets, explicit workshop setup and exact future frontiers.
+This is the same 189-test harness described in the welfare entry above, not an
+additional disjoint test set. Scoped pinned-nightly formatting, source review
+and diff checks passed.
+
+The full MCP server/facade/stdio runtime and its test children, including the
+new public-facade regressions, remain unexecuted. The focused harness imports
+the actual intent, laboratory and named MCP semantic modules with the exact
+GameAdapter API and native-read subset; it does not execute unrelated adapter
+transport/bootstrap/mutation modules, DFHack or a live game. The required
+repository checks retain their pre-existing source-bundle and static-contract
+failures. No full-workspace, native or live qualification is claimed. See
+`docs/PRODUCTION_RESERVE_PLANNING.md` and
 `docs/PRODUCTION_GOAL_CONTINUATION.md`.
 
 ### Finite shared ingredients for laboratory food and reserve plans (2026-10-24)

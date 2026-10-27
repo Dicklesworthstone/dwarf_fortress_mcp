@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-pub(super) const POLICY: &str = "dfmcp.spatial-situation/1";
+pub(super) const POLICY: &str = "dfmcp.spatial-situation/2";
 pub(super) const ATTENTION_LIMIT: usize = 2;
 const CHANGE_LIMIT: usize = 4;
 const MAX_ENTITIES: usize = 131_072;
@@ -28,7 +28,7 @@ struct Rule {
 }
 // Order is the complete inspection-priority policy, not a probability or a
 // causal score. Equal inputs always retain the smallest matching entity ID.
-const RULES: [Rule; 7] = [
+const RULES: [Rule; 8] = [
     Rule {
         code: "citizen_not_alive",
         severity: "high",
@@ -42,6 +42,13 @@ const RULES: [Rule; 7] = [
         finding: "Living strict citizens observed not sane",
         limitation: "Does not establish diagnosis, cause or imminent violence.",
         fields: &["alive", "sane", "position"],
+    },
+    Rule {
+        code: "living_citizen_elevated_stress",
+        severity: "high",
+        finding: "Living strict citizens observed in DFHack stress categories 0 through 2",
+        limitation: "Lower categories indicate higher stress; causes, needs, physical health and danger are not established.",
+        fields: &["alive", "stress_category", "position"],
     },
     Rule {
         code: "visible_magma",
@@ -161,11 +168,11 @@ fn both(left: Option<bool>, right: Option<bool>) -> Option<bool> {
 fn applies(index: usize, entity: &EntityRecord) -> bool {
     matches!(
         (index, &entity.kind),
-        (0 | 1, EntityKind::Unit)
-            | (2, EntityKind::TileFeature)
-            | (3 | 4, EntityKind::Job)
-            | (5, EntityKind::Building)
-            | (6, EntityKind::Item)
+        (0 | 1 | 2, EntityKind::Unit)
+            | (3, EntityKind::TileFeature)
+            | (4 | 5, EntityKind::Job)
+            | (6, EntityKind::Building)
+            | (7, EntityKind::Item)
     )
 }
 fn evaluate(
@@ -179,6 +186,25 @@ fn evaluate(
         0 => flag("alive").map(|value| !value),
         1 => both(flag("alive"), flag("sane").map(|value| !value)),
         2 => {
+            // DFHack Units::getStressCategory uses category 0 for the most
+            // stressed citizens. Category 3 also includes its no-soul fallback.
+            // An absent, invalid or differently sourced category stays unknown.
+            let qualified = entity.fields.get("stress_category").is_some_and(|fact|
+                matches!(&fact.source, FactSource::DfhackField(path) if path == "spatial/1.8.citizen.stress_category"));
+            let elevated = if qualified {
+                integer(entity, "stress_category", anchor, source)
+                    .filter(|value| (0..=6).contains(value))
+                    .map(|value| value <= 2)
+            } else {
+                None
+            };
+            let living = if entity.fields.get("alive").is_some_and(|fact|
+                matches!(&fact.source, FactSource::DfhackField(path) if path == "spatial/1.8.alive")) {
+                flag("alive")
+            } else { None };
+            both(living, elevated)
+        }
+        3 => {
             // Hidden/unallocated terrain is outside the observed liquid scope.
             // Never consult plausible-looking residual fields behind redaction.
             if !matches!(known(entity,"visibility",anchor,source), Some(WorldValue::Text(text)) if text=="visible")
@@ -191,25 +217,25 @@ fn evaluate(
             };
             both(flag("magma"), depth)
         }
-        3 => flag("suspended"),
-        4 => both(
+        4 => flag("suspended"),
+        5 => both(
             flag("suspended").map(|value| !value),
             flag("worker_assigned").map(|value| !value),
         ),
-        5 => match (
+        6 => match (
             integer(entity, "build_stage", anchor, source),
             integer(entity, "max_build_stage", anchor, source),
         ) {
             (Some(stage), Some(maximum)) if stage >= 0 && maximum >= stage => Some(stage < maximum),
             _ => None,
         },
-        6 => both(flag("removed").map(|value| !value), flag("rotten")),
+        7 => both(flag("removed").map(|value| !value), flag("rotten")),
         _ => None,
     }
 }
 
 /// Whole-projection Query authority is checked before any canonical facts are
-/// inspected. Work is one ordered entity pass with a fixed seven-rule ceiling.
+/// inspected. Work is one ordered entity pass with a fixed eight-rule ceiling.
 pub(super) fn build(
     snapshot: &WorldSnapshot,
     context: &OperationContext,

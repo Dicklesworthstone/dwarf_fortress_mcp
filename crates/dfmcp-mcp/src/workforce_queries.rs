@@ -21,6 +21,9 @@ mod quality;
 #[path = "shelter_queries.rs"]
 mod shelter;
 
+#[path = "citizen_welfare.rs"]
+mod welfare;
+
 fn invalid(text: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, text)
 }
@@ -91,7 +94,7 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|q| q.get("kind"))
             .and_then(Value::as_str),
-        Some("workforce_candidates" | "workforce_plan" | "shelter_status")
+        Some("workforce_candidates" | "workforce_plan" | "shelter_status" | "citizen_welfare")
     )
 }
 fn validate_shape(input: &Value) -> Result<()> {
@@ -300,8 +303,21 @@ pub(super) fn execute(
 ) -> Result<Value> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     validate_shape(input)?;
-    if input.get("query").and_then(|q| q.get("kind")).and_then(Value::as_str) == Some("shelter_status") {
+    if input
+        .get("query")
+        .and_then(|q| q.get("kind"))
+        .and_then(Value::as_str)
+        == Some("shelter_status")
+    {
         return shelter::execute(state, context, input);
+    }
+    if input
+        .get("query")
+        .and_then(|q| q.get("kind"))
+        .and_then(Value::as_str)
+        == Some("citizen_welfare")
+    {
+        return welfare::execute(state, context, input);
     }
     let envelope: Envelope = serde_json::from_value(input.clone())
         .map_err(|_| invalid("invalid workforce query fields"))?;
@@ -445,6 +461,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
         include_str!("../../../schemas/mcp_workforce_candidates_v1.json"),
         include_str!("../../../schemas/mcp_workforce_plan_v1.json"),
         include_str!("../../../schemas/mcp_shelter_status_v1.json"),
+        include_str!("../../../schemas/mcp_citizen_welfare_v1.json"),
     ] {
         let variant: Value = serde_json::from_str(source)
             .map_err(|_| invariant("embedded workforce schema invalid"))?;
@@ -454,6 +471,10 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
             .push(variant);
     }
     Ok(schema)
+}
+
+pub(super) fn pin_historical(out: &mut Value, record: u64, digest: Digest32) -> Result<()> {
+    welfare::pin_historical(out, record, digest)
 }
 
 #[cfg(test)]

@@ -381,6 +381,51 @@ fn workforce_query_preserves_authority_fencing_and_invalid_input_refusal() -> Re
     Ok(())
 }
 
+#[test]
+fn welfare_mode_and_structured_query_share_bounded_source_qualified_rows() -> Result<()> {
+    let _serial = crate::test_serial();
+    let s = register(3, 8192)?;
+    let brief = decode(&fortress_query(s.handle(), Some("welfare".into()), None))?;
+    assert_eq!(brief["ok"], true, "{brief}");
+    assert_eq!(brief["kind"], "citizen_welfare");
+    assert_eq!(brief["summary"]["strict_citizens"], 3);
+    assert_eq!(brief["summary"]["stress_categories"][6], 3);
+    assert_eq!(brief["returned"], 0);
+    assert_eq!(brief["coverage"]["physical_health"], "unknown");
+    assert_eq!(brief["all_clear_proven"], false);
+    let first = ask(
+        &s,
+        json!({"kind":"citizen_welfare","max_stress_category":6,"limit":1}),
+    )?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["returned"], 1);
+    assert_eq!(first["total_rows"], 3);
+    let inspected = decode(&fortress_query(
+        s.handle(),
+        None,
+        Some(first["rows"][0]["inspect_query"].clone()),
+    ))?;
+    assert_eq!(inspected["ok"], true, "{inspected}");
+    let second = ask(
+        &s,
+        json!({"kind":"citizen_welfare","max_stress_category":6,"limit":2,
+        "continuation":first["continuation"]}),
+    )?;
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["returned"], 2);
+    assert!(second["continuation"].is_null());
+    assert_eq!(s.calls.load(Ordering::SeqCst), 0);
+    {
+        let handle = resolve(s.handle())?;
+        lock(&handle)?.source.fence();
+    }
+    assert_eq!(
+        ask(&s, json!({"kind":"citizen_welfare"}))?["error"]["code"],
+        "adapter_unavailable"
+    );
+    Ok(())
+}
+
 #[path = "workforce_quality_runtime_tests.rs"]
 mod quality;
 

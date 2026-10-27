@@ -741,7 +741,7 @@ fn finish(view: &QueryResponseProjection, v: Value) -> Result<String> {
     Ok(out)
 }
 #[tool(
-    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, production, citizens, jobs, buildings, items, tiles, history, schema. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
+    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -772,6 +772,9 @@ pub fn fortress_query(
                     Some("history") => json!({"schema":"dfmcp.query/1","query":{"kind":"history"}}),
                     Some("production") => {
                         json!({"schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"}})
+                    }
+                    Some("welfare") => {
+                        json!({"schema":"dfmcp.query/1","query":{"kind":"citizen_welfare"}})
                     }
                     Some("citizens") => {
                         json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["unit"],"fields":["name","profession","position","alive","active"],"limit":1}})
@@ -901,6 +904,7 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
             &c,
             json!({"ok":true,"coherence":"strict citizens, operations and requested terrain are one native capture",
         "situation_policy":situation::policy(),
+        "welfare":"citizen_welfare ranks observed stress categories with same-capture job assignments and social-preserving availability; physical health, needs, hunger, thirst, injuries and stress causes remain unknown",
         "production":"production_diagnosis and inventory_plan use this exact capture and entity generations; flags, attachments and declared supply shortages do not prove causal blockers, native requirements, reachability or job completion",
         "furniture":"furniture_allocation selects distinct exact items for every declared bed/chair/table target, or explains a complete shortage; the returned furniture-plan requires fresh placement review and reserves no items",
         "worker_join":"observed strict-citizen workers have generation-checked unit entities and performs edges to jobs",

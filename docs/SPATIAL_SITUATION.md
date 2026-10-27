@@ -5,7 +5,7 @@ projection into a bounded operational briefing. A newly arrived agent can see ob
 inspecting without first downloading every unit, job, building and tile. This is derived read-only
 presentation, not a new native observation profile, game effect, causal diagnosis or admission claim.
 
-The policy is `dfmcp.spatial-situation/1`. It runs over one exact canonical snapshot and requires
+The policy is `dfmcp.spatial-situation/2`. It runs over one exact canonical snapshot and requires
 current whole-projection Query authority. Native source digests, game ticks, field types and presence
 representations must agree before a fact contributes to a positive finding.
 
@@ -50,15 +50,20 @@ example, independent of arrival order.
 |---|---|---|---|
 | 0 | `citizen_not_alive` | A strict citizen's native `alive` field is false. | Time or cause of death. |
 | 1 | `living_citizen_not_sane` | Native `alive` is true and `sane` is false. | Diagnosis, cause or imminent violence. |
-| 2 | `visible_magma` | Visible terrain has magma and positive liquid depth. | Exposure, flooding or danger; it may be contained. |
-| 3 | `suspended_jobs` | A current job's native suspension flag is true. | Cause, age, criticality or inability to complete. |
-| 4 | `unassigned_unsuspended_jobs` | A job is not suspended and has no assigned worker. | A labor shortage or blockage; queueing may be normal. |
-| 5 | `incomplete_buildings` | Observed nonnegative build stage is below its observed maximum. | Stalled construction or missing materials. |
-| 6 | `retained_rotten_items` | An item is not removed and is observed rotten. | Available food quantity or starvation. |
+| 2 | `living_citizen_elevated_stress` | Native `alive` is true and the exact citizen stress source reports category 0, 1 or 2. | Causes, needs, physical health or danger. |
+| 3 | `visible_magma` | Visible terrain has magma and positive liquid depth. | Exposure, flooding or danger; it may be contained. |
+| 4 | `suspended_jobs` | A current job's native suspension flag is true. | Cause, age, criticality or inability to complete. |
+| 5 | `unassigned_unsuspended_jobs` | A job is not suspended and has no assigned worker. | A labor shortage or blockage; queueing may be normal. |
+| 6 | `incomplete_buildings` | Observed nonnegative build stage is below its observed maximum. | Stalled construction or missing materials. |
+| 7 | `retained_rotten_items` | An item is not removed and is observed rotten. | Available food quantity or starvation. |
 
-All seven observed/unestablished counts remain present in the detailed summary even when only two
+All eight observed/unestablished counts remain present in the detailed summary even when only two
 groups receive full attention entries. Omitted detail counts are explicit. Zero positive findings
 never emits an all-clear claim. Food, drink, health and threat coverage are explicitly incomplete.
+
+DFHack stress category 0 is highest and 6 is lowest; category 3 also includes its no-soul fallback.
+The [citizen-welfare report](CITIZEN_WELFARE.md) provides the complete histogram, selection,
+source interpretation and bounded citizen drilldowns without another capture.
 
 ## Unknown facts and redaction
 
@@ -108,7 +113,7 @@ A fenced native source produces no current situation findings. Archive-only sess
 `situation` mode, and historical query/comparison responses do not inherit current live attention.
 The existing historical explanation and watch evidence remain separate.
 
-Derivation scans at most the negotiated entity limit and 131,072 entities, with a fixed seven-rule
+Derivation scans at most the negotiated entity limit and 131,072 entities, with a fixed eight-rule
 ceiling, one retained example per rule and cooperative deadline/cancellation checks. There is no
 background worker or retained situation store. Hash verification and native capture remain separate
 existing operations; this is not a claim of hard real-time preemption or one shared deadline over
@@ -118,19 +123,21 @@ Full Agent Turn metadata and active watches are reserved before result paginatio
 use their own worst-case response-metadata sample through the actual final renderer, rather than
 paying for unrelated baseline-comparison metadata. Complete watch output is still rendered and
 checked before watch state publication or durable checkpoint append. Insufficient space causes a
-visible error; no alert or watch is silently discarded to make a result fit. The complete seven-rule
+visible error; no alert or watch is silently discarded to make a result fit. The complete eight-rule
 explanation or many retained watches can require a larger negotiated output budget.
 
 ## Evidence status
 
-Fifteen Rust scenarios are registered: nine canonical-projection tests and six actual live/archive
+Eighteen Rust scenarios are registered: twelve canonical-projection tests and six actual live/archive
 handler tests. They cover all rules, unknown/provenance distinctions, hidden-data noninterference,
 deterministic generation-bound drill-downs, authority and budget refusals, endpoint/reset semantics,
 compact/detail navigation, 8,192-byte paginated queries with a current watch, failed watch
 publication, source failure, expiry after refresh and historical separation.
 
-They have **not been compiled or executed here**. Rust, Cargo and rustfmt are unavailable in this
-editing environment. A focused command on a configured checkout is:
+The additional stress scenarios cover all seven native categories, exact source qualification,
+unknown or invalid inputs, living-citizen gating and endpoint changes. Welfare query and drilldown
+tests are described in [Citizen welfare indicators](CITIZEN_WELFARE.md). A focused full-runtime
+command on a configured checkout is:
 
 ```bash
 cargo test --locked -p dfmcp-mcp situation -- --test-threads=1

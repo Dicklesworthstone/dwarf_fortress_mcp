@@ -3,7 +3,7 @@
 //! Historical monitor replay is request-owned analysis, not a live watch sample.
 use super::*;
 
-const READ_KINDS: [&str; 16] = [
+const READ_KINDS: [&str; 17] = [
     "entities",
     "inspect",
     "traverse",
@@ -20,6 +20,7 @@ const READ_KINDS: [&str; 16] = [
     "production_portfolio",
     "condition_evaluation",
     "map_connectivity",
+    "citizen_welfare",
 ];
 
 #[derive(Deserialize)]
@@ -263,6 +264,7 @@ fn execute_on(
         semantic_query::execute(snapshot, &narrowed, &input)?
     };
     production::pin_historical(&mut out, entry.number, entry.record_digest)?;
+    workforce_queries::pin_historical(&mut out, entry.number, entry.record_digest)?;
     pin_routes(&mut out, entry)?;
     packet(session, context, "fortress.query", Some(entry), out)
 }

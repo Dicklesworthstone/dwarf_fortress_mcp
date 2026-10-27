@@ -402,19 +402,158 @@ fn policy_explains_every_emitted_rule_and_order() -> Result<()> {
     let rules = policy["rules"]
         .as_array()
         .ok_or_else(|| dfmcp_core::DfmcpError::new(ErrorCode::InvalidRequest, "rules missing"))?;
-    assert_eq!(rules.len(), 7);
+    assert_eq!(rules.len(), 8);
     assert_eq!(policy["authority_granted"], false);
     let codes: BTreeMap<_, _> = rules
         .iter()
         .filter_map(|r| r["rule"].as_str().map(|key| (key, &r["priority"])))
         .collect();
-    assert_eq!(codes.len(), 7);
+    assert_eq!(codes.len(), 8);
     for finding in report(&warning_world())?.attention(SessionId::new(123)) {
         assert_eq!(
             codes.get(finding["rule"].as_str().unwrap_or("")).copied(),
             Some(&finding["inspection_priority"])
         );
     }
+    Ok(())
+}
+
+fn stressed(id: u64, category: i64, tick: u64) -> EntityRecord {
+    let mut unit = entity(
+        id,
+        EntityKind::Unit,
+        &[
+            ("alive", W::Bool(true)),
+            ("stress_category", W::I64(category)),
+        ],
+        tick,
+    );
+    unit.fields.insert(
+        "stress_category".into(),
+        Fact::known(
+            W::I64(category),
+            GameTick(tick),
+            FactSource::DfhackField("spatial/1.8.citizen.stress_category".into()),
+            source(),
+        ),
+    );
+    unit
+}
+
+#[test]
+fn elevated_stress_prioritizes_categories_zero_through_two() -> Result<()> {
+    let snapshot = world(
+        0,
+        1,
+        10,
+        (0..7).map(|n| stressed(10 + n, n as i64, 10)).collect(),
+    );
+    let report = report(&snapshot)?;
+    let summary = report.summary();
+    assert_eq!(summary["policy"], "dfmcp.spatial-situation/2");
+    assert_eq!(
+        summary["signals"]["living_citizen_elevated_stress"]["observed"],
+        3
+    );
+    assert_eq!(
+        summary["signals"]["living_citizen_elevated_stress"]["unestablished"],
+        0
+    );
+    assert_eq!(summary["all_clear_proven"], false);
+    let attention = report.attention(SessionId::new(123));
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["rule"], "living_citizen_elevated_stress");
+    assert_eq!(attention[0]["severity"], "high");
+    assert_eq!(
+        attention[0]["example"]["entity_id"],
+        EntityId::new(10).to_string()
+    );
+    assert_eq!(
+        attention[0]["next_step"]["arguments"]["query"]["query"]["fields"],
+        json!(["alive", "stress_category", "position"])
+    );
+    Ok(())
+}
+
+#[test]
+fn elevated_stress_requires_exact_sources_known_values_and_living_citizens() -> Result<()> {
+    for case in 0..10 {
+        let mut unit = stressed(10, 0, 10);
+        let stress = unit.fields.get_mut("stress_category").ok_or_else(|| {
+            dfmcp_core::DfmcpError::new(ErrorCode::InvalidRequest, "stress fixture")
+        })?;
+        match case {
+            0 => stress.presence = Some(FactPresence::Unknown("missing".into())),
+            1 => stress.presence = Some(FactPresence::Redacted("hidden".into())),
+            2 => stress.observed_at = GameTick(9),
+            3 => stress.source_digest = Digest32::ZERO,
+            4 => stress.source = FactSource::DfhackField("different.stress_category".into()),
+            5 => {
+                stress.value = W::I64(7);
+                stress.presence = None;
+            }
+            6 => {
+                stress.value = W::I64(-1);
+                stress.presence = None;
+            }
+            7 => stress.presence = Some(FactPresence::Known(W::I64(6))),
+            8 => {
+                unit.fields.remove("alive");
+            }
+            _ => {
+                unit.fields.insert(
+                    "alive".into(),
+                    Fact::known(
+                        W::Bool(true),
+                        GameTick(10),
+                        FactSource::DfhackField("different.alive".into()),
+                        source(),
+                    ),
+                );
+            }
+        }
+        let summary = report(&world(0, 1, 10, vec![unit]))?.summary();
+        assert_eq!(
+            summary["signals"]["living_citizen_elevated_stress"]["observed"], 0,
+            "case {case}"
+        );
+        assert_eq!(
+            summary["signals"]["living_citizen_elevated_stress"]["unestablished"], 1,
+            "case {case}"
+        );
+    }
+    let mut dead = stressed(10, 0, 10);
+    dead.fields.insert(
+        "alive".into(),
+        Fact::known(
+            W::Bool(false),
+            GameTick(10),
+            FactSource::DfhackField("spatial/1.8.alive".into()),
+            source(),
+        ),
+    );
+    let summary = report(&world(0, 1, 10, vec![dead]))?.summary();
+    assert_eq!(
+        summary["signals"]["living_citizen_elevated_stress"]["observed"],
+        0
+    );
+    assert_eq!(
+        summary["signals"]["living_citizen_elevated_stress"]["unestablished"],
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn stress_attention_changes_are_observed_endpoint_counts() -> Result<()> {
+    let before = report(&world(0, 1, 10, vec![stressed(10, 6, 10)]))?;
+    let after = report(&world(0, 2, 11, vec![stressed(10, 0, 11)]))?;
+    let (comparison, changes) = after.comparison(&before);
+    assert_eq!(comparison["comparable"], true);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0]["rule"], "living_citizen_elevated_stress");
+    assert_eq!(changes[0]["before"]["observed"], 0);
+    assert_eq!(changes[0]["after"]["observed"], 1);
     Ok(())
 }
 

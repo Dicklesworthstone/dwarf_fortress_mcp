@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-26 — Inspect citizen welfare and elevated stress
+
+- Add `mode: "welfare"` and `citizen_welfare` to the existing spatial/1.8 query
+  surface. Rank observed stress categories with current job assignments and
+  social-preserving availability from the same complete strict-citizen capture.
+- Support live, exact-record historical and offline archive queries with
+  source-bound pagination and inspection drilldowns. Retain current Query
+  authority, source fencing, journal custody and bounded response/work budgets.
+- Add living-citizen elevated-stress attention under the separately versioned
+  `dfmcp.spatial-situation/2` policy. Explicitly leave needs and physical health
+  unknown; filtered absence does not prove population wellbeing.
+- Pass the 189-test actual-source MCP semantic harness, including nine welfare,
+  twelve pure situation and four workforce schema/pagination cases. Full server,
+  facade and stdio runtime tests, DFHack and live-game execution remain outside
+  this evidence. Exact scope is recorded in `IMPLEMENTATION_STATUS.md`.
+
 ## 2026-10-26 — Plan explicit future food and drink reserves
 
 - Accept `reserve_until_tick` in the existing production blueprint. Budget
@@ -12,9 +28,14 @@
 - Expose a separate forecast at the exact requested tick. Preserve action
   completion, current stock truth and predicted future stock as distinct results.
   Wire the forecast through ordinary planning and reviewed stale-plan replay.
-- Add compiler, real reference-effect, source replay, continuation, forecast and
-  public-facade regressions. Exact executed validation is recorded in
-  `IMPLEMENTATION_STATUS.md`; no native compatibility claim is introduced.
+- Admit already-satisfied original stock minima through a typed laboratory-only
+  reserve rule. Require qualified production stock predicates and registered
+  production/setup actions; seal the bounded horizon while preserving prior
+  valid plan bytes and ordinary planner refusal behavior.
+- Pass all 203 intent library tests and the same 189-test focused MCP harness,
+  including twenty reserve-specific cases and six new intent admission groups.
+  Public-facade regressions are present but unexecuted. Exact scope and the
+  remaining full-server/native/live limits are in `IMPLEMENTATION_STATUS.md`.
 
 ## 2026-10-24 — Complete food and drink reserve plans with finite ingredients
 

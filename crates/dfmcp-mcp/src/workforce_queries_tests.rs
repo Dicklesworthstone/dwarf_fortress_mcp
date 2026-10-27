@@ -148,7 +148,7 @@ fn embedded_schema_and_input_shape_keep_the_query_family_closed() -> Result<()> 
     let schema = extend_schema(json!({"$defs":{"query":{"oneOf":[]}}}))?;
     assert_eq!(
         schema["$defs"]["query"]["oneOf"].as_array().map(Vec::len),
-        Some(2)
+        Some(4)
     );
     assert!(handles(&json!({"query":{"kind":"workforce_candidates"}})));
     assert!(handles(&json!({"query":{"kind":"workforce_plan"}})));

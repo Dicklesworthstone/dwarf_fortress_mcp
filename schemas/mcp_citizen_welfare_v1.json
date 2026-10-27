@@ -1,0 +1,19 @@
+{
+  "$comment": "Read-only welfare indicators from one coherent spatial/1.8 strict-citizen roster. Stress category ordering follows DFHack Units::getStressCategory; it does not establish physical health, needs or the cause of stress. Continuations bind the entire source, session, normalized filter and work allowance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind"],
+  "properties": {
+    "kind": {"const": "citizen_welfare"},
+    "max_stress_category": {"type": ["integer", "null"], "minimum": 0, "maximum": 6, "default": 2},
+    "include_unestablished": {"type": ["boolean", "null"], "default": true},
+    "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+    "max_work": {"type": ["integer", "null"], "minimum": 1, "maximum": 4000000},
+    "continuation": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "pattern": "^cw1:[1-9][0-9]*:[0-9a-f]{64}$",
+      "not": {"type": "string", "pattern": "[^a-z0-9:]"}
+    }
+  }
+}
