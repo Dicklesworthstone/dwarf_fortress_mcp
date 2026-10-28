@@ -184,6 +184,26 @@ pub(super) fn open(
     mode: BuildMode,
     expected: Option<BuildBinding>,
 ) -> Result<BuildJournal<PrivateBuildFile>> {
+    open_inner(path, context, mode, expected, None)
+}
+
+pub(super) fn open_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    expected: Option<BuildBinding>,
+    initialize: bool,
+) -> Result<BuildJournal<PrivateBuildFile>> {
+    open_inner(path, context, mode, expected, Some(initialize))
+}
+
+fn open_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    expected: Option<BuildBinding>,
+    initialize: Option<bool>,
+) -> Result<BuildJournal<PrivateBuildFile>> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(context.budget.max_wall_millis))
         .ok_or_else(|| {
@@ -223,12 +243,13 @@ pub(super) fn open(
             "furniture storage open requires current Query authority",
         ));
     }
-    let (storage, created, _) = open_storage(
+    let (storage, created, _) = open_storage_inner(
         path,
         &remaining(context, deadline)?,
         mode,
         expected.is_some(),
         super::super::MAX_JOURNAL_BYTES,
+        initialize,
     )?;
     let nonce = if created {
         let mut nonce = [0; 32];
@@ -256,6 +277,17 @@ pub(super) fn open_storage(
     mode: BuildMode,
     allow_create: bool,
     maximum_bytes: usize,
+) -> Result<(PrivateBuildFile, bool, OperationContext)> {
+    open_storage_inner(path, context, mode, allow_create, maximum_bytes, None)
+}
+
+fn open_storage_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    allow_create: bool,
+    maximum_bytes: usize,
+    initialize: Option<bool>,
 ) -> Result<(PrivateBuildFile, bool, OperationContext)> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(context.budget.max_wall_millis))
@@ -322,6 +354,12 @@ pub(super) fn open_storage(
         Err(cause) => return Err(failure(cause)),
     };
     let created = before.is_none();
+    if initialize.is_some_and(|initialize| initialize != created) {
+        return Err(error(
+            ErrorCode::Conflict,
+            "furniture journal initialization/reopening differs from existing custody",
+        ));
+    }
     if created && (mode != BuildMode::Control || !allow_create) {
         return Err(error(
             ErrorCode::CapabilityDenied,

@@ -154,7 +154,9 @@ impl<S: SpatialFurnitureEvidenceIo> SpatialFurnitureRpcSource<S> {
     ) -> Result<Self> {
         Self::negotiate_until(stream, token, nonce, limits, context, deadline(context)?)
     }
-    fn negotiate_until(
+    /// Preserve a trusted host's earlier connection deadline while negotiating
+    /// a checked stream. The supplied deadline can only narrow the context.
+    pub fn negotiate_until(
         stream: S,
         token: Vec<u8>,
         nonce: Vec<u8>,
@@ -162,6 +164,7 @@ impl<S: SpatialFurnitureEvidenceIo> SpatialFurnitureRpcSource<S> {
         context: &OperationContext,
         end: Instant,
     ) -> Result<Self> {
+        let end = end.min(deadline(context)?);
         read_authority(context)?;
         limits.validate()?;
         remaining_millis(end)?;
@@ -306,6 +309,19 @@ fn local_bytes(state: &LiveSpatialCitizenState, limits: CitizenSpatialLimits) ->
         .and_then(|n| n.checked_add((skills as u64) * LOCAL_SKILL_BYTES))
         .and_then(|n| n.checked_add(16 * limits.spatial.operations.payload_bytes as u64))
         .and_then(|n| n.checked_add(LOCAL_BASE_BYTES))
+        .ok_or_else(exhausted)
+}
+
+/// Pure preflight for a trusted host before constructing an evidence owner.
+/// This is the same complete logical reservation used by every later refresh.
+pub fn evidence_reserve_bytes(
+    state: &LiveSpatialCitizenState,
+    limits: CitizenSpatialLimits,
+) -> Result<u64> {
+    limits.validate()?;
+    local_bytes(state, limits)?
+        .checked_add(wire_bytes(limits)?)
+        .and_then(|n| n.checked_add(CONNECTION_BYTES + 2 * AUTHORIZE_BYTES + FINAL_CHECK_BYTES))
         .ok_or_else(exhausted)
 }
 

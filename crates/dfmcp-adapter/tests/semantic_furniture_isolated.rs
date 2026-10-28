@@ -902,3 +902,6 @@ fn unchanged_native_guard_default_rechecks_authority_after_durable_dispatch_mark
 
 #[path = "semantic_furniture/goal_tests.rs"]
 mod goal_tests;
+
+#[path = "semantic_furniture/archive_tests.rs"]
+mod archive_tests;

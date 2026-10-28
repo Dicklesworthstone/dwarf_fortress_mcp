@@ -636,6 +636,22 @@ fn durable_history_requires_current_independent_policy_and_exact_storage_custody
     )?;
     assert!(durable_poll(&mut fixture, &mut monitor, 1, &source)?.semantic_completion_proven());
     drop(monitor);
+    // Recovery cannot revive authority by returning to the original plan tick.
+    let mut expired = fixture.context.clone();
+    for grant in &mut expired.grants {
+        if grant.capability == Capability::Query {
+            grant.expires_at_tick = Some(GameTick(fixture.capture.tick() + 5));
+        }
+    }
+    let policies = source.borrow().policies;
+    let store = history(&mut fixture, &review, disk.clone(), false, false)?;
+    assert!(
+        fixture
+            .session
+            .begin_goal_monitor_durable(review.seal(), store, &expired, policy(source.clone()))
+            .is_err()
+    );
+    assert_eq!(source.borrow().policies, policies);
     let bytes = disk.bytes();
     let calls = source.borrow().opened;
     source.borrow_mut().permitted = false;

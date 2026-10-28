@@ -165,6 +165,37 @@ pub fn open_private_build(
     }
 }
 
+/// Explicit create-versus-reopen custody. Initialization refuses an existing
+/// file before opening it; reopening never creates a missing file, including in
+/// Control mode. The ordinary opener retains its existing compatibility behavior.
+pub fn open_private_build_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    expected: Option<BuildBinding>,
+    initialize: bool,
+) -> Result<BuildJournal<PrivateBuildFile>> {
+    validate_open(context)?;
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        linux::open_exact(path, context, mode, expected, initialize)
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
+    {
+        let _ = (path, mode, expected, initialize);
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "furniture private journals require Linux x86_64/aarch64",
+        ))
+    }
+}
+
 fn validate_open(context: &OperationContext) -> Result<()> {
     if context.cancellation_requested {
         return Err(error(

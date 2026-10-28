@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-28 — Expose original furniture construction through MCP
+
+- Join canonical spatial observation, exact-item original Build planning, paired
+  native review, one confirmed placement, fresh construction proof and exact
+  restart recovery through the frozen eleven tools.
+- Add the operator-owned spatial/1.8, furniture/1.19 and operations/1.4 composition
+  with independent source pins, bounded credentials, exact private create/reopen
+  custody, scoped construction leases and a pre-seal development checkpoint exception.
+- Preserve original recovery identities through partial publication, errors,
+  close and response overflow. Reopening cannot restore placement permission;
+  placement, current construction and historical first achievement stay distinct.
+- Read original archives at the retained authority-clock floor without rewriting
+  their anchors or reviving expired Query authority. Prepay complete fresh
+  opening work before creating custody files.
+- Pass 63 focused tests: 32 actual-source MCP runtime/native/presentation/facade,
+  26 public adapter/goal/archive and five concrete spatial wire cases.
+  Full FastMCP executable/stdio, native/live qualification and admission remain
+  unverified; existing repository-wide static gate failures remain.
+- Document setup and the complete tool/recovery workflow in
+  docs/SEMANTIC_FURNITURE_DEVELOPMENT.md. Game-time advancement remains external.
+
 ## 2026-10-27 — Prove original furniture construction and retain its history
 
 - Assess current construction from the exact original Placed receipt and one

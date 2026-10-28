@@ -44,6 +44,69 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original furniture goals through the MCP loop (2026-10-28)
+
+The dedicated `dfmcp-live-semantic-furniture-dev-server` carries one original
+single-tile bed, chair or table goal through the frozen eleven tools. A complete
+paused spatial observation supplies canonical item pages. Closed plan input
+retains the original Build, postconditions, action key, absolute deadline,
+cadence and stability while separately sealing the exact item in the paired
+native review. Explicit confirmation performs one placement; subsequent waits
+reconcile the original key or acquire receipt-bracketed construction samples.
+
+The concrete native shell binds independently pinned spatial/1.8, furniture/1.19
+and operations/1.4 sources. Paths, loopback endpoint, credentials, source pins,
+protected regions and host-local construction leases remain operator inputs.
+Exact private create/reopen APIs preserve journal and immutable association
+custody. A required checkpoint is never removed from a sealed plan; the explicit
+disposable-fortress exception is decided before fresh initialization and plan
+compilation. Fresh opening prepays all 512 MiB of logical work before custody
+creation, in addition to facade inspection and response reservations.
+
+Original publication retains its intended archive identity before storage I/O,
+so a lost acknowledgement cannot substitute another goal. Error, close and
+overflow packets preserve recovery references and uncertainty without granting
+authority or making cached evidence current. Offline reopening performs no native
+calls. Restarted sessions cannot restore a placement permit. A recovered native
+preparation can be queried and explicitly retired; fenced histories recommend
+preserving the handoff and releasing the session. Closed packets retain closure
+state and offer no continuation on the released handle. Unknown completion stays
+unknown; historical placement, current construction and first achievement remain
+distinct claims.
+
+The explicit read-only archive authority-floor API permits authorization at a
+retained later tick with the same exact original cursor/hash, while returning
+the original anchor unchanged. Strict archive APIs and publication retain their
+behavior. Recovery checks Query at current authority time, rejects clock rollback
+and changed identity, and cannot revive a grant that expired after planning.
+
+Final focused evidence passes 63 distinct tests: 32 actual-source component cases
+(eight runtime, eight concrete native composition, nine Agent Turn presentation
+and seven verbatim facade boundary cases), 26 public adapter/coordinator/goal/
+archive cases and five concrete spatial wire-codec cases. All passed with no
+compiler warnings. The component target compiles the real native/runtime sources
+and complete facade Action dispatch. It excludes FastMCP macro expansion, handler
+registration, transport and the complete stdio executable. Six private
+goal-history unit cases were front-end checked during an earlier attempt but
+could not complete code generation/linking because build storage was exhausted;
+they are not included in the executed count.
+
+Required static verification was attempted on the frozen Rust source.
+`verify.sh` stops at the existing source-bundle documentation phrase check.
+Static dirty-tree qualification fails with 76 existing findings across 5,964
+checks: 67 forbidden-call/macro findings and nine room-example schema errors.
+The failure lines match the prior run, and all 62 files they name match the
+prior committed head. None names the new furniture implementation. The receipt
+records failed, dirty and not head-equivalent; these runs do not establish full
+Rust or release qualification.
+
+The [operator guide](docs/SEMANTIC_FURNITURE_DEVELOPMENT.md) documents exact setup,
+tool inputs, current versus historical claims, bounds and restart handoffs.
+Wait never advances game time or retries placement automatically. Construction
+clock composition, multi-step furnishing, a checkpoint provider, native/live
+campaigns, compatibility admission and production runner admission remain open.
+The broader mutation/dispatcher bead remains in progress.
+
 ### Original construction goals and durable proof (2026-10-27)
 
 The original furniture owner now has process-local and durable goal monitors.
