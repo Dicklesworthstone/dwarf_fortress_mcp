@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-10-28 — Expose original mining and recovery through MCP
+
+- Add a dedicated eleven-tool original mining server with exact observation-bound
+  tile pages, closed Mine requests, paired explicit confirmation, original-goal
+  waits, offline/reconcile recovery and separate goal/session cancellation.
+- Compose independently pinned dig/1.16 and spatial/1.8 sources with current
+  operator gates, protected shared-block leases, exact private custody and a
+  pre-seal development checkpoint exception. Retain the bootstrap clock floor.
+- Preserve original recovery identities through partial publication, errors,
+  response overflow and session release. Recovered preparation cannot regain
+  dispatch; explicit retirement needs current authority but no new checkpoint.
+- Prepay all three source acquisitions and complete native/archive work before
+  original publication. A larger source that exceeds the allowance leaves its
+  original observation reusable. Use the existing 60-second wall cap as the
+  default review window without renewing native connection deadlines.
+- Pass 113 distinct focused cases: 17 adapter, four world, 15 joined runtime,
+  nine native, 13 presentation, seven facade and 48 adjacent regressions. The
+  final 35 affected cases pass without warnings with 413 inputs unchanged;
+  ordinary joined workflows use the actual facade-reserved default budget and
+  a realistic 430 MiB allowance for each evidence acquisition.
+- Preserve concurrent historical job-progress work on main. Final required
+  verification reaches the existing source-bundle assertion; integrated static
+  qualification reports 77 findings (76 starting findings plus one incoming
+  job-progress test expectation), with no mining findings. Failed development
+  checks do not establish release qualification.
+- Document complete operator setup, exact restart, original receipt versus
+  current excavation, bounded history initialization and nonrenewable review
+  deadlines in docs/SEMANTIC_DIG_DEVELOPMENT.md. Game-time advancement remains
+  external; full FastMCP/native/live qualification and admission are unverified.
+
 ## 2026-10-28 — Compare source-qualified historical job progress
 
 - Add `historical_job_progress` through the existing spatial query surface for

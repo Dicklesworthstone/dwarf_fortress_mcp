@@ -44,6 +44,82 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original mining workflow through MCP (2026-10-28)
+
+A dedicated dfmcp-live-semantic-dig-dev-server now exposes the original mining
+adapter through the frozen eleven tools. It acquires a complete paused canonical
+terrain basis, pages exact observation-bound tiles, compiles a closed single-Mine
+request, retains the full original archive and paired native review, confirms one
+designation, and acquires independently qualified original-goal evidence. The
+first post-designation wait initializes private proof history; subsequent waits
+sample terrain. Wait never advances game time or starts background polling.
+
+The concrete operator shell pins exact dig/1.16 and spatial/1.8 incarnations,
+software, named fortress, dimensions and scope independently. Current credentials,
+runtime I/O/cancellation, checkpoint policy, protected whole-block writes and
+exclusive host-local leases are checked at bounded native boundaries. The initial
+bootstrap capture's clock is retained privately before custody opens, without
+publishing an unqualified canonical anchor. Exact private file creation/reopening
+prevents missing custody from becoming a new goal. Sources, credentials, paths,
+checkpoint exceptions and raw native keys cannot enter through tool arguments.
+
+Offline and reconcile reopening preserve exact original history without restoring
+a native dispatch permit. Current goal truth, historical first achievement and a
+historical Designated receipt remain separate claims. Unknown native outcomes do
+not permit redispatch or endless recovery recommendations. A confirmed recovered
+preparation offers explicit retirement only with current native authority;
+retirement requires no fresh Plan grant, lease or checkpoint exception. Error,
+overflow and session-close packets retain bounded recovery identities, withdraw
+cached goal/control claims and never inherit production-admission provenance.
+
+The default wall allowance is the existing 60-second cap, with explicit narrowing
+still supported. The retained native connection has one absolute deadline from
+connection establishment across preparation, review and commit; later requests
+cannot renew it or reconnect to recover a commit permit. Expiry requires exact
+original-key reconciliation and preparation retirement. Known planning work is
+fully prepaid before source acquisition or original archive publication, including
+all three evidence acquisitions, both native stages and fixed archive/guard/output
+costs. A byte-budget refusal leaves the original observation and custody unchanged.
+
+Focused evidence passes 113 distinct tests without warnings:
+
+- four actual-world partial-terrain regressions;
+- 17 public actual-adapter execution/goal/history cases;
+- 15 joined original-runtime lifecycle and failure cases;
+- nine native source/configuration/private-custody and cost-bound cases;
+- 13 actual Agent Turn presentation cases and seven verbatim facade cases;
+- 34 adjacent dig journal/session, seven control-policy and seven spatial cases.
+
+The combined 91-case component run passed with 413 actual source/fixture/harness
+inputs unchanged. After final prepayment/default-window corrections, all 35
+affected runtime/facade/presentation cases pass with another unchanged 413-input
+snapshot. Unchanged native/adjacent/adapter/world cases retain their prior passing
+evidence. Every ordinary joined workflow uses the actual facade-retained default
+allowance (2 GiB minus 256 MiB minus 128 KiB), 8192 observed nodes, zero game ticks
+and 430 MiB for initial evidence and each refresh. The actual native cost helper
+fits that envelope. A larger 520 MiB source refuses before source/archive/native
+preparation and successfully reuses the same basis with sufficient already
+negotiated allowance. Full FastMCP macros/handlers/stdio, a real DFHack build,
+live-fortress execution and compatibility/runtime admission remain unverified.
+
+Required verification and static development qualification were run again after
+preserving concurrent historical-job-progress commit 577e4a02f831560e6bd8a9d233dd8699c1b37956.
+None of its 15 changed paths overlaps the mining compile inputs; all 413 mining
+input hashes are unchanged. Verify passes its first four checks and reaches the
+same source-bundle documentation assertion. Static qualification reports 77
+findings across 6198 checks: all 76 starting findings plus a forbidden expect in
+the incoming, unchanged job_progress_tests.rs. Mining introduces no new finding.
+All 2476 repository file hashes, the path set and HEAD remain stable during the
+runs. The failed dirty development receipt has no Rust-toolchain or release
+qualification claim. This evidence paragraph records those completed runs;
+production code and the operator guide are unchanged afterward.
+
+The operator guide is docs/SEMANTIC_DIG_DEVELOPMENT.md. This remains an isolated
+unadmitted development profile with one original rectangle/goal per custody
+bundle. Multi-region and general action-DAG execution, automatic mining clock
+advancement, checkpoint/restore, mining reachability and structural-safety proof
+remain outside this implemented slice.
+
 ### Historical job progress across exact retained observations (2026-10-28)
 
 The existing spatial/1.8 `fortress.query` surface now accepts
