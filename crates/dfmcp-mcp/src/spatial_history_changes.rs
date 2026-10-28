@@ -11,6 +11,8 @@ use std::time::Instant;
 pub(in super::super) mod monitor;
 #[path = "spatial_history_series.rs"]
 pub(in super::super) mod series;
+#[path = "spatial_job_progress.rs"]
+pub(in super::super) mod job_progress;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +48,7 @@ fn bounded(text: &str) -> DfmcpError {
 pub(in super::super) fn handles(input: &Value) -> bool {
     monitor::handles(input)
         || series::handles(input)
+        || job_progress::handles(input)
         || input
             .get("query")
             .and_then(|q| q.get("kind"))
@@ -208,6 +211,9 @@ pub(in super::super) fn execute(
     }
     if series::handles(input) {
         return series::execute(session, context, input);
+    }
+    if job_progress::handles(input) {
+        return job_progress::execute(session, context, input);
     }
     let started = Instant::now();
     remaining(context, started)?;

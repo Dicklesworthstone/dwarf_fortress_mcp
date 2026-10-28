@@ -44,6 +44,29 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Historical job progress across exact retained observations (2026-10-28)
+
+The existing spatial/1.8 `fortress.query` surface now accepts
+`historical_job_progress` in journal-backed live and archive-only sessions. It
+compares exact original job generations and independently sourced suspension,
+worker assignment, holder/build-stage and attached-material indicators at two
+selected records. Disappearance, replacement and unestablished evidence remain
+explicit; unchanged endpoints do not establish a stall or completion.
+
+The full-roster summary precedes filtering and whole-row pagination. Every row
+includes record/digest/generation-pinned inspection queries. Current authority,
+exact archive custody, source incarnation, reset boundaries, complete response
+bounds and session-bound continuations are rechecked. Reads perform no native
+capture, journal write, watch progression or game effect.
+
+Evidence: all 15 focused actual-source model/archive-handler/schema tests pass
+(10 model, four handlers and one schema regression). The temporary harness
+omits FastMCP tool attributes/stdio startup and uses the unchanged admission
+provenance declaration/getter; it does not test transport registration, admission
+ticket loading or a running game. The twelve unused-import warnings belong only
+to that temporary admission prefix. No compatibility admission is added.
+See `docs/HISTORICAL_JOB_PROGRESS.md` for the query and precise proof limits.
+
 ### Original mining execution and durable terrain proof (2026-10-28)
 
 The adapter now connects one original canonical Mine rectangle (1..8 by 1..8,

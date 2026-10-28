@@ -468,7 +468,7 @@ fn archive_query_and_doctor_fence_changed_storage_without_hiding_the_error() -> 
 }
 
 #[test]
-fn archive_schema_advertises_nineteen_read_variants_including_condition_inspection() -> Result<()> {
+fn archive_schema_advertises_read_variants_including_job_progress() -> Result<()> {
     let _serial = crate::test_serial();
     let files = Files::new()?;
     files.populate(2)?;
@@ -478,10 +478,11 @@ fn archive_schema_advertises_nineteen_read_variants_including_condition_inspecti
     let variants = result["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .ok_or_else(|| error(ErrorCode::InvalidRequest, "schema variants"))?;
-    assert_eq!(variants.len(), 22);
+    assert_eq!(variants.len(), 23);
     for kind in [
         "historical_changes",
         "historical_series",
+        "historical_job_progress",
         "production_diagnosis",
         "inventory_plan",
         "item_quantity",

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-28 — Compare source-qualified historical job progress
+
+- Add `historical_job_progress` through the existing spatial query surface for
+  exact retained job identities, worker/suspension changes, holder construction
+  stages and complete qualified attached-item membership.
+- Preserve disappearance/reused IDs and unknown evidence without inferring
+  completion, stalls, intermediate events or current game freshness.
+- Return whole-roster summaries, bounded whole-row pages, session-bound cursors
+  and runnable inspections pinned to each exact archived record/generation.
+- Pass 15 focused actual-source model, archive-handler and schema tests; queries
+  do not capture native state, write journals, advance watches or confer admission.
+  Full FastMCP transport/native/live qualification remains unverified.
+
 ## 2026-10-28 — Execute and verify exact original mining goals
 
 - Bind one original canonical Mine rectangle to the existing dig/1.16 native

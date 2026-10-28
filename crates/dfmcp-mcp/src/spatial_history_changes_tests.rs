@@ -2,6 +2,9 @@
 //! exclusively owned test files, rather than competing for global session slots.
 use super::*;
 
+#[path = "spatial_job_progress_tests.rs"]
+mod job_progress;
+
 fn changed_observation(
     tick: u32,
     workers: u32,
