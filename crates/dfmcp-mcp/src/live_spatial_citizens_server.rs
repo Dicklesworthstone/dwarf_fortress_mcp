@@ -492,6 +492,7 @@ fn capabilities(input: Option<Vec<String>>) -> Result<Vec<Capability>> {
 }
 
 #[tool(
+    name = "fortress.open_session",
     description = "Open an unadmitted spatial/1.8 session with a bounded operational briefing and evidence-linked attention. Default live mode captures citizens, operations and terrain and can restore paired watches. Set recovery_only=true to open an existing observation archive without DFHack or credentials: Query and optional Doctor only, no repair, watch recovery or live refresh. The requested region must match the archive. Close with fortress.cancel scope=session to release connections, locks and capacity before reopening."
 )]
 #[allow(clippy::too_many_arguments)]
@@ -685,12 +686,14 @@ fn observe(id: Option<String>, operation: &str) -> String {
     })
 }
 #[tool(
+    name = "fortress.observe",
     description = "Acquire one coherent capture without changing game time. Query-authorized live sessions receive operational attention and bounded endpoint-count changes, not event history or causal diagnoses. Archive-only sessions refuse."
 )]
 pub fn fortress_observe(session_id: Option<String>) -> String {
     observe(session_id, "fortress.observe")
 }
 #[tool(
+    name = "fortress.wait",
     description = "Acquire one coherent capture and summarize operational count changes. For monitoring use query await_watch or await_watches; await_watches evaluates up to eight watches after one shared capture. Archive-only sessions refuse."
 )]
 pub fn fortress_wait(session_id: Option<String>) -> String {
@@ -741,6 +744,7 @@ fn finish(view: &QueryResponseProjection, v: Value) -> Result<String> {
     Ok(out)
 }
 #[tool(
+    name = "fortress.query",
     description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. historical_job_progress compares exact archived job generations, assignments, holder stages and material attachments; disappearance does not prove completion. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
 )]
 pub fn fortress_query(
@@ -896,6 +900,7 @@ pub fn fortress_query(
     )
 }
 #[tool(
+    name = "fortress.explain",
     description = "Explain coherent evidence, workforce limits and the deterministic situation-attention rule catalog. Findings are inspection priorities, not causal diagnoses or effect authority."
 )]
 pub fn fortress_explain(session_id: Option<String>) -> String {
@@ -918,6 +923,7 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
     })
 }
 #[tool(
+    name = "fortress.doctor",
     description = "Report spatial/1.8 source or archive health; no reconnect or qualification claim."
 )]
 pub fn fortress_doctor(session_id: Option<String>) -> String {
@@ -938,15 +944,22 @@ fn no_effect(id: Option<String>, operation: &str) -> String {
         ))
     })
 }
-#[tool(description = "Unavailable: coherent observations do not authorize effects.")]
+#[tool(
+    name = "fortress.plan",
+    description = "Unavailable: coherent observations do not authorize effects."
+)]
 pub fn fortress_plan(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.plan")
 }
-#[tool(description = "Unavailable: no executable plan is created.")]
+#[tool(
+    name = "fortress.commit",
+    description = "Unavailable: no executable plan is created."
+)]
 pub fn fortress_commit(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.commit")
 }
 #[tool(
+    name = "fortress.cancel",
     description = "Close this read-only session with scope=session, releasing connections, locks and capacity without modifying observation or watch journals. Process-local watches or baselines require explicit discard_process_local_work=true. Teardown reads no game facts and remains available after read-grant expiry or source failure. Omitted scope retains the refusal of game-effect cancellation."
 )]
 pub fn fortress_cancel(
@@ -956,11 +969,17 @@ pub fn fortress_cancel(
 ) -> String {
     session_release::cancel(session_id, scope, discard_process_local_work)
 }
-#[tool(description = "Unavailable: no game-save checkpoint is created.")]
+#[tool(
+    name = "fortress.checkpoint",
+    description = "Unavailable: no game-save checkpoint is created."
+)]
 pub fn fortress_checkpoint(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.checkpoint")
 }
-#[tool(description = "Unavailable: no game or save state is restored.")]
+#[tool(
+    name = "fortress.restore",
+    description = "Unavailable: no game or save state is restored."
+)]
 pub fn fortress_restore(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.restore")
 }

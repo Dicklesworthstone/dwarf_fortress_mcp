@@ -207,11 +207,11 @@ fn rebuild(original: &WorldSnapshot, graph: WorldGraph) -> WorldSnapshot {
 }
 fn edited(
     state: &LiveSpatialCitizenState,
-    edit: impl FnOnce(&mut WorldGraph),
+    edit: impl FnOnce(&mut WorldGraph) -> Result<()>,
 ) -> Result<WorldSnapshot> {
     let source = snapshot(state)?;
     let mut graph = source.graph.clone();
-    edit(&mut graph);
+    edit(&mut graph)?;
     Ok(rebuild(source, graph))
 }
 fn evidence<'a>(
@@ -544,21 +544,25 @@ fn assignment_join_rejects_contradictions_and_outside_roster_identity_claims() -
         let modified = edited(&after, |graph| {
             if variation == 0 {
                 graph.edges.retain(|_, e| e.kind != EdgeKind::Performs);
-                return;
+                return Ok(());
             }
             let job = graph
                 .entities
                 .get_mut(&EntityId::new(3))
-                .expect("fixture job");
+                .ok_or_else(|| invariant("fixture job absent"))?;
             let (key, value) = match variation {
                 1 => ("worker_assigned", W::Bool(false)),
                 2 => ("worker_native_id", W::U64(11)),
                 3 => ("worker_is_strict_citizen", W::Bool(false)),
                 _ => ("worker_entity", W::Entity(citizen_entity_id(11))),
             };
-            let f = job.fields.get_mut(key).expect("fixture worker field");
+            let f = job
+                .fields
+                .get_mut(key)
+                .ok_or_else(|| invariant("fixture worker field absent"))?;
             f.value = value.clone();
             f.presence = Some(FactPresence::Known(value));
+            Ok(())
         })?;
         assert_eq!(
             row(&compare_edited(&before, &after, &modified)?)?["after"]["worker_assignment"]["status"],
@@ -569,8 +573,9 @@ fn assignment_join_rejects_contradictions_and_outside_roster_identity_claims() -
         graph
             .entities
             .get_mut(&citizen_entity_id(10))
-            .expect("fixture citizen")
+            .ok_or_else(|| invariant("fixture citizen absent"))?
             .generation += 1;
+        Ok(())
     })?;
     assert_eq!(
         row(&compare_edited(&before, &after, &worker_replaced)?)?["indicators"]["worker_assignment"],
@@ -614,10 +619,10 @@ fn unknown_absent_wrong_source_digest_tick_and_presence_never_become_clear_indic
             let f = graph
                 .entities
                 .get_mut(&EntityId::new(3))
-                .expect("fixture job")
+                .ok_or_else(|| invariant("fixture job absent"))?
                 .fields
                 .get_mut("suspended")
-                .expect("fixture suspension");
+                .ok_or_else(|| invariant("fixture suspension absent"))?;
             match variation {
                 0 => f.source = FactSource::Derived("spatial/1.8.job.flags.suspend".into()),
                 1 => f.source = FactSource::DfhackField("spatial/1.6.job.flags.suspend".into()),
@@ -632,12 +637,9 @@ fn unknown_absent_wrong_source_digest_tick_and_presence_never_become_clear_indic
                     f.presence = Some(FactPresence::Absent);
                 }
                 6 => f.presence = Some(FactPresence::Known(W::Bool(false))),
-                _ => {
-                    f.presence = Some(FactPresence::Stale(
-                        snapshot(&before).expect("fixture snapshot").anchor(),
-                    ))
-                }
+                _ => f.presence = Some(FactPresence::Stale(snapshot(&before)?.anchor())),
             }
+            Ok(())
         })?;
         let value = row(&compare_edited(&before, &after, &modified)?)?;
         assert!(value["after"]["suspended"].is_null(), "variant {variation}");
@@ -678,26 +680,26 @@ fn construction_stages_compare_only_the_same_qualified_holder_generation() -> Re
                 graph.edges.retain(|_, e| {
                     !(e.kind == EdgeKind::ContainedIn && e.from == EntityId::new(3))
                 });
-                return;
+                return Ok(());
             }
             let holder = graph
                 .entities
                 .get_mut(&building_entity_id(1))
-                .expect("fixture holder");
+                .ok_or_else(|| invariant("fixture holder absent"))?;
             match variation {
                 1 => holder.generation += 1,
                 2 => {
                     holder
                         .fields
                         .get_mut("build_stage")
-                        .expect("fixture stage")
+                        .ok_or_else(|| invariant("fixture stage absent"))?
                         .source_digest = Digest32::of_bytes(b"wrong capture")
                 }
                 3 => {
                     let f = holder
                         .fields
                         .get_mut("max_build_stage")
-                        .expect("fixture maximum");
+                        .ok_or_else(|| invariant("fixture maximum absent"))?;
                     f.value = W::I64(4);
                     f.presence = Some(FactPresence::Known(W::I64(4)));
                 }
@@ -705,11 +707,12 @@ fn construction_stages_compare_only_the_same_qualified_holder_generation() -> Re
                     let f = holder
                         .fields
                         .get_mut("native_building_id")
-                        .expect("fixture native ID");
+                        .ok_or_else(|| invariant("fixture native ID absent"))?;
                     f.value = W::U64(2);
                     f.presence = Some(FactPresence::Known(W::U64(2)));
                 }
             }
+            Ok(())
         })?;
         let value = row(&compare_edited(&before, &after, &modified)?)?;
         assert_eq!(
@@ -729,45 +732,54 @@ fn item_membership_retains_generation_and_rejects_incomplete_attachment_joins() 
     let first = Input::default();
     let (before, after) = states(&first, &Input { tick: 4, ..first })?;
     for variation in 0..4 {
-        let modified = edited(&after, |graph| match variation {
-            0 => {
-                graph
-                    .entities
-                    .get_mut(&item_entity_id(1))
-                    .expect("fixture item")
-                    .generation += 1
-            }
-            1 => {
-                let f = graph
-                    .entities
-                    .get_mut(&EntityId::new(3))
-                    .expect("fixture job")
-                    .fields
-                    .get_mut("attached_item_count")
-                    .expect("fixture count");
-                f.value = W::U64(2);
-                f.presence = Some(FactPresence::Known(W::U64(2)));
-            }
-            2 => {
-                for e in graph
-                    .edges
-                    .values_mut()
-                    .filter(|e| e.kind == EdgeKind::Uses)
-                {
-                    e.fields.get_mut("role").expect("fixture role").source = FactSource::Replay;
+        let modified = edited(&after, |graph| {
+            match variation {
+                0 => {
+                    graph
+                        .entities
+                        .get_mut(&item_entity_id(1))
+                        .ok_or_else(|| invariant("fixture item absent"))?
+                        .generation += 1
+                }
+                1 => {
+                    let f = graph
+                        .entities
+                        .get_mut(&EntityId::new(3))
+                        .ok_or_else(|| invariant("fixture job absent"))?
+                        .fields
+                        .get_mut("attached_item_count")
+                        .ok_or_else(|| invariant("fixture count absent"))?;
+                    f.value = W::U64(2);
+                    f.presence = Some(FactPresence::Known(W::U64(2)));
+                }
+                2 => {
+                    for e in graph
+                        .edges
+                        .values_mut()
+                        .filter(|e| e.kind == EdgeKind::Uses)
+                    {
+                        e.fields
+                            .get_mut("role")
+                            .ok_or_else(|| invariant("fixture role absent"))?
+                            .source = FactSource::Replay;
+                    }
+                }
+                _ => {
+                    for e in graph
+                        .edges
+                        .values_mut()
+                        .filter(|e| e.kind == EdgeKind::Uses)
+                    {
+                        let f = e
+                            .fields
+                            .get_mut("filter_index")
+                            .ok_or_else(|| invariant("fixture filter absent"))?;
+                        f.value = W::I64(5);
+                        f.presence = Some(FactPresence::Known(W::I64(5)));
+                    }
                 }
             }
-            _ => {
-                for e in graph
-                    .edges
-                    .values_mut()
-                    .filter(|e| e.kind == EdgeKind::Uses)
-                {
-                    let f = e.fields.get_mut("filter_index").expect("fixture filter");
-                    f.value = W::I64(5);
-                    f.presence = Some(FactPresence::Known(W::I64(5)));
-                }
-            }
+            Ok(())
         })?;
         let value = row(&compare_edited(&before, &after, &modified)?)?;
         assert_eq!(

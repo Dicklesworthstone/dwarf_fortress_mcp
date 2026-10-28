@@ -387,6 +387,7 @@ fn with_session(
 }
 
 #[tool(
+    name = "fortress.open_session",
     description = "Open one original mining goal. Default offline reads exact retained custody; reconcile can acquire evidence without designation authority; control requires explicit operator designation enablement and checkpoint exception before planning. Byte-work defaults to 2GiB and may be explicitly bounded up to 64GiB for history replay; wall defaults to its 60s cap and may be narrowed. The original native connection has one nonrenewable deadline across preparation and confirmation. Sources, credentials and paths are operator configuration."
 )]
 pub fn fortress_open_session(
@@ -467,6 +468,7 @@ pub fn fortress_open_session(
 }
 
 #[tool(
+    name = "fortress.observe",
     description = "Acquire a complete paused canonical spatial observation before original planning. Returns the exact observation seal and terrain coverage. Once the original goal is retained, use wait or recovery; observation cannot replace that goal."
 )]
 pub fn fortress_observe(session_id: String) -> String {
@@ -474,6 +476,7 @@ pub fn fortress_observe(session_id: String) -> String {
 }
 
 #[tool(
+    name = "fortress.query",
     description = "Inspect original plan, paired review, designation certainty, historical achievement and the last anchored excavation sample. Optional closed JSON {mode:tiles,expected_observation,offset,limit} pages 1..32 terrain tiles from that exact retained observation. No native calls."
 )]
 pub fn fortress_query(session_id: String, query: Option<String>) -> String {
@@ -546,6 +549,7 @@ fn cancel_action(scope: Option<&str>) -> Result<Action> {
 }
 
 #[tool(
+    name = "fortress.plan",
     description = "Compile and durably prepare one original mining goal. Closed JSON: expected_observation, kind mine, target [x,y,z,width,height] with width and height 1..8, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Returns a paired original/native review and preserves the exact original predicates, deadline and stability. Preparation does not designate."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
@@ -553,6 +557,7 @@ pub fn fortress_plan(session_id: String, request: String) -> String {
 }
 
 #[tool(
+    name = "fortress.commit",
     description = "Confirm the exact paired original/native excavation review once with confirmed=true under current operator authority and fresh qualified spatial evidence. A Designated receipt records mining flags, not excavation completion. The original native connection must still be within its nonrenewable deadline, at most 60s from connection establishment. A lost reply or expired preparation requires original-key reconciliation and never another designation attempt."
 )]
 pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool) -> String {
@@ -562,6 +567,7 @@ pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool)
 }
 
 #[tool(
+    name = "fortress.wait",
     description = "Reconcile the original designation, initialize its bounded proof history, or acquire one fresh original-receipt-linked excavation sample. Preserve original deadline, cadence, stability and durable first achievement. Offline sessions inspect retained evidence with query. Wait does not designate tiles, advance the clock or start background polling."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
@@ -605,6 +611,7 @@ fn close(raw: String) -> String {
 }
 
 #[tool(
+    name = "fortress.cancel",
     description = "scope=goal (default) retires a still-prepared original designation without clearing designated tiles, undoing excavation or erasing history. scope=session releases local resources even after cancellation or fencing, without cancelling game effects. Preserve the complete original recovery handoff before closing."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
@@ -617,6 +624,7 @@ pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
 }
 
 #[tool(
+    name = "fortress.explain",
     description = "Inspect exact original-plan custody and retained recovery evidence without native calls. Historical designation, current excavation and first satisfaction remain distinct claims."
 )]
 pub fn fortress_explain(session_id: String) -> String {
@@ -624,6 +632,7 @@ pub fn fortress_explain(session_id: String) -> String {
 }
 
 #[tool(
+    name = "fortress.doctor",
     description = "Check bounded local custody and report the unadmitted development scope, source acceptance and retained goal state. Does not contact the game or confer compatibility admission."
 )]
 pub fn fortress_doctor(session_id: String) -> String {
@@ -631,6 +640,7 @@ pub fn fortress_doctor(session_id: String) -> String {
 }
 
 #[tool(
+    name = "fortress.checkpoint",
     description = "Unavailable in this isolated excavation profile. Returns an explicit denial; checkpoint requirements cannot be removed from an already sealed plan."
 )]
 pub fn fortress_checkpoint(session_id: String) -> String {
@@ -640,6 +650,7 @@ pub fn fortress_checkpoint(session_id: String) -> String {
 }
 
 #[tool(
+    name = "fortress.restore",
     description = "Unavailable in this isolated excavation profile. Restart recovery uses the exact original archive and journal identities; this tool cannot restore or rewrite game state."
 )]
 pub fn fortress_restore(session_id: String) -> String {

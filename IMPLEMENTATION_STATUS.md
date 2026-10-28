@@ -44,6 +44,17 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Documented MCP names registered explicitly (2026-10-28)
+
+The spatial/citizen and original-mining servers now explicitly register all eleven
+dotted `fortress.*` tool names. The pinned FastMCP macro's default is the Rust
+function name; explicit names align registration with emitted calls and the
+frozen public surface. All handler bodies remain byte-identical after excluding
+tool attributes. The historical-job fixture cleanup also reran all 15 focused
+model/archive-handler/schema tests successfully; twelve unused-import warnings
+belong only to the temporary admission-prefix harness. Full macro/stdio execution
+remains unverified under the existing pinned-dependency build limitation.
+
 ### Original mining workflow through MCP (2026-10-28)
 
 A dedicated dfmcp-live-semantic-dig-dev-server now exposes the original mining

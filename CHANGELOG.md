@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-28 — Match MCP registration to documented tool calls
+
+- Explicitly register the eleven dotted `fortress.*` names in the spatial/citizen
+  and original-mining servers, matching the calls emitted in agent guidance.
+  The pinned FastMCP macro otherwise uses underscore-separated Rust names.
+- Preserve every handler body. Replace forbidden job-test fixture helpers with
+  propagated errors and rerun all 15 model/archive-handler/schema cases successfully.
+  Macro/stdio execution remains subject to the existing full-build limitations.
+
 ## 2026-10-28 — Expose original mining and recovery through MCP
 
 - Add a dedicated eleven-tool original mining server with exact observation-bound
