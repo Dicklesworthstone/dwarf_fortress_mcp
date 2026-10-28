@@ -276,3 +276,338 @@ fn fenced_goal_preserves_history_and_recommends_session_release_instead_of_more_
     assert!(fallback["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
     Ok(())
 }
+
+fn construction_clock_source() -> Value {
+    let mut view = source();
+    view["native_state"] = json!("terminal");
+    view["native_phase"] = json!("placed");
+    view["native_needs_query"] = json!(false);
+    view["prepared_in_this_opening"] = json!(false);
+    view["placement"] = json!({"verified":true,"receipt":"a".repeat(64)});
+    view["development_clock_enabled"] = json!(true);
+    view["recovery"]["history_present"] = json!(true);
+    view["recovery"]["clock_journal_id"] = json!("1".repeat(64));
+    view["current_goal_available"] = json!(true);
+    view["current_goal"] = json!({"anchor":view["anchor"],"current_truth":"false",
+        "receipt_linked":true,"construction_condition":"pending","construction_proven":false,
+        "original_goal_proven":false,"semantic_completion_proven":false,"failure_predicate":null});
+    view["clock"] = json!({"journal_id":"1".repeat(64),"head":"2".repeat(64),"mode":"control",
+        "target_digest":"3".repeat(64),"original_paired_seal":"c".repeat(64),
+        "run_count":0,"pending":false,"unresolved":false,"may_be_running":false,
+        "needs_reconciliation":false,"high_tick":100,"high_source_sequence":4,"active_run":null});
+    view
+}
+fn prepare_clock(view: &mut Value) {
+    view["clock"]["pending"] = json!(true);
+    view["clock"]["run_count"] = json!(1);
+    view["clock"]["active_run"] = json!({"review_seal":"8".repeat(64),"plan_digest":"9".repeat(64),
+        "key":format!("furniture-clock-{}","7".repeat(64)),"state":"prepared",
+        "before_tick":100,"source_generation":7,"source_sequence":4,"game_ticks":5,"wall_millis":1000,
+        "pending":true,"unresolved":false,"native":{"phase":"prepared","reason":"none",
+            "receipt":"6".repeat(64),"unpause_attempted":false,"historical_pause_verified":false}});
+}
+fn clock_packet(operation: &str, view: Value, ticks: u64) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(&packet(
+        operation,
+        Some(SessionId::new(77)),
+        None,
+        Some("control"),
+        Some(RequestId::new(8)),
+        Some(WorkBudget {
+            max_game_ticks: ticks,
+            max_wall_millis: 5000,
+            max_bytes: 2 * 1024 * 1024 * 1024,
+            max_entities: 8192,
+            max_actions: 1,
+            max_output_tokens: 32768,
+        }),
+        view,
+        None,
+        false,
+    ))
+}
+fn offers_clock(packet: &Value, tool: &str) -> bool {
+    packet["agent_turn"]["affordances"]
+        .as_array()
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|v| v["scope"] == "run" && v["tool"] == tool && v["enabled"] == true)
+        })
+}
+
+#[test]
+fn viable_incomplete_construction_proposes_only_a_bounded_original_cadence_run()
+-> Result<(), serde_json::Error> {
+    for (ticks, expected) in [(3, 3), (1200, 5)] {
+        let view = construction_clock_source();
+        let out = clock_packet("fortress.wait", view, ticks)?;
+        let next = &out["agent_turn"]["recommendations"][0];
+        assert_eq!(next["tool"], "fortress.plan");
+        let raw: String = serde_json::from_value(next["arguments"]["request"].clone())?;
+        let request: Value = serde_json::from_str(&raw)?;
+        assert_eq!(request["kind"], "run");
+        assert_eq!(request["original_paired_seal"], "c".repeat(64));
+        assert_eq!(request["game_ticks"], expected);
+        assert_eq!(next["requires_confirmation"], false);
+        assert!(offers_clock(&out, "fortress.plan"));
+        assert_eq!(
+            out["agent_turn"]["briefing"]["original_goal_proven_at_anchor"],
+            false
+        );
+    }
+    let mut deadline = construction_clock_source();
+    deadline["original_plan"]["steps"][0]["obligation"]["deadline_tick"] = json!(102);
+    let out = clock_packet("fortress.wait", deadline, 1200)?;
+    let raw: String = serde_json::from_value(
+        out["agent_turn"]["recommendations"][0]["arguments"]["request"].clone(),
+    )?;
+    let request: Value = serde_json::from_str(&raw)?;
+    assert_eq!(request["game_ticks"], 2);
+    Ok(())
+}
+
+#[test]
+fn clock_offers_require_current_viable_evidence_scope_allowance_and_original_deadline()
+-> Result<(), serde_json::Error> {
+    let mut cases = Vec::new();
+    for condition in [
+        "suspended",
+        "no_construction_job",
+        "item_unverified",
+        "removal_pending",
+        "building_identity_mismatch",
+    ] {
+        let mut v = construction_clock_source();
+        v["current_goal"]["construction_condition"] = json!(condition);
+        cases.push(v);
+    }
+    for (field, value) in [
+        ("current_truth", json!("unknown")),
+        ("receipt_linked", json!(false)),
+        ("failure_predicate", json!("true")),
+        ("semantic_completion_proven", json!(true)),
+    ] {
+        let mut v = construction_clock_source();
+        v["current_goal"][field] = value;
+        cases.push(v);
+    }
+    let mut v = construction_clock_source();
+    v["current_goal"]["anchor"]["sequence"] = json!(2);
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["development_clock_enabled"] = json!(false);
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["recovery"]["clock_journal_id"] = json!("4".repeat(64));
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["clock"]["original_paired_seal"] = json!("4".repeat(64));
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["clock"]["run_count"] = json!(64);
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["history"]["fenced"] = json!(true);
+    cases.push(v);
+    let mut v = construction_clock_source();
+    v["original_plan"]["steps"][0]["obligation"]["deadline_tick"] = json!(100);
+    cases.push(v);
+    for view in cases {
+        let out = clock_packet("fortress.query", view, 1200)?;
+        assert!(!offers_clock(&out, "fortress.plan"));
+        assert!(!offers_clock(&out, "fortress.commit"));
+    }
+    assert!(!offers_clock(
+        &clock_packet("fortress.query", construction_clock_source(), 0)?,
+        "fortress.plan"
+    ));
+    Ok(())
+}
+
+#[test]
+fn prepared_clock_uses_its_distinct_review_and_never_recommends_placement()
+-> Result<(), serde_json::Error> {
+    let mut view = construction_clock_source();
+    prepare_clock(&mut view);
+    let out = clock_packet("fortress.plan", view.clone(), 1200)?;
+    let next = &out["agent_turn"]["recommendations"][0];
+    assert_eq!(next["tool"], "fortress.commit");
+    assert_eq!(next["arguments"]["scope"], "run");
+    assert_eq!(next["arguments"]["paired_seal"], "8".repeat(64));
+    assert_eq!(next["requires_confirmation"], true);
+    assert!(offers_clock(&out, "fortress.commit"));
+    assert_eq!(
+        out["agent_turn"]["active_work"]["confirmations"][0]["scope"],
+        "run"
+    );
+    assert_eq!(
+        out["agent_turn"]["briefing"]["clock_receipt_is_goal_proof"],
+        false
+    );
+    for (field, value) in [
+        ("before_tick", 99),
+        ("source_sequence", 3),
+        ("game_ticks", 101),
+    ] {
+        let mut changed = view.clone();
+        changed["clock"]["active_run"][field] = json!(value);
+        let denied = clock_packet("fortress.query", changed, 1200)?;
+        assert!(!offers_clock(&denied, "fortress.commit"));
+        assert_eq!(
+            denied["agent_turn"]["recommendations"][0]["tool"],
+            "fortress.cancel"
+        );
+        assert_eq!(
+            denied["agent_turn"]["recommendations"][0]["arguments"]["scope"],
+            "run"
+        );
+    }
+    assert!(!offers_clock(
+        &clock_packet("fortress.query", view, 4)?,
+        "fortress.commit"
+    ));
+    Ok(())
+}
+
+#[test]
+fn unsettled_clock_hides_cached_completion_and_keeps_safety_pause_available()
+-> Result<(), serde_json::Error> {
+    let mut view = construction_clock_source();
+    prepare_clock(&mut view);
+    view["clock"]["unresolved"] = json!(true);
+    view["clock"]["may_be_running"] = json!(true);
+    view["clock"]["active_run"]["state"] = json!("tracking");
+    view["clock"]["active_run"]["native"]["phase"] = json!("running");
+    view["current_goal"]["semantic_completion_proven"] = json!(true);
+    view["current_goal"]["original_goal_proven"] = json!(true);
+    view["first_satisfied_anchor"] = view["anchor"].clone();
+    // Safety cancellation remains available after the original deadline.
+    view["original_plan"]["steps"][0]["obligation"]["deadline_tick"] = json!(99);
+    let out = clock_packet("fortress.commit", view, 0)?;
+    assert_eq!(out["agent_turn"]["phase"], "reconcile");
+    assert_eq!(
+        out["agent_turn"]["recommendations"][0]["tool"],
+        "fortress.wait"
+    );
+    assert!(out["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
+    assert!(out["agent_turn"]["briefing"]["original_goal_proven_at_anchor"].is_null());
+    assert_eq!(out["agent_turn"]["briefing"]["clock_may_be_running"], true);
+    assert!(offers_clock(&out, "fortress.cancel"));
+    assert!(!offers_clock(&out, "fortress.plan"));
+    assert!(!offers_clock(&out, "fortress.commit"));
+    assert_eq!(
+        out["agent_turn"]["references"][0]["recovery"]["clock_journal_id"],
+        "1".repeat(64)
+    );
+    assert_eq!(
+        out["agent_turn"]["active_work"]["obligations"][0]["historical_first_satisfied_anchor"]["tick"],
+        100
+    );
+    Ok(())
+}
+
+#[test]
+fn stopped_clock_does_not_make_an_older_construction_sample_current()
+-> Result<(), serde_json::Error> {
+    let mut view = construction_clock_source();
+    view["clock"]["run_count"] = json!(1);
+    view["clock"]["high_tick"] = json!(110);
+    view["current_goal"]["semantic_completion_proven"] = json!(true);
+    let out = clock_packet("fortress.wait", view, 1200)?;
+    assert!(out["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
+    assert_eq!(
+        out["agent_turn"]["recommendations"][0]["tool"],
+        "fortress.wait"
+    );
+    assert!(!offers_clock(&out, "fortress.plan"));
+    assert_eq!(out["agent_turn"]["briefing"]["current_pause_proven"], false);
+    assert!(out["agent_turn"]["briefing"]["clock_advanced"].is_null());
+    Ok(())
+}
+
+#[test]
+fn clock_overflow_preserves_exact_original_and_run_handoff_without_control_or_truth()
+-> Result<(), serde_json::Error> {
+    let mut view = construction_clock_source();
+    prepare_clock(&mut view);
+    view["clock"]["unresolved"] = json!(true);
+    view["clock"]["may_be_running"] = json!(true);
+    view["clock"]["active_run"]["state"] = json!("dispatch_started");
+    view["clock"]["untrusted_extra"] = json!("x".repeat(RESPONSE_RESERVE as usize));
+    view["original_plan"]["summary"] = json!("oversized".repeat(50_000));
+    let encoded = packet(
+        "fortress.commit",
+        Some(SessionId::new(77)),
+        None,
+        Some("control"),
+        None,
+        None,
+        view,
+        None,
+        true,
+    );
+    assert!(encoded.len() as u64 <= RESPONSE_RESERVE);
+    let out: Value = serde_json::from_str(&encoded)?;
+    assert_eq!(out["result"]["error"]["code"], "budget_exceeded");
+    assert_eq!(
+        out["retained_reference"]["recovery"]["object_digest"],
+        "f".repeat(64)
+    );
+    assert_eq!(
+        out["retained_reference"]["recovery"]["clock_journal_id"],
+        "1".repeat(64)
+    );
+    assert_eq!(
+        out["retained_reference"]["clock"]["active_run"]["review_seal"],
+        "8".repeat(64)
+    );
+    assert!(
+        out["retained_reference"]["clock"]
+            .get("untrusted_extra")
+            .is_none()
+    );
+    assert_eq!(out["result"]["clock_effect_may_have_started"], true);
+    assert!(out["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
+    assert!(!offers_clock(&out, "fortress.commit"));
+    Ok(())
+}
+
+#[test]
+fn closing_a_clock_session_preserves_running_identity_without_offering_further_actions()
+-> Result<(), serde_json::Error> {
+    for oversized in [false, true] {
+        let mut retained = construction_clock_source();
+        prepare_clock(&mut retained);
+        retained["clock"]["unresolved"] = json!(true);
+        retained["clock"]["active_run"]["state"] = json!("tracking");
+        if oversized {
+            retained["original_plan"]["summary"] = json!("oversized".repeat(50_000));
+        }
+        let out = run(
+            "fortress.cancel",
+            json!({"ok":true,"closed":true,"session_closed":true,
+            "effects_cancelled":false,"retained_state_currently_verified":false}),
+            Some(retained),
+            true,
+        )?;
+        assert_eq!(out["result"]["session_closed"], true);
+        assert_eq!(out["agent_turn"]["briefing"]["session_closed"], true);
+        assert!(
+            out["agent_turn"]["recommendations"]
+                .as_array()
+                .is_some_and(|v| v.is_empty())
+        );
+        assert!(
+            out["agent_turn"]["affordances"]
+                .as_array()
+                .is_some_and(|v| v.iter().all(|a| a["enabled"] != true))
+        );
+        assert_eq!(
+            out["agent_turn"]["references"][0]["recovery"]["clock_journal_id"],
+            "1".repeat(64)
+        );
+        assert!(out["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
+    }
+    Ok(())
+}

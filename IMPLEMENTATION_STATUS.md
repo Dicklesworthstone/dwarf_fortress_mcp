@@ -44,6 +44,82 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original construction and finite clock runs through MCP (2026-10-28)
+
+The original furniture workflow now exposes separately reviewed bounded game-time
+advancement through the existing eleven tools. Opening accepts an optional
+max_game_ticks allowance with a zero default and 1200-tick ceiling. A closed
+plan(kind=run) request binds the original paired seal and finite game/wall limits;
+commit(scope=run) requires its distinct clock review and explicit confirmation.
+Placement confirmation and authority remain separate. Safety cancel(scope=run)
+retires an undispatched review or requests its native owner's pause, while
+cancel(scope=session) releases only local resources.
+
+Agent Turns propose a cadence-sized interval only when current qualified
+receipt-linked construction remains viable and unfinished, and the original
+deadline and negotiated allowance permit it. Known pending construction may
+have false completion predicates without blocking useful advancement. Unknown,
+blocked, failed, mismatched, expired or fulfilled goals cannot receive a new run
+offer. A stale undispatched review offers explicit retirement. Wait first
+reconciles retained clock work and withholds paused construction sampling while
+that clock may still be running; it never starts, extends or chains a run.
+
+The runtime, tool facade and bounded response path retain the exact original
+and clock journal identities through partial errors, lost replies, close and
+response overflow. Clock uncertainty is independent of placement uncertainty.
+Cached goal truth is suppressed after a possible clock effect and until a fresh
+qualified construction sample reaches the retained clock floor. Historical clock
+receipts prove neither current pause nor original goal completion. Released
+handles offer no further work, and development packets cannot inherit ambient
+production-admission provenance. The operator guide documents the complete setup,
+request sequence, exact recovery handoff and independent clock-only reopening.
+
+Final focused validation passes 122 distinct tests without compiler warnings:
+
+- 74 actual-source component cases: 16 clock-owner, ten joined construction/
+  clock/recovery, eight original runtime, 15 native/configuration/custody,
+  16 Agent Turn presentation and nine verbatim facade boundary cases;
+- 26 public adapter/coordinator/goal/archive integration cases;
+- 22 existing bounded-run core/journal/RPC cases.
+
+The joined cases execute viable pending construction through finite advancement,
+original completion and stability with the ordinary 2 GiB allowance after facade
+reservations. The full 64-sample goal completes through 64 explicitly confirmed
+runs and fits the new 1024-event bound. Exact offline recovery preserves original
+achievement and all 64 runs with an explicit 64 GiB logical allowance; 32 GiB
+refuses safely without native contact or history changes. Lost replies, native
+edge refusals, immutable original deadlines, clock-floor rejection and
+Query/ControlClock-only safety cancellation are covered. A denied policy retains
+its consumed private canonical cursor while withholding public proof, allowing
+both a later safety pause and a fresh higher-cursor sample.
+
+All 454 source/manifests/harness inputs remained stable across the 74-case run.
+The static gate then identified one newly introduced expect in a test helper;
+that sole changed test input now propagates Result, and all 16 affected owner
+cases pass again without warnings. The other inputs remained identical. The
+component target compiles actual runtime/native source and the complete facade
+Action dispatcher, but excludes FastMCP macro expansion, handler registration,
+transport and the complete stdio executable. The six private goal-history unit
+cases previously blocked by build storage are not included in this executed
+count. No native DFHack build, live campaign or compatibility admission is claimed.
+
+Required repository checks ran against frozen implementation and guide files.
+verify.sh passes its first four checks and stops at the unchanged source-bundle
+assertion about the exact clean git commit. The final static dirty-tree
+qualification has 76 failures across 6,014 checks; every failure line is identical
+to the prior baseline, in the same order, with zero new findings. All 63 files
+implicated by those findings and the source-bundle assertion match the original
+baseline commit. The failed development receipt records dirty=true and
+head_equivalent=false, with no cargo/rustc qualification evidence. All 2,447
+repository file hashes and HEAD stayed stable during that run. Final evidence
+annotations do not turn it into a clean release receipt.
+
+The [operator guide](docs/SEMANTIC_FURNITURE_DEVELOPMENT.md) contains the complete
+workflow. Automatic chaining, a multi-step furnishing dispatcher, a checkpoint/
+restore provider and named-fortress identity in the native clock remain open
+functional gaps. The compatibility registry and production protocol map are
+unchanged; the broader semantic dispatcher bead remains in progress.
+
 ### Original furniture bounded clock owner and native composition (2026-10-28)
 
 An optional separately authorized run/1.13 owner can now advance the original
@@ -88,20 +164,15 @@ byte-work ceiling is 64 GiB for complete history reauthorization; the ordinary
 opening prepays 576 MiB, including optional clock opening and inspection, before
 custody creation. No allocation of the full logical allowance is implied.
 
-Evidence at this checkpoint: all 26 current public adapter integration cases and
-22 existing bounded-run cases pass without compiler warnings. A preceding
-actual-source component run passed 71 of 73 cases; its two failures were test
-expectations that incorrectly credited an immediate same-tick construction
-sample toward temporal stability. Those expectations are corrected, and a new
-regression covers denied-policy cursor retention, safety pause and fresh retry.
-The final 74-case combined run is in progress under shared build-memory pressure;
-final-generation runtime/native success is not yet claimed. It also includes the
-MCP presentation/facade work being committed separately. These focused targets do
-not exercise FastMCP macros, handler registration, complete stdio, a native build
-or a live campaign. The compatibility registry and production map are unchanged.
-
-MCP run dispatch and the complete operator guide follow in the next checkpoint.
-The broader semantic dispatcher bead remains in progress.
+Final core/native validation passes all 49 actual-source cases: 16 clock-owner,
+ten joined construction/clock/recovery, eight original runtime and 15 concrete
+native/configuration/custody cases. The current 26 public adapter integration and
+22 existing bounded-run cases also pass, giving 97 relevant core/native tests.
+The immediate same-tick observation correctly earns no temporal stability credit;
+full 64-run completion and exact recovery, plus denied-policy safety cancellation
+and fresh retry, now pass. The MCP section above records the complete 122-test
+integration evidence and qualification limits. No native/live or admission claim
+is made, and the compatibility registry and production map remain unchanged.
 
 ### Original furniture goals through the MCP loop (2026-10-28)
 

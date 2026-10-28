@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-28 — Expose original construction clock runs through MCP
+
+- Add explicit zero-default game-tick negotiation, closed original-bound run
+  planning, distinct clock confirmation and safety cancellation through the
+  existing eleven tools. Wait reconciles retained runs before fresh construction
+  reads; it never starts or chains an interval.
+- Recommend cadence-sized intervals only for qualified viable unfinished work,
+  within the original deadline and negotiated allowance. Stale prepared clock
+  reviews offer explicit retirement instead of an endless wait loop.
+- Preserve original and clock recovery identities and independent effect
+  uncertainty through errors, response overflow and session close. Historical
+  clock receipts never become current pause or original completion proof.
+- Document optional operator clock setup, complete tool flow, exact restart and
+  the bounded 64-sample workflow. Keep development responses free of production
+  admission provenance.
+- Pass 122 distinct focused tests: 74 actual-source runtime/native/presentation/
+  facade cases, 26 adapter integration cases and 22 existing bounded-run cases.
+  All pass without warnings; the final test-helper correction also passes its
+  16 affected owner cases. No full FastMCP, native/live or admission claim.
+- Run required repository verification and static development qualification.
+  The source-bundle assertion and all 76 static findings are identical to the
+  prior baseline; there are no new findings. These failed development runs do
+  not establish release qualification.
+
 ## 2026-10-28 — Advance original furniture goals with separately reviewed finite runs
 
 - Compose original construction proof with the existing run/1.13 coordinator,
@@ -17,11 +41,11 @@
 - Raise bounded goal history from 512 to 1024 events, retaining its 64 MiB file
   limit; allow explicit logical replay budgets up to 64 GiB, with 2 GiB unchanged
   as the default. Add full 64-run stability/recovery and denial-path regressions.
-- Current adapter integration and existing bounded-run suites pass 26 and 22
-  tests. Final focused runtime/native validation is still running after two
-  stability-fixture corrections and the private-authority-floor fix. No full
-  FastMCP, native/live qualification or admission is claimed. MCP run dispatch
-  follows in the next implementation checkpoint.
+- Final core/native evidence passes 97 focused tests: 49 actual-source runtime/
+  native, 26 adapter integration and 22 existing bounded-run cases. The full
+  64-run stability/recovery and private-authority-floor regressions pass. The
+  subsequent MCP checkpoint records complete integration evidence; no full
+  FastMCP, native/live qualification or admission is claimed.
 
 ## 2026-10-28 — Expose original furniture construction through MCP
 

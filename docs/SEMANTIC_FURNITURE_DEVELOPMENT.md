@@ -1,7 +1,8 @@
 # Original furniture construction development runtime
 
 This isolated runtime connects one original canonical `Build` plan to exact-item
-native placement, durable recovery and receipt-linked proof of construction. It
+native placement, separately reviewed finite game-time runs, durable recovery
+and receipt-linked proof of construction. It
 supports a single-tile **bed, chair or table**, one original goal and one private
 custody bundle per process session. It retains the frozen eleven-tool MCP surface.
 
@@ -48,6 +49,8 @@ The process accepts only these `DFMCP_*` environment names:
 | `DFMCP_SEMANTIC_FURNITURE_SPATIAL_TOKEN` | Credential for the independently pinned spatial/1.8 source. |
 | `DFMCP_SEMANTIC_FURNITURE_BUILD_TOKEN` | Credential for the furniture/1.19 source. |
 | `DFMCP_SEMANTIC_FURNITURE_OPERATIONS_TOKEN` | Credential for the operations/1.4 construction source. |
+| `DFMCP_SEMANTIC_FURNITURE_ALLOW_CLOCK` | Exactly `1` to enable independent clock control for a configured clock owner. |
+| `DFMCP_SEMANTIC_FURNITURE_CLOCK_TOKEN` | Credential for the separately pinned run/1.13 source when online clock operations are used. |
 
 Tokens must contain 32–256 UTF-8 bytes and no NUL. Supply them through the
 operator's secret handling, not tool arguments. Offline reopening does not need
@@ -82,7 +85,14 @@ scope with independently obtained values for the exact running sources:
 }
 ```
 
-The generation counters belong to three independent source namespaces. Their
+To configure optional bounded clock control when creating the custody bundle,
+add `"clock": {"generation": 40}` at the top level, replacing `40` with the exact
+independently observed run/1.13 source incarnation. The clock uses the same
+accepted endpoint and software versions; it has its own generation, credential
+and authority. Its protocol identifies a source incarnation rather than a named
+fortress. Matching ticks are a consistency check, not fortress-lineage proof.
+
+The generation counters belong to independent source namespaces. Their
 values need not match. The endpoint must be canonical numeric IPv4 loopback with
 a nonzero port. The scope and every protected cuboid must be ordered and inside
 the pinned map; at most 32 protected cuboids are accepted. The target's full
@@ -97,6 +107,8 @@ directory. The runtime owns these fixed, regular, single-link, exact-mode
 - `semantic.associations`: immutable original/native association.
 - `original.plan`: complete original plan and archive identity.
 - `goal.history`: bounded original construction samples and proof history.
+- `clock.journal`: optional bounded-run identity, review and single-attempt clock
+  coordination when clock control was configured for this bundle.
 
 Fresh initialization requires control mode, explicit placement enablement, the
 disposable-fortress checkpoint exception and a paused fortress. It performs a read-only native bootstrap before creating the
@@ -131,10 +143,11 @@ input cannot supply that exception or remove a sealed checkpoint requirement.
 6. **Wait explicitly.** Call `fortress.wait` to reconcile an unsettled placement
    or initialize/replay construction history. Those are separate bounded calls;
    a later wait acquires one fresh construction sample.
-7. **Continue construction.** Advance game time externally, pause again and call
-   `fortress.wait` at or after the original cadence. Repeat only while the
-   original goal and deadline allow it. Inspect current and historical results
-   with `fortress.query` or `fortress.explain`.
+7. **Continue construction.** If optional clock control is configured, follow the
+   separately reviewed finite-run workflow below. Otherwise advance game time
+   externally, pause again and call `fortress.wait` at or after the original
+   cadence. Inspect current and historical results with `fortress.query` or
+   `fortress.explain`.
 
 The plan request below is illustrative. Replace the seal and item with the exact
 returned values; this deadline example assumes an observed tick of 500000:
@@ -162,8 +175,9 @@ The canonical plan retains its default material selector and original
 construction predicates. Exact item choice is additionally sealed into the
 request identity and paired native review. Both must still agree when committing.
 
-`wait` does not unpause the fortress, advance a clock, repeat placement, start a
-background worker or continuously poll. Repeated reads at one game tick cannot
+`wait` reconciles retained clock work before attempting a paused construction
+sample. It does not unpause the fortress, start or extend a clock run, repeat
+placement, start a background worker or continuously poll. Repeated reads at one game tick cannot
 manufacture stable samples. An initial sample before the next cadence is due
 cannot complete a stability requirement. Calling wait also retires the current
 opening's permission to commit; finish the intended paired review/commit sequence
@@ -173,12 +187,87 @@ The runtime intentionally retains one original goal. A new observation or plan
 cannot replace it after publication. `fortress.checkpoint` and
 `fortress.restore` return explicit unsupported-operation denials.
 
+## Separately reviewed finite construction runs
+
+Clock control is optional and independent of placement. Configure `clock` when
+initializing the private bundle, enable the clock environment gate, provide its
+credential for online operations, and explicitly negotiate a nonzero
+`max_game_ticks` in `fortress.open_session`. The default remains zero; the maximum
+is 1200 ticks per requested interval. Opening, observation and waiting never
+start a run.
+
+After the original placement has been verified and a fresh construction sample
+is available, call `fortress.plan` with a JSON string of this form:
+
+```json
+{
+  "kind": "run",
+  "original_paired_seal": "<the original furniture review seal>",
+  "game_ticks": 10,
+  "wall_millis": 5000
+}
+```
+
+The request binds the unchanged original plan/archive, placement journal, exact
+placed building/item/job receipt and original deadline. `game_ticks` must be
+1–1200 and fit both the negotiated tick allowance and remaining original
+deadline; `wall_millis` must be 1–60000. A client cannot supply another native key,
+source, deadline, receipt, checkpoint policy or clock journal path.
+
+The prerequisite construction sample must be independently qualified,
+receipt-linked and viable. Known incomplete construction is eligible: its
+condition must be `pending`, or `condition_met` while the original stability
+requirement is still unfinished. Suspended construction, a missing construction
+job, unverified items, removal, changed identity, unknown goal truth or a true
+failure predicate blocks a new run. A completed original goal does not need
+another run. Recommendations propose a cadence-sized interval within the
+remaining deadline and negotiated allowance.
+
+Planning returns a **distinct clock review seal**. Inspect it, then call
+`fortress.commit` with `scope="run"`, that clock seal as `paired_seal`, and
+`confirmed=true`. The default commit scope remains `goal` for the original
+placement. Clock confirmation does not reuse the placement confirmation.
+
+Before the native unpause, the owner rechecks original archive and placement
+identity, independent clock authority, fresh receipt-linked construction,
+source pins and exact clock state after durable dispatch intent. There is at
+most one unsettled run. The native coordinator owns its single unpause attempt;
+a missing reply cannot authorize another attempt.
+
+Call `fortress.wait` to reconcile that run. While it may still be running or its
+outcome is unresolved, the runtime withholds current goal proof and does not
+attempt a paused construction read. Once settled, a subsequent bounded wait can
+acquire construction evidence at or after the retained clock tick floor. A run
+receipt is historical clock evidence; it does not prove present pause,
+construction completion or temporal stability. Native tick/wall limits are stop
+triggers evaluated at native callbacks; reported overshoot remains visible.
+
+If further progress is needed, explicitly plan and confirm another interval.
+There is no automatic chaining. Repeated reads during one paused tick do not add
+stable samples. Up to 64 original-bound run records are retained under the
+native journal's unchanged limits.
+
+`fortress.cancel(scope="run")` retires an undispatched run or asks its native
+owner for the safety pause. It requires current independent clock authority but
+not renewed placement authority, a new original deadline or a fresh successful
+construction predicate. It neither removes the building nor abandons the
+original construction goal. A stale or otherwise unusable prepared clock review
+must be retired before planning another; waiting cannot make that old review
+committable.
+
+Configure clock custody at initial bundle creation. An existing bundle without
+`clock.journal` remains supported for external progression; reopening cannot
+silently create a new clock journal or hide an existing one. A configured clock
+with a zero negotiated tick budget can be reopened later with an explicit
+nonzero allowance and its exact retained identities.
+
 ## Exact restart and lost replies
 
 Keep the **complete returned recovery object** outside the custody directory.
 It includes the journal ID, original semantic digest, original archive object
-digest, full original anchor and whether goal history is present. Copy partial
-publication diagnostics too when returned. Cached packets retain identities
+digest, full original anchor and whether goal history is present. When configured,
+it also includes `clock_journal_id`; keep that identity even before the first run.
+Copy partial publication diagnostics too when returned. Cached packets retain identities
 during errors and response overflow; they do not become current proof.
 
 Before restarting, use
@@ -190,15 +279,18 @@ Keep the same exact operator source configuration and fixed files. Set
 `initialize=false`, add the exact top-level `journal_id`, and copy the complete
 returned object into `recovery`. A journal with no original plan can reopen
 using its exact journal ID alone. A retained original requires its original
-recovery object; guessing a seal or anchor is not supported.
+recovery object; guessing a seal or anchor is not supported. For clock-enabled
+bundles, also set `clock.journal_id` to the exact retained clock identity. It must
+match `recovery.clock_journal_id` whenever an original recovery object is present.
+The independently pinned clock generation remains unchanged.
 
 Choose the reopening mode according to the work required:
 
 | Mode | Behavior |
 | --- | --- |
 | `offline` | Opens exact retained custody without native contact. Use query, explain or doctor. Wait is denied. |
-| `reconcile` | Can query the original native key and acquire fresh construction evidence under current source authority. Does not acquire placement permission. |
-| `control` after restart | Still cannot restore the lost original commit permit. Recovery remains read/reconcile/retire only. |
+| `reconcile` | Can query original placement and clock keys and acquire fresh construction evidence once the clock is settled. Does not acquire control authority. |
+| `control` after restart | Cannot restore the lost placement permit. Separately enabled clock control can reconcile/retire its exact runs and prepare newly reviewed finite intervals for the retained original goal. |
 
 Online recovery requires the exact native incarnation and independent source
 pins. Native reloads or changed incarnations are not silently accepted. A lost
@@ -224,19 +316,30 @@ the original anchor unchanged while allowing that current authorization check.
 
 Each call owns its work and has no detached task. Session opening defaults to
 5000 ms and 2 GiB of logical byte-work; explicit allowances are capped at 60000 ms
-and 32 GiB for longer history replay. The byte-work allowance counts bounded work
+and 64 GiB for longer history replay. The byte-work allowance counts bounded work
 and repeated custody checks, not a promise to allocate that much resident memory.
-Fresh runtime opening reserves 512 MiB of logical work before custody creation.
-Together with opening inspection and the complete response, the minimum
-negotiable opening allowance is 768 MiB plus 128 KiB; the 2 GiB default exceeds
+Fresh runtime opening reserves 576 MiB of logical work before custody creation,
+including optional clock opening and inspection. Together with facade opening
+inspection and the complete response, the minimum negotiable allowance is
+832 MiB plus 128 KiB; the 2 GiB default exceeds
 that minimum. All of these reservations precede I/O.
-The output allowance is 32768 proxy units. Game-tick allowance is fixed at zero.
+The output allowance is 32768 proxy units. Game-tick allowance defaults to zero
+and requires explicit negotiation up to 1200.
 
-Goal history is limited to 64 MiB and 512 events. A poll prepays its possible
+Goal history is limited to 64 MiB and 1024 events. The event allowance accommodates
+fresh construction checks at preparation and dispatch boundaries across a
+64-sample original stability goal; the byte and native journal limits remain
+unchanged. A poll prepays its possible
 records before contacting a source: read intent precedes acquisition, complete
 captured evidence precedes policy, and publication precedes acknowledgement.
 An interrupted read or failed append cannot be silently replayed as fresh proof.
 Exhausted budgets refuse the operation while retaining recoverable identities.
+Long histories also require enough logical work to reauthorize every retained
+sample. The maximum-stability run workflow is covered by an explicit 64 GiB
+replay allowance (68719476736 bytes); 32 GiB refuses safely at that capacity.
+This does not allocate 64 GiB of memory or relax the 64 MiB history, source-frame,
+event or 60-second call limits. Ordinary short-history operations retain the
+2 GiB default.
 
 Source entry points:
 
@@ -246,6 +349,6 @@ Source entry points:
 - [Operator/native composition](../crates/dfmcp-mcp/src/semantic_furniture_runtime/native.rs)
 - [MCP tool facade](../crates/dfmcp-mcp/src/live_semantic_furniture_server.rs)
 
-Automatic construction clock runs, a multi-step furnishing dispatcher, a
+Automatic chaining of clock runs, a multi-step furnishing dispatcher, a
 checkpoint provider, native/live qualification and production admission remain
 outside this implemented slice.

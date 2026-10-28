@@ -328,8 +328,9 @@ impl Fixture {
         )
     }
 }
-fn active(view: &ClockView) -> &ClockRunView {
-    view.active().expect("fixture has one active run")
+fn active(view: &ClockView) -> Result<&ClockRunView> {
+    view.active()
+        .ok_or_else(|| invalid("fixture has no active run"))
 }
 
 #[test]
@@ -361,7 +362,7 @@ fn closed_request_cannot_choose_native_keys_or_source_identity() -> Result<()> {
 fn reviewed_clock_executes_once_and_never_becomes_construction_proof() -> Result<()> {
     let mut f = Fixture::new()?;
     let prepared = f.prepare()?;
-    let seal = active(&prepared).review_seal;
+    let seal = active(&prepared)?.review_seal;
     assert_ne!(seal, f.target.original_seal);
     assert!(!prepared.may_be_running());
     assert!(prepared.pending);
@@ -372,7 +373,7 @@ fn reviewed_clock_executes_once_and_never_becomes_construction_proof() -> Result
     assert!(!running.can_sample_goal());
     assert!(f.commit(seal).is_err());
     assert_eq!(f.source.commits, 1);
-    f.source.record = Some(native_record(active(&running).entry.plan(), 3, 1, 120)?);
+    f.source.record = Some(native_record(active(&running)?.entry.plan(), 3, 1, 120)?);
     let stopped = f.reconcile()?;
     assert!(!stopped.pending);
     assert!(stopped.can_sample_goal());
@@ -393,7 +394,7 @@ fn reviewed_clock_executes_once_and_never_becomes_construction_proof() -> Result
 #[test]
 fn lost_reply_reopens_read_only_without_unpause_replay() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     f.source.fail_commit = true;
     assert!(f.commit(seal).is_err());
     assert_eq!(f.source.commits, 1);
@@ -444,8 +445,8 @@ fn separate_source_grants_cannot_be_derived_from_canonical_scope() -> Result<()>
 fn post_dispatch_guard_preserves_canonical_scope_and_blocks_unpause_forever() -> Result<()> {
     let mut f = Fixture::new()?;
     let prepared = f.prepare()?;
-    let seal = active(&prepared).review_seal;
-    let plan = active(&prepared).entry.plan().clone();
+    let seal = active(&prepared)?.review_seal;
+    let plan = active(&prepared)?.entry.plan().clone();
     let calls = Cell::new(0);
     let memory = f.memory.clone();
     let native = f.native_context.clone();
@@ -487,7 +488,7 @@ fn post_dispatch_guard_preserves_canonical_scope_and_blocks_unpause_forever() ->
     assert!(f.inspect()?.unresolved);
     f.reopen(RunMode::Control)?;
     let recovered = f.reconcile()?;
-    assert_eq!(active(&recovered).entry.state(), RunState::Tracking);
+    assert_eq!(active(&recovered)?.entry.state(), RunState::Tracking);
     assert!(f.commit(seal).is_err());
     assert_eq!(f.source.commits, 0);
     Ok(())
@@ -519,7 +520,7 @@ fn post_intent_guard_failure_retains_one_preparation_without_retry() -> Result<(
     );
     assert_eq!(calls.get(), 1);
     assert_eq!(f.source.prepares, 0);
-    assert_eq!(active(&f.prepare()?).entry.state(), RunState::Intent);
+    assert_eq!(active(&f.prepare()?)?.entry.state(), RunState::Intent);
     assert!(f.reconcile().is_err());
     assert!(!f.cancel(false)?.pending);
     assert_eq!(f.source.prepares, 0);
@@ -551,7 +552,7 @@ fn changed_target_deadline_tick_or_either_budget_refuses_preparation() -> Result
 #[test]
 fn original_or_clock_source_substitution_is_refused_on_reopen() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     let mut changed = f.target.clone();
     changed.digest = Digest32::of_bytes(b"other-original-plan-or-building-identity");
     assert!(
@@ -574,7 +575,7 @@ fn original_or_clock_source_substitution_is_refused_on_reopen() -> Result<()> {
 #[test]
 fn sync_failure_after_dispatch_keeps_recovery_without_another_effect() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     f.source.fail_receipt_sync = true;
     assert!(f.commit(seal).is_err());
     assert!(f.inspect().is_err());
@@ -590,9 +591,9 @@ fn sync_failure_after_dispatch_keeps_recovery_without_another_effect() -> Result
 #[test]
 fn stopped_history_floors_require_later_valid_samples_for_next_slice() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     let running = f.commit(seal)?;
-    f.source.record = Some(native_record(active(&running).entry.plan(), 3, 1, 120)?);
+    f.source.record = Some(native_record(active(&running)?.entry.plan(), 3, 1, 120)?);
     f.reconcile()?;
     assert!(f.prepare().is_err());
     f.canonical.anchor.tick = GameTick(120);
@@ -603,14 +604,14 @@ fn stopped_history_floors_require_later_valid_samples_for_next_slice() -> Result
     let next = f.prepare()?;
     assert_eq!(next.runs.len(), 2);
     assert_eq!(f.source.prepares, 2);
-    assert_ne!(active(&next).review_seal, seal);
+    assert_ne!(active(&next)?.review_seal, seal);
     Ok(())
 }
 
 #[test]
 fn safety_cancel_survives_goal_expiry_without_observe_or_plan_authority() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     f.commit(seal)?;
     for c in [&mut f.canonical, &mut f.native_context] {
         c.anchor.tick = GameTick(2000);
@@ -627,9 +628,9 @@ fn safety_cancel_survives_goal_expiry_without_observe_or_plan_authority() -> Res
 #[test]
 fn source_loss_remains_unresolved_without_querying_or_pausing_replacement() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     let running = f.commit(seal)?;
-    f.source.record = Some(native_record(active(&running).entry.plan(), 5, 7, 0)?);
+    f.source.record = Some(native_record(active(&running)?.entry.plan(), 5, 7, 0)?);
     let lost = f.reconcile()?;
     assert!(lost.pending);
     assert!(lost.unresolved);
@@ -692,7 +693,7 @@ fn retention_covers_64_samples_and_preserves_complete_bounded_output() -> Result
 #[test]
 fn offline_history_never_contacts_native_or_gains_control() -> Result<()> {
     let mut f = Fixture::new()?;
-    let seal = active(&f.prepare()?).review_seal;
+    let seal = active(&f.prepare()?)?.review_seal;
     f.reopen(RunMode::Offline)?;
     let reads = f.source.reads;
     assert_eq!(f.inspect()?.mode, RunMode::Offline);
@@ -709,9 +710,9 @@ fn offline_history_never_contacts_native_or_gains_control() -> Result<()> {
 fn retained_tick_floors_do_not_renew_either_authority_scope() -> Result<()> {
     for native in [false, true] {
         let mut f = Fixture::new()?;
-        let seal = active(&f.prepare()?).review_seal;
+        let seal = active(&f.prepare()?)?.review_seal;
         let running = f.commit(seal)?;
-        f.source.record = Some(native_record(active(&running).entry.plan(), 3, 1, 120)?);
+        f.source.record = Some(native_record(active(&running)?.entry.plan(), 3, 1, 120)?);
         f.reconcile()?;
         let c = if native {
             &mut f.native_context
