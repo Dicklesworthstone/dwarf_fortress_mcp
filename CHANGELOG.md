@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-28 — Preserve unknown terrain in partial canonical observations
+
+- Represent hidden, unsupported and unobserved cells explicitly in canonical
+  terrain chunks, while keeping observed cells usable by original predicates.
+- Preserve unknowns through canonical snapshot encoding. Even broad evidence
+  coverage cannot prove those cells or their negation; reference mutation cannot
+  fill them and spatial indexing cannot infer safe paths through them.
+- Pass all four actual-world regression cases without compiler warnings. This
+  supplies the terrain prerequisite for original-plan mining integration; it
+  does not itself expose a new native mutation or MCP workflow.
+
 ## 2026-10-28 — Expose original construction clock runs through MCP
 
 - Add explicit zero-default game-tick negotiation, closed original-bound run

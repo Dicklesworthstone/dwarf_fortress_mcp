@@ -44,6 +44,23 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Partial canonical terrain for original mining (2026-10-28)
+
+Canonical terrain can now retain explicitly unknown cells inside otherwise
+observed chunks. Tile lookup reports those cells as unavailable, three-valued
+terrain predicates cannot certify them or their negation, and reference mutation
+refuses to turn them into invented terrain. The existing spatial index requires
+fully observed chunks and rejects partial chunks instead of assigning safe
+properties. Canonical snapshot bytes preserve this distinction without changing
+the format or existing complete-chunk encodings.
+
+All four focused actual-world integration tests pass without warnings, covering
+roundtrip identity, predicate evidence, mutation refusal and spatial-index safety.
+This is the prerequisite for a new independently scoped original-mining terrain
+projection. The canonical-plan/native mining handoff and dedicated MCP runtime
+are being implemented separately; this checkpoint does not claim them complete
+or establish native, live, full-server or compatibility qualification.
+
 ### Original construction and finite clock runs through MCP (2026-10-28)
 
 The original furniture workflow now exposes separately reviewed bounded game-time

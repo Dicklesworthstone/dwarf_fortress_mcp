@@ -110,10 +110,14 @@ impl SpatialChunkNode {
             || chunk.height != 16
             || chunk.encoded_tile_count() != Some(256)
             || chunk.sparse_overlays.keys().any(|offset| *offset >= 256)
+            || chunk
+                .terrain_runs
+                .iter()
+                .any(|run| run.tile_code == crate::terrain::tile_codes::UNKNOWN)
         {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidRequest,
-                "spatial index currently accepts only complete 16x16 chunks",
+                "spatial index currently accepts only fully observed complete 16x16 chunks",
             ));
         }
         let mut tiles = [TileProperties::from_tile_type(TileType::SolidWall); 256];

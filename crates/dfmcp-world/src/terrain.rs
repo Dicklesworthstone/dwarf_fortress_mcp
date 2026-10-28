@@ -3,7 +3,8 @@
 //! Canonical terrain is stored as run-length encoded 16x16x1 chunks keyed by
 //! `ChunkCoord { x: x.div_euclid(16), y: y.div_euclid(16), z }`, matching the
 //! spatial index. A tile whose chunk is absent, malformed, or not 16x16 is
-//! unknown: region predicates never treat missing terrain as a match.
+//! unknown: region predicates never treat missing terrain as a match. Partially
+//! observed chunks retain explicit UNKNOWN cells instead of inventing terrain.
 
 use dfmcp_core::{DfmcpError, ErrorCode, MapCoord, MapCuboid, Result};
 
@@ -18,6 +19,9 @@ pub const MAX_REGION_TERRAIN_TILES: u64 = 65_536;
 
 /// Canonical tile codes, shared with [`crate::TileType::from_tile_code`].
 pub mod tile_codes {
+    /// No observed canonical terrain at this cell, including hidden, missing
+    /// and unsupported source values. Never a predicate match or effect input.
+    pub const UNKNOWN: u32 = u32::MAX;
     pub const OPEN_SPACE: u32 = 0;
     pub const FLOOR: u32 = 1;
     pub const SOLID_WALL: u32 = 2;
@@ -147,6 +151,7 @@ impl WorldSnapshot {
             .chunks
             .get(&slot.chunk)
             .and_then(|chunk| code_in_chunk(chunk, slot.offset))
+            .filter(|code| *code != tile_codes::UNKNOWN)
     }
 
     /// Compare every tile of `area` with `expected`. Oversized or inverted
@@ -195,6 +200,12 @@ impl WorldSnapshot {
                 "terrain tile offset is outside its chunk",
             ));
         };
+        if *current == tile_codes::UNKNOWN {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                format!("terrain at {coord:?} has not been observed"),
+            ));
+        }
         if *current == code {
             return Ok(false);
         }
