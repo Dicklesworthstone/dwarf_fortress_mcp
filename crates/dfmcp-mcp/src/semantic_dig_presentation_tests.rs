@@ -132,6 +132,7 @@ fn unavailable_custody_withdraws_current_goal_and_uses_executable_inspection_arg
     retained["current_goal_available"] = json!(true);
     retained["current_goal"] =
         json!({"original_goal_proven":true,"semantic_completion_proven":true});
+    retained["first_satisfied_anchor"] = retained["anchor"].clone();
     let packet = run(
         "fortress.wait",
         json!({"ok":false,"error":{"code":"capability_denied"}}),
@@ -145,6 +146,20 @@ fn unavailable_custody_withdraws_current_goal_and_uses_executable_inspection_arg
     assert_eq!(next["tool"], "fortress.query");
     assert!(next["arguments"].get("query").is_none());
     assert_eq!(packet["retained_reference_current"], false);
+    let reference = &packet["retained_reference"];
+    assert!(reference["current_goal"].is_null());
+    for field in [
+        "retained_state_currently_verified",
+        "current_goal_available",
+        "prepared_in_this_opening",
+        "development_designation_enabled",
+        "native_retirement_enabled",
+    ] {
+        assert_eq!(reference[field], false, "retained current-use flag {field}");
+    }
+    assert_eq!(reference["review"]["paired_seal"], "c".repeat(64));
+    assert_eq!(reference["recovery"]["object_digest"], "f".repeat(64));
+    assert_eq!(reference["first_satisfied_anchor"]["tick"], 100);
     Ok(())
 }
 #[test]
@@ -181,6 +196,28 @@ fn overflow_preserves_exact_recovery_and_suppresses_all_goal_claims()
             .is_none()
     );
     assert_eq!(packet["result"]["current_goal_available"], false);
+    for field in [
+        "retained_state_currently_verified",
+        "current_goal_available",
+        "prepared_in_this_opening",
+        "development_designation_enabled",
+        "native_retirement_enabled",
+    ] {
+        assert_eq!(
+            packet["retained_reference"][field], false,
+            "retained {field}"
+        );
+    }
+    assert!(packet["retained_reference"]["current_goal"].is_null());
+    assert_eq!(
+        packet["retained_reference"]["original_plan"]["steps"][0]["obligation"],
+        json!({"deadline_tick":200,"poll_interval_ticks":5,"stable_samples":2})
+    );
+    assert!(
+        packet["agent_turn"]["active_work"]["confirmations"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert!(packet["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
     Ok(())
 }
@@ -376,5 +413,76 @@ fn every_packet_removes_ambient_admission_and_withholds_unverified_designation()
         packet["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"],
         false
     );
+    Ok(())
+}
+
+#[test]
+fn weaker_recovered_original_goal_preserves_its_truth_without_proving_excavation()
+-> Result<(), serde_json::Error> {
+    let mut view = source();
+    view["prepared_in_this_opening"] = json!(false);
+    view["native_state"] = json!("terminal");
+    view["native_phase"] = json!("designated");
+    view["native_needs_query"] = json!(false);
+    view["designation"] = json!({"verified":true,"receipt":"a".repeat(64)});
+    view["current_goal_available"] = json!(true);
+    view["current_goal"] = json!({"original_goal_proven":true,"excavation_proven":false,
+        "semantic_completion_proven":false});
+    let packet = run("fortress.wait", view, None, false)?;
+    assert_eq!(
+        packet["result"]["current_goal"]["original_goal_proven"],
+        true
+    );
+    assert_eq!(
+        packet["agent_turn"]["briefing"]["original_goal_proven_at_anchor"],
+        true
+    );
+    assert_eq!(
+        packet["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"],
+        false
+    );
+    assert_eq!(
+        packet["agent_turn"]["active_work"]["obligations"][0]["complete_at_anchor"],
+        false
+    );
+    assert_eq!(
+        packet["agent_turn"]["recommendations"][0]["tool"],
+        "fortress.wait"
+    );
+    Ok(())
+}
+
+#[test]
+fn overflow_retains_exact_historical_recovery_without_resurrecting_current_goal()
+-> Result<(), serde_json::Error> {
+    let mut view = source();
+    view["native_state"] = json!("terminal");
+    view["native_phase"] = json!("designated");
+    view["native_needs_query"] = json!(false);
+    view["designation"] = json!({"verified":true,"receipt":"a".repeat(64),"designated_count":4});
+    view["current_goal_available"] = json!(true);
+    view["current_goal"] = json!({"original_goal_proven":true,"excavation_proven":true,
+        "semantic_completion_proven":true,"large":"x".repeat(RESPONSE_RESERVE as usize)});
+    view["first_satisfied_anchor"] = view["anchor"].clone();
+    view["recovery"]["history_present"] = json!(true);
+    view["recovery"]["archive_publication_unknown"] = json!(false);
+    view["recovery"]["paired_preparation_present"] = json!(true);
+    let packet = run("fortress.wait", view, None, false)?;
+    assert!(packet.to_string().len() as u64 <= RESPONSE_RESERVE);
+    assert_eq!(packet["result"]["error"]["code"], "budget_exceeded");
+    assert!(packet["agent_turn"]["briefing"]["original_goal_proven_at_anchor"].is_null());
+    assert!(packet["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"].is_null());
+    let reference = &packet["retained_reference"];
+    assert_eq!(reference["journal_id"], "b".repeat(64));
+    assert_eq!(reference["review"]["paired_seal"], "c".repeat(64));
+    assert_eq!(reference["recovery"]["object_digest"], "f".repeat(64));
+    assert_eq!(reference["recovery"]["history_present"], true);
+    assert_eq!(reference["recovery"]["archive_publication_unknown"], false);
+    assert_eq!(reference["recovery"]["paired_preparation_present"], true);
+    assert_eq!(reference["first_satisfied_anchor"]["tick"], 100);
+    assert_eq!(reference["designation"]["receipt"], "a".repeat(64));
+    assert!(reference["current_goal"].is_null());
+    assert_eq!(reference["current_goal_available"], false);
+    assert_eq!(reference["prepared_in_this_opening"], false);
     Ok(())
 }

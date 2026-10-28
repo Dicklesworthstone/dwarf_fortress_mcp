@@ -457,13 +457,104 @@ impl SpatialFurnitureEvidenceIo for NativeSpatialIo {
     }
 }
 
+/// A retained preparation socket spans separate foreground requests. Its byte
+/// reservation and one-shot permit remain owned by `DigRpcClient`; only a new
+/// trusted request may start a new wall-time window. Calls within one request
+/// can only narrow that window. Any observed failure permanently retires it.
+struct NativeRequestWindow {
+    session: SessionId,
+    request: RequestId,
+    end: Instant,
+    fenced: bool,
+}
+impl NativeRequestWindow {
+    fn candidate(c: &OperationContext, now: Instant) -> Result<Instant> {
+        c.budget.validate()?;
+        if c.cancellation_requested {
+            return Err(DfmcpError::new(
+                ErrorCode::CancellationRequested,
+                "native mining request was cancelled",
+            ));
+        }
+        if c.session_id == SessionId::NIL || c.request_id.get() == 0 {
+            return Err(denied("native mining requires a named host request"));
+        }
+        if !(1..=MAX_WALL_MILLIS).contains(&c.budget.max_wall_millis) {
+            return Err(exhausted("native mining request exceeds sixty seconds"));
+        }
+        now.checked_add(Duration::from_millis(c.budget.max_wall_millis))
+            .ok_or_else(|| exhausted("native mining request deadline overflow"))
+    }
+    fn new_at(c: &OperationContext, now: Instant) -> Result<Self> {
+        Ok(Self {
+            session: c.session_id,
+            request: c.request_id,
+            end: Self::candidate(c, now)?,
+            fenced: false,
+        })
+    }
+    fn enter_at(&mut self, c: &OperationContext, now: Instant) -> Result<()> {
+        let result = (|| {
+            if self.fenced
+                || c.session_id != self.session
+                || c.request_id.get() < self.request.get()
+            {
+                return Err(denied(
+                    "native mining request changed owner, regressed or uses a fenced socket",
+                ));
+            }
+            let candidate = Self::candidate(c, now)?;
+            self.end = if c.request_id == self.request {
+                self.end.min(candidate)
+            } else {
+                candidate
+            };
+            self.request = c.request_id;
+            self.remaining_at(now).map(|_| ())
+        })();
+        if result.is_err() {
+            self.fenced = true;
+        }
+        result
+    }
+    fn narrow_at(&mut self, timeout: Duration, now: Instant) -> Result<()> {
+        let result = (|| {
+            if timeout.is_zero() || timeout > Duration::from_millis(MAX_WALL_MILLIS) {
+                return Err(exhausted("native mining wire timeout exceeds its bound"));
+            }
+            self.end = self.end.min(
+                now.checked_add(timeout)
+                    .ok_or_else(|| exhausted("native mining wire deadline overflow"))?,
+            );
+            self.remaining_at(now).map(|_| ())
+        })();
+        if result.is_err() {
+            self.fenced = true;
+        }
+        result
+    }
+    fn remaining_at(&mut self, now: Instant) -> Result<Duration> {
+        if self.fenced {
+            return Err(denied("native mining request window is fenced"));
+        }
+        let result = self
+            .end
+            .checked_duration_since(now)
+            .filter(|left| *left >= Duration::from_millis(1))
+            .ok_or_else(|| exhausted("native mining request deadline expired"));
+        if result.is_err() {
+            self.fenced = true;
+        }
+        result
+    }
+}
 /// Every partial wire operation rechecks the original host/configuration/credential
-/// and the nonrenewable connection deadline, including post-dispatch revocation.
+/// and its current request deadline, including post-dispatch revocation.
 struct NativeDigIo {
     stream: TcpStream,
     config: Arc<Config>,
     pinned: Vec<u8>,
-    end: Instant,
+    window: Arc<Mutex<NativeRequestWindow>>,
     write: Arc<AtomicBool>,
     checkpoint_required: Arc<AtomicBool>,
 }
@@ -480,10 +571,10 @@ impl NativeDigIo {
                 "native dig credential or designation authority changed",
             ));
         }
-        self.end
-            .checked_duration_since(Instant::now())
-            .filter(|d| !d.is_zero())
-            .ok_or_else(|| exhausted("native dig connection deadline expired"))
+        self.window
+            .try_lock()
+            .map_err(|_| denied("native dig request window is unavailable"))?
+            .remaining_at(Instant::now())
     }
     fn io_check(&self) -> io::Result<Duration> {
         self.check()
@@ -508,11 +599,10 @@ impl Write for NativeDigIo {
 }
 impl DigStream for NativeDigIo {
     fn narrow_deadline(&mut self, timeout: Duration) -> Result<()> {
-        self.end = self.end.min(
-            Instant::now()
-                .checked_add(timeout)
-                .ok_or_else(|| exhausted("dig deadline overflow"))?,
-        );
+        self.window
+            .try_lock()
+            .map_err(|_| denied("native dig request window is unavailable"))?
+            .narrow_at(timeout, Instant::now())?;
         self.check()?;
         Ok(())
     }
@@ -520,6 +610,7 @@ impl DigStream for NativeDigIo {
 pub struct PinnedNative {
     inner: DigRpcClient<NativeDigIo>,
     config: Arc<Config>,
+    window: Arc<Mutex<NativeRequestWindow>>,
     control: bool,
     write: Arc<AtomicBool>,
     checkpoint_required: Arc<AtomicBool>,
@@ -532,6 +623,12 @@ impl PinnedNative {
             self.config.current()?;
             let m = self.inner.manifest();
             if self.fenced
+                || self.inner.fenced()
+                || self
+                    .window
+                    .try_lock()
+                    .map_err(|_| denied("native dig request window is unavailable"))?
+                    .fenced
                 || m.generation != self.config.sources.dig_generation
                 || m.df_version != self.config.sources.df_version
                 || m.dfhack_version != self.config.sources.dfhack_version
@@ -549,26 +646,47 @@ impl PinnedNative {
             Ok(())
         })();
         if result.is_err() {
-            self.fenced = true;
+            self.fence();
         }
         result
     }
-    fn mutation<T>(
-        &mut self,
-        prepare: bool,
-        operation: impl FnOnce(&mut DigRpcClient<NativeDigIo>) -> Result<T>,
-    ) -> Result<T> {
-        self.check(true, prepare)?;
-        self.checkpoint_required.store(prepare, Ordering::Release);
-        self.write.store(true, Ordering::Release);
-        let result = operation(&mut self.inner);
-        self.write.store(false, Ordering::Release);
+    fn fence(&mut self) {
+        self.fenced = true;
+        if let Ok(mut window) = self.window.try_lock() {
+            window.fenced = true;
+        }
+    }
+    fn begin_request(&mut self, c: &OperationContext, write: bool, prepare: bool) -> Result<()> {
+        self.check(write, prepare)?;
+        let result = match self.window.try_lock() {
+            Ok(mut window) => window.enter_at(c, Instant::now()),
+            Err(_) => Err(denied("native dig request window is unavailable")),
+        };
         if result.is_err() {
-            self.fenced = true;
+            self.fence();
+        }
+        result
+    }
+    fn finish<T>(&mut self, result: Result<T>) -> Result<T> {
+        if result.is_err() {
+            self.fence();
         }
         let value = result?;
         self.check(false, false)?;
         Ok(value)
+    }
+    fn mutation<T>(
+        &mut self,
+        prepare: bool,
+        c: &OperationContext,
+        operation: impl FnOnce(&mut DigRpcClient<NativeDigIo>) -> Result<T>,
+    ) -> Result<T> {
+        self.begin_request(c, true, prepare)?;
+        self.checkpoint_required.store(prepare, Ordering::Release);
+        self.write.store(true, Ordering::Release);
+        let result = operation(&mut self.inner);
+        self.write.store(false, Ordering::Release);
+        self.finish(result)
     }
 }
 impl DigSource for PinnedNative {
@@ -579,27 +697,28 @@ impl DigSource for PinnedNative {
         Some(self.config.endpoint)
     }
     fn observe(&mut self, region: DigRegion, c: &OperationContext) -> Result<DigObservation> {
-        self.check(false, false)?;
-        self.config.selection(region)?;
-        let value = self.inner.observe(region, c)?;
-        self.config.sources.capture(&value)?;
-        self.check(false, false)?;
-        Ok(value)
+        self.begin_request(c, false, false)?;
+        let result = (|| {
+            self.config.selection(region)?;
+            let value = self.inner.observe(region, c)?;
+            self.config.sources.capture(&value)?;
+            Ok(value)
+        })();
+        self.finish(result)
     }
     fn prepare(&mut self, plan: &DigPlan, c: &OperationContext) -> Result<DigPreparation> {
-        self.mutation(true, |source| source.prepare(plan, c))
+        self.mutation(true, c, |source| source.prepare(plan, c))
     }
     fn commit(&mut self, plan: &DigPlan, c: &OperationContext) -> Result<DigEffect> {
-        self.mutation(true, |source| source.commit(plan, c))
+        self.mutation(true, c, |source| source.commit(plan, c))
     }
     fn query(&mut self, plan: &DigPlan, c: &OperationContext) -> Result<Option<DigEffect>> {
-        self.check(false, false)?;
-        let value = self.inner.query(plan, c)?;
-        self.check(false, false)?;
-        Ok(value)
+        self.begin_request(c, false, false)?;
+        let result = self.inner.query(plan, c);
+        self.finish(result)
     }
     fn cancel(&mut self, plan: &DigPlan, c: &OperationContext) -> Result<DigEffect> {
-        self.mutation(false, |source| source.cancel(plan, c))
+        self.mutation(false, c, |source| source.cancel(plan, c))
     }
 }
 impl Config {
@@ -619,9 +738,9 @@ impl Config {
         )?;
         let mut current = c.clone();
         let secret = token(DIG_TOKEN)?;
-        let end = Instant::now()
-            .checked_add(Duration::from_millis(c.budget.max_wall_millis))
-            .ok_or_else(|| exhausted("dig connection deadline overflow"))?;
+        let window = NativeRequestWindow::new_at(c, Instant::now())?;
+        let end = window.end;
+        let window = Arc::new(Mutex::new(window));
         let connection_nonce = nonce(&mut current)?;
         let left = end
             .checked_duration_since(Instant::now())
@@ -640,7 +759,7 @@ impl Config {
                 stream,
                 config: Arc::clone(self),
                 pinned: secret.clone(),
-                end,
+                window: Arc::clone(&window),
                 write: Arc::clone(&write),
                 checkpoint_required: Arc::clone(&checkpoint_required),
             },
@@ -652,6 +771,7 @@ impl Config {
         let mut source = PinnedNative {
             inner,
             config: Arc::clone(self),
+            window,
             control,
             write,
             checkpoint_required,

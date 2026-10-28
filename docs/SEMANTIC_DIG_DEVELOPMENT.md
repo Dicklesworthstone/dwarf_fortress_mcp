@@ -151,12 +151,14 @@ hidden-neighbor overrides and tool-supplied source/checkpoint policy are rejecte
    records no mining designation. Call `fortress.commit(session_id, paired_seal,
    confirmed=true)` once. The coordinator checks current authority, exact original
    custody and fresh independent terrain after durable intent and again at the
-   native dispatch boundary. The original native connection has a single absolute
-   deadline, at most 60 seconds from its establishment; preparation and review
-   consume that same window. Later requests cannot extend it or reconnect to
-   recover a commit permit. If it expires, reconcile the original key and retire
-   the exact remaining preparation. A lost reply is also reconciled using the
-   original key.
+   native dispatch boundary. Human review may span foreground requests. Each
+   newer trusted request in the same session receives a wall window bounded by
+   the negotiated allowance and 60-second cap; callbacks within that request
+   can only narrow its deadline. The original connection, preparation permit,
+   prepaid byte allowance and game-time limits remain unchanged. An active
+   timeout, source error or authority failure permanently fences the connection;
+   a later request cannot revive it or recover a commit permit by reconnecting.
+   A lost reply is reconciled using the original key.
 5. Call `fortress.wait(session_id)` for original-key recovery or bounded goal
    monitoring. After `Designated`, the first wait initializes `goal.history` and
    returns without a current terrain sample; the next wait acquires the first
@@ -197,6 +199,13 @@ only compare policy; they never restore grants. Current goal truth is cleared
 on reopening and unfinished stability is interrupted. Historical first achievement
 remains separately visible. Source-incarnation changes, regressed clocks or
 corrupt/replaced custody fence the owner instead of renewing its deadline or key.
+
+A failed foreground wait immediately withdraws its cached current goal, including
+failures before a native read or while publishing the response. The next permitted
+wait records that known gap within its own budget before another sample can
+continue unfinished stability. A later query cannot restore the withdrawn proof;
+historical first achievement remains visible. Recovery references also omit
+cached proof and preparation/enablement flags while preserving exact identities.
 
 The default logical byte-work allowance is 2 GiB; callers may explicitly request
 up to 64 GiB for larger bounded source work or historical replay. These account

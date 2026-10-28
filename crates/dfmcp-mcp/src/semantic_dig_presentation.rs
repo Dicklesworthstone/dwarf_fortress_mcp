@@ -77,7 +77,8 @@ fn compact(value: &Value) -> Value {
         "native_state":native_state(value),"native_phase":native_phase(value),
         "native_needs_query":value["native_needs_query"].as_bool(),
         "effect_uncertain":value["effect_uncertain"].as_bool(),
-        "prepared_in_this_opening":value["prepared_in_this_opening"].as_bool(),
+        "prepared_in_this_opening":false,"development_designation_enabled":false,
+        "native_retirement_enabled":false,
         "original_plan":{"plan_digest":digest(&value["original_plan"]["plan_digest"]),
             "anchor":anchor(&value["original_plan"]["anchor"]),
             "steps":[{"obligation":obligation(value)}]},
@@ -215,7 +216,7 @@ fn render(
             }
         } else if prepared {
             recommendations.push(next("confirm_original_excavation","fortress.commit",
-                "Review the exact original goal and paired native selection, then confirm within the original connection deadline (at most 60 seconds from connection establishment). Expiry requires original-key recovery and retirement; a later request cannot renew the permit.",true,
+                "Review the exact original goal and paired native selection, then confirm once. Each trusted foreground request has a bounded wall deadline on the original connection; the original permit, prepaid bytes and game-time limits stay unchanged. Failed I/O requires original-key recovery.",true,
                 json!({"session_id":session.map(|s|s.to_string()),
                     "paired_seal":paired.as_ref().and_then(|v|v["paired_seal"].as_str()),"confirmed":true})));
         } else if designated && !complete && mode != Some("offline") {
@@ -349,6 +350,26 @@ fn finish(mut turn: Value, result: Value, retained: Option<&Value>) -> String {
     if let Some(briefing) = turn["briefing"].as_object_mut() {
         briefing.remove("admission");
     }
+    // Recovery references preserve identities and historical achievement, never
+    // a cached preparation permit or a usable current proof. Keep this true even
+    // when a caller supplies its last successful view after a failed operation.
+    let retained = retained.map(|value| {
+        let mut reference = value.clone();
+        if let Some(fields) = reference.as_object_mut() {
+            for field in [
+                "ok",
+                "retained_state_currently_verified",
+                "development_designation_enabled",
+                "native_retirement_enabled",
+                "prepared_in_this_opening",
+                "current_goal_available",
+            ] {
+                fields.insert(field.to_owned(), json!(false));
+            }
+            fields.insert("current_goal".to_owned(), Value::Null);
+        }
+        reference
+    });
     json!({"agent_turn":turn,"result":result,"retained_reference":retained,
         "retained_reference_current":false})
     .to_string()

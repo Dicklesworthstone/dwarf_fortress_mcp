@@ -399,6 +399,101 @@ fn exact_private_opener_cannot_adopt_existing_or_create_on_reopen()
 }
 
 static RUNTIME_CHECKS: AtomicUsize = AtomicUsize::new(0);
+#[test]
+fn native_request_window_can_resume_after_human_review_without_reopening_the_preparation()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut c = native_context()?;
+    c.budget.max_wall_millis = 5000;
+    let started = Instant::now();
+    let mut window = NativeRequestWindow::new_at(&c, started)?;
+    let initial_end = window.end;
+    let next_request = started + Duration::from_secs(30);
+    c.request_id = RequestId::new(c.request_id.get() + 1);
+    c.budget.max_wall_millis = MAX_WALL_MILLIS;
+    window.enter_at(&c, next_request)?;
+    assert!(window.end > initial_end);
+    assert_eq!(window.remaining_at(next_request)?, Duration::from_secs(60));
+    assert_eq!(window.session, c.session_id);
+    assert_eq!(window.request, c.request_id);
+    assert!(!window.fenced);
+    Ok(())
+}
+
+#[test]
+fn same_request_cannot_extend_its_retained_window_or_refund_time_after_wire_narrowing()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut c = native_context()?;
+    c.budget.max_wall_millis = 5000;
+    let started = Instant::now();
+    let mut window = NativeRequestWindow::new_at(&c, started)?;
+    let original_end = window.end;
+    c.budget.max_wall_millis = MAX_WALL_MILLIS;
+    window.enter_at(&c, started + Duration::from_secs(2))?;
+    assert_eq!(window.end, original_end);
+    window.narrow_at(Duration::from_secs(1), started + Duration::from_secs(2))?;
+    assert_eq!(window.end, started + Duration::from_secs(3));
+    window.enter_at(&c, started + Duration::from_millis(2500))?;
+    assert_eq!(window.end, started + Duration::from_secs(3));
+    assert!(
+        window
+            .enter_at(&c, started + Duration::from_secs(4))
+            .is_err()
+    );
+    assert!(window.fenced);
+    c.request_id = RequestId::new(c.request_id.get() + 1);
+    assert!(
+        window
+            .enter_at(&c, started + Duration::from_secs(5))
+            .is_err(),
+        "a timed-out operation permanently fences the retained socket"
+    );
+    Ok(())
+}
+
+#[test]
+fn native_request_window_rejects_foreign_regressed_cancelled_and_unbounded_authority()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut original = native_context()?;
+    original.request_id = RequestId::new(10);
+    original.budget.max_wall_millis = 5000;
+    let started = Instant::now();
+    let mut foreign = original.clone();
+    foreign.session_id = SessionId::new(original.session_id.get() + 1);
+    let mut regressed = original.clone();
+    regressed.request_id = RequestId::new(9);
+    let mut cancelled = original.clone();
+    cancelled.request_id = RequestId::new(11);
+    cancelled.cancellation_requested = true;
+    let mut excessive = original.clone();
+    excessive.request_id = RequestId::new(11);
+    excessive.budget.max_wall_millis = MAX_WALL_MILLIS + 1;
+    for denied_context in [foreign, regressed, cancelled, excessive] {
+        let mut window = NativeRequestWindow::new_at(&original, started)?;
+        assert!(
+            window
+                .enter_at(&denied_context, started + Duration::from_secs(1))
+                .is_err()
+        );
+        assert!(window.fenced);
+        let mut later = original.clone();
+        later.request_id = RequestId::new(12);
+        assert!(
+            window
+                .enter_at(&later, started + Duration::from_secs(2))
+                .is_err()
+        );
+    }
+    let mut window = NativeRequestWindow::new_at(&original, started)?;
+    window.fenced = true;
+    original.request_id = RequestId::new(11);
+    assert!(
+        window
+            .enter_at(&original, started + Duration::from_secs(30))
+            .is_err()
+    );
+    Ok(())
+}
+
 fn reject_runtime() -> Result<()> {
     RUNTIME_CHECKS.fetch_add(1, Ordering::SeqCst);
     Err(DfmcpError::new(

@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Mining review windows and interrupted proof (2026-10-28)
+
+The original-mining runtime now permits human review between foreground requests
+on its retained preparation socket. A newer trusted request in the same session
+receives a bounded wall window, capped at 60 seconds; callbacks within one request
+only narrow the deadline. The original socket, token, preparation permit, prepaid
+byte allowance and game-time limits remain unchanged. Foreign/regressed requests,
+cancellation, active expiry, malformed replies and source/authority errors fence
+the owner permanently. Existing retirement/checkpoint distinctions are preserved.
+
+Every failed wait withdraws cached current goal proof, including failures before
+polling or in facade context/publication checks. The next permitted wait durably
+records the interruption within its own budget before another sample can continue
+unfinished stability. Historical first achievement and exact original custody
+remain intact. Bounded retained references suppress cached proof, preparation and
+enablement flags, including after overflow; exact recovery identities remain.
+
+Evidence: 66 focused current-source cases pass without warnings: 16 runtime,
+12 native, 15 presentation, six Agent Turn and 17 adopted adapter tests. The
+recorded production-source hashes remain unchanged across the final run. The
+temporary runtime view adds only four absolute child-module paths; runtime,
+authority and test bodies are unchanged, as is the admission-prefix getter.
+The earlier full locked MCP library check was SIGKILLed while checking pinned
+asupersync 0.5.0 before MCP typechecking in the memory-constrained shared runtime.
+FastMCP registration/stdio, ambient runtime acquisition, full Rust qualification,
+native/live evidence and admission remain unverified. The operator guide and
+emitted commit guidance now describe the per-request wall windows explicitly.
+Required verification passes its first four checks, then reaches the unchanged
+source-bundle documentation assertion. Integrated static qualification reports
+76 existing findings across 6199 checks; all 62 implicated files match the prior
+commit and none of the follow-up files introduces a finding. The failed dirty
+development receipt does not establish release qualification.
+
 ### Documented MCP names registered explicitly (2026-10-28)
 
 The spatial/citizen and original-mining servers now explicitly register all eleven
@@ -84,15 +117,16 @@ overflow and session-close packets retain bounded recovery identities, withdraw
 cached goal/control claims and never inherit production-admission provenance.
 
 The default wall allowance is the existing 60-second cap, with explicit narrowing
-still supported. The retained native connection has one absolute deadline from
-connection establishment across preparation, review and commit; later requests
-cannot renew it or reconnect to recover a commit permit. Expiry requires exact
-original-key reconciliation and preparation retirement. Known planning work is
+still supported. Trusted foreground requests now receive separate wall windows
+on the same retained native connection as described above. A failed active request
+cannot renew a fenced connection or recover a commit permit by reconnecting.
+Known planning work is
 fully prepaid before source acquisition or original archive publication, including
 all three evidence acquisitions, both native stages and fixed archive/guard/output
 costs. A byte-budget refusal leaves the original observation and custody unchanged.
 
-Focused evidence passes 113 distinct tests without warnings:
+The initial workflow baseline, before the follow-ups above, passed 113 distinct
+focused tests without warnings:
 
 - four actual-world partial-terrain regressions;
 - 17 public actual-adapter execution/goal/history cases;

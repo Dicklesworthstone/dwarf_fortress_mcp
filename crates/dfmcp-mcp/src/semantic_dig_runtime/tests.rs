@@ -388,6 +388,92 @@ fn wait(runtime: &mut Runtime<Host>) -> Result<View> {
     runtime.wait(&c)
 }
 #[test]
+fn interrupted_wait_withdraws_cached_proof_and_breaks_unfinished_stability() -> Result<()> {
+    for before_runtime_dispatch in [false, true] {
+        let host = Host::new()?;
+        let mut runtime = host.runtime(Mode::Control)?;
+        let planned = observe_plan(&mut runtime, 2)?;
+        let original = planned.original.clone();
+        commit(&mut runtime)?;
+        wait(&mut runtime)?;
+        host.goal.borrow_mut().tick += 5;
+        let first = wait(&mut runtime)?;
+        assert!(first.goal.is_some());
+        assert!(
+            !first
+                .goal
+                .as_ref()
+                .ok_or_else(|| invalid("first interrupted-wait sample absent"))?
+                .current_goal_proven()
+        );
+        let reads = host.goal.borrow().reads;
+        let history = host.history.durable();
+
+        if before_runtime_dispatch {
+            // The facade can fail ambient context or budget checks before it
+            // calls Runtime::wait. Its pure failure notification spends no I/O.
+            runtime.mark_observation_interrupted();
+        } else {
+            let mut c = runtime.context(false)?;
+            c.budget.max_bytes = 1;
+            assert!(
+                matches!(runtime.wait(&c), Err(cause) if cause.code == ErrorCode::BudgetExceeded)
+            );
+        }
+        assert_eq!(host.goal.borrow().reads, reads);
+        assert_eq!(host.history.durable(), history);
+        let c = runtime.context(false)?;
+        let interrupted = runtime.inspect(&c)?;
+        assert!(interrupted.goal.is_none());
+        assert_eq!(interrupted.to_json()["current_goal_available"], false);
+        assert_eq!(interrupted.original, original);
+
+        host.goal.borrow_mut().tick += 5;
+        let resumed = wait(&mut runtime)?;
+        assert!(
+            !resumed
+                .goal
+                .as_ref()
+                .ok_or_else(|| invalid("resumed interrupted-wait sample absent"))?
+                .current_goal_proven()
+        );
+        host.goal.borrow_mut().tick += 5;
+        let complete = wait(&mut runtime)?;
+        assert!(
+            complete
+                .goal
+                .as_ref()
+                .ok_or_else(|| invalid("completed interrupted-wait sample absent"))?
+                .current_goal_proven()
+        );
+        let achieved = complete.first_satisfied_anchor;
+        assert!(achieved.is_some());
+
+        // A later failed wait withdraws current proof, while the already
+        // established historical achievement and original custody survive.
+        let c = runtime.context(true)?;
+        assert!(runtime.wait(&c).is_err());
+        let c = runtime.context(false)?;
+        let historical = runtime.inspect(&c)?;
+        assert!(historical.goal.is_none());
+        assert_eq!(historical.first_satisfied_anchor, achieved);
+        assert_eq!(historical.original, original);
+        host.goal.borrow_mut().tick += 5;
+        let fresh = wait(&mut runtime)?;
+        assert!(
+            fresh
+                .goal
+                .as_ref()
+                .ok_or_else(|| invalid("fresh post-achievement sample absent"))?
+                .current_goal_proven()
+        );
+        assert_eq!(fresh.first_satisfied_anchor, achieved);
+        assert_eq!(host.native.borrow().commits, 1);
+    }
+    Ok(())
+}
+
+#[test]
 fn insufficient_complete_opening_budget_refuses_before_any_custody_io() -> Result<()> {
     let host = Host::new()?;
     let native_before = host.native_disk.durable();

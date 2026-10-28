@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-28 — Preserve mining review and proof across foreground failures
+
+- Give newer trusted requests bounded wall windows on the original preparation
+  socket, allowing human review without renewing its permit, credentials, prepaid
+  bytes or game-time deadlines. Failed or regressed requests cannot revive it.
+- Withdraw cached current proof after every failed wait, including facade failures
+  before polling. Persist the interruption before continuing unfinished stability;
+  preserve historical achievement and the exact original recovery handoff.
+- Remove cached proof/preparation/enablement flags from retained response
+  references, including overflow. Keep verified results and historical identities
+  distinct, and update the operator workflow and commit guidance.
+- Pass all 66 current-source runtime/native/presentation/Agent Turn/adapter cases
+  without warnings. Preserve the concurrently landed mining implementation;
+  full FastMCP, native/live and admission qualification remain unverified.
+
 ## 2026-10-28 — Match MCP registration to documented tool calls
 
 - Explicitly register the eleven dotted `fortress.*` names in the spatial/citizen

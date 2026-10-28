@@ -195,6 +195,22 @@ explicitly authorized labor and workshop setup. See the
 [furniture production walkthrough](docs/CARPENTRY_PRODUCTION.md) and
 [production reserve planning](docs/PRODUCTION_RESERVE_PLANNING.md).
 
+### Original mining goals
+
+The dedicated `dfmcp-live-semantic-dig-dev-server` joins a paused spatial
+observation, one original Mine plan, paired native preparation, one confirmed
+designation and fresh excavation evidence through the existing eleven tools.
+Original action identity, deadline, cadence and stability survive recovery.
+Designation receipts and historical achievement stay separate from current
+excavation proof, and an uncertain reply never permits another designation.
+
+The workflow supports human review between requests on the original prepared
+connection. Failed waits withdraw cached goal proof and interrupt unfinished
+stability. Game time advances externally. This is an unadmitted development
+profile with explicit operator configuration and a pre-seal disposable-fortress
+checkpoint exception. See the [mining workflow](docs/SEMANTIC_DIG_DEVELOPMENT.md)
+for setup and exact recovery.
+
 ### Durable whole-room readiness
 
 The development room workflow can monitor every original floor, required wall

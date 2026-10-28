@@ -212,6 +212,7 @@ pub struct Runtime<S: Shell> {
     monitor: Option<DurableDigGoalMonitor<S::History>>,
     history_initialized: bool,
     prepared_in_opening: bool,
+    goal_interrupted: bool,
 }
 #[derive(Clone, Debug)]
 pub struct View {
@@ -506,6 +507,7 @@ impl<S: Shell> Runtime<S> {
             monitor: None,
             history_initialized: recovery.is_some_and(|r| r.history_present),
             prepared_in_opening: false,
+            goal_interrupted: false,
         };
         if let Some(recovery) = recovery {
             let mut archive = out
@@ -552,6 +554,12 @@ impl<S: Shell> Runtime<S> {
     }
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+    /// A failed foreground wait cannot leave its prior sample available as
+    /// current proof. Persist the known gap using the next permitted request's
+    /// budget before another sample can continue an unfinished stability streak.
+    pub fn mark_observation_interrupted(&mut self) {
+        self.goal_interrupted = true;
     }
     pub fn designation_control_enabled(&self) -> bool {
         self.mode == Mode::Control
@@ -757,7 +765,7 @@ impl<S: Shell> Runtime<S> {
             goal: self
                 .monitor
                 .as_ref()
-                .filter(|m| !m.is_fenced())
+                .filter(|m| !self.goal_interrupted && !m.is_fenced())
                 .and_then(|m| m.latest())
                 .cloned(),
             first_satisfied_anchor: self
@@ -1067,6 +1075,14 @@ impl<S: Shell> Runtime<S> {
         Ok(())
     }
     pub fn wait(&mut self, c: &OperationContext) -> Result<View> {
+        let outcome = self.wait_inner(c);
+        if outcome.is_err() {
+            self.mark_observation_interrupted();
+        }
+        self.raise_floor();
+        outcome
+    }
+    fn wait_inner(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, false)?;
         if self.mode == Mode::Offline {
             return Err(denied(
@@ -1077,6 +1093,16 @@ impl<S: Shell> Runtime<S> {
         let review = self.reviewed()?;
         let mut work = Work::new(c)?;
         let output = work.reserve(VIEW_BYTES)?;
+        if self.goal_interrupted {
+            if let Some(monitor) = &mut self.monitor {
+                let bytes = (monitor.history_byte_len() as u64)
+                    .checked_mul(6)
+                    .and_then(|n| n.checked_add(MIB))
+                    .ok_or_else(|| exhausted("mining interruption allowance overflow"))?;
+                monitor.observation_interrupted(&work.reserve(bytes)?)?;
+            }
+            self.goal_interrupted = false;
+        }
         self.verify_original(&mut work)?;
         let current = self
             .semantic

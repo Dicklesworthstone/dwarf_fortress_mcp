@@ -298,6 +298,9 @@ fn render(
         }
         Err(cause) => {
             state.designation_uncertain |= attempted_designation;
+            if operation == "fortress.wait" {
+                state.runtime.mark_observation_interrupted();
+            }
             let mut reference = retain_failure_reference(
                 state.last_view.take(),
                 state.runtime.opening_recovery_reference(),
@@ -388,7 +391,7 @@ fn with_session(
 
 #[tool(
     name = "fortress.open_session",
-    description = "Open one original mining goal. Default offline reads exact retained custody; reconcile can acquire evidence without designation authority; control requires explicit operator designation enablement and checkpoint exception before planning. Byte-work defaults to 2GiB and may be explicitly bounded up to 64GiB for history replay; wall defaults to its 60s cap and may be narrowed. The original native connection has one nonrenewable deadline across preparation and confirmation. Sources, credentials and paths are operator configuration."
+    description = "Open one original mining goal. Default offline reads exact retained custody; reconcile can acquire evidence without designation authority; control requires explicit operator designation enablement and checkpoint exception before planning. Byte-work defaults to 2GiB and may be explicitly bounded up to 64GiB for history replay; wall defaults to its 60s cap and may be narrowed. Each trusted foreground request has its own bounded wall window on the original native connection; its preparation permit, prepaid bytes and original game deadline never renew. Sources, credentials and paths are operator configuration."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
