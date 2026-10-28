@@ -125,6 +125,19 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
         Ok(())
     }
 
+    /// Worst-case remaining local/native work for a supervising coordinator.
+    /// This only reports a reservation; it grants no connection or dispatch.
+    pub fn operation_reserve(&self, connect: bool) -> u64 {
+        36 * (self.journal.raw.len() + 2 * MAX_FRAME_BYTES) as u64
+            + 2 * MAX_BODY_BYTES as u64
+            + 4 * RPC_BYTES
+            + if connect {
+                SOURCE_RESERVATION_BYTES + RPC_BYTES
+            } else {
+                0
+            }
+    }
+
     fn journal_reservation(&self) -> u64 {
         30 * (self.journal.raw.len() + MAX_FRAME_BYTES) as u64 + 3 * RPC_BYTES
     }

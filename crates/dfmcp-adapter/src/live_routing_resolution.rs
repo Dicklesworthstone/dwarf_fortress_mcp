@@ -36,6 +36,7 @@ fn stale(message: impl Into<String>) -> DfmcpError {
 pub enum LiveIdentitySchema {
     CitizensV1,
     SpatialV1_8,
+    DigTerrainV1_8,
 }
 
 impl LiveIdentitySchema {
@@ -44,6 +45,7 @@ impl LiveIdentitySchema {
         match self {
             Self::CitizensV1 => "dfmcp.live_world_projection/2",
             Self::SpatialV1_8 => "spatial/1.8",
+            Self::DigTerrainV1_8 => crate::semantic_dig::terrain::DIG_TERRAIN_SCHEMA,
         }
     }
 }
@@ -60,6 +62,7 @@ pub struct LiveRoutingEvidence<'a> {
     folder: String,
     site: u32,
     map_dimensions: Option<[u32; 3]>,
+    dig_source_identity: Option<Digest32>,
 }
 
 impl<'a> LiveRoutingEvidence<'a> {
@@ -120,6 +123,33 @@ impl<'a> LiveRoutingEvidence<'a> {
         )
     }
 
+    /// Only this typed projection can bind the new partial canonical terrain.
+    /// Its source policy is independently issued; detached snapshot hashes or
+    /// native designation receipts cannot create terrain authority.
+    pub fn dig_terrain_v1_8(
+        policy: dfmcp_world::EvidencePolicy,
+        projection: &'a crate::semantic_dig::terrain::DigTerrainProjection,
+    ) -> Result<Self> {
+        // A detached or laboratory PredicateEvidence cannot enter this new
+        // boundary. Revalidate every independently issued terrain domain.
+        let evidence = projection.evidence(policy)?;
+        let raw = projection.raw().spatial().terrain();
+        let mut out = Self::bind(
+            evidence,
+            LiveIdentitySchema::DigTerrainV1_8,
+            projection.source_digest(),
+            raw.bridge_generation,
+            &raw.world_folder,
+            raw.site_id,
+            Some(raw.map_dimensions),
+        )?;
+        out.dig_source_identity = Some(projection.source_identity_digest());
+        Ok(out)
+    }
+    pub const fn dig_source_identity(&self) -> Option<Digest32> {
+        self.dig_source_identity
+    }
+
     fn bind(
         evidence: PredicateEvidence<'a>,
         schema: LiveIdentitySchema,
@@ -149,6 +179,7 @@ impl<'a> LiveRoutingEvidence<'a> {
             folder: folder.to_owned(),
             site,
             map_dimensions,
+            dig_source_identity: None,
         })
     }
 
@@ -198,6 +229,11 @@ impl<'a> LiveRoutingEvidence<'a> {
                 ));
             }
             let (native_id, field, source_name, value) = match self.schema {
+                LiveIdentitySchema::DigTerrainV1_8 => {
+                    return Err(invalid(
+                        "terrain-only projection cannot resolve unit identities",
+                    ));
+                }
                 LiveIdentitySchema::CitizensV1 => {
                     let raw = entity_id_to_raw_unit_id(canonical_id)
                         .ok_or_else(|| invalid("canonical ID is outside the V1 unit schema"))?;
@@ -701,6 +737,99 @@ pub fn resolve_furniture_step(
         anchor: evidence.anchor(),
         source_digest: evidence.source_digest,
         native_plan: BuildPlan::new(&step.idempotency_key, capture.clone())?,
+    })
+}
+
+/// Closed original Mine recipe, retaining the exact semantic key and source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedDigRoute {
+    semantic_plan: Digest32,
+    step: StepId,
+    anchor: StateAnchor,
+    source_digest: Digest32,
+    source_identity: Digest32,
+    native_plan: crate::dig_designation::DigPlan,
+}
+impl ResolvedDigRoute {
+    pub const fn semantic_plan_digest(&self) -> Digest32 {
+        self.semantic_plan
+    }
+    pub const fn step(&self) -> StepId {
+        self.step
+    }
+    pub const fn anchor(&self) -> StateAnchor {
+        self.anchor
+    }
+    pub const fn source_digest(&self) -> Digest32 {
+        self.source_digest
+    }
+    pub const fn source_identity_digest(&self) -> Digest32 {
+        self.source_identity
+    }
+    pub fn native_plan(&self) -> &crate::dig_designation::DigPlan {
+        &self.native_plan
+    }
+}
+/// Normal mining only, exactly one bounded rectangle, with independently
+/// observed original walls. Dig and spatial incarnations remain distinct.
+pub fn resolve_dig_step(
+    plan: &PreparedPlan,
+    step_id: StepId,
+    evidence: &LiveRoutingEvidence<'_>,
+    capture: &crate::dig_designation::DigObservation,
+) -> Result<ResolvedDigRoute> {
+    let step = selected_step(plan, step_id, evidence)?;
+    let routed = route_step(step)
+        .outcome
+        .map_err(|refusal| invalid(refusal.reason))?;
+    let LiveRequest::Dig { regions } = routed.request else {
+        return Err(invalid("selected step is not normal mining"));
+    };
+    let Action::DesignateDig {
+        area,
+        mode: dfmcp_intent::DigMode::Mine,
+    } = &step.action
+    else {
+        return Err(invalid("only original normal mining is supported"));
+    };
+    if evidence.schema != LiveIdentitySchema::DigTerrainV1_8
+        || regions.len() != 1
+        || regions[0] != capture.region()
+        || evidence.map_dimensions != Some(capture.dimensions())
+        || !capture.blockers(false).is_empty()
+    {
+        return Err(invalid(
+            "original Mine action requires one exact eligible rectangle and typed independent terrain",
+        ));
+    }
+    evidence.native_capture(
+        capture.folder(),
+        capture.site(),
+        capture.generation(),
+        capture.tick(),
+        capture.paused(),
+    )?;
+    if !evidence.evidence.establishes(&Predicate::RegionTerrain {
+        area: *area,
+        tile_code: dfmcp_world::terrain::tile_codes::SOLID_WALL,
+    })? {
+        return Err(invalid(
+            "independent canonical source does not establish every original mining target as observed wall",
+        ));
+    }
+    Ok(ResolvedDigRoute {
+        semantic_plan: plan.digest,
+        step: step_id,
+        anchor: evidence.anchor(),
+        source_digest: evidence.source_digest,
+        source_identity: evidence
+            .dig_source_identity
+            .ok_or_else(|| invalid("missing exact terrain source identity"))?,
+        native_plan: crate::dig_designation::DigPlan::new(
+            &step.idempotency_key,
+            false,
+            capture.clone(),
+        )?,
     })
 }
 

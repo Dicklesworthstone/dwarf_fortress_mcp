@@ -542,6 +542,9 @@ impl<S: EffectJournalStorage> DigJournal<S> {
             stage == DigStage::Prepare,
         )?;
         guard.check(stage, plan, &context)?;
+        // Policy and independent source acquisition cannot hide a changed
+        // DispatchStarted marker or changed native custody at the write edge.
+        self.verify(budget)?;
         // Guard work must not refresh or escape the same wall-time allowance.
         let left = budget.current()?.budget.max_wall_millis;
         let mut context = context;

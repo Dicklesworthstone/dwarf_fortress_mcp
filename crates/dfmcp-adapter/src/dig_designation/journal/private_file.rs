@@ -81,19 +81,7 @@ pub fn open_private_dig(
     mode: DigMode,
     expected: Option<DigBinding>,
 ) -> Result<DigJournal<PrivateDigFile>> {
-    if context.cancellation_requested {
-        return Err(error(
-            ErrorCode::CancellationRequested,
-            "dig storage open cancelled",
-        ));
-    }
-    context.budget.validate()?;
-    if context.budget.max_wall_millis > 60_000 {
-        return Err(error(
-            ErrorCode::BudgetExceeded,
-            "dig storage deadline exceeds profile bound",
-        ));
-    }
+    validate_open(context)?;
     #[cfg(all(
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")
@@ -112,4 +100,51 @@ pub fn open_private_dig(
             "dig private journals require Linux x86_64/aarch64",
         ))
     }
+}
+
+/// Exact custody selection for the original semantic dig owner. Initialization
+/// must create a new file; recovery must find the already retained file. Neither
+/// mode silently substitutes the other when a path disappears or appears.
+pub fn open_private_dig_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: DigMode,
+    expected: Option<DigBinding>,
+    initialize: bool,
+) -> Result<DigJournal<PrivateDigFile>> {
+    validate_open(context)?;
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        linux::open_exact(path, context, mode, expected, initialize)
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
+    {
+        let _ = (path, mode, expected, initialize);
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "dig private journals require Linux x86_64/aarch64",
+        ))
+    }
+}
+fn validate_open(context: &OperationContext) -> Result<()> {
+    if context.cancellation_requested {
+        return Err(error(
+            ErrorCode::CancellationRequested,
+            "dig storage open cancelled",
+        ));
+    }
+    context.budget.validate()?;
+    if context.budget.max_wall_millis > 60_000 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "dig storage deadline exceeds profile bound",
+        ));
+    }
+    Ok(())
 }

@@ -44,6 +44,53 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original mining execution and durable terrain proof (2026-10-28)
+
+The adapter now connects one original canonical Mine rectangle (1..8 by 1..8,
+one z-level) to exact dig/1.16 preparation, one confirmed dispatch, original-key
+reconciliation and fresh spatial/1.8 proof. The canonical terrain projection is
+independently scoped and retains explicit unknown cells. Its new routing
+constructor takes a source policy and validates the exact projection's eligible
+domains; laboratory evidence, broad entity/edge coverage and detached hashes
+cannot be substituted. Spatial and dig generations remain independent.
+
+An immutable private association binds the full original object and anchor,
+original action key, exact native plan/witness and initial spatial source identity.
+The original predicates, terminal/failure conditions, deadline, cadence and
+stable-sample obligation remain unchanged. Source/authority/custody are checked
+after native intent and at the post-dispatch-marker pre-RPC boundary. Native
+journal bytes are verified again after external policy work. Recovery cannot
+restore a lost live preparation permit, and a missing query response or permanent
+native Unknown cannot authorize a replacement dispatch.
+
+A terminal Designated receipt records historical designation only. Goal polling
+links that exact retained receipt and original rectangle to one fresh complete
+paused spatial capture, with exact local native-journal and association checks
+around acquisition. It does not issue a new dig-query RPC bracket. Only observed
+dry floors with cleared dig designations can prove the original excavation.
+Hidden, unallocated, unsupported or wet cells remain unproven. All original
+postconditions and terminal/failure predicates participate in the original
+cadence/deadline/stability evaluation.
+
+Private goal history retains Started/Captured/Published/Interrupted boundaries,
+source/cursor/tick floors and first achievement within 64 MiB and 1024 events.
+Reopening independently reauthorizes history, clears current proof and interrupts
+unfinished stability without changing the original plan or deadline. Denied
+policy cannot bank a stable sample or erase a consumed private cursor. Source
+incarnation drift, replaced custody and corruption fence the owner. Exact-create
+and exact-reopen native journal APIs prevent accidental custody recreation.
+
+Focused actual adapter validation passes 17 integration tests without warnings;
+all 396 recorded actual-source, fixture and manifest inputs remain unchanged
+across that run. Cases include single dispatch and duplicate acknowledgement,
+lost replies, recovered-preparation refusal, post-marker policy revocation and
+persistent native-journal tampering before RPC, unknown/unsafe terrain, current
+completion and temporal stability, exact historical recovery, denied policy,
+source drift, corrupt history and immutable deadlines. The four prerequisite
+world regressions also pass. The concrete operator shell and eleven-tool MCP
+entry point are separate integration work at this checkpoint. No full FastMCP,
+native DFHack build, live fortress, compatibility or runtime admission is claimed.
+
 ### Partial canonical terrain for original mining (2026-10-28)
 
 Canonical terrain can now retain explicitly unknown cells inside otherwise

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-28 — Execute and verify exact original mining goals
+
+- Bind one original canonical Mine rectangle to the existing dig/1.16 native
+  owner, with independently qualified spatial/1.8 terrain, the unchanged
+  original key/archive/predicates/deadline and a paired confirmation seal.
+- Persist original/native association before native intent; revalidate source,
+  authority and exact journal custody after the dispatch marker, before RPC.
+  Reopening and lost replies reconcile the original key without redispatch.
+- Prove current excavation only from fresh known dry, undesignated target floors
+  and the original temporal goal. Keep historical designation, current terrain
+  and historical first achievement separate.
+- Retain original proof history in bounded private custody. Replay requires new
+  historical policy, clears current truth and breaks unfinished stability while
+  preserving consumed source/cursor/tick floors and the original deadline.
+- Add exact-create versus exact-reopen native journal custody and reject broad
+  or laboratory evidence at the typed terrain-routing boundary.
+- Pass all 17 actual adapter integration cases without warnings; all 396 recorded
+  source/fixture/manifest inputs stay unchanged across the final run. The four
+  prerequisite world cases also pass. Dedicated MCP composition follows in the
+  next checkpoint; full-server/native/live qualification remains unverified.
+
 ## 2026-10-28 — Preserve unknown terrain in partial canonical observations
 
 - Represent hidden, unsupported and unobserved cells explicitly in canonical

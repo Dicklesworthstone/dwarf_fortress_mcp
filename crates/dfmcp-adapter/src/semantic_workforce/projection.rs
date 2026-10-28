@@ -12,7 +12,9 @@ use dfmcp_world::{
     PredicateEvidence, Value, WorldGraph, WorldSnapshot,
 };
 
-use crate::live_routing::{LiveIdentitySchema, LiveRoutingEvidence, NativeUnitIdentity, resolve_workforce_step};
+use crate::live_routing::{
+    LiveIdentitySchema, LiveRoutingEvidence, NativeUnitIdentity, resolve_workforce_step,
+};
 use crate::workforce_control::WorkforceCapture;
 
 use super::{SemanticWorkforceReview, custody, error};
@@ -83,9 +85,13 @@ impl IdentityBinding {
             || capture.labor_keys() != self.before.labor_keys()
             || capture.citizens().len() != self.units.len()
         {
-            return Err(stale("workforce goal observation changed its original source, clock or labor schema"));
+            return Err(stale(
+                "workforce goal observation changed its original source, clock or labor schema",
+            ));
         }
-        for ((identity, original), current) in self.units.iter()
+        for ((identity, original), current) in self
+            .units
+            .iter()
             .zip(self.before.citizens())
             .zip(capture.citizens())
         {
@@ -93,7 +99,9 @@ impl IdentityBinding {
                 || current.id() != original.id()
                 || current.historical_id() != original.historical_id()
             {
-                return Err(stale("workforce goal observation replaced an original selected citizen"));
+                return Err(stale(
+                    "workforce goal observation replaced an original selected citizen",
+                ));
             }
         }
         Ok(())
@@ -108,7 +116,9 @@ impl IdentityBinding {
         if cursor.epoch != self.original_anchor.cursor.epoch
             || cursor.sequence <= self.original_anchor.cursor.sequence
         {
-            return Err(stale("workforce goal projection requires a later cursor in the original epoch"));
+            return Err(stale(
+                "workforce goal projection requires a later cursor in the original epoch",
+            ));
         }
         let tick = GameTick(capture.tick());
         let digest = capture.witness();
@@ -116,43 +126,85 @@ impl IdentityBinding {
         for (identity, citizen) in self.units.iter().zip(capture.citizens()) {
             let mut fields = BTreeMap::new();
             let (field, value) = match self.schema {
-                LiveIdentitySchema::CitizensV1 => ("raw_unit_id", Value::I64(i64::from(citizen.id()))),
-                LiveIdentitySchema::SpatialV1_8 => ("native_unit_id", Value::U64(u64::from(citizen.id()))),
+                LiveIdentitySchema::DigTerrainV1_8 => {
+                    return Err(stale(
+                        "terrain-only evidence cannot bind workforce identity",
+                    ));
+                }
+                LiveIdentitySchema::CitizensV1 => {
+                    ("raw_unit_id", Value::I64(i64::from(citizen.id())))
+                }
+                LiveIdentitySchema::SpatialV1_8 => {
+                    ("native_unit_id", Value::U64(u64::from(citizen.id())))
+                }
             };
-            fields.insert(field.to_owned(), observed(value, tick, UNIT_ID_SOURCE, digest));
-            fields.insert("historical_figure_id".to_owned(), observed(
-                Value::U64(u64::from(citizen.historical_id())), tick, HISTORICAL_ID_SOURCE, digest,
-            ));
-            fields.insert("workforce_eligible".to_owned(), observed(
-                Value::Bool(citizen.eligible()), tick, ELIGIBILITY_SOURCE, digest,
-            ));
+            fields.insert(
+                field.to_owned(),
+                observed(value, tick, UNIT_ID_SOURCE, digest),
+            );
+            fields.insert(
+                "historical_figure_id".to_owned(),
+                observed(
+                    Value::U64(u64::from(citizen.historical_id())),
+                    tick,
+                    HISTORICAL_ID_SOURCE,
+                    digest,
+                ),
+            );
+            fields.insert(
+                "workforce_eligible".to_owned(),
+                observed(
+                    Value::Bool(citizen.eligible()),
+                    tick,
+                    ELIGIBILITY_SOURCE,
+                    digest,
+                ),
+            );
             for (key, bit) in capture.labor_keys().iter().zip(citizen.labors()) {
-                fields.insert(format!("labor.{key}"), observed(
-                    Value::Bool(*bit == 1), tick, LABOR_SOURCE, digest,
-                ));
+                fields.insert(
+                    format!("labor.{key}"),
+                    observed(Value::Bool(*bit == 1), tick, LABOR_SOURCE, digest),
+                );
             }
-            entities.insert(identity.canonical_id, EntityRecord {
-                id: identity.canonical_id,
-                generation: identity.canonical_generation,
-                revision: cursor.sequence,
-                kind: EntityKind::Unit,
-                label: format!("citizen {}", citizen.id()),
-                fields,
-            });
+            entities.insert(
+                identity.canonical_id,
+                EntityRecord {
+                    id: identity.canonical_id,
+                    generation: identity.canonical_generation,
+                    revision: cursor.sequence,
+                    kind: EntityKind::Unit,
+                    label: format!("citizen {}", citizen.id()),
+                    fields,
+                },
+            );
         }
         let snapshot = WorldSnapshot::new(
-            self.original_anchor.fortress_id, tick, cursor, capture.paused(),
-            WorldGraph { entities, ..WorldGraph::default() },
+            self.original_anchor.fortress_id,
+            tick,
+            cursor,
+            capture.paused(),
+            WorldGraph {
+                entities,
+                ..WorldGraph::default()
+            },
         );
         Ok(WorkforceGoalProjection {
-            snapshot, capture, original_anchor: self.original_anchor,
-            review_seal: self.review_seal, schema: self.schema,
+            snapshot,
+            capture,
+            original_anchor: self.original_anchor,
+            review_seal: self.review_seal,
+            schema: self.schema,
         })
     }
 }
 
 fn observed(value: Value, tick: GameTick, source: &str, digest: Digest32) -> Fact {
-    Fact::known(value, tick, FactSource::DfhackField(source.to_owned()), digest)
+    Fact::known(
+        value,
+        tick,
+        FactSource::DfhackField(source.to_owned()),
+        digest,
+    )
 }
 
 /// One immutable, bounded selected-unit observation. Missing units, relations,
@@ -168,33 +220,54 @@ pub struct WorkforceGoalProjection {
 }
 
 impl WorkforceGoalProjection {
-    pub fn snapshot(&self) -> &WorldSnapshot { &self.snapshot }
-    pub fn capture(&self) -> &WorkforceCapture { &self.capture }
-    pub fn anchor(&self) -> StateAnchor { self.snapshot.anchor() }
-    pub fn source_digest(&self) -> Digest32 { self.capture.witness() }
-    pub fn original_anchor(&self) -> StateAnchor { self.original_anchor }
-    pub fn review_seal(&self) -> Digest32 { self.review_seal }
-    pub fn identity_schema(&self) -> LiveIdentitySchema { self.schema }
-    pub const fn schema(&self) -> &'static str { WORKFORCE_GOAL_PROJECTION_SCHEMA }
+    pub fn snapshot(&self) -> &WorldSnapshot {
+        &self.snapshot
+    }
+    pub fn capture(&self) -> &WorkforceCapture {
+        &self.capture
+    }
+    pub fn anchor(&self) -> StateAnchor {
+        self.snapshot.anchor()
+    }
+    pub fn source_digest(&self) -> Digest32 {
+        self.capture.witness()
+    }
+    pub fn original_anchor(&self) -> StateAnchor {
+        self.original_anchor
+    }
+    pub fn review_seal(&self) -> Digest32 {
+        self.review_seal
+    }
+    pub fn identity_schema(&self) -> LiveIdentitySchema {
+        self.schema
+    }
+    pub const fn schema(&self) -> &'static str {
+        WORKFORCE_GOAL_PROJECTION_SCHEMA
+    }
 
     /// Validate a separately issued policy against this projection's actual
     /// limits. A selected capture cannot certify whole-roster absence or any
     /// unobserved graph/terrain domain, even if an issuer accidentally requests it.
     pub fn evidence(&self, policy: EvidencePolicy) -> Result<PredicateEvidence<'_>> {
         if policy.all_entities == EvidenceCoverage::Complete
-            || policy.entity_kinds.iter().any(|(kind, coverage)|
-                kind != &EntityKind::Unit || *coverage == EvidenceCoverage::Complete)
+            || policy.entity_kinds.iter().any(|(kind, coverage)| {
+                kind != &EntityKind::Unit || *coverage == EvidenceCoverage::Complete
+            })
             || policy.all_edges != EvidenceCoverage::Unknown
             || !policy.edge_kinds.is_empty()
             || !policy.terrain_regions.is_empty()
-            || policy.sources.iter().any(|source| !matches!(source,
+            || policy.sources.iter().any(|source| {
+                !matches!(source,
                 EvidenceSource::Observed { field, source_digest }
                     if *source_digest == self.source_digest()
                         && [UNIT_ID_SOURCE, HISTORICAL_ID_SOURCE, ELIGIBILITY_SOURCE, LABOR_SOURCE]
-                            .contains(&field.as_str())))
+                            .contains(&field.as_str()))
+            })
         {
-            return Err(error(ErrorCode::CapabilityDenied,
-                "workforce goal policy exceeds the exact observed selected-citizen domain"));
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "workforce goal policy exceeds the exact observed selected-citizen domain",
+            ));
         }
         PredicateEvidence::scoped(&self.snapshot, policy)
     }

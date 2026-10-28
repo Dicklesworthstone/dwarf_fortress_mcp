@@ -165,6 +165,24 @@ pub(super) fn open(
     mode: DigMode,
     expected: Option<DigBinding>,
 ) -> Result<DigJournal<PrivateDigFile>> {
+    open_inner(path, context, mode, expected, None)
+}
+pub(super) fn open_exact(
+    path: &Path,
+    context: &OperationContext,
+    mode: DigMode,
+    expected: Option<DigBinding>,
+    initialize: bool,
+) -> Result<DigJournal<PrivateDigFile>> {
+    open_inner(path, context, mode, expected, Some(initialize))
+}
+fn open_inner(
+    path: &Path,
+    context: &OperationContext,
+    mode: DigMode,
+    expected: Option<DigBinding>,
+    initialize: Option<bool>,
+) -> Result<DigJournal<PrivateDigFile>> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(context.budget.max_wall_millis))
         .ok_or_else(|| error(ErrorCode::BudgetExceeded, "dig storage deadline overflow"))?;
@@ -238,6 +256,12 @@ pub(super) fn open(
         Err(cause) => return Err(failure(cause)),
     };
     let created = before.is_none();
+    if initialize.is_some_and(|requested| requested != created) {
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "dig exact initialization or recovery differs from existing custody",
+        ));
+    }
     if created && (mode != DigMode::Control || expected.is_none()) {
         return Err(error(
             ErrorCode::CapabilityDenied,
