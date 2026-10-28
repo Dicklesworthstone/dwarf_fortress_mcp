@@ -44,6 +44,65 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original furniture bounded clock owner and native composition (2026-10-28)
+
+An optional separately authorized run/1.13 owner can now advance the original
+furniture construction goal through finite, explicitly reviewed intervals. Each
+clock target binds the exact original PreparedPlan and archive object, placement
+journal, paired review and verified Placed receipt, including the original
+building, item and job identity. The original deadline, cadence, stability and
+failure predicates remain unchanged. There is no automatic chaining, replacement
+goal or retry of an uncertain unpause.
+
+Fresh independently qualified construction evidence must be receipt-linked and
+viable. Known unfinished construction is eligible when its condition is pending;
+condition_met is eligible while the original temporal obligation remains
+unfinished. Unknown truth, a failed predicate, suspended or missing work,
+unverified items, removal and changed identity refuse a new interval. Original
+archive custody and fresh construction policy are checked again after the clock
+journal's durable marker, immediately before the native effect boundary.
+
+Canonical fortress authority and native source authority remain independently
+issued. Run/1.13 identifies a source incarnation, not named-fortress lineage;
+matching endpoint/software pins and ticks do not turn that source into lineage
+proof. The optional operator configuration retains an independent clock generation,
+credential and enablement gate. Exact create/reopen discovery checks the fixed
+private clock.journal before furniture custody can be initialized. Existing
+bundles without a clock remain usable but cannot silently acquire a new clock
+journal on reopening. Recovered placement cannot dispatch again; independently
+authorized clock control can continue the retained original construction goal.
+
+Wait reconciles unsettled clock work before acquiring paused construction proof.
+A potentially running clock suppresses current goal truth, and retained clock
+ticks become a minimum for subsequent construction evidence. Source/canonical
+floors consumed by a denied policy stay private and monotonic without publishing
+an unqualified current anchor. A later safety pause or fresh sample can continue
+from that exact floor. Safety cancellation needs Query and ControlClock; it does
+not require Plan, Observe, Construct or an extended original deadline.
+
+At most 64 original-bound runs are retained, with one unsettled run. Furniture
+history now permits 1024 events within the unchanged 64 MiB file bound, covering
+fresh review/dispatch samples throughout a 64-sample stability goal. The logical
+byte-work ceiling is 64 GiB for complete history reauthorization; the ordinary
+2 GiB default and physical file/frame/native limits remain unchanged. Runtime
+opening prepays 576 MiB, including optional clock opening and inspection, before
+custody creation. No allocation of the full logical allowance is implied.
+
+Evidence at this checkpoint: all 26 current public adapter integration cases and
+22 existing bounded-run cases pass without compiler warnings. A preceding
+actual-source component run passed 71 of 73 cases; its two failures were test
+expectations that incorrectly credited an immediate same-tick construction
+sample toward temporal stability. Those expectations are corrected, and a new
+regression covers denied-policy cursor retention, safety pause and fresh retry.
+The final 74-case combined run is in progress under shared build-memory pressure;
+final-generation runtime/native success is not yet claimed. It also includes the
+MCP presentation/facade work being committed separately. These focused targets do
+not exercise FastMCP macros, handler registration, complete stdio, a native build
+or a live campaign. The compatibility registry and production map are unchanged.
+
+MCP run dispatch and the complete operator guide follow in the next checkpoint.
+The broader semantic dispatcher bead remains in progress.
+
 ### Original furniture goals through the MCP loop (2026-10-28)
 
 The dedicated `dfmcp-live-semantic-furniture-dev-server` carries one original

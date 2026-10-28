@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-28 — Advance original furniture goals with separately reviewed finite runs
+
+- Compose original construction proof with the existing run/1.13 coordinator,
+  binding the unchanged original plan, archive, placed building/item/job receipt
+  and absolute deadline to each separately confirmed finite interval.
+- Permit known viable unfinished construction while rejecting unknown identity,
+  blocked work and failed predicates. Recheck original custody and independently
+  authorized construction evidence after durable clock intent, before unpause.
+- Retain at most 64 runs, one unsettled run, exact private clock custody and
+  offline recovery. Lost replies never permit another unpause; independent safety
+  cancellation remains available without renewed placement authority or deadline.
+- Keep current construction proof separate from clock receipts and retain consumed
+  clock/canonical floors across refusals. A denied evidence policy cannot strand
+  safety cancellation behind an unpublished observation cursor.
+- Raise bounded goal history from 512 to 1024 events, retaining its 64 MiB file
+  limit; allow explicit logical replay budgets up to 64 GiB, with 2 GiB unchanged
+  as the default. Add full 64-run stability/recovery and denial-path regressions.
+- Current adapter integration and existing bounded-run suites pass 26 and 22
+  tests. Final focused runtime/native validation is still running after two
+  stability-fixture corrections and the private-authority-floor fix. No full
+  FastMCP, native/live qualification or admission is claimed. MCP run dispatch
+  follows in the next implementation checkpoint.
+
 ## 2026-10-28 — Expose original furniture construction through MCP
 
 - Join canonical spatial observation, exact-item original Build planning, paired

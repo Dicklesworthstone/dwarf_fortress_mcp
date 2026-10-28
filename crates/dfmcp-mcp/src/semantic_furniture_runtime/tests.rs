@@ -15,6 +15,8 @@ use dfmcp_world::{EntityKind, EvidenceCoverage};
 use fixtures::{Evidence, EvidenceState, Memory, Native, SourceState};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+#[path = "runtime_clock_tests.rs"]
+mod runtime_clock_tests;
 
 #[derive(Default)]
 struct GoalState {
@@ -24,6 +26,8 @@ struct GoalState {
     policies: usize,
     denied: bool,
     corrupt_archive: bool,
+    paused: bool,
+    condition: &'static str,
 }
 struct GoalSource {
     state: Rc<RefCell<GoalState>>,
@@ -37,7 +41,9 @@ impl FurnitureGoalSource for GoalSource {
         c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         let mut state = self.state.borrow_mut();
         state.reads += 1;
-        complete_sample(original, state.tick, |_| {})
+        complete_sample(original, state.tick, |observed| {
+            runtime_clock_tests::change_construction(original, observed, &state);
+        })
     }
 }
 impl Drop for GoalSource {
@@ -62,6 +68,7 @@ struct Host {
     recovery: Option<Recovery>,
     policy: Rc<Cell<bool>>,
     open_calls: Rc<Cell<usize>>,
+    clock: Option<runtime_clock_tests::ClockResources>,
 }
 impl Host {
     fn new() -> Result<Self> {
@@ -76,6 +83,7 @@ impl Host {
             evidence: f.evidence_state.clone(),
             goal: Rc::new(RefCell::new(GoalState {
                 tick: f.capture.tick(),
+                paused: true,
                 ..GoalState::default()
             })),
             enabled: Rc::new(Cell::new(true)),
@@ -84,6 +92,7 @@ impl Host {
             recovery: None,
             policy: Rc::new(Cell::new(true)),
             open_calls: Rc::new(Cell::new(0)),
+            clock: None,
         })
     }
     fn runtime(&self, mode: Mode) -> Result<Runtime<Self>> {
@@ -97,7 +106,11 @@ impl Host {
                 max_entities: 8192,
                 max_actions: 1,
                 max_output_tokens: MAX_OUTPUT_TOKENS,
-                max_game_ticks: 0,
+                max_game_ticks: if self.clock.is_some() {
+                    MAX_GAME_TICKS
+                } else {
+                    0
+                },
             },
         )
     }
@@ -115,6 +128,17 @@ impl Host {
                 .anchor,
             history_present,
         });
+        if let Some(clock) = &self.clock {
+            out.clock = Some(
+                clock.recovered(
+                    runtime
+                        .opening_clock
+                        .as_ref()
+                        .ok_or_else(|| invalid("test retained clock"))?
+                        .journal_id,
+                ),
+            );
+        }
         Ok(out)
     }
 }
@@ -127,6 +151,29 @@ impl Shell for Host {
     type Evidence = Evidence;
     type Guard = fixtures::Guard;
     type GoalSource = GoalSource;
+    type ClockJournal = Memory;
+    type ClockSource = runtime_clock_tests::ClockNative;
+    fn clock_enabled(&self) -> bool {
+        self.clock.as_ref().is_some_and(|clock| clock.enabled())
+    }
+    fn open_clock(&self, mode: Mode, c: &OperationContext) -> Result<Option<RunJournal<Memory>>> {
+        self.clock
+            .as_ref()
+            .map(|clock| clock.open(mode, c))
+            .transpose()
+    }
+    fn clock_context(&self, c: &OperationContext, control: bool) -> Result<OperationContext> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| denied("test clock not configured"))?
+            .context(c, control)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| denied("test clock not configured"))?
+            .source(c)
+    }
     fn fortress(&self) -> FortressId {
         self.binding.fortress().fortress_id()
     }
@@ -335,7 +382,7 @@ fn insufficient_complete_opening_budget_refuses_before_any_custody_io() -> Resul
         SessionId::new(771),
         WorkBudget {
             max_wall_millis: 60_000,
-            max_bytes: 512 * MIB - 1,
+            max_bytes: 576 * MIB - 1,
             max_entities: 8192,
             max_actions: 1,
             max_output_tokens: MAX_OUTPUT_TOKENS,

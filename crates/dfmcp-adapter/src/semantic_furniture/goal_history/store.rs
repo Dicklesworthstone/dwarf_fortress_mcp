@@ -27,7 +27,8 @@ use super::super::{Call, SemanticFurnitureReview, custody, error, exhausted};
 
 /// Explicit bounded retention, without silent pruning, repair or rollover.
 pub const MAX_GOAL_HISTORY_BYTES: usize = 64 * 1024 * 1024;
-pub const MAX_GOAL_HISTORY_EVENTS: usize = 512;
+// Fresh review/dispatch samples plus cadence polls retain all 64 stable samples.
+pub const MAX_GOAL_HISTORY_EVENTS: usize = 1024;
 const HEADER: &[u8; 8] = b"DFMFGH01";
 const FRAME: &[u8; 8] = b"DFMFGF01";
 const END: &[u8; 8] = b"DFMFGE01";
