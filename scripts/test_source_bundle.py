@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Callable
+from unittest import mock
 
 CREATOR_PATH = Path(__file__).with_name("create_source_bundle.py")
 CREATOR_SPEC = importlib.util.spec_from_file_location("source_bundle_creator_test", CREATOR_PATH)
@@ -127,6 +128,29 @@ class Fixture:
 
 
 class SourceBundleTests(unittest.TestCase):
+    def test_archive_pipes_close_on_success_and_bound_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            commit = run_git(fixture.repository, "rev-parse", "HEAD")
+            actual_popen = subprocess.Popen
+            children = []
+            def tracked(*args, **kwargs):
+                child = actual_popen(*args, **kwargs)
+                children.append(child)
+                return child
+            with mock.patch.object(creator.subprocess, "Popen", side_effect=tracked):
+                creator.stream_git_archive(fixture.repository, commit, "snapshot/",
+                                           fixture.outputs / "complete.tar", 1024 * 1024)
+                with self.assertRaises(creator.SourceBundleCreationError):
+                    creator.stream_git_archive(fixture.repository, commit, "snapshot/",
+                                               fixture.outputs / "refused.tar", 1)
+            self.assertEqual(len(children), 2)
+            for child in children:
+                self.assertIsNotNone(child.poll())
+                self.assertTrue(child.stdout.closed)
+                self.assertTrue(child.stderr.closed)
+            self.assertFalse((fixture.outputs / "refused.tar").exists())
+
     def fixture(self) -> tuple[tempfile.TemporaryDirectory[str], Fixture]:
         temporary = tempfile.TemporaryDirectory()
         return temporary, Fixture(Path(temporary.name))

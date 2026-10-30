@@ -220,6 +220,10 @@ def stream_git_archive(
             pass
         raise
     finally:
+        if process is not None:
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
         if descriptor >= 0:
             os.close(descriptor)
 
