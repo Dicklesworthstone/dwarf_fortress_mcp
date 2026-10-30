@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable whole-blueprint excavation monitor core (2026-10-30)
+
+The Rust adapter now binds the complete original sparse blueprint and every
+terminal native Designated receipt to an independently pinned map/1.5 source.
+One complete enclosing capture evaluates only the original selected cells.
+Visible dry floors with cleared designations must hold together through one
+fixed shared sampled stability window. Equal ticks cannot add samples; unknown,
+unfinished, interrupted or over-gap observations break the streak. Native
+Unknown cannot be discharged by terrain. Source/clock drift invalidates the
+monitor; deadline and attempt allowance cannot renew on restart.
+
+The private append-only history synchronizes read intent before map contact,
+raw captures before learned-tick authority checks, and separate publication
+before exposing progress. Exact recovery heads reject rollback while accepting
+complete descendants after lost replies. Reopen preserves terminal historical
+achievement, resets unfinished stability and fences unfinished durable reads.
+Local cancellation requires current scoped Query and dispatches no native work.
+The bounded foreground wire wrapper reuses the existing typed map protocol,
+shrinking one deadline and checking scoped authority at every I/O boundary.
+
+All 77 focused actual-source adapter tests pass: 47 new monitor model, durable
+history, actual map-wire and private-file cases plus 30 existing blueprint
+regressions. All 388 compiler/source input hashes stayed unchanged during the
+run. Only the preexisting unrelated workforce-test import warning remains.
+Tests cover complete sparse multi-level masks, original receipt substitution,
+shared stability, clock/grant expiry, ambiguous writes, rollback, cancellation
+and exact loopback protocol bytes. The temporary workspace compiles original
+source with a minimal dependency manifest. This is component evidence, not
+full Rust/FastMCP/native/live qualification or admission. No native protocol,
+dependency, production runner or existing recovery-only profile is changed.
+MCP composition follows separately; see `docs/DIG_BLUEPRINT_MONITOR.md`.
+
 ### Sparse mining projects through the eleven MCP tools (2026-10-30)
 
 The existing dig-control development server now composes the retained Rust

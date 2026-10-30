@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-30 — Durable whole-blueprint excavation monitoring core
+
+- Bind complete original sparse geometry and all terminal Designated receipts
+  to one independent typed map source and a fixed sampled completion policy.
+- Evaluate the entire selected mask together: visible dry floors, no magma and
+  cleared dig designations. Preserve unknown cells and exclude unselected gaps.
+- Retain started reads, raw observations, published outcomes and local stops in
+  a bounded private history with exact monotonic recovery and clock floors.
+- Add a foreground bounded wire reader using the unchanged map/1.5 protocol;
+  no new native command, automatic game advancement or mutation authority.
+- Pass 77 actual-source adapter tests (47 new and 30 prior blueprint cases),
+  with 388 compiler/source hashes unchanged. Full MCP/native/live qualification
+  and compatibility admission remain unverified.
+
 ## 2026-10-30 — Execute retained sparse mining projects through MCP
 
 - Join complete original floor blueprints to the existing one-attempt native

@@ -15,6 +15,7 @@ use crate::dig_designation::journal::{DigBinding, DigRecord, DigState};
 use crate::dig_designation::{DigEffect, DigObservation, DigPhase, DigReason, DigRegion};
 
 pub mod store;
+pub mod monitor;
 
 pub const SCHEMA: &str = "dfmcp.excavation-blueprint/1";
 pub const MAX_PARTS: usize = 32;
