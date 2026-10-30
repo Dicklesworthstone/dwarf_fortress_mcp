@@ -112,7 +112,8 @@ fn error(code: ErrorCode, message: &str) -> DfmcpError {
 
 fn failure(cause: &DfmcpError, attempted_designation: bool, attempted_clock: bool) -> Value {
     json!({"ok":false,
-        "error":{"code":cause.code.as_str(),"message":cause.message,"retryable":false},
+        "error":{"code":cause.code.as_str(),"message":cause.message,"retryable":false,
+            "details":cause.details},
         "runtime_admitted":false,"automatic_redispatch":false,
         "game_mutation_dispatched":if attempted_designation || attempted_clock {Value::Null} else {json!(false)},
         "designation_may_have_started":attempted_designation,
@@ -461,7 +462,7 @@ pub fn fortress_open_session(
             ));
         }
         let sequence = NEXT
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < SEQUENCE_LIMIT).then_some(n + 1)
             })
             .map_err(|_| {
@@ -906,6 +907,19 @@ mod tests {
         assert!(cancel_action(Some("destroy")).is_err());
         assert!(!commit_action(None, &seal, false)?.may_designate());
         Ok(())
+    }
+
+    #[test]
+    fn rejected_witness_keeps_diagnostic_reasons_without_claiming_an_effect() {
+        let cause = error(ErrorCode::CapabilityDenied, "native witness refused")
+            .with_detail("blockers", "{HiddenContext, KnownHazard}")
+            .with_detail("observed_tick", "42")
+            .with_detail("required_tick", "42");
+        let refused = failure(&cause, false, false);
+        assert_eq!(refused["error"]["details"], json!(cause.details));
+        assert_eq!(refused["game_mutation_dispatched"], false);
+        assert_eq!(refused["current_goal_available"], false);
+        assert_eq!(refused["automatic_redispatch"], false);
     }
 
     #[test]
