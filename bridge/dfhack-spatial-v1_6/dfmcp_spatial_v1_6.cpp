@@ -41,7 +41,10 @@ bool authorize(const wire::Request *in,wire::Reply *out){
     for(std::size_t i=0;i<256;++i){const unsigned char a=i<expected.size()?expected[i]:0,b=i<provided.size()?provided[i]:0;difference|=a^b;}
     if(difference)return false;
     out->set_failure_code(5);const auto &version=Core::getInstance().vinfo;
-    const auto df=version?version->getVersion():std::string(),dfhack=Version::dfhack_version();
+    const auto df=version?version->getVersion():std::string();
+    const char *native_version=Version::dfhack_version();
+    if(!native_version)return false;
+    const std::string dfhack(native_version);
     if(!generation||generation==std::numeric_limits<std::uint64_t>::max()||!capture::utf8(df,128)||!capture::utf8(dfhack,128))return false;
     out->set_bridge_generation(generation);out->set_df_version(df);out->set_dfhack_version(dfhack);out->set_failure_code(0);return true;
 }
