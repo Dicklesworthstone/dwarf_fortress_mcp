@@ -27,7 +27,10 @@
     "DFMCP_DIG_TOKEN",
     "DFMCP_DIG_ALLOW_DESIGNATE",
     "DFMCP_DIG_CHECKPOINT_POLICY",
-    "DFMCP_DIG_PROTECTED"
+    "DFMCP_DIG_PROTECTED",
+    "DFMCP_DIG_BLUEPRINT_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_MAP_TOKEN"
   ],
   "checkpoint_default": "required_and_refused_without_real_verifier",
   "operator_exception": "disposable-fortress-no-checkpoint",
@@ -56,10 +59,46 @@
   "recovery_profile_changed": false,
   "native_wire_changed": false,
   "production_admitted": false,
-  "rust_tests_registered_this_increment": 22,
-  "rust_compiled_or_executed": false,
   "executed_schema_cases": {
-    "valid": 28,
-    "invalid": 102
-  }
+    "valid": 49,
+    "invalid": 175
+  },
+  "opening_modes": [
+    "control",
+    "offline",
+    "reconcile",
+    "monitor-offline",
+    "monitor-recovery"
+  ],
+  "whole_blueprint_monitor": {
+    "map_protocol": "1.5",
+    "maximum_selected_cells": 512,
+    "maximum_capture_cells": 1024,
+    "shared_stability_across_all_selected_cells": true,
+    "registration_tool": "fortress.plan",
+    "sampling_tool": "fortress.wait",
+    "query_mode": "blueprint_monitor",
+    "cancellation_scope": "monitor",
+    "independent_map_source_pin": true,
+    "same_tick_can_increase_stability": false,
+    "changed_same_tick_capture_withdraws_stability": true,
+    "failed_request_withdraws_unfinished_stability": true,
+    "runtime_worker_acknowledgement_required_for_continuity": true,
+    "external_client_delivery_acknowledged": false,
+    "invalidated_source_retained_pages_marked_historical": true,
+    "automatic_polling": false,
+    "game_clock_advanced": false,
+    "terminal_satisfaction_is_historical": true,
+    "continuous_or_current_terrain_claim": false,
+    "monitor_only_reopening_requires_original_files": false,
+    "monitor_only_reopening_requires_exact_recovery_pins": true,
+    "monitor_only_recovery_allows_local_cancel": true,
+    "monitor_only_offline_writes": false,
+    "monitor_only_original_designations_verified": false,
+    "monitor_only_can_sample_or_designate": false
+  },
+  "qualification_evidence": "IMPLEMENTATION_STATUS.md",
+  "new_continuity_regression_tests_executed": false,
+  "full_rust_runtime_qualification": false,
+  "live_game_qualified": false
 }

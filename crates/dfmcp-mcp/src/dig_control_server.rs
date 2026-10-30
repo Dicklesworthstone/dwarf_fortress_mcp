@@ -30,8 +30,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{
-    Mutex, MutexGuard, TryLockError,
-    atomic::{AtomicU64, Ordering},
+    Arc, Mutex, MutexGuard, TryLockError,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -170,6 +170,7 @@ struct State<S, N, B = S> {
     monitor: Option<dfmcp_adapter::dig_blueprint::monitor::store::MonitorStore<B>>,
     monitor_recovery: Option<dfmcp_adapter::dig_blueprint::monitor::store::Recovery>,
     monitor_config: Option<monitor::Config>,
+    worker_acknowledgement: Option<Arc<AtomicBool>>,
 }
 impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N, B> {
     fn new(mut control: DigSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
@@ -218,9 +219,11 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             monitor: None,
             monitor_recovery: None,
             monitor_config: config.monitor.clone(),
+            worker_acknowledgement: None,
         })
     }
     fn context(&mut self, write_enabled: bool, wall: Option<u64>) -> Result<OperationContext> {
+        self.withdraw_unacknowledged();
         self.request = self.request.checked_add(1).ok_or_else(exhausted)?;
         let mut budget = self.budget;
         if let Some(wall) = wall {
@@ -248,6 +251,27 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
     fn abandon(&mut self) {
         self.review = None;
         self.control.abandon_preparation();
+    }
+    fn withdraw_monitor(&mut self) {
+        if let Some(store) = self.monitor.as_mut() {
+            self.authority_tick = self.authority_tick.max(store.high_tick());
+            self.monitor_recovery = Some(store.recovery());
+            if store.withdraw_unpublished().is_err() {
+                // Preserve exact recovery pins, but never keep a sampler whose
+                // unfinished continuity could not be conservatively withdrawn.
+                self.monitor = None;
+            }
+        }
+    }
+    fn withdraw_unacknowledged(&mut self) {
+        if self
+            .worker_acknowledgement
+            .take()
+            .is_some_and(|ack| !ack.load(Ordering::Acquire))
+        {
+            self.abandon();
+            self.withdraw_monitor();
+        }
     }
     fn seal(&self) -> Option<Digest32> {
         if self.control.has_preparation_connection() {
@@ -1122,6 +1146,9 @@ where
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
     M: monitor::MonitorIo<B>,
 {
+    if action.is_err() {
+        state.withdraw_monitor();
+    }
     match action {
         Ok(
             action @ (Action::StartMonitor(_)
@@ -1436,6 +1463,9 @@ async fn with_session(
                 .as_mut()
                 .filter(|v| v.id() == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
+            if let Entry::Native { state, .. } = entry {
+                state.withdraw_unacknowledged();
+            }
             retained = entry.blueprint_reference();
             retained_monitor = entry.monitor_reference();
             monitor_only = matches!(entry, Entry::Monitor { .. });
@@ -1443,10 +1473,25 @@ async fn with_session(
                 entry.abandon();
             }
             let config = entry.config().clone();
-            runtime::boundary(&control, &config, false)?;
+            if let Err(cause) = runtime::boundary(&control, &config, false) {
+                entry.abandon();
+                if let Entry::Native { state, .. } = entry {
+                    state.withdraw_monitor();
+                }
+                retained_monitor = entry.monitor_reference();
+                return Err(cause);
+            }
             let rendered = match entry {
                 Entry::Native { state, .. } => {
-                    let c = state.context(runtime::enabled()?, wall)?;
+                    let c =
+                        match runtime::enabled().and_then(|enabled| state.context(enabled, wall)) {
+                            Ok(c) => c,
+                            Err(cause) => {
+                                state.withdraw_monitor();
+                                retained_monitor = state.monitor_reference();
+                                return Err(cause);
+                            }
+                        };
                     let binding = state.binding.clone();
                     let mut guard = runtime::Guard {
                         control: &control,
@@ -1484,7 +1529,14 @@ async fn with_session(
             native_handoff = presentation::retained_handoff(&rendered);
             if let Err(e) = runtime::boundary(&control, &config, false) {
                 entry.abandon();
+                if let Entry::Native { state, .. } = entry {
+                    state.withdraw_monitor();
+                }
+                retained_monitor = entry.monitor_reference();
                 return Err(e);
+            }
+            if let Entry::Native { state, .. } = entry {
+                state.worker_acknowledgement = Some(control.acknowledgement());
             }
             Ok(rendered)
         })();

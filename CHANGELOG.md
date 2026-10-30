@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-30 — Withdraw unfinished monitor continuity after failed MCP publication
+
+- Integrate local monitor withdrawal with failed request preflight, runtime and
+  authority checks, failed publication, response overflow and timeout. Persist
+  the reset before a later sample without renewing the original goal or deadline.
+- Track owned-worker acknowledgement in each native session. A missing successful
+  outer-runtime join withdraws unfinished monitor continuity and stale local
+  preparation permission before the next request; client delivery is not implied.
+- Preserve updated failure handoffs and mark older accepted target pages as
+  historical after a source-invalidating acquisition.
+- Preserve the incoming independent monitor recovery implementation. Add two
+  handler regression groups, one runtime test and stronger source-drift assertions.
+- Pass query-schema validation for 49 valid and 175 invalid cases. New Rust test
+  execution remains unverified after SIGKILL and filesystem exhaustion blocked
+  compilation; full FastMCP/native/live qualification remains unclaimed.
+
 ## 2026-10-30 — Preserve blueprint stability across contradictory and unpublished samples
 
 - Clear the whole-project matching streak when capture bytes change at one

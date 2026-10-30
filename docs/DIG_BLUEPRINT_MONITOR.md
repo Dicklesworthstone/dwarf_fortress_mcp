@@ -243,6 +243,14 @@ It needs no new authority and performs no I/O, and never repairs history,
 restores a consumed attempt, removes a known clock floor or erases a terminal
 historical achievement.
 
+The MCP host applies this withdrawal to rejected monitor requests, failed final
+publication checks and missing acknowledgement of an owned worker's result.
+Before the next request it checks whether the outer runtime successfully joined
+and acknowledged the prior worker. This tracks local runtime completion, not
+network delivery or receipt by an external MCP client. An invalidated source may
+retain an older accepted target page; that page remains explicitly historical
+and is never marked as a fresh sample.
+
 Keep the returned `{monitor_id, head}` recovery object outside the owner. Exact
 reopening requires that acknowledged head in the verified append chain. A
 complete later tail can be adopted after a lost reply; rollback, torn frames,

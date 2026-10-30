@@ -486,6 +486,8 @@ fn map_source_drift_is_durable_and_preserves_last_accepted_original_sample() -> 
     success(&invalidated);
     let result = monitor_result(&invalidated);
     assert_eq!(result["status"], "invalidated");
+    assert_eq!(result["fresh_sample_acquired"], false);
+    assert_eq!(result["historical_evidence_only"], true);
     assert_eq!(result["latest_sample_tick"], TICK);
     assert_eq!(result["authority_tick_floor"], TICK + 10);
     assert_eq!(result["sampled_excavation_condition_proven"], false);
@@ -869,6 +871,119 @@ fn monitor_routing_is_exclusive_and_source_recovery_inputs_are_closed() -> Resul
         changed["path"] = json!(path);
         assert!(monitor::Config::parse(&changed.to_string()).is_err());
     }
+    Ok(())
+}
+
+#[test]
+fn unacknowledged_worker_result_withdraws_shared_monitor_stability_before_next_context()
+-> Result<()> {
+    let (mut h, mut io) = completed(sparse_levels()?)?;
+    success(&start(&mut h, &mut io)?);
+    let value = capture(&h, TICK)?;
+    success(&sample(&mut h, &mut io, value)?);
+    let original = spec(&h)?.id();
+    let deadline = spec(&h)?.policy().deadline_tick();
+    let completed = Arc::new(AtomicBool::new(false));
+    h.state.worker_acknowledgement = Some(completed.clone());
+    completed.store(true, Ordering::Release);
+    h.state.context(false, None)?;
+    assert_eq!(
+        h.state
+            .monitor
+            .as_ref()
+            .ok_or_else(exhausted)?
+            .state()
+            .streak(),
+        1
+    );
+    let retained = io.history.snapshot_bytes();
+    h.state.worker_acknowledgement = Some(Arc::new(AtomicBool::new(false)));
+    h.state.context(false, None)?;
+    assert_eq!(io.history.snapshot_bytes(), retained);
+    assert_eq!(
+        h.state
+            .monitor
+            .as_ref()
+            .ok_or_else(exhausted)?
+            .state()
+            .streak(),
+        0
+    );
+    let inspected = query(&mut h, &mut io)?;
+    success(&inspected);
+    assert_eq!(monitor_result(&inspected)["matching_samples"], 0);
+    let value = capture(&h, TICK + 10)?;
+    let resumed = sample(&mut h, &mut io, value)?;
+    success(&resumed);
+    assert_eq!(monitor_result(&resumed)["matching_samples"], 1);
+    assert_eq!(
+        monitor_result(&resumed)["sampled_excavation_condition_proven"],
+        false
+    );
+    assert_ne!(io.history.snapshot_bytes(), retained);
+    assert_eq!(spec(&h)?.id(), original);
+    assert_eq!(spec(&h)?.policy().deadline_tick(), deadline);
+    let value = capture(&h, TICK + 20)?;
+    let done = sample(&mut h, &mut io, value)?;
+    success(&done);
+    assert_eq!(
+        monitor_result(&done)["sampled_excavation_condition_proven"],
+        true
+    );
+    Ok(())
+}
+
+#[test]
+fn early_budget_and_runtime_rejection_break_monitor_stability_without_source_contact() -> Result<()>
+{
+    let (mut h, mut io) = completed(sparse_levels()?)?;
+    success(&start(&mut h, &mut io)?);
+    let value = capture(&h, TICK)?;
+    success(&sample(&mut h, &mut io, value)?);
+    let original = spec(&h)?.id();
+    let deadline = spec(&h)?.policy().deadline_tick();
+    h.c.budget.max_bytes = 0;
+    let reads = io.reads;
+    let refused = run(
+        &mut h,
+        &mut io,
+        "fortress.wait",
+        Ok(Action::SampleMonitor(original)),
+    )?;
+    assert_eq!(refused["result"]["ok"], false);
+    assert_eq!(io.reads, reads);
+    h.c.budget.max_bytes = MAX_WORK_BYTES;
+    let value = capture(&h, TICK + 10)?;
+    let resumed = sample(&mut h, &mut io, value)?;
+    success(&resumed);
+    assert_eq!(monitor_result(&resumed)["matching_samples"], 1);
+    io.boundary_failure = Some(ErrorCode::CancellationRequested);
+    let reads = io.reads;
+    let refused = run(
+        &mut h,
+        &mut io,
+        "fortress.wait",
+        Ok(Action::SampleMonitor(original)),
+    )?;
+    assert_eq!(refused["result"]["ok"], false);
+    assert_eq!(io.reads, reads);
+    let value = capture(&h, TICK + 20)?;
+    let resumed = sample(&mut h, &mut io, value)?;
+    success(&resumed);
+    assert_eq!(monitor_result(&resumed)["matching_samples"], 1);
+    assert_eq!(
+        monitor_result(&resumed)["sampled_excavation_condition_proven"],
+        false
+    );
+    assert_eq!(spec(&h)?.id(), original);
+    assert_eq!(spec(&h)?.policy().deadline_tick(), deadline);
+    let value = capture(&h, TICK + 30)?;
+    let done = sample(&mut h, &mut io, value)?;
+    success(&done);
+    assert_eq!(
+        monitor_result(&done)["sampled_excavation_condition_proven"],
+        true
+    );
     Ok(())
 }
 

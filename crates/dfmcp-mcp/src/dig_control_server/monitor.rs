@@ -266,6 +266,9 @@ pub(super) fn display<S: EffectJournalStorage>(
     } else {
         vec![]
     };
+    // Invalid source captures retain the last accepted target page. That older
+    // evidence must remain historical even when this request acquired new bytes.
+    let fresh = fresh && progress.status() != Status::Invalidated;
     let satisfied = progress.status() == Status::Satisfied;
     let identity = json!({
         "monitor_id":spec.id().to_string(),"blueprint_id":spec.parent().id().to_string(),
@@ -596,6 +599,7 @@ where
     let mut work = match Work::new(&c, started) {
         Ok(work) => work,
         Err(cause) => {
+            state.withdraw_monitor();
             return presentation::packet(
                 op,
                 retain_blueprint(state, presentation::failure(&cause)),
@@ -608,6 +612,9 @@ where
         }
     };
     let outcome = perform(state, &c, &mut work, action, io);
+    if outcome.is_err() {
+        state.withdraw_monitor();
+    }
     if let Some(store) = &state.monitor {
         state.authority_tick = state.authority_tick.max(store.high_tick());
         state.monitor_recovery = Some(store.recovery());
@@ -630,6 +637,7 @@ where
         None,
     );
     if rendered.len() as u64 > presentation::OUTPUT_BYTES || work.current(&c).is_err() {
+        state.withdraw_monitor();
         presentation::packet(
             op,
             retain_blueprint(state, presentation::failure(&exhausted())),

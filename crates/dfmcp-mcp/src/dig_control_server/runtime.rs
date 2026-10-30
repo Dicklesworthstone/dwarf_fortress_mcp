@@ -228,8 +228,14 @@ pub(super) struct RequestControl {
     parent: Cx,
     worker: Cx,
     abandoned: Arc<AtomicBool>,
+    acknowledged: Arc<AtomicBool>,
 }
 impl RequestControl {
+    /// Confirms owned-worker completion in the outer runtime, not delivery to
+    /// the external MCP client. False survives join failure or caller loss.
+    pub fn acknowledgement(&self) -> Arc<AtomicBool> {
+        self.acknowledged.clone()
+    }
     pub fn checkpoint(&self) -> Result<()> {
         if self.abandoned.load(Ordering::Acquire)
             || self.parent.checkpoint().is_err()
@@ -271,6 +277,8 @@ where
     }
     let started = Instant::now();
     let abandoned = Arc::new(AtomicBool::new(false));
+    let acknowledged = Arc::new(AtomicBool::new(false));
+    let worker_acknowledged = acknowledged.clone();
     let _cancel = CancelOnDrop(abandoned.clone());
     let parent = cx.clone();
     let task = cx.spawn_blocking(move |worker| {
@@ -280,6 +288,7 @@ where
             parent,
             worker,
             abandoned,
+            acknowledged: worker_acknowledged,
         };
         if let Err(e) = control.checkpoint() {
             return unbound(op, &e);
@@ -291,7 +300,19 @@ where
         Err(_) => return unbound(op, &denied()),
     };
     match task.join(&cx).await {
-        Ok(value) => value,
+        Ok(value) => {
+            if cx.checkpoint().is_err() {
+                return unbound(
+                    op,
+                    &error(
+                        ErrorCode::CancellationRequested,
+                        "request cancelled before worker acknowledgement",
+                    ),
+                );
+            }
+            acknowledged.store(true, Ordering::Release);
+            value
+        }
         Err(_) => unbound(
             op,
             &error(
@@ -568,6 +589,32 @@ mod tests {
         })?;
         assert_eq!(result, "owned");
         assert!(Cx::current().is_none());
+        Ok(())
+    }
+    #[test]
+    fn owned_worker_acknowledgement_is_set_only_after_join()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let retained = Arc::new(std::sync::Mutex::new(None));
+        let worker = retained.clone();
+        let result = crate::run_with_runtime_cx(|_| async move {
+            owned("fortress.query", move |control| {
+                let acknowledgement = control.acknowledgement();
+                assert!(!acknowledgement.load(Ordering::Acquire));
+                if let Ok(mut retained) = worker.lock() {
+                    *retained = Some(acknowledgement);
+                }
+                "acknowledged".into()
+            })
+            .await
+        })?;
+        assert_eq!(result, "acknowledged");
+        assert!(
+            retained
+                .lock()
+                .map_err(|_| "poisoned acknowledgement fixture")?
+                .as_ref()
+                .is_some_and(|value| value.load(Ordering::Acquire))
+        );
         Ok(())
     }
     #[test]

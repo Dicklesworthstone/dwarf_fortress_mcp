@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Preserve blueprint monitor continuity across failed MCP responses (2026-10-30)
+
+The existing dig-control MCP server now withdraws unfinished monitor stability
+after failed request preflight, runtime or authority checks, failed publication
+and final response overflow or timeout. The next permitted sample persists the
+continuity reset before reading again. Original monitor identity, deadline,
+attempt allowance, historical achievement and native recovery remain intact.
+
+Each native session retains an explicit owned-worker acknowledgement. Only a
+successful join and final outer runtime checkpoint set it. If the next request
+finds the preceding worker result unacknowledged, it abandons stale local native
+preparation permission and withdraws unfinished monitor continuity before
+creating the new request context. This acknowledges runtime completion, not
+network delivery to an MCP client. Early and final failures preserve updated
+recovery handoffs. A source-invalidating acquisition keeps the last accepted
+target page explicitly historical, without labeling it a fresh sample.
+
+Two new handler regression groups cover the acknowledgement latch and early
+budget/runtime failures without source contact; a separate runtime test covers
+acknowledgement after joining. The existing source-drift case now checks the
+historical freshness labels. Query-schema validation passes 49 valid and 175
+invalid cases. New Rust test execution remains unverified: complete adapter
+test compilation ended in SIGKILL, and the isolated follow-up also encountered
+filesystem exhaustion, including compiler metadata writes after scoped cleanup.
+The exact full FastMCP dependency set is unavailable. No full MCP transport,
+ambient-runtime, native/live or admission qualification is claimed.
+
+Changed Rust files pass the pinned rustfmt check. The contract matches all 13
+operator environment names, 11 frozen tools and five opening modes. `verify.sh`
+passes its first four gates, then stops at the existing source-bundle
+documentation failure. The final local qualification attempt cannot create its
+receipt because the filesystem is full; no qualification receipt is claimed.
+
+This increment preserves the independently contributed monitor-only recovery
+implementation. It adds only acknowledgement, continuity withdrawal and evidence
+presentation corrections. See `docs/DIG_BLUEPRINT_MONITOR.md`.
+
 ### Preserve whole-blueprint stability across contradictory or unpublished observations (2026-10-30)
 
 The existing monitor now clears its shared matching streak when a complete

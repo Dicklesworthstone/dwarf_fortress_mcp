@@ -187,6 +187,13 @@ Cancellation during a kernel filesystem operation cannot forcibly interrupt it;
 no hard filesystem cancellation bound is claimed. Journal state survives a lost
 response. Cursor publication waits for final verification and complete rendering.
 
+Whole-blueprint monitoring also withdraws unfinished stability after request
+rejection or failed publication. A missing acknowledgement from the owned
+worker's outer runtime forces withdrawal before the next request can continue
+sampling. The next permitted read persists the interruption before contacting
+the map source. This acknowledgement does not attest delivery to an MCP client;
+historical achievements and exact recovery pins remain available.
+
 `fortress.cancel(scope="session")` closes only settled custody. An explicit
 `release_for_recovery=true` permits releasing unresolved/fenced local ownership
 without erasing history or claiming native quiescence. Checkpoint and restore
