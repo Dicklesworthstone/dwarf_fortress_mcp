@@ -10,9 +10,10 @@ The operator integration is documented in
 [whole-batch construction clock control through MCP](FURNITURE_CONSTRUCTION_CLOCK_MCP.md).
 The [construction monitor](FURNITURE_COMPLETION_RUST.md) and
 [durable run coordinator](BOUNDED_SIMULATION_COORDINATOR.md) retain independent
-responsibilities. The run journal is unchanged. The monitor now additionally
-offers a distinct full-sample readiness publication path without positive proof
-credit; adopting that path in the clock host is a separate integration step.
+responsibilities. The run journal is unchanged. The monitor retains its existing
+header and earlier frame encodings and adds a distinct readiness frame; older
+readers refuse histories containing that new frame instead of treating it as a
+credited goal sample.
 
 ## Preserve the whole original project
 
@@ -46,7 +47,9 @@ and after one complete operations capture on the same connection.
 
 The guard returns `ClockSample { progress, sample }`. Its progress must come from
 the unchanged retained monitor. The clock verifies the entire original receipt
-bracket and previews the original construction transition without publishing it.
+bracket using a pure readiness assessment. This assessment applies the original
+source, identity and temporal checks without consuming a second acquisition or
+adding positive stability credit.
 Every target must be either `pending` with viable construction or
 `condition_met`; a `suspended` condition, missing jobs at an incomplete stage,
 changed identity, removal, source regression and unverified item conditions refuse
@@ -55,21 +58,39 @@ The complete operations capture must be paused and at exactly the selected
 paused run tick. The original monitor must remain unfinished, idle and within
 its real observation allowance and absolute deadline.
 
-If that fresh capture would already satisfy the original sampled goal, the
-clock refuses unnecessary advancement. The caller settles the retained run
-intent and publishes an ordinary completion sample instead. A hypothetical
-readiness check does not consume the monitor's last available real sample.
-Readiness, a successful unpause and a historical native pause receipt are all
-separate from construction completion.
+Readiness cannot satisfy the sampled goal, even when treating the same capture
+as an ordinary credited sample would do so. Positive construction proof still
+requires an explicit ordinary sample. Readiness, a successful unpause and a
+historical native pause receipt remain separate from construction completion.
 
-A readiness result reports pending and complete counts, its tick and full
-sample digest, and whether it contradicts an unfinished stability streak.
-The host calls `MonitorStore::withdraw_unpublished()` for those contradictions
-and for failed enclosing publication/runtime checks. This clears visible
-unfinished stability without renewing the original goal, deadline, sample
-allowance or source floor. Before another real sample, the store synchronizes
-the existing interrupted-read transition. A reopened unfinished monitor also
-starts with its streak withdrawn; terminal historical achievement is retained.
+A host using the clock between completion samples records read intent with
+`MonitorStore::begin_read`, acquires the whole receipt-bracketed capture, and
+retains it with `MonitorStore::publish_readiness` before returning verified
+progress and the sample to the clock guard. The readiness frame stores the full
+canonical sample and replays it under the same source, authority, custody,
+deadline and semantic-work checks as a goal sample.
+
+Each retained readiness consumes one of the original `max_observations`
+completed acquisitions. It never increments `streak`, establishes
+`first_tick`, advances `counted_tick`, or independently satisfies the goal.
+The original observation count therefore includes both ordinary goal samples
+and readiness captures; only ordinary samples earn positive stability credit.
+Preparation and commit normally consume two readiness acquisitions per run.
+
+Fully qualifying, paused all-target readiness preserves an existing streak.
+Pending or unknown conditions, unpaused observations, excessive gaps and changed
+bytes at one tick clear it. Source, identity, stage and allocation regressions,
+removal, deadline expiry and acquisition-budget exhaustion retain their normal
+absorbing outcomes. Every retained capture advances durable evidence floors,
+even though it does not advance proof credit.
+
+A successfully retained readiness closes its read intent. Leaving every
+successful read interrupted would reset the streak between every pair of runs
+and make multi-sample completion impossible. An acquisition that fails before
+acknowledgement instead leaves an unfinished read and the normal continuity
+reset. Hosts may still call `withdraw_unpublished()` when an enclosing failure
+requires withdrawal. Reopening an unfinished monitor withdraws its live streak;
+terminal historical achievement and durable evidence floors remain retained.
 
 Successful commit retains its readiness only as historical pre-dispatch evidence
 for this continuity handling. It retains no preparation seal or further dispatch
@@ -80,11 +101,11 @@ permission. Readiness never contributes a positive completion sample.
 Only the current owner that prepared an interval holds its process-local review
 seal. Commit consumes it before entering the dispatch path. Reopen,
 reconciliation, failed publication and explicit abandonment cannot restore that
-permission. A final preparation publication failure also clears the review
-when the wall deadline expires before journal inspection starts; the historical
-Prepared record remains available for original-key retirement. After either
-guard, the run journal rechecks its own complete bytes and current authority
-before calling the native method.
+permission. Every final preparation publication failure clears the review,
+including deadline expiry before the final journal inspection starts; the
+historical Prepared record remains available for original-key retirement.
+After either guard, the run journal rechecks its own complete bytes and current
+authority before calling the native method.
 
 A synchronized DispatchStarted marker permanently prevents another unpause
 attempt for that key, including after an original-custody failure before the

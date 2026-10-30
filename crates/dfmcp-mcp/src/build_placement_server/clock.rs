@@ -1,5 +1,5 @@
 //! Separately reviewed finite run/1.13 advancement for the entire original
-//! furnishing batch. Fresh receipt-bracket readiness never publishes a sample.
+//! furnishing batch. Durable receipt-bracket readiness never earns goal stability.
 use super::{State, Work, completion, error, exhausted, presentation, runtime};
 use dfmcp_adapter::bounded_run::RunSpec;
 use dfmcp_adapter::bounded_run::journal::RunBinding;
@@ -616,6 +616,59 @@ fn preflight<S: EffectJournalStorage, N: BuildSource>(
     native.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)
 }
 
+/// One separately prepaid allowance for the complete write-ahead readiness
+/// acquisition. All nested custody checks share the outer and native deadline.
+struct GuardWork {
+    context: OperationContext,
+    deadline: Instant,
+    bytes: u64,
+}
+impl GuardWork {
+    fn new(work: &Work, reserved: &OperationContext, edge: &OperationContext) -> Result<Self> {
+        let mut context = narrowed(work, reserved, edge.anchor.tick.get())?;
+        context.grants = edge.grants.clone();
+        context.cancellation_requested |= edge.cancellation_requested;
+        context.budget.max_wall_millis = context
+            .budget
+            .max_wall_millis
+            .min(edge.budget.max_wall_millis);
+        Ok(Self {
+            deadline: Instant::now()
+                .checked_add(Duration::from_millis(context.budget.max_wall_millis))
+                .ok_or_else(exhausted)?,
+            bytes: context.budget.max_bytes,
+            context,
+        })
+    }
+    fn take(&mut self, bytes: u64, tick: u64) -> Result<OperationContext> {
+        self.bytes = self.bytes.checked_sub(bytes).ok_or_else(exhausted)?;
+        let mut current = self.context.clone();
+        current.anchor.tick = GameTick(current.anchor.tick.get().max(tick));
+        current.budget.max_bytes = bytes;
+        current.budget.max_wall_millis = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .and_then(|left| u64::try_from(left.as_millis()).ok())
+            .filter(|left| *left > 0)
+            .ok_or_else(exhausted)?;
+        Ok(current)
+    }
+}
+fn readiness_reserve<S: EffectJournalStorage, N: BuildSource>(state: &State<S, N>) -> Result<u64> {
+    let store = &state.completion.as_ref().ok_or_else(exhausted)?.store;
+    let source = completion::source_reserve(store.definition().origin())?;
+    // A reopened monitor may need two read-intent frames. Every source guard,
+    // both complete journal checks, publication and decode are prepaid before
+    // the clock can synchronize its Intent or DispatchStarted marker.
+    source
+        .checked_mul(10)
+        .and_then(|bytes| bytes.checked_add(2 * (store.byte_len() as u64 + 8192)))
+        .and_then(|bytes| bytes.checked_add(store.operation_reserve(false)))
+        .and_then(|bytes| bytes.checked_add(store.operation_reserve(true)))
+        .and_then(|bytes| bytes.checked_add(SOURCE_BYTES + DECODE_BYTES + 16_384))
+        .ok_or_else(exhausted)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn guard<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
     state: &mut State<S, N>,
@@ -626,58 +679,123 @@ fn guard<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
     audit: u64,
     io: &mut I,
 ) -> Result<ClockSample> {
-    let deadline = Instant::now()
-        .checked_add(Duration::from_millis(edge.budget.max_wall_millis))
-        .ok_or_else(exhausted)?;
-    let remaining = || -> Result<u64> {
-        u64::try_from(
-            deadline
-                .checked_duration_since(Instant::now())
-                .ok_or_else(exhausted)?
-                .as_millis(),
-        )
-        .ok()
-        .filter(|left| *left > 0)
-        .ok_or_else(exhausted)
-    };
-    let mut current = narrowed(
-        work,
-        reserved,
-        state.authority_tick.max(edge.anchor.tick.get()),
-    )?;
-    current.budget.max_wall_millis = current.budget.max_wall_millis.min(remaining()?);
-    current.budget.max_bytes = audit;
-    io.checkpoint(&current, true)?;
-    active_original(state, spec, &current)?;
-    let mut read = narrowed(work, &current, state.authority_tick)?;
-    read.budget.max_wall_millis = read.budget.max_wall_millis.min(remaining()?);
-    read.budget.max_bytes = SOURCE_BYTES;
-    let sample = io.sample(spec, &read)?;
-    // Decode before any post-read host check and retain the consumed source tick
-    // even if that check, current authority or core eligibility subsequently fails.
-    let observed = LiveOperationsObservation::decode_profile(
-        &sample.capture,
-        sample.operations.generation,
-        sample.operations.df_version.clone(),
-        sample.operations.dfhack_version.clone(),
-        OperationsProfile::PagedV1_4,
-    )?;
-    state.authority_tick = state.authority_tick.max(observed.jobs.tick().get());
-    drop(observed);
-    let mut final_check = narrowed(work, &current, state.authority_tick)?;
-    final_check.budget.max_wall_millis = final_check.budget.max_wall_millis.min(remaining()?);
-    io.checkpoint(&final_check, true)?;
-    active_original(state, spec, &final_check)?;
-    let progress = state
-        .completion
-        .as_ref()
-        .ok_or_else(exhausted)?
-        .store
-        .progress()
-        .clone();
-    work.current(&final_check)?;
-    remaining()?;
-    Ok(ClockSample { progress, sample })
+    let mut budget = GuardWork::new(work, reserved, edge)?;
+    let initial = budget.take(audit, state.authority_tick)?;
+    io.checkpoint(&initial, true)?;
+    active_original(state, spec, &initial)?;
+    let mut monitor = state.completion.take().ok_or_else(exhausted)?;
+    let outcome = (|| {
+        let parent = monitor.parent.clone();
+        let child = monitor.child.clone();
+        let source_bytes = completion::source_reserve(spec.origin())?;
+        let begin = budget.take(monitor.store.operation_reserve(false), state.authority_tick)?;
+        {
+            let mut admit =
+                |definition: &MonitorDefinition,
+                 progress: &dfmcp_adapter::construction_plan::Progress| {
+                    if definition.canonical_bytes() != spec.canonical_bytes() || progress.terminal()
+                    {
+                        return Err(denied("readiness requires the unchanged unfinished goal"));
+                    }
+                    Ok(())
+                };
+            let mut source_guard = |origin: &dfmcp_adapter::construction_plan::origin::Origin,
+                                    c: &OperationContext| {
+                let mut current =
+                    budget.take(source_bytes, state.authority_tick.max(c.anchor.tick.get()))?;
+                current.budget.max_wall_millis =
+                    current.budget.max_wall_millis.min(c.budget.max_wall_millis);
+                io.checkpoint(&current, true)?;
+                let view = completion::verify_source(
+                    &mut state.control,
+                    &mut state.batch,
+                    &state.binding,
+                    origin,
+                    (&parent, &child),
+                    &current,
+                )?;
+                state.historical = Some(view);
+                Ok(())
+            };
+            monitor
+                .store
+                .begin_read(&begin, &mut admit, &mut source_guard)?;
+        }
+        let read = budget.take(SOURCE_BYTES, state.authority_tick)?;
+        io.checkpoint(&read, true)?;
+        let _decode = budget.take(DECODE_BYTES, state.authority_tick)?;
+        let sample = io.sample(spec, &read)?;
+        // Retain the consumed source clock before later custody, runtime or
+        // authority checks can refuse this completed acquisition. Its bounded
+        // decode allowance was reserved before the native acquisition.
+        let observed = LiveOperationsObservation::decode_profile(
+            &sample.capture,
+            sample.operations.generation,
+            sample.operations.df_version.clone(),
+            sample.operations.dfhack_version.clone(),
+            OperationsProfile::PagedV1_4,
+        )?;
+        state.authority_tick = state.authority_tick.max(observed.jobs.tick().get());
+        drop(observed);
+        let history = budget.take(monitor.store.byte_len() as u64 + 8192, state.authority_tick)?;
+        monitor.store.verify(&history)?;
+        let publish_bytes = monitor
+            .store
+            .operation_reserve(true)
+            .checked_add(8192)
+            .ok_or_else(exhausted)?;
+        let publish = budget.take(publish_bytes, state.authority_tick)?;
+        let mut admit = |definition: &MonitorDefinition,
+                         _: &dfmcp_adapter::construction_plan::Progress| {
+            if definition.canonical_bytes() != spec.canonical_bytes() {
+                return Err(denied("readiness names another original construction goal"));
+            }
+            Ok(())
+        };
+        let mut source_guard = |origin: &dfmcp_adapter::construction_plan::origin::Origin,
+                                c: &OperationContext| {
+            let mut current =
+                budget.take(source_bytes, state.authority_tick.max(c.anchor.tick.get()))?;
+            current.budget.max_wall_millis =
+                current.budget.max_wall_millis.min(c.budget.max_wall_millis);
+            io.checkpoint(&current, true)?;
+            let view = completion::verify_source(
+                &mut state.control,
+                &mut state.batch,
+                &state.binding,
+                origin,
+                (&parent, &child),
+                &current,
+            )?;
+            state.historical = Some(view);
+            Ok(())
+        };
+        // This distinct durable frame consumes the original acquisition budget
+        // but never credits stability. Valid all-member readiness preserves an
+        // existing streak; unknown, pending and interrupted evidence clears it.
+        // Absorbing negative evidence is retained before refusing clock control.
+        monitor
+            .store
+            .publish_readiness(&publish, &sample, &mut admit, &mut source_guard)?;
+        if monitor.store.progress().terminal() {
+            return Err(denied(
+                "readiness terminated the original construction goal; no new run is permitted",
+            ));
+        }
+        let progress = monitor.store.progress().clone();
+        let final_check = budget.take(0, state.authority_tick)?;
+        work.current(&final_check)?;
+        monitor.verified = true;
+        monitor.store_verified = true;
+        Ok(ClockSample { progress, sample })
+    })();
+    monitor.store.abandon_read();
+    if outcome.is_err() {
+        monitor.verified = false;
+        monitor.store_verified = false;
+    }
+    state.completion = Some(monitor);
+    outcome
 }
 fn retain_readiness<S: EffectJournalStorage, N: BuildSource>(
     state: &mut State<S, N>,
@@ -712,7 +830,7 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             let config = configuration(state)?;
             let audit = audit_bytes(state)?;
             let initial = work.take(c, audit)?;
-            let guard_budget = work.take(c, 2 * audit + SOURCE_BYTES + DECODE_BYTES)?;
+            let guard_budget = work.take(c, readiness_reserve(state)?)?;
             let initial_clock = work.take(c, VIEW_BYTES)?;
             let connect = work.take(c, CONNECT_BYTES)?;
             let operation = work.take(c, OPERATION_BYTES)?;
@@ -773,7 +891,8 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             io.checkpoint(&work.current(c)?, true)?;
             Ok(
                 json!({"ok":true,"construction_clock":display(&checked,0,8)?,
-                "confirmation_required":true,"game_unpause_requested":false,"goal_sample_published":false}),
+                "confirmation_required":true,"game_unpause_requested":false,"goal_sample_published":false,
+                "readiness_acquisition_retained":true,"readiness_earns_stability_credit":false}),
             )
         }
         Action::Commit { id, seal } => {
@@ -783,7 +902,7 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             let audit = audit_bytes(state)?;
             let initial = work.take(c, audit)?;
             let initial_clock = work.take(c, VIEW_BYTES)?;
-            let guard_budget = work.take(c, 2 * audit + SOURCE_BYTES + DECODE_BYTES)?;
+            let guard_budget = work.take(c, readiness_reserve(state)?)?;
             let connect = work.take(c, CONNECT_BYTES)?;
             let operation = work.take(c, OPERATION_BYTES)?;
             let final_check = work.take(c, VIEW_BYTES)?;
@@ -837,6 +956,7 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             Ok(
                 json!({"ok":true,"construction_clock":display(&checked,0,8)?,
                 "game_unpause_requested":true,"goal_sample_published":false,
+                "readiness_acquisition_retained":true,"readiness_earns_stability_credit":false,
                 "next_step":"reconcile_clock_then_acquire_a_separate_whole_plan_construction_sample"}),
             )
         }

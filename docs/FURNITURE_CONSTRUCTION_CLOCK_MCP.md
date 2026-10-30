@@ -99,8 +99,10 @@ An interval must fit both opening and current authority, the original monitor's
 maximum sample gap and unchanged absolute deadline. Retained interval intents
 are bounded by `min(64, original max_observations)`; cancellation does not erase
 an attempt or renew that allowance. The original monitor must remain unfinished,
-unfenced and idle, have real observations remaining, and belong to an unstopped,
-unfenced original batch.
+unfenced and idle, have completed-acquisition allowance remaining, and belong to
+an unstopped, unfenced original batch. Choose enough observations in the original
+goal for both readiness captures and the ordinary samples required by the
+planned intervals; the allowance cannot be increased by clock preparation.
 
 ## Prepare and separately commit one interval
 
@@ -126,10 +128,16 @@ removal, missing required jobs, changed identity and unverified item conditions
 refuse advancement. The complete operations capture must be paused at exactly
 the independently observed run tick.
 
-The fresh bracket is readiness evidence only. It cannot shrink the target set,
-publish a monitor sample or add positive stability. If its prospective ordinary
-sample would already satisfy the fixed goal, the clock refuses unnecessary
-advancement. Settle its retained intent and take an ordinary completion sample.
+The fresh bracket is retained as readiness evidence in the original monitor.
+A synchronized read intent precedes acquisition, and a separate full-sample
+readiness frame closes that read before native preparation or unpause. The
+original source and exact custody are checked around publication, including after
+synchronization. A lost or interrupted acquisition cannot restore permission.
+
+Readiness cannot shrink the target set, earn positive stability credit or satisfy
+the construction goal. Even if the same capture would satisfy an ordinary goal
+sample, readiness remains uncredited evidence. The clock's pure assessment does
+not count that already retained acquisition a second time.
 
 Review `result.construction_clock.active_run`, including the requested interval,
 before tick, plan digest and separate `review_seal`. Commit that seal explicitly:
@@ -166,13 +174,28 @@ fortress.observe(session_id, selection="completion")
 fortress.query(session_id, query='{"mode":"completion"}')
 ```
 
-Only those ordinary observations can advance the original construction stability
-window. A readiness capture that contradicts an earlier matching window withdraws
-the unfinished streak. Failed guards, custody, runtime publication and unacknowledged
-worker results also withdraw it. Before another ordinary acquisition, the monitor
-synchronizes its existing interrupted-read reset. Restart withdraws unfinished
-stability as well; the deadline, total observations, source floors and original
-target set remain fixed. Terminal historical achievement remains historical.
+Only ordinary observations can add positive credit to the construction stability
+window. Fully qualifying paused readiness can preserve an existing streak, so
+explicit run/sample cycles can reach the required multi-sample result. Pending,
+unknown, unpaused, same-tick changed or excessive-gap readiness clears unfinished
+stability. Removal, identity/source regressions and deadline or observation
+exhaustion retain their absorbing negative outcomes durably.
+
+The monitor's `observations` field counts completed acquisitions: both ordinary
+goal samples and retained readiness. Each run normally needs one readiness
+acquisition during preparation and another during commit, plus any separate
+ordinary proof sample. All use the original `max_observations` allowance.
+Readiness never increments `streak`, establishes `first_tick` or advances
+`counted_tick`; those fields describe credited ordinary samples. A monitor that
+exhausts its acquisition allowance during readiness refuses new native dispatch.
+
+Successful readiness closes its durable read intent without manufacturing an
+interruption. Failed guards, custody, runtime publication and unacknowledged
+worker results still withdraw unfinished continuity when required. Restart also
+withdraws the live streak while preserving all retained readiness facts and
+source/stage/allocation floors. The deadline, total acquisition allowance and
+original target set never renew. Terminal historical achievement remains
+historical.
 
 ## Inspect history or request a safety pause
 
@@ -251,10 +274,14 @@ mode when the original files cannot be reconstructed. Monitor-only recovery
 refuses configured clock custody. Retaining an owner in a running session and
 reopening after loss of original files are different recovery situations.
 
-Before publishing combined state, the server reserves and verifies exact clock
-history after the final runtime checkpoint. Current and retained Query authority
-also governs cached handoffs. The consumed authority floor includes a decoded
-construction capture even if a later original-custody check rejects it. Durable
+Before publishing an opening response, the server prepays and rechecks the
+original placement journal, batch custody, complete monitor and exact clock
+recovery head after the final runtime checkpoint. These checks keep the opening
+request's original absolute deadline and cannot renew their allowances. Later
+combined responses also reserve and recheck exact clock history after their
+final checkpoint. Current and retained Query authority governs cached handoffs.
+Every clock projection includes the greatest consumed authority floor, including
+a decoded construction capture rejected by a later original-custody check. Durable
 run evidence reconstructs its floor on restart; rejected unjournaled read floors
 remain process-local. Worker acknowledgement covers the joined local runtime,
 not delivery to a remote MCP client.

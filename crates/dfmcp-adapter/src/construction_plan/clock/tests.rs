@@ -956,7 +956,7 @@ fn readiness_cannot_start_without_an_accepted_source_or_renew_terminal_monitor_l
 }
 
 #[test]
-fn already_prospectively_satisfied_goal_refuses_unnecessary_unpause() -> Result<()> {
+fn complete_readiness_cannot_project_goal_satisfaction_or_bypass_separate_review() -> Result<()> {
     let (mut clock, _, mut source, c, n) = setup()?;
     let spec = clock.spec().clone();
     let initial = fixtures::sample(spec.goal(), fixtures::TICK);
@@ -969,20 +969,35 @@ fn already_prospectively_satisfied_goal_refuses_unnecessary_unpause() -> Result<
     assert_eq!(progress.streak, 1);
     source.tick += 10;
     let raw = fixtures::sample(spec.goal(), source.tick);
-    assert!(
-        clock
-            .prepare_guarded(&mut source, &request(&spec), &c, &n, |_, _, _| {
-                Ok(ClockSample {
-                    progress: progress.clone(),
-                    sample: raw.clone(),
-                })
-            })
-            .is_err()
+    // Ordinary goal publication at this new tick would satisfy the original
+    // sampled condition. Readiness must neither claim nor project that credit.
+    assert_eq!(
+        super::super::advance(&progress.begin_read()?, spec.goal(), &raw, &c)?.phase,
+        "satisfied"
     );
-    assert_eq!((source.prepares, source.commits), (0, 0));
+    let prepared = clock.prepare_guarded(&mut source, &request(&spec), &c, &n, |_, _, _| {
+        Ok(ClockSample {
+            progress: progress.clone(),
+            sample: raw.clone(),
+        })
+    })?;
+    let readiness = prepared.readiness.as_ref().ok_or_else(stale)?;
+    assert_eq!(
+        readiness.complete_count(),
+        spec.goal().records().len() as u32
+    );
+    assert_eq!(readiness.pending_count(), 0);
+    assert!(!readiness.withdraws_stability());
+    assert!(prepared.active().and_then(|run| run.review_seal).is_some());
+    assert_eq!((source.prepares, source.commits), (1, 0));
     assert_eq!(clock.high_tick(), fixtures::TICK + 10);
-    assert_eq!(clock.cached_view().runs[0].entry.state(), RunState::Intent);
-    assert_eq!(progress.streak, 1);
+    assert_eq!(
+        clock.cached_view().runs[0].entry.state(),
+        RunState::Prepared
+    );
+    assert_eq!((progress.observations, progress.streak), (1, 1));
+    clock.cancel(None, &c, &n)?;
+    assert_eq!(source.commits, 0);
     Ok(())
 }
 
@@ -1193,5 +1208,60 @@ fn final_preparation_publication_expiry_withdraws_seal_without_repeating_dispatc
     assert_eq!(source.commits, 0);
     clock.cancel(None, &c, &n)?;
     assert_eq!(source.commits, 0);
+    Ok(())
+}
+
+#[test]
+fn clock_probe_accepts_pre_and_post_acknowledgement_without_stealing_the_last_acquisition()
+-> Result<()> {
+    let original = fixture()?.definition;
+    let spec = changed_timing(
+        &original,
+        Timing {
+            max_observations: 4,
+            ..original.goal().timing()
+        },
+    )?;
+    let (c, _) = contexts(&spec);
+    let raw = pending(&spec, fixtures::TICK)?;
+    let initial = retained(&spec)?;
+    let before = super::super::readiness::advance(&initial.begin_read()?, spec.goal(), &raw, &c)?;
+    let after = super::super::readiness::advance(&before.begin_read()?, spec.goal(), &raw, &c)?;
+    assert_eq!((before.observations, after.observations), (2, 3));
+    for progress in [&before, &after] {
+        let checked = Readiness::capture(&spec, &operations(), progress, &raw, &c)?;
+        assert_eq!((checked.pending_count(), checked.complete_count()), (1, 1));
+        assert_eq!(progress.streak, 0);
+    }
+    assert_eq!((before.observations, after.observations), (2, 3));
+    let expired = super::super::readiness::advance(&after.begin_read()?, spec.goal(), &raw, &c)?;
+    assert_eq!(
+        (expired.phase, expired.reason, expired.observations),
+        ("expired", "sample_budget_exhausted", 4)
+    );
+    assert!(Readiness::capture(&spec, &operations(), &expired, &raw, &c).is_err());
+    Ok(())
+}
+
+#[test]
+fn first_completed_readiness_establishes_source_floors_without_a_positive_goal_sample() -> Result<()>
+{
+    let spec = fixture()?.definition;
+    let (c, _) = contexts(&spec);
+    let raw = pending(&spec, fixtures::TICK)?;
+    let initial = Progress::new(spec.goal());
+    assert!(Readiness::capture(&spec, &operations(), &initial, &raw, &c).is_err());
+    let acknowledged =
+        super::super::readiness::advance(&initial.begin_read()?, spec.goal(), &raw, &c)?;
+    assert_eq!((acknowledged.observations, acknowledged.streak), (1, 0));
+    assert_eq!(
+        (acknowledged.first_tick, acknowledged.counted_tick),
+        (None, None)
+    );
+    assert!(!acknowledged.reading);
+    assert!(acknowledged.source.is_some() && acknowledged.horizons.is_some());
+    let checked = Readiness::capture(&spec, &operations(), &acknowledged, &raw, &c)?;
+    assert_eq!((checked.pending_count(), checked.complete_count()), (1, 1));
+    assert_eq!(acknowledged.observations, 1);
     Ok(())
 }

@@ -22,6 +22,9 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+#[path = "clock/opening_tests.rs"]
+mod opening_tests;
+
 const TICK: u64 = 806_500;
 static DIRECTORY_ID: AtomicU64 = AtomicU64::new(0);
 struct Directory(PathBuf);
@@ -543,6 +546,9 @@ fn clock_grants() -> Vec<CapabilityGrant> {
     .collect()
 }
 fn setup_clock(count: usize) -> Result<Harness> {
+    setup_clock_with_observations(count, 32)
+}
+fn setup_clock_with_observations(count: usize, max_observations: u32) -> Result<Harness> {
     let directory = Directory::new()?;
     let originals = original_goal(count)?;
     let before = originals.records()[0].plan().before();
@@ -653,7 +659,7 @@ fn setup_clock(count: usize) -> Result<Harness> {
             stable_samples: 2,
             stable_span: 1,
             max_gap: 1200,
-            max_observations: 32,
+            max_observations,
         },
     )?;
     let definition = MonitorDefinition::new(origin, goal)?;
@@ -800,14 +806,21 @@ fn whole_furniture_clock_separates_review_dispatch_reconciliation_and_completion
     assert_eq!(clock["pending"], true);
     assert_eq!(clock["fresh_goal_sampling_permitted"], false);
     assert_eq!(h.io.game.borrow().calls, ["observe", "observe", "prepare"]);
+    let readiness_progress = h
+        .state
+        .completion
+        .as_ref()
+        .ok_or_else(missing_fixture)?
+        .store
+        .progress();
+    assert_eq!(readiness_progress.goal_digest, original.goal_digest);
+    assert_eq!(readiness_progress.observations, original.observations + 1);
+    assert_eq!(readiness_progress.streak, 0);
+    assert!(!readiness_progress.reading);
+    assert_eq!(prepared["result"]["readiness_acquisition_retained"], true);
     assert_eq!(
-        h.state
-            .completion
-            .as_ref()
-            .ok_or_else(missing_fixture)?
-            .store
-            .progress(),
-        &original
+        prepared["result"]["readiness_earns_stability_credit"],
+        false
     );
     let c = h.state.context(false, None)?;
     assert!(clock::ensure_for_sample(&mut h.state, &c).is_err());
@@ -837,7 +850,7 @@ fn whole_furniture_clock_separates_review_dispatch_reconciliation_and_completion
             .store
             .progress()
             .observations,
-        1
+        3
     );
     assert!(
         h.state
@@ -870,7 +883,7 @@ fn whole_furniture_clock_separates_review_dispatch_reconciliation_and_completion
             .store
             .progress()
             .observations,
-        1
+        3
     );
     let c = h.state.context(false, None)?;
     clock::ensure_for_sample(&mut h.state, &c)?;
@@ -976,9 +989,16 @@ fn readiness_rejects_a_missing_original_member_and_consumes_newer_tick_on_failur
         .io
         .samples
         .push_back(linked_sample(&definition, TICK + 20, false)?);
+    later.io.lose_parent_after_sample = later.config.batch_path.clone();
     let denied = later.prepare()?;
     assert_eq!(denied["result"]["ok"], false, "{denied}");
     assert!(later.state.authority_tick >= TICK + 20);
+    assert!(
+        denied["result"]["construction_clock"]["authority_tick_floor"]
+            .as_u64()
+            .is_some_and(|tick| tick >= TICK + 20),
+        "{denied}"
+    );
     assert!(!later.io.game.borrow().calls.contains(&"prepare"));
     assert!(
         later
@@ -1071,7 +1091,7 @@ fn lost_commit_reply_blocks_new_runs_and_sampling_until_original_reconciliation(
             .store
             .progress()
             .observations,
-        1
+        3
     );
     Ok(())
 }
@@ -1160,7 +1180,7 @@ fn absent_native_run_history_never_unlocks_construction_proof_or_another_run() -
             .store
             .progress()
             .observations,
-        1
+        3
     );
     Ok(())
 }
@@ -1317,46 +1337,222 @@ fn original_deadline_tick_budget_checkpoint_and_expiring_clock_grants_gate_new_i
     Ok(())
 }
 
-#[test]
-fn prospective_whole_plan_completion_refuses_unnecessary_clock_and_preserves_sample_count()
--> Result<()> {
-    let mut h = setup_clock(3)?;
-    // Establish the first real complete sample under the original monitor.
+fn publish_complete_goal_sample(h: &mut Harness) -> Result<()> {
     let c = h.state.context(false, None)?;
     clock::ensure_for_sample(&mut h.state, &c)?;
+    let tick = h.io.game.borrow().tick;
     let monitor = h.state.completion.as_mut().ok_or_else(missing_fixture)?;
-    let sample = linked_sample(monitor.store.definition(), TICK + 2, true)?;
+    let sample = linked_sample(monitor.store.definition(), tick, true)?;
     let mut admit = |_: &MonitorDefinition, _: &Progress| Ok(());
     let mut guard = |_: &Origin, _: &OperationContext| Ok(());
     monitor.store.begin_read(&c, &mut admit, &mut guard)?;
     monitor
         .store
         .publish_sample(&c, &sample, &mut admit, &mut guard)?;
-    assert_eq!(monitor.store.progress().phase, "candidate");
-    assert_eq!(monitor.store.progress().observations, 2);
-    h.io.game.borrow_mut().tick = TICK + 3;
-    h.io.complete = true;
-    let refused = h.prepare()?;
-    assert_eq!(refused["result"]["ok"], false, "{refused}");
-    assert!(!h.io.game.borrow().calls.contains(&"prepare"));
-    assert!(!h.io.game.borrow().calls.contains(&"commit"));
-    let progress = h
-        .state
-        .completion
-        .as_ref()
-        .ok_or_else(missing_fixture)?
-        .store
-        .progress();
-    assert_eq!(progress.observations, 2);
-    assert_ne!(progress.phase, "satisfied");
-    assert!(
-        h.state
-            .clock
+    Ok(())
+}
+
+#[test]
+fn whole_plan_stability_survives_two_real_clock_intervals_between_credited_samples() -> Result<()> {
+    for count in [2, 32] {
+        let mut h = setup_clock(count)?;
+        let original_id = h.id()?;
+        for interval in 0..3 {
+            if interval > 0 {
+                h.io.complete = true;
+            }
+            let before = h
+                .state
+                .completion
+                .as_ref()
+                .ok_or_else(missing_fixture)?
+                .store
+                .progress()
+                .observations;
+            let prepared = h.prepare()?;
+            assert_eq!(prepared["result"]["ok"], true, "{prepared}");
+            assert_eq!(prepared["result"]["goal_sample_published"], false);
+            assert_eq!(prepared["result"]["readiness_acquisition_retained"], true);
+            assert_eq!(
+                prepared["result"]["readiness_earns_stability_credit"],
+                false
+            );
+            let progress = h
+                .state
+                .completion
+                .as_ref()
+                .ok_or_else(missing_fixture)?
+                .store
+                .progress();
+            assert_eq!(progress.observations, before + 1);
+            assert_eq!(progress.streak, u32::from(interval > 0));
+            assert!(!progress.reading);
+            if interval > 0 {
+                assert_eq!(progress.first_tick, Some(TICK + 11));
+                assert_eq!(progress.counted_tick, Some(TICK + 11));
+            }
+            let committed = h.commit(h.seal()?)?;
+            assert_eq!(committed["result"]["ok"], true, "{committed}");
+            let progress = h
+                .state
+                .completion
+                .as_ref()
+                .ok_or_else(missing_fixture)?
+                .store
+                .progress();
+            assert_eq!(progress.observations, before + 2);
+            assert_eq!(progress.streak, u32::from(interval > 0));
+            h.io.game.borrow_mut().finish()?;
+            let settled = h.call(clock::Action::Wait(original_id))?;
+            assert_eq!(settled["result"]["ok"], true, "{settled}");
+            assert_eq!(settled["result"]["construction_clock"]["pending"], false);
+            if interval == 0 {
+                publish_complete_goal_sample(&mut h)?;
+                let progress = h
+                    .state
+                    .completion
+                    .as_ref()
+                    .ok_or_else(missing_fixture)?
+                    .store
+                    .progress();
+                assert_eq!(progress.phase, "candidate");
+                assert_eq!((progress.observations, progress.streak), (4, 1));
+            }
+        }
+        assert_eq!(h.io.game.borrow().tick, TICK + 31);
+        publish_complete_goal_sample(&mut h)?;
+        let progress = h
+            .state
+            .completion
             .as_ref()
             .ok_or_else(missing_fixture)?
-            .cached_view()
-            .pending
-    );
+            .store
+            .progress();
+        assert_eq!(progress.phase, "satisfied");
+        assert_eq!((progress.observations, progress.streak), (9, 2));
+        assert_eq!(progress.condition_met_count(), count);
+        assert_eq!(progress.first_tick, Some(TICK + 11));
+        assert_eq!(progress.counted_tick, Some(TICK + 31));
+        assert_eq!(h.id()?, original_id);
+        assert_eq!(h.io.acquisitions, 6);
+        assert_eq!(
+            h.io.game
+                .borrow()
+                .calls
+                .iter()
+                .filter(|&&call| call == "commit")
+                .count(),
+            3
+        );
+        assert_eq!(h.prepare()?["result"]["ok"], false);
+    }
+    Ok(())
+}
+
+#[test]
+fn final_original_acquisition_expires_before_prepare_or_commit_unpause() -> Result<()> {
+    for maximum in [2, 3] {
+        let mut h = setup_clock_with_observations(32, maximum)?;
+        let prepared = h.prepare()?;
+        let rejected = if maximum == 2 {
+            assert!(!h.io.game.borrow().calls.contains(&"prepare"));
+            prepared
+        } else {
+            assert_eq!(prepared["result"]["ok"], true, "{prepared}");
+            assert_eq!(
+                h.state
+                    .completion
+                    .as_ref()
+                    .ok_or_else(missing_fixture)?
+                    .store
+                    .progress()
+                    .observations,
+                2
+            );
+            h.commit(h.seal()?)?
+        };
+        assert_eq!(rejected["result"]["ok"], false, "{rejected}");
+        assert!(!h.io.game.borrow().calls.contains(&"commit"));
+        assert_eq!(h.io.acquisitions, (maximum - 1) as usize);
+        let monitor = h.state.completion.take().ok_or_else(missing_fixture)?;
+        assert_eq!(monitor.store.progress().phase, "expired");
+        assert_eq!(monitor.store.progress().reason, "sample_budget_exhausted");
+        assert_eq!(
+            (
+                monitor.store.progress().observations,
+                monitor.store.progress().streak
+            ),
+            (maximum, 0)
+        );
+        drop(monitor);
+        let c = h.state.context(false, None)?;
+        let reopened = open_private_monitor(
+            h.config
+                .completion_path
+                .as_ref()
+                .ok_or_else(missing_fixture)?,
+            &c,
+            BuildMode::Recover,
+            None,
+        )?;
+        assert_eq!(reopened.progress().phase, "expired");
+        assert_eq!(reopened.progress().observations, maximum);
+    }
+    Ok(())
+}
+
+#[test]
+fn readiness_persists_complete_negative_evidence_before_refusing_the_clock() -> Result<()> {
+    for source_change in [false, true] {
+        let mut h = setup_clock(32)?;
+        let definition = h
+            .state
+            .completion
+            .as_ref()
+            .ok_or_else(missing_fixture)?
+            .store
+            .definition()
+            .clone();
+        let mut sample = linked_sample(&definition, TICK + 1, false)?;
+        if source_change {
+            sample.operations.generation += 1;
+        } else {
+            let mut observed = LiveOperationsObservation::decode_profile(
+                &sample.capture,
+                sample.operations.generation,
+                sample.operations.df_version.clone(),
+                sample.operations.dfhack_version.clone(),
+                OperationsProfile::PagedV1_4,
+            )?;
+            observed.buildings.pop();
+            observed.items.pop();
+            observed.jobs.jobs.pop();
+            sample.capture = observed.encode_profile(OperationsProfile::PagedV1_4)?;
+        }
+        h.io.samples.push_back(sample);
+        let rejected = h.prepare()?;
+        assert_eq!(rejected["result"]["ok"], false, "{rejected}");
+        assert!(!h.io.game.borrow().calls.contains(&"prepare"));
+        assert!(!h.io.game.borrow().calls.contains(&"commit"));
+        let monitor = h.state.completion.take().ok_or_else(missing_fixture)?;
+        assert_eq!(monitor.store.progress().phase, "invalidated");
+        assert_eq!(monitor.store.progress().observations, 2);
+        let reason = monitor.store.progress().reason;
+        drop(monitor);
+        let c = h.state.context(false, None)?;
+        let reopened = open_private_monitor(
+            h.config
+                .completion_path
+                .as_ref()
+                .ok_or_else(missing_fixture)?,
+            &c,
+            BuildMode::Recover,
+            None,
+        )?;
+        assert_eq!(reopened.progress().phase, "invalidated");
+        assert_eq!(reopened.progress().reason, reason);
+        assert_eq!(reopened.progress().observations, 2);
+    }
     Ok(())
 }
 
@@ -1533,7 +1729,7 @@ fn unacknowledged_owned_result_withdraws_monitor_stability_and_clock_review_befo
     );
     let monitor = h.state.completion.as_ref().ok_or_else(missing_fixture)?;
     assert_eq!(monitor.store.progress().streak, 0);
-    assert_eq!(monitor.store.progress().observations, 2);
+    assert_eq!(monitor.store.progress().observations, 3);
     assert_eq!(monitor.store.definition().id(), original_id);
     assert_eq!(
         monitor.store.definition().goal().timing().deadline,

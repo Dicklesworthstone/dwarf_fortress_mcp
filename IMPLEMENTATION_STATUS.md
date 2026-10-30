@@ -44,6 +44,53 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable MCP furnishing run/sample cycles (2026-10-30)
+
+The whole-batch MCP clock now uses the durable readiness path introduced below.
+Preparation and commit each synchronize a monitor read intent, acquire the full
+original receipt-bracketed capture, and acknowledge it as readiness before the
+native effect. Guards prepay all original-custody reads, monitor replay,
+publication and decode work before synchronizing the clock's durable boundary.
+Each acknowledged capture consumes the original acquisition allowance and
+retains source, stage, allocation and tick floors. Clock reassessment uses a
+pure probe, so it cannot charge that acquisition twice or manufacture a credited
+completion result.
+
+Whole 2-target and 32-target scenarios now traverse real reviewed intervals
+between ordinary completion samples. Fully valid readiness preserves an
+existing shared streak across those intervals; pending, unknown, interrupted
+or contradictory evidence resets it or retains the appropriate terminal
+outcome. Ordinary goal samples remain the only source of positive proof credit.
+Original budgets of two or three acquisitions stop preparation or commit at
+the relevant boundary before unpause. Terminal negative readiness survives
+reopen rather than disappearing as an unjournaled preview.
+
+Opening a combined session now prepays and rechecks original placement and
+batch custody, unchanged monitor history and exact clock recovery after its
+last runtime callback, under the same absolute deadline. Clock response and
+recovery metadata retains the greatest consumed tick even when a later custody
+failure prevents the owner from accepting the capture. Final preparation
+publication still withdraws every live review seal on failure.
+
+**Evidence: 106 adapter tests and 60 MCP/AgentTurn component tests pass (166
+total).** The adapter view retains all production bodies and selected tests,
+disabling only 120 unrelated test-module declarations for the memory limit.
+The MCP view retains the complete public handler/native bodies and selected
+tests, with nonexecuted FastMCP/asupersync ambient stubs; four worker-runtime
+tests and the allocation-owner runtime module are excluded. All 278 adapter
+source/fixture inputs and all 761 MCP/dependency inputs match their tested
+snapshots. This proves component behavior and type compatibility against the
+stubs, not execution of the real ambient runtime.
+
+The required repository gates were attempted. `verify.sh` reaches the existing
+source-bundle documentation gate and fails because it omits the exact clean
+commit. Development-mode `qualify_local.sh` reaches 76 existing validation
+findings across 62 files; every named file is unchanged from the incoming
+`9c93fda` baseline. No release qualification receipt or native/live admission
+is claimed. The compatibility registry and production runner map are unchanged.
+The broader mutation-dispatch bead remains in progress. Operator instructions:
+[whole-batch clock through MCP](docs/FURNITURE_CONSTRUCTION_CLOCK_MCP.md).
+
 ### Durable construction readiness without positive proof credit (2026-10-30)
 
 The whole-furnishing monitor now has a separate readiness publication path for

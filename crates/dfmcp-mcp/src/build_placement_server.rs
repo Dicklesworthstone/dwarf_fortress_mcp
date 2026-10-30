@@ -281,6 +281,32 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
                     "fresh_goal_sampling_permitted":false,"retry_commit_permitted":false});
             }
         }
+        if let Some(clock) = result
+            .get_mut("construction_clock")
+            .filter(|v| v.is_object())
+        {
+            // A decoded readiness capture can raise the shared floor before a
+            // later original-custody failure prevents the clock owner seeing it.
+            // Every handoff, including an already-rendered history page, retains
+            // that consumed evidence without claiming a new successful sample.
+            let floor = self
+                .authority_tick
+                .max(self.control.high_tick())
+                .max(self.clock.as_ref().map_or(0, |owner| owner.high_tick()))
+                .max(
+                    self.completion
+                        .as_ref()
+                        .and_then(|monitor| monitor.store.progress().last_tick)
+                        .map_or(0, |tick| tick),
+                )
+                .max(
+                    clock
+                        .get("authority_tick_floor")
+                        .and_then(Value::as_u64)
+                        .map_or(0, |tick| tick),
+                );
+            clock["authority_tick_floor"] = json!(floor);
+        }
     }
     fn verify_batch(&mut self, c: &OperationContext, view: &BuildInventory) -> Result<()> {
         if let Some(parent) = &mut self.batch {
@@ -1304,6 +1330,114 @@ fn verify_clock_handoff<S: EffectJournalStorage, N: BuildSource>(
     state.disclosure_context(&current)?;
     Ok(())
 }
+
+/// Opening publishes one exact original inventory, monitor and clock together.
+/// These independent replays are prepaid before the clock file can be opened or
+/// initialized, and retain the opening request's original absolute deadline.
+struct OpeningPublication {
+    deadline: Instant,
+    source: OperationContext,
+    monitor: OperationContext,
+    clock: OperationContext,
+    monitor_head: Digest32,
+}
+impl OpeningPublication {
+    fn reserve<S: EffectJournalStorage, N: BuildSource>(
+        state: &State<S, N>,
+        c: &OperationContext,
+        work: &mut Work,
+        clock: OperationContext,
+    ) -> Result<Self> {
+        let monitor = state.completion.as_ref().ok_or_else(|| {
+            error(
+                ErrorCode::CorruptLedger,
+                "construction opening lost its original monitor",
+            )
+        })?;
+        let source = work.take(
+            c,
+            completion::source_reserve(monitor.store.definition().origin())?,
+        )?;
+        let bytes = (monitor.store.byte_len() as u64)
+            .checked_add(8192)
+            .ok_or_else(exhausted)?;
+        Ok(Self {
+            deadline: work.deadline,
+            source,
+            monitor: work.take(c, bytes)?,
+            clock,
+            monitor_head: monitor.store.head(),
+        })
+    }
+    fn current<S: EffectJournalStorage, N: BuildSource>(
+        &self,
+        state: &State<S, N>,
+        reserved: &OperationContext,
+    ) -> Result<OperationContext> {
+        let remaining: u64 = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(exhausted)?
+            .as_millis()
+            .try_into()
+            .map_err(|_| exhausted())?;
+        if remaining == 0 {
+            return Err(exhausted());
+        }
+        let mut current = reserved.clone();
+        current.budget.max_wall_millis = current.budget.max_wall_millis.min(remaining);
+        state.disclosure_context(&current)
+    }
+}
+fn finalize_opening_publication<S: EffectJournalStorage, N: BuildSource>(
+    state: &mut State<S, N>,
+    reservation: &OpeningPublication,
+    expected_clock: Option<dfmcp_adapter::construction_plan::clock::Recovery>,
+    checkpoint: impl FnOnce(&OperationContext) -> Result<()>,
+) -> Result<()> {
+    checkpoint(&reservation.current(state, &reservation.source)?)?;
+    let source = reservation.current(state, &reservation.source)?;
+    let monitor = state.completion.as_ref().ok_or_else(|| {
+        error(
+            ErrorCode::CorruptLedger,
+            "construction opening lost its original monitor",
+        )
+    })?;
+    let view = completion::verify_source(
+        &mut state.control,
+        &mut state.batch,
+        &state.binding,
+        monitor.store.definition().origin(),
+        (&monitor.parent, &monitor.child),
+        &source,
+    )?;
+    state.authority_tick = state.authority_tick.max(state.control.high_tick());
+    state.historical = Some(view);
+    let current = reservation.current(state, &reservation.monitor)?;
+    let monitor = state.completion.as_mut().ok_or_else(|| {
+        error(
+            ErrorCode::CorruptLedger,
+            "construction opening lost its original monitor",
+        )
+    })?;
+    monitor.store.verify(&current)?;
+    if monitor.store.head() != reservation.monitor_head {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "construction monitor changed at opening publication",
+        ));
+    }
+    let current = reservation.current(state, &reservation.clock)?;
+    clock::inspect(state, &current)?;
+    if state.clock_recovery != expected_clock {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "construction clock changed at opening publication",
+        ));
+    }
+    reservation.current(state, &reservation.clock)?;
+    Ok(())
+}
 fn session_id(raw: &str) -> Result<SessionId> {
     if raw.len() != 32
         || !raw
@@ -1516,10 +1650,10 @@ pub async fn fortress_open_session(
             let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
             add_clock_grants(&mut c, &config, runtime::clock_enabled()?);
             let mut work = Work::new(&c,control.started)?;
-            if config.clock.is_some() {
+            let mut opening_clock_replay = if config.clock.is_some() {
                 // Reserve the final replay before bootstrap or any storage work.
-                work.take(&c, clock::VIEW_BYTES)?;
-            }
+                Some(work.take(&c, clock::VIEW_BYTES)?)
+            } else { None };
             if config.completion_only {
                 if selection.is_some() || plan.is_some() || requested.is_some() {
                     return Err(error(ErrorCode::InvalidRequest, "completion recovery reopens only its retained original monitor"));
@@ -1642,6 +1776,7 @@ pub async fn fortress_open_session(
             let view = state.control.inventory(&work.view(&c)?)?;
             state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
             completion::reopen(&mut state, &config, &c, &mut work, &view)?;
+            let mut opening_publication = None;
             if let Some(selected) = config.clock.as_ref() {
                 use clock::ClockIo as _;
                 let monitor = state.completion.as_ref().ok_or_else(|| error(ErrorCode::InvalidRequest,
@@ -1651,6 +1786,8 @@ pub async fn fortress_open_session(
                     .ok_or_else(|| error(ErrorCode::InvalidRequest,
                         "construction clock requires one accepted original completion sample"))?.operations.clone();
                 c = state.disclosure_context(&c)?;
+                opening_publication = Some(OpeningPublication::reserve(&state, &c, &mut work,
+                    opening_clock_replay.take().ok_or_else(exhausted)?)?);
                 let opening = work.take(&c, clock::OPEN_BYTES)?;
                 let native = clock::native_context(&opening, &state.clock_grants)?;
                 let mut io = runtime::ClockIo { control: &control, config: &config,
@@ -1674,6 +1811,10 @@ pub async fn fortress_open_session(
                     return Ok(state.failed("fortress.open_session",Some(&c),&e));
                 }
             }
+            c = match state.disclosure_context(&c) {
+                Ok(current) => current,
+                Err(e) => return Ok(state.failed("fortress.open_session",Some(&c),&e)),
+            };
             state.worker_acknowledgement = Some(control.acknowledgement());
             let mut result = json!({"ok":true,"session_opened":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),"planning_observation_retained":false,
@@ -1683,14 +1824,15 @@ pub async fn fortress_open_session(
             if output.len() as u64>OUTPUT_BYTES {
                 return Ok(state.failed("fortress.open_session",Some(&c),&exhausted()));
             }
-            if let Err(e) = work.current(&c).and_then(|_| runtime::boundary(&control,&config,importing)) {
-                return Ok(state.failed("fortress.open_session",Some(&c),&e));
-            }
-            if config.clock.is_some() {
+            let finalized = if let Some(reservation) = opening_publication.as_ref() {
                 let expected = state.clock_recovery;
-                if let Err(e) = verify_clock_handoff(&mut state, &c, control.started, expected) {
-                    return Ok(state.failed("fortress.open_session",Some(&c),&e));
-                }
+                finalize_opening_publication(&mut state, reservation, expected,
+                    |_| work.current(&c).and_then(|_| runtime::boundary(&control,&config,importing)))
+            } else {
+                work.current(&c).and_then(|_| runtime::boundary(&control,&config,importing))
+            };
+            if let Err(e) = finalized {
+                return Ok(state.failed("fortress.open_session",Some(&c),&e));
             }
             *locked = Some(Entry::Placement{state,config});
             Ok(output)

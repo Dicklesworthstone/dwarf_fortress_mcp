@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-30 — Complete durable furnishing run/sample cycles through MCP
+
+- Wire both clock guards to durable whole-plan readiness with write-ahead read
+  intent, complete receipt-bracket acquisition and guarded acknowledgement.
+- Charge original acquisition limits once, preserve a valid existing streak
+  across reviewed finite intervals, and keep ordinary samples responsible for
+  positive construction proof.
+- Retain terminal negative readiness and source/stage/allocation floors through
+  restart; refuse preparation or unpause when the original budget expires.
+- Recheck placement, batch, monitor and clock histories after the final opening
+  callback under prepaid bounds and the original deadline. Preserve the highest
+  consumed tick in current and fallback clock metadata.
+- Pass 106 focused adapter tests and 60 MCP/AgentTurn component tests, including
+  whole 2/32-target multi-interval completion, tiny budgets, durable negatives,
+  and final opening corruption. MCP ambient runtime uses nonexecuted stubs;
+  full runtime/native/live qualification remains separate. Required repository
+  gates still stop on unchanged baseline documentation/validation findings.
+
 ## 2026-10-30 — Retain furnishing readiness without crediting completion
 
 - Add durable whole-plan readiness publication and replay using the original

@@ -206,12 +206,11 @@ impl Readiness {
         current.anchor.tick = GameTick(tick.max(current.anchor.tick.get()));
         current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         current.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-        // The original evaluator validates every immutable receipt, source,
-        // horizon, stage and shared stability predicate. This hypothetical
-        // observation is deliberately not returned as monitor progress.
-        let preview = super::advance(&progress.begin_read()?, goal, sample, &current)?;
-        if preview.phase == "satisfied"
-            || (preview.terminal() && preview.reason != "sample_budget_exhausted")
+        // The host accounts for this completed acquisition separately. Recheck
+        // every original predicate without charging another observation,
+        // adding positive stability credit, or projecting goal satisfaction.
+        let preview = super::readiness::probe(&progress.begin_read()?, goal, sample, &current)?;
+        if preview.terminal()
             || preview.assessments.len() != goal.records().len()
             || preview
                 .assessments
@@ -220,8 +219,8 @@ impl Readiness {
         {
             return Err(stale());
         }
-        // A hypothetical assessment must not consume the real monitor's last
-        // remaining sample. The actual subsequent publication owns that charge.
+        // The same probe accepts pre- or post-acknowledgement progress without
+        // consuming the final remaining acquisition a second time.
         let complete_count = preview.condition_met_count() as u32;
         let pending_count = goal.records().len() as u32 - complete_count;
         let capture = Digest32::of_bytes(&sample.capture);
