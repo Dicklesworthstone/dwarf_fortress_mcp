@@ -311,6 +311,7 @@ fn schema() -> Result<Value> {
     all.push(history::changes::series::schema()?);
     all.push(history::changes::monitor::schema()?);
     all.push(history::changes::job_progress::schema()?);
+    all.push(history::changes::citizen_welfare::schema()?);
     schema["$defs"]["query"]["oneOf"] = json!(all);
     Ok(schema)
 }

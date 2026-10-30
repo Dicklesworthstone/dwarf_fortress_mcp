@@ -745,7 +745,7 @@ fn finish(view: &QueryResponseProjection, v: Value) -> Result<String> {
 }
 #[tool(
     name = "fortress.query",
-    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. historical_job_progress compares exact archived job generations, assignments, holder stages and material attachments; disappearance does not prove completion. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
+    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. historical_job_progress compares exact archived job generations, assignments, holder stages and material attachments; disappearance does not prove completion. historical_citizen_welfare compares exact archived citizen categories, availability and observed status without proving raw stress, health or continuous trends. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -916,6 +916,7 @@ pub fn fortress_explain(session_id: Option<String>) -> String {
         "workforce":"query workforce_plan maximizes filled declared worker slots with one capacity per citizen; no labor assignment, reservation, native job eligibility or global distance/skill optimum is proved",
         "location_join":"citizens and jobs inside the captured region have observed located_at edges to physical tile entities; this is not path feasibility",
         "history":"optional fixed-profile spatial/1.8 archive; history and historical_query never import another profile or mutate current watches",
+        "citizen_welfare_history":"historical_citizen_welfare compares exact archived citizen generations and source-qualified stress categories, availability and status; category3 can be no-soul fallback, disappearance is not a cause, and no continuous/current wellbeing or physical health claim is made",
         "job_progress":"historical_job_progress compares two exact retained job endpoints with generation-qualified workers, holders and material attachments; unchanged indicators do not prove a stall and disappearance does not prove completion; inspect calls stay pinned to each original record",
         "unknown":["noncitizen unit details","complete native skill-key registry","needs","labor eligibility","full unit pathfinding","outside-region routes"]}),
             |v| packet(Some(s), Some(&c), "fortress.explain", v),

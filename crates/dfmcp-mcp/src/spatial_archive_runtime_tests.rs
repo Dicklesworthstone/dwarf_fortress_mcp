@@ -478,11 +478,12 @@ fn archive_schema_advertises_read_variants_including_job_progress() -> Result<()
     let variants = result["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .ok_or_else(|| error(ErrorCode::InvalidRequest, "schema variants"))?;
-    assert_eq!(variants.len(), 23);
+    assert_eq!(variants.len(), 24);
     for kind in [
         "historical_changes",
         "historical_series",
         "historical_job_progress",
+        "historical_citizen_welfare",
         "production_diagnosis",
         "inventory_plan",
         "item_quantity",

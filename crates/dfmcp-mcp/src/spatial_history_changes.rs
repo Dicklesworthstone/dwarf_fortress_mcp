@@ -7,12 +7,14 @@ use dfmcp_core::Digest32;
 use dfmcp_world::WorldSnapshot;
 use std::time::Instant;
 
+#[path = "spatial_citizen_welfare_progress.rs"]
+pub(in super::super) mod citizen_welfare;
+#[path = "spatial_job_progress.rs"]
+pub(in super::super) mod job_progress;
 #[path = "spatial_history_watch_replay.rs"]
 pub(in super::super) mod monitor;
 #[path = "spatial_history_series.rs"]
 pub(in super::super) mod series;
-#[path = "spatial_job_progress.rs"]
-pub(in super::super) mod job_progress;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +51,7 @@ pub(in super::super) fn handles(input: &Value) -> bool {
     monitor::handles(input)
         || series::handles(input)
         || job_progress::handles(input)
+        || citizen_welfare::handles(input)
         || input
             .get("query")
             .and_then(|q| q.get("kind"))
@@ -214,6 +217,9 @@ pub(in super::super) fn execute(
     }
     if job_progress::handles(input) {
         return job_progress::execute(session, context, input);
+    }
+    if citizen_welfare::handles(input) {
+        return citizen_welfare::execute(session, context, input);
     }
     let started = Instant::now();
     remaining(context, started)?;

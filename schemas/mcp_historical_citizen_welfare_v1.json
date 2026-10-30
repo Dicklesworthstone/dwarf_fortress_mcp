@@ -1,0 +1,117 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "from",
+    "to"
+  ],
+  "description": "Compare source-qualified citizen indicators at two exact retained spatial/1.8 records in the same observation epoch. Reports whole-roster stress categories, job availability and generation-qualified indicator changes. Category3 may be the native no-soul fallback; category movement does not measure raw stress or health. Roster disappearance does not prove death or migration. Two endpoints do not prove continuous trends or causes. Read-only; creates no capture, watch, baseline or effect.",
+  "properties": {
+    "kind": {
+      "const": "historical_citizen_welfare"
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "record_digest"
+      ],
+      "properties": {
+        "record": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "record_digest": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "record_digest"
+      ],
+      "properties": {
+        "record": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "record_digest": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "include_unchanged": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": true
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 128,
+      "default": 4
+    },
+    "continuation": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128,
+      "pattern": "^hcw1:[1-9][0-9]*:[0-9a-f]{64}$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      }
+    },
+    "max_work": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 4000000,
+      "default": 4000000
+    },
+    "citizen": {
+      "description": "Optional original citizen in the from record. Its generation must match the basis. Disappearance and a reused native ID remain separate from the original citizen; no replacement identity is substituted.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "entity_id",
+        "generation"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    }
+  }
+}

@@ -44,6 +44,38 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Historical citizen welfare comparison (2026-10-29)
+
+The existing spatial/citizen server exposes `historical_citizen_welfare` through
+`fortress.query`, including archive-only reopening. Two exact retained record
+digests identify the endpoints. A complete strict-roster scan reports stress
+categories and job availability before filtering or pagination; same-generation
+rows compare category movement, elevated-category crossings, availability and
+observed status flags. New, absent and replaced-generation identities stay
+separate. Each row carries runnable inspections of its exact archived citizen
+generation. The bounded cursor binds the current session/authority anchor,
+archive identity/head, both endpoints, selection and work allowance.
+
+All evidence remains historical and source-qualified. Category 3 may be the
+native no-soul fallback; the comparison does not measure raw stress, physical
+health, needs, causes or continuous trends. Leaving the strict roster does not
+prove death or migration. Missing or mismatched native fields remain
+unestablished. Queries neither acquire native state nor append journals,
+advance durable watches, grant mutation authority or confer admission.
+
+All 14 focused tests pass: nine model tests, four actual archive/live-handler
+fixtures and one schema catalog case, with 421 compiler input hashes unchanged
+across the final run. They cover
+exact-record inspection, pagination, authority/anchor rejection, complete
+summaries and unchanged journal/watch state. The minimal harness compiles the
+repository's core, world, intent and adapter source plus spatial handlers and
+Agent Turn code. Its source view omits only FastMCP imports/attributes/stdio
+and the unrelated process-admission loader; handler and model bodies are
+unchanged. External dependencies retain the exact repository serde/JSON pins.
+This is component evidence, not a qualified FastMCP executable, native build,
+live campaign or release. Operator examples and the query contract are in
+`docs/HISTORICAL_CITIZEN_WELFARE.md`.
+
 ### Mining review windows and interrupted proof (2026-10-28)
 
 The original-mining runtime now permits human review between foreground requests

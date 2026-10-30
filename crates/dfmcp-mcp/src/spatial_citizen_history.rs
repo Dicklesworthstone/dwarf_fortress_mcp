@@ -503,6 +503,7 @@ pub(super) fn schema() -> Result<Value> {
     variants.push(changes::series::schema()?);
     variants.push(changes::monitor::schema()?);
     variants.push(changes::job_progress::schema()?);
+    variants.push(changes::citizen_welfare::schema()?);
     Ok(schema)
 }
 

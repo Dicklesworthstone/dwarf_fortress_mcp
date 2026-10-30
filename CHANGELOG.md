@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-29 — Compare historical citizen welfare through MCP
+
+- Add `historical_citizen_welfare` to the existing spatial query surface, joining
+  two exact retained citizen observations by canonical identity and generation.
+- Report complete endpoint stress-category and job-availability distributions,
+  category movement, elevated-category crossings and observed status changes,
+  with bounded pages and runnable exact-record citizen inspections.
+- Bind continuations to the session, archive head, endpoints, selection and work
+  allowance. Preserve unknown evidence, new/absent citizens and replaced
+  generations; never infer health, causes, raw stress or continuous trends.
+- Pass all 13 focused actual-source model/archive-handler tests and the schema
+  catalog regression (14 cases in total).
+  Historical queries perform no native capture, journal write or watch advancement.
+  Full FastMCP transport/native/live qualification and admission remain unverified.
+
 ## 2026-10-28 — Preserve mining review and proof across foreground failures
 
 - Give newer trusted requests bounded wall windows on the original preparation

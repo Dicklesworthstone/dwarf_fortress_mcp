@@ -120,3 +120,9 @@ and pinned historical drilldowns. Additional situation tests cover stress priori
 inputs and endpoint comparisons; runtime tests cover the live convenience mode and exact-record
 historical/archive dispatch. This is read-side validation, not a live-fortress or native admission
 certificate.
+
+## Compare two retained observations
+
+Use `historical_citizen_welfare` for exact endpoint category, availability and
+status comparisons with whole-roster summaries and generation-bound drilldowns.
+See [historical citizen welfare](HISTORICAL_CITIZEN_WELFARE.md).

@@ -2,6 +2,8 @@
 //! exclusively owned test files, rather than competing for global session slots.
 use super::*;
 
+#[path = "spatial_citizen_welfare_progress_tests.rs"]
+mod citizen_welfare;
 #[path = "spatial_job_progress_tests.rs"]
 mod job_progress;
 
