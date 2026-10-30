@@ -44,6 +44,58 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Sparse mining projects through the eleven MCP tools (2026-10-30)
+
+The existing dig-control development server now composes the retained Rust
+blueprint parent with actual one-attempt native mining. A closed original floor
+blueprint publishes its full shape, source, journal and deterministic keys.
+Every next region requires a fresh observation and its own paired review;
+parent identity, stop state, native prefix/head, exact plan and current policy
+are rechecked at the effect boundaries, including after the dispatch marker.
+Unknown, refused or cancelled predecessors block advancement. Gaps and levels
+remain exact; no blanket bounding-box designation or multi-child commit occurs.
+
+Complete original-prefix inventory is paged under both native and parent head
+pins. Canonical layout export, exact offline/reconcile/control reopening and a
+permanent parent stop are available through existing tools. Current native
+Query/Cancel recovery remains usable when the parent is stopped or damaged.
+Error, overflow, close and post-action runtime failure preserve historical
+project/native identities without restoring a review or dispatch permit.
+Agent Turns expose next/pending original work and structured review/recovery
+steps. Historical `all_designated` is explicitly not excavation completion.
+
+Control reopen verifies one fresh exact-source clock/sequence before issuing a
+new lease, retaining both monotonic floors while discarding the observation
+connection and selection. Offline/reconcile opening remains source-free.
+Known initialization authority/checkpoint/budget failures are refused before
+creating the native journal. Unpredictable cross-file failures retain evidence
+without repair; parent/native publication is not an atomic transaction.
+
+All 79 focused tests on the final feature source pass: 31 MCP handler/configuration
+cases, 30 adapter model/store cases and 18 mining-session regressions. Coverage
+includes sparse three-region execution, all 128 original records, lost replies,
+post-marker parent corruption, durable stop, reopen after 2,000 ticks and native
+sequence rewind. Final 393 MCP and 381 adapter compiler/source hashes remain
+unchanged. The earlier core checkpoint also passed 27 adjacent regressions.
+MCP compilation is warning-free; the adapter retains one preexisting unrelated
+workforce-test import warning. JSON Schema checks pass 39 valid/145 invalid cases.
+Changed Rust files pass rustfmt.
+
+Required verification passes its first four checks, then reaches the unchanged
+source-bundle wording gate. Development static qualification reports the same
+76 baseline findings across 6,346 checks, with all 62 implicated files unchanged.
+Full locked/offline metadata cannot resolve the unavailable exact FastMCP git
+checkout in this environment. The dirty development failure receipt is not a
+release qualification result.
+
+The focused temporary workspaces compile original handler/adapter bodies but
+exclude FastMCP macro/stdio/public async wrappers and ambient runtime ownership.
+This is component evidence, not full Rust qualification, native/live evidence
+or compatibility admission. The native wire, production protocol map and sealed
+recovery-only server are unchanged. Generic mixed-action execution, multi-region
+original-goal excavation proof and verified game checkpoint/restore remain open.
+See `docs/DIG_BLUEPRINT_MCP.md`; the broad live-dispatch bead stays in progress.
+
 ### Durable sparse mining blueprint core (2026-10-29)
 
 The Rust adapter now retains one complete sparse floor blueprint, its exact
@@ -72,7 +124,7 @@ The sole warning is an unchanged unrelated workforce-test import. The temporary
 workspace uses original core/world/intent/adapter source with minimal manifests;
 this is component evidence, not full Rust qualification, FastMCP compilation,
 a native DFHack build, live-fortress evidence or compatibility admission.
-MCP project orchestration is the next integration increment. Existing original
+MCP project orchestration follows in the increment above. Existing original
 single-region semantics, native wire and production admission are unchanged.
 
 ### Finite advancement of original mining goals (2026-10-30)

@@ -8,7 +8,7 @@ use dfmcp_adapter::dig_control_policy::{DigCheckpointPolicy, DigControlPolicy};
 use dfmcp_adapter::dig_designation::journal::session::DigSessionView;
 use dfmcp_adapter::dig_designation::journal::{DigBinding, DigRecord, DigSummary};
 use dfmcp_adapter::dig_designation::{DigBlocker, DigObservation, DigReason, DigTile};
-use dfmcp_core::{Digest32, ErrorCode, MapCuboid, OperationContext, Result};
+use dfmcp_core::{Capability, Digest32, ErrorCode, MapCuboid, OperationContext, Result, RiskTier};
 use serde_json::{Value, json};
 
 pub const OUTPUT_BYTES: u64 = 32768;
@@ -121,6 +121,31 @@ pub fn failure(e: &dfmcp_core::DfmcpError) -> Value {
     "retry_commit_permitted":false,"effect_outcome_inferred":false,
     "recovery":"Inspect the original key and journal; do not reprepare or create another key to bypass uncertainty."})
 }
+/// Keep bounded original identities if a final runtime check fails after work.
+/// A prior packet is historical evidence, never a fresh inventory or review.
+pub(super) fn retained_handoff(raw: &str) -> Option<Value> {
+    if raw.len() as u64 > OUTPUT_BYTES {
+        return None;
+    }
+    let packet: Value = serde_json::from_str(raw).ok()?;
+    let active = &packet["agent_turn"]["active_work"];
+    let result = &packet["result"];
+    let record = ["effect", "plan", "record"].iter().find_map(|field| {
+        let value = &result[*field];
+        value["idempotency_key"].is_string().then(|| {
+            json!({
+                "idempotency_key":value["idempotency_key"],"plan_digest":value["plan_digest"],
+                "state":value["state"],"native":value["native"]
+            })
+        })
+    });
+    Some(
+        json!({"inventory_verified":false,"historical_evidence_only":true,
+        "journal":active["counts"],"pending_plans":active["pending_plans"],
+        "recovery":active["recovery"],"record":record,"operation":result["operation"],
+        "retry_commit_permitted":false,"dispatch_authorized":false}),
+    )
+}
 pub fn packet(
     op: &str,
     result: Value,
@@ -147,6 +172,20 @@ pub fn packet(
                 "idempotency_key":p.key,"plan_digest":p.plan_digest.to_string()}});
         }
     }
+    let blueprint = result.get("blueprint").filter(|v| v.is_object());
+    let blueprint_verified = blueprint.is_some_and(|p| p["inventory_verified"] == true);
+    if let Some(parent) = blueprint {
+        active["scope"] = json!("this_blueprint_and_original_dig_journal");
+        active["blueprint"] = json!({
+            "blueprint_id":parent["blueprint_id"],"journal_id":parent["journal_id"],
+            "recovery":parent["recovery"],"layout_digest":parent["layout_digest"],
+            "inventory_verified":blueprint_verified,"status":parent["status"],
+            "total":parent["total"],"designated":parent["designated"],"next":parent["next"],
+            "pending_step":parent["pending_step"],"stopped":parent["stopped"],
+            "creation_pending":parent["creation_pending"],"advancement_fenced":parent["advancement_fenced"],
+            "excavation_completion_proven":false,"reopening_restores_dispatch_permission":false
+        });
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -161,7 +200,9 @@ pub fn packet(
             "mutation_admissible":false,"development_policy":control_policy.map(policy),
             "current_terrain_proven":false,"excavation_completion_proven":false}))
         .active_work(active)
-        .coverage(json!({"status":"partial","complete_domains":if view.is_some(){json!(["this_journal_coordination_inventory"])}else{json!([])},
+        .coverage(json!({"status":"partial","complete_domains":if view.is_some() && blueprint_verified {
+                json!(["this_journal_coordination_inventory","this_blueprint_original_prefix"])
+            }else if view.is_some(){json!(["this_journal_coordination_inventory"])}else{json!([])},
             "partial_domains":["bounded_mining_evidence"],"omitted_domains":["excavation_completion","structural_safety","other_controllers","game_checkpoint"]}))
         .uncertainty(vec![uncertainty("mining-not-excavation","unknown",
             "Designation proof is historical configuration, not excavation completion or structural safety.",
@@ -172,9 +213,86 @@ pub fn packet(
             "max_bytes":c.budget.max_bytes,"max_output_tokens":c.budget.max_output_tokens,"max_game_ticks":0,"max_actions":1});
         budget["reserved_output_bytes"] = json!(OUTPUT_BYTES);
         budget["accounting"] = json!("conservative_byte_reservations_not_measured_tokens");
-        builder=builder.session_id(c.session_id.to_string()).request_id(c.request_id.to_string()).budget(budget)
-            .recommendations(vec![recommendation("discover-mining","fortress.query","Inspect retained mining obligations before new work.",
-                "high","high","read_only","not_applicable",false,json!({"session_id":c.session_id.to_string(),"query":"{\"mode\":\"records\",\"limit\":8}"}))]);
+        let mut next = vec![];
+        if let Some(pending) = view.and_then(|v| v.pending.as_ref()) {
+            if let Some(seal) = review {
+                next.push(recommendation("confirm-original-mining","fortress.commit",
+                    "Confirm this exact process-local review for the original pending region.",
+                    "high","high","guarded","not_reversible",true,
+                    json!({"session_id":c.session_id.to_string(),"idempotency_key":pending.key,
+                        "plan_digest":pending.plan_digest.to_string(),"review_seal":seal.to_string()})));
+            } else {
+                next.push(recommendation("recover-original-mining","fortress.explain",
+                    "Inspect the exact original pending operation before reconciliation; never retry its commit.",
+                    "high","high","read_only","not_applicable",false,
+                    json!({"session_id":c.session_id.to_string(),"idempotency_key":pending.key,
+                        "plan_digest":pending.plan_digest.to_string()})));
+            }
+        } else if let Some(parent) =
+            blueprint.filter(|p| p["inventory_verified"] == true && p["status"] == "ready")
+        {
+            let permitted = binding.is_some_and(|b| {
+                c.authorize(Capability::Plan, RiskTier::Guarded, &[], Some(b.scope()))
+                    .is_ok()
+                    && c.authorize(
+                        Capability::Designate,
+                        RiskTier::Guarded,
+                        &[],
+                        Some(b.scope()),
+                    )
+                    .is_ok()
+                    && c.authorize(
+                        Capability::Observe,
+                        RiskTier::ReadOnly,
+                        &[],
+                        Some(b.scope()),
+                    )
+                    .is_ok()
+            });
+            if permitted {
+                let child = &parent["next"];
+                let capture = result.get("observation").filter(|o| {
+                    o["region"] == child["region"]
+                        && o["witness"].is_string()
+                        && o["blockers_without_hidden_acknowledgement"]
+                            .as_array()
+                            .is_some_and(Vec::is_empty)
+                });
+                if let Some(capture) = capture {
+                    next.push(recommendation("review-next-blueprint-region","fortress.plan",
+                        "Prepare a review for the next original region using its fresh selected observation.",
+                        "high","high","guarded","not_applicable",false,
+                        json!({"session_id":c.session_id.to_string(),"idempotency_key":child["idempotency_key"],
+                            "observation_witness":capture["witness"],"allow_hidden_neighbors":false})));
+                } else {
+                    next.push(recommendation("observe-next-blueprint-region","fortress.observe",
+                        "Read the next original region before preparing its separate review.",
+                        "high","high","read_only","not_applicable",false,
+                        json!({"session_id":c.session_id.to_string(),"region":child["region"].to_string()})));
+                }
+            }
+        }
+        let query = if let Some(parent) = blueprint.filter(|p| p["blueprint_id"].is_string()) {
+            json!({"mode":"blueprint","blueprint_id":parent["blueprint_id"],"offset":0,"limit":8})
+        } else {
+            json!({"mode":"records","limit":8})
+        };
+        next.push(recommendation(
+            "discover-mining",
+            "fortress.query",
+            "Inspect retained mining obligations before new work.",
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"session_id":c.session_id.to_string(),"query":query.to_string()}),
+        ));
+        builder = builder
+            .session_id(c.session_id.to_string())
+            .request_id(c.request_id.to_string())
+            .budget(budget)
+            .recommendations(next);
     }
     if let (Some(b), Some(v)) = (binding, view) {
         builder=builder.anchor(json!({"fortress_id":b.fortress_id().to_string(),"epoch":b.manifest().generation,

@@ -478,6 +478,34 @@ Checks bridge, compatibility, canonical state, ledger, active work, leases, chec
 replay, and presentation continuity. May propose a sealed repair plan but does not silently apply
 it.
 
+## Sparse mining project development profile
+
+With operator `DFMCP_DIG_BLUEPRINT_CONFIG`, the existing
+`dfmcp-dig-control-dev-server` retains one original sparse floor blueprint and
+its complete native dig/1.16 prefix. The frozen eleven tool names remain:
+
+- `open_session` adds `mode="control"|"offline"|"reconcile"` for exact retained
+  projects. Offline/reconcile opening makes no native call. Control reopening
+  takes a fresh exact-source clock/sequence read before issuing its new lease,
+  retaining neither that selection nor an old dispatch permit.
+- `plan(blueprint=<closed JSON string>)` publishes the original bounded shape.
+  Individual regions use the existing full key/witness/hidden-choice request,
+  followed by their exact paired review confirmation through `commit`.
+- `query` adds `blueprint` (complete-prefix-verified pages) and
+  `blueprint_layout` (canonical original geometry) to `dig-control-query/1`.
+  Continuation queries bind both native and parent heads.
+- `cancel(scope="blueprint", blueprint_id=...)` permanently stops future
+  advancement. Exact original native query/retirement remain available.
+
+At most one native commit is attempted per request. Every next region requires
+a fresh capture and separate review; unresolved/refused/cancelled predecessors
+cannot be skipped. Agent Turns retain the original project, next or pending
+child and recovery pins. `all_designated` certifies historical designation
+receipts only, with excavation completion explicitly unproven. The separate
+single-original-Mine goal/clock profile is not widened into a multi-step goal.
+See `docs/DIG_BLUEPRINT_MCP.md` for bounds, operator setup, exact recovery and
+component-test limitations. No production admission or native wire is changed.
+
 ## Common mutation state
 
 ```text

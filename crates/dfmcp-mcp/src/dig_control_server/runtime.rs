@@ -15,7 +15,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
-const NAMES: [&str; 10] = [
+const NAMES: [&str; 11] = [
     "DFMCP_ALLOW_UNADMITTED_DIG_CONTROL_V1_16",
     "DFMCP_DIG_WORLD_FOLDER",
     "DFMCP_DIG_SITE_ID",
@@ -26,6 +26,7 @@ const NAMES: [&str; 10] = [
     "DFMCP_DIG_ALLOW_DESIGNATE",
     "DFMCP_DIG_CHECKPOINT_POLICY",
     "DFMCP_DIG_PROTECTED",
+    "DFMCP_DIG_BLUEPRINT_CONFIG",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -42,6 +43,7 @@ pub(super) struct Config {
     pub endpoint: SocketAddr,
     pub protected: Vec<MapCuboid>,
     pub checkpoint: DigCheckpointPolicy,
+    pub blueprint: Option<super::batch::Config>,
 }
 impl Config {
     pub fn fortress(&self) -> dfmcp_core::FortressId {
@@ -151,6 +153,7 @@ fn configured(
         endpoint,
         protected,
         checkpoint,
+        blueprint: None,
     })
 }
 fn isolated(opt: &str, names: impl IntoIterator<Item = String>, admitted: bool) -> Result<()> {
@@ -178,7 +181,7 @@ pub(super) fn configuration() -> Result<Config> {
     enabled()?;
     let endpoint =
         optional("DFMCP_DIG_ENDPOINT")?.map_or_else(|| "127.0.0.1:5000".to_owned(), |v| v);
-    configured(
+    let mut config = configured(
         value("DFMCP_DIG_WORLD_FOLDER", 512)?,
         value("DFMCP_DIG_SITE_ID", 10)?,
         value("DFMCP_DIG_SCOPE", 128)?,
@@ -186,7 +189,19 @@ pub(super) fn configuration() -> Result<Config> {
         endpoint,
         optional("DFMCP_DIG_PROTECTED")?.as_deref(),
         optional("DFMCP_DIG_CHECKPOINT_POLICY")?.as_deref(),
-    )
+    )?;
+    config.blueprint = optional("DFMCP_DIG_BLUEPRINT_CONFIG")?
+        .as_deref()
+        .map(super::batch::Config::parse)
+        .transpose()?;
+    if config
+        .blueprint
+        .as_ref()
+        .is_some_and(|b| b.path == config.path)
+    {
+        return Err(denied());
+    }
+    Ok(config)
 }
 
 pub(super) struct RequestControl {

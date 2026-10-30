@@ -216,6 +216,18 @@ profile with explicit operator configuration and a pre-seal disposable-fortress
 checkpoint exception. See the [mining workflow](docs/SEMANTIC_DIG_DEVELOPMENT.md)
 for setup and exact recovery.
 
+### Sparse mining projects
+
+The `dfmcp-dig-control-dev-server` also executes retained floor blueprints with
+multiple rooms, corridors and levels. It partitions exactly the selected tiles
+into bounded native regions, keeps their original keys and receipts, and exposes
+one fresh review and confirmed designation at a time through the eleven tools.
+Unknown, refused or cancelled work blocks later regions. Complete project
+inspection, exact offline/reconcile/control reopening and permanent stopping
+preserve the original history; designation remains separate from excavation
+completion. See the [MCP blueprint workflow](docs/DIG_BLUEPRINT_MCP.md) for this
+unadmitted development profile and its limits.
+
 ### Durable whole-room readiness
 
 The development room workflow can monitor every original floor, required wall

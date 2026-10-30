@@ -182,6 +182,7 @@ impl Harness {
             endpoint: "127.0.0.1:5000".parse().map_err(|_| exhausted())?,
             protected: vec![],
             checkpoint,
+            blueprint: None,
         };
         let binding = DigBinding::new(
             config.endpoint,
@@ -595,6 +596,7 @@ fn reopened_prepared_journal_cannot_reconstruct_review_or_native_permission() ->
         endpoint: h.state.binding.endpoint(),
         protected: vec![],
         checkpoint: DigCheckpointPolicy::DisposableFortress,
+        blueprint: None,
     };
     let journal = DigJournal::open(
         h.runtime.memory.clone(),

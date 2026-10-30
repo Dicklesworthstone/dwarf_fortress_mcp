@@ -6,14 +6,19 @@ It supplies observation, preparation, explicitly confirmed one-attempt commit,
 query-only reconciliation and native preparation retirement. This is separate
 from `dfmcp-dig-recovery-dev-server`, whose Query-only restrictions are unchanged.
 
-**This is source-present development functionality, not a qualified live runtime.**
-The Rust implementation and its tests have not been compiled or executed here.
+**This is development functionality, not a qualified live runtime.**
+Focused actual-source Rust handler and adapter tests now pass; the full
+FastMCP/runtime/native qualification boundary remains unverified (details below).
 There is no production admission, real game-checkpoint creation, restore,
 structural-safety proof, global controller fence or excavation-completion claim.
 
+The optional [sparse blueprint workflow](DIG_BLUEPRINT_MCP.md) retains complete
+multi-region projects, reviews one original child at a time, and adds exact
+offline/reconcile/control reopening plus permanent project stopping.
+
 ## Operator configuration and checkpoint policy
 
-The runtime accepts exactly these ten DFMCP environment names:
+The runtime accepts exactly these eleven DFMCP environment names:
 
 | Name | Meaning |
 |---|---|
@@ -27,6 +32,7 @@ The runtime accepts exactly these ten DFMCP environment names:
 | `DFMCP_DIG_ALLOW_DESIGNATE` | Absent disables new designation/native retirement; exact `1` enables consideration under all other policy checks. |
 | `DFMCP_DIG_CHECKPOINT_POLICY` | Absent or `required` requires an unavailable verified game checkpoint. Only `disposable-fortress-no-checkpoint` selects the explicit development exception. |
 | `DFMCP_DIG_PROTECTED` | Optional array of up to 32 cuboids in the same six-coordinate format; default `[]`. |
+| `DFMCP_DIG_BLUEPRINT_CONFIG` | Optional closed JSON with an operator-owned parent path and exact initialization or recovery identity; see the blueprint workflow. |
 
 Other DFMCP profile variables, recovery-profile switches, production admission
 state, noncanonical enablement and malformed configuration fail closed. Paths,
@@ -138,13 +144,15 @@ Query-only historical inspection and outcome recovery do not need Designate.
 
 ## Discovery, output and close
 
-`fortress.query` takes a closed JSON string with one of four modes:
+`fortress.query` takes a closed JSON string with one of six modes:
 
 ```json
 {"mode":"records","limit":8}
 {"mode":"selection_tiles","witness":"<exact 64-character lowercase digest>","offset":0,"limit":16}
 {"mode":"plan_tiles","idempotency_key":"dig-001","plan_digest":"<exact digest>","offset":0,"limit":16}
 {"mode":"schema"}
+{"mode":"blueprint","blueprint_id":"<original id>","offset":0,"limit":8}
+{"mode":"blueprint_layout","blueprint_id":"<original id>"}
 ```
 
 Records use 1..8 whole rows and bounded opaque continuations bound to the exact
@@ -176,15 +184,24 @@ remain explicit refusals: a coordinator journal is not a game save.
 
 ## Evidence and remaining qualification
 
-The policy increment adds three core lease and seven adapter-policy tests.
-This MCP increment adds seventeen actual-handler tests and five runtime/configuration
-tests, for 32 newly registered Rust tests across both increments. They cover the
-owned lifecycle, one-attempt dispatch, lost replies, restart, exact review,
-current grant/lease/runtime revocation, protected shared blocks, terminal-sync
-failure, absorbing Unknown, source-free history and complete response bounds.
-**All 32 Rust tests are uncompiled and unexecuted in this editing environment.**
+The final blueprint integration passes 31 focused actual-source MCP tests:
+17 existing handlers, three existing configuration cases and 11 new project
+cases. The final changed adapter passes 30 blueprint model/store cases and
+18 mining-session regressions, for 79 tests on the final feature source.
+The earlier core checkpoint also passed three private-file and 24 furniture
+batch regressions. Tests cover sparse target preservation, one-attempt dispatch,
+lost replies, exact restart, current grants and leases, protected shared blocks,
+128-child history, damaged parent custody, permanent Unknown and complete output.
+Clock tests reopen after 2,000 elapsed ticks and reject same-tick sequence rewind.
 
-The executed Python query-schema checker passes 28 valid and 102 invalid cases.
+These runs compile original source through temporary minimal dependency
+manifests. They exclude FastMCP annotations/stdio, public async wrappers and
+ambient runtime scheduling/connect boundaries, including the two runtime-owner
+tests. No handler logic is replaced. The MCP compile is warning-free; the adapter
+has one unchanged unrelated workforce-test import warning. This component
+evidence is not full Rust qualification.
+
+The executed Python query-schema checker passes 39 valid and 145 invalid cases.
 It validates the published JSON Schema only, not Rust parsing, stateful cursors,
 MCP routing, runtime scheduling, receipt handling or native I/O. Mathematical JSON
 Schema integer semantics do not establish Rust lexical-number or duplicate-field
@@ -198,7 +215,7 @@ python3 scripts/test_dig_control_query_schema.py
 ```
 
 The real DFHack SDK/plugin, generated protobuf runtime, disposable-fort lifecycle,
-MCP stdio, power-loss durability, Rust/Clippy/rustfmt and full repository qualification
-remain unverified. No dependency, native-wire, production runner or recovery-only
+MCP stdio, power-loss durability and full repository Rust/Clippy/rustdoc qualification
+remain unverified. Changed Rust files pass rustfmt. No dependency, native-wire, production runner or recovery-only
 profile is changed. Actual verified game checkpoints/restore, globally coordinated
 controller ownership, and observed excavation-completion obligations remain missing.

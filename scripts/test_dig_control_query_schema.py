@@ -32,6 +32,14 @@ def cases() -> tuple[list[dict], list[object]]:
     for key in ("a", "x" * 128, "a._-Z09"):
         valid.append({**examples[2], "idempotency_key": key})
 
+    blueprint = {"mode": "blueprint", "blueprint_id": digest}
+    definition = {"mode": "blueprint_layout", "blueprint_id": digest}
+    valid += [blueprint, definition]
+    for offset in (0, 7, 127):
+        for limit in (1, 8, 16):
+            valid.append({**blueprint, "offset": offset, "limit": limit,
+                          "expected_head": digest, "expected_parent_head": digest})
+
     invalid: list[object] = [None, True, [], "records", {}, {"mode": "commit"}]
     for example in examples:
         invalid.append({**example, "command": "not-accepted"})
@@ -50,6 +58,18 @@ def cases() -> tuple[list[dict], list[object]]:
     for key in (None, 1, "", "x" * 129, "with space", "a/b", "a\n", "a\r", "é", "\x00"):
         invalid.append({**examples[2], "idempotency_key": key})
     invalid.append({k: v for k, v in examples[2].items() if k != "idempotency_key"})
+    for example in (blueprint, definition):
+        invalid += [{**example, "command": "mine"}, {"mode": example["mode"]}]
+        for value in (None, True, 1, "", "A" * 64, "a" * 63, digest + "\n"):
+            invalid.append({**example, "blueprint_id": value})
+    for field in ("expected_head", "expected_parent_head"):
+        for value in (None, True, 1, "", "g" * 64, digest + "\n"):
+            invalid.append({**blueprint, field: value})
+    for offset in (None, True, -1, 128, "0", 0.5):
+        invalid.append({**blueprint, "offset": offset})
+    for limit in (None, False, 0, 17, "1", 1.5):
+        invalid.append({**blueprint, "limit": limit})
+    invalid.append({**definition, "offset": 0})
     return valid, invalid
 
 

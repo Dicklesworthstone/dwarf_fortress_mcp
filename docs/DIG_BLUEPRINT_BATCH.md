@@ -224,5 +224,9 @@ again at actual child effect boundaries.
 This core checkpoint passes 30 new tests and 45 adjacent regression tests,
 including all 4095 nonempty 4x3 masks, independent Python digest vectors, the
 128-child maximum, corruption/torn-history failures and actual Linux file
-custody. MCP integration is a separate increment; no native/live admission or
-full-workspace qualification is claimed.
+custody. The [MCP integration](DIG_BLUEPRINT_MCP.md) now exposes this retained
+parent through the existing dig-control server, with individual child reviews,
+complete progress, exact restart and permanent stopping. Its later final-source
+run passes 31 MCP handler/configuration cases plus these 30 core cases and
+18 mining-session regressions. No native/live admission or full-workspace
+qualification is claimed.

@@ -113,6 +113,37 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
         self.journal.fresh_key = None;
     }
 
+    /// Retain monotonic read floors from an independently verified observation.
+    /// This only tightens subsequent reads: it discards all ephemeral authority
+    /// and never supplies a selection, connection or native dispatch permit.
+    pub fn retain_read_floor(
+        &mut self,
+        capture: &DigObservation,
+        context: &OperationContext,
+    ) -> Result<()> {
+        self.abandon_preparation();
+        let current = self.current(context)?;
+        self.binding().capture(capture)?;
+        if capture.tick() < current.anchor.tick.get() || capture.sequence() < self.high_sequence {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "dig read floor regressed behind retained evidence",
+            ));
+        }
+        authorize(
+            &current,
+            self.binding().fortress_id(),
+            capture.tick(),
+            capture.region(),
+            true,
+            false,
+            false,
+        )?;
+        self.high_tick = capture.tick();
+        self.high_sequence = capture.sequence();
+        Ok(())
+    }
+
     fn current(&self, context: &OperationContext) -> Result<OperationContext> {
         let mut current = context.clone();
         current.anchor.tick = GameTick(self.high_tick.max(context.anchor.tick.get()));

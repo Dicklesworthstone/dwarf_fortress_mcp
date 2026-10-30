@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-30 — Execute retained sparse mining projects through MCP
+
+- Join complete original floor blueprints to the existing one-attempt native
+  coordinator through the frozen eleven tools. Fresh observations and distinct
+  paired reviews advance only the exact next child after a verified prefix.
+- Expose complete head-pinned progress pages, canonical layout export, exact
+  offline/reconcile/control restart and permanent stopping. Preserve original
+  native query/cancel recovery through damaged or stopped parent custody.
+- Retain current source tick and sequence on Control reopen before issuing a
+  new lease; reject expiry/rewind and restore no preparation permit. Preflight
+  predictable initialization refusals before exclusive native file creation.
+- Preserve project and native identities through error/overflow/close/final
+  runtime failures, and expose actionable next/pending work in Agent Turns.
+- Pass 79 focused final-source Rust tests and 39 valid/145 invalid JSON Schema
+  cases. Full FastMCP/native/live and release qualification remain unverified.
+  Multi-region designation does not establish excavation completion.
+- Required gates reproduce the unchanged source-bundle failure and 76 baseline
+  static findings, with no new findings from this feature.
+
 ## 2026-10-29 — Durable Rust sparse mining projects
 
 - Added exact floor-blueprint geometry and immutable native source/journal-bound

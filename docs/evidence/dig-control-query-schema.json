@@ -1,13 +1,13 @@
 {
-  "accepted_cases": 28,
+  "accepted_cases": 39,
   "limitations": "JSON Schema mathematical integer semantics do not certify Rust lexical numbers, duplicate fields, raw input bounds, routing or stateful identity.",
   "mcp_runtime_or_native_io_executed": false,
-  "rejected_cases": 102,
+  "rejected_cases": 145,
   "rust_compiled_or_executed": false,
   "schema": "dfmcp.dig-control-query-schema-evidence/1",
   "source_sha256": {
-    "schemas/dig_control_query.json": "3d35fa8f35470a5970c76dbb22229bed2efc803973b7d68af60b2cc00e5754db",
-    "scripts/test_dig_control_query_schema.py": "9d22f0f371a496feb1b73d2870cfb702cf1854218725e424ca60c297a6d83aeb"
+    "schemas/dig_control_query.json": "c6dde2d39be998f620de31b456deaa6e3090f03a86746cff8b222a5af729e6da",
+    "scripts/test_dig_control_query_schema.py": "74e6158cb048ec6dded0e311e13a305bab9948e4e95e6bbb135c625a9ccb2aff"
   },
   "status": "passed_json_schema_only"
 }
