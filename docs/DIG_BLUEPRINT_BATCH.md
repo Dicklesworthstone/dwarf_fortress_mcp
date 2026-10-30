@@ -189,3 +189,40 @@ or live fortress**. Rust/Cargo/rustfmt and the full workspace were unavailable;
 no Rust, MCP, SDK, power-loss, full-repository or production qualification is
 claimed. `docs/evidence/dig-blueprint-batch.json` binds the executed tests to exact
 source hashes. The bridge/coordinator beads remain open for broader integration.
+
+## Durable Rust parent and complete native inventory
+
+`dfmcp_adapter::dig_blueprint` now implements the same floor-only geometry in
+safe Rust. `Layout::new` accepts bounded typed cuboids; its normalized blueprint,
+mask digest and deterministic rectangle digest agree with the Python compiler.
+The Rust custody format is separate from Python directories and does not import
+or manufacture their mutation authority.
+
+`BatchDefinition` seals the full layout, original `DigBinding`, exact journal ID
+and complete paused bootstrap. It preflights every future halo and shared write
+block, then derives one immutable key for each native rectangle. Its audit
+requires the complete original ordered prefix, validates every receipt against
+its plan, and retains source, dimension, tick and sequence floors. A terminal
+Designated receipt unlocks the next rectangle; uncertain, refused or cancelled
+work cannot be skipped. `all_designated` is historical configuration evidence,
+not current terrain, goal completion or a structural-safety certificate.
+
+`dig_blueprint::store::BatchStore` owns an immutable private parent and an
+optional permanent stop. The externally retained recovery object contains
+`blueprint_id` and the exact parent `head`. Reopening validates both without
+repair or renewed dispatch permission. A complete newer stop is accepted after
+a lost acknowledgement; an acknowledged stop cannot be removed by reopening a
+valid older header. Query authority in the exact original map scope suffices
+for local stop publication in writable modes. Offline access never writes.
+
+`DigSession::complete_inventory` verifies one complete original journal and
+returns all records under an explicit bounded allowance. It performs no native
+calls, does not rely on a partial records page and does not recreate a commit
+permit. Callers must verify the parent and use current independent authority
+again at actual child effect boundaries.
+
+This core checkpoint passes 30 new tests and 45 adjacent regression tests,
+including all 4095 nonempty 4x3 masks, independent Python digest vectors, the
+128-child maximum, corruption/torn-history failures and actual Linux file
+custody. MCP integration is a separate increment; no native/live admission or
+full-workspace qualification is claimed.

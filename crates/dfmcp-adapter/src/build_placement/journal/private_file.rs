@@ -86,6 +86,23 @@ impl PrivateBuildFile {
             "private journal identities require Linux x86_64/aarch64",
         ))
     }
+
+    pub(crate) fn private_identity_scoped(
+        &self,
+        context: &OperationContext,
+        scope: dfmcp_core::MapCuboid,
+    ) -> Result<PrivateFileIdentity> {
+        context.authorize(
+            dfmcp_core::Capability::Query,
+            dfmcp_core::RiskTier::ReadOnly,
+            &[],
+            Some(scope),
+        )?;
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "private journal identities require Linux x86_64/aarch64",
+        ))
+    }
 }
 
 // A refusing implementation preserves the public return type on unsupported
@@ -241,6 +258,47 @@ pub(crate) fn open_private_storage(
         Err(error(
             ErrorCode::CapabilityDenied,
             "furniture private journals require Linux x86_64/aarch64",
+        ))
+    }
+}
+
+/// Raw private custody for a caller whose Query authority covers one exact map
+/// scope. The caller still validates its own decoded source and scope; no grant
+/// is widened and existing unscoped storage entry points remain unchanged.
+pub(crate) fn open_private_storage_scoped(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    allow_create: bool,
+    maximum_bytes: usize,
+    scope: Option<dfmcp_core::MapCuboid>,
+) -> Result<(PrivateBuildFile, bool, OperationContext)> {
+    validate_open(context)?;
+    if let Some(scope) = scope {
+        dfmcp_core::MapCuboid::new(scope.min, scope.max)?;
+    }
+    context.authorize(
+        dfmcp_core::Capability::Query,
+        dfmcp_core::RiskTier::ReadOnly,
+        &[],
+        scope,
+    )?;
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    {
+        linux::open_storage_scoped(path, context, mode, allow_create, maximum_bytes, scope)
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
+    {
+        let _ = (path, mode, allow_create, maximum_bytes, scope);
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "private storage requires Linux x86_64/aarch64",
         ))
     }
 }

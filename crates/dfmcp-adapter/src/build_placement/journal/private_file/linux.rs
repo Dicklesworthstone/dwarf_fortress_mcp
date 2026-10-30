@@ -83,6 +83,19 @@ impl PrivateBuildFile {
     pub fn private_identity(&self, context: &OperationContext) -> Result<PrivateFileIdentity> {
         super::validate_open(context)?;
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        self.checked_identity()
+    }
+    pub(crate) fn private_identity_scoped(
+        &self,
+        context: &OperationContext,
+        scope: dfmcp_core::MapCuboid,
+    ) -> Result<PrivateFileIdentity> {
+        super::validate_open(context)?;
+        dfmcp_core::MapCuboid::new(scope.min, scope.max)?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], Some(scope))?;
+        self.checked_identity()
+    }
+    fn checked_identity(&self) -> Result<PrivateFileIdentity> {
         self.validate_identity().map_err(failure)?;
         let identity = PrivateFileIdentity {
             path: self.path.clone(),
@@ -250,6 +263,7 @@ fn open_inner(
         expected.is_some(),
         super::super::MAX_JOURNAL_BYTES,
         initialize,
+        None,
     )?;
     let nonce = if created {
         let mut nonce = [0; 32];
@@ -278,7 +292,26 @@ pub(super) fn open_storage(
     allow_create: bool,
     maximum_bytes: usize,
 ) -> Result<(PrivateBuildFile, bool, OperationContext)> {
-    open_storage_inner(path, context, mode, allow_create, maximum_bytes, None)
+    open_storage_inner(path, context, mode, allow_create, maximum_bytes, None, None)
+}
+
+pub(super) fn open_storage_scoped(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    allow_create: bool,
+    maximum_bytes: usize,
+    scope: Option<dfmcp_core::MapCuboid>,
+) -> Result<(PrivateBuildFile, bool, OperationContext)> {
+    open_storage_inner(
+        path,
+        context,
+        mode,
+        allow_create,
+        maximum_bytes,
+        None,
+        scope,
+    )
 }
 
 fn open_storage_inner(
@@ -288,6 +321,7 @@ fn open_storage_inner(
     allow_create: bool,
     maximum_bytes: usize,
     initialize: Option<bool>,
+    query_scope: Option<dfmcp_core::MapCuboid>,
 ) -> Result<(PrivateBuildFile, bool, OperationContext)> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(context.budget.max_wall_millis))
@@ -297,7 +331,7 @@ fn open_storage_inner(
                 "furniture storage deadline overflow",
             )
         })?;
-    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], query_scope)?;
     // Each source-selected caller supplies its own ceiling. Placement remains
     // 16 MiB, batch parents 64 KiB, and complete-capture monitors 128 MiB.
     if maximum_bytes == 0 || maximum_bytes > 128 * 1024 * 1024 {

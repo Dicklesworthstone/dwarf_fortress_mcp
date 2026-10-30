@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-29 — Durable Rust sparse mining projects
+
+- Added exact floor-blueprint geometry and immutable native source/journal-bound
+  parent custody, with Python-compatible mask/layout digests and deterministic
+  region partitioning that preserves every unselected gap.
+- Added complete original-prefix auditing, independently reviewed child keys,
+  permanent durable stopping and exact monotonic recovery identities. Historical
+  designation remains separate from excavation completion.
+- Added one-pass bounded complete mining-journal inventory and scoped private
+  storage without broadening existing grants or changing native protocol bytes.
+- Verified 75 actual-source model/store and adjacent regression tests. This
+  checkpoint does not claim MCP integration, native/live or release qualification.
+
+
 ## 2026-10-30 — Advance original mining goals with reviewed finite runs
 
 - Join the exact original Mine plan and verified designation to optional,

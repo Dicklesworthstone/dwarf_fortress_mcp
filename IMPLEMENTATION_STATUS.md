@@ -44,6 +44,37 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable sparse mining blueprint core (2026-10-29)
+
+The Rust adapter now retains one complete sparse floor blueprint, its exact
+native dig/1.16 source and journal, and a paused bootstrap capture. Geometry
+matches the existing Python compiler: at most 32 nonoverlapping parts, 512
+selected cells, a 1024-cell bounding capture and 128 deterministic native
+rectangles. Gaps remain unselected. Every future halo and shared scheduling
+block is checked before parent publication. Only a complete original prefix of
+durably terminal Designated receipts unlocks another original child key.
+
+The private parent has immutable original bytes and one permanent stop marker.
+Exact initialization/reopening, scoped current authority, source and clock
+floors, exclusive filesystem custody, complete readback and monotonic recovery
+pins preserve failed or uncertain publication without repair. A lost stop reply
+can adopt a complete newer stop; an acknowledged stop cannot reopen as unstopped.
+Stopping future advancement never cancels native work or proves excavation.
+A new bounded complete-inventory accessor verifies the native journal once,
+retains all original records and never restores an old dispatch permit.
+
+All 75 focused actual-source tests pass: 30 new model/store tests, 18 existing
+mining-session tests, three private-file regressions and 24 furniture-batch
+regressions. Tests include all 4095 nonempty 4x3 masks, independent Python digest
+vectors, all 128 original child receipts, corrupt/torn/changed custody and actual
+Linux private files. The final 381 compiler/source inputs remain unchanged.
+The sole warning is an unchanged unrelated workforce-test import. The temporary
+workspace uses original core/world/intent/adapter source with minimal manifests;
+this is component evidence, not full Rust qualification, FastMCP compilation,
+a native DFHack build, live-fortress evidence or compatibility admission.
+MCP project orchestration is the next integration increment. Existing original
+single-region semantics, native wire and production admission are unchanged.
+
 ### Finite advancement of original mining goals (2026-10-30)
 
 The original mining runtime now composes optional run/1.13 clock ownership with

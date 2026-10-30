@@ -17,6 +17,7 @@ pub mod dfhack_rpc {
 }
 pub mod dfhack_wire;
 pub mod dfhack_wire_v1_1;
+pub mod dig_blueprint;
 pub mod dig_control_policy;
 pub mod dig_designation;
 pub mod dispatcher;

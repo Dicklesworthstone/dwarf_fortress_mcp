@@ -118,6 +118,16 @@ impl DigBinding {
     pub fn fortress_id(&self) -> FortressId {
         crate::workforce_control::fortress_id(&self.folder, self.site)
     }
+    /// Canonical retained source identity. These bytes grant no capability.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        self.encode()
+    }
+    /// Decode the existing exact binding format without opening a journal or source.
+    pub fn from_canonical_bytes(raw: &[u8]) -> Result<Self> {
+        let binding = Self::decode(raw)?;
+        require(binding.encode() == raw, "noncanonical dig journal binding")?;
+        Ok(binding)
+    }
     pub(super) fn capture(&self, value: &DigObservation) -> Result<()> {
         require(
             value.generation() == self.manifest.generation

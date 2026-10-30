@@ -36,6 +36,12 @@ pub trait DigSessionGuard: DigGuard {
 /// request budgets cannot replenish the RPC client's absolute connection budget.
 pub const SOURCE_RESERVATION_BYTES: u64 = CONNECT_BYTES + 6 * RPC_BYTES;
 
+/// A complete historical inventory requires one full journal verification plus
+/// bounded copies of raw captures, decoded cells and record metadata. This is a
+/// work reservation, not a fixed allocation or native authority.
+pub const COMPLETE_INVENTORY_BYTES: u64 =
+    super::MAX_JOURNAL_BYTES as u64 + super::MAX_KEYS as u64 * (4 * MAX_BODY_BYTES as u64) + 4096;
+
 /// Constant-sized orientation for every response. The journal invariant permits
 /// at most one nonterminal key, regardless of its position in a records page.
 #[derive(Clone, Debug)]
@@ -408,6 +414,32 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
         let mut work = Allowance::new(&current)?;
         self.journal.verify(&mut work)?;
         work.charge(1024)?;
+        let view = self.inventory_view()?;
+        work.current()?;
+        Ok(view)
+    }
+
+    /// One verified complete snapshot for parent-plan prefix auditing. No
+    /// pagination, native call, journal append or permit restoration occurs.
+    pub fn complete_inventory(
+        &mut self,
+        context: &OperationContext,
+    ) -> Result<(DigSessionView, Vec<DigRecord>)> {
+        let current = self.current(context)?;
+        if self.journal.records.len() > current.budget.max_entities as usize {
+            return Err(exhausted());
+        }
+        let mut work = Allowance::new(&current)?;
+        // Charge the entire clone before reading custody or allocating records.
+        work.charge(4 * MAX_BODY_BYTES * self.journal.records.len() + 4096)?;
+        self.journal.verify(&mut work)?;
+        let view = self.inventory_view()?;
+        let records = self.journal.records.values().cloned().collect();
+        work.current()?;
+        Ok((view, records))
+    }
+
+    fn inventory_view(&self) -> Result<DigSessionView> {
         let mut unsettled = self
             .journal
             .records
@@ -429,7 +461,6 @@ impl<S: EffectJournalStorage, N: DigSource> DigSession<S, N> {
                 "multiple unsettled mining keys violate journal custody",
             ));
         }
-        work.current()?;
         Ok(DigSessionView {
             journal_id: self.journal.id,
             head: self.journal.head,
