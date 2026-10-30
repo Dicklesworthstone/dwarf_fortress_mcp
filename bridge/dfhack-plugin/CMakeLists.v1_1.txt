@@ -1,0 +1,6 @@
+# Kept separate so source and native receipts bind the exact protocol generation.
+dfhack_plugin(
+    dfmcp_bridge_v1_1
+    src/dfmcp_bridge_v1_1.cpp
+    PROTOBUFS DfmcpBridgeV1_1
+)

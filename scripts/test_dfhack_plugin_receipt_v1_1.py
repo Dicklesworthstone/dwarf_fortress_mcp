@@ -155,7 +155,7 @@ class ProtocolGenerationNativeReceiptTests(unittest.TestCase):
             with self.assertRaises(receipt_tool.ReceiptError):
                 receipt_tool.validate_receipt(value, fixture.contract)
 
-    def test_generation_source_digest_key_order_is_exact(self) -> None:
+    def test_generation_source_digest_key_set_is_exact_and_order_is_canonical(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:
             value = fixture.issue()
@@ -166,8 +166,20 @@ class ProtocolGenerationNativeReceiptTests(unittest.TestCase):
             value["receipt_digest"] = receipt_tool.sha256_bytes(
                 receipt_tool.canonical_json(unsigned)
             )
-            with self.assertRaises(receipt_tool.ReceiptError):
-                receipt_tool.validate_receipt(value, fixture.contract)
+            # JSON object order is not canonical meaning; canonical_json sorts
+            # it. Required names and their bound digest values remain exact.
+            receipt_tool.validate_receipt(value, fixture.contract)
+            for missing in [False, True]:
+                changed = fixture.issue()
+                if missing:
+                    changed["source_digests"].pop(next(iter(changed["source_digests"])))
+                else:
+                    changed["source_digests"]["unexpected_source"] = digest("extra")
+                unsigned = dict(changed)
+                unsigned.pop("receipt_digest", None)
+                changed["receipt_digest"] = receipt_tool.sha256_bytes(receipt_tool.canonical_json(unsigned))
+                with self.assertRaises(receipt_tool.ReceiptError):
+                    receipt_tool.validate_receipt(changed, fixture.contract)
 
     def test_cli_issue_and_validate_round_trip(self) -> None:
         temporary, fixture = self.fixture()

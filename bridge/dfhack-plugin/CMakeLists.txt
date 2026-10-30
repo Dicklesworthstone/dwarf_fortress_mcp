@@ -17,3 +17,7 @@ dfhack_plugin(
     LINK_LIBRARIES ${PROJECT_LIBS}
     PROTOBUFS ${PROJECT_PROTO}
 )
+
+# Protocol 1.1 is a separate read-only development plugin. Building it grants
+# no compatibility or production-runner admission.
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.v1_1.txt)
