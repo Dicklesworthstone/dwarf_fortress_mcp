@@ -67,6 +67,7 @@ pub mod operations_analysis;
 pub mod operations_journal;
 pub mod order_progress;
 pub mod order_run;
+mod owned_file_lock;
 pub mod pause_reconciliation;
 pub mod plan_archive;
 pub mod room_condition;

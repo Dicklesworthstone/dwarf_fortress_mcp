@@ -1,4 +1,5 @@
 //! Operator-selected private custody. No MCP request may select this path.
+use crate::owned_file_lock::OwnedFileLock;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
@@ -10,7 +11,7 @@ use super::{
 use dfmcp_core::ErrorCode;
 
 pub struct PrivateJobJournalFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     #[cfg(unix)]
@@ -191,6 +192,7 @@ fn open_storage(
         file.try_lock().map_err(|_| {
             conflict("job journal already has an owner or cannot be exclusively locked")
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(io_error)?;
         if before
             .as_ref()

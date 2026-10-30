@@ -2,6 +2,7 @@
 //! Ancestors and the owning account/root are trusted; this is not a hostile-host
 //! sandbox. Pre/post-open identity checks reject ordinary replacement and links.
 
+use crate::owned_file_lock::OwnedFileLock;
 #[path = "observation_projection.rs"]
 mod projection;
 
@@ -17,7 +18,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub struct PrivateJournalFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     #[cfg(unix)]
@@ -220,6 +221,7 @@ impl PrivateJournalFile {
                     "observation journal already has an owner or cannot be exclusively locked",
                 )
             })?;
+            let file = OwnedFileLock::from_locked(file);
             let opened = file.metadata().map_err(storage_error)?;
             if before
                 .as_ref()

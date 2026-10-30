@@ -1,4 +1,5 @@
 //! Operator-selected private custody, never a path accepted from an MCP request.
+use crate::owned_file_lock::OwnedFileLock;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
@@ -7,7 +8,7 @@ use super::{EffectJournalStorage, JournalMode, WorkOrderJournal, authorize, erro
 use dfmcp_core::{ErrorCode, OperationContext, Result};
 
 pub struct PrivateWorkOrderFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     extent: u64,
@@ -209,6 +210,7 @@ fn open_private_work_orders_inner(
                 "creation journal already owned or lock unavailable",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(storage_error)?;
         if before
             .as_ref()

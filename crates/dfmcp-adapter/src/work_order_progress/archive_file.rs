@@ -1,12 +1,13 @@
 //! Operator-only private custody. Offline descriptors cannot write or repair.
 use super::{ArchiveMode, JournalStorage, ProgressArchive, error, storage_error};
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{Capability, ErrorCode, OperationContext, Result, RiskTier};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub struct PrivateProgressArchiveFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     offline: bool,
     #[cfg(unix)]
@@ -170,6 +171,7 @@ pub fn open_progress_archive(
                 "progress archive already has an owner or cannot be locked",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(storage_error)?;
         if before
             .as_ref()

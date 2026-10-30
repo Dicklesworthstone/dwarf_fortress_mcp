@@ -4,6 +4,7 @@ use super::{JOURNAL_NAME, Mode};
 use crate::control_effect_journal::EffectJournalStorage;
 use crate::excavation_run::coordinator::MAX_JOURNAL_BYTES;
 use crate::excavation_run::{Result, error};
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{ErrorCode, OperationContext};
 use std::cell::Cell;
 use std::fs::{self, File, Metadata, OpenOptions};
@@ -88,8 +89,8 @@ fn membership(directory: &File, expected_file: bool) -> io::Result<()> {
 /// The raw constructor is private. Returned only inside the typed coordinator;
 /// fixed-directory custody cannot be bypassed by selecting a second filename.
 pub struct PrivateExcavationFile {
-    file: File,
-    directory: File,
+    file: OwnedFileLock,
+    directory: OwnedFileLock,
     path: PathBuf,
     file_id: (u64, u64, u32),
     directory_id: (u64, u64, u32),
@@ -265,6 +266,7 @@ pub(super) fn open(
             "excavation directory is already owned or locking failed",
         )
     })?;
+    let directory = OwnedFileLock::from_locked(directory);
     membership(&directory, mode != Mode::Create).map_err(storage_error)?;
     check()?;
     // Rewalk immediately before opening; the locked original remains pinned.
@@ -304,6 +306,7 @@ pub(super) fn open(
             "excavation journal is already owned or locking failed",
         )
     })?;
+    let file = OwnedFileLock::from_locked(file);
     let out = PrivateExcavationFile {
         file,
         directory,

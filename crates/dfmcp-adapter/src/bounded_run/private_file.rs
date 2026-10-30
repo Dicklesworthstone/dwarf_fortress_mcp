@@ -3,13 +3,14 @@ use super::error;
 use super::journal::{RunBinding, RunJournal, RunMode};
 use super::rpc::authorize;
 use crate::control_effect_journal::EffectJournalStorage;
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{ErrorCode, OperationContext, Result};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub struct PrivateRunFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     extent: u64,
@@ -216,6 +217,7 @@ fn open_private_run_journal_inner(
                 "run journal already owned or file locking unavailable",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(storage_error)?;
         if before
             .as_ref()
