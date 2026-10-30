@@ -13,7 +13,7 @@ use dfmcp_world::map_region::{MapRegion, Tile};
 use std::collections::BTreeSet;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 
-pub(super) fn parts() -> Vec<BlueprintPart> {
+pub(crate) fn parts() -> Vec<BlueprintPart> {
     vec![
         BlueprintPart {
             origin: [2, 2, 2],
@@ -213,7 +213,7 @@ impl DigSource for NoSource {
         Err(invalid("unexpected native fixture call"))
     }
 }
-pub(super) fn context(spec: &MonitorSpec) -> OperationContext {
+pub(crate) fn context(spec: &MonitorSpec) -> OperationContext {
     context_for(spec.parent(), spec.start_tick())
 }
 fn context_for(parent: &BatchDefinition, tick: u64) -> OperationContext {
@@ -251,7 +251,7 @@ fn context_for(parent: &BatchDefinition, tick: u64) -> OperationContext {
         cancellation_requested: false,
     }
 }
-pub(super) fn native_history(
+pub(crate) fn native_history(
     parts: Vec<BlueprintPart>,
 ) -> Result<(BatchDefinition, DigSessionView, Vec<DigRecord>)> {
     history(parts, false)
@@ -344,7 +344,7 @@ fn history(
     let (view, records) = session.complete_inventory(&c)?;
     Ok((parent, view, records))
 }
-pub(super) fn spec(parts: Vec<BlueprintPart>) -> Result<MonitorSpec> {
+pub(crate) fn spec(parts: Vec<BlueprintPart>) -> Result<MonitorSpec> {
     let (parent, view, records) = native_history(parts)?;
     MonitorSpec::new(
         parent.clone(),
@@ -360,7 +360,7 @@ pub(super) fn spec(parts: Vec<BlueprintPart>) -> Result<MonitorSpec> {
         1000,
     )
 }
-pub(super) fn capture(spec: &MonitorSpec, tick: u64) -> Result<LiveMapObservation> {
+pub(crate) fn capture(spec: &MonitorSpec, tick: u64) -> Result<LiveMapObservation> {
     let value = LiveMapObservation {
         bridge_generation: spec.source().generation(),
         df_version: spec.source().df_version().into(),

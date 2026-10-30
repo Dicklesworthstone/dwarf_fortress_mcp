@@ -44,6 +44,34 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Reviewed finite whole-blueprint clock core (2026-10-30)
+
+The adapter now binds one independently pinned run/1.13 journal to the complete
+original excavation monitor, every original Designated receipt and the unchanged
+sparse mask and temporal policy. Each interval requires a fresh complete map
+readiness check, separate process-local review and explicit confirmation. Native
+bounds, original deadline/cadence, opening/current game allowance and retained
+run capacity all constrain advancement. No automatic run chain is introduced.
+
+The existing coordinator now supports external revalidation after durable
+Intent and DispatchStarted, followed by final verification of its own bytes and
+current authority before the native call. Same-size journal corruption during
+the map guard cannot unpause. Lost replies and failed synchronization preserve
+uncertainty; exact acknowledged recovery heads accept descendants but reject
+rollback. The shared canonical header identity can be pinned before creation,
+preserving exact recovery after a lost initialization acknowledgment. Reopened preparation cannot recover a dispatch permit. Consumed native,
+map and supplied authority floors cannot be reset by stale contexts or new grants.
+Safety cancellation remains possible without future tick budget or Plan/Observe.
+
+All 122 focused adapter tests pass: 100 blueprint cases (19 new clock groups and
+81 prior regressions, including the concurrently added continuity fixes), plus all 22 existing bounded-run tests. All 390 compiler
+and source input hashes remained unchanged. The one preexisting unrelated
+workforce-test import warning remains; no new warning was introduced. These are
+actual-source component tests, not full Rust/FastMCP, native/live or release
+qualification. No native protocol, dependency, production runner or admission
+registry changed. MCP composition follows separately. See
+`docs/DIG_BLUEPRINT_CLOCK.md` for the contracts and source-identity limitations.
+
 ### Preserve blueprint monitor continuity across failed MCP responses (2026-10-30)
 
 The existing dig-control MCP server now withdraws unfinished monitor stability

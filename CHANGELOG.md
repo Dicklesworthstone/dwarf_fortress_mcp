@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-30 — Reviewed finite whole-blueprint clock core
+
+- Bind the whole original excavation monitor, Designated receipt set and fixed
+  temporal policy to independent run/1.13 custody and separately reviewed runs.
+- Recheck fresh sparse terrain and original custody after durable intent/dispatch,
+  then reverify the clock journal before native prepare or unpause.
+- Preserve exact ancestral recovery pins, single-attempt dispatch, consumed clock
+  floors, retained authority and safety cancellation after future budgets expire.
+- Pass 122 focused actual-source adapter tests (100 blueprint and 22 bounded-run),
+  including 19 new clock groups, with 390 compiler/source inputs unchanged.
+  Full MCP/native/live qualification and compatibility admission remain unverified.
+
 ## 2026-10-30 — Withdraw unfinished monitor continuity after failed MCP publication
 
 - Integrate local monitor withdrawal with failed request preflight, runtime and

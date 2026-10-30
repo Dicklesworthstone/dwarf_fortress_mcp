@@ -878,4 +878,4 @@ impl<'a> Reader<'a> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

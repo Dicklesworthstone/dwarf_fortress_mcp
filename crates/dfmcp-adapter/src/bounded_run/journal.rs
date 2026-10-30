@@ -3,7 +3,8 @@ use super::rpc::{RunManifest, RunSource, authorize, authorize_plan};
 use super::{Reader, RunObservation, RunPhase, RunPlan, RunRecord, error, hash, require};
 use crate::control_effect_journal::EffectJournalStorage;
 use dfmcp_core::{
-    Capability, Digest32, ErrorCode, GameTick, OperationContext, Result, RiskTier, SessionId,
+    Capability, Digest32, ErrorCode, GameTick, OperationContext, RequestId, Result, RiskTier,
+    SessionId,
 };
 use std::collections::BTreeMap;
 use std::io::{self, SeekFrom};
@@ -63,6 +64,23 @@ impl RunBinding {
     }
     pub fn manifest(&self) -> &RunManifest {
         &self.manifest
+    }
+    /// Intended identity for the exact initial header, available before any
+    /// storage I/O. Preserve it when creation or sync acknowledgment is lost;
+    /// it proves neither publication nor authority to initialize existing bytes.
+    pub fn initial_journal_id(&self, session_id: SessionId, request_id: RequestId) -> Digest32 {
+        self.initial_header(session_id, request_id).1
+    }
+    fn initial_header(&self, session_id: SessionId, request_id: RequestId) -> (Vec<u8>, Digest32) {
+        let payload = self.encode();
+        let mut bytes = b"DFMRJ001".to_vec();
+        bytes.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes.extend_from_slice(&session_id.get().to_be_bytes());
+        bytes.extend_from_slice(&request_id.get().to_be_bytes());
+        let id = hash(b"dfmcp-run-journal/1", &bytes);
+        bytes.extend_from_slice(id.as_bytes());
+        (bytes, id)
     }
     fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
@@ -325,6 +343,7 @@ pub struct RunJournal<S> {
     owner: SessionId,
     mode: RunMode,
     fenced: bool,
+    initialized_here: bool,
 }
 impl<S: EffectJournalStorage> RunJournal<S> {
     /// initialize is accepted ONLY for newly created storage in Control mode.
@@ -350,14 +369,7 @@ impl<S: EffectJournalStorage> RunJournal<S> {
             authorize(context, true)?;
             let binding =
                 binding.ok_or_else(|| corrupt("new run journal requires exact source binding"))?;
-            let payload = binding.encode();
-            let mut bytes = b"DFMRJ001".to_vec();
-            bytes.extend_from_slice(&(payload.len() as u16).to_be_bytes());
-            bytes.extend_from_slice(&payload);
-            bytes.extend_from_slice(&context.session_id.get().to_be_bytes());
-            bytes.extend_from_slice(&context.request_id.get().to_be_bytes());
-            let id = hash(b"dfmcp-run-journal/1", &bytes);
-            bytes.extend_from_slice(id.as_bytes());
+            let (bytes, id) = binding.initial_header(context.session_id, context.request_id);
             allowance.charge(bytes.len() as u64)?;
             storage
                 .write_all(&bytes)
@@ -376,6 +388,7 @@ impl<S: EffectJournalStorage> RunJournal<S> {
                 owner: context.session_id,
                 mode,
                 fenced: false,
+                initialized_here: true,
             });
         }
         require(size >= 74, "existing run journal is empty or incomplete")?;
@@ -455,6 +468,7 @@ impl<S: EffectJournalStorage> RunJournal<S> {
             owner: context.session_id,
             mode,
             fenced: false,
+            initialized_here: false,
         };
         journal.verify(&mut allowance)?;
         Ok(journal)
@@ -481,6 +495,55 @@ impl<S: EffectJournalStorage> RunJournal<S> {
     }
     pub fn fenced(&self) -> bool {
         self.fenced
+    }
+    /// Ephemeral creation provenance; replayed header salts do not recreate it.
+    pub fn initialized_here(&self) -> bool {
+        self.initialized_here
+    }
+    /// Validate an externally acknowledged root against the exact currently
+    /// held append-only history. Complete descendants recover a lost reply;
+    /// acknowledged rollback and unrelated histories are refused unchanged.
+    /// This is an evidence comparison, never dispatch authorization.
+    pub fn verify_recovery(
+        &mut self,
+        journal_id: Digest32,
+        head: Digest32,
+        context: &OperationContext,
+    ) -> Result<()> {
+        let mut allowance = Allowance::new(context)?;
+        self.verify(&mut allowance)?;
+        require(
+            journal_id != Digest32::ZERO && head != Digest32::ZERO && journal_id == self.id,
+            "bounded-run recovery names another original journal",
+        )?;
+        allowance.charge(self.bytes.len() as u64)?;
+        let mut reader = Reader(&self.bytes);
+        require(reader.take(8)? == b"DFMRJ001", "wrong retained run header")?;
+        let n = usize::from(u16::from_be_bytes(reader.array()?));
+        reader.take(n)?;
+        reader.take(32)?;
+        require(
+            reader.take(32)? == self.id.as_bytes(),
+            "retained run identity changed",
+        )?;
+        let mut found = head == self.id;
+        while !reader.0.is_empty() {
+            allowance.remaining()?;
+            require(reader.take(8)? == b"DFMRF001", "wrong retained run frame")?;
+            let n = reader.u32()? as usize;
+            require(n <= MAX_BODY, "oversized retained run frame")?;
+            reader.take(8 + 32 + n)?;
+            let digest = Digest32::from_bytes(reader.array()?);
+            require(
+                reader.take(8)? == b"DFMREND1",
+                "incomplete retained run frame",
+            )?;
+            found |= digest == head;
+        }
+        require(
+            found,
+            "bounded-run recovery head is absent; rollback is not recovery",
+        )
     }
     fn access(&self, context: &OperationContext, write: bool, control: bool) -> Result<()> {
         authorize(context, control)?;
@@ -681,6 +744,17 @@ impl<S: EffectJournalStorage> RunJournal<S> {
         plan: RunPlan,
         context: &OperationContext,
     ) -> Result<DurableRun> {
+        self.prepare_guarded(source, plan, context, |_, _| Ok(()))
+    }
+    /// Revalidate external original-goal custody after durable intent, then
+    /// reverify this journal before its native preparation boundary.
+    pub fn prepare_guarded(
+        &mut self,
+        source: &mut impl RunSource,
+        plan: RunPlan,
+        context: &OperationContext,
+        mut guard: impl FnMut(&RunPlan, &OperationContext) -> Result<()>,
+    ) -> Result<DurableRun> {
         let mut allowance = Allowance::new(context)?;
         self.verify(&mut allowance)?;
         self.access(context, true, true)?;
@@ -715,6 +789,11 @@ impl<S: EffectJournalStorage> RunJournal<S> {
             native: None,
         };
         self.append(intent, &mut allowance)?;
+        guard(&plan, &allowance.remaining()?)?;
+        self.verify(&mut allowance)?;
+        self.access(&allowance.remaining()?, true, true)?;
+        authorize_plan(&allowance.remaining()?, &plan)?;
+        self.source(source, true)?;
         let native = source.prepare(&plan, &allowance.rpc()?)?;
         self.source(source, false)?;
         self.accept_native(&plan, native, &mut allowance, false)
@@ -755,6 +834,18 @@ impl<S: EffectJournalStorage> RunJournal<S> {
         digest: Digest32,
         context: &OperationContext,
     ) -> Result<DurableRun> {
+        self.commit_guarded(source, key, digest, context, |_, _| Ok(()))
+    }
+    /// The external guard runs only after the irreversible dispatch marker.
+    /// Exact own-journal verification follows it before the one native call.
+    pub fn commit_guarded(
+        &mut self,
+        source: &mut impl RunSource,
+        key: &str,
+        digest: Digest32,
+        context: &OperationContext,
+        mut guard: impl FnMut(&RunPlan, &OperationContext) -> Result<()>,
+    ) -> Result<DurableRun> {
         let mut allowance = Allowance::new(context)?;
         self.verify(&mut allowance)?;
         self.access(context, true, true)?;
@@ -783,8 +874,11 @@ impl<S: EffectJournalStorage> RunJournal<S> {
         // A synced marker is no longer dispatchable, even if this process stops
         // before the actual call. Reopening cannot promote it back to Prepared.
         let result = (|| {
+            guard(&record.plan, &allowance.remaining()?)?;
             self.verify(&mut allowance)?;
             self.access(&allowance.remaining()?, true, true)?;
+            authorize_plan(&allowance.remaining()?, &record.plan)?;
+            self.source(source, true)?;
             let native = source.commit(&record.plan, &allowance.rpc()?)?;
             self.source(source, false)?;
             require(

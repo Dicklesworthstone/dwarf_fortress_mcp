@@ -14,6 +14,7 @@ use crate::dig_designation::journal::session::DigSessionView;
 use crate::dig_designation::journal::{DigBinding, DigRecord, DigState};
 use crate::dig_designation::{DigEffect, DigObservation, DigPhase, DigReason, DigRegion};
 
+pub mod clock;
 pub mod monitor;
 pub mod store;
 
