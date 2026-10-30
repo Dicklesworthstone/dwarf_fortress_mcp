@@ -30,6 +30,13 @@ const CONSTRUCTION: Limits = Limits {
     notification_bytes: 2 * 1024 * 1024,
 };
 
+const ROOM_CONSTRUCTION: Limits = Limits {
+    bytes: 22 * 1024 * 1024,
+    calls: 332,
+    reply_bytes: crate::live_map::MAX_MAP_BYTES + 4096,
+    notification_bytes: 2 * 1024 * 1024,
+};
+
 const ALLOCATION: Limits = Limits {
     bytes: 20 * 1024 * 1024,
     calls: 272,
@@ -66,6 +73,24 @@ impl Link {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         Self::connect_profile(address, timeout, bytes, cancellation, check, CONSTRUCTION)
+    }
+    /// One closed room-readiness bracket adds two map reads to the original
+    /// receipt/operations acquisition, sharing its one deadline and allowance.
+    pub(crate) fn connect_room_construction(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(
+            address,
+            timeout,
+            bytes,
+            cancellation,
+            check,
+            ROOM_CONSTRUCTION,
+        )
     }
     /// One complete operations/1.4 read for a furniture allocation. No caller
     /// can select a wider profile or renew its connection allowance per page.

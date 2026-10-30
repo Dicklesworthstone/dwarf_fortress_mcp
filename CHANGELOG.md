@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-30 — Prove original room terrain and furnishings together
+
+- Add a durable joint room monitor with one complete original condition and
+  stability streak, preserving every floor, wall and furnishing through recovery.
+- Acquire one fixed receipt/map/operations/map/receipt bracket on one connection,
+  with exact paused endpoints, full released pagination and no effect methods.
+- Retain partial-read clock floors on errors; preserve immutable source history,
+  acknowledged ancestry and local cancellation after original-file loss.
+- Pass 212 focused adapter tests, including 24 new joint-core/native-reader groups;
+  preserve the concurrent mixed-family dispatcher. Public MCP monitor routing is
+  a following increment; no native/live or full runtime admission is claimed.
+
 ## 2026-10-30 — Coordinate sealed mutations across live native families
 
 - Add one deterministic cross-family dispatch frontier over the existing control,

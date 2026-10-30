@@ -1208,3 +1208,6 @@ fn one_connection_byte_allowance_is_shared_by_all_receipts_and_capture_pages() -
     );
     Ok(())
 }
+
+#[path = "rpc/room_tests.rs"]
+mod room_tests;

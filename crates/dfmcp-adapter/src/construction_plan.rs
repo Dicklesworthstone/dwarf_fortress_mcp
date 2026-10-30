@@ -520,7 +520,43 @@ pub(super) fn advance_for_purpose(
         .ok_or_else(|| bounded("construction work overflow"))?;
     let result = work
         .charge(0)
-        .and_then(|()| advance_work(state, goal, sample, &mut work, purpose));
+        .and_then(|()| advance_work(state, goal, sample, &mut work, purpose, None));
+    *used = work.used;
+    result
+}
+
+/// Additional complete-original conditions from a source-qualified embedding
+/// monitor. The caller supplies one digest for the entire jointly sampled
+/// evidence so a same-tick change outside the furniture roster resets proof.
+/// This does not alter the ordinary Goal, Readiness or Probe profiles.
+pub(crate) struct JointCondition {
+    pub capture: Digest32,
+    pub unmet: Option<&'static str>,
+    pub invalidation: Option<&'static str>,
+}
+
+pub(crate) fn advance_joint(
+    state: &Progress,
+    goal: &Goal,
+    sample: &LinkedSample,
+    context: &OperationContext,
+    used: &mut u64,
+    joint: JointCondition,
+) -> Result<Progress> {
+    let mut work = Work::new(goal, context, state.last_tick.map_or(0, |tick| tick))?;
+    work.used = used
+        .checked_add(work.used)
+        .ok_or_else(|| bounded("construction work overflow"))?;
+    let result = work.charge(0).and_then(|()| {
+        advance_work(
+            state,
+            goal,
+            sample,
+            &mut work,
+            SamplePurpose::Goal,
+            Some(joint),
+        )
+    });
     *used = work.used;
     result
 }
@@ -531,6 +567,7 @@ fn advance_work(
     sample: &LinkedSample,
     work: &mut Work,
     purpose: SamplePurpose,
+    joint: Option<JointCondition>,
 ) -> Result<Progress> {
     require(
         state.goal_digest == goal.digest() && state.reading && !state.terminal(),
@@ -542,7 +579,10 @@ fn advance_work(
     )?;
     let observed = sample.validate_work(goal, work)?;
     let tick = observed.jobs.tick().get();
-    let capture = Digest32::of_bytes(&sample.capture);
+    let capture = joint.as_ref().map_or_else(
+        || Digest32::of_bytes(&sample.capture),
+        |value| value.capture,
+    );
     work.charge(1)?;
     let mut findings = Vec::with_capacity(goal.records.len());
     for record in &goal.records {
@@ -606,7 +646,7 @@ fn advance_work(
     } else if state.last_tick.is_some_and(|old| tick < old) {
         Some("game_clock_regressed")
     } else {
-        None
+        joint.as_ref().and_then(|value| value.invalidation)
     };
     if let Some(reason) = reason {
         current.stop("invalidated", reason, None);
@@ -659,6 +699,8 @@ fn advance_work(
     {
         let (reason, id) = (row.condition.status, row.building_id);
         current.stop("active", reason, Some(id));
+    } else if let Some(reason) = joint.as_ref().and_then(|value| value.unmet) {
+        current.stop("active", reason, None);
     } else {
         if state.last_tick.is_some_and(|old| {
             tick - old > u64::from(goal.timing.max_gap)

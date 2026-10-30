@@ -2,6 +2,8 @@
 //! capture. This client binds exactly four existing native methods and owns no
 //! preparation, effect, reconnect, polling, or publication permission.
 
+pub mod room;
+
 use super::{Goal, LinkedSample, Manifest};
 use crate::build_placement::rpc::BuildCancellation;
 use crate::build_placement::rpc::codec::{Message, bytes, number};

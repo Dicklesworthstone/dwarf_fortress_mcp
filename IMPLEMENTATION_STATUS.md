@@ -44,6 +44,46 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Joint original-room monitor and native reader (2026-10-30)
+
+Rust now evaluates every retained room floor, required wall and original furnishing
+in one condition and one advancing-tick stability streak. The separate joint
+monitor retains the complete room-backed batch, all original placement receipts,
+fixed deadline/cadence/gap/observation allowance and independently scoped source
+identities. Hidden, missing, wet, designated or mismatched terrain cannot borrow
+success from completed furnishings. Alternating success, changed same-tick captures,
+interruption and restart cannot combine into a successful whole-room result.
+
+A fixed six-method native reader queries every original receipt, reads map-before,
+acquires and releases the complete operations roster, reads map-after and queries
+every receipt again on one bounded connection. Map endpoints must have identical
+complete bytes, be paused and share the operations tick; original software,
+fortress, dimensions and receipt identities remain exact. There is no reconnect,
+effect dispatch or clock advance. Equal endpoints provide bounded bracket evidence,
+not an atomic cross-profile snapshot.
+
+New DFMRCG01/DFMRCS01/DFMRCJ01 definition, sample and private-journal formats keep
+legacy furniture monitoring unchanged. Read intent is synchronized before native
+contact; replay recomputes every condition and verifies acknowledged ancestry.
+Lost acknowledgements may recover through complete descendants, while rollback,
+substitution and damaged tails refuse without repair. Current Query governs local
+cancellation even after original source loss. First accepted sources survive later
+diagnostic invalidation. Decoded clocks survive partial native or sample failure;
+they narrow current authority without awarding evidence, and the next authorized
+read intent or cancellation persists them. Unjournaled failure floors still need
+caller retention and are not automatically durable across a process crash.
+
+The final combined-source focused view passes all 212 adapter tests, including
+14 joint-core and 10 independent native-reader groups. All 287 original adapter
+inputs remain unchanged during execution. The view retains every production body
+and disables 114 unrelated test-module declarations. Maximum-width original goals,
+precise entity accounting, last-receipt loss, map/source/tick corruption, release
+ordering, failed-read clock expiry, journal ancestry and real private-file recovery
+are covered. Concurrent mixed-family dispatch commits 5314b17/13e7dbd are preserved.
+This is component execution evidence; full workspace/FastMCP runtime/native/live
+qualification and admission remain unverified. Public MCP joint-monitor integration
+follows separately. See [the implemented contract](docs/ROOM_CONDITION_RUST.md).
+
 ### Cross-family live mutation dispatch frontier (2026-10-30)
 
 The adapter now has a single deterministic coordinator above the existing
