@@ -67,6 +67,14 @@ fn counts(value: &Counts) -> Value {
         "missing":value.missing,"wrong_shape":value.wrong_shape,"liquid":value.liquid,
         "designated":value.designated,"occupied":value.occupied,"unoccupied":value.unoccupied})
 }
+pub(super) fn terrain(value: &dfmcp_adapter::room_condition::TerrainAssessment) -> Value {
+    json!({"floors":counts(&value.floors),"walls":counts(&value.walls),
+        "furnishings":counts(&value.furnishings),"condition_met":value.condition_met(),
+        "unknown":value.unknown(),"deficit_count":value.deficit_count(),
+        "deficits_complete":value.deficit_count() as usize <= MAX_DEFICITS,
+        "deficits":value.deficits.iter().map(|d|json!({"position":d.position,
+            "requirement":d.requirement,"status":d.status})).collect::<Vec<_>>()})
+}
 pub(super) fn projected(definition: &Definition, progress: &Progress, verified: bool) -> Value {
     let mut value = completion::projected(definition.original(), &progress.construction, verified);
     value["schema"] = json!("dfmcp.room-completion-mcp/1");
@@ -76,15 +84,9 @@ pub(super) fn projected(definition: &Definition, progress: &Progress, verified: 
     value["authority_tick_floor"] = json!(progress.observed_tick_floor);
     value["evidence_scope"] =
         json!("historical_joint_original_room_and_furnishings_sampled_condition");
-    value["terrain"] = json!({"region":{"origin":definition.room().terrain().region().origin,
-        "size":definition.room().terrain().region().size},
-        "floors":counts(&progress.terrain.floors),"walls":counts(&progress.terrain.walls),
-        "furnishings":counts(&progress.terrain.furnishings),
-        "condition_met":progress.terrain.condition_met(),"unknown":progress.terrain.unknown(),
-        "deficit_count":progress.terrain.deficit_count(),
-        "deficits_complete":progress.terrain.deficit_count() as usize <= MAX_DEFICITS,
-        "deficits":progress.terrain.deficits.iter().map(|d|json!({"position":d.position,
-            "requirement":d.requirement,"status":d.status})).collect::<Vec<_>>()});
+    value["terrain"] = terrain(&progress.terrain);
+    value["terrain"]["region"] = json!({"origin":definition.room().terrain().region().origin,
+        "size":definition.room().terrain().region().size});
     value["source"] = progress.source.as_ref().map_or(Value::Null, |source| {
         json!({
         "furniture_generation":source.furniture.furniture_generation,
@@ -293,6 +295,7 @@ pub(super) struct Publication {
     source: OperationContext,
     monitor: OperationContext,
     clock: Option<OperationContext>,
+    room_clock: Option<OperationContext>,
     head: Digest32,
 }
 impl Publication {
@@ -313,6 +316,38 @@ impl Publication {
             monitor.store.head(),
         )?))
     }
+    pub(super) fn reserve_growing<S: EffectJournalStorage, N: BuildSource>(
+        state: &State<S, N>,
+        c: &OperationContext,
+        work: &mut Work,
+        growth: u64,
+    ) -> Result<Option<Self>> {
+        let Some(monitor) = &state.room_completion else {
+            return Ok(None);
+        };
+        Ok(Some(Self::reserve_for(
+            state,
+            c,
+            work,
+            monitor.store.definition(),
+            (monitor.store.byte_len() as u64)
+                .checked_add(growth)
+                .ok_or_else(exhausted)?,
+            monitor.store.head(),
+        )?))
+    }
+    pub(super) fn retain_current_head<S: EffectJournalStorage, N: BuildSource>(
+        &mut self,
+        state: &State<S, N>,
+    ) -> Result<()> {
+        self.head = state
+            .room_completion
+            .as_ref()
+            .ok_or_else(missing)?
+            .store
+            .head();
+        Ok(())
+    }
     fn reserve_for<S: EffectJournalStorage, N: BuildSource>(
         state: &State<S, N>,
         c: &OperationContext,
@@ -327,6 +362,11 @@ impl Publication {
             monitor: work.take(c, monitor_bytes.checked_add(8192).ok_or_else(exhausted)?)?,
             clock: if state.clock_config.is_some() || state.clock.is_some() {
                 Some(work.take(c, clock::VIEW_BYTES)?)
+            } else {
+                None
+            },
+            room_clock: if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                Some(work.take(c, room_clock::VIEW_BYTES)?)
             } else {
                 None
             },
@@ -360,6 +400,7 @@ impl Publication {
         allow_missing_origin: bool,
         checkpoint: impl FnOnce(&OperationContext) -> Result<()>,
     ) -> Result<()> {
+        let expected_room_clock = state.room_clock_recovery;
         checkpoint(&self.current(state, &self.source)?)?;
         let c = self.current(state, &self.source)?;
         let monitor = state.room_completion.as_ref().ok_or_else(missing)?;
@@ -406,6 +447,27 @@ impl Publication {
                 ));
             }
         }
+        if let Some(reserved) = &self.room_clock {
+            let c = self.current(state, reserved)?;
+            let checked = room_clock::inspect(state, &c);
+            if !allow_missing_origin {
+                checked?;
+            }
+            if !allow_missing_origin && state.room_clock_recovery != expected_room_clock {
+                return Err(corrupt());
+            }
+            // A first ordinary joint sample may publish its source before the
+            // explicit Plan call opens the absent initializer. It earns no run.
+            if sampling
+                && room_clock::blocks_sampling(state)
+                && !room_clock::bootstrap_pending(state)
+            {
+                return Err(error(
+                    ErrorCode::EffectIndeterminate,
+                    "settle the retained room clock before joint sampling",
+                ));
+            }
+        }
         self.current(state, &self.monitor)?;
         Ok(())
     }
@@ -434,6 +496,16 @@ fn check_origin<S: EffectJournalStorage, N: BuildSource, I: Io>(
                 "settle the original construction clock before sampling the room",
             ));
         }
+    }
+    if state.room_clock_config.is_some() || state.room_clock.is_some() {
+        let context = ledger.borrow_mut().take(&current, room_clock::VIEW_BYTES)?;
+        let checked = if sampling {
+            room_clock::ensure_for_joint_sample(state, &context)
+        } else {
+            room_clock::inspect(state, &context).map(|_| ())
+        };
+        floor.set(floor.get().max(state.authority_tick));
+        checked?;
     }
     current.anchor.tick = GameTick(
         current
@@ -473,6 +545,25 @@ pub(super) fn run<N: BuildSource, I: Io>(
     io: &mut I,
 ) -> String {
     state.abandon_all();
+    if !matches!(action, Action::Cancel)
+        && state.room_clock_config.is_some()
+        && state.room_clock.is_none()
+        && !room_clock::bootstrap_pending(state)
+    {
+        if let Err(e) = room_clock::admit_bootstrap(state, &c) {
+            return completion::read_only_packet(state.failed(op, Some(&c), &e));
+        }
+    }
+    if matches!(action, Action::Sample)
+        && room_clock::bootstrap_pending(state)
+        && state
+            .room_completion
+            .as_ref()
+            .is_some_and(|m| m.store.first_source().is_some())
+    {
+        return completion::read_only_packet(state.failed(op,Some(&c),&error(ErrorCode::EffectIndeterminate,
+            "open the original room clock through explicit planning before another joint acquisition")));
+    }
     let sampling = matches!(action, Action::Sample);
     let cancelling = matches!(action, Action::Cancel);
     let floor = Cell::new(state.authority_tick);
@@ -679,6 +770,13 @@ pub(super) fn run<N: BuildSource, I: Io>(
                         clock::VIEW_BYTES
                     } else {
                         0
+                    })
+                    .and_then(|n| {
+                        n.checked_add(if owner.borrow().room_clock_config.is_some() {
+                            room_clock::VIEW_BYTES
+                        } else {
+                            0
+                        })
                     })
                     .ok_or_else(exhausted)?;
                 let required = begin_bytes

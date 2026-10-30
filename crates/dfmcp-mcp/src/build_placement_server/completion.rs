@@ -681,7 +681,8 @@ pub(super) fn run<N: BuildSource>(
     if sampling {
         let checked = (|| {
             let mut preflight = Work::new(&c, request.started)?;
-            clock::ensure_for_sample(state, &preflight.take(&c, clock::VIEW_BYTES)?)
+            clock::ensure_for_sample(state, &preflight.take(&c, clock::VIEW_BYTES)?)?;
+            room_clock::ensure_for_sample(state, &preflight.take(&c, room_clock::VIEW_BYTES)?)
         })();
         if let Err(e) = checked {
             return state.failed(op, Some(&c), &e);
@@ -691,6 +692,12 @@ pub(super) fn run<N: BuildSource>(
     let mut c = c;
     if state.clock_config.is_some() {
         match c.budget.max_bytes.checked_sub(3 * clock::VIEW_BYTES) {
+            Some(bytes) => c.budget.max_bytes = bytes,
+            None => return state.failed(op, Some(&c), &exhausted()),
+        }
+    }
+    if state.room_clock_config.is_some() {
+        match c.budget.max_bytes.checked_sub(3 * room_clock::VIEW_BYTES) {
             Some(bytes) => c.budget.max_bytes = bytes,
             None => return state.failed(op, Some(&c), &exhausted()),
         }
@@ -788,6 +795,11 @@ pub(super) fn run<N: BuildSource>(
         let clock_floor = &observed_floor;
         let clock_recovery = &mut state.clock_recovery;
         let clock_verified = &mut state.clock_verified;
+        let room_clock_owner = &mut state.room_clock;
+        let room_clock_configured = state.room_clock_config.is_some();
+        let room_clock_grants = &state.room_clock_grants;
+        let room_clock_recovery = &mut state.room_clock_recovery;
+        let room_clock_verified = &mut state.room_clock_verified;
         let mut guard = |origin: &Origin, context: &OperationContext| -> Result<()> {
             runtime::boundary(request, config, false)?;
             if clock_configured {
@@ -810,6 +822,29 @@ pub(super) fn run<N: BuildSource>(
                     return Err(error(
                         ErrorCode::EffectIndeterminate,
                         "settle the original construction clock before publishing completion",
+                    ));
+                }
+            }
+            if room_clock_configured {
+                *room_clock_verified = false;
+                let owner = room_clock_owner.as_mut().ok_or_else(|| {
+                    error(
+                        ErrorCode::EffectIndeterminate,
+                        "configured room clock custody is unavailable",
+                    )
+                })?;
+                let mut current = ledger.borrow_mut().take(context, room_clock::VIEW_BYTES)?;
+                current.anchor.tick = GameTick(current.anchor.tick.get().max(clock_floor.get()));
+                let native = clock::native_context(&current, room_clock_grants)?;
+                let checked = owner.inspect(&current, &native);
+                clock_floor.set(clock_floor.get().max(owner.high_tick()));
+                *room_clock_recovery = Some(owner.recovery());
+                let checked = checked?;
+                *room_clock_verified = true;
+                if sampling && (checked.pending || checked.unresolved) {
+                    return Err(error(
+                        ErrorCode::EffectIndeterminate,
+                        "settle the room clock before furnishing completion sampling",
                     ));
                 }
             }
@@ -869,6 +904,13 @@ pub(super) fn run<N: BuildSource>(
                         clock::VIEW_BYTES
                     } else {
                         0
+                    })
+                    .and_then(|bytes| {
+                        bytes.checked_add(if room_clock_configured {
+                            room_clock::VIEW_BYTES
+                        } else {
+                            0
+                        })
                     })
                     .and_then(|bytes| bytes.checked_mul(10))
                     .ok_or_else(exhausted)?;
@@ -1028,6 +1070,31 @@ pub(super) fn run<N: BuildSource>(
                 &error(
                     ErrorCode::CorruptLedger,
                     "construction clock changed at final completion publication",
+                ),
+            );
+        }
+    }
+    if state.room_clock_config.is_some() {
+        let expected = state.room_clock_recovery;
+        let mut final_context = current.clone();
+        final_context.budget.max_bytes = room_clock::VIEW_BYTES;
+        final_context.budget.max_wall_millis = match c.budget.max_wall_millis.checked_sub(
+            u64::try_from(request.started.elapsed().as_millis()).map_or(u64::MAX, |v| v),
+        ) {
+            Some(remaining) if remaining > 0 => remaining,
+            _ => return state.failed(op, Some(&current), &exhausted()),
+        };
+        if let Err(e) = room_clock::inspect(state, &final_context) {
+            return state.failed(op, Some(&current), &e);
+        }
+        if state.room_clock_recovery != expected || (sampling && room_clock::blocks_sampling(state))
+        {
+            return state.failed(
+                op,
+                Some(&current),
+                &error(
+                    ErrorCode::CorruptLedger,
+                    "room clock changed at final furnishing publication",
                 ),
             );
         }

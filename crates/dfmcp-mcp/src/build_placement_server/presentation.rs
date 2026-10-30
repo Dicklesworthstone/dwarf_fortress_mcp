@@ -216,6 +216,20 @@ pub(super) fn packet(
             active["inventory_verified"] = json!(false);
         }
     }
+    if let Some(clock) = result.get("room_clock") {
+        active["room_clock"] = json!({"inventory_path":"result.room_clock","monitor_id":clock["monitor_id"],
+            "recovery":clock["recovery"],"history_verified":clock["history_verified"],
+            "authority_tick_floor":clock["authority_tick_floor"],"pending":clock["pending"],
+            "unresolved":clock["unresolved"],"active_run":clock["active_run"],
+            "bootstrap_sample_required":clock["bootstrap_sample_required"],
+            "initial_plan_required":clock["initial_plan_required"],"current_pause_proven":false});
+        if clock["history_verified"] != true
+            || clock["pending"] == true
+            || clock["unresolved"] == true
+        {
+            active["pending_absence_proven"] = json!(false);
+        }
+    }
     if let Some(room) = result.get("room_completion") {
         active["scope"] = json!("original_furniture_batch_and_joint_room_goal");
         active["room_completion"] = json!({"inventory_path":"result.room_completion",
@@ -300,6 +314,13 @@ pub(super) fn packet(
         references.push(json!({"kind":"original_construction_clock_journal",
             "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],
             "currently_verified":clock["history_verified"],"canonical_world_anchor":false}));
+    }
+    if let Some(clock) = result.get("room_clock") {
+        references.push(
+            json!({"kind":"original_joint_room_clock_journal","monitor_id":clock["monitor_id"],
+            "recovery":clock["recovery"],"authority_tick_floor":clock["authority_tick_floor"],
+            "currently_verified":clock["history_verified"],"canonical_world_anchor":false}),
+        );
     }
     if let Some(room) = result.get("room_completion") {
         references.push(json!({"kind":"original_room_joint_sampled_condition",
@@ -515,9 +536,125 @@ pub(super) fn packet(
     {
         turn["recommendations"] = json!([room_recommendation(room, c)]);
     }
+    if let Some(clock) = result.get("room_clock") {
+        let id = clock["monitor_id"].clone();
+        let session = c.map(|c| c.session_id.to_string());
+        let verified = clock["history_verified"] == true;
+        let pending = clock["pending"] == true || clock["unresolved"] == true;
+        let offline = clock["mode"] == "offline";
+        let seal = &clock["active_run"]["review_seal"];
+        let ordinary_blocks = result.get("construction_clock").is_some_and(|other| {
+            other["history_verified"] != true
+                || other["pending"] == true
+                || other["unresolved"] == true
+        });
+        turn["briefing"]["room_clock"] = json!({"history_verified":verified,"pending":pending,
+            "current_pause_proven":false,"goal_sample_published":false,"separate_review_required":true,
+            "source_has_named_fortress_identity":false,"active_dig_work_proven":false,
+            "known_terrain_deficits":clock["readiness"]["terrain"]["deficit_count"]});
+        let inspect = json!({"session_id":session,"query":json!({"mode":"room_clock","monitor_id":id,
+            "head":clock["recovery"]["head"],"limit":8}).to_string()});
+        if !ordinary_blocks {
+            let next = if verified && seal.is_string() && !offline {
+                recommendation(
+                    "review-original-room-clock",
+                    "fortress.commit",
+                    "Review the original room terrain deficits, all furnishings and finite interval, then confirm this separate room-clock seal.",
+                    "high",
+                    "high",
+                    "guarded",
+                    "bounded_run_not_rollback",
+                    true,
+                    json!({"session_id":session,"scope":"room_clock","monitor_id":id,"review_seal":seal}),
+                )
+            } else if verified && pending && !offline {
+                recommendation(
+                    "reconcile-original-room-clock",
+                    "fortress.wait",
+                    "Reconcile the original room interval before another run or joint sample.",
+                    "high",
+                    "high",
+                    "read_only",
+                    "not_applicable",
+                    false,
+                    json!({"session_id":session,"scope":"room_clock","monitor_id":id}),
+                )
+            } else if clock["initial_plan_required"] == true {
+                let ticks = c
+                    .map_or(0, |c| c.budget.max_game_ticks)
+                    .min(
+                        result["room_completion"]["timing"]["max_gap"]
+                            .as_u64()
+                            .map_or(0, |v| v),
+                    )
+                    .min(
+                        result["room_completion"]["timing"]["deadline"]
+                            .as_u64()
+                            .map_or(0, |deadline| {
+                                deadline.saturating_sub(c.map_or(0, |c| c.anchor.tick.get()))
+                            }),
+                    );
+                let allowed = ticks > 0
+                    && c.is_some_and(|c| {
+                        c.authorize(
+                            dfmcp_core::Capability::Plan,
+                            dfmcp_core::RiskTier::Guarded,
+                            &[],
+                            None,
+                        )
+                        .is_ok()
+                            && c.authorize(
+                                dfmcp_core::Capability::ControlClock,
+                                dfmcp_core::RiskTier::Guarded,
+                                &[],
+                                None,
+                            )
+                            .is_ok()
+                    });
+                if allowed {
+                    recommendation(
+                        "prepare-original-room-clock",
+                        "fortress.plan",
+                        "Initialize the absent room clock under current planning authority and review one finite interval for the exact joint goal.",
+                        "high",
+                        "high",
+                        "guarded",
+                        "bounded_run_not_rollback",
+                        false,
+                        json!({"session_id":session,"scope":"room_clock","clock":json!({"monitor_id":id,
+                            "game_ticks":1,"wall_millis":c.map_or(1,|c|c.budget.max_wall_millis.min(5000))}).to_string()}),
+                    )
+                } else {
+                    room_recommendation(&result["room_completion"], c)
+                }
+            } else if clock["bootstrap_sample_required"] == true {
+                room_recommendation(&result["room_completion"], c)
+            } else if verified && !pending && !offline {
+                room_recommendation(&result["room_completion"], c)
+            } else {
+                recommendation(
+                    "inspect-original-room-clock",
+                    "fortress.query",
+                    "Inspect exact retained room-clock history; historical readiness and pause receipts establish no current room condition.",
+                    "high",
+                    "high",
+                    "read_only",
+                    "not_applicable",
+                    false,
+                    inspect,
+                )
+            };
+            turn["recommendations"] = json!([next]);
+        }
+        if pending && clock["mode"] == "control" {
+            turn["active_work"]["room_clock"]["cancellation"] = json!({"tool":"fortress.cancel",
+                "arguments":{"session_id":session,"scope":"room_clock","monitor_id":id},
+                "requires":"current separately retained room clock authority"});
+        }
+    }
     if result["closed"] == true {
         turn["recommendations"] = json!([]);
-        for name in ["room_completion", "construction_clock"] {
+        for name in ["room_completion", "construction_clock", "room_clock"] {
             if let Some(domain) = turn["active_work"]
                 .get_mut(name)
                 .and_then(Value::as_object_mut)

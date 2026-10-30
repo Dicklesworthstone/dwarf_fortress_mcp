@@ -1,6 +1,8 @@
 //! Separately reviewed finite run/1.13 advancement for the entire original
 //! furnishing batch. Durable receipt-bracket readiness never earns goal stability.
-use super::{State, Work, completion, error, exhausted, presentation, runtime};
+use super::{
+    State, Work, completion, error, exhausted, presentation, room_clock, room_monitor, runtime,
+};
 use dfmcp_adapter::bounded_run::RunSpec;
 use dfmcp_adapter::bounded_run::journal::RunBinding;
 use dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
@@ -279,7 +281,7 @@ pub(super) fn recovery(value: Recovery) -> Value {
     json!({"journal_id":value.journal_id.to_string(),"head":value.head.to_string()})
 }
 
-fn run_row(value: &ClockRunView, review: bool) -> Value {
+pub(super) fn run_row(value: &ClockRunView, review: bool) -> Value {
     let plan = value.entry.plan();
     let native = value.entry.native().map(|record| {
         json!({
@@ -661,7 +663,22 @@ fn readiness_reserve<S: EffectJournalStorage, N: BuildSource>(state: &State<S, N
     // both complete journal checks, publication and decode are prepaid before
     // the clock can synchronize its Intent or DispatchStarted marker.
     source
-        .checked_mul(10)
+        .checked_add(
+            if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                room_clock::VIEW_BYTES
+            } else {
+                0
+            },
+        )
+        .and_then(|bytes| {
+            bytes.checked_mul(
+                if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                    12
+                } else {
+                    10
+                },
+            )
+        })
         .and_then(|bytes| bytes.checked_add(2 * (store.byte_len() as u64 + 8192)))
         .and_then(|bytes| bytes.checked_add(store.operation_reserve(false)))
         .and_then(|bytes| bytes.checked_add(store.operation_reserve(true)))
@@ -683,6 +700,10 @@ fn guard<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
     let initial = budget.take(audit, state.authority_tick)?;
     io.checkpoint(&initial, true)?;
     active_original(state, spec, &initial)?;
+    if state.room_clock_config.is_some() || state.room_clock.is_some() {
+        let other = budget.take(room_clock::VIEW_BYTES, state.authority_tick)?;
+        room_clock::ensure_for_sample(state, &other)?;
+    }
     let mut monitor = state.completion.take().ok_or_else(exhausted)?;
     let outcome = (|| {
         let parent = monitor.parent.clone();
@@ -706,6 +727,12 @@ fn guard<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
                 current.budget.max_wall_millis =
                     current.budget.max_wall_millis.min(c.budget.max_wall_millis);
                 io.checkpoint(&current, true)?;
+                if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                    let other = budget.take(room_clock::VIEW_BYTES, current.anchor.tick.get())?;
+                    room_clock::ensure_for_sample(state, &other)?;
+                    current.anchor.tick =
+                        GameTick(current.anchor.tick.get().max(state.authority_tick));
+                }
                 let view = completion::verify_source(
                     &mut state.control,
                     &mut state.batch,
@@ -759,6 +786,11 @@ fn guard<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             current.budget.max_wall_millis =
                 current.budget.max_wall_millis.min(c.budget.max_wall_millis);
             io.checkpoint(&current, true)?;
+            if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                let other = budget.take(room_clock::VIEW_BYTES, current.anchor.tick.get())?;
+                room_clock::ensure_for_sample(state, &other)?;
+                current.anchor.tick = GameTick(current.anchor.tick.get().max(state.authority_tick));
+            }
             let view = completion::verify_source(
                 &mut state.control,
                 &mut state.batch,
@@ -835,6 +867,13 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             let connect = work.take(c, CONNECT_BYTES)?;
             let operation = work.take(c, OPERATION_BYTES)?;
             let final_check = work.take(c, VIEW_BYTES)?;
+            if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                let other = work.take(c, room_clock::VIEW_BYTES)?;
+                room_clock::ensure_for_sample(
+                    state,
+                    &narrowed(work, &other, state.authority_tick)?,
+                )?;
+            }
             active_original(
                 state,
                 &spec,
@@ -906,6 +945,13 @@ fn perform<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             let connect = work.take(c, CONNECT_BYTES)?;
             let operation = work.take(c, OPERATION_BYTES)?;
             let final_check = work.take(c, VIEW_BYTES)?;
+            if state.room_clock_config.is_some() || state.room_clock.is_some() {
+                let other = work.take(c, room_clock::VIEW_BYTES)?;
+                room_clock::ensure_for_sample(
+                    state,
+                    &narrowed(work, &other, state.authority_tick)?,
+                )?;
+            }
             active_original(
                 state,
                 &spec,
@@ -1053,6 +1099,9 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
     io: &mut I,
 ) -> String {
     state.abandon();
+    if let Some(other) = &mut state.room_clock {
+        other.abandon_preparation();
+    }
     state.clock_verified = false;
     let control = matches!(
         &action,
@@ -1106,10 +1155,13 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             return packet(state, failure(&cause), &c);
         }
     };
+    let advancement = matches!(&action, Action::Prepare(_) | Action::Commit { .. });
+    let room_publication = room_monitor::Publication::reserve(state, &c, &mut work);
     let publication = work.take(&c, VIEW_BYTES);
-    let outcome = match &publication {
-        Ok(_) => perform(state, &c, &mut work, action, io),
-        Err(cause) => Err(cause.clone()),
+    let outcome = match (&publication, &room_publication) {
+        (_, Err(cause)) => Err(cause.clone()),
+        (Ok(_), Ok(_)) => perform(state, &c, &mut work, action, io),
+        (Err(cause), _) => Err(cause.clone()),
     };
     retain_floor(state);
     c.anchor.tick = GameTick(c.anchor.tick.get().max(state.authority_tick));
@@ -1123,13 +1175,30 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             failure(&cause)
         }
     };
-    let rendered = packet(state, result, &c);
+    let rendered = packet(state, result.clone(), &c);
     let expected = state.clock.as_ref().map(Clock::recovery);
     let final_check = (|| {
         if rendered.len() as u64 > presentation::OUTPUT_BYTES {
             return Err(exhausted());
         }
         io.checkpoint(&work.current(&c)?, control)?;
+        if let Some(reserved) = room_publication.as_ref().map_err(Clone::clone)? {
+            let check = reserved.verify(state, expected, false, !advancement, |_| Ok(()));
+            if advancement {
+                check?;
+                if room_clock::blocks_sampling(state) || room_clock::bootstrap_pending(state) {
+                    return Err(error(
+                        ErrorCode::EffectIndeterminate,
+                        "retained room clock blocks furnishing clock publication",
+                    ));
+                }
+            } else if check.is_err() {
+                if let Some(monitor) = &mut state.room_completion {
+                    monitor.verified = false;
+                    monitor.store_verified = false;
+                }
+            }
+        }
         if let Some(expected) = expected {
             let checked =
                 inspect_current(state, &work, publication.as_ref().map_err(Clone::clone)?)?;
@@ -1148,7 +1217,15 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
             if failed {
                 state.clock_verified = false;
             }
-            rendered
+            let output = packet(state, result, &c);
+            if output.len() as u64 > presentation::OUTPUT_BYTES || work.current(&c).is_err() {
+                state.withdraw_monitor();
+                state.abandon_all();
+                state.clock_verified = false;
+                packet(state, failure(&exhausted()), &c)
+            } else {
+                output
+            }
         }
         Err(cause) => {
             state.withdraw_monitor();

@@ -17,7 +17,7 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 21] = [
+pub(super) const NAMES: [&str; 24] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
@@ -39,6 +39,9 @@ pub(super) const NAMES: [&str; 21] = [
     "DFMCP_BUILD_CLOCK_TOKEN",
     "DFMCP_BUILD_ALLOW_CLOCK",
     "DFMCP_BUILD_CLOCK_MONITOR_RECOVERY",
+    "DFMCP_BUILD_ROOM_CLOCK_CONFIG",
+    "DFMCP_BUILD_ROOM_CLOCK_TOKEN",
+    "DFMCP_BUILD_ALLOW_ROOM_CLOCK",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -80,6 +83,7 @@ pub(super) struct Config {
     pub clock_only: bool,
     pub clock_monitor_recovery: Option<dfmcp_adapter::construction_plan::store::Recovery>,
     pub clock: Option<super::clock::Config>,
+    pub room_clock: Option<super::room_clock::Config>,
     pub scope: MapCuboid,
     pub fortress: FortressIdentity,
     pub endpoint: SocketAddr,
@@ -109,7 +113,7 @@ impl Config {
         Ok(halo)
     }
 }
-fn required(name: &str, limit: usize) -> Result<String> {
+pub(super) fn required(name: &str, limit: usize) -> Result<String> {
     let value = std::env::var(name).map_err(|_| denied())?;
     if value.is_empty() || value.len() > limit || value.contains('\0') {
         return Err(denied());
@@ -132,6 +136,13 @@ pub(super) fn enabled() -> Result<bool> {
 }
 pub(super) fn clock_enabled() -> Result<bool> {
     match optional("DFMCP_BUILD_ALLOW_CLOCK")?.as_deref() {
+        None => Ok(false),
+        Some("1") => Ok(true),
+        _ => Err(denied()),
+    }
+}
+pub(super) fn room_clock_enabled() -> Result<bool> {
+    match optional("DFMCP_BUILD_ALLOW_ROOM_CLOCK")?.as_deref() {
         None => Ok(false),
         Some("1") => Ok(true),
         _ => Err(denied()),
@@ -239,6 +250,7 @@ fn configured(
         clock_only,
         clock_monitor_recovery: None,
         clock: None,
+        room_clock: None,
         scope,
         fortress,
         endpoint,
@@ -296,6 +308,7 @@ pub(super) fn configuration() -> Result<Config> {
     )?;
     enabled()?;
     clock_enabled()?;
+    room_clock_enabled()?;
     let mut config = configured(
         &required("DFMCP_BUILD_WORLD_FOLDER", 512)?,
         &required("DFMCP_BUILD_SITE_ID", 10)?,
@@ -392,6 +405,30 @@ pub(super) fn configuration() -> Result<Config> {
             return Err(denied());
         }
     } else if clock_enabled()? || optional("DFMCP_BUILD_CLOCK_TOKEN")?.is_some() {
+        return Err(denied());
+    }
+    config.room_clock = optional("DFMCP_BUILD_ROOM_CLOCK_CONFIG")?
+        .as_deref()
+        .map(super::room_clock::Config::parse)
+        .transpose()?;
+    if let Some(clock) = &config.room_clock {
+        if config.completion_only
+            || config.clock_only
+            || config.room_completion_path.is_none()
+            || config.batch_path.is_none()
+            || clock.path == config.path
+            || config.batch_path.as_ref() == Some(&clock.path)
+            || config.completion_path.as_ref() == Some(&clock.path)
+            || config.room_completion_path.as_ref() == Some(&clock.path)
+            || config
+                .clock
+                .as_ref()
+                .is_some_and(|other| other.path == clock.path)
+            || (clock.initialize && config.mode != BuildMode::Control)
+        {
+            return Err(denied());
+        }
+    } else if room_clock_enabled()? || optional("DFMCP_BUILD_ROOM_CLOCK_TOKEN")?.is_some() {
         return Err(denied());
     }
     Ok(config)
@@ -819,6 +856,7 @@ pub(super) struct ClockSource<'a> {
     control: &'a RequestControl,
     config: &'a Config,
     token_digest: dfmcp_core::Digest32,
+    room: bool,
 }
 fn clock_boundary(control: &RequestControl, config: &Config, effect: bool) -> Result<()> {
     boundary(control, config, false)?;
@@ -827,10 +865,35 @@ fn clock_boundary(control: &RequestControl, config: &Config, effect: bool) -> Re
     }
     Ok(())
 }
+pub(super) fn selected_clock_boundary(
+    control: &RequestControl,
+    config: &Config,
+    effect: bool,
+    room: bool,
+) -> Result<()> {
+    boundary(control, config, false)?;
+    if effect
+        && !(if room {
+            room_clock_enabled()?
+        } else {
+            clock_enabled()?
+        })
+    {
+        return Err(denied());
+    }
+    Ok(())
+}
 impl ClockSource<'_> {
     fn boundary(&self, effect: bool) -> Result<()> {
-        clock_boundary(self.control, self.config, effect)?;
-        let token = required("DFMCP_BUILD_CLOCK_TOKEN", 256)?;
+        selected_clock_boundary(self.control, self.config, effect, self.room)?;
+        let token = required(
+            if self.room {
+                "DFMCP_BUILD_ROOM_CLOCK_TOKEN"
+            } else {
+                "DFMCP_BUILD_CLOCK_TOKEN"
+            },
+            256,
+        )?;
         if token.len() < 32 || dfmcp_core::Digest32::of_bytes(token.as_bytes()) != self.token_digest
         {
             return Err(denied());
@@ -899,6 +962,74 @@ impl dfmcp_adapter::bounded_run::rpc::RunSource for ClockSource<'_> {
         // its consumed clock or durable receipt; the owner checks publication.
         self.inner.cancel(p, c)
     }
+}
+pub(super) fn connect_clock<'a>(
+    control: &'a RequestControl,
+    config: &'a Config,
+    selected: &super::clock::Config,
+    n: &OperationContext,
+    effect: bool,
+    room: bool,
+) -> Result<ClockSource<'a>> {
+    selected_clock_boundary(control, config, effect, room)?;
+    if config.mode == BuildMode::Offline {
+        return Err(denied());
+    }
+    if effect {
+        n.authorize(
+            dfmcp_core::Capability::ControlClock,
+            dfmcp_core::RiskTier::Guarded,
+            &[],
+            None,
+        )?;
+    }
+    if (if room {
+        config.room_clock.as_ref()
+    } else {
+        config.clock.as_ref()
+    }) != Some(selected)
+    {
+        return Err(denied());
+    }
+    let token = required(
+        if room {
+            "DFMCP_BUILD_ROOM_CLOCK_TOKEN"
+        } else {
+            "DFMCP_BUILD_CLOCK_TOKEN"
+        },
+        256,
+    )?
+    .into_bytes();
+    if token.len() < 32 {
+        return Err(denied());
+    }
+    let token_digest = dfmcp_core::Digest32::of_bytes(&token);
+    let mut nonce = n.session_id.get().to_be_bytes().to_vec();
+    nonce.extend_from_slice(&n.request_id.get().to_be_bytes());
+    let inner = dfmcp_adapter::bounded_run::rpc::RunRpcClient::connect(
+        selected.binding.endpoint(),
+        token,
+        nonce,
+        n,
+    )?;
+    // Exact incarnation is required by the coordinator before prepare or
+    // commit. Recovery cancellation may ask a newer incarnation for the
+    // original record; it cannot authorize pausing a replacement fortress.
+    if !inner.manifest().same_software(selected.binding.manifest())
+        || inner.manifest().generation < selected.binding.manifest().generation
+    {
+        return Err(denied());
+    }
+    selected_clock_boundary(control, config, effect, room)?;
+    let source = ClockSource {
+        inner,
+        control,
+        config,
+        token_digest,
+        room,
+    };
+    source.boundary(effect)?;
+    Ok(source)
 }
 impl<'a> super::clock::ClockIo for ClockIo<'a> {
     type Source = ClockSource<'a>;
@@ -1004,51 +1135,7 @@ impl<'a> super::clock::ClockIo for ClockIo<'a> {
         n: &OperationContext,
         effect: bool,
     ) -> Result<Self::Source> {
-        clock_boundary(self.control, self.config, effect)?;
-        if self.config.mode == BuildMode::Offline {
-            return Err(denied());
-        }
-        if effect {
-            n.authorize(
-                dfmcp_core::Capability::ControlClock,
-                dfmcp_core::RiskTier::Guarded,
-                &[],
-                None,
-            )?;
-        }
-        if self.config.clock.as_ref() != Some(selected) {
-            return Err(denied());
-        }
-        let token = required("DFMCP_BUILD_CLOCK_TOKEN", 256)?.into_bytes();
-        if token.len() < 32 {
-            return Err(denied());
-        }
-        let token_digest = dfmcp_core::Digest32::of_bytes(&token);
-        let mut nonce = n.session_id.get().to_be_bytes().to_vec();
-        nonce.extend_from_slice(&n.request_id.get().to_be_bytes());
-        let inner = dfmcp_adapter::bounded_run::rpc::RunRpcClient::connect(
-            selected.binding.endpoint(),
-            token,
-            nonce,
-            n,
-        )?;
-        // Exact incarnation is required by the coordinator before prepare or
-        // commit. Recovery cancellation may ask a newer incarnation for the
-        // original record; it cannot authorize pausing a replacement fortress.
-        if !inner.manifest().same_software(selected.binding.manifest())
-            || inner.manifest().generation < selected.binding.manifest().generation
-        {
-            return Err(denied());
-        }
-        clock_boundary(self.control, self.config, effect)?;
-        let source = ClockSource {
-            inner,
-            control: self.control,
-            config: self.config,
-            token_digest,
-        };
-        source.boundary(effect)?;
-        Ok(source)
+        connect_clock(self.control, self.config, selected, n, effect, false)
     }
     fn sample(
         &mut self,

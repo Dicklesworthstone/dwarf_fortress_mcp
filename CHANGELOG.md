@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-30 — Complete reviewed room-clock control through MCP
+
+- Add explicit room-clock plan/commit/wait/cancel and exact-head history query
+  through the existing eleven tools, preserving the complete original joint goal.
+- Require fresh durable full-room readiness at both native boundaries without
+  positive goal credit; reconcile each original run before another room sample.
+- Add independently configured room clock custody, credential and opt-in in the 24-name
+  environment. First-source bootstrap creates no owner under Query-only sampling;
+  explicit Plan opens it under current retained authority.
+- Keep room and ordinary furniture clock authority/identities separate and enforce
+  reciprocal prepared/uncertain-history exclusion before native contact.
+- Preserve original safety cancellation after source-file loss, goal expiry and
+  zero future ticks; allow local monitor cancellation after failed initialization.
+  Recheck final custody and render current proof flags, review and exact page limits.
+- Pass 233 adapter plus 118 MCP/Agent Turn component tests (351 total), including 38
+  new groups across the core and MCP increments. All 291/784 source inputs remain
+  unchanged. Scoped formatting passes; required repository gates retain 77 existing
+  findings across 63 unchanged paths and the source-bundle documentation blocker.
+- Document configuration, complete run/reconcile/sample calls and recovery limits.
+  Full ambient-runtime/native/live qualification and independent room-only startup
+  remain open; no compatibility or production admission is claimed.
+
 ## 2026-10-30 — Bind reviewed native clock intervals to complete room goals
 
 - Add a separate original-room clock owner over the existing native run engine,

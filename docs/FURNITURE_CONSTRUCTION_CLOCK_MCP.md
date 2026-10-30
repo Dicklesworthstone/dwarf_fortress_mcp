@@ -14,6 +14,12 @@ durability and authority rules. Exact executed tests and their limitations belon
 to [implementation status](../IMPLEMENTATION_STATUS.md). A clock receipt and a
 construction-readiness capture do not establish construction completion.
 
+The [original-room clock](ROOM_CONSTRUCTION_CLOCK_MCP.md) is a separate optional
+owner for complete terrain-and-furnishing goals. It cannot replace this clock's
+ordinary monitor or borrow its authority. When both are configured, either
+unsettled or unverified history blocks new advancement and fresh completion
+samples in both workflows.
+
 ## Activate after the first ordinary completion sample
 
 Start with the original [furniture batch](FURNITURE_BATCH_MCP.md) and

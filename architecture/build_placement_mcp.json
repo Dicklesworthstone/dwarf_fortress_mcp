@@ -41,7 +41,10 @@
       "DFMCP_BUILD_CLOCK_CONFIG",
       "DFMCP_BUILD_CLOCK_TOKEN",
       "DFMCP_BUILD_ALLOW_CLOCK",
-      "DFMCP_BUILD_CLOCK_MONITOR_RECOVERY"
+      "DFMCP_BUILD_CLOCK_MONITOR_RECOVERY",
+      "DFMCP_BUILD_ROOM_CLOCK_CONFIG",
+      "DFMCP_BUILD_ROOM_CLOCK_TOKEN",
+      "DFMCP_BUILD_ALLOW_ROOM_CLOCK"
     ],
     "opt_in_exact_value": "1",
     "unknown_dfmcp_names_refused": true,
@@ -74,7 +77,9 @@
     "clock_monitor_recovery_maximum_json_bytes": 2048,
     "clock_monitor_recovery_requires_nonzero_digests": true,
     "clock_monitor_recovery_allowed_in_other_modes": false,
-    "clock_only_max_game_ticks": 0
+    "clock_only_max_game_ticks": 0,
+    "completion_only_modes_allow_room_clock": false,
+    "clock_only_modes_allow_room_clock": false
   },
   "selection": {
     "shape": [
@@ -125,7 +130,8 @@
       "completion_start",
       "construction_clock",
       "room_completion",
-      "room_completion_start"
+      "room_completion_start",
+      "room_clock"
     ],
     "record_page_limit": [
       1,
@@ -144,6 +150,23 @@
     "completion_start_preserves_full_original_placed_receipts": true,
     "completion_start_fixes_absolute_deadline": true,
     "construction_clock": {
+      "required": [
+        "monitor_id",
+        "head"
+      ],
+      "offset": [
+        0,
+        63
+      ],
+      "default_offset": 0,
+      "limit": [
+        1,
+        8
+      ],
+      "default_limit": 8,
+      "first_page_requires_exact_head": true
+    },
+    "room_clock": {
       "required": [
         "monitor_id",
         "head"
@@ -510,6 +533,119 @@
     "fresh_sample_separate_from_historical_satisfaction": true,
     "canonical_world_anchor_created": false,
     "atomic_snapshot_claimed": false,
-    "current_usability_pathfinding_assignment_or_effect_discharge_claimed": false
+    "current_usability_pathfinding_assignment_or_effect_discharge_claimed": false,
+    "configured_room_clock_contract": "room_clock",
+    "readiness_consumes_original_acquisitions_without_positive_credit": true,
+    "sampling_guidance_checks_current_deadline_and_acquisition_allowance": true
+  },
+  "room_clock": {
+    "status": "implemented_unadmitted_development_only",
+    "adapter": "dfmcp_adapter::room_condition::clock",
+    "adapter_contract": "architecture/room_clock_rust.json",
+    "module": "build_placement_server::room_clock",
+    "operator_guide": "docs/ROOM_CONSTRUCTION_CLOCK_MCP.md",
+    "configuration_environment": [
+      "DFMCP_BUILD_ROOM_CLOCK_CONFIG",
+      "DFMCP_BUILD_ROOM_CLOCK_TOKEN",
+      "DFMCP_BUILD_ALLOW_ROOM_CLOCK"
+    ],
+    "configuration_maximum_json_bytes": 8192,
+    "configuration_closed_fields": [
+      "path",
+      "initialize",
+      "source",
+      "recovery"
+    ],
+    "source_closed_fields": [
+      "endpoint",
+      "generation",
+      "df_version",
+      "dfhack_version"
+    ],
+    "recovery_required_when_not_initializing": [
+      "journal_id",
+      "head"
+    ],
+    "full_original_room_and_first_sources_bound": true,
+    "ordinary_furniture_goal_promotion": false,
+    "ordinary_clock_authority_credential_or_review_borrowed": false,
+    "distinct_from_all_other_custody_paths": true,
+    "independent_clock_only_startup_mode": false,
+    "source_protocols": {
+      "furniture": "1.19",
+      "operations": "1.4",
+      "map": "1.5",
+      "run": "1.13"
+    },
+    "source_generations_independently_pinned": true,
+    "first_source_bootstrap": {
+      "requires_absent_unattempted_initializer_without_recovery_pin": true,
+      "ordinary_joint_acquisitions_before_explicit_plan": 1,
+      "creates_clock_file_or_owner": false,
+      "adds_plan_or_clock_authority_to_sampling_context": false,
+      "second_sample_requires_exact_clock_custody": true,
+      "first_explicit_plan_opens_under_current_retained_authority": true,
+      "accepted_source_at_session_open_uses_eager_exact_open": true,
+      "failed_initialization_recovery_pin_preserved": true,
+      "failed_initialization_blocks_local_monitor_cancellation": false,
+      "ordinary_furniture_clock_bootstrap_rules_changed": false
+    },
+    "plan_scope": "room_clock",
+    "plan_argument": "clock",
+    "plan_closed_fields": [
+      "monitor_id",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "plan_maximum_json_bytes": 2048,
+    "omitted_plan_scope_preserves_legacy_inference": true,
+    "commit_scope": "room_clock",
+    "wait_scope": "room_clock",
+    "cancel_scope": "room_clock",
+    "query_mode": "room_clock",
+    "commit_requires_original_joint_monitor_and_current_review_seal": true,
+    "new_advancement_requires_current_and_retained_independent_authority": true,
+    "session_default_max_game_ticks": 0,
+    "session_maximum_game_ticks": 1200,
+    "requested_game_ticks": [
+      1,
+      1200
+    ],
+    "requested_wall_millis": [
+      1,
+      60000
+    ],
+    "original_deadline_max_gap_and_acquisition_allowance_unchanged": true,
+    "full_joint_readiness_after_durable_intent_and_dispatch_started": true,
+    "fresh_paused_map_operations_run_ticks_must_match": true,
+    "known_terrain_deficits_disclosed_and_allowed_under_explicit_review": true,
+    "hidden_or_missing_required_terrain_refuses_advancement": true,
+    "readiness_acquisition_charge_per_boundary": 1,
+    "readiness_positive_goal_credit": false,
+    "full_furnishing_assessments_path": "result.room_completion.assessments",
+    "terrain_readiness_path": "result.room_clock.readiness.terrain",
+    "both_configured_clocks_gate_new_advancement_and_completion_sampling": true,
+    "maximum_unpause_attempts_per_original_key": 1,
+    "maximum_native_queries_per_wait": 1,
+    "wait_starts_new_interval_or_acquires_room_sample": false,
+    "retained_owner_reconciliation_requires_original_parent_monitor_custody": false,
+    "safety_cancel_requires_retained_current_named_and_native_query_clock": true,
+    "safety_cancel_requires_plan_observe_future_ticks_or_unexpired_goal": false,
+    "own_clock_damage_blocks_native_contact": true,
+    "original_proof_unavailable_during_recovery_is_redacted": true,
+    "complete_validated_descendants_accept_acknowledged_ancestor": true,
+    "reopen_restores_review_permission": false,
+    "combined_reopen_requires_original_placement_parent_room_files": true,
+    "new_advancement_final_source_monitor_and_both_clock_replay_after_last_callback": true,
+    "final_history_render_preserves_requested_page_limit": true,
+    "partial_native_read_floor_retained_before_error": true,
+    "unjournaled_failure_floors_automatically_crash_durable": false,
+    "normal_close_requires_terminal_room_and_settled_clocks": true,
+    "explicit_release_settles_native_effect": false,
+    "output_reservation_bytes": 65536,
+    "maximum_shared_work_bytes": 1073741824,
+    "automatic_loop_or_new_native_protocol": false,
+    "native_excavation_causality_or_current_usability_proven": false,
+    "native_live_or_full_runtime_qualification": "see IMPLEMENTATION_STATUS.md"
   }
 }

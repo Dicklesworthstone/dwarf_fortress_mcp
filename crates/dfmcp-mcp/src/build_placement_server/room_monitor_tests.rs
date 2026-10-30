@@ -2,6 +2,8 @@
 //! histories and independent protocol fixtures. The only injected operation
 //! is the existing query-only source bracket; no live fortress is implied.
 use super::*;
+#[path = "room_clock_tests.rs"]
+mod room_clock_tests;
 use dfmcp_adapter::furniture_allocation::{Kind, Request, Slot};
 use dfmcp_adapter::live_map::LiveMapObservation;
 use dfmcp_adapter::live_operations::LiveOperationsState;
@@ -873,6 +875,10 @@ fn room_native_acquisition_is_precluded_by_insufficient_budget_or_configured_clo
 }
 
 fn prepare_original_furniture_clock(h: &mut RoomHarness) -> Result<ClockIo> {
+    prepare_original_furniture_clock_at(h, TICK + 1)
+}
+
+fn prepare_original_furniture_clock_at(h: &mut RoomHarness, tick: u64) -> Result<ClockIo> {
     let definition = h.definition()?.original().clone();
     h.state.budget.max_game_ticks = 1200;
     h.state.grants.push(CapabilityGrant {
@@ -886,7 +892,7 @@ fn prepare_original_furniture_clock(h: &mut RoomHarness) -> Result<ClockIo> {
         remaining_uses: None,
     });
     let c = h.state.context(true, None)?;
-    let initial = linked_sample(&definition, TICK + 1, false)?;
+    let initial = linked_sample(&definition, tick, false)?;
     let mut store = open_private_monitor(
         h.config.completion_path.as_ref().ok_or_else(exhausted)?,
         &c,
@@ -917,8 +923,10 @@ fn prepare_original_furniture_clock(h: &mut RoomHarness) -> Result<ClockIo> {
         binding: RunBinding::new(h.state.binding.endpoint(), manifest.clone())?,
         recovery: None,
     };
+    let mut game = RunGame::new();
+    game.tick = tick;
     let mut io = ClockIo {
-        game: Rc::new(RefCell::new(RunGame::new())),
+        game: Rc::new(RefCell::new(game)),
         manifest,
         samples: VecDeque::new(),
         complete: false,

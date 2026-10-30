@@ -44,6 +44,58 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete original-room run/reconcile/sample workflow through MCP (2026-10-30)
+
+The existing eleven-tool furniture server now exposes the separate joint room
+clock: `plan(scope="room_clock", clock=...)`, explicit sealed `commit`, original
+`wait` reconciliation, safety `cancel` and exact-head paginated `query`. Each
+interval preserves the full original terrain/furnishing goal and first source
+association. Both durable native boundaries acquire and retain complete joint
+readiness without positive completion credit. Only a later ordinary room sample
+can advance the shared stability streak. Known terrain deficits stay visible;
+unknown required terrain blocks advancement. No automatic interval loop is added.
+
+Three independent operator settings extend the closed environment to 24 names.
+An absent, unattempted initializer permits one first-source room sample without
+creating a clock file or owner; explicit Plan then opens it under current retained
+authority. Existing accepted sources eagerly open exact custody during combined
+startup. Room and ordinary furniture clocks retain separate goals, files, native
+credentials and grants. Both configured histories must be settled and verified
+before new advancement or completion sampling. Missing authority and failed or
+uncertain original work never authorize another unpause.
+
+Within an established owner, Query-only original reconciliation and separately
+authorized safety cancellation survive source-file loss, expired goals and zero
+future ticks. Failed clock initialization cannot strand local room cancellation.
+Final replay follows the last callback and withdraws unsupported review/proof;
+safety-only paths preserve their own clock custody while redacting unavailable
+original proof. History pages retain the caller's exact page limit. Complete
+Agent Turns show room identity, deficits, recovery pins, consumed floors and
+currently available actions within unchanged 64 KiB output/1 GiB work limits.
+Normal original-custody restart restores no review or downtime stability; no
+independent room-only or room-clock-only startup mode is added.
+
+The final combined source passes 233 adapter and 118 MCP/Agent Turn component tests
+(351 total), including 21 new core groups and 17 new MCP lifecycle/parser groups.
+Coverage includes 1/32-target full run/reconcile/sample cycles, known/unknown terrain,
+final-acquisition refusal, source/final-callback loss, partial-read expiry, lost
+commit replies, exact restart, cancelled-key identity, failed-initializer local
+cancellation, bounded history pages and reciprocal exclusion of two real retained
+clock owners. All 291 adapter and 784 MCP/dependency source inputs match their tested
+views; scoped formatting and diff checks pass. Every production body is retained.
+The adapter view disables 114 unrelated test-module declarations. Full MCP public
+and native bodies type-check with nonexecuted FastMCP/asupersync stubs; four ambient
+worker tests and the allocation-owner module remain excluded. These runs do not
+execute the actual ambient runtime, native DFHack plugin or a live fortress.
+
+Required gates were attempted: `verify.sh` passes integrity, local receipt,
+implementation status and release custody before the unchanged source-bundle
+`exact clean git commit` documentation gate. Development `qualify_local.sh` stops
+at static contracts before full Rust phases. Its 77 findings across 63 paths match
+the preceding checkpoint exactly; all affected files are byte-identical to the
+session's starting main. Full workspace/runtime/native/live/release qualification
+and admission remain open. See [the operator workflow](docs/ROOM_CONSTRUCTION_CLOCK_MCP.md).
+
 ### Finite clock intervals bound to the complete original room (2026-10-30)
 
 The adapter now connects the durable joint room monitor to run/1.13 through a

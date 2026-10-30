@@ -31,9 +31,11 @@ mod clock_recovery;
 mod completion;
 mod policy;
 mod presentation;
+mod room_clock;
 mod room_intake;
 mod room_monitor;
 mod runtime;
+mod runtime_room_clock;
 use presentation::{OUTPUT_BYTES, digest, failure, inventory, packet};
 use runtime::Config;
 
@@ -162,6 +164,16 @@ struct State<S, N> {
     clock_recovery: Option<dfmcp_adapter::construction_plan::clock::Recovery>,
     clock_grants: Vec<CapabilityGrant>,
     clock_verified: bool,
+    room_clock: Option<
+        dfmcp_adapter::room_condition::clock::Clock<
+            dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+        >,
+    >,
+    room_clock_config: Option<room_clock::Config>,
+    room_clock_recovery: Option<room_clock::Recovery>,
+    room_clock_grants: Vec<CapabilityGrant>,
+    room_clock_verified: bool,
+    room_clock_bootstrap: bool,
     authority_tick: u64,
     worker_acknowledgement: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
@@ -201,6 +213,12 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             clock_recovery: config.clock.as_ref().and_then(|clock| clock.recovery),
             clock_grants: Vec::new(),
             clock_verified: false,
+            room_clock: None,
+            room_clock_config: config.room_clock.clone(),
+            room_clock_recovery: config.room_clock.as_ref().and_then(|clock| clock.recovery),
+            room_clock_grants: Vec::new(),
+            room_clock_verified: false,
+            room_clock_bootstrap: false,
             authority_tick: current.anchor.tick.get(),
             worker_acknowledgement: None,
         })
@@ -208,6 +226,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     fn context(&mut self, write: bool, wall: Option<u64>) -> Result<OperationContext> {
         self.withdraw_unacknowledged();
         self.clock_verified = false;
+        self.room_clock_verified = false;
         if let Some(monitor) = &mut self.completion {
             monitor.verified = false;
             monitor.store_verified = false;
@@ -261,6 +280,9 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         if let Some(clock) = &mut self.clock {
             clock.abandon_preparation();
         }
+        if let Some(clock) = &mut self.room_clock {
+            clock.abandon_preparation();
+        }
     }
     fn withdraw_monitor(&mut self) {
         if let Some(monitor) = &mut self.room_completion {
@@ -283,6 +305,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             self.abandon_all();
             self.withdraw_monitor();
             self.clock_verified = false;
+            self.room_clock_verified = false;
         }
     }
     fn seal(&self) -> Option<Digest32> {
@@ -298,7 +321,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         }
         if let Some(monitor) = &self.completion {
             result["completion"] = completion::display(monitor, verified && monitor.verified);
-            if clock::blocks_sampling(self) {
+            if clock::blocks_sampling(self) || room_clock::blocks_sampling(self) {
                 result["completion"]["sampled_condition_satisfied"] = json!(false);
                 result["completion"]["clock_history_blocks_sampling"] = json!(true);
             }
@@ -315,7 +338,14 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
                     && monitor.store_verified
                     && !monitor.store.is_fenced()
                     && !monitor.store.progress().terminal()
-                    && !clock::blocks_sampling(self)
+                    && monitor.store.progress().observations
+                        < monitor.store.definition().goal().timing().max_observations
+                    && self
+                        .authority_tick
+                        .max(self.control.high_tick())
+                        .max(self.room_floor())
+                        <= monitor.store.definition().goal().timing().deadline
+                    && !(clock::blocks_sampling(self) || room_clock::blocks_sampling(self))
             );
             result["room_completion"]["local_cancel_permitted"] = json!(
                 open && self.control.mode() != BuildMode::Offline
@@ -323,7 +353,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
                     && !monitor.store.is_fenced()
                     && !monitor.store.progress().terminal()
             );
-            if clock::blocks_sampling(self) {
+            if clock::blocks_sampling(self) || room_clock::blocks_sampling(self) {
                 result["room_completion"]["sampled_condition_satisfied"] = json!(false);
                 result["room_completion"]["clock_history_blocks_sampling"] = json!(true);
             }
@@ -344,32 +374,51 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
                     "fresh_goal_sampling_permitted":false,"retry_commit_permitted":false});
             }
         }
-        if let Some(clock) = result
-            .get_mut("construction_clock")
-            .filter(|v| v.is_object())
-        {
-            // A decoded readiness capture can raise the shared floor before a
-            // later original-custody failure prevents the clock owner seeing it.
-            // Every handoff, including an already-rendered history page, retains
-            // that consumed evidence without claiming a new successful sample.
-            let floor = self
-                .authority_tick
-                .max(self.control.high_tick())
-                .max(self.room_floor())
-                .max(self.clock.as_ref().map_or(0, |owner| owner.high_tick()))
-                .max(
-                    self.completion
-                        .as_ref()
-                        .and_then(|monitor| monitor.store.progress().last_tick)
-                        .map_or(0, |tick| tick),
-                )
-                .max(
-                    clock
-                        .get("authority_tick_floor")
-                        .and_then(Value::as_u64)
-                        .map_or(0, |tick| tick),
-                );
-            clock["authority_tick_floor"] = json!(floor);
+        if result.get("room_clock").is_none() {
+            if let Some(owner) = &self.room_clock {
+                result["room_clock"] = room_clock::reference(owner);
+                result["room_clock"]["history_verified"] = json!(self.room_clock_verified);
+            } else if self.room_clock_config.is_some() || self.room_clock_recovery.is_some() {
+                let bootstrap = room_clock::bootstrap_pending(self);
+                result["room_clock"] = json!({"history_verified":false,"configured":self.room_clock_config.is_some(),
+                    "monitor_id":self.room_completion.as_ref().map(|m|m.store.definition().id().to_string()),
+                    "pending":!bootstrap,"bootstrap_sample_required":bootstrap && self.room_completion.as_ref().is_none_or(|m|m.store.first_source().is_none()),
+                    "initial_plan_required":bootstrap && self.room_completion.as_ref().is_some_and(|m|m.store.first_source().is_some()),
+                    "recovery":self.room_clock_recovery.map(room_clock::recovery),
+                    "fresh_goal_sampling_permitted":false,"retry_commit_permitted":false,
+                    "sampled_joint_room_condition_proven":false});
+            }
+        }
+        for name in ["construction_clock", "room_clock"] {
+            if let Some(clock) = result.get_mut(name).filter(|v| v.is_object()) {
+                // A decoded readiness capture can raise the shared floor before a
+                // later original-custody failure prevents the clock owner seeing it.
+                // Every handoff, including an already-rendered history page, retains
+                // that consumed evidence without claiming a new successful sample.
+                let floor = self
+                    .authority_tick
+                    .max(self.control.high_tick())
+                    .max(self.room_floor())
+                    .max(self.clock.as_ref().map_or(0, |owner| owner.high_tick()))
+                    .max(
+                        self.room_clock
+                            .as_ref()
+                            .map_or(0, |owner| owner.high_tick()),
+                    )
+                    .max(
+                        self.completion
+                            .as_ref()
+                            .and_then(|monitor| monitor.store.progress().last_tick)
+                            .map_or(0, |tick| tick),
+                    )
+                    .max(
+                        clock
+                            .get("authority_tick_floor")
+                            .and_then(Value::as_u64)
+                            .map_or(0, |tick| tick),
+                    );
+                clock["authority_tick_floor"] = json!(floor);
+            }
         }
     }
     fn verify_batch(&mut self, c: &OperationContext, view: &BuildInventory) -> Result<()> {
@@ -412,6 +461,15 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
                 owner.authorize_disclosure(&current, &native)?;
             }
         }
+        if self.room_clock_config.is_some()
+            || self.room_clock.is_some()
+            || self.room_clock_recovery.is_some()
+        {
+            let native = clock::native_context(&current, &self.room_clock_grants)?;
+            if let Some(owner) = &self.room_clock {
+                owner.authorize_disclosure(&current, &native)?;
+            }
+        }
         Ok(current)
     }
     fn failed(
@@ -423,6 +481,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         self.abandon_all();
         self.withdraw_monitor();
         self.clock_verified = false;
+        self.room_clock_verified = false;
         let current = match c.map(|c| self.disclosure_context(c)) {
             Some(Ok(c)) => c,
             Some(Err(denied)) => return unbound(op, &denied),
@@ -518,7 +577,10 @@ fn grants(fortress: dfmcp_core::FortressId, mode: BuildMode, write: bool) -> Vec
     .collect()
 }
 fn add_clock_grants(c: &mut OperationContext, config: &Config, enabled: bool) {
-    if config.clock.is_none() || config.mode != BuildMode::Control || !enabled {
+    if (config.clock.is_none() && config.room_clock.is_none())
+        || config.mode != BuildMode::Control
+        || !enabled
+    {
         return;
     }
     for capability in [Capability::Plan, Capability::ControlClock] {
@@ -674,6 +736,12 @@ enum Query {
         offset: Option<usize>,
         limit: Option<usize>,
     },
+    RoomClock {
+        monitor_id: String,
+        head: String,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    },
     CompletionStart {
         deadline: u64,
         interval: Option<u32>,
@@ -739,6 +807,12 @@ impl Query {
                 head,
                 offset,
                 limit,
+            }
+            | Self::RoomClock {
+                monitor_id,
+                head,
+                offset,
+                limit,
             } => {
                 if digest(monitor_id)? == Digest32::ZERO
                     || digest(head)? == Digest32::ZERO
@@ -782,6 +856,7 @@ enum Action {
     Completion(completion::Action),
     RoomCompletion(room_monitor::Action),
     Clock(clock::Action),
+    RoomClock(room_clock::Action),
     Denied,
 }
 fn schema() -> Value {
@@ -789,6 +864,7 @@ fn schema() -> Value {
     "modes":{"records":{"limit":"optional integer 1..8","offset":"optional integer 0..256; head required when nonzero","head":"optional lowercase SHA-256 exact journal head"},
         "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"completion":{},"room_completion":{},
         "allocation":{"view":"optional request (default) or items; retained original evidence only"},
+        "room_clock":{"monitor_id":"required original joint room monitor SHA-256","head":"required exact room clock journal head SHA-256","offset":"optional 0..63","limit":"optional 1..8"},
         "construction_clock":{"monitor_id":"required original completion monitor SHA-256","head":"required exact clock journal head SHA-256","offset":"optional 0..63","limit":"optional 1..8"},
         "room_completion_start":{"deadline":"required absolute game tick","interval":"optional 1..403200; default 1","stable_samples":"optional 2..64; default 2","stable_span":"optional 1..4032000; default 1","max_gap":"optional interval..4032000; default 1200","max_observations":"optional stable_samples..512; default 512"},
         "completion_start":{"deadline":"required absolute game tick","interval":"optional 1..403200; default 1","stable_samples":"optional 2..64; default 2","stable_span":"optional 1..4032000; default 1","max_gap":"optional interval..4032000; default 1200","max_observations":"optional stable_samples..512; default 512"},"schema":{}},
@@ -1192,12 +1268,14 @@ where
         Action::Completion(_)
         | Action::RoomCompletion(_)
         | Action::Clock(_)
+        | Action::RoomClock(_)
         | Action::Query(
             Query::Completion {}
             | Query::CompletionStart { .. }
             | Query::RoomCompletion {}
             | Query::RoomCompletionStart { .. }
-            | Query::ConstructionClock { .. },
+            | Query::ConstructionClock { .. }
+            | Query::RoomClock { .. },
         ) => Err(error(
             ErrorCode::InvalidRequest,
             "completion requires the original private batch session",
@@ -1225,6 +1303,9 @@ where
     F: FnOnce(BuildSelection, bool, &BuildBinding, &OperationContext, Duration) -> Result<N>,
 {
     if let Some(clock) = &mut state.clock {
+        clock.abandon_preparation();
+    }
+    if let Some(clock) = &mut state.room_clock {
         clock.abandon_preparation();
     }
     if op == "fortress.observe" {
@@ -1383,6 +1464,19 @@ where
         if let Err(e) = checked {
             state.withdraw_monitor();
             result["clock_inventory_unverified"] = json!(true);
+            if op == "fortress.doctor" {
+                result["ok"] = json!(false);
+                result["error"] = failure(&e)["error"].clone();
+            }
+        }
+    }
+    if state.room_clock_config.is_some() || state.room_clock.is_some() {
+        let checked = work
+            .take(&display, room_clock::VIEW_BYTES)
+            .and_then(|c| room_clock::inspect(state, &c));
+        if let Err(e) = checked {
+            state.withdraw_monitor();
+            result["room_clock_inventory_unverified"] = json!(true);
             if op == "fortress.doctor" {
                 result["ok"] = json!(false);
                 result["error"] = failure(&e)["error"].clone();
@@ -1633,14 +1727,20 @@ async fn with_session(
                 Entry::Placement { state, config } => (state, config),
             };
             let placement_enabled = runtime::enabled().unwrap_or(false);
-            let clock_enabled = runtime::clock_enabled().unwrap_or(false);
-            let mut c = match state.context(placement_enabled || clock_enabled, wall) {
+            let clock_enabled = runtime::clock_enabled().map_or(false, |v| v);
+            let room_clock_enabled = runtime::room_clock_enabled().map_or(false, |v| v);
+            let mut c = match state.context(
+                placement_enabled || clock_enabled || room_clock_enabled,
+                wall,
+            ) {
                 Ok(c) => c,
                 Err(e) => return Ok(state.failed(op, None, &e)),
             };
             c.grants.retain(|grant| {
                 (placement_enabled || grant.capability != Capability::Construct)
-                    && (clock_enabled || grant.capability != Capability::ControlClock)
+                    && (clock_enabled
+                        || room_clock_enabled
+                        || grant.capability != Capability::ControlClock)
             });
             state.worker_acknowledgement = Some(control.acknowledgement());
             if let Err(e) = runtime::boundary(&control, config, false) {
@@ -1656,6 +1756,22 @@ async fn with_session(
                         opening_recovery: state.clock_recovery,
                     };
                     return Ok(clock::run_action(
+                        state,
+                        c,
+                        op,
+                        action,
+                        control.started,
+                        &mut io,
+                    ));
+                }
+                Ok(Action::RoomClock(action)) => {
+                    let mut io = runtime_room_clock::Io {
+                        control: &control,
+                        config: &config,
+                        opening_recovery: state.room_clock_recovery,
+                        observed_floor: state.authority_tick,
+                    };
+                    return Ok(room_clock::run_action(
                         state,
                         c,
                         op,
@@ -2011,7 +2127,9 @@ pub async fn fortress_open_session(
                 max_bytes:max_bytes.unwrap_or(MAX_WORK_BYTES),max_output_tokens:max_output_tokens.unwrap_or(16384),
                 max_entities:73729,max_actions:1,max_game_ticks:max_game_ticks.unwrap_or(0) };
             if budget.max_game_ticks > 1200 || (budget.max_game_ticks > 0
-                && (config.mode != BuildMode::Control || config.clock.is_none() || !runtime::clock_enabled()?)) {
+                && (config.mode != BuildMode::Control
+                    || !((config.clock.is_some() && runtime::clock_enabled()?)
+                        || (config.room_clock.is_some() && runtime::room_clock_enabled()?)))) {
                 return Err(error(ErrorCode::CapabilityDenied,"game ticks require explicit construction clock control"));
             }
             let mut locked = lock()?;
@@ -2024,7 +2142,9 @@ pub async fn fortress_open_session(
                 c.grants = canonical;
                 native
             } else {
-                add_clock_grants(&mut c, &config, runtime::clock_enabled()?);
+                add_clock_grants(&mut c, &config,
+                    (config.clock.is_some() && runtime::clock_enabled()?)
+                    || (config.room_clock.is_some() && runtime::room_clock_enabled()?));
                 Vec::new()
             };
             let mut work = Work::new(&c,control.started)?;
@@ -2159,6 +2279,8 @@ pub async fn fortress_open_session(
             state.grants = c.grants.clone();
             state.clock_grants = runtime::clock_grants(config.mode == BuildMode::Control
                 && config.clock.is_some() && runtime::clock_enabled()?);
+            state.room_clock_grants=runtime::clock_grants(config.mode==BuildMode::Control
+                && config.room_clock.is_some() && runtime::room_clock_enabled()?);
             state.batch = retained_parent;
             c = state.disclosure_context(&c)?;
             let view = state.control.inventory(&work.view(&c)?)?;
@@ -2200,6 +2322,13 @@ pub async fn fortress_open_session(
                 let checked = work.take(&c, clock::VIEW_BYTES)
                     .and_then(|current| clock::inspect(&mut state, &current));
                 if let Err(e) = checked {
+                    return Ok(state.failed("fortress.open_session",Some(&c),&e));
+                }
+            }
+            if config.room_clock.is_some() {
+                let mut io=runtime_room_clock::Io {control:&control,config:&config,
+                    opening_recovery:state.room_clock_recovery,observed_floor:state.authority_tick};
+                if let Err(e)=room_clock::open(&mut state,&c,&mut work,&mut io) {
                     return Ok(state.failed("fortress.open_session",Some(&c),&e));
                 }
             }
@@ -2268,34 +2397,51 @@ pub async fn fortress_observe(session_id: String, selection: String) -> String {
 }
 #[tool(
     name = "fortress.plan",
-    description = "Prepare one furniture placement from this session's exact observation witness under current scope, lease, protected regions and checkpoint policy. A batch requires its returned original step key; review also binds the complete parent plan and prepared journal head. Alternatively supply only clock JSON {monitor_id,game_ticks,wall_millis} to prepare a finite whole-batch clock interval after fresh complete receipt-bracket readiness. Returns a separately confirmable review seal. Preparation never places a building or unpauses the game."
+    description = "Prepare one furniture placement from this session's exact observation witness under current scope, lease, protected regions and checkpoint policy. A batch requires its returned original step key; review also binds the complete parent plan and prepared journal head. Alternatively supply clock JSON {monitor_id,game_ticks,wall_millis} to prepare a finite whole-batch clock interval after fresh complete receipt-bracket readiness; scope=room_clock instead binds the exact joint room monitor and full map-and-furnishings readiness. Returns a separately confirmable review seal. Preparation never places a building or unpauses the game."
 )]
 pub async fn fortress_plan(
     session_id: String,
     idempotency_key: Option<String>,
     observation_witness: Option<String>,
     clock: Option<String>,
+    scope: Option<String>,
 ) -> String {
-    let action = match (idempotency_key, observation_witness, clock) {
-        (Some(key_value), Some(witness), None) => key(&key_value)
-            .and_then(|_| digest(&witness))
-            .map(|witness| Action::Plan {
+    let action = plan_action(
+        scope.as_deref(),
+        idempotency_key,
+        observation_witness,
+        clock,
+    );
+    with_session(session_id, "fortress.plan", None, action).await
+}
+fn plan_action(
+    scope: Option<&str>,
+    idempotency_key: Option<String>,
+    observation_witness: Option<String>,
+    request: Option<String>,
+) -> Result<Action> {
+    match (scope, idempotency_key, observation_witness, request) {
+        (None | Some("effect"), Some(key_value), Some(witness), None) => {
+            key(&key_value)?;
+            Ok(Action::Plan {
                 key: key_value,
-                witness,
-            }),
-        (None, None, Some(raw)) => clock::Request::parse(&raw)
+                witness: digest(&witness)?,
+            })
+        }
+        (None | Some("clock"), None, None, Some(raw)) => clock::Request::parse(&raw)
             .map(|request| Action::Clock(clock::Action::Prepare(request))),
+        (Some("room_clock"), None, None, Some(raw)) => room_clock::Request::parse(&raw)
+            .map(|request| Action::RoomClock(room_clock::Action::Prepare(request))),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "choose one exact placement or one complete construction clock request",
+            "choose one exact placement, furniture clock or room clock request",
         )),
-    };
-    with_session(session_id, "fortress.plan", None, action).await
+    }
 }
 
 #[tool(
     name = "fortress.commit",
-    description = "Confirm exact plan digest and review seal for one native placement attempt on the original preparation connection. Current policy and complete capture are revalidated after dispatch state is durable. scope=clock instead requires the original monitor_id and its separate review_seal, with no placement key/digest; fresh whole-batch readiness precedes one finite unpause attempt. Uncertainty requires original-outcome recovery. Placement and clock receipts do not prove completed construction."
+    description = "Confirm exact plan digest and review seal for one native placement attempt on the original preparation connection. Current policy and complete capture are revalidated after dispatch state is durable. scope=clock or room_clock instead requires the original monitor_id and its separate review_seal, with no placement key/digest; fresh whole-batch readiness precedes one finite unpause attempt. Uncertainty requires original-outcome recovery. Placement and clock receipts do not prove completed construction."
 )]
 pub async fn fortress_commit(
     session_id: String,
@@ -2325,6 +2471,12 @@ pub async fn fortress_commit(
                 id: digest(&id)?,
                 seal,
             })),
+            ("room_clock", None, None, Some(id)) => {
+                Ok(Action::RoomClock(room_clock::Action::Commit {
+                    id: digest(&id)?,
+                    seal,
+                }))
+            }
             _ => Err(error(
                 ErrorCode::InvalidRequest,
                 "commit scope and review identity disagree",
@@ -2336,7 +2488,7 @@ pub async fn fortress_commit(
 
 #[tool(
     name = "fortress.query",
-    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation/construction_clock. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. construction_clock requires monitor_id and exact head; offset and limit page original run history. Independent clock recovery permits historical batch/allocation/completion/clock/schema inspection only. No native calls or renewed commit permission."
+    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/room_completion/allocation/construction_clock/room_clock. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. construction_clock requires monitor_id and exact head; offset and limit page original run history. Independent clock recovery permits historical batch/allocation/completion/clock/schema inspection only. No native calls or renewed commit permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -2367,6 +2519,17 @@ pub async fn fortress_query(session_id: String, query: String) -> String {
                     max_observations: max_observations.map_or(512, |v| v),
                 },
             ))),
+            Query::RoomClock {
+                monitor_id,
+                head,
+                offset,
+                limit,
+            } => Ok(Action::RoomClock(room_clock::Action::Inspect {
+                id: digest(&monitor_id)?,
+                head: digest(&head)?,
+                offset: offset.map_or(0, |v| v),
+                limit: limit.map_or(8, |v| v),
+            })),
             Query::ConstructionClock {
                 monitor_id,
                 head,
@@ -2410,7 +2573,7 @@ fn effect_action(
 }
 #[tool(
     name = "fortress.wait",
-    description = "Reconcile one original outcome and synchronize validated evidence. Default scope=effect uses the original furniture key/digest; scope=clock uses only monitor_id and queries its unresolved run at most once; scope=room_completion takes no effect identity and performs one joint room sample. Terminal history returns locally. No commit retry, new run, timer or construction-completion claim. Querying clears local commit permission. Independent clock-recover supports the original clock wait under Query authority; clock-offline never contacts the game."
+    description = "Reconcile one original outcome and synchronize validated evidence. Default scope=effect uses the original furniture key/digest; scope=clock or room_clock uses only monitor_id and queries its unresolved run at most once; scope=room_completion takes no effect identity and performs one joint room sample. Terminal history returns locally. No commit retry, new run, timer or construction-completion claim. Querying clears local commit permission. Independent clock-recover supports the original clock wait under Query authority; clock-offline never contacts the game."
 )]
 pub async fn fortress_wait(
     session_id: String,
@@ -2434,6 +2597,9 @@ pub async fn fortress_wait(
         }
         ("clock", None, None, Some(id)) => {
             digest(&id).map(|id| Action::Clock(clock::Action::Wait(id)))
+        }
+        ("room_clock", None, None, Some(id)) => {
+            digest(&id).map(|id| Action::RoomClock(room_clock::Action::Wait(id)))
         }
         _ => Err(error(
             ErrorCode::InvalidRequest,
@@ -2508,6 +2674,11 @@ async fn close(raw: String, release: bool) -> String {
                         &error(ErrorCode::EffectIndeterminate,
                             "unsettled construction clock requires exact recovery or explicit release")));
                 }
+                if let Some(view)=room_clock::inspect(state,&work.take(&c,room_clock::VIEW_BYTES)?)?
+                    && (view.pending || view.unresolved) {
+                    return Ok(state.failed("fortress.cancel",Some(&c),&error(ErrorCode::EffectIndeterminate,
+                        "unsettled room clock requires exact recovery or explicit release")));
+                }
                 let view = state.control.inventory(&work.view(&c)?)?;
                 if state.room_completion.is_some() {
                     state.verify_batch(&work.take(&c, batch::GUARD_BYTES)?, &view)?;
@@ -2546,7 +2717,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=room_completion cancels only the original joint room monitor. scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=clock with monitor_id retires the original preparation or requests its native safety pause under current clock authority, even after future-tick budgets expire. scope=session releases custody; release_for_recovery preserves unresolved identities. Independent clock recovery permits clock cancellation only with separately retained current clock authority, and explicit session release remains possible after Query loss with evidence redacted."
+    description = "scope=room_completion cancels only the original joint room monitor. scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=clock or room_clock with monitor_id retires the original preparation or requests its native safety pause under current clock authority, even after future-tick budgets expire. scope=session releases custody; release_for_recovery preserves unresolved identities. Independent clock recovery permits clock cancellation only with separately retained current clock authority, and explicit session release remains possible after Query loss with evidence redacted."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -2577,6 +2748,15 @@ pub async fn fortress_cancel(
                 "fortress.cancel",
                 None,
                 Ok(Action::Completion(completion::Action::Cancel)),
+            )
+            .await
+        }
+        ("room_clock", None, None, Some(id)) if !release => {
+            with_session(
+                session_id,
+                "fortress.cancel",
+                None,
+                digest(&id).map(|id| Action::RoomClock(room_clock::Action::Cancel(id))),
             )
             .await
         }

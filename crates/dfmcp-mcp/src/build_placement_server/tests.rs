@@ -224,6 +224,7 @@ fn config() -> Result<Config> {
         clock_only: false,
         clock_monitor_recovery: None,
         clock: None,
+        room_clock: None,
         batch_path: None,
         path: "/private/build/journal".into(),
         scope: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(63, 63, 7))?,

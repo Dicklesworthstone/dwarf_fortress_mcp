@@ -44,10 +44,12 @@ Explicit sampling also needs the original `DFMCP_BUILD_TOKEN` and independent
 inspection, cancellation and reopening need no native connection. Credentials,
 paths, source selectors and policy exceptions are operator settings, not MCP arguments.
 
-The server's closed environment now contains **21 allowed `DFMCP_` names**.
+The server's closed environment now contains **24 allowed `DFMCP_` names**.
 The three room additions are `DFMCP_BUILD_ROOM_COMPLETION`,
 `DFMCP_BUILD_ROOM_COMPLETION_RECOVERY` and `DFMCP_MAP_TOKEN`; the remaining settings
-are documented in the placement and [construction-clock guides](FURNITURE_CONSTRUCTION_CLOCK_MCP.md).
+are documented in the placement, [furniture clock](FURNITURE_CONSTRUCTION_CLOCK_MCP.md)
+and [room clock](ROOM_CONSTRUCTION_CLOCK_MCP.md) guides. The room clock adds its
+independent configuration, token and opt-in names.
 Unknown `DFMCP_` names, including native-plugin opt-ins and production admission
 settings, are refused. Native process configuration remains separate.
 
@@ -163,8 +165,17 @@ separate preparation/review/commit authority. A joint room goal cannot replace
 that clock goal, and furniture readiness cannot prove terrain readiness.
 `construction_clock_goal_promoted=false` makes this boundary explicit.
 
+A separate [original-room clock](ROOM_CONSTRUCTION_CLOCK_MCP.md) now supports
+explicit finite intervals bound to the joint goal and its first accepted sources.
+Both preparation and commit acquire full joint readiness, charge the original
+observation allowance and earn no positive completion credit. A new absent clock
+may permit one first-source sample; explicit room-clock planning must then open
+its exact custody before another sample. Each interval requires its own review
+and commit; the ordinary monitor alone still never changes game time.
+
 Prepared, pending, unresolved, missing or unverified configured clock custody
-blocks fresh room sampling. Reconcile or safely cancel the original clock, then
+in either configured clock blocks fresh room sampling. Reconcile or safely
+cancel that original clock, then
 request another room sample. Keep its configuration and all recovery references
 on combined-session reopen: omitting optional clock configuration does not prove
 that no earlier clock exists. The room monitor neither settles nor discharges it.
