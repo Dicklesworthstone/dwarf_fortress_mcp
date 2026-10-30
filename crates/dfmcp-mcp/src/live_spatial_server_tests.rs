@@ -210,8 +210,41 @@ fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill() -> Result
     assert_eq!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
-            .map(Vec::len),
-        Some(23)
+            .map(|variants| variants
+                .iter()
+                .map(|v| v["properties"]["kind"]["const"].as_str())
+                .collect::<Vec<_>>()),
+        Some(
+            vec![
+                "entities",
+                "inspect",
+                "traverse",
+                "dependencies",
+                "aggregate",
+                "search",
+                "capture",
+                "changes",
+                "baselines",
+                "release_baseline",
+                "watch",
+                "poll_watch",
+                "await_watch",
+                "watches",
+                "cancel_watch",
+                "release_watch",
+                "map_route",
+                "spatial_inventory_plan",
+                "blueprint_layout",
+                "map_connectivity",
+                "construction_progress",
+                "map_route_resilience",
+                "history",
+                "historical_query"
+            ]
+            .into_iter()
+            .map(Some)
+            .collect()
+        )
     );
     assert_eq!(s.calls.load(Ordering::SeqCst), 0);
     Ok(())

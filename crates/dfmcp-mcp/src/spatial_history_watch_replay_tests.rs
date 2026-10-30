@@ -95,12 +95,11 @@ impl Registered {
         .map_err(|_| invalid("handler returned invalid JSON"))
     }
     fn schema(&self) -> Result<Value> {
-        serde_json::from_str(&fortress_query(
+        crate::live_spatial_citizens_server::schema_paging::test_decode_schema(&fortress_query(
             Some(self.id.to_string()),
             Some("schema".into()),
             None,
         ))
-        .map_err(|_| invalid("schema handler returned invalid JSON"))
     }
     fn current(&self) -> Result<StateAnchor> {
         lock(&self.session)?.anchor()

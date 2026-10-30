@@ -525,11 +525,36 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
             .map(Vec::len),
         Some(17)
     );
+    let archive_variants = schema["query_schema"]["$defs"]["query"]["oneOf"]
+        .as_array()
+        .ok_or_else(|| error(ErrorCode::InvalidRequest, "missing archive query variants"))?;
+    let stateless_variants = schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
+        .as_array()
+        .ok_or_else(|| {
+            error(
+                ErrorCode::InvalidRequest,
+                "missing archive stateless variants",
+            )
+        })?;
+    assert_eq!(archive_variants.len(), stateless_variants.len() + 7);
     assert_eq!(
-        schema["query_schema"]["$defs"]["query"]["oneOf"]
-            .as_array()
-            .map(Vec::len),
-        Some(22)
+        &archive_variants[..stateless_variants.len()],
+        stateless_variants
+    );
+    assert_eq!(
+        archive_variants[stateless_variants.len()..]
+            .iter()
+            .map(|v| v["properties"]["kind"]["const"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            Some("history"),
+            Some("historical_query"),
+            Some("historical_changes"),
+            Some("historical_series"),
+            Some("historical_watch_replay"),
+            Some("historical_job_progress"),
+            Some("historical_citizen_welfare")
+        ]
     );
     for definition in ["archive_stateless", "query"] {
         assert!(

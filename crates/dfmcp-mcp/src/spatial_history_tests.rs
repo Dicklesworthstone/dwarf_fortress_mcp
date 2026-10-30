@@ -305,8 +305,41 @@ fn discovery_and_historical_requests_reject_wrong_record_scope_and_stateful_work
     assert_eq!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
-            .map(Vec::len),
-        Some(23)
+            .map(|variants| variants
+                .iter()
+                .map(|v| v["properties"]["kind"]["const"].as_str())
+                .collect::<Vec<_>>()),
+        Some(
+            vec![
+                "entities",
+                "inspect",
+                "traverse",
+                "dependencies",
+                "aggregate",
+                "search",
+                "capture",
+                "changes",
+                "baselines",
+                "release_baseline",
+                "watch",
+                "poll_watch",
+                "await_watch",
+                "watches",
+                "cancel_watch",
+                "release_watch",
+                "map_route",
+                "spatial_inventory_plan",
+                "blueprint_layout",
+                "map_connectivity",
+                "construction_progress",
+                "map_route_resilience",
+                "history",
+                "historical_query"
+            ]
+            .into_iter()
+            .map(Some)
+            .collect()
+        )
     );
     for kind in [
         "watch",
