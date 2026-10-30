@@ -4295,7 +4295,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                 );
                             }
                             guard.last_action =
-                                receipt.actions.first().map(|action| action.action_id);
+                                receipt.actions.last().map(|action| action.action_id);
                             guard.last_plan_actions = receipt
                                 .actions
                                 .iter()
@@ -4461,6 +4461,11 @@ fn wait_progress_error(
         );
         payload["open_actions_remaining"] = json!(session.open_actions.len());
         payload["durability_pending"] = json!(session.durability_fault.is_some());
+        if !session.carried.is_empty() {
+            payload["carried_obligations"] = json!(
+                session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+            );
+        }
         if let Some(action_id) = session.last_action {
             payload["action_id"] = json!(action_id.to_string());
             payload["work_state"] = action_work_json(session, action_id);
