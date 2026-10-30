@@ -5337,29 +5337,55 @@ addendum rather than editing the phase table above:
 
 ## Reality-check wiring corrections (2026-10-30)
 
-The current worktree contains six qualified `crate::lab_world` references in the
-laboratory server, correcting unresolved module paths found by a full build of
-commit `6e608849dc2b418c85ea508c382469110744b79d`. The legacy EE batch helper
-now escapes its JSONL string fields; its existing representation is not the E09
-batch schema and does not establish EE ingestion or runtime integration. The
-repository validator now distinguishes production Rust from explicitly test-only
-modules and masks comments and literals; source-bundle documentation keeps the
-contract check's required phrases contiguous. The nine room-example schema
-findings remain separate and are not waived here.
+The current worktree repairs unresolved lab module paths, modern Tasks historical
+receipt recovery, bounded schema discovery, cancellation receipt selection,
+partial-wait obligation retention, native SDK/protobuf compatibility, citizen
+name encoding, executable gates and legacy EE JSONL escaping. Room examples now
+use their actual bounded offline decoders. The EE helper retains its legacy
+format; this does not establish E09 ingestion or runtime memory integration.
 
-Native CMake and protobuf compatibility repairs are in progress. Neither those
-source changes nor the six Rust path fixes establish native, full-workspace,
-release or live qualification. The disposable-fort trial used source commit
-`6e608849dc2b418c85ea508c382469110744b79d` plus a six-path Rust overlay and
-staging native link changes; its read evidence does not qualify the later
-`f502dd7bc9e1ddf084a46b37bf962ee673bd1635` worktree or its concurrent changes.
+All 20 plugins in 19 packages compile and link against the actual DFHack 53.16-r3
+SDK/source `0bf381cc1615656acf756e6e67573fffca715125`. This is native development
+build evidence, not a complete R1 receipt. The SDK exposed unsupported fictional
+job APIs; lookup is now bounded, but positive job-suspension eligibility remains
+unimplemented and fails closed. A live modal-pause trial exposed a safety defect:
+composite UI pause was mistaken for the raw simulation pause flag. The shared
+bounded-run engine now sets and verifies raw pause before releasing ownership;
+failed readback retains ownership. Run/order-run/excavation-run SDK builds and
+negative handler vectors exercise that repair.
+
+Sonnet 5.5, launched through NTM, exercised the actual game through development
+MCP. It reconstructed 67 schema pages, read citizens and retained announcements,
+and executed an exact-source ten-tick run ending at `tick_limit`, zero overshoot,
+with fresh-session and independent native pause/owner checks. Private clean
+candidate `a5fa53c4f9365e7ba27da1ffa0ac9ab0c7509952` and executable SHA-256
+`7dae1087e82ace62c0b7a01b6a6131710f24dbd9e4de1b870ed732392b9b1898`
+bind that ten-tick result; later source changes inherit no qualification.
+An earlier sixty-tick request reached forty-seven ticks before its wall limit.
+Mining correctly refused hidden cells in its required safety halo. No mining,
+furniture-production or sustained fortress-management competence is established.
+Operator save loading and welcome-modal removal are excluded from gameplay credit.
+A later Terra read-only search covered eleven windows and 1,859 target origins;
+native assessment confirmed hidden-context refusal, with no designation or time
+advance. Two 64-row tile queries exposed another transport-size failure; current
+spatial live/archive source now reserves the pinned text ceiling before page
+production. That repair and its actual-handler decoder regression require fresh
+execution. Both qualifiers also now keep explicit Python syntax caches under
+ignored `target/`, preventing their checks from dirtying the source they qualify.
+
+Full workspace runs preserve their failures: R4 had 5,014 passed / 54 failed;
+R5 had 5,100 / 12; R6 had 5,111 / 2, each across 123 targets with zero ignored.
+The clean private R7 qualifier passed static/Python gates, locked metadata and
+formatting, then failed warning-denied Clippy on ten adapter findings. Repairs
+are present for a new exact-source qualification; no complete current latest-
+nightly qualification is claimed. Logs and sealed live exports are linked from
+`docs/reality-checks/2026-09-22-phase-0c-reality-check.md`.
+
 The registry remains empty and the production runner map remains protocol 1.0.
-
-Current implementation boundaries remain material: search is a lexical lab
-prototype rather than FrankenSearch integration; the table ledger and ATP
-proof primitives do not establish a durable distributed state plane; the EE
-helper is not a connected curation/export flow; the structural rebase engine
-is not the lab's separate witness-replay path; the cross-family coordinator
-has no wired production family executors; and several advertised resource
-families still need session-bound authorization and handlers. Existing closed
-beads for component work must not be read as proof of these end-to-end paths.
+Search is a lexical lab prototype rather than FrankenSearch integration; the
+in-memory table ledger and ATP proof primitives do not establish distributed
+state movement; the structural rebase engine has no runtime fallback consumer
+found. A concrete production family executor exists, but no MCP host consumer
+was found. Several declared resource families still lack runtime handlers.
+Residual beads .8–.11 and existing storage/ATP beads retain these boundaries;
+closed component beads do not prove end-to-end delivery.

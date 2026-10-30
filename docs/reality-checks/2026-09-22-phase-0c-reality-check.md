@@ -49,11 +49,11 @@ are retained as history, with explicit residual work rather than silent completi
   `tick_limit`, ten ticks advanced, zero overshoot, closed custody, child exit 0; fresh-session
   and native checks show pause true and no active owner. Server SHA-256:
   `7dae1087e82ace62c0b7a01b6a6131710f24dbd9e4de1b870ed732392b9b1898`.
-  Its [source-bound report](../../target/reality-check-20261030/live4-sourcebound-export/terra-live4-sourcebound-report.json)
+  Its local source-bound report, `target/reality-check-20261030/live4-sourcebound-export/terra-live4-sourcebound-report.json`,
   seals 40 artifacts; SHA256SUMS digest
   `1eb42b06b302fdedd8024f4fd28d8b46ab19db3c15344a9f38be891631d50555`.
 - The earlier sixty-tick request reached **47 ticks** before `wall_limit`, then reconciled
-  and verified pause. The [larger live report](../../target/reality-check-20261030/live4-export/terra-live4-report.json)
+  and verified pause. The local larger report, `target/reality-check-20261030/live4-export/terra-live4-report.json`,
   seals 199 artifacts; SHA256SUMS digest
   `a4834efbd86e24447fc4a1e41d33875c0f3b81c8b36d3840665be0f09a7c6ae9`.
   Its older Rust binaries are hash-identified but lack the later R7 source binding.
@@ -65,6 +65,29 @@ are retained as history, with explicit residual work rather than silent completi
   source members) found zero matches. The owned game/supervisor group is stopped, TCP closed,
   original save backup intact, and the verified idle NTM trial session has been removed.
   No fresh complete qualification, R1/R2–R5 campaign, release or production admission exists.
+
+The later Terra perception campaign inspected eleven complete 16×16×3 windows
+and 1,859 target origins without advancing time. Four wall-shaped rectangles
+retained hidden halo cells. A Query/Observe-only dig-control session worked after
+required operator configuration was supplied; its native 48-cell assessment
+reported 15 hidden cells and `hidden_context`. It made no plan or designation.
+The local `terra-live5-export` seals 136 artifacts, SHA256SUMS digest
+`01fc1a82d4b6e9b5b5df4366359caf4918be1c47a7dbfdc92472c2486a003945`.
+The later cleanup receipt digest is
+`0052aca68c63a9a66d444d36d2218dc71455987e8aa2b3cc53d43e2325027eea`;
+it supersedes the package's then-idle NTM field. Game, supervisor and NTM are
+stopped; raw pause/time and all thirty backup entries were independently checked.
+
+Two 64-row tile queries in that campaign returned a modern invalid-result error;
+32-row retries succeeded. The current repair caps complete live and archive
+spatial packets at 60,000 text bytes before reserving result bytes, preserving
+normal pagination and coverage. Its new actual-handler regression requests the
+same fields and page limit over 768 tiles and checks each complete MCP envelope
+with the pinned modern decoder. Execution of that repair remains pending.
+R11 also exposed explicit `py_compile` dirtying its own source; both aggregates
+now direct bytecode into ignored `target/`. R12's postcheck verified all 2,590
+source files unchanged and a clean worktree, while its remaining test-only lint
+failure remains failed. No full qualification is inferred from these repairs.
 
 ### Current vision and wiring matrix
 

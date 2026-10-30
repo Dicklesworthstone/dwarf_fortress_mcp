@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-30 — Repair executable wiring and prove a bounded live run
+
+- Repair laboratory composition, Tasks recovery of original receipts, partial-wait
+  obligations, cancellation selection, bounded lossless schema discovery and stale
+  executable gates. Keep all eleven tools and the exact owned FastMCP pin.
+- Compile all 20 native plugins against the named real DFHack 53.16-r3 SDK;
+  replace fictional job APIs with bounded lookup and fail-closed eligibility.
+  Preserve complete UTF-8 citizen names from native code-page text.
+- Fix shared clock safety: a modal UI pause cannot release ownership without a
+  successful raw simulation-pause write/readback. Exercise failure vectors and an
+  actual game modal; compile run/order-run/excavation-run against the real SDK.
+- Execute an exact-source ten-tick MCP run with Sonnet 5.5 through NTM, zero
+  overshoot, fresh pause observation and independent native ownership checks.
+  Preserve the earlier forty-seven-of-sixty wall-limit stop and hidden-halo mining
+  refusal as limits. No sustained fortress or production-goal success is claimed.
+- Record real wiring gaps and owning beads in the current reality-check matrix.
+  Private R7 passed static/Python/format gates and failed Clippy; full qualification
+  repairs continue. Native development builds and live trials grant no admission.
+- Preserve Terra's later read-only mining search and native hidden-context refusal;
+  repair the 64-row spatial text overflow at pre-pagination packet budgeting.
+  Direct explicit Python syntax caches under ignored `target/` so qualification
+  preserves clean source custody. Fresh execution remains required.
+- Close source-bundle Git subprocess pipes on success and failure; exercise actual
+  child exit, bounded oversized output and ResourceWarning-denied cleanup.
+
 ## 2026-10-30 — Execute complete original labor and work-order plans
 
 - Connect the durable frontier to the real workforce/1.17 and work-orders/1.10

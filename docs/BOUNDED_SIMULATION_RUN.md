@@ -33,6 +33,15 @@ dispatch requests a safety pause; failure to verify the pause keeps the record i
 `stopping`, retains ownership, and blocks new runs. Only safety pauses may repeat.
 A pause readback can be known even while the game tick is unknown.
 
+DFHack 53.16's `World::ReadPauseState()` includes modal UI pauses, while
+`World::SetPauseState()` writes the underlying simulation pause flag. A modal
+pause therefore cannot alone release run ownership. On an external-pause stop,
+the engine first requests the safety pause; the native writer verifies the raw
+`pause_state` flag. A missing flag, failed setter or false raw readback retains
+ownership in `stopping`. This rule also applies to the shared order-run and
+excavation-run engine. Dismissing a modal after a verified stop must not resume
+an unfenced simulation.
+
 Limits are **stop triggers checked at native callback opportunities**, not hard
 real-time or exact-tick guarantees. The game/DFHack thread can stall. Actual
 observed ticks, including overshoot, are recorded; no production completion,
@@ -119,6 +128,31 @@ verified before using evidence. Replies carry current plugin generation; retaine
 records carry the generation at preparation, which can be historical.
 
 ## Executed evidence and missing qualification
+
+### 2026-10-30 real SDK and disposable-fort development evidence
+
+The repaired run, order-run and excavation-run plugins compile against DFHack
+source `0bf381cc1615656acf756e6e67573fffca715125`, matching DF Classic 53.16 /
+DFHack 53.16-r3. A live modal-pause trial verifies a terminal external-pause
+record and an independently true raw pause flag. Deterministic handler suites
+also cover failed raw readback without releasing ownership. These executions
+supplement the earlier SDK-double evidence below; they are not a complete R1
+receipt or production admission.
+
+A Sonnet 5.5 agent using the isolated run MCP server then requested ten ticks,
+observed `tick_limit` after exactly ten ticks with zero overshoot, closed its
+durable custody, and observed the fortress paused in a fresh session. Independent
+native checks found no active run owner and a true raw pause flag. The exact
+private clean source candidate is `a5fa53c4f9365e7ba27da1ffa0ac9ab0c7509952`;
+the executable SHA-256 is
+`7dae1087e82ace62c0b7a01b6a6131710f24dbd9e4de1b870ed732392b9b1898`.
+The sealed source-bound export is recorded in the current
+[reality check](reality-checks/2026-09-22-phase-0c-reality-check.md).
+An earlier sixty-tick request stopped at its wall limit after forty-seven ticks;
+that result does not prove sixty-tick completion. Operator-only save loading and
+welcome-popup removal occurred while raw pause remained true and game time did
+not advance; neither counts as agent gameplay. No mining or fortress-production
+goal was proved. The registry and production runner map remain unchanged.
 
 ```bash
 python3 scripts/test_bounded_run_native.py
