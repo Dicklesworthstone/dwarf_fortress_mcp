@@ -101,9 +101,26 @@ fn commit_ok(session: &str, plan: &Json) -> TestResult<()> {
 }
 
 fn wait(session: &str, ticks: u64) -> TestResult<()> {
-    let result = parsed(&wait_with_ticks(Some(session.to_owned()), Some(ticks)))?;
-    assert_eq!(result["ok"], true, "{result}");
-    Ok(())
+    let mut remaining = ticks;
+    for _ in 0..128 {
+        let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(remaining)))?;
+        if waited["ok"] == true {
+            return Ok(());
+        }
+        assert_eq!(waited["error"]["code"], "budget_exceeded", "{waited}");
+        let advanced = waited["advanced_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without a progress frontier")?;
+        let next = waited["wait_progress"]["remaining_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without remaining ticks")?;
+        assert!(advanced > 0 && next < remaining, "{waited}");
+        assert_eq!(advanced + next, remaining);
+        // This is a new explicit foreground request for only the unconsumed
+        // ticks; no call's wall-time or game-time allowance is increased.
+        remaining = next;
+    }
+    Err("wait exceeded 128 bounded continuation requests".into())
 }
 
 fn goal(session: &str, digest: &str) -> TestResult<Json> {

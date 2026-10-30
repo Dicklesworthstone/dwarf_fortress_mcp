@@ -124,9 +124,26 @@ fn commit_ok(session: &str, planned: &Value) -> TestResult<Value> {
 }
 
 fn wait(session: &str, ticks: u64) -> TestResult<Value> {
-    let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(ticks)))?;
-    assert_eq!(waited["ok"], true, "{waited}");
-    Ok(waited)
+    let mut remaining = ticks;
+    for _ in 0..128 {
+        let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(remaining)))?;
+        if waited["ok"] == true {
+            return Ok(waited);
+        }
+        assert_eq!(waited["error"]["code"], "budget_exceeded", "{waited}");
+        let advanced = waited["advanced_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without a progress frontier")?;
+        let next = waited["wait_progress"]["remaining_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without remaining ticks")?;
+        assert!(advanced > 0 && next < remaining, "{waited}");
+        assert_eq!(advanced + next, remaining);
+        // This is a new explicit foreground request for only the unconsumed
+        // ticks; no call's wall-time or game-time allowance is increased.
+        remaining = next;
+    }
+    Err("wait exceeded 128 bounded continuation requests".into())
 }
 
 fn production_with_unfinished_setup(session: &str) -> TestResult<(Value, PreparedPlan)> {
@@ -915,6 +932,19 @@ fn contradicted_custody_cannot_fall_back_to_completed_original_work() -> TestRes
                 .checked_next()
                 .ok_or_else(|| fixture_error("fixture cursor exhausted"))?;
             shadow.refresh_hash();
+            // The quota planner includes consumption reserve. Advance actual
+            // reference metabolism until that reserve is exhausted instead of
+            // fabricating a low stock count in this fault fixture.
+            for _ in 0..16 {
+                shadow.refresh_hash();
+                if PredicateEvidence::laboratory(&shadow)?.evaluate(&original.terminal_condition)?
+                    == PredicateTruth::False
+                {
+                    break;
+                }
+                shadow.tick = GameTick(shadow.tick.0 + effects::DRINK_INTERVAL_TICKS);
+                effects::advance_effects(&mut shadow, effects::DRINK_INTERVAL_TICKS)?;
+            }
             for step in &original.steps {
                 assert!(
                     dfmcp_intent::inspect_effect_work(

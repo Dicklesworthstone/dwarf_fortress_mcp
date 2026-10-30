@@ -105,9 +105,26 @@ fn commit_ok(session: &str, plan: &Json) -> TestResult<()> {
 }
 
 fn wait(session: &str, ticks: u64) -> TestResult<()> {
-    let result = parsed(&wait_with_ticks(Some(session.to_owned()), Some(ticks)))?;
-    assert_eq!(result["ok"], true, "{result}");
-    Ok(())
+    let mut remaining = ticks;
+    for _ in 0..128 {
+        let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(remaining)))?;
+        if waited["ok"] == true {
+            return Ok(());
+        }
+        assert_eq!(waited["error"]["code"], "budget_exceeded", "{waited}");
+        let advanced = waited["advanced_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without a progress frontier")?;
+        let next = waited["wait_progress"]["remaining_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without remaining ticks")?;
+        assert!(advanced > 0 && next < remaining, "{waited}");
+        assert_eq!(advanced + next, remaining);
+        // This is a new explicit foreground request for only the unconsumed
+        // ticks; no call's wall-time or game-time allowance is increased.
+        remaining = next;
+    }
+    Err("wait exceeded 128 bounded continuation requests".into())
 }
 
 fn goal(session: &str, digest: &str) -> TestResult<Json> {
@@ -606,7 +623,8 @@ fn connected_goal_rechecks_its_original_entry_without_rewriting_success_history(
 fn excavation_only_connected_continuation_still_requires_review_after_anchor_changes() -> TestResult
 {
     let _serial = serialized_durable_tests();
-    let session = open("964380", false, false)?;
+    let directory = StateDir::new();
+    let session = open("964380", false, true)?;
     let (original, _, _, _) = partial_room(&session)?;
     let first = continuation(&session, &identity(&original, "plan_digest")?)?;
     assert_eq!(first["ok"], true, "{first}");
@@ -632,6 +650,18 @@ fn excavation_only_connected_continuation_still_requires_review_after_anchor_cha
         guard.adapter.inject_snapshot(snapshot)
     })?;
     assert_eq!(goal(&session, &child)?["predicate_truth"], "false");
+    // Injection deliberately invalidates every live adapter handle. A fresh
+    // recovery must verify retained original custody before a new pursuit may
+    // rely on the physically completed steps.
+    let gap = continuation(&session, &child)?;
+    assert_eq!(gap["ok"], false, "{gap}");
+    assert_eq!(gap["error"]["code"], "preconditions_failed");
+    in_session(&session, |guard| {
+        persist_durable_head(guard);
+        durability_gate(guard)
+    })?;
+    simulate_durable_restart(Some(directory.0.clone()));
+    let session = open("964380", false, true)?;
     let repair = continuation(&session, &child)?;
     assert_eq!(repair["ok"], true, "{repair}");
     in_session(&session, |guard| {

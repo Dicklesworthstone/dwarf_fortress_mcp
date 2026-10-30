@@ -126,9 +126,26 @@ fn production(session: &str) -> TestResult<String> {
 }
 
 fn wait(session: &str, ticks: u64) -> TestResult<Value> {
-    let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(ticks)))?;
-    assert_eq!(waited["ok"], true, "{waited}");
-    Ok(waited)
+    let mut remaining = ticks;
+    for _ in 0..128 {
+        let waited = parsed(&wait_with_ticks(Some(session.to_owned()), Some(remaining)))?;
+        if waited["ok"] == true {
+            return Ok(waited);
+        }
+        assert_eq!(waited["error"]["code"], "budget_exceeded", "{waited}");
+        let advanced = waited["advanced_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without a progress frontier")?;
+        let next = waited["wait_progress"]["remaining_game_ticks"]
+            .as_u64()
+            .ok_or("bounded wait refused without remaining ticks")?;
+        assert!(advanced > 0 && next < remaining, "{waited}");
+        assert_eq!(advanced + next, remaining);
+        // This is a new explicit foreground request for only the unconsumed
+        // ticks; no call's wall-time or game-time allowance is increased.
+        remaining = next;
+    }
+    Err("wait exceeded 128 bounded continuation requests".into())
 }
 
 fn goal(session: &str, digest: &str) -> TestResult<Value> {
@@ -487,8 +504,19 @@ fn achieved_quiet_goals_cannot_free_capacity_after_consumption_or_lost_stock_evi
     // Distinct seals preserve distinct original effect identities, even when
     // every request shares the same quota. Nothing is produced before time
     // advances, so all 64 goals are initially unmet.
-    for _ in 0..dfmcp_lab::durable::MAX_OBJECTIVES_PER_FORTRESS {
+    for index in 0..dfmcp_lab::durable::MAX_OBJECTIVES_PER_FORTRESS {
         digests.push(production(&first)?);
+        if index + 1 < dfmcp_lab::durable::MAX_OBJECTIVES_PER_FORTRESS {
+            // Keep original goals, but obey the overlap guard: only the final
+            // order remains live and can produce the stock for these quotas.
+            let stopped = parsed(&cancel_in_scope(
+                Some(first.clone()),
+                Some("stop_future_steps".to_owned()),
+                Some("plan".to_owned()),
+            ))?;
+            assert_eq!(stopped["ok"], true, "{stopped}");
+            assert_eq!(stopped["drain_progress"]["quiescent"], true);
+        }
     }
     wait(&first, 200)?;
     let drained = parsed(&cancel_in_scope(
