@@ -720,12 +720,16 @@ impl MonitorState {
             .latest
             .as_ref()
             .is_none_or(|old| capture.tick() > old.tick());
+        let changed_at_same_tick = self
+            .latest
+            .as_ref()
+            .is_some_and(|old| capture.tick() == old.tick() && capture != *old);
         let gap = self
             .latest
             .as_ref()
             .is_some_and(|old| tick - old.tick().get() > self.spec.policy.max_gap_ticks);
         next.latest = Some(capture);
-        if gap {
+        if gap || changed_at_same_tick {
             next.streak = 0;
             next.since_tick = None;
         }
@@ -736,18 +740,18 @@ impl MonitorState {
         } else if counts.mismatched != 0 {
             next.reset(Status::Pending);
         } else {
-            if next.streak == 0 {
-                next.streak = 1;
-                next.since_tick = Some(tick);
-            } else if advanced {
+            // An equal-tick capture cannot seed a new streak after a changed
+            // snapshot, contradiction, interrupted read or restarted owner.
+            if advanced {
+                if next.streak == 0 {
+                    next.since_tick = Some(tick);
+                }
                 next.streak += 1;
             }
-            let since = next
-                .since_tick
-                .ok_or_else(|| invalid("matching blueprint streak lost its start"))?;
-            if next.streak >= self.spec.policy.required_samples
-                && tick - since >= self.spec.policy.stable_ticks
-            {
+            if next.since_tick.is_some_and(|since| {
+                next.streak >= self.spec.policy.required_samples
+                    && tick - since >= self.spec.policy.stable_ticks
+            }) {
                 next.status = Status::Satisfied;
                 if next.first_satisfied.is_none() {
                     next.first_satisfied = next.latest.clone();

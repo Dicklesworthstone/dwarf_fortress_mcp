@@ -213,8 +213,11 @@ designations are separately counted; those deficit categories can overlap.
 Every target participates in one shared stability window. The fixed policy has
 an inclusive absolute deadline, required advancing-tick samples, elapsed stable
 ticks, a maximum gap and at most 128 attempts. Equal-tick reads cannot increase
-the sample count. Failed reads, unknown/false conditions and excessive gaps
-break unfinished stability. Source or clock regression invalidates the monitor.
+the sample count. Changed capture bytes at the same tick also break the shared
+streak, even when the selected tiles still match. Another observation at that
+tick cannot seed a replacement streak; a later advancing tick is required.
+Failed reads, unknown/false conditions and excessive gaps break unfinished
+stability. Source or clock regression invalidates the monitor.
 Terminal results are immutable. A past satisfied sample does not establish
 continuous stability, present terrain, structural safety or attribution.
 
@@ -232,6 +235,13 @@ runtime or original-custody checks. Failed acknowledgement fences uncertain
 publication. The known clock floor survives even when the new tick makes the
 current grants expire. Reopening preserves terminal historical achievement and
 breaks an unfinished streak; an unfinished durable read cannot resume sampling.
+
+The store exposes local evidence withdrawal for an enclosing request or runtime
+failure after an accepted sample. Withdrawing clears unfinished stability
+immediately; the next authorized attempt first records that interruption durably.
+It needs no new authority and performs no I/O, and never repairs history,
+restores a consumed attempt, removes a known clock floor or erases a terminal
+historical achievement.
 
 Keep the returned `{monitor_id, head}` recovery object outside the owner. Exact
 reopening requires that acknowledged head in the verified append chain. A

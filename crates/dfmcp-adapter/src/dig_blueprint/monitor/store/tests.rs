@@ -338,6 +338,87 @@ fn pending_started_or_captured_reopen_fences_sampling_but_allows_query_cancel() 
 }
 
 #[test]
+fn unpublished_response_withdrawal_is_local_and_next_attempt_seals_the_reset() -> Result<()> {
+    let spec = definition()?;
+    let c = context(&spec);
+    let memory = Memory::default();
+    let mut store = create(memory.clone(), &spec, &c)?;
+    sample(&mut store, &c, 1000)?;
+    let before = memory.effects();
+    let pin = store.recovery();
+    store.withdraw_unpublished()?;
+    assert_eq!(store.state().status(), Status::Unknown);
+    assert_eq!(store.state().streak(), 0);
+    assert_eq!(
+        store.state().latest().map(|raw| raw.tick().get()),
+        Some(1000)
+    );
+    assert_eq!(memory.effects(), before);
+    assert_eq!(store.recovery(), pin);
+    let token = store.begin_attempt(&c)?;
+    let replay = decode(&memory.snapshot_bytes())?;
+    assert!(replay.pending());
+    assert_eq!(replay.state.streak(), 0);
+    store.capture(&token, fixtures::capture(&spec, 1005)?, &c)?;
+    store.publish(&token, &c)?;
+    assert_eq!(store.state().streak(), 1);
+    assert_eq!(store.state().since_tick(), Some(1005));
+    sample(&mut store, &c, 1010)?;
+    assert_eq!(store.state().status(), Status::Stabilizing);
+    sample(&mut store, &c, 1015)?;
+    let first = store.state().first_satisfied().cloned();
+    assert_eq!(first.as_ref().map(|raw| raw.tick().get()), Some(1015));
+    let before = memory.effects();
+    store.withdraw_unpublished()?;
+    assert_eq!(store.state().status(), Status::Satisfied);
+    assert_eq!(store.state().first_satisfied(), first.as_ref());
+    assert_eq!(memory.effects(), before);
+    Ok(())
+}
+
+#[test]
+fn abandoned_active_attempt_retains_consumed_evidence_but_cannot_publish_it() -> Result<()> {
+    for withdraw_before_capture in [false, true] {
+        let spec = definition()?;
+        let c = context(&spec);
+        let memory = Memory::default();
+        let mut store = create(memory.clone(), &spec, &c)?;
+        sample(&mut store, &c, 1000)?;
+        let token = store.begin_attempt(&c)?;
+        if withdraw_before_capture {
+            let before = memory.effects();
+            store.withdraw_unpublished()?;
+            assert_eq!(memory.effects(), before);
+        }
+        store.capture(&token, fixtures::capture(&spec, 1010)?, &c)?;
+        if !withdraw_before_capture {
+            let before = memory.effects();
+            store.withdraw_unpublished()?;
+            assert_eq!(memory.effects(), before);
+        }
+        assert_eq!(store.high_tick(), 1010);
+        let replay = decode(&memory.snapshot_bytes())?;
+        assert_eq!(replay.high_tick, 1010);
+        assert!(replay.candidate.is_some());
+        assert_eq!(code(store.publish(&token, &c)), Some(ErrorCode::Conflict));
+        assert!(store.is_fenced());
+        assert_eq!(store.state().status(), Status::Unknown);
+        assert_eq!(store.state().streak(), 0);
+        assert!(store.state().first_satisfied().is_none());
+        let mut query = c.clone();
+        query
+            .grants
+            .retain(|grant| grant.capability == Capability::Query);
+        store.cancel(&query)?;
+        assert_eq!(store.state().status(), Status::Cancelled);
+        let recovered = reopen(memory, &query, store.recovery(), DigMode::Offline)?;
+        assert_eq!(recovered.state().status(), Status::Cancelled);
+        assert_eq!(recovered.high_tick(), 1010);
+    }
+    Ok(())
+}
+
+#[test]
 fn consumed_clock_precedes_new_authority_check_and_cannot_be_revived_by_old_anchor() -> Result<()> {
     let spec = definition()?;
     let mut c = context(&spec);

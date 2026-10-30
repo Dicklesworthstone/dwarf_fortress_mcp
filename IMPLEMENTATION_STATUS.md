@@ -44,6 +44,33 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Preserve whole-blueprint stability across contradictory or unpublished observations (2026-10-30)
+
+The existing monitor now clears its shared matching streak when a complete
+capture changes at the same game tick, including changes in unselected padding.
+An equal-tick correction, repeated capture or restarted owner cannot seed a new
+streak. A later advancing-tick observation must establish a new matching window;
+the original deadline, attempt allowance and terminal historical evidence remain
+unchanged.
+
+The store also exposes local withdrawal of unfinished progress after an enclosing
+runtime or response publication fails. Withdrawal performs no I/O and grants no
+authority. The next permitted attempt synchronizes a continuity reset before
+source contact. A held abandoned attempt can still retain already consumed raw
+evidence and its newer clock floor, but cannot publish that evidence as progress;
+interruption or Query-only cancellation settles its retained ownership.
+
+Four new regression groups cover same-tick contradictions and corrections,
+restart, local withdrawal, durable reset before another attempt, preserved first
+historical achievement and abandoned-read evidence retention. The changed source
+has been independently reviewed and formatted. The attempted final 51-case
+actual-source monitor run was blocked when compilation of the complete adapter
+test target ended with SIGKILL under shared resource pressure. No new test
+execution is claimed at this checkpoint.
+This is a source checkpoint, not full Rust/FastMCP/native/live qualification or
+production admission. MCP failure-boundary integration follows separately; the concurrent independent
+monitor restart implementation is preserved. See `docs/DIG_BLUEPRINT_MONITOR.md`.
+
 ### Independent whole-blueprint monitor recovery through MCP (2026-10-30)
 
 Explicit `monitor-offline` and `monitor-recovery` opening modes now reopen an

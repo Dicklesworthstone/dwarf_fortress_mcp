@@ -772,6 +772,74 @@ fn equal_ticks_failed_reads_and_reopen_do_not_inflate_sampled_stability() -> Res
 }
 
 #[test]
+fn changed_same_tick_captures_reset_stability_until_an_advancing_sample() -> Result<()> {
+    let spec = spec(parts())?;
+    for unselected in [false, true] {
+        let state = MonitorState::new(spec.clone()).sample(capture(&spec, 1000)?)?;
+        let mut changed = capture(&spec, 1000)?;
+        if unselected {
+            changed.map.cells[1] = Cell::Hidden;
+        } else {
+            set(
+                &mut changed,
+                spec.parent().layout().targets()[0],
+                Cell::Visible(Tile {
+                    temperature_1: 10001,
+                    ..floor()
+                }),
+            )?;
+        }
+        assert_eq!(spec.classify(&changed)?.matched, 2);
+        let state = state.sample(changed.clone())?;
+        assert_eq!(state.streak(), 0);
+        assert_eq!(state.since_tick(), None);
+        assert_eq!(state.status(), Status::Stabilizing);
+        let state = state.sample(changed)?;
+        assert_eq!(state.streak(), 0);
+        let state = state.sample(capture(&spec, 1005)?)?;
+        assert_eq!(state.streak(), 1);
+        assert_eq!(state.since_tick(), Some(1005));
+        let state = state.sample(capture(&spec, 1010)?)?;
+        assert_eq!(state.status(), Status::Stabilizing);
+        let state = state.sample(capture(&spec, 1015)?)?;
+        assert_eq!(state.status(), Status::Satisfied);
+        assert_eq!(
+            state.first_satisfied().map(|raw| raw.tick().get()),
+            Some(1015)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn equal_tick_corrections_and_restarts_cannot_seed_single_sample_success() -> Result<()> {
+    let base = spec(parts())?;
+    let spec = with_policy(&base, Policy::new(2000, 0, 1, 1200, 128)?)?;
+    let mut mismatch = capture(&spec, 1000)?;
+    mismatch.map.cells[0] = Cell::Visible(Tile {
+        shape: Shape::Wall,
+        ..floor()
+    });
+    let state = MonitorState::new(spec.clone()).sample(mismatch)?;
+    let state = state.sample(capture(&spec, 1000)?)?;
+    assert_eq!(state.status(), Status::Stabilizing);
+    assert_eq!(state.streak(), 0);
+    let state = state.sample(capture(&spec, 1000)?)?;
+    assert_eq!(state.streak(), 0);
+    assert_eq!(
+        state.sample(capture(&spec, 1001)?)?.status(),
+        Status::Satisfied
+    );
+
+    let state = MonitorState::new(base.clone()).sample(capture(&base, 1000)?)?;
+    let state = state.reopened()?.sample(capture(&base, 1000)?)?;
+    assert_eq!(state.streak(), 0);
+    assert_eq!(state.since_tick(), None);
+    assert_eq!(state.status(), Status::Stabilizing);
+    Ok(())
+}
+
+#[test]
 fn excessive_gaps_restart_stability_and_deadline_is_fixed_inclusive() -> Result<()> {
     let base = spec(parts())?;
     let spec = with_policy(&base, Policy::new(1030, 10, 2, 10, 128)?)?;

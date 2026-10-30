@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-30 — Preserve blueprint stability across contradictory and unpublished samples
+
+- Clear the whole-project matching streak when capture bytes change at one
+  paused tick. Equal-tick corrections and restarted observations cannot seed
+  another streak; a later advancing tick must establish a new matching window.
+- Add local withdrawal of unfinished progress after an enclosing runtime or
+  publication failure. Persist the continuity reset before another read while
+  preserving the original deadline, attempt budget and terminal history.
+- Keep already consumed raw evidence and clock floors from an abandoned read,
+  fence its publication, and preserve interruption and Query-only cancellation.
+- Add four regression groups. Source review and formatting are complete; the
+  attempted 51-case monitor run was blocked by SIGKILL during complete adapter
+  test compilation. No new test execution, full-runtime, native/live or admission
+  qualification is claimed at this checkpoint.
+
 ## 2026-10-30 — Independent whole-blueprint monitor recovery
 
 - Add explicit `monitor-offline` and `monitor-recovery` opening modes that retain

@@ -576,6 +576,21 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     pub fn is_fenced(&self) -> bool {
         self.sampling_fenced || self.custody_fenced || self.active.is_some()
     }
+    /// Withdraw unfinished derived progress after an enclosing runtime or
+    /// response publication fails. This local operation needs no authority or
+    /// I/O: it preserves terminal historical evidence and held read ownership.
+    /// A subsequent attempt must durably reset continuity before source contact.
+    /// An active attempt may still retain already consumed bytes, but cannot
+    /// publish them after this withdrawal; interruption or cancellation settles it.
+    pub fn withdraw_unpublished(&mut self) -> Result<()> {
+        self.visible = self.replay.safe_pending_state()?;
+        if self.replay.pending() || self.active.is_some() {
+            self.sampling_fenced = true;
+        } else if !self.replay.state.status().terminal() {
+            self.resume_reset = true;
+        }
+        Ok(())
+    }
     /// Whole begin/capture/publication allowance, including rereads, replay,
     /// possible restart reset, failure completion and bounded response space.
     /// The owner retains one absolute deadline and allowance across the token.
@@ -747,6 +762,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         context: &OperationContext,
     ) -> Result<()> {
         let mut active = self.take_active(token, context)?;
+        let previously_fenced = self.sampling_fenced;
         let result = (|| {
             if self.replay.candidate.is_some() {
                 return Err(conflict("monitor read already has a capture"));
@@ -757,7 +773,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
             let raw = encode_capture(&capture)?;
             self.append(Event::Captured(raw), &mut active.work)?;
             self.visible = self.replay.safe_pending_state()?;
-            self.sampling_fenced = false;
+            self.sampling_fenced = previously_fenced;
             Ok(())
         })();
         if !self.custody_fenced {
