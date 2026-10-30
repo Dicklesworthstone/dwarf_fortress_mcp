@@ -233,6 +233,150 @@ def validate_markdown_links() -> None:
             check(resolved.exists(), f"broken local link in {document.relative_to(ROOT)}: {raw_target}")
 
 
+def rust_code_mask(source: str) -> str:
+    """Blank Rust comments and literals while retaining offsets and newlines."""
+    out = list(source)
+    n = len(source)
+    i = 0
+    while i < n:
+        start = i
+        if source.startswith("//", i):
+            end = source.find("\n", i)
+            i = n if end < 0 else end
+        elif source.startswith("/*", i):
+            i += 2
+            depth = 1
+            while i < n and depth:
+                if source.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif source.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+        else:
+            raw = re.match(r'(?:br|cr|r)(#{0,255})"', source[i:i + 260]) if source[i] in "bcr" else None
+            if raw and (i == 0 or not (source[i - 1].isalnum() or source[i - 1] == "_")):
+                terminator = '"' + raw.group(1)
+                end = source.find(terminator, i + raw.end())
+                i = n if end < 0 else end + len(terminator)
+            elif source[i] == '"':
+                i += 1
+                while i < n:
+                    if source[i] == "\\":
+                        i = min(n, i + 2)
+                    elif source[i] == '"':
+                        i += 1
+                        break
+                    else:
+                        i += 1
+            elif source[i] == "'":
+                # A lifetime such as 'a is code, not a character literal.
+                char = re.match(r"'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'", source[i:])
+                if not char:
+                    i += 1
+                    continue
+                i += char.end()
+            else:
+                i += 1
+                continue
+        for k in range(start, i):
+            if source[k] != "\n":
+                out[k] = " "
+    return "".join(out)
+
+
+RUST_MODULE = re.compile(
+    r"(?P<attrs>(?:#\s*\[[^\]]*\]\s*)*)"
+    r"(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?P<name>[A-Za-z_][A-Za-z_0-9]*)\s*(?P<end>[;{])"
+)
+TEST_ATTRIBUTE = re.compile(
+    r"#\s*\[\s*cfg\s*\(\s*(?:test|all\s*\(\s*test\s*,\s*[A-Za-z_][A-Za-z_0-9]*\s*\))\s*\)\s*\]"
+)
+RUST_INCLUDE = re.compile(r'\binclude\s*!\s*\(\s*"([^"\n]+)"\s*\)')
+RUST_FORBIDDEN = {
+    r"\bunsafe\s*(?:fn|impl|trait|extern|\{)": "unsafe block or declaration",
+    r"\.unwrap\s*\(": "unwrap call",
+    r"\.expect\s*\(": "expect call",
+    r"\bpanic\s*!\s*[({\[]": "panic macro",
+    r"\bunreachable\s*!\s*[({\[]": "unreachable macro",
+    r"\btodo\s*!\s*[({\[]": "todo macro",
+    r"\bunimplemented\s*!\s*[({\[]": "unimplemented macro",
+}
+
+
+def rust_module_scan(path: Path, source: str) -> tuple[str, list[tuple[Path, bool]]]:
+    """Remove only explicit cfg(test) inline modules; report external module edges."""
+    mask = rust_code_mask(source)
+    out = list(mask)
+    edges: list[tuple[Path, bool]] = []
+    cursor = 0
+    while match := RUST_MODULE.search(mask, cursor):
+        is_test = TEST_ATTRIBUTE.search(match.group("attrs")) is not None
+        end = match.end()
+        if match.group("end") == "{" and is_test:
+            depth = 1
+            while end < len(mask) and depth:
+                depth += (mask[end] == "{") - (mask[end] == "}")
+                end += 1
+            if depth:
+                cursor = match.end()
+                continue
+            for include in RUST_INCLUDE.finditer(source, match.end(), end):
+                # Ignore include-like text inside comments and literals.
+                if mask[include.start():include.start() + 7] == "include":
+                    candidate = path.parent / include.group(1)
+                    if candidate.is_file():
+                        edges.append((candidate, True))
+            for i in range(match.start(), end):
+                if out[i] != "\n":
+                    out[i] = " "
+            cursor = end
+            continue
+        if match.group("end") == ";":
+            attrs = source[match.start("attrs"):match.end("attrs")]
+            explicit = re.search(r'#\s*\[\s*path\s*=\s*"([^"\n]+)"\s*\]', attrs)
+            if explicit:
+                candidates = [path.parent / explicit.group(1)]
+            else:
+                base = path.parent if path.name in ("lib.rs", "main.rs", "mod.rs") else path.with_suffix("")
+                candidates = [base / (match.group("name") + ".rs"), base / match.group("name") / "mod.rs"]
+            edges.extend((candidate, is_test) for candidate in candidates if candidate.is_file())
+        cursor = match.end()
+    for include in RUST_INCLUDE.finditer(source):
+        if "".join(out[include.start():include.start() + 7]) == "include":
+            candidate = path.parent / include.group(1)
+            if candidate.is_file():
+                edges.append((candidate, False))
+    return "".join(out), edges
+
+
+def rust_production_masks(paths: list[Path]) -> dict[Path, str]:
+    """Only exempt external modules reached exclusively through cfg(test)."""
+    scans = {path: rust_module_scan(path, path.read_text(encoding="utf-8")) for path in paths}
+    test_roots = {p for p in paths if "tests" in p.relative_to(ROOT / "crates").parts[:2]}
+    test_roots.update(child for _, edges in scans.values() for child, test in edges if test)
+    test_owned = set(test_roots)
+    pending = list(test_roots)
+    while pending:
+        parent = pending.pop()
+        for child, _ in scans.get(parent, ("", []))[1]:
+            if child not in test_owned:
+                test_owned.add(child)
+                pending.append(child)
+    # A production reference wins even if a test module also imports the file.
+    pending = [child for parent, (_, edges) in scans.items() if parent not in test_owned
+               for child, test in edges if not test and child in test_owned]
+    while pending:
+        parent = pending.pop()
+        if parent not in test_owned:
+            continue
+        test_owned.remove(parent)
+        pending.extend(child for child, test in scans.get(parent, ("", []))[1] if not test)
+    return {path: mask for path, (mask, _) in scans.items() if path not in test_owned}
+
+
 def validate_repository() -> None:
     required = [
         "README.md", "COMPREHENSIVE_PLAN_FOR_DWARF_FORTRESS_MCP.md", "IMPLEMENTATION_STATUS.md",
@@ -356,21 +500,14 @@ def validate_repository() -> None:
 
     rust_files = sorted(ROOT.glob("crates/**/*.rs"))
     check(bool(rust_files), "no Rust source files found")
-    forbidden = {
-        r"\bunsafe\s*(?:fn|impl|trait|extern|\{)": "unsafe block or declaration",
-        r"\.unwrap\s*\(": "unwrap call",
-        r"\.expect\s*\(": "expect call",
-        r"\bpanic!\s*\(": "panic macro",
-        r"\bunreachable!\s*\(": "unreachable macro",
-        r"\btodo!\s*\(": "todo macro",
-        r"\bunimplemented!\s*\(": "unimplemented macro",
-    }
+    production_masks = rust_production_masks(rust_files)
     for path in rust_files:
         source = path.read_text(encoding="utf-8")
         if path.name in ("lib.rs", "main.rs"):
             check("#![forbid(unsafe_code)]" in source, f"{path.relative_to(ROOT)} does not forbid unsafe code")
-        for pattern, description in forbidden.items():
-            check(re.search(pattern, source) is None, f"{path.relative_to(ROOT)} contains forbidden {description}")
+        if path in production_masks:
+            for pattern, description in RUST_FORBIDDEN.items():
+                check(re.search(pattern, production_masks[path]) is None, f"{path.relative_to(ROOT)} contains forbidden {description}")
 
     json_files = (
         sorted((ROOT / "schemas").glob("*.json"))

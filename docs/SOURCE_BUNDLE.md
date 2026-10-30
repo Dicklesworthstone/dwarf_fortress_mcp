@@ -1,7 +1,7 @@
 # Canonical source bundles
 
-A release source bundle is a deterministic, manifest-sealed projection of one **exact clean Git
-commit**. It is not a snapshot of whatever happens to be on disk and it is not produced by copying
+A release source bundle is a deterministic, manifest-sealed projection of one **exact clean git commit**.
+It is not a snapshot of whatever happens to be on disk and it is not produced by copying
 the worktree. Tracked Git blobs and their executable bits are the authority.
 
 The machine contract is `architecture/source_bundle_v1.json`. The authoritative implementation is:
@@ -81,9 +81,9 @@ facts, optional checkout reconciliation, explicit `clean` and `clean_required` s
 its own canonical digest. Receipt publication is create-only.
 
 The source-bundle contract and adversarial suite are part of normal repository verification and
-local qualification. Their source digests are recorded by `qualify_local.sh`. They remain a release
-packaging boundary, however, and are intentionally not folded into the narrower live-server binary
-receipt, whose job is to qualify one executable and its admission machinery.
+local qualification. Their source digests are recorded by `qualify_local.sh`. They remain a
+release packaging boundary, however, and are intentionally not folded into the narrower
+live-server binary receipt, whose job is to qualify one executable and its admission machinery.
 
 ## Commands
 
@@ -112,7 +112,7 @@ python3 scripts/verify_source_bundle.py \
 ## Evidence boundary
 
 A verified source bundle proves exact source content, archive structure, canonical metadata,
-manifest integrity, and, when requested, agreement with one clean checkout. It **does not prove
-compilation** and does not prove tests, latest-nightly qualification, DFHack compatibility,
+manifest integrity, and, when requested, agreement with one clean checkout. It **does not prove compilation**
+and does not prove tests, latest-nightly qualification, DFHack compatibility,
 compatibility-registry admission, binary reproducibility, release-signature authenticity, live
 operation, mutation correctness, or hostile-host resistance.
