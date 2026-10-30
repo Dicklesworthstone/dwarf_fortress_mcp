@@ -42,16 +42,28 @@ fn bind_map(link: &mut Link, existing: &[i16], check: &dyn Fn() -> Result<()>) -
     Ok(methods)
 }
 
-fn map_read(
-    link: &mut Link,
+struct MapRead<'a> {
     method: i16,
-    token: &[u8],
-    nonce: &[u8; 32],
+    token: &'a [u8],
+    nonce: &'a [u8; 32],
     region: Region,
     read: bool,
-    pinned: Option<&Manifest>,
+    pinned: Option<&'a Manifest>,
+}
+
+fn map_read(
+    link: &mut Link,
+    request: MapRead<'_>,
     work: &Work<'_>,
 ) -> Result<(Manifest, Option<Vec<u8>>, Option<LiveMapObservation>)> {
+    let MapRead {
+        method,
+        token,
+        nonce,
+        region,
+        read,
+        pinned,
+    } = request;
     let mut request = Vec::new();
     bytes(&mut request, 1, token);
     bytes(&mut request, 2, nonce);
@@ -256,7 +268,16 @@ pub fn acquire_trusted_with_floor(
             "room native software families disagree",
         )?;
         let (map, _, _) = map_read(
-            &mut link, maps[0], &map_token, &nonce, region, false, None, &work,
+            &mut link,
+            MapRead {
+                method: maps[0],
+                token: &map_token,
+                nonce: &nonce,
+                region,
+                read: false,
+                pinned: None,
+            },
+            &work,
         )?;
         let before_records = receipts(
             &mut link,
@@ -269,12 +290,14 @@ pub fn acquire_trusted_with_floor(
         )?;
         let (before, before_raw, before_map) = map_read(
             &mut link,
-            maps[1],
-            &map_token,
-            &nonce,
-            region,
-            true,
-            Some(&map),
+            MapRead {
+                method: maps[1],
+                token: &map_token,
+                nonce: &nonce,
+                region,
+                read: true,
+                pinned: Some(&map),
+            },
             &work,
         )?;
         let before_capture = before_raw.ok_or_else(|| invalid("missing room map"))?;
@@ -310,12 +333,14 @@ pub fn acquire_trusted_with_floor(
         drop(capture.observation);
         let (after, after_raw, _) = map_read(
             &mut link,
-            maps[1],
-            &map_token,
-            &nonce,
-            region,
-            true,
-            Some(&map),
+            MapRead {
+                method: maps[1],
+                token: &map_token,
+                nonce: &nonce,
+                region,
+                read: true,
+                pinned: Some(&map),
+            },
             &work,
         )?;
         let after_capture = after_raw.ok_or_else(|| invalid("missing trailing room map"))?;
