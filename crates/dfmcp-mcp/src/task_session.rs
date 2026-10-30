@@ -710,6 +710,28 @@ mod tests {
     }
 
     #[test]
+    fn completion_first_observed_after_deadline_is_failed_even_when_work_is_quiet() -> TestResult {
+        let session = new_session()?;
+        let (digest, id, _) = add_order(&session, false)?;
+        with_task_session(&session, |session| {
+            // Deliberately bypass foreground sampling to model a missed proof
+            // window, rather than assume wait no longer observes intermediates.
+            session.adapter.advance_ticks(10_000)?;
+            let ctx = context_for(session, session.next_request_id);
+            let receipt = session.adapter.poll_action(id, &ctx)?;
+            assert_eq!(receipt.state, CommitState::Failed);
+            assert!(session.adapter.action_work_state(id)?.is_quiescent());
+            Ok(())
+        })?;
+        let failed = view(&session, &digest)?;
+        assert_eq!(failed.status, McpTaskStatus::Failed);
+        assert_eq!(failed.payload["action_proof_status"], "failed");
+        assert_eq!(failed.payload["physical_quiescent"], true);
+        assert_eq!(failed.payload["blind_retry_allowed"], false);
+        Ok(())
+    }
+
+    #[test]
     fn original_goal_truth_is_independent_of_verified_actions_and_physical_drain() -> TestResult {
         for (truth, label) in [
             (PredicateTruth::True, "true"),
