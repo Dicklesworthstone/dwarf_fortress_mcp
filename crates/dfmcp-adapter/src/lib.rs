@@ -46,6 +46,7 @@ pub mod live_compatibility;
 pub mod live_connect;
 pub mod live_connect_v1_1;
 pub mod live_control_rpc;
+pub mod live_dispatch;
 pub mod live_evidence;
 pub mod live_identity;
 pub mod live_jobs;
@@ -160,6 +161,10 @@ pub use live_connect::{
     connect_authenticated_live_source, parse_loopback_endpoint,
 };
 pub use live_connect_v1_1::{AuthenticatedLiveSourceV1_1, connect_authenticated_live_source_v1_1};
+pub use live_dispatch::{
+    DispatchEntry, DispatchState, FamilyPreparation, FamilyReceipt, LiveDispatchCoordinator,
+    LiveFamilyExecutor, ReconcileOutcome,
+};
 pub use live_evidence::LiveObservationReceipt;
 pub use live_identity::derive_live_fortress_id;
 pub use live_observation::{
