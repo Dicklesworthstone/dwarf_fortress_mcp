@@ -19,6 +19,7 @@ inline std::function<void(bool)> setter_hook;
 inline void suspended() { if (suspension < 1) throw std::runtime_error("native access outside suspension"); }
 }
 namespace df {
+namespace global { inline bool *pause_state = &fake::paused; }
 enum class tiletype_shape { EMPTY, WALL, FLOOR, RAMP, RAMP_TOP, STAIR_UP, STAIR_DOWN, STAIR_UPDOWN, OTHER };
 enum class tiletype { EMPTY, WALL, FLOOR, RAMP, RAMP_TOP, STAIR_UP, STAIR_DOWN, STAIR_UPDOWN, OTHER };
 struct tile_designation { struct { unsigned hidden = 0, flow_size = 0, dig = 0; } bits; };

@@ -118,7 +118,23 @@ void cancellation_and_ambiguous_delivery() {
     check(record(prepared).reason == run::Reason::NativeFailure && record(prepared).pause_verified);
     prepared = prepare("no-op-unpause"); fake::ignore_unpause = true;
     invoke(CommitRun, identity(prepared)); fake::ignore_unpause = false;
-    check(!engine.active() && record(prepared).reason == run::Reason::ExternalPause);
+    check(!engine.active() && record(prepared).reason == run::Reason::NativeFailure);
+    prepared = prepare("modal-pause"); fake::modal = true;
+    invoke(CommitRun, identity(prepared));
+    check(!engine.active() && fake::paused && record(prepared).reason == run::Reason::ExternalPause);
+    fake::modal = false; check(fake::paused); // closing UI cannot resume an ownerless clock
+    prepared = prepare("modal-pause-setter-failure"); fake::modal = true; fake::fail_pause = true;
+    invoke(CommitRun, identity(prepared));
+    check(engine.active() && !fake::paused && !record(prepared).pause_verified);
+    fake::fail_pause = false; update();
+    check(!engine.active() && fake::paused && record(prepared).pause_verified);
+    fake::modal = false; check(fake::paused);
+    prepared = prepare("raw-pause-pointer-missing");
+    df::global::pause_state = nullptr;
+    invoke(CommitRun, identity(prepared));
+    check(engine.active() && fake::paused && !record(prepared).pause_verified);
+    df::global::pause_state = &fake::paused; update();
+    check(!engine.active() && fake::paused && record(prepared).pause_verified);
 }
 void clock_source_and_wall() {
     auto prepared = prepare("wall-only", 1200, 1); invoke(CommitRun, identity(prepared));

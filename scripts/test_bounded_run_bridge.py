@@ -68,11 +68,12 @@ def generate_doubles(build: Path) -> None:
 namespace fake {
 inline int depth = 0, year = 2, pauses = 0, unpauses = 0;
 inline std::uint32_t tick = 100;
-inline bool world_loaded = true, map_loaded = true, fortress = true, paused = true;
+inline bool world_loaded = true, map_loaded = true, fortress = true, paused = true, modal = false;
 inline bool fail_pause = false, fail_after_unpause = false, ignore_unpause = false;
 inline std::function<void()> on_unpause;
 inline void suspended() { if (depth <= 0) throw std::logic_error("native access without suspension"); }
 }
+namespace df::global { inline bool *pause_state = &fake::paused; }
 #define DFHACK_PLUGIN(name) static_assert(true, name)
 #define DFhackCExport extern "C"
 namespace DFHack {
@@ -91,7 +92,7 @@ struct CoreSuspender { CoreSuspender() { ++fake::depth; } ~CoreSuspender() { --f
 namespace Version { inline const char *dfhack_version() { return "fake-dfhack"; } }
 namespace World {
 inline bool isFortressMode() { fake::suspended(); return fake::fortress; }
-inline bool ReadPauseState() { fake::suspended(); return fake::paused; }
+inline bool ReadPauseState() { fake::suspended(); return fake::paused || fake::modal; }
 inline std::int32_t ReadCurrentYear() { fake::suspended(); return fake::year; }
 inline std::uint32_t ReadCurrentTick() { fake::suspended(); return fake::tick; }
 inline void SetPauseState(bool pause) {
@@ -118,7 +119,7 @@ struct RPCService {
 }
 '''
     (build / 'sdk_double.h').write_text(sdk)
-    for name in ['Core.h', 'Export.h', 'PluginManager.h', 'RemoteServer.h', 'VersionInfo.h', 'modules/World.h']:
+    for name in ['Core.h', 'Export.h', 'PluginManager.h', 'RemoteServer.h', 'VersionInfo.h', 'modules/World.h', 'df/global_objects.h']:
         path = build / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('#include "sdk_double.h"\n')

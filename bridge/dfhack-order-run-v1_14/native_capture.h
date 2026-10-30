@@ -72,6 +72,8 @@ inline void set_pause(std::uint64_t generation, const run::Identity &expected, b
     // Independent of target reads: corrupt queue/clock data must not disable a
     // same-fortress safety pause or enable a replacement-fortress setter.
     run::require(identity(generation) == expected, 4);
+    run::require(df::global::pause_state != nullptr, 5);
     DFHack::World::SetPauseState(paused);
+    run::require(*df::global::pause_state == paused, 5);
 }
 } // namespace dfmcp_order_run_native

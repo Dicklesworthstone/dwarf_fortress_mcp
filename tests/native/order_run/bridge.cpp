@@ -176,6 +176,11 @@ void independent_setter_scope() {
         try { write_native(expected, false); } catch (const run::clock::Failure &) { refused = true; }
         check(refused && World::unpauses == writes);
     }
+    World::folder = expected.folder; World::site = expected.site;
+    df::global::pause_state = nullptr; bool refused = false;
+    try { write_native(expected, false); } catch (const run::clock::Failure &) { refused = true; }
+    df::global::pause_state = &World::paused;
+    check(refused && World::unpauses == writes);
 }
 void unload_drain() {
     Fixture f; check(f.prepare().accepted());

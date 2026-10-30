@@ -24,7 +24,7 @@ FILES = ('bridge/common/bounded_run.h', 'bridge/common/bounded_run_wire.h',
          'tests/native/excavation_run/stubs.h', 'tests/native/excavation_run/handler.cpp')
 HEADERS = ('Core.h', 'Export.h', 'PluginManager.h', 'RemoteServer.h', 'VersionInfo.h',
            'TileTypes.h', 'modules/Maps.h', 'modules/World.h', 'df/map_block.h',
-           'df/tile_designation.h', 'df/tiletype_shape.h')
+           'df/tile_designation.h', 'df/tiletype_shape.h', 'df/global_objects.h')
 
 
 def protobuf_double(proto: str) -> str:

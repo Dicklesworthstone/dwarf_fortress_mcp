@@ -32,7 +32,7 @@ struct manager_order {
     void *items = nullptr;
 };
 struct world { struct { std::vector<manager_order *> all; std::int32_t manager_order_next_id = 10; } manager_orders; };
-namespace global { inline df::world *world = nullptr; }
+namespace global { inline df::world *world = nullptr; extern bool *pause_state; }
 }
 namespace DFHack {
 struct color_ostream {};
@@ -77,3 +77,4 @@ struct RPCService {
     template<class F> void addFunction(const std::string &name, F, int flags) { methods.emplace_back(name, flags); }
 };
 }
+namespace df::global { inline bool *pause_state = &DFHack::World::paused; }

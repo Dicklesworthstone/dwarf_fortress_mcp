@@ -4,6 +4,7 @@
 #include "TileTypes.h"
 #include "modules/Maps.h"
 #include "modules/World.h"
+#include "df/global_objects.h"
 #include "df/map_block.h"
 #include "df/tile_designation.h"
 #include "df/tiletype_shape.h"
@@ -72,6 +73,8 @@ inline run::Capture capture(std::uint64_t generation, run::Region region) {
 inline void set_pause(std::uint64_t generation, const run::Identity &expected, bool paused) {
     // No terrain/clock acquisition here: even failed capture must be stoppable.
     run::require(identity(generation) == expected, 4);
+    run::require(df::global::pause_state != nullptr, 5);
     DFHack::World::SetPauseState(paused);
+    run::require(*df::global::pause_state == paused, 5);
 }
 } // namespace dfmcp_excavation_run_native

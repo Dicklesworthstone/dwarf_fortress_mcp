@@ -162,8 +162,10 @@ public:
                 if (current.tick >= record.before.tick + record.spec.game_ticks)
                     begin_stop(record, Reason::TickLimit);
                 if (current.paused) {
-                    if (record.phase == Phase::Running) record.reason = Reason::ExternalPause;
-                    finish(record); return;
+                    // DFHack's observed pause includes modal/UI pauses that can
+                    // mask an unpaused raw clock. Establish an owned raw pause
+                    // before treating an external pause as quiescence.
+                    begin_stop(record, Reason::ExternalPause);
                 }
             }
         } catch (...) {
@@ -209,17 +211,19 @@ private:
         record.pause_verified = false; record.tick_known = false; active_ = nullptr;
     }
     template<class Reader, class Writer> void attempt_pause(Record &record, Reader read, Writer write) {
+        bool setter_verified = false;
         try {
             // Repeating a safety pause is intentional; repeating unpause is not.
             // This writer independently checks incarnation even if read() failed.
             write(record.before.generation, true);
-        } catch (...) { /* Readback may still prove that an ambiguous setter paused. */ }
+            setter_verified = true;
+        } catch (...) { /* A composite pause observation cannot prove the raw setter succeeded. */ }
         try {
             const auto current = observe(read);
             if (current.generation != record.before.generation) { lose_source(record); return; }
             record.tick_known = current.loaded && current.clock_valid;
             if (record.tick_known) record.observed_tick = current.tick;
-            if (current.loaded && current.paused) finish(record);
+            if (setter_verified && current.loaded && current.paused) finish(record);
         } catch (...) { record.tick_known = false; }
         // Otherwise retain Stopping and ownership: no new run may start.
     }

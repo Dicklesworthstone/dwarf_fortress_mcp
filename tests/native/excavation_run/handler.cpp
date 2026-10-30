@@ -191,6 +191,13 @@ static void source_changes_and_writer_fence() {
     ++fake::site; bool refused = false; const auto pauses = fake::pauses;
     { CoreSuspender suspend; try { write_native(original, true); } catch (const run::clock::Failure &) { refused = true; } }
     CHECK(refused); CHECK(fake::pauses == pauses);
+    --fake::site; df::global::pause_state = nullptr; refused = false;
+    { CoreSuspender suspend; try { write_native(original, true); } catch (const run::clock::Failure &) { refused = true; } }
+    df::global::pause_state = &fake::paused;
+    CHECK(refused); CHECK(fake::pauses == pauses);
+    fake::paused = false; fake::noop_pause = true; refused = false;
+    { CoreSuspender suspend; try { write_native(original, true); } catch (const run::clock::Failure &) { refused = true; } }
+    fake::noop_pause = false; fake::paused = true; CHECK(refused);
 }
 static void clock_permission_and_stale_preparation() {
     ++scenarios; setup(); auto p = preparation(false);

@@ -10,6 +10,7 @@
 #include "RemoteServer.h"
 #include "VersionInfo.h"
 #include "modules/World.h"
+#include "df/global_objects.h"
 #include "DfmcpRunV1_13.pb.h"
 
 using namespace DFHack;
@@ -52,7 +53,9 @@ void write_native(std::uint64_t expected_generation, bool paused) {
     // the safety setter to operate on a different local-map incarnation.
     run::require(expected_generation == generation && Core::getInstance().isWorldLoaded()
         && Core::getInstance().isMapLoaded() && World::isFortressMode(), 4);
+    run::require(df::global::pause_state != nullptr, 5);
     World::SetPauseState(paused);
+    run::require(*df::global::pause_state == paused, 5);
 }
 void service() {
     if (drain_requested.load())
