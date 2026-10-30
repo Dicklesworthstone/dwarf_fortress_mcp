@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-30 — Bind reviewed native clock intervals to complete room goals
+
+- Add a separate original-room clock owner over the existing native run engine,
+  binding complete geometry, furnishings, first sources and private clock custody.
+  Preserve exact ordinary-furniture clock identity bytes and public behavior.
+- Require full paused joint readiness after durable intent and DispatchStarted;
+  disclose known terrain deficits and refuse hidden/missing required terrain.
+- Retain full readiness as room-journal frame 5, charge one original acquisition
+  per boundary, and award no positive completion credit. Preserve original limits,
+  first sources, terminal negatives and conservative floors through recovery.
+- Reuse explicit one-use review, one-attempt unpause, original-key reconciliation
+  and separately authorized safety cancellation after goal/future-budget expiry.
+- Pass all 233 focused adapter tests, including 21 new groups, with 291 unchanged
+  source inputs. Public MCP integration follows separately; full workspace,
+  ambient runtime, native/live qualification and admission remain open.
+- Document the joint readiness and clock contract without claiming excavation
+  causality, present room usability, assignment or pathfinding.
+
 ## 2026-10-30 — Expose durable whole-room completion through MCP
 
 - Add original-room start, inspect, one-sample observe/wait and local cancellation

@@ -1,0 +1,114 @@
+{
+  "schema": "dfmcp.room-clock-rust/1",
+  "status": "implemented_unadmitted_development_only",
+  "module": "dfmcp_adapter::room_condition::clock",
+  "guide": "docs/ROOM_CONSTRUCTION_CLOCK.md",
+  "beads": [
+    "df-dfhack-bridge-plane-c-pic.3",
+    "df-dfhack-bridge-plane-c-pic.4",
+    "df-dfhack-bridge-plane-c-pic.5"
+  ],
+  "shared_engine": "construction_plan::clock::Clock with closed private Objective",
+  "public_owner": "room_condition::clock::Clock<EffectJournalStorage>",
+  "identity": {
+    "full_original_joint_definition": true,
+    "first_furniture_operations_map_sources": true,
+    "independent_run_journal_incarnation": true,
+    "room_monitor_id_required": true,
+    "ordinary_furniture_promotion": false,
+    "legacy_furniture_identity_bytes_changed": false,
+    "sources_domain": "dfmcp-room-clock-sources/1",
+    "target_domain": "dfmcp-room-clock-target/1",
+    "key_domain": "dfmcp-room-clock-key/1",
+    "key_prefix": "room-clock-",
+    "readiness_domain": "dfmcp-room-clock-readiness/1",
+    "review_domain": "dfmcp-room-clock-review/1"
+  },
+  "readiness": {
+    "boundaries": [
+      "after_durable_run_intent",
+      "after_durable_dispatch_started"
+    ],
+    "sample": "complete_original_receipt_map_operations_map_receipt_bracket",
+    "full_joint_probe": true,
+    "original_completed_acquisitions_per_successful_boundary": 1,
+    "probe_acquisition_charge": 0,
+    "positive_stability_credit": false,
+    "fully_qualifying_evidence_may_preserve_existing_streak": true,
+    "known_unmet_terrain_permitted_with_explicit_global_clock_review": true,
+    "hidden_or_missing_required_terrain_refused": true,
+    "viable_furniture_statuses": [
+      "pending",
+      "condition_met"
+    ],
+    "unknown_or_unmet_clears_unfinished_stability": true,
+    "native_excavation_causality_proven": false,
+    "paused_map_operations_run_tick_must_agree": true,
+    "original_deadline_and_allowance_never_renewed": true,
+    "journal_magic": "DFMRCJ01",
+    "journal_frame": 5,
+    "full_raw_sample_retained": true,
+    "legacy_frames_unchanged": true,
+    "old_readers_refuse_new_frame": true
+  },
+  "authority": {
+    "named": [
+      "Query",
+      "Observe",
+      "Plan",
+      "ControlClock"
+    ],
+    "independent_native_nil": [
+      "Query",
+      "Plan",
+      "ControlClock"
+    ],
+    "retained_and_current_checked": true,
+    "cancellation_named_and_native": [
+      "Query",
+      "ControlClock"
+    ],
+    "cancellation_requires_future_ticks_or_unexpired_goal": false,
+    "query_bootstrap_may_restore_plan_grants": false,
+    "partial_read_floors_retained_before_rejection": true,
+    "unjournaled_failure_floors_automatically_crash_durable": false
+  },
+  "recovery": {
+    "pin": [
+      "journal_id",
+      "head"
+    ],
+    "exact_validated_descendants_only": true,
+    "reopen_restores_review": false,
+    "lost_reply_allows_duplicate_unpause": false,
+    "missing_native_record_is_success": false,
+    "pending_or_unknown_blocks_sampling": true,
+    "safety_cancel_requires_original_placement_files": false
+  },
+  "bounds": {
+    "max_furnishings": 32,
+    "max_room_cells": 4096,
+    "game_ticks": [
+      1,
+      1200
+    ],
+    "wall_millis": [
+      1,
+      60000
+    ],
+    "max_runs": "min(64, original max_observations)",
+    "view_bytes": 8388608,
+    "readiness_bytes": 201326592,
+    "operation_bytes": 268435456,
+    "host_custody_acquisition_publication_reserved_separately": true
+  },
+  "claims": {
+    "automatic_loop": false,
+    "goal_completion_from_readiness_or_unpause": false,
+    "new_native_protocol": false,
+    "common_process_or_atomic_snapshot": false,
+    "current_room_usability_or_pathfinding": false,
+    "native_live_or_runtime_admission": false
+  },
+  "executed_evidence_reference": "IMPLEMENTATION_STATUS.md"
+}

@@ -40,9 +40,14 @@
       {"kind": 1, "payload": "complete_original_joint_definition"},
       {"kind": 2, "payload": "monotonic_authority_floor_u64_be", "meaning": "read_started"},
       {"kind": 3, "payload": "complete_raw_joint_sample", "meaning": "accepted_sample"},
-      {"kind": 4, "payload": "monotonic_authority_floor_u64_be", "meaning": "local_monitor_cancel"}
+      {"kind": 4, "payload": "monotonic_authority_floor_u64_be", "meaning": "local_monitor_cancel"},
+      {"kind": 5, "payload": "complete_raw_joint_sample", "meaning": "readiness_without_positive_stability_credit"}
     ],
-    "legacy_furniture_monitor_formats_changed": false
+    "legacy_furniture_monitor_formats_changed": false,
+    "legacy_joint_room_frame_encodings_changed": false,
+    "readiness_completed_acquisition_charge": 1,
+    "readiness_positive_stability_credit": false,
+    "pure_readiness_probe_acquisition_charge": 0
   },
   "native_acquisition": {
     "authority": "current_fortress_scoped_Query_and_operator_read_permission",
@@ -168,5 +173,6 @@
   ],
   "executed_evidence_reference": "IMPLEMENTATION_STATUS.md",
   "public_mcp_contract": "architecture/build_placement_mcp.json",
-  "public_mcp_guide": "docs/ROOM_COMPLETION_MCP.md"
+  "public_mcp_guide": "docs/ROOM_COMPLETION_MCP.md",
+  "finite_room_clock_contract": "architecture/room_clock_rust.json"
 }

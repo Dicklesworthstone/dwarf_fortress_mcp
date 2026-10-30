@@ -18,6 +18,10 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
+
+#[path = "readiness_tests.rs"]
+mod readiness_tests;
+
 fn corrupt() -> DfmcpError {
     invalid("synthetic original fixture invalid")
 }
@@ -190,7 +194,7 @@ fn identity(name: &str, inode: u64) -> PrivateFileIdentity {
     }
 }
 
-fn fixture(count: usize) -> Result<(Definition, OperationContext)> {
+pub(super) fn fixture(count: usize) -> Result<(Definition, OperationContext)> {
     let originals = fixtures::goal(count);
     let first = originals.records()[0].plan().before();
     let endpoint = SocketAddr::from(([127, 0, 0, 1], 5000));
@@ -337,7 +341,7 @@ fn fixture(count: usize) -> Result<(Definition, OperationContext)> {
     Ok((Definition::new(MonitorDefinition::new(origin, goal)?)?, c))
 }
 
-fn evidence(definition: &Definition, tick: u64) -> Result<Sample> {
+pub(super) fn evidence(definition: &Definition, tick: u64) -> Result<Sample> {
     let binding = definition.origin().definition().binding();
     let region = definition.room().terrain().region();
     let floor = Tile {
@@ -394,7 +398,7 @@ fn evidence(definition: &Definition, tick: u64) -> Result<Sample> {
         after_capture: raw,
     })
 }
-fn change_map(
+pub(super) fn change_map(
     sample: &mut Sample,
     edit: impl FnOnce(&mut LiveMapObservation) -> Result<()>,
 ) -> Result<()> {

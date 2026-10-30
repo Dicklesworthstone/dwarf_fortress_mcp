@@ -16,6 +16,7 @@ use crate::bounded_run::rpc::{RunManifest, RunSource};
 use crate::bounded_run::{RunObservation, RunPlan, RunRecord, RunSpec};
 use crate::control_effect_journal::EffectJournalStorage;
 use crate::live_operations::{LiveOperationsObservation, OperationsProfile};
+use crate::room_condition::{self as room, clock::RoomClockSample};
 use dfmcp_core::{
     Capability, CapabilityGrant, DfmcpError, Digest32, ErrorCode, FortressId, GameTick,
     ObservationCursor, OperationContext, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
@@ -117,6 +118,7 @@ pub struct Readiness {
     pending_count: u32,
     complete_count: u32,
     withdraws_stability: bool,
+    terrain: Option<room::TerrainAssessment>,
 }
 fn start_tick(spec: &MonitorDefinition) -> u64 {
     spec.origin()
@@ -240,6 +242,27 @@ impl Readiness {
             pending_count,
             complete_count,
             withdraws_stability,
+            terrain: None,
+        })
+    }
+    pub(crate) fn from_room_capture(
+        definition: &room::Definition,
+        source: &room::SourceIdentity,
+        progress: &room::Progress,
+        sample: &room::Sample,
+        context: &OperationContext,
+    ) -> Result<Self> {
+        let assessment = room::clock::assess(definition, source, progress, sample, context)?;
+        Ok(Self {
+            tick: assessment.tick,
+            digest: hash(
+                b"dfmcp-room-clock-readiness/1",
+                &[definition.id().as_bytes(), &sample.canonical_bytes()?],
+            ),
+            pending_count: assessment.pending_count,
+            complete_count: assessment.complete_count,
+            withdraws_stability: assessment.withdraws_stability,
+            terrain: Some(assessment.terrain),
         })
     }
     pub fn tick(&self) -> u64 {
@@ -257,6 +280,43 @@ impl Readiness {
     pub fn withdraws_stability(&self) -> bool {
         self.withdraws_stability
     }
+    /// Complete room deficits disclosed by a room-bound clock review. A known
+    /// unmet requirement can accompany an explicitly reviewed global interval;
+    /// this assessment never promises excavation work or positive goal credit.
+    /// Ordinary furniture clock reviews retain their original representation.
+    pub fn terrain(&self) -> Option<&room::TerrainAssessment> {
+        self.terrain.as_ref()
+    }
+}
+
+struct RoomObjective {
+    definition: room::Definition,
+    source: room::SourceIdentity,
+    source_bytes: Vec<u8>,
+}
+/// Closed internal variants prevent an ordinary furnishing monitor or caller
+/// supplied predicate from acquiring authority over a different room goal.
+enum Objective {
+    Furniture,
+    Room(Box<RoomObjective>),
+}
+impl Objective {
+    fn operation_bytes(&self) -> u64 {
+        match self {
+            Self::Furniture => OPERATION_BYTES,
+            Self::Room(_) => room::clock::OPERATION_BYTES,
+        }
+    }
+    fn readiness_bytes(&self) -> u64 {
+        match self {
+            Self::Furniture => READINESS_BYTES,
+            Self::Room(_) => room::clock::READINESS_BYTES,
+        }
+    }
+}
+enum ReadinessCapture {
+    Furniture(Box<ClockSample>),
+    Room(Box<RoomClockSample>),
 }
 
 #[derive(Clone, Debug)]
@@ -444,6 +504,7 @@ impl Work {
 /// commit, and it is consumed before the journal's dispatch path is entered.
 pub struct Clock<S: EffectJournalStorage> {
     journal: RunJournal<S>,
+    objective: Objective,
     spec: MonitorDefinition,
     operations: Manifest,
     operations_bytes: Vec<u8>,
@@ -455,9 +516,46 @@ pub struct Clock<S: EffectJournalStorage> {
 }
 impl<S: EffectJournalStorage> Clock<S> {
     pub fn new(
+        journal: RunJournal<S>,
+        spec: MonitorDefinition,
+        operations: Manifest,
+        recovery: Option<Recovery>,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<Self> {
+        Self::new_objective(
+            journal,
+            spec,
+            operations,
+            Objective::Furniture,
+            recovery,
+            c,
+            n,
+        )
+    }
+    pub(crate) fn new_room(
+        journal: RunJournal<S>,
+        definition: room::Definition,
+        source: room::SourceIdentity,
+        recovery: Option<Recovery>,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<Self> {
+        let source_bytes = room::clock::source_bytes(&definition, &source)?;
+        let spec = definition.original().clone();
+        let operations = source.furniture.operations.clone();
+        let objective = Objective::Room(Box::new(RoomObjective {
+            definition,
+            source,
+            source_bytes,
+        }));
+        Self::new_objective(journal, spec, operations, objective, recovery, c, n)
+    }
+    fn new_objective(
         mut journal: RunJournal<S>,
         spec: MonitorDefinition,
         operations: Manifest,
+        objective: Objective,
         recovery: Option<Recovery>,
         c: &OperationContext,
         n: &OperationContext,
@@ -495,6 +593,7 @@ impl<S: EffectJournalStorage> Clock<S> {
         }
         let mut clock = Self {
             journal,
+            objective,
             high_tick: start_tick(&spec).max(work.c.anchor.tick.get()),
             spec,
             operations,
@@ -548,6 +647,16 @@ impl<S: EffectJournalStorage> Clock<S> {
         self.readiness = None;
     }
     fn target_digest(&self) -> Digest32 {
+        if let Objective::Room(room) = &self.objective {
+            return hash(
+                b"dfmcp-room-clock-target/1",
+                &[
+                    room.definition.canonical_bytes(),
+                    &room.source_bytes,
+                    self.journal.id().as_bytes(),
+                ],
+            );
+        }
         hash(
             b"dfmcp-furniture-clock-target/1",
             &[
@@ -558,6 +667,16 @@ impl<S: EffectJournalStorage> Clock<S> {
         )
     }
     fn key(&self, plan: Digest32) -> String {
+        if matches!(self.objective, Objective::Room(_)) {
+            return format!(
+                "room-clock-{}",
+                hash(
+                    b"dfmcp-room-clock-key/1",
+                    &[self.target_digest().as_bytes(), plan.as_bytes()]
+                )
+                .to_hex()
+            );
+        }
         format!(
             "furniture-clock-{}",
             hash(
@@ -566,6 +685,12 @@ impl<S: EffectJournalStorage> Clock<S> {
             )
             .to_hex()
         )
+    }
+    fn monitor_id(&self) -> Digest32 {
+        match &self.objective {
+            Objective::Furniture => self.spec.id(),
+            Objective::Room(room) => room.definition.id(),
+        }
     }
     fn validate_plan(&self, plan: &RunPlan) -> Result<()> {
         let tick = plan.before().tick().ok_or_else(corrupt)?;
@@ -606,7 +731,7 @@ impl<S: EffectJournalStorage> Clock<S> {
         ClockView {
             recovery: self.recovery(),
             mode: self.mode(),
-            monitor_id: self.spec.id(),
+            monitor_id: self.monitor_id(),
             pending: fenced || runs.iter().any(|run| !settled(&run.entry)),
             unresolved: fenced || runs.iter().any(|run| run.entry.unresolved()),
             runs,
@@ -777,12 +902,50 @@ impl<S: EffectJournalStorage> Clock<S> {
         N: RunSource,
         F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<ClockSample>,
     {
+        if !matches!(self.objective, Objective::Furniture) {
+            return Err(denied());
+        }
+        self.prepare_capture(source, request, c, n, |edge, plan, context| {
+            guard(edge, plan, context).map(|sample| ReadinessCapture::Furniture(Box::new(sample)))
+        })
+    }
+    pub(crate) fn prepare_room_guarded<N, F>(
+        &mut self,
+        source: &mut N,
+        request: &RunRequest,
+        c: &OperationContext,
+        n: &OperationContext,
+        mut guard: F,
+    ) -> Result<ClockView>
+    where
+        N: RunSource,
+        F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<RoomClockSample>,
+    {
+        if !matches!(self.objective, Objective::Room(_)) {
+            return Err(denied());
+        }
+        self.prepare_capture(source, request, c, n, |edge, plan, context| {
+            guard(edge, plan, context).map(|sample| ReadinessCapture::Room(Box::new(sample)))
+        })
+    }
+    fn prepare_capture<N, F>(
+        &mut self,
+        source: &mut N,
+        request: &RunRequest,
+        c: &OperationContext,
+        n: &OperationContext,
+        mut guard: F,
+    ) -> Result<ClockView>
+    where
+        N: RunSource,
+        F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<ReadinessCapture>,
+    {
         let (current, native) = self.control(c, n, Access::Plan)?;
-        if request.monitor_id != self.spec.id() {
+        if request.monitor_id != self.monitor_id() {
             return Err(stale());
         }
         let requested = request.spec()?;
-        let mut work = Work::new(current, native, OPERATION_BYTES)?;
+        let mut work = Work::new(current, native, self.objective.operation_bytes())?;
         let output = work.take(VIEW_BYTES, true)?;
         let inspection = work.take(VIEW_BYTES, true)?;
         let before = self.inspect(&work.c, &inspection)?;
@@ -807,7 +970,11 @@ impl<S: EffectJournalStorage> Clock<S> {
         {
             return Err(stale());
         }
-        let provisional = RunPlan::new("furniture-clock-candidate", requested, observation)?;
+        let candidate = match self.objective {
+            Objective::Furniture => "furniture-clock-candidate",
+            Objective::Room(_) => "room-clock-candidate",
+        };
+        let provisional = RunPlan::new(candidate, requested, observation)?;
         let plan = RunPlan::new(
             &self.key(provisional.digest()),
             requested,
@@ -816,13 +983,14 @@ impl<S: EffectJournalStorage> Clock<S> {
         self.horizon(&plan, &work.c, &work.n)?;
         let reservation = work.take(ACTION_BYTES, true)?;
         let native = Self::native_plan_context(&reservation, &plan)?;
-        let mut canonical = work.take(READINESS_BYTES, false)?;
+        let mut canonical = work.take(self.objective.readiness_bytes(), false)?;
         canonical.anchor.tick = native.anchor.tick;
         let tick = ClockFloor::new(self.high_tick);
         let sequence = ClockFloor::new(self.high_sequence);
         let prepared = {
             let mut boundary = Boundary {
                 edge: Edge::Prepare,
+                objective: &self.objective,
                 spec: &self.spec,
                 operations: &self.operations,
                 authority: &self.authority,
@@ -859,8 +1027,12 @@ impl<S: EffectJournalStorage> Clock<S> {
             return Err(uncertain());
         }
         let ready = self.readiness.as_ref().ok_or_else(stale)?;
+        let review_domain: &[u8] = match self.objective {
+            Objective::Furniture => b"dfmcp-furniture-clock-review/1",
+            Objective::Room(_) => b"dfmcp-room-clock-review/1",
+        };
         let seal = hash(
-            b"dfmcp-furniture-clock-review/1",
+            review_domain,
             &[
                 self.target_digest().as_bytes(),
                 &entry.plan().canonical_bytes(),
@@ -901,6 +1073,46 @@ impl<S: EffectJournalStorage> Clock<S> {
         N: RunSource,
         F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<ClockSample>,
     {
+        if !matches!(self.objective, Objective::Furniture) {
+            return Err(denied());
+        }
+        self.commit_capture(source, seal, confirmed, c, n, |edge, plan, context| {
+            guard(edge, plan, context).map(|sample| ReadinessCapture::Furniture(Box::new(sample)))
+        })
+    }
+    pub(crate) fn commit_room_guarded<N, F>(
+        &mut self,
+        source: &mut N,
+        seal: Digest32,
+        confirmed: bool,
+        c: &OperationContext,
+        n: &OperationContext,
+        mut guard: F,
+    ) -> Result<ClockView>
+    where
+        N: RunSource,
+        F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<RoomClockSample>,
+    {
+        if !matches!(self.objective, Objective::Room(_)) {
+            return Err(denied());
+        }
+        self.commit_capture(source, seal, confirmed, c, n, |edge, plan, context| {
+            guard(edge, plan, context).map(|sample| ReadinessCapture::Room(Box::new(sample)))
+        })
+    }
+    fn commit_capture<N, F>(
+        &mut self,
+        source: &mut N,
+        seal: Digest32,
+        confirmed: bool,
+        c: &OperationContext,
+        n: &OperationContext,
+        mut guard: F,
+    ) -> Result<ClockView>
+    where
+        N: RunSource,
+        F: FnMut(Edge, &RunPlan, &OperationContext) -> Result<ReadinessCapture>,
+    {
         let (current, native) = self.control(c, n, Access::Plan)?;
         if !confirmed {
             return Err(denied());
@@ -910,7 +1122,7 @@ impl<S: EffectJournalStorage> Clock<S> {
             .take()
             .filter(|review| review.seal == seal)
             .ok_or_else(denied)?;
-        let mut work = Work::new(current, native, OPERATION_BYTES)?;
+        let mut work = Work::new(current, native, self.objective.operation_bytes())?;
         let output = work.take(VIEW_BYTES, true)?;
         let inspection = work.take(VIEW_BYTES, true)?;
         let before = self.inspect(&work.c, &inspection)?;
@@ -937,7 +1149,7 @@ impl<S: EffectJournalStorage> Clock<S> {
         self.source(source, true)?;
         let reservation = work.take(ACTION_BYTES, true)?;
         let native = Self::native_plan_context(&reservation, &plan)?;
-        let mut canonical = work.take(READINESS_BYTES, false)?;
+        let mut canonical = work.take(self.objective.readiness_bytes(), false)?;
         canonical.anchor.tick = native.anchor.tick;
         self.readiness = None;
         let tick = ClockFloor::new(self.high_tick);
@@ -945,6 +1157,7 @@ impl<S: EffectJournalStorage> Clock<S> {
         let result = {
             let mut boundary = Boundary {
                 edge: Edge::Commit,
+                objective: &self.objective,
                 spec: &self.spec,
                 operations: &self.operations,
                 authority: &self.authority,
@@ -1067,6 +1280,7 @@ fn narrow(deadline: Instant, c: &OperationContext) -> Result<OperationContext> {
 }
 struct Boundary<'a> {
     edge: Edge,
+    objective: &'a Objective,
     spec: &'a MonitorDefinition,
     operations: &'a Manifest,
     authority: &'a Authority,
@@ -1082,7 +1296,7 @@ impl Boundary<'_> {
         &mut self,
         plan: &RunPlan,
         n: &OperationContext,
-        guard: &mut impl FnMut(Edge, &RunPlan, &OperationContext) -> Result<ClockSample>,
+        guard: &mut impl FnMut(Edge, &RunPlan, &OperationContext) -> Result<ReadinessCapture>,
     ) -> Result<()> {
         if self.used {
             return Err(denied());
@@ -1101,19 +1315,40 @@ impl Boundary<'_> {
             .max_wall_millis
             .min(n.budget.max_wall_millis);
         let capture = guard(self.edge, plan, &canonical)?;
-        let observed = decode_capture(&capture.sample)?;
-        self.high_tick
-            .set(self.high_tick.get().max(observed.jobs.tick().get()));
         // Retain a decoded source clock before stricter identity, authority or
         // original-goal checks can reject this already consumed observation.
-        let readiness = Readiness::from_capture(
-            self.spec,
-            self.operations,
-            &capture.progress,
-            &capture.sample,
-            &canonical,
-            observed,
-        )?;
+        let readiness = match (self.objective, capture) {
+            (Objective::Furniture, ReadinessCapture::Furniture(capture)) => {
+                let observed = decode_capture(&capture.sample)?;
+                self.high_tick
+                    .set(self.high_tick.get().max(observed.jobs.tick().get()));
+                Readiness::from_capture(
+                    self.spec,
+                    self.operations,
+                    &capture.progress,
+                    &capture.sample,
+                    &canonical,
+                    observed,
+                )?
+            }
+            (Objective::Room(room), ReadinessCapture::Room(capture)) => {
+                let mut tick = self
+                    .high_tick
+                    .get()
+                    .max(capture.progress.observed_tick_floor);
+                let decoded = capture.sample.retain_observed_tick(&mut tick);
+                self.high_tick.set(tick);
+                decoded?;
+                Readiness::from_room_capture(
+                    &room.definition,
+                    &room.source,
+                    &capture.progress,
+                    &capture.sample,
+                    &canonical,
+                )?
+            }
+            _ => return Err(denied()),
+        };
         if Some(readiness.tick()) != plan.before().tick() || readiness.tick() < self.high_tick.get()
         {
             return Err(stale());

@@ -159,3 +159,13 @@ full-workspace qualification or production admission follows from these tests.
 Historical sampled satisfaction proves neither a current usable room nor native
 room assignment, circulation, pathfinding, structural safety, continuous wall
 preservation, causality or discharge of any original placement effect.
+
+## Durable readiness for separately reviewed room clocks
+
+The [room clock owner](ROOM_CONSTRUCTION_CLOCK.md) reuses the complete joint
+condition at each preparation and commit boundary. New journal frame kind 5
+retains the full raw sample and consumes one original observation, while
+`room_condition::readiness::probe` reassesses without a second charge. Readiness
+cannot seed or increment positive stability. Fully qualifying continuity may
+preserve a candidate; unmet/unknown conditions and interruptions withdraw it.
+All earlier frame bytes are unchanged, and older readers reject the new kind.

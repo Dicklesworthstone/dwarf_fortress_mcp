@@ -44,6 +44,46 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Finite clock intervals bound to the complete original room (2026-10-30)
+
+The adapter now connects the durable joint room monitor to run/1.13 through a
+separate `room_condition::clock::Clock` owner. Every interval binds the complete
+original room definition, every retained placement receipt, the immutable first
+furniture/operations/map sources and its private run journal. A closed shared
+engine preserves exact ordinary-furniture target/key/review encodings while
+reusing one-attempt dispatch, explicit review, reconciliation and safety cancellation.
+No furniture-only goal or successful subset can replace the room objective.
+
+Both preparation and commit require a fresh full paused joint bracket after their
+durable native boundary. All original furnishings must remain viable or complete.
+Known unmet terrain may remain pending under explicit global-clock review with
+complete deficits disclosed; hidden or missing required terrain refuses advancement.
+This does not establish active excavation or other construction causality.
+A new full-sample readiness frame consumes one original observation at each
+boundary, while the pure probe charges none. Readiness never creates or increments
+positive completion credit. Compatible full truth may preserve an existing streak;
+unmet/unknown evidence and continuity loss withdraw it durably. Original deadline,
+acquisition allowance, first sources and consumed floors survive recovery.
+
+Room clock preparation and native dispatch require retained/current named-fortress
+and independent native authority. Query-only reconciliation and separately
+authorized safety cancellation remain possible without Plan/Observe, future ticks
+or an unexpired goal; neither restores a review nor repeats unpause. Full original
+identity, acknowledged ancestry, exact custody and partial-read floors remain
+bound. Joint reassessment and core operation reservations are 192 MiB and 256 MiB;
+ordinary furniture reservations remain unchanged. No new native method, dependency,
+compatibility admission or production runner is introduced.
+
+All 233 focused adapter tests pass, including 21 new readiness/room-clock groups
+covering 1/32-target goals, source/definition drift, both durable guard boundaries,
+known/unknown terrain, final-acquisition refusal, interrupted publication, lost
+replies, exact recovery, Query-only safety and a two-run joint stability cycle.
+All 291 adapter source hashes match the tested view. Every production body is
+retained; 114 unrelated test-module declarations are disabled. This is component
+execution, not full workspace/latest-nightly, ambient runtime, native SDK or live
+fortress qualification. The public MCP integration follows in a separate checkpoint.
+See [the room clock contract](docs/ROOM_CONSTRUCTION_CLOCK.md).
+
 ### Joint original-room completion through MCP (2026-10-30)
 
 The existing eleven-tool furniture server now exposes the complete joint room

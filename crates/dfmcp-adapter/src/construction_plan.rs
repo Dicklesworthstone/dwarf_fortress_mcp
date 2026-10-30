@@ -475,7 +475,7 @@ fn assess(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SamplePurpose {
+pub(crate) enum SamplePurpose {
     Goal,
     Readiness,
     Probe,
@@ -541,22 +541,16 @@ pub(crate) fn advance_joint(
     sample: &LinkedSample,
     context: &OperationContext,
     used: &mut u64,
+    purpose: SamplePurpose,
     joint: JointCondition,
 ) -> Result<Progress> {
     let mut work = Work::new(goal, context, state.last_tick.map_or(0, |tick| tick))?;
     work.used = used
         .checked_add(work.used)
         .ok_or_else(|| bounded("construction work overflow"))?;
-    let result = work.charge(0).and_then(|()| {
-        advance_work(
-            state,
-            goal,
-            sample,
-            &mut work,
-            SamplePurpose::Goal,
-            Some(joint),
-        )
-    });
+    let result = work
+        .charge(0)
+        .and_then(|()| advance_work(state, goal, sample, &mut work, purpose, Some(joint)));
     *used = work.used;
     result
 }

@@ -3,6 +3,8 @@
 //! Equal paused map endpoints bracket one receipt-linked operations capture.
 //! These are independently scoped sources, not an atomic world snapshot,
 //! native room assignment, pathfinding result or causal effect proof.
+pub mod clock;
+pub mod readiness;
 pub mod store;
 mod wire;
 
@@ -332,6 +334,24 @@ pub(crate) fn advance_with_counter(
     context: &OperationContext,
     used: &mut u64,
 ) -> Result<Progress> {
+    advance_for_purpose(
+        state,
+        definition,
+        sample,
+        context,
+        used,
+        construction::SamplePurpose::Goal,
+    )
+}
+
+fn advance_for_purpose(
+    state: &Progress,
+    definition: &Definition,
+    sample: &Sample,
+    context: &OperationContext,
+    used: &mut u64,
+    purpose: construction::SamplePurpose,
+) -> Result<Progress> {
     let start = Instant::now();
     require(
         state.definition_id == definition.id() && state.reading && !state.terminal(),
@@ -489,6 +509,7 @@ pub(crate) fn advance_with_counter(
         &sample.furnishings,
         &current,
         used,
+        purpose,
         construction::JointCondition {
             capture: hash(b"dfmcp.joint-room-sample/1\0", &raw),
             unmet,

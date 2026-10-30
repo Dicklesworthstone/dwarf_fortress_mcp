@@ -194,7 +194,7 @@ fn read<S: EffectJournalStorage>(storage: &mut S, work: &mut Work) -> Result<Vec
     Ok(bytes)
 }
 fn frame(sequence: u32, previous: Digest32, kind: u8, payload: &[u8]) -> Result<Vec<u8>> {
-    require(sequence < MAX_STORE_FRAMES && (1..=4).contains(&kind) && payload.len() < MAX_BODY)?;
+    require(sequence < MAX_STORE_FRAMES && (1..=5).contains(&kind) && payload.len() < MAX_BODY)?;
     let mut out = Vec::with_capacity(OVERHEAD + payload.len());
     out.extend_from_slice(&((payload.len() + 1) as u32).to_be_bytes());
     out.extend_from_slice(&sequence.to_be_bytes());
@@ -244,18 +244,28 @@ fn transition(
             next.observed_tick_floor = floor;
             Ok(next)
         }
-        3 => {
+        3 | 5 => {
             // Parsing and all member evaluation share this one reservation;
             // no target or frame renews the enclosing operation allowance.
             let current = work.child(payload.len().saturating_mul(6).saturating_add(16_384))?;
             let sample = Sample::decode(payload)?;
-            super::advance_with_counter(
-                progress,
-                definition,
-                &sample,
-                &current,
-                &mut work.semantic_work,
-            )
+            if kind == 3 {
+                super::advance_with_counter(
+                    progress,
+                    definition,
+                    &sample,
+                    &current,
+                    &mut work.semantic_work,
+                )
+            } else {
+                super::readiness::advance_with_counter(
+                    progress,
+                    definition,
+                    &sample,
+                    &current,
+                    &mut work.semantic_work,
+                )
+            }
         }
         4 => {
             require(payload.len() == 8)?;
@@ -430,7 +440,27 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         F: FnMut(&Definition, &Progress) -> Result<()>,
         G: FnMut(&Origin, &OperationContext) -> Result<()>,
     {
-        let result = self.publish_sample_inner(context, sample, admit, guard);
+        let result = self.publish_acquisition(context, sample, 3, admit, guard);
+        self.completed(result)
+    }
+    /// Retain one complete room acquisition for an independently authorized
+    /// clock review. The full raw sample uses a distinct frame from ordinary
+    /// completion evidence: replay consumes its original observation allowance
+    /// but never awards stability credit or satisfaction. A compatible sample
+    /// can preserve an existing streak; unmet or unknown facts withdraw it.
+    /// `operation_reserve(true)` covers the same bounded publication path.
+    pub fn publish_readiness<F, G>(
+        &mut self,
+        context: &OperationContext,
+        sample: &Sample,
+        admit: &mut F,
+        guard: &mut G,
+    ) -> Result<()>
+    where
+        F: FnMut(&Definition, &Progress) -> Result<()>,
+        G: FnMut(&Origin, &OperationContext) -> Result<()>,
+    {
+        let result = self.publish_acquisition(context, sample, 5, admit, guard);
         self.completed(result)
     }
     pub fn cancel<F>(&mut self, context: &OperationContext, admit: &mut F) -> Result<()>
@@ -815,10 +845,11 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         self.read_owned = true;
         Ok(())
     }
-    fn publish_sample_inner<F, G>(
+    fn publish_acquisition<F, G>(
         &mut self,
         context: &OperationContext,
         sample: &Sample,
+        kind: u8,
         admit: &mut F,
         guard: &mut G,
     ) -> Result<()>
@@ -845,10 +876,10 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         work.charge(payload.len())?;
         self.verify_work(&mut work)?;
         guard(self.definition.origin(), &work.current()?)?;
-        let proposed = transition(&self.definition, &self.progress, 3, &payload, &mut work)?;
+        let proposed = transition(&self.definition, &self.progress, kind, &payload, &mut work)?;
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         admit(&self.definition, &proposed)?;
-        self.append(3, &payload, proposed, &mut work, guard)
+        self.append(kind, &payload, proposed, &mut work, guard)
     }
     /// Cancels only this monitor. No original-source guard is consulted, so an
     /// active obligation can be retired when its original batch is unavailable.
