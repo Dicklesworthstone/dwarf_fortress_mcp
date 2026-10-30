@@ -261,10 +261,9 @@ mod actual {
             }
             if let Some((at, storage)) = &hooks.corrupt_at
                 && *at == hooks.orders
+                && let Some(byte) = storage.0.borrow_mut().file.get_mut().last_mut()
             {
-                if let Some(byte) = storage.0.borrow_mut().file.get_mut().last_mut() {
-                    *byte ^= 1;
-                }
+                *byte ^= 1;
             }
             Ok(())
         }

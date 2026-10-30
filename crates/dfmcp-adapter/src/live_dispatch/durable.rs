@@ -1033,11 +1033,11 @@ impl<S: EffectJournalStorage> Coordinator<S> {
                     return Err(cause);
                 }
             };
-            if proposed != self.entries || self.high_tick > self.stored_tick {
-                if let Err(cause) = self.append(event, &mut work) {
-                    self.fenced = true;
-                    return Err(cause);
-                }
+            if (proposed != self.entries || self.high_tick > self.stored_tick)
+                && let Err(cause) = self.append(event, &mut work)
+            {
+                self.fenced = true;
+                return Err(cause);
             }
             self.finish(&mut work, true)
         })();

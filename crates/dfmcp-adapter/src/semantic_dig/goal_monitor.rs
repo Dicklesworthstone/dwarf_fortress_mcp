@@ -131,10 +131,10 @@ impl DigSourceFloor {
         if self.source.is_none() {
             self.source = other.source;
         }
-        if let Some(cursor) = other.cursor {
-            if self.cursor.is_none_or(|old| old.sequence < cursor.sequence) {
-                self.cursor = Some(cursor);
-            }
+        if let Some(cursor) = other.cursor
+            && self.cursor.is_none_or(|old| old.sequence < cursor.sequence)
+        {
+            self.cursor = Some(cursor);
         }
         Ok(())
     }

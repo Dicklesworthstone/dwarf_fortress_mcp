@@ -268,11 +268,13 @@ impl DigTerrainProjection {
 fn domains(cells: &BTreeSet<(i32, i32, i32)>) -> Result<Vec<MapCuboid>> {
     let mut rows: Vec<MapCuboid> = Vec::new();
     for &(z, y, x) in cells {
-        if let Some(last) = rows.last_mut() {
-            if last.min.z == z && last.min.y == y && last.max.x + 1 == x {
-                last.max.x = x;
-                continue;
-            }
+        if let Some(last) = rows.last_mut()
+            && last.min.z == z
+            && last.min.y == y
+            && last.max.x + 1 == x
+        {
+            last.max.x = x;
+            continue;
         }
         let p = MapCoord::new(x, y, z);
         rows.push(MapCuboid::new(p, p)?);

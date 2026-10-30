@@ -215,10 +215,10 @@ impl FurnitureSourceFloor {
         if self.source.is_none() {
             self.source = other.source.clone();
         }
-        if let Some(cursor) = other.cursor {
-            if self.cursor.is_none_or(|old| old.sequence < cursor.sequence) {
-                self.cursor = Some(cursor);
-            }
+        if let Some(cursor) = other.cursor
+            && self.cursor.is_none_or(|old| old.sequence < cursor.sequence)
+        {
+            self.cursor = Some(cursor);
         }
         for (seal, retained) in &other.selected {
             if !self.selected.contains_key(seal) && self.selected.len() >= super::MAX_ASSOCIATIONS {

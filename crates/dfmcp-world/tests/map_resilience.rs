@@ -24,14 +24,29 @@ fn floor() -> Cell {
     })
 }
 fn grid(size: [u32; 3]) -> Result<MapRegion, MapError> {
-    let region = Region { origin: [0; 3], size };
-    Ok(MapRegion { region, cells: vec![floor(); region.volume()?] })
+    let region = Region {
+        origin: [0; 3],
+        size,
+    };
+    Ok(MapRegion {
+        region,
+        cells: vec![floor(); region.volume()?],
+    })
 }
 fn pos(map: &MapRegion, i: usize) -> Result<[u32; 3], MapError> {
     map.region.position(i).ok_or(MapError::InvalidRegion)
 }
-fn run(map: &MapRegion, mode: Disjointness) -> Result<dfmcp_world::map_resilience::RouteResilience, MapError> {
-    analyze(map, pos(map, 0)?, pos(map, map.cells.len() - 1)?, mode, MAX_ROUTE_WORK)
+fn run(
+    map: &MapRegion,
+    mode: Disjointness,
+) -> Result<dfmcp_world::map_resilience::RouteResilience, MapError> {
+    analyze(
+        map,
+        pos(map, 0)?,
+        pos(map, map.cells.len() - 1)?,
+        mode,
+        MAX_ROUTE_WORK,
+    )
 }
 
 // An independent edge oracle uses the EXISTING public shortest-route policy.
@@ -41,7 +56,13 @@ fn adjacency(map: &MapRegion) -> Result<Vec<Vec<usize>>, MapError> {
     let mut out = vec![Vec::new(); map.cells.len()];
     for (a, neighbors) in out.iter_mut().enumerate() {
         for b in 0..map.cells.len() {
-            if a != b && map.route(pos(map, a)?, pos(map, b)?, MAX_ROUTE_WORK)?.path.len() == 2 {
+            if a != b
+                && map
+                    .route(pos(map, a)?, pos(map, b)?, MAX_ROUTE_WORK)?
+                    .path
+                    .len()
+                    == 2
+            {
                 neighbors.push(b);
             }
         }
@@ -77,7 +98,11 @@ fn minimum_cut(adj: &[Vec<usize>], source: usize, target: usize, mode: Disjointn
             }
         }
     } else {
-        elements.extend((0..adj.len()).filter(|&i| i != source && i != target).map(CutElement::Tile));
+        elements.extend(
+            (0..adj.len())
+                .filter(|&i| i != source && i != target)
+                .map(CutElement::Tile),
+        );
         if adj[source].contains(&target) {
             elements.push(CutElement::Edge([source.min(target), source.max(target)]));
         }
@@ -88,8 +113,12 @@ fn minimum_cut(adj: &[Vec<usize>], source: usize, target: usize, mode: Disjointn
         if count > best {
             continue;
         }
-        let cut = elements.iter().enumerate().filter(|(i, _)| mask & (1usize << *i) != 0)
-            .map(|(_, &element)| element).collect();
+        let cut = elements
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1usize << *i) != 0)
+            .map(|(_, &element)| element)
+            .collect();
         if !reaches(adj, source, target, &cut) {
             best = count;
         }
@@ -106,9 +135,14 @@ fn corridor_has_one_route_and_a_checked_minimum_separator() -> Result<(), MapErr
         assert_eq!(report.paths, vec![vec![0, 1, 2, 3, 4]]);
         assert_eq!(report.candidate_tiles, 5);
         assert_eq!(report.candidate_edges, 4);
-        assert_eq!(report.minimum_cut, vec![if mode == Disjointness::Edges {
-            CutElement::Edge([0, 1])
-        } else { CutElement::Tile(1) }]);
+        assert_eq!(
+            report.minimum_cut,
+            vec![if mode == Disjointness::Edges {
+                CutElement::Edge([0, 1])
+            } else {
+                CutElement::Tile(1)
+            }]
+        );
         verify_certificate(&map, &report, MAX_ROUTE_WORK)?;
     }
     Ok(())
@@ -134,9 +168,18 @@ fn two_edge_routes_may_still_share_one_failure_critical_tile() -> Result<(), Map
 #[test]
 fn adjacent_endpoints_do_not_invent_an_internal_tile_separator() -> Result<(), MapError> {
     let map = grid([2, 2, 1])?;
-    let report = analyze(&map, [0, 0, 0], [1, 0, 0], Disjointness::InternalTiles, MAX_ROUTE_WORK)?;
+    let report = analyze(
+        &map,
+        [0, 0, 0],
+        [1, 0, 0],
+        Disjointness::InternalTiles,
+        MAX_ROUTE_WORK,
+    )?;
     assert_eq!(report.paths.len(), 2);
-    assert_eq!(report.minimum_cut, vec![CutElement::Tile(2), CutElement::Edge([0, 1])]);
+    assert_eq!(
+        report.minimum_cut,
+        vec![CutElement::Tile(2), CutElement::Edge([0, 1])]
+    );
     verify_certificate(&map, &report, MAX_ROUTE_WORK)?;
     Ok(())
 }
@@ -170,7 +213,8 @@ fn disconnected_candidate_endpoints_have_a_zero_cut_only_in_this_model() -> Resu
 }
 
 #[test]
-fn occupancy_liquid_unknown_walkability_and_unsupported_shapes_match_route_policy() -> Result<(), MapError> {
+fn occupancy_liquid_unknown_walkability_and_unsupported_shapes_match_route_policy()
+-> Result<(), MapError> {
     for which in 0..6 {
         let mut map = grid([3, 1, 1])?;
         if let Cell::Visible(tile) = &mut map.cells[1] {
@@ -186,19 +230,28 @@ fn occupancy_liquid_unknown_walkability_and_unsupported_shapes_match_route_polic
         for mode in MODES {
             assert!(run(&map, mode)?.paths.is_empty());
         }
-        assert!(map.route([0, 0, 0], [2, 0, 0], MAX_ROUTE_WORK)?.path.is_empty());
+        assert!(
+            map.route([0, 0, 0], [2, 0, 0], MAX_ROUTE_WORK)?
+                .path
+                .is_empty()
+        );
     }
     Ok(())
 }
 
 #[test]
-fn vertical_edges_require_complementary_observed_stairs_in_both_directions() -> Result<(), MapError> {
+fn vertical_edges_require_complementary_observed_stairs_in_both_directions() -> Result<(), MapError>
+{
     let mut map = grid([1, 1, 2])?;
     for phase in 0..3 {
         if phase == 1 {
-            if let Cell::Visible(tile) = &mut map.cells[0] { tile.shape = Shape::StairUp; }
-        } else if phase == 2 {
-            if let Cell::Visible(tile) = &mut map.cells[1] { tile.shape = Shape::StairDown; }
+            if let Cell::Visible(tile) = &mut map.cells[0] {
+                tile.shape = Shape::StairUp;
+            }
+        } else if phase == 2
+            && let Cell::Visible(tile) = &mut map.cells[1]
+        {
+            tile.shape = Shape::StairDown;
         }
         for (source, target) in [([0, 0, 0], [0, 0, 1]), ([0, 0, 1], [0, 0, 0])] {
             for mode in MODES {
@@ -212,20 +265,36 @@ fn vertical_edges_require_complementary_observed_stairs_in_both_directions() -> 
 }
 
 #[test]
-fn every_three_by_three_obstacle_map_matches_independently_enumerated_cuts() -> Result<(), MapError> {
+fn every_three_by_three_obstacle_map_matches_independently_enumerated_cuts() -> Result<(), MapError>
+{
     for mask in 0..512u32 {
         let mut map = grid([3, 3, 1])?;
         for (i, cell) in map.cells.iter_mut().enumerate() {
-            if mask & (1 << i) != 0 { *cell = Cell::Hidden; }
+            if mask & (1 << i) != 0 {
+                *cell = Cell::Hidden;
+            }
         }
         let excluded = !map.candidate(0) || !map.candidate(8);
-        let adj = if excluded { Vec::new() } else { adjacency(&map)? };
+        let adj = if excluded {
+            Vec::new()
+        } else {
+            adjacency(&map)?
+        };
         for mode in MODES {
             let report = run(&map, mode)?;
             assert_eq!(report.endpoint_excluded, excluded);
             if !excluded {
-                assert_eq!(report.paths.len(), minimum_cut(&adj, 0, 8, mode), "mask={mask} mode={mode:?}");
-                assert_eq!(report.paths.is_empty(), map.route([0, 0, 0], [2, 2, 0], MAX_ROUTE_WORK)?.path.is_empty());
+                assert_eq!(
+                    report.paths.len(),
+                    minimum_cut(&adj, 0, 8, mode),
+                    "mask={mask} mode={mode:?}"
+                );
+                assert_eq!(
+                    report.paths.is_empty(),
+                    map.route([0, 0, 0], [2, 2, 0], MAX_ROUTE_WORK)?
+                        .path
+                        .is_empty()
+                );
             }
             verify_certificate(&map, &report, MAX_ROUTE_WORK)?;
         }
@@ -234,14 +303,27 @@ fn every_three_by_three_obstacle_map_matches_independently_enumerated_cuts() -> 
 }
 
 #[test]
-fn exact_work_boundary_is_inclusive_and_exhaustion_never_returns_a_partial_cut() -> Result<(), MapError> {
+fn exact_work_boundary_is_inclusive_and_exhaustion_never_returns_a_partial_cut()
+-> Result<(), MapError> {
     let map = grid([5, 5, 1])?;
     for mode in MODES {
         let report = run(&map, mode)?;
-        assert_eq!(analyze(&map, report.start, report.goal, mode, report.work_units)?, report);
-        assert_eq!(analyze(&map, report.start, report.goal, mode, report.work_units - 1), Err(MapError::BudgetExceeded));
-        assert_eq!(analyze(&map, report.start, report.goal, mode, 0), Err(MapError::BudgetExceeded));
-        assert_eq!(analyze(&map, report.start, report.goal, mode, MAX_ROUTE_WORK + 1), Err(MapError::BudgetExceeded));
+        assert_eq!(
+            analyze(&map, report.start, report.goal, mode, report.work_units)?,
+            report
+        );
+        assert_eq!(
+            analyze(&map, report.start, report.goal, mode, report.work_units - 1),
+            Err(MapError::BudgetExceeded)
+        );
+        assert_eq!(
+            analyze(&map, report.start, report.goal, mode, 0),
+            Err(MapError::BudgetExceeded)
+        );
+        assert_eq!(
+            analyze(&map, report.start, report.goal, mode, MAX_ROUTE_WORK + 1),
+            Err(MapError::BudgetExceeded)
+        );
     }
     Ok(())
 }
@@ -257,10 +339,17 @@ fn every_cooperative_abort_including_final_publication_returns_no_result() -> Re
         })?;
         for reject_at in 1..=calls {
             let mut call = 0;
-            assert_eq!(analyze_with_check(&map, [0, 0, 0], [4, 4, 0], mode, MAX_ROUTE_WORK, || {
-                call += 1;
-                if call == reject_at { Err(MapError::BudgetExceeded) } else { Ok(()) }
-            }), Err(MapError::BudgetExceeded));
+            assert_eq!(
+                analyze_with_check(&map, [0, 0, 0], [4, 4, 0], mode, MAX_ROUTE_WORK, || {
+                    call += 1;
+                    if call == reject_at {
+                        Err(MapError::BudgetExceeded)
+                    } else {
+                        Ok(())
+                    }
+                }),
+                Err(MapError::BudgetExceeded)
+            );
         }
     }
     Ok(())
@@ -270,11 +359,16 @@ fn every_cooperative_abort_including_final_publication_returns_no_result() -> Re
 fn malformed_maps_and_endpoints_are_refused() -> Result<(), MapError> {
     let mut map = grid([3, 1, 1])?;
     assert!(analyze(&map, [0; 3], [0; 3], Disjointness::Edges, MAX_ROUTE_WORK).is_err());
-    assert_eq!(analyze(&map, [0; 3], [3, 0, 0], Disjointness::Edges, MAX_ROUTE_WORK), Err(MapError::OutsideRegion));
+    assert_eq!(
+        analyze(&map, [0; 3], [3, 0, 0], Disjointness::Edges, MAX_ROUTE_WORK),
+        Err(MapError::OutsideRegion)
+    );
     map.cells.pop();
     assert!(analyze(&map, [0; 3], [2, 0, 0], Disjointness::Edges, MAX_ROUTE_WORK).is_err());
     let mut map = grid([3, 1, 1])?;
-    if let Cell::Visible(tile) = &mut map.cells[1] { tile.liquid_depth = 8; }
+    if let Cell::Visible(tile) = &mut map.cells[1] {
+        tile.liquid_depth = 8;
+    }
     assert_eq!(run(&map, Disjointness::Edges), Err(MapError::InvalidTile));
     Ok(())
 }
@@ -294,7 +388,10 @@ fn certificate_rejects_forged_packings_cuts_counts_and_changed_maps() -> Result<
             5 => forged.paths[0] = vec![0; map.cells.len() + 1],
             _ => forged.minimum_cut.clear(),
         }
-        assert!(verify_certificate(&map, &forged, MAX_ROUTE_WORK).is_err(), "mutation {which}");
+        assert!(
+            verify_certificate(&map, &forged, MAX_ROUTE_WORK).is_err(),
+            "mutation {which}"
+        );
     }
     let mut changed = map;
     changed.cells[report.paths[0][1]] = Cell::Hidden;
@@ -307,7 +404,9 @@ fn maximum_size_snaking_corridor_is_iterative_and_remains_budgeted() -> Result<(
     let mut map = grid([128, 128, 1])?;
     map.cells.fill(Cell::Hidden);
     for y in (0usize..128).step_by(2) {
-        for x in 0..128 { map.cells[y * 128 + x] = floor(); }
+        for x in 0..128 {
+            map.cells[y * 128 + x] = floor();
+        }
         if y < 126 {
             let x = if (y / 2) % 2 == 0 { 127 } else { 0 };
             map.cells[(y + 1) * 128 + x] = floor();
@@ -327,22 +426,30 @@ fn maximum_size_snaking_corridor_is_iterative_and_remains_budgeted() -> Result<(
 fn six_independent_stair_lattice_routes_reach_the_endpoint_degree_bound() -> Result<(), MapError> {
     let mut map = grid([4, 4, 4])?;
     for cell in &mut map.cells {
-        if let Cell::Visible(tile) = cell { tile.shape = Shape::StairUpDown; }
+        if let Cell::Visible(tile) = cell {
+            tile.shape = Shape::StairUpDown;
+        }
     }
     for mode in MODES {
         let report = analyze(&map, [1, 1, 1], [2, 2, 2], mode, MAX_ROUTE_WORK)?;
         assert_eq!(report.paths.len(), 6);
         assert_eq!(report.minimum_cut.len(), 6);
         verify_certificate(&map, &report, MAX_ROUTE_WORK)?;
-        assert_eq!(analyze(&map, report.start, report.goal, mode, MAX_ROUTE_WORK)?, report);
+        assert_eq!(
+            analyze(&map, report.start, report.goal, mode, MAX_ROUTE_WORK)?,
+            report
+        );
     }
     Ok(())
 }
 
 #[test]
-fn residual_rerouting_finds_a_second_corridor_that_greedy_path_deletion_loses() -> Result<(), MapError> {
+fn residual_rerouting_finds_a_second_corridor_that_greedy_path_deletion_loses()
+-> Result<(), MapError> {
     let mut map = grid([5, 5, 1])?;
-    for i in [9, 12, 13, 15, 19, 20, 21, 22] { map.cells[i] = Cell::Hidden; }
+    for i in [9, 12, 13, 15, 19, 20, 21, 22] {
+        map.cells[i] = Cell::Hidden;
+    }
     let start = pos(&map, 11)?;
     let goal = pos(&map, 3)?;
     let first = map.route(start, goal, MAX_ROUTE_WORK)?;
@@ -352,7 +459,13 @@ fn residual_rerouting_finds_a_second_corridor_that_greedy_path_deletion_loses() 
         greedy.cells[i] = Cell::Hidden;
     }
     assert!(greedy.route(start, goal, MAX_ROUTE_WORK)?.path.is_empty());
-    let report = analyze(&map, start, goal, Disjointness::InternalTiles, MAX_ROUTE_WORK)?;
+    let report = analyze(
+        &map,
+        start,
+        goal,
+        Disjointness::InternalTiles,
+        MAX_ROUTE_WORK,
+    )?;
     assert_eq!(report.paths.len(), 2);
     verify_certificate(&map, &report, MAX_ROUTE_WORK)?;
     Ok(())
