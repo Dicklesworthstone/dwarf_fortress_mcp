@@ -55,15 +55,15 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 type Native = DigRpcClient<DigTcpStream>;
 enum Entry {
     Native {
-        state: State<PrivateDigFile, Native, PrivateBuildFile, PrivateRunFile>,
+        state: Box<State<PrivateDigFile, Native, PrivateBuildFile, PrivateRunFile>>,
         config: Config,
     },
     Monitor {
-        state: monitor_recovery::RecoveryState<PrivateBuildFile>,
+        state: Box<monitor_recovery::RecoveryState<PrivateBuildFile>>,
         config: Config,
     },
     ClockRecovery {
-        state: clock_recovery::RecoveryState<PrivateBuildFile, PrivateRunFile>,
+        state: Box<clock_recovery::RecoveryState<PrivateBuildFile, PrivateRunFile>>,
         config: Config,
     },
 }
@@ -1023,20 +1023,19 @@ where
                 .review
                 .take()
                 .ok_or_else(|| error(ErrorCode::CapabilityDenied, "review unavailable"))?;
-            if let Some(parent) = state.blueprint.as_ref() {
-                if review.blueprint_seal
+            if let Some(parent) = state.blueprint.as_ref()
+                && review.blueprint_seal
                     != Some(batch::seal(
                         parent,
                         old.plan(),
                         before.head,
                         review.value.seal(),
                     ))
-                {
-                    return Err(error(
-                        ErrorCode::StaleAnchor,
-                        "original blueprint prefix or review changed",
-                    ));
-                }
+            {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "original blueprint prefix or review changed",
+                ));
             }
             let policy_seal = review.value.seal();
             let confirmed = review.value.confirm(policy_seal)?;
@@ -1598,21 +1597,24 @@ fn retain_blueprint<
     state: &State<S, N, B, C>,
     mut result: Value,
 ) -> Value {
-    if result.get("blueprint").is_none() {
-        if let Some(reference) = state.blueprint_reference() {
-            result["blueprint"] = reference;
-        }
+    if result.get("blueprint").is_none()
+        && let Some(reference) = state.blueprint_reference()
+    {
+        result["blueprint"] = reference;
     }
-    if result.get("blueprint_monitor").is_none() {
-        if let Some(reference) = state.monitor_reference() {
-            result["blueprint_monitor"] = reference;
-        }
+
+    if result.get("blueprint_monitor").is_none()
+        && let Some(reference) = state.monitor_reference()
+    {
+        result["blueprint_monitor"] = reference;
     }
-    if result.get("blueprint_clock").is_none() {
-        if let Some(reference) = state.clock_reference() {
-            result["blueprint_clock"] = reference;
-        }
+
+    if result.get("blueprint_clock").is_none()
+        && let Some(reference) = state.clock_reference()
+    {
+        result["blueprint_clock"] = reference;
     }
+
     result
 }
 fn lock() -> Result<MutexGuard<'static, Option<Entry>>> {
@@ -2194,7 +2196,7 @@ pub async fn fortress_open_session(
                     return Err(error(ErrorCode::StaleAnchor,"original recovered histories changed before publication"));
                 }
                 work.current(&c)?;
-                *locked=Some(Entry::ClockRecovery{state,config});
+                *locked=Some(Entry::ClockRecovery{state: Box::new(state),config});
                 return Ok(rendered);
             }
             if monitor_only {
@@ -2222,7 +2224,7 @@ pub async fn fortress_open_session(
                 if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
                 work.current(&c)?;
                 runtime::boundary(&control,&config,false)?;
-                *locked=Some(Entry::Monitor{state,config});
+                *locked=Some(Entry::Monitor{state: Box::new(state),config});
                 return Ok(rendered);
             }
             let region=region.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"native opening lost its selected region"))?;
@@ -2369,7 +2371,7 @@ pub async fn fortress_open_session(
             if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
             work.current(&c)?;
             runtime::boundary(&control,&config,false)?;
-            *locked=Some(Entry::Native {state,config});
+            *locked=Some(Entry::Native {state: Box::new(state),config});
             Ok(rendered)
         })();
         match result {

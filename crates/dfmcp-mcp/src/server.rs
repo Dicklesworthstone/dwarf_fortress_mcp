@@ -1715,12 +1715,9 @@ impl PlanSource {
             _ => Ok(None),
         };
         match reserve_until {
-            Ok(Some(until)) => plan_forecast::forecast_plan_with_reserve(
-                adapter,
-                plan,
-                context,
-                Some(until),
-            ),
+            Ok(Some(until)) => {
+                plan_forecast::forecast_plan_with_reserve(adapter, plan, context, Some(until))
+            }
             Ok(None) => forecast_plan(adapter, plan, context),
             Err(error) => json!({
                 "epistemic_state": "predicted",
@@ -4463,7 +4460,11 @@ fn wait_progress_error(
         payload["durability_pending"] = json!(session.durability_fault.is_some());
         if !session.carried.is_empty() {
             payload["carried_obligations"] = json!(
-                session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+                session
+                    .carried
+                    .iter()
+                    .map(CarriedStep::to_json)
+                    .collect::<Vec<_>>()
             );
         }
         if let Some(action_id) = session.last_action {

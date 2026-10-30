@@ -8,11 +8,17 @@ process, or live fortress correctness.
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import pathlib
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
+
+import check_local_qualification_receipt as local_receipt
+from validate_repo import rust_code_mask
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPECTED_METHODS = ["Handshake", "ReadObservation"]
@@ -67,6 +73,15 @@ FORBIDDEN_RPC_NAMES = [
     "Mutate",
     "ApplyEffect",
 ]
+RECEIPT_BRIDGE_PATHS = [
+    "architecture/dfhack_read_bridge_v1.json",
+    "bridge/dfhack-plugin/proto/DfmcpBridge.proto",
+    "bridge/dfhack-plugin/src/dfmcp_bridge.cpp",
+    "crates/dfmcp-adapter/src/dfhack_wire.rs",
+    "crates/dfmcp-adapter/src/live_observation.rs",
+    "crates/dfmcp-adapter/src/live_session.rs",
+    "scripts/qualify_dfhack_plugin.sh",
+]
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,50 @@ def read_required(path: str, failures: list[Failure]) -> str:
     except OSError as exc:
         failures.append(Failure(path, f"cannot read required file: {exc}"))
         return ""
+
+
+def canonical_boolean_writer(source: str) -> bool:
+    """Check the Boolean writer itself, not unrelated integer writers."""
+    code = rust_code_mask(source)
+    match = re.search(
+        r"\bfn\s+boolean\s*\(\s*&mut\s+self\s*,\s*field\s*:\s*u32\s*,\s*value\s*:\s*bool\s*\)\s*\{"
+        r"\s*self\.key\s*\(\s*field\s*,\s*WireType::Varint\s*\)\s*;"
+        r"\s*self\.varint\s*\(\s*if\s+value\s*\{\s*1\s*\}\s*else\s*\{\s*0\s*\}\s*\)\s*;\s*\}",
+        code,
+    )
+    return match is not None
+
+
+def receipt_inventory_dataflow(source: str) -> bool:
+    """Check executable AST, not comments, for the complete snapshot path."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    if not {"collect_source_snapshot", "begin", "finish"} <= functions.keys():
+        return False
+    collect, begin, finish = (functions[name] for name in ("collect_source_snapshot", "begin", "finish"))
+
+    def has(node: ast.AST, expected: str) -> bool:
+        return any(ast.unparse(child) == expected for child in ast.walk(node))
+
+    def calls(node: ast.AST, name: str) -> int:
+        return sum(isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                   and child.func.id == name for child in ast.walk(node))
+
+    return (
+        has(collect, "['ls-tree', '-rz', '--full-tree', before_commit]")
+        and has(collect, "listing.split(b'\\x00')")
+        and has(collect, "entries.append({'path': path, 'mode': mode, 'git_blob': object_id, 'worktree_mode': stable.mode, 'bytes': stable.size, 'sha256': stable.sha256})")
+        and calls(collect, "read_stable_regular_file") >= 1
+        and has(begin, "current != snapshot") and calls(begin, "collect_source_snapshot") >= 2
+        and has(finish, "current != snapshot")
+        and has(finish, "current_before_publish != snapshot")
+        and has(finish, "current_after_publish != snapshot")
+        and calls(finish, "collect_source_snapshot") >= 3
+        and has(finish, "{entry['path']: entry['sha256'] for entry in snapshot['entries']}")
+    )
 
 
 def check_registry(failures: list[Failure]) -> None:
@@ -332,7 +391,7 @@ def check_rust_wire(failures: list[Failure]) -> None:
         failures,
     )
     require(
-        "u64::from(value)" not in source,
+        canonical_boolean_writer(source),
         path,
         "protobuf Boolean encoding must use explicit canonical 0/1",
         failures,
@@ -458,22 +517,34 @@ def check_qualification_wiring(failures: list[Failure]) -> None:
             "native DFHack build harness is not shell-syntax checked",
             failures,
         )
-    qualify = read_required("scripts/qualify_local.sh", failures)
-    for needle in [
-        "dfhack_read_bridge_contract",
-        "dfhack_bridge_proto",
-        "dfhack_bridge_plugin",
-        "dfhack_wire_client",
-        "live_observation_capsule",
-        "live_observation_driver",
-        "dfhack_native_build_harness",
-    ]:
-        require(
-            needle in qualify,
-            "scripts/qualify_local.sh",
-            f"qualification receipt omits {needle}",
-            failures,
+    # The two-phase receipt binds every tracked HEAD path, rather than a
+    # hand-maintained list of digest aliases. Reuse the independent authority
+    # for the exact contract, writer, and begin/finish wrapper checks.
+    try:
+        local_receipt.check_contract()
+        local_receipt.check_writer()
+        local_receipt.check_wrapper()
+    except (OSError, SyntaxError, json.JSONDecodeError, local_receipt.ContractError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"qualification source binding is invalid: {exc}"))
+    writer = read_required("scripts/write_local_qualification_receipt.py", failures)
+    require(receipt_inventory_dataflow(writer), "scripts/write_local_qualification_receipt.py",
+            "qualification receipt does not preserve complete two-phase inventory dataflow", failures)
+    for path in RECEIPT_BRIDGE_PATHS:
+        require((ROOT / path).is_file(), path, "required bridge source is absent", failures)
+    try:
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        environment["GIT_CONFIG_GLOBAL"] = os.devnull
+        result = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *RECEIPT_BRIDGE_PATHS],
+            cwd=ROOT, capture_output=True, check=True, timeout=30, env=environment,
         )
+        tracked = set(result.stdout.decode("utf-8").split("\0"))
+    except (OSError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"cannot verify HEAD bridge inventory: {exc}"))
+    else:
+        for path in RECEIPT_BRIDGE_PATHS:
+            require(path in tracked, path, "required bridge source is absent from HEAD inventory", failures)
 
 
 def main() -> int:

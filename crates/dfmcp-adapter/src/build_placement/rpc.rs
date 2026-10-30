@@ -439,9 +439,7 @@ impl Wire {
         let unresolved = reply.boolean(12)?;
         let retained = reply.number(13)?;
         require(
-            retained <= 256
-                && retained >= self.retained
-                && (retained != 0 || !unresolved),
+            retained <= 256 && retained >= self.retained && (retained != 0 || !unresolved),
             "invalid furniture native retention or uncertainty fence",
         )?;
         let capture = if let Request::Observe(selection) = request {
@@ -713,7 +711,11 @@ impl BuildRpc {
                 let previous = self.seen.get(plan.key());
                 if let Some(old) = previous {
                     validate_query_successor(
-                        request, old, record, self.binding.generation(), self.wire.unresolved,
+                        request,
+                        old,
+                        record,
+                        self.binding.generation(),
+                        self.wire.unresolved,
                     )?;
                 } else {
                     require(

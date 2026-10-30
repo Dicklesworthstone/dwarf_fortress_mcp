@@ -19,28 +19,28 @@ pub(super) fn change_construction(
         "pending" | "suspended" | "missing_job" | "removal"
     ) {
         observed.buildings[0].build_stage = 0;
-        if let Some(insertion) = record.insertion() {
-            if state.condition != "missing_job" {
-                observed.jobs.jobs.push(LiveJob {
-                    native_id: insertion.job_id(),
-                    job_type: 1,
-                    type_key: if state.condition == "removal" {
-                        "DestroyBuilding"
-                    } else {
-                        "ConstructBuilding"
-                    }
-                    .into(),
-                    reaction: String::new(),
-                    suspended: state.condition == "suspended",
-                    repeating: false,
-                    position: observed.items[0].raw_position,
-                    worker_native_id: None,
-                    holder_native_id: Some(insertion.building_id()),
-                    completion_timer: 0,
-                    attached_item_count: 0,
-                    required_item_filter_count: 0,
-                });
-            }
+        if let Some(insertion) = record.insertion()
+            && state.condition != "missing_job"
+        {
+            observed.jobs.jobs.push(LiveJob {
+                native_id: insertion.job_id(),
+                job_type: 1,
+                type_key: if state.condition == "removal" {
+                    "DestroyBuilding"
+                } else {
+                    "ConstructBuilding"
+                }
+                .into(),
+                reaction: String::new(),
+                suspended: state.condition == "suspended",
+                repeating: false,
+                position: observed.items[0].raw_position,
+                worker_native_id: None,
+                holder_native_id: Some(insertion.building_id()),
+                completion_timer: 0,
+                attached_item_count: 0,
+                required_item_filter_count: 0,
+            });
         }
     }
     match state.condition {

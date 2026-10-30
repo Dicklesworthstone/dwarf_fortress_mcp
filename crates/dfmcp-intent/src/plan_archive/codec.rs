@@ -3,90 +3,177 @@ use super::*;
 
 impl<F: FnMut() -> Result<()>> Writer<'_, F> {
     fn coord(&mut self, value: MapCoord) -> Result<()> {
-        self.i32(value.x)?; self.i32(value.y)?; self.i32(value.z)
+        self.i32(value.x)?;
+        self.i32(value.y)?;
+        self.i32(value.z)
     }
     fn area(&mut self, value: MapCuboid) -> Result<()> {
-        self.coord(value.min)?; self.coord(value.max)
+        self.coord(value.min)?;
+        self.coord(value.max)
     }
     fn anchor(&mut self, value: StateAnchor) -> Result<()> {
         self.u64(value.fortress_id.get())?;
-        self.u64(value.cursor.epoch)?; self.u64(value.cursor.sequence)?;
-        self.u64(value.tick.0)?; self.raw(value.state_hash.as_bytes())
+        self.u64(value.cursor.epoch)?;
+        self.u64(value.cursor.sequence)?;
+        self.u64(value.tick.0)?;
+        self.raw(value.state_hash.as_bytes())
     }
     fn ids(&mut self, ids: &[EntityId]) -> Result<()> {
         self.count(ids.len(), MAX_COLLECTION)?;
-        for id in ids { self.u64(id.get())?; }
+        for id in ids {
+            self.u64(id.get())?;
+        }
         Ok(())
     }
     fn strings(&mut self, values: &BTreeSet<String>) -> Result<()> {
         self.count(values.len(), MAX_COLLECTION)?;
-        for value in values { self.text(value, MAX_TEXT)?; }
+        for value in values {
+            self.text(value, MAX_TEXT)?;
+        }
         Ok(())
     }
     fn optional_u32(&mut self, value: Option<u32>) -> Result<()> {
         self.boolean(value.is_some())?;
-        if let Some(value) = value { self.u32(value)?; }
+        if let Some(value) = value {
+            self.u32(value)?;
+        }
         Ok(())
     }
     fn action(&mut self, action: &Action) -> Result<()> {
         self.node(0)?;
         match action {
-            Action::Pause { paused } => { self.byte(0)?; self.boolean(*paused)?; }
+            Action::Pause { paused } => {
+                self.byte(0)?;
+                self.boolean(*paused)?;
+            }
             Action::DesignateDig { area, mode } => {
-                self.byte(1)?; self.area(*area)?; self.dig_mode(*mode)?;
+                self.byte(1)?;
+                self.area(*area)?;
+                self.dig_mode(*mode)?;
             }
-            Action::Build { kind, location, footprint, material } => {
-                self.byte(2)?; self.building_kind(kind)?; self.coord(*location)?;
-                self.area(*footprint)?; self.strings(&material.required_tokens)?;
+            Action::Build {
+                kind,
+                location,
+                footprint,
+                material,
+            } => {
+                self.byte(2)?;
+                self.building_kind(kind)?;
+                self.coord(*location)?;
+                self.area(*footprint)?;
+                self.strings(&material.required_tokens)?;
                 self.strings(&material.forbidden_tokens)?;
-                self.boolean(material.prefer_nearest)?; self.u32(material.reserve_count)?;
+                self.boolean(material.prefer_nearest)?;
+                self.u32(material.reserve_count)?;
             }
-            Action::SetLabor { units, labor, enabled } => {
-                self.byte(3)?; self.ids(units)?; self.text(labor, MAX_TEXT)?; self.boolean(*enabled)?;
+            Action::SetLabor {
+                units,
+                labor,
+                enabled,
+            } => {
+                self.byte(3)?;
+                self.ids(units)?;
+                self.text(labor, MAX_TEXT)?;
+                self.boolean(*enabled)?;
             }
-            Action::CreateWorkOrder { name, job_token, amount, conditions } => {
-                self.byte(4)?; self.text(name, MAX_TEXT)?; self.text(job_token, MAX_TEXT)?;
-                self.u32(*amount)?; self.count(conditions.len(), MAX_COLLECTION)?;
+            Action::CreateWorkOrder {
+                name,
+                job_token,
+                amount,
+                conditions,
+            } => {
+                self.byte(4)?;
+                self.text(name, MAX_TEXT)?;
+                self.text(job_token, MAX_TEXT)?;
+                self.u32(*amount)?;
+                self.count(conditions.len(), MAX_COLLECTION)?;
                 for condition in conditions {
                     match condition {
-                        WorkOrderCondition::ItemCountBelow { item_token, threshold } => {
-                            self.byte(0)?; self.text(item_token, MAX_TEXT)?; self.u32(*threshold)?;
+                        WorkOrderCondition::ItemCountBelow {
+                            item_token,
+                            threshold,
+                        } => {
+                            self.byte(0)?;
+                            self.text(item_token, MAX_TEXT)?;
+                            self.u32(*threshold)?;
                         }
-                        WorkOrderCondition::MaterialAvailable { material_token, minimum } => {
-                            self.byte(1)?; self.text(material_token, MAX_TEXT)?; self.u32(*minimum)?;
+                        WorkOrderCondition::MaterialAvailable {
+                            material_token,
+                            minimum,
+                        } => {
+                            self.byte(1)?;
+                            self.text(material_token, MAX_TEXT)?;
+                            self.u32(*minimum)?;
                         }
                         WorkOrderCondition::CompletedOrder { order_name } => {
-                            self.byte(2)?; self.text(order_name, MAX_TEXT)?;
+                            self.byte(2)?;
+                            self.text(order_name, MAX_TEXT)?;
                         }
                     }
                 }
             }
-            Action::ConfigureStockpile { stockpile, accepts, max_bins, max_barrels, max_wheelbarrows } => {
-                self.byte(5)?; self.u64(stockpile.get())?; self.strings(accepts)?;
-                self.optional_u32(*max_bins)?; self.optional_u32(*max_barrels)?;
+            Action::ConfigureStockpile {
+                stockpile,
+                accepts,
+                max_bins,
+                max_barrels,
+                max_wheelbarrows,
+            } => {
+                self.byte(5)?;
+                self.u64(stockpile.get())?;
+                self.strings(accepts)?;
+                self.optional_u32(*max_bins)?;
+                self.optional_u32(*max_barrels)?;
                 self.optional_u32(*max_wheelbarrows)?;
             }
             Action::AssignSquad { units, squad } => {
-                self.byte(6)?; self.ids(units)?; self.u64(squad.get())?;
+                self.byte(6)?;
+                self.ids(units)?;
+                self.u64(squad.get())?;
             }
-            Action::SetBurrowMembership { units, burrow, assigned } => {
-                self.byte(7)?; self.ids(units)?; self.u64(burrow.get())?; self.boolean(*assigned)?;
+            Action::SetBurrowMembership {
+                units,
+                burrow,
+                assigned,
+            } => {
+                self.byte(7)?;
+                self.ids(units)?;
+                self.u64(burrow.get())?;
+                self.boolean(*assigned)?;
             }
             Action::SetStandingOrder { key, value } => {
-                self.byte(8)?; self.text(key, MAX_TEXT)?; self.text(value, MAX_TEXT)?;
+                self.byte(8)?;
+                self.text(key, MAX_TEXT)?;
+                self.text(value, MAX_TEXT)?;
             }
-            Action::Extension { namespace, name, parameters } => {
-                self.byte(9)?; self.text(namespace, MAX_TEXT)?; self.text(name, MAX_TEXT)?;
+            Action::Extension {
+                namespace,
+                name,
+                parameters,
+            } => {
+                self.byte(9)?;
+                self.text(namespace, MAX_TEXT)?;
+                self.text(name, MAX_TEXT)?;
                 self.count(parameters.len(), MAX_COLLECTION)?;
-                for (key, value) in parameters { self.text(key, MAX_TEXT)?; self.text(value, MAX_TEXT)?; }
+                for (key, value) in parameters {
+                    self.text(key, MAX_TEXT)?;
+                    self.text(value, MAX_TEXT)?;
+                }
             }
-            Action::PlaceFurniture { kind, item, location } => {
+            Action::PlaceFurniture {
+                kind,
+                item,
+                location,
+            } => {
                 self.byte(10)?;
                 self.byte(match kind {
-                    FurnitureKind::Bed => 0, FurnitureKind::Door => 1,
-                    FurnitureKind::Table => 2, FurnitureKind::Chair => 3,
+                    FurnitureKind::Bed => 0,
+                    FurnitureKind::Door => 1,
+                    FurnitureKind::Table => 2,
+                    FurnitureKind::Chair => 3,
                 })?;
-                self.u64(item.get())?; self.coord(*location)?;
+                self.u64(item.get())?;
+                self.coord(*location)?;
             }
         }
         Ok(())
@@ -95,21 +182,53 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
         self.node(depth)?;
         match value {
             Value::Null => self.byte(0)?,
-            Value::Bool(value) => { self.byte(1)?; self.boolean(*value)?; }
-            Value::I64(value) => { self.byte(2)?; self.i64(*value)?; }
-            Value::U64(value) => { self.byte(3)?; self.u64(*value)?; }
-            Value::Fixed { units, scale } => { self.byte(4)?; self.i64(*units)?; self.u32(*scale)?; }
-            Value::Text(value) => { self.byte(5)?; self.text(value, MAX_TEXT)?; }
-            Value::Entity(value) => { self.byte(6)?; self.u64(value.get())?; }
-            Value::Coord(value) => { self.byte(7)?; self.coord(*value)?; }
-            Value::Bytes(value) => { self.byte(8)?; self.blob(value)?; }
+            Value::Bool(value) => {
+                self.byte(1)?;
+                self.boolean(*value)?;
+            }
+            Value::I64(value) => {
+                self.byte(2)?;
+                self.i64(*value)?;
+            }
+            Value::U64(value) => {
+                self.byte(3)?;
+                self.u64(*value)?;
+            }
+            Value::Fixed { units, scale } => {
+                self.byte(4)?;
+                self.i64(*units)?;
+                self.u32(*scale)?;
+            }
+            Value::Text(value) => {
+                self.byte(5)?;
+                self.text(value, MAX_TEXT)?;
+            }
+            Value::Entity(value) => {
+                self.byte(6)?;
+                self.u64(value.get())?;
+            }
+            Value::Coord(value) => {
+                self.byte(7)?;
+                self.coord(*value)?;
+            }
+            Value::Bytes(value) => {
+                self.byte(8)?;
+                self.blob(value)?;
+            }
             Value::List(values) => {
-                self.byte(9)?; self.count(values.len(), MAX_COLLECTION)?;
-                for value in values { self.value(value, depth + 1)?; }
+                self.byte(9)?;
+                self.count(values.len(), MAX_COLLECTION)?;
+                for value in values {
+                    self.value(value, depth + 1)?;
+                }
             }
             Value::Object(values) => {
-                self.byte(10)?; self.count(values.len(), MAX_COLLECTION)?;
-                for (key, value) in values { self.text(key, MAX_TEXT)?; self.value(value, depth + 1)?; }
+                self.byte(10)?;
+                self.count(values.len(), MAX_COLLECTION)?;
+                for (key, value) in values {
+                    self.text(key, MAX_TEXT)?;
+                    self.value(value, depth + 1)?;
+                }
             }
         }
         Ok(())
@@ -119,69 +238,132 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
         match predicate {
             Predicate::True => self.byte(0)?,
             Predicate::False => self.byte(1)?,
-            Predicate::EntityExists(id) => { self.byte(2)?; self.u64(id.get())?; }
-            Predicate::EntityKind { entity_id, kind } => {
-                self.byte(3)?; self.u64(entity_id.get())?; self.entity_kind(kind)?;
+            Predicate::EntityExists(id) => {
+                self.byte(2)?;
+                self.u64(id.get())?;
             }
-            Predicate::FieldCompare { entity_id, field, op, value } => {
-                self.byte(4)?; self.u64(entity_id.get())?; self.text(field, 256)?;
-                self.compare_op(*op)?; self.value(value, depth + 1)?;
+            Predicate::EntityKind { entity_id, kind } => {
+                self.byte(3)?;
+                self.u64(entity_id.get())?;
+                self.entity_kind(kind)?;
+            }
+            Predicate::FieldCompare {
+                entity_id,
+                field,
+                op,
+                value,
+            } => {
+                self.byte(4)?;
+                self.u64(entity_id.get())?;
+                self.text(field, 256)?;
+                self.compare_op(*op)?;
+                self.value(value, depth + 1)?;
             }
             Predicate::EdgeExists { edge_id, kind } => {
-                self.byte(5)?; self.u128(edge_id.get())?; self.boolean(kind.is_some())?;
-                if let Some(kind) = kind { self.edge_kind(kind)?; }
+                self.byte(5)?;
+                self.u128(edge_id.get())?;
+                self.boolean(kind.is_some())?;
+                if let Some(kind) = kind {
+                    self.edge_kind(kind)?;
+                }
             }
-            Predicate::Paused(value) => { self.byte(6)?; self.boolean(*value)?; }
+            Predicate::Paused(value) => {
+                self.byte(6)?;
+                self.boolean(*value)?;
+            }
             Predicate::All(values) | Predicate::Any(values) => {
-                self.byte(if matches!(predicate, Predicate::All(_)) { 7 } else { 8 })?;
+                self.byte(if matches!(predicate, Predicate::All(_)) {
+                    7
+                } else {
+                    8
+                })?;
                 self.count(values.len(), MAX_COLLECTION)?;
-                for value in values { self.predicate(value, depth + 1)?; }
+                for value in values {
+                    self.predicate(value, depth + 1)?;
+                }
             }
-            Predicate::Not(value) => { self.byte(9)?; self.predicate(value, depth + 1)?; }
+            Predicate::Not(value) => {
+                self.byte(9)?;
+                self.predicate(value, depth + 1)?;
+            }
             Predicate::RegionTerrain { area, tile_code } => {
-                self.byte(10)?; self.area(*area)?; self.u32(*tile_code)?;
+                self.byte(10)?;
+                self.area(*area)?;
+                self.u32(*tile_code)?;
             }
-            Predicate::LaboratoryRoomAccess { area, entry, targets } => {
-                self.byte(11)?; self.area(*area)?; self.coord(*entry)?;
-                self.count(targets.len(), dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS)?;
-                for target in targets { self.coord(*target)?; }
+            Predicate::LaboratoryRoomAccess {
+                area,
+                entry,
+                targets,
+            } => {
+                self.byte(11)?;
+                self.area(*area)?;
+                self.coord(*entry)?;
+                self.count(
+                    targets.len(),
+                    dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS,
+                )?;
+                for target in targets {
+                    self.coord(*target)?;
+                }
             }
         }
         Ok(())
     }
     fn predicates(&mut self, values: &[Predicate]) -> Result<()> {
         self.count(values.len(), 64)?;
-        for value in values { self.predicate(value, 1)?; }
+        for value in values {
+            self.predicate(value, 1)?;
+        }
         Ok(())
     }
     fn obligation(&mut self, value: &ObligationSpec) -> Result<()> {
-        self.node(0)?; self.predicate(&value.terminal, 1)?;
+        self.node(0)?;
+        self.predicate(&value.terminal, 1)?;
         self.boolean(value.failure.is_some())?;
-        if let Some(failure) = &value.failure { self.predicate(failure, 1)?; }
-        self.u64(value.deadline_tick.0)?; self.u64(value.poll_interval_ticks)?;
+        if let Some(failure) = &value.failure {
+            self.predicate(failure, 1)?;
+        }
+        self.u64(value.deadline_tick.0)?;
+        self.u64(value.poll_interval_ticks)?;
         self.u32(value.stable_for_observations)
     }
     pub(super) fn plan(&mut self, value: &PreparedPlan) -> Result<()> {
-        self.node(0)?; self.u128(value.id.get())?; self.u128(value.intent_id.get())?;
-        self.anchor(value.anchor)?; self.text(&value.summary, 4096)?;
+        self.node(0)?;
+        self.u128(value.id.get())?;
+        self.u128(value.intent_id.get())?;
+        self.anchor(value.anchor)?;
+        self.text(&value.summary, 4096)?;
         self.predicate(&value.terminal_condition, 1)?;
         self.count(value.steps.len(), self.limits.max_steps)?;
         for step in &value.steps {
-            self.u32(step.id.get())?; self.action(&step.action)?;
-            self.predicates(&step.preconditions)?; self.predicates(&step.postconditions)?;
+            self.u32(step.id.get())?;
+            self.action(&step.action)?;
+            self.predicates(&step.preconditions)?;
+            self.predicates(&step.postconditions)?;
             self.boolean(step.compensation.is_some())?;
-            if let Some(compensation) = &step.compensation { self.action(compensation)?; }
+            if let Some(compensation) = &step.compensation {
+                self.action(compensation)?;
+            }
             self.boolean(step.obligation.is_some())?;
-            if let Some(obligation) = &step.obligation { self.obligation(obligation)?; }
+            if let Some(obligation) = &step.obligation {
+                self.obligation(obligation)?;
+            }
             self.count(step.depends_on.len(), self.limits.max_steps)?;
-            for id in &step.depends_on { self.u32(id.get())?; }
-            self.risk(step.risk)?; self.capability(step.required_capability)?;
+            for id in &step.depends_on {
+                self.u32(id.get())?;
+            }
+            self.risk(step.risk)?;
+            self.capability(step.required_capability)?;
             self.text(&step.idempotency_key, 64)?;
         }
         self.risk(value.max_risk)?;
         self.count(value.required_capabilities.len(), 18)?;
-        for capability in &value.required_capabilities { self.capability(*capability)?; }
-        self.boolean(value.requires_checkpoint)?; self.u64(value.expires_at_tick.0)?;
+        for capability in &value.required_capabilities {
+            self.capability(*capability)?;
+        }
+        self.boolean(value.requires_checkpoint)?;
+        self.u64(value.expires_at_tick.0)?;
         self.raw(value.digest.as_bytes())
     }
 }
@@ -202,70 +384,150 @@ fn insert_set<T: Ord>(set: &mut BTreeSet<T>, value: T) -> Result<()> {
 }
 
 impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
-    fn coord(&mut self) -> Result<MapCoord> { Ok(MapCoord::new(self.i32()?, self.i32()?, self.i32()?)) }
-    fn area(&mut self) -> Result<MapCuboid> { Ok(MapCuboid { min: self.coord()?, max: self.coord()? }) }
+    fn coord(&mut self) -> Result<MapCoord> {
+        Ok(MapCoord::new(self.i32()?, self.i32()?, self.i32()?))
+    }
+    fn area(&mut self) -> Result<MapCuboid> {
+        Ok(MapCuboid {
+            min: self.coord()?,
+            max: self.coord()?,
+        })
+    }
     fn anchor(&mut self) -> Result<StateAnchor> {
-        Ok(StateAnchor { fortress_id: FortressId::new(self.u64()?),
-            cursor: ObservationCursor { epoch: self.u64()?, sequence: self.u64()? },
-            tick: GameTick(self.u64()?), state_hash: Digest32::from_bytes(self.array()?) })
+        Ok(StateAnchor {
+            fortress_id: FortressId::new(self.u64()?),
+            cursor: ObservationCursor {
+                epoch: self.u64()?,
+                sequence: self.u64()?,
+            },
+            tick: GameTick(self.u64()?),
+            state_hash: Digest32::from_bytes(self.array()?),
+        })
     }
     fn ids(&mut self) -> Result<Vec<EntityId>> {
         let count = self.count(MAX_COLLECTION, 8)?;
         let mut values = Vec::with_capacity(count);
-        for _ in 0..count { values.push(EntityId::new(self.u64()?)); }
+        for _ in 0..count {
+            values.push(EntityId::new(self.u64()?));
+        }
         Ok(values)
     }
     fn strings(&mut self) -> Result<BTreeSet<String>> {
         let count = self.count(MAX_COLLECTION, 4)?;
         let mut values = BTreeSet::new();
-        for _ in 0..count { insert_set(&mut values, self.text(MAX_TEXT)?)?; }
+        for _ in 0..count {
+            insert_set(&mut values, self.text(MAX_TEXT)?)?;
+        }
         Ok(values)
     }
     fn optional_u32(&mut self) -> Result<Option<u32>> {
-        if self.boolean()? { Ok(Some(self.u32()?)) } else { Ok(None) }
+        if self.boolean()? {
+            Ok(Some(self.u32()?))
+        } else {
+            Ok(None)
+        }
     }
     fn action(&mut self) -> Result<Action> {
         self.node(0)?;
         Ok(match self.byte()? {
-            0 => Action::Pause { paused: self.boolean()? },
-            1 => Action::DesignateDig { area: self.area()?, mode: self.dig_mode()? },
-            2 => Action::Build { kind: self.building_kind()?, location: self.coord()?, footprint: self.area()?,
-                material: MaterialSelector { required_tokens: self.strings()?, forbidden_tokens: self.strings()?,
-                    prefer_nearest: self.boolean()?, reserve_count: self.u32()? } },
-            3 => Action::SetLabor { units: self.ids()?, labor: self.text(MAX_TEXT)?, enabled: self.boolean()? },
+            0 => Action::Pause {
+                paused: self.boolean()?,
+            },
+            1 => Action::DesignateDig {
+                area: self.area()?,
+                mode: self.dig_mode()?,
+            },
+            2 => Action::Build {
+                kind: self.building_kind()?,
+                location: self.coord()?,
+                footprint: self.area()?,
+                material: MaterialSelector {
+                    required_tokens: self.strings()?,
+                    forbidden_tokens: self.strings()?,
+                    prefer_nearest: self.boolean()?,
+                    reserve_count: self.u32()?,
+                },
+            },
+            3 => Action::SetLabor {
+                units: self.ids()?,
+                labor: self.text(MAX_TEXT)?,
+                enabled: self.boolean()?,
+            },
             4 => {
-                let name = self.text(MAX_TEXT)?; let job_token = self.text(MAX_TEXT)?;
-                let amount = self.u32()?; let count = self.count(MAX_COLLECTION, 5)?;
+                let name = self.text(MAX_TEXT)?;
+                let job_token = self.text(MAX_TEXT)?;
+                let amount = self.u32()?;
+                let count = self.count(MAX_COLLECTION, 5)?;
                 let mut conditions = Vec::with_capacity(count);
                 for _ in 0..count {
                     conditions.push(match self.byte()? {
-                        0 => WorkOrderCondition::ItemCountBelow { item_token: self.text(MAX_TEXT)?, threshold: self.u32()? },
-                        1 => WorkOrderCondition::MaterialAvailable { material_token: self.text(MAX_TEXT)?, minimum: self.u32()? },
-                        2 => WorkOrderCondition::CompletedOrder { order_name: self.text(MAX_TEXT)? },
+                        0 => WorkOrderCondition::ItemCountBelow {
+                            item_token: self.text(MAX_TEXT)?,
+                            threshold: self.u32()?,
+                        },
+                        1 => WorkOrderCondition::MaterialAvailable {
+                            material_token: self.text(MAX_TEXT)?,
+                            minimum: self.u32()?,
+                        },
+                        2 => WorkOrderCondition::CompletedOrder {
+                            order_name: self.text(MAX_TEXT)?,
+                        },
                         _ => return Err(invalid("unknown archived work-order condition")),
                     });
                 }
-                Action::CreateWorkOrder { name, job_token, amount, conditions }
+                Action::CreateWorkOrder {
+                    name,
+                    job_token,
+                    amount,
+                    conditions,
+                }
             }
-            5 => Action::ConfigureStockpile { stockpile: EntityId::new(self.u64()?), accepts: self.strings()?,
-                max_bins: self.optional_u32()?, max_barrels: self.optional_u32()?, max_wheelbarrows: self.optional_u32()? },
-            6 => Action::AssignSquad { units: self.ids()?, squad: EntityId::new(self.u64()?) },
-            7 => Action::SetBurrowMembership { units: self.ids()?, burrow: EntityId::new(self.u64()?), assigned: self.boolean()? },
-            8 => Action::SetStandingOrder { key: self.text(MAX_TEXT)?, value: self.text(MAX_TEXT)? },
+            5 => Action::ConfigureStockpile {
+                stockpile: EntityId::new(self.u64()?),
+                accepts: self.strings()?,
+                max_bins: self.optional_u32()?,
+                max_barrels: self.optional_u32()?,
+                max_wheelbarrows: self.optional_u32()?,
+            },
+            6 => Action::AssignSquad {
+                units: self.ids()?,
+                squad: EntityId::new(self.u64()?),
+            },
+            7 => Action::SetBurrowMembership {
+                units: self.ids()?,
+                burrow: EntityId::new(self.u64()?),
+                assigned: self.boolean()?,
+            },
+            8 => Action::SetStandingOrder {
+                key: self.text(MAX_TEXT)?,
+                value: self.text(MAX_TEXT)?,
+            },
             9 => {
-                let namespace = self.text(MAX_TEXT)?; let name = self.text(MAX_TEXT)?;
+                let namespace = self.text(MAX_TEXT)?;
+                let name = self.text(MAX_TEXT)?;
                 let count = self.count(MAX_COLLECTION, 8)?;
                 let mut parameters = BTreeMap::new();
-                for _ in 0..count { let key = self.text(MAX_TEXT)?; let value = self.text(MAX_TEXT)?; insert(&mut parameters, key, value)?; }
-                Action::Extension { namespace, name, parameters }
+                for _ in 0..count {
+                    let key = self.text(MAX_TEXT)?;
+                    let value = self.text(MAX_TEXT)?;
+                    insert(&mut parameters, key, value)?;
+                }
+                Action::Extension {
+                    namespace,
+                    name,
+                    parameters,
+                }
             }
             10 => Action::PlaceFurniture {
                 kind: match self.byte()? {
-                    0 => FurnitureKind::Bed, 1 => FurnitureKind::Door,
-                    2 => FurnitureKind::Table, 3 => FurnitureKind::Chair,
+                    0 => FurnitureKind::Bed,
+                    1 => FurnitureKind::Door,
+                    2 => FurnitureKind::Table,
+                    3 => FurnitureKind::Chair,
                     _ => return Err(invalid("unknown archived furniture kind")),
                 },
-                item: EntityId::new(self.u64()?), location: self.coord()?,
+                item: EntityId::new(self.u64()?),
+                location: self.coord()?,
             },
             _ => return Err(invalid("unknown archived action")),
         })
@@ -277,7 +539,10 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
             1 => Value::Bool(self.boolean()?),
             2 => Value::I64(self.i64()?),
             3 => Value::U64(self.u64()?),
-            4 => Value::Fixed { units: self.i64()?, scale: self.u32()? },
+            4 => Value::Fixed {
+                units: self.i64()?,
+                scale: self.u32()?,
+            },
             5 => Value::Text(self.text(MAX_TEXT)?),
             6 => Value::Entity(EntityId::new(self.u64()?)),
             7 => Value::Coord(self.coord()?),
@@ -285,13 +550,19 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
             9 => {
                 let count = self.count(MAX_COLLECTION, 1)?;
                 let mut values = Vec::with_capacity(count);
-                for _ in 0..count { values.push(self.value(depth + 1)?); }
+                for _ in 0..count {
+                    values.push(self.value(depth + 1)?);
+                }
                 Value::List(values)
             }
             10 => {
                 let count = self.count(MAX_COLLECTION, 5)?;
                 let mut values = BTreeMap::new();
-                for _ in 0..count { let key = self.text(MAX_TEXT)?; let value = self.value(depth + 1)?; insert(&mut values, key, value)?; }
+                for _ in 0..count {
+                    let key = self.text(MAX_TEXT)?;
+                    let value = self.value(depth + 1)?;
+                    insert(&mut values, key, value)?;
+                }
                 Value::Object(values)
             }
             _ => return Err(invalid("unknown archived value")),
@@ -303,29 +574,59 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
             0 => Predicate::True,
             1 => Predicate::False,
             2 => Predicate::EntityExists(EntityId::new(self.u64()?)),
-            3 => Predicate::EntityKind { entity_id: EntityId::new(self.u64()?), kind: self.entity_kind()? },
-            4 => Predicate::FieldCompare { entity_id: EntityId::new(self.u64()?), field: self.text(256)?,
-                op: self.compare_op()?, value: self.value(depth + 1)? },
+            3 => Predicate::EntityKind {
+                entity_id: EntityId::new(self.u64()?),
+                kind: self.entity_kind()?,
+            },
+            4 => Predicate::FieldCompare {
+                entity_id: EntityId::new(self.u64()?),
+                field: self.text(256)?,
+                op: self.compare_op()?,
+                value: self.value(depth + 1)?,
+            },
             5 => {
                 let edge_id = EdgeId::new(self.u128()?);
-                let kind = if self.boolean()? { Some(self.edge_kind()?) } else { None };
+                let kind = if self.boolean()? {
+                    Some(self.edge_kind()?)
+                } else {
+                    None
+                };
                 Predicate::EdgeExists { edge_id, kind }
             }
             6 => Predicate::Paused(self.boolean()?),
             tag @ (7 | 8) => {
                 let count = self.count(MAX_COLLECTION, 1)?;
                 let mut values = Vec::with_capacity(count);
-                for _ in 0..count { values.push(self.predicate(depth + 1)?); }
-                if tag == 7 { Predicate::All(values) } else { Predicate::Any(values) }
+                for _ in 0..count {
+                    values.push(self.predicate(depth + 1)?);
+                }
+                if tag == 7 {
+                    Predicate::All(values)
+                } else {
+                    Predicate::Any(values)
+                }
             }
             9 => Predicate::Not(Box::new(self.predicate(depth + 1)?)),
-            10 => Predicate::RegionTerrain { area: self.area()?, tile_code: self.u32()? },
+            10 => Predicate::RegionTerrain {
+                area: self.area()?,
+                tile_code: self.u32()?,
+            },
             11 => {
-                let area = self.area()?; let entry = self.coord()?;
-                let count = self.count(dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS, 12)?;
+                let area = self.area()?;
+                let entry = self.coord()?;
+                let count = self.count(
+                    dfmcp_world::laboratory_access::MAX_LABORATORY_ACCESS_TARGETS,
+                    12,
+                )?;
                 let mut targets = Vec::with_capacity(count);
-                for _ in 0..count { targets.push(self.coord()?); }
-                Predicate::LaboratoryRoomAccess { area, entry, targets }
+                for _ in 0..count {
+                    targets.push(self.coord()?);
+                }
+                Predicate::LaboratoryRoomAccess {
+                    area,
+                    entry,
+                    targets,
+                }
             }
             _ => return Err(invalid("unknown archived predicate")),
         })
@@ -333,39 +634,86 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
     fn predicates(&mut self) -> Result<Vec<Predicate>> {
         let count = self.count(64, 1)?;
         let mut values = Vec::with_capacity(count);
-        for _ in 0..count { values.push(self.predicate(1)?); }
+        for _ in 0..count {
+            values.push(self.predicate(1)?);
+        }
         Ok(values)
     }
     fn obligation(&mut self) -> Result<ObligationSpec> {
         self.node(0)?;
-        Ok(ObligationSpec { terminal: self.predicate(1)?,
-            failure: if self.boolean()? { Some(self.predicate(1)?) } else { None },
-            deadline_tick: GameTick(self.u64()?), poll_interval_ticks: self.u64()?, stable_for_observations: self.u32()? })
+        Ok(ObligationSpec {
+            terminal: self.predicate(1)?,
+            failure: if self.boolean()? {
+                Some(self.predicate(1)?)
+            } else {
+                None
+            },
+            deadline_tick: GameTick(self.u64()?),
+            poll_interval_ticks: self.u64()?,
+            stable_for_observations: self.u32()?,
+        })
     }
     pub(super) fn plan(&mut self) -> Result<PreparedPlan> {
         self.node(0)?;
-        let id = PlanId::new(self.u128()?); let intent_id = IntentId::new(self.u128()?);
-        let anchor = self.anchor()?; let summary = self.text(4096)?;
+        let id = PlanId::new(self.u128()?);
+        let intent_id = IntentId::new(self.u128()?);
+        let anchor = self.anchor()?;
+        let summary = self.text(4096)?;
         let terminal_condition = self.predicate(1)?;
         let count = self.count(self.limits.max_steps, 1)?;
         let mut steps = Vec::with_capacity(count);
         for _ in 0..count {
-            let id = StepId::new(self.u32()?); let action = self.action()?;
-            let preconditions = self.predicates()?; let postconditions = self.predicates()?;
-            let compensation = if self.boolean()? { Some(self.action()?) } else { None };
-            let obligation = if self.boolean()? { Some(self.obligation()?) } else { None };
+            let id = StepId::new(self.u32()?);
+            let action = self.action()?;
+            let preconditions = self.predicates()?;
+            let postconditions = self.predicates()?;
+            let compensation = if self.boolean()? {
+                Some(self.action()?)
+            } else {
+                None
+            };
+            let obligation = if self.boolean()? {
+                Some(self.obligation()?)
+            } else {
+                None
+            };
             let count = self.count(self.limits.max_steps, 4)?;
             let mut depends_on = Vec::with_capacity(count);
-            for _ in 0..count { depends_on.push(StepId::new(self.u32()?)); }
-            steps.push(PlanStep { id, action, preconditions, postconditions, compensation, obligation, depends_on,
-                risk: self.risk()?, required_capability: self.capability()?, idempotency_key: self.text(64)? });
+            for _ in 0..count {
+                depends_on.push(StepId::new(self.u32()?));
+            }
+            steps.push(PlanStep {
+                id,
+                action,
+                preconditions,
+                postconditions,
+                compensation,
+                obligation,
+                depends_on,
+                risk: self.risk()?,
+                required_capability: self.capability()?,
+                idempotency_key: self.text(64)?,
+            });
         }
-        let max_risk = self.risk()?; let count = self.count(18, 1)?;
+        let max_risk = self.risk()?;
+        let count = self.count(18, 1)?;
         let mut required_capabilities = BTreeSet::new();
-        for _ in 0..count { insert_set(&mut required_capabilities, self.capability()?)?; }
-        Ok(PreparedPlan { id, intent_id, anchor, summary, terminal_condition, steps, max_risk, required_capabilities,
-            requires_checkpoint: self.boolean()?, expires_at_tick: GameTick(self.u64()?),
-            digest: Digest32::from_bytes(self.array()?) })
+        for _ in 0..count {
+            insert_set(&mut required_capabilities, self.capability()?)?;
+        }
+        Ok(PreparedPlan {
+            id,
+            intent_id,
+            anchor,
+            summary,
+            terminal_condition,
+            steps,
+            max_risk,
+            required_capabilities,
+            requires_checkpoint: self.boolean()?,
+            expires_at_tick: GameTick(self.u64()?),
+            digest: Digest32::from_bytes(self.array()?),
+        })
     }
 }
 
@@ -512,7 +860,10 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
             EntityKind::Civilization => self.byte(15),
             EntityKind::Announcement => self.byte(16),
             EntityKind::Syndrome => self.byte(17),
-            EntityKind::Other(text) => { self.byte(18)?; self.text(text, 128) } ,
+            EntityKind::Other(text) => {
+                self.byte(18)?;
+                self.text(text, 128)
+            }
         }
     }
 }
@@ -557,7 +908,10 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
             EdgeKind::Threatens => self.byte(9),
             EdgeKind::OrderedBy => self.byte(10),
             EdgeKind::ParentOf => self.byte(11),
-            EdgeKind::Custom(text) => { self.byte(12)?; self.text(text, 128) } ,
+            EdgeKind::Custom(text) => {
+                self.byte(12)?;
+                self.text(text, 128)
+            }
         }
     }
 }
@@ -584,15 +938,33 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
 impl<F: FnMut() -> Result<()>> Writer<'_, F> {
     fn building_kind(&mut self, value: &BuildingKind) -> Result<()> {
         match value {
-            BuildingKind::Workshop(text) => { self.byte(0)?; self.text(text, 65536) } ,
-            BuildingKind::Furnace(text) => { self.byte(1)?; self.text(text, 65536) } ,
-            BuildingKind::Furniture(text) => { self.byte(2)?; self.text(text, 65536) } ,
-            BuildingKind::Construction(text) => { self.byte(3)?; self.text(text, 65536) } ,
-            BuildingKind::Trap(text) => { self.byte(4)?; self.text(text, 65536) } ,
+            BuildingKind::Workshop(text) => {
+                self.byte(0)?;
+                self.text(text, 65536)
+            }
+            BuildingKind::Furnace(text) => {
+                self.byte(1)?;
+                self.text(text, 65536)
+            }
+            BuildingKind::Furniture(text) => {
+                self.byte(2)?;
+                self.text(text, 65536)
+            }
+            BuildingKind::Construction(text) => {
+                self.byte(3)?;
+                self.text(text, 65536)
+            }
+            BuildingKind::Trap(text) => {
+                self.byte(4)?;
+                self.text(text, 65536)
+            }
             BuildingKind::FarmPlot => self.byte(5),
             BuildingKind::Bridge => self.byte(6),
             BuildingKind::Well => self.byte(7),
-            BuildingKind::Custom(text) => { self.byte(8)?; self.text(text, 65536) } ,
+            BuildingKind::Custom(text) => {
+                self.byte(8)?;
+                self.text(text, 65536)
+            }
         }
     }
 }

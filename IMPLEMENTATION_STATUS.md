@@ -5389,3 +5389,19 @@ found. A concrete production family executor exists, but no MCP host consumer
 was found. Several declared resource families still lack runtime handlers.
 Residual beads .8–.11 and existing storage/ATP beads retain these boundaries;
 closed component beads do not prove end-to-end delivery.
+
+R15 development evidence adds a full warning-denied Clippy pass and an actual
+768-tile modern query replay (23 pages, same requested64-row limit), source-bound
+to private clean commit `23d2516e8ee2ba42a6bca363c84909cc47241666`. Its full qualifier
+then failed six private-store lock tests (1276/1282 passed in the first target).
+Recurring ownership-release conflicts are investigated under reality bead .13;
+new deterministic backend regressions require execution before repair claims.
+The source-bound live query result does not qualify later ownership changes.
+
+R16 actual-backend duplicate-descriptor regressions all fail before the repair
+(0/3), independently confirming a local lock-lifetime defect. Current source
+introduces an owned guard immediately after all twelve successful adapter lock
+acquisitions, releasing owned kernel locks on scope exit and early errors. No
+acquisition authority, modes, byte formats or retry behavior is relaxed. Linux
+regression and complete qualification results remain pending; best-effort cleanup
+alone is not proof of release or durability.

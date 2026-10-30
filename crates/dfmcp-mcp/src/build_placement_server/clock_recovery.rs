@@ -207,9 +207,6 @@ impl<B: EffectJournalStorage, C: EffectJournalStorage> RecoveryState<B, C> {
     pub(super) fn binding(&self) -> &BuildBinding {
         self.clock.definition().origin().definition().binding()
     }
-    pub(super) fn mode(&self) -> Mode {
-        self.mode
-    }
     pub(super) fn high_tick(&self) -> u64 {
         self.authority_tick
             .max(self.clock.high_tick())
@@ -220,9 +217,6 @@ impl<B: EffectJournalStorage, C: EffectJournalStorage> RecoveryState<B, C> {
     pub(super) fn set_budget(&mut self, mut budget: WorkBudget) {
         budget.max_game_ticks = 0;
         self.budget = budget;
-    }
-    pub(super) fn inspect_reserve(&self) -> Result<u64> {
-        inspect_reserve(self.monitor.byte_len())
     }
     pub(super) fn context(&mut self, wall: Option<u64>) -> Result<OperationContext> {
         self.request = self.request.checked_add(1).ok_or_else(exhausted)?;

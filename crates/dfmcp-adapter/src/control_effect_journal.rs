@@ -6,6 +6,7 @@
 //! ambiguous transport outcome therefore recovers as reconciliation-required rather
 //! than as a retryable failure.
 
+use crate::owned_file_lock::OwnedFileLock;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -964,7 +965,7 @@ impl<'a> Reader<'a> {
 }
 
 pub struct PrivateControlJournalFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     #[cfg(unix)]
@@ -1148,6 +1149,7 @@ fn open_private_control_storage(
         file.try_lock().map_err(|_| {
             conflict("control effect journal already has a writer or cannot be exclusively locked")
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(storage_error)?;
         if before
             .as_ref()

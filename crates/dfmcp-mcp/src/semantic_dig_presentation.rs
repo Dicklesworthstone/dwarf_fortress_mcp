@@ -384,20 +384,19 @@ fn render(
     } else {
         vec![]
     };
-    if verified {
-        if let Some(run) = clock_active {
-            action.push(
-                json!({"kind":"original_excavation_clock","scope":"run","clock_run":run,
+    if verified && let Some(run) = clock_active {
+        action.push(
+            json!({"kind":"original_excavation_clock","scope":"run","clock_run":run,
                 "evidence":identity,"current_pause_proven":false,"original_goal_proven":false}),
-            );
-            if run["state"] == "prepared" {
-                pending_plans.push(json!({"scope":"run","clock":clock,"original_review":paired,
+        );
+        if run["state"] == "prepared" {
+            pending_plans.push(json!({"scope":"run","clock":clock,"original_review":paired,
                     "recovery":recovery(view)}));
-                confirmations.push(json!({"kind":"original_excavation_clock","scope":"run",
+            confirmations.push(json!({"kind":"original_excavation_clock","scope":"run",
                     "paired_seal":run["review_seal"],"required":true,"commit_available":clock_offers.commit}));
-            }
         }
     }
+
     let mut affordances = vec![json!({"kind":"original_mining",
         "enabled":verified&&!closed&&mode==Some("control")&&original.is_none()
             &&view["development_designation_enabled"].as_bool()==Some(true)&&!view["observation"].is_null(),

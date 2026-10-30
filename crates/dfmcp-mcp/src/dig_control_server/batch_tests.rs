@@ -328,11 +328,12 @@ impl DigSource for Source {
     fn cancel(&mut self, plan: &DigPlan, _: &OperationContext) -> Result<DigEffect> {
         let mut game = self.game.borrow_mut();
         game.calls.push(DigStage::Cancel);
-        if let Some(effect) = game.records.get(plan.key()) {
-            if effect.phase().terminal() || effect.phase() == DigPhase::Unknown {
-                return Ok(effect.clone());
-            }
+        if let Some(effect) = game.records.get(plan.key())
+            && (effect.phase().terminal() || effect.phase() == DigPhase::Unknown)
+        {
+            return Ok(effect.clone());
         }
+
         let effect = native(plan, DigPhase::Refused)?;
         game.records.insert(plan.key().to_owned(), effect.clone());
         Ok(effect)

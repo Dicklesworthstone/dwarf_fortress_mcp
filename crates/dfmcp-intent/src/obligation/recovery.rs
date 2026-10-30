@@ -29,8 +29,12 @@ impl RecoveredObligation {
         registered_tick: GameTick,
         frontier: &WorldSnapshot,
     ) -> Result<Self> {
-        Self::new_with_evidence(action_id, spec, registered_tick,
-            &PredicateEvidence::untrusted(frontier)?)
+        Self::new_with_evidence(
+            action_id,
+            spec,
+            registered_tick,
+            &PredicateEvidence::untrusted(frontier)?,
+        )
     }
 
     /// Explicit reference-model recovery; never a live source or effect grant.
@@ -40,8 +44,12 @@ impl RecoveredObligation {
         registered_tick: GameTick,
         frontier: &WorldSnapshot,
     ) -> Result<Self> {
-        Self::new_with_evidence(action_id, spec, registered_tick,
-            &PredicateEvidence::laboratory(frontier)?)
+        Self::new_with_evidence(
+            action_id,
+            spec,
+            registered_tick,
+            &PredicateEvidence::laboratory(frontier)?,
+        )
     }
 
     /// Recover against the exact evidence scope chosen by the observing shell.
@@ -213,8 +221,12 @@ mod tests {
     #[test]
     fn frontier_and_repeated_reads_do_not_create_stability_samples() -> Result<()> {
         let frontier = snapshot(20, 2, 1, false);
-        let mut monitor =
-            RecoveredObligation::new_laboratory(ActionId::new(1), spec(100, 10, 2), GameTick(0), &frontier)?;
+        let mut monitor = RecoveredObligation::new_laboratory(
+            ActionId::new(1),
+            spec(100, 10, 2),
+            GameTick(0),
+            &frontier,
+        )?;
         monitor.observe_laboratory(&frontier)?;
         monitor.observe_laboratory(&snapshot(29, 2, 2, false))?;
         assert!(matches!(
@@ -247,8 +259,12 @@ mod tests {
     #[test]
     fn exact_deadline_can_supply_final_sample_but_late_first_proof_fails() -> Result<()> {
         let frontier = snapshot(10, 2, 1, true);
-        let mut exact =
-            RecoveredObligation::new_laboratory(ActionId::new(2), spec(15, 100, 1), GameTick(0), &frontier)?;
+        let mut exact = RecoveredObligation::new_laboratory(
+            ActionId::new(2),
+            spec(15, 100, 1),
+            GameTick(0),
+            &frontier,
+        )?;
         let mut late = exact.clone();
         exact.observe_laboratory(&snapshot(15, 2, 2, false))?;
         late.observe_laboratory(&snapshot(16, 2, 2, false))?;
@@ -388,11 +404,31 @@ mod tests {
         )?;
         monitor.observe_laboratory(&snapshot(20, 2, 2, false))?;
         let prior = monitor.status().cloned();
-        assert!(monitor.observe_laboratory(&snapshot(21, 3, 3, false)).is_err());
-        assert!(monitor.observe_laboratory(&snapshot(19, 2, 3, false)).is_err());
-        assert!(monitor.observe_laboratory(&snapshot(20, 2, 2, true)).is_err());
-        assert!(monitor.after_restart_laboratory(&snapshot(19, 3, 1, false)).is_err());
-        assert!(monitor.after_restart_laboratory(&snapshot(21, 1, 99, false)).is_err());
+        assert!(
+            monitor
+                .observe_laboratory(&snapshot(21, 3, 3, false))
+                .is_err()
+        );
+        assert!(
+            monitor
+                .observe_laboratory(&snapshot(19, 2, 3, false))
+                .is_err()
+        );
+        assert!(
+            monitor
+                .observe_laboratory(&snapshot(20, 2, 2, true))
+                .is_err()
+        );
+        assert!(
+            monitor
+                .after_restart_laboratory(&snapshot(19, 3, 1, false))
+                .is_err()
+        );
+        assert!(
+            monitor
+                .after_restart_laboratory(&snapshot(21, 1, 99, false))
+                .is_err()
+        );
         assert_eq!(monitor.status(), prior.as_ref());
         Ok(())
     }

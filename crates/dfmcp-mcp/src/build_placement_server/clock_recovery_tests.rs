@@ -58,13 +58,14 @@ impl clock::ClockIo for RecoveryIo {
     }
     fn checkpoint(&mut self, c: &OperationContext, control: bool) -> Result<()> {
         clock::ClockIo::checkpoint(&mut self.inner, c, control)?;
-        if self.inner.game.borrow().calls.last() == Some(&"cancel") {
-            if let Some((path, backup)) = self.replace_after_cancel.take() {
-                let bytes = fs::read(&path).map_err(storage_error)?;
-                fs::rename(&path, backup).map_err(storage_error)?;
-                write_private(&path, &bytes)?;
-            }
+        if self.inner.game.borrow().calls.last() == Some(&"cancel")
+            && let Some((path, backup)) = self.replace_after_cancel.take()
+        {
+            let bytes = fs::read(&path).map_err(storage_error)?;
+            fs::rename(&path, backup).map_err(storage_error)?;
+            write_private(&path, &bytes)?;
         }
+
         Ok(())
     }
 }

@@ -71,7 +71,7 @@ and 1,859 target origins without advancing time. Four wall-shaped rectangles
 retained hidden halo cells. A Query/Observe-only dig-control session worked after
 required operator configuration was supplied; its native 48-cell assessment
 reported 15 hidden cells and `hidden_context`. It made no plan or designation.
-The local `terra-live5-export` seals 136 artifacts, SHA256SUMS digest
+The local `terra-live5-export` seals 136 artifacts, `manifest.json` digest
 `01fc1a82d4b6e9b5b5df4366359caf4918be1c47a7dbfdc92472c2486a003945`.
 The later cleanup receipt digest is
 `0052aca68c63a9a66d444d36d2218dc71455987e8aa2b3cc53d43e2325027eea`;
@@ -89,11 +89,43 @@ now direct bytecode into ignored `target/`. R12's postcheck verified all 2,590
 source files unchanged and a clean worktree, while its remaining test-only lint
 failure remains failed. No full qualification is inferred from these repairs.
 
+R15 source `23d2516e8ee2ba42a6bca363c84909cc47241666` passed full
+warning-denied Clippy and the strengthened 768-tile handler regression. Its
+source-bound executable `4080963d55a5186fd0ca2e425a1508713c53b79c2840af5af9eef99d9854bf70`
+then passed the actual Terra/NTM modern replay: 27 requests, 23 pages of 30–34
+rows, all 768 identities and exact coordinates, stable anchors, final null
+continuation and closed child. All 2,590 source inputs were checked before and
+after the build. The local `terra-live6-export` manifest digest is
+`2d6a7e6ddfbd4f19f8906ea3481b4f7e99a19129ba66e7e0c5d58f54235989da`.
+Parent independently verified all 39 manifest members. Game and NTM stopped;
+raw pause/time and thirty backup entries were checked, five secrets had no matches.
+This is exact-source development replay, not an admitted campaign.
+
+The same R15 full qualifier subsequently failed six private-journal lock tests:
+1,276 passed / 6 failed / zero ignored in its first adapter target. Failed
+qualification remains failed. A real syscall trace and controlled descriptor
+experiments identify an inherited-open-file-description lifetime issue consistent
+with those reopen errors; the exact attribution of every intermittent failure is
+not proved. Bead `.13` owns deterministic actual-backend regressions, bounded
+nonblocking ownership cleanup, shared-descriptor review and full parallel reruns.
+No retry, serialization, ignored test or guard weakening is an accepted repair.
+
+R16 then reproduced the lock lifetime defect deterministically in the actual
+furniture, dig and excavation backends: **0 passed / 3 failed**, with duplicate
+open-file descriptions kept alive after the logical owner dropped. Current
+source wraps all twelve successful lock acquisitions in eleven storage families
+immediately in an owned guard. Cleanup explicitly unlocks the already-owned local
+descriptor, including early-error paths; acquisition remains nonblocking and
+subject to the original context checks. No journal encoding, custody rule or
+native protocol changes. Three guard-kernel tests passed on macOS; Linux backend,
+parallel-suite and full qualification execution remain pending. An unlock failure
+is not a release certificate; subsequent acquisition continues to fail closed.
+
 ### Current vision and wiring matrix
 
 | Goal | Actual reachable path and present limit | Status / owning work |
 |---|---|---|
-| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; all 21 MCP development entrypoints dispatch to explicit profile servers; canonical Agent Turn and negotiated bounds | PARTIAL; .1/.3/.6; full current qualification pending |
+| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; all 22 MCP development entrypoints dispatch to explicit profile servers; canonical Agent Turn and negotiated bounds | PARTIAL; .1/.3/.6; full current qualification pending |
 | Modern transport and Tasks | Pinned owned FastMCP → actual stdio child → task service/store → retained original plan and foreground progress | Executed process tests 7/7; .1; no full qualification transfer |
 | Real read-only world observation | Native authenticated Handshake/ReadObservation → wire/capsule/projection → read adapter → admitted wrapper or isolated dev server | Real citizens/items/buildings/map read trials; no admitted tuple |
 | Protocol-1.1 announcements | Separate native plugin → transactional suffix publication → one-read bootstrap → development MCP | Real retained-suffix development reads; no A1–A6 or production-map admission |

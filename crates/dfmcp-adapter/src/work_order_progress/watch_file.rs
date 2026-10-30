@@ -2,13 +2,14 @@
 use super::{
     ArchiveMode, JournalStorage, ProgressArchive, WatchBook, authorize, error, storage_error,
 };
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{ErrorCode, OperationContext, Result};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub struct PrivateWatchFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     offline: bool,
     #[cfg(unix)]
@@ -172,6 +173,7 @@ pub fn open_watch_book<A: JournalStorage>(
                 "watch book already has an owner or cannot be locked",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(storage_error)?;
         if before
             .as_ref()

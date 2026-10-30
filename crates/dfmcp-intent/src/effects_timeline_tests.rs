@@ -689,12 +689,7 @@ fn timeline_budgets_and_clock_arithmetic_refuse_without_publishing_partial_event
     Ok(())
 }
 
-
-fn production_workshop(
-    snapshot: &mut WorldSnapshot,
-    id: EntityId,
-    kind: &str,
-) -> Result<()> {
+fn production_workshop(snapshot: &mut WorldSnapshot, id: EntityId, kind: &str) -> Result<()> {
     put(
         snapshot,
         id,
@@ -748,9 +743,15 @@ fn production_worker_and_workshop_capacity_independently_limit_simultaneous_orde
                 );
                 if index >= service {
                     let blocker = field_text(entity(&middle, id)?, BLOCKED_BY_FIELD, middle.tick);
-                    assert!(blocker.is_some_and(|reason| reason.contains("production capacity busy")));
+                    assert!(
+                        blocker.is_some_and(|reason| reason.contains("production capacity busy"))
+                    );
                     assert!(blocker.is_some_and(|reason| reason.contains(
-                        if workshops <= workers { "workshop:Still" } else { "living units" }
+                        if workshops <= workers {
+                            "workshop:Still"
+                        } else {
+                            "living units"
+                        }
                     )));
                 }
             }
@@ -760,7 +761,11 @@ fn production_worker_and_workshop_capacity_independently_limit_simultaneous_orde
                 service as u64 * 5
             );
             assert_eq!(
-                number(&whole, EntityId::new(if service == 1 { 200 } else { 300 }), "work_ticks")?,
+                number(
+                    &whole,
+                    EntityId::new(if service == 1 { 200 } else { 300 }),
+                    "work_ticks"
+                )?,
                 25
             );
             assert_physical(&whole, &after(&source, &[1, 24, 24, 1, 25])?);
@@ -777,14 +782,34 @@ fn one_multiskilled_worker_cannot_brew_and_cook_in_the_same_interval() -> Result
     let mut source = world()?;
     set(&mut source, BREWER, "labor.COOK", Value::Bool(true))?;
     production_workshop(&mut source, EntityId::new(52), "workshop:Kitchen")?;
-    order(&mut source, EntityId::new(100), "brew", "BREW_DRINK", 1, 0, Vec::new())?;
-    order(&mut source, EntityId::new(200), "cook", "COOK_MEAL", 1, 0, Vec::new())?;
+    order(
+        &mut source,
+        EntityId::new(100),
+        "brew",
+        "BREW_DRINK",
+        1,
+        0,
+        Vec::new(),
+    )?;
+    order(
+        &mut source,
+        EntityId::new(200),
+        "cook",
+        "COOK_MEAL",
+        1,
+        0,
+        Vec::new(),
+    )?;
     let middle = after(&source, &[25])?;
     assert_eq!(number(&middle, EntityId::new(100), "work_ticks")?, 25);
     assert_eq!(number(&middle, EntityId::new(200), "work_ticks")?, 0);
     assert!(
-        field_text(entity(&middle, EntityId::new(200))?, BLOCKED_BY_FIELD, middle.tick)
-            .is_some_and(|reason| reason.contains("living units with COOK"))
+        field_text(
+            entity(&middle, EntityId::new(200))?,
+            BLOCKED_BY_FIELD,
+            middle.tick
+        )
+        .is_some_and(|reason| reason.contains("living units with COOK"))
     );
     let whole = after(&source, &[75])?;
     assert_eq!(number(&whole, LEDGER, STOCK_DRINK_FIELD)?, 5);
@@ -792,7 +817,10 @@ fn one_multiskilled_worker_cannot_brew_and_cook_in_the_same_interval() -> Result
     assert_eq!(number(&whole, EntityId::new(200), "work_ticks")?, 25);
     assert_physical(&whole, &after(&source, &[17, 32, 1, 25])?);
     assert_physical(&whole, &tick_oracle(&source, 75)?);
-    assert_eq!(number(&after(&source, &[100])?, LEDGER, STOCK_FOOD_FIELD)?, 105);
+    assert_eq!(
+        number(&after(&source, &[100])?, LEDGER, STOCK_FOOD_FIELD)?,
+        105
+    );
     Ok(())
 }
 
@@ -804,24 +832,66 @@ fn production_matching_moves_a_flexible_worker_to_keep_a_specialist_productive()
     set(&mut source, CITIZEN, "labor.BREW", Value::Bool(true))?;
     set(&mut source, CITIZEN, "labor.COOK", Value::Bool(true))?;
     production_workshop(&mut source, EntityId::new(52), "workshop:Kitchen")?;
-    order(&mut source, EntityId::new(100), "brew", "BREW_DRINK", 1, 0, Vec::new())?;
-    order(&mut source, EntityId::new(200), "cook", "PREPARE_MEAL", 1, 0, Vec::new())?;
+    order(
+        &mut source,
+        EntityId::new(100),
+        "brew",
+        "BREW_DRINK",
+        1,
+        0,
+        Vec::new(),
+    )?;
+    order(
+        &mut source,
+        EntityId::new(200),
+        "cook",
+        "PREPARE_MEAL",
+        1,
+        0,
+        Vec::new(),
+    )?;
     let whole = after(&source, &[50])?;
     assert_eq!(number(&whole, LEDGER, STOCK_DRINK_FIELD)?, 5);
     assert_eq!(number(&whole, LEDGER, STOCK_FOOD_FIELD)?, 105);
-    assert_eq!(number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?, 0);
-    assert_eq!(number(&whole, EntityId::new(200), AMOUNT_REMAINING_FIELD)?, 0);
+    assert_eq!(
+        number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?,
+        0
+    );
+    assert_eq!(
+        number(&whole, EntityId::new(200), AMOUNT_REMAINING_FIELD)?,
+        0
+    );
     assert_physical(&whole, &after(&source, &[1, 17, 31, 1])?);
     Ok(())
 }
 
 #[test]
-fn production_capacity_preserves_earned_partial_work_and_does_not_bank_waiting_ticks() -> Result<()> {
+fn production_capacity_preserves_earned_partial_work_and_does_not_bank_waiting_ticks() -> Result<()>
+{
     let mut source = world()?;
-    order(&mut source, EntityId::new(100), "new", "BREW_DRINK", 1, 0, Vec::new())?;
-    order(&mut source, EntityId::new(200), "started", "BREW_DRINK", 1, 40, Vec::new())?;
+    order(
+        &mut source,
+        EntityId::new(100),
+        "new",
+        "BREW_DRINK",
+        1,
+        0,
+        Vec::new(),
+    )?;
+    order(
+        &mut source,
+        EntityId::new(200),
+        "started",
+        "BREW_DRINK",
+        1,
+        40,
+        Vec::new(),
+    )?;
     let boundary = after(&source, &[10])?;
-    assert_eq!(number(&boundary, EntityId::new(200), AMOUNT_REMAINING_FIELD)?, 0);
+    assert_eq!(
+        number(&boundary, EntityId::new(200), AMOUNT_REMAINING_FIELD)?,
+        0
+    );
     assert_eq!(number(&boundary, EntityId::new(100), "work_ticks")?, 0);
     let whole = after(&source, &[35])?;
     assert_eq!(number(&whole, EntityId::new(100), "work_ticks")?, 25);
@@ -830,11 +900,30 @@ fn production_capacity_preserves_earned_partial_work_and_does_not_bank_waiting_t
     assert_physical(&whole, &tick_oracle(&source, 35)?);
 
     let mut blocked = world()?;
-    order(&mut blocked, EntityId::new(100), "gated", "BREW_DRINK", 1, 40, vec![below(0)])?;
-    order(&mut blocked, EntityId::new(200), "ready", "BREW_DRINK", 1, 0, Vec::new())?;
+    order(
+        &mut blocked,
+        EntityId::new(100),
+        "gated",
+        "BREW_DRINK",
+        1,
+        40,
+        vec![below(0)],
+    )?;
+    order(
+        &mut blocked,
+        EntityId::new(200),
+        "ready",
+        "BREW_DRINK",
+        1,
+        0,
+        Vec::new(),
+    )?;
     let completed = after(&blocked, &[50])?;
     assert_eq!(number(&completed, EntityId::new(100), "work_ticks")?, 40);
-    assert_eq!(number(&completed, EntityId::new(200), AMOUNT_REMAINING_FIELD)?, 0);
+    assert_eq!(
+        number(&completed, EntityId::new(200), AMOUNT_REMAINING_FIELD)?,
+        0
+    );
     assert_eq!(number(&completed, LEDGER, STOCK_DRINK_FIELD)?, 5);
     assert_physical(&completed, &tick_oracle(&blocked, 50)?);
     Ok(())
@@ -846,19 +935,38 @@ fn another_workshop_adds_capacity_only_after_its_actual_completion() -> Result<(
     set(&mut source, CITIZEN, "labor.BREW", Value::Bool(true))?;
     let building = EntityId::new(52);
     production_workshop(&mut source, building, "workshop:Still")?;
-    set(&mut source, building, CONSTRUCTION_STAGE_FIELD, Value::Text(STAGE_PLANNED.to_owned()))?;
+    set(
+        &mut source,
+        building,
+        CONSTRUCTION_STAGE_FIELD,
+        Value::Text(STAGE_PLANNED.to_owned()),
+    )?;
     set(&mut source, building, "required_ticks", Value::U64(25))?;
     set(&mut source, building, "progress_ticks", Value::U64(0))?;
     for id in [100, 200] {
-        order(&mut source, EntityId::new(id), &format!("brew {id}"), "BREW_DRINK", 1, 0, Vec::new())?;
+        order(
+            &mut source,
+            EntityId::new(id),
+            &format!("brew {id}"),
+            "BREW_DRINK",
+            1,
+            0,
+            Vec::new(),
+        )?;
     }
     let whole = after(&source, &[50])?;
-    assert_eq!(number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?, 0);
+    assert_eq!(
+        number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?,
+        0
+    );
     assert_eq!(number(&whole, EntityId::new(200), "work_ticks")?, 25);
     assert_eq!(number(&whole, LEDGER, STOCK_DRINK_FIELD)?, 5);
     assert_physical(&whole, &after(&source, &[24, 1, 24, 1])?);
     assert_physical(&whole, &tick_oracle(&source, 50)?);
-    assert_eq!(number(&after(&source, &[75])?, LEDGER, STOCK_DRINK_FIELD)?, 10);
+    assert_eq!(
+        number(&after(&source, &[75])?, LEDGER, STOCK_DRINK_FIELD)?,
+        10
+    );
     Ok(())
 }
 
@@ -867,14 +975,34 @@ fn worker_death_reduces_joint_production_capacity_at_the_next_interval() -> Resu
     let mut source = world()?;
     parallel_brewing_capacity(&mut source)?;
     for id in [100, 200] {
-        order(&mut source, EntityId::new(id), &format!("brew {id}"), "BREW_DRINK", 10, 0, Vec::new())?;
+        order(
+            &mut source,
+            EntityId::new(id),
+            &format!("brew {id}"),
+            "BREW_DRINK",
+            10,
+            0,
+            Vec::new(),
+        )?;
     }
     threat(&mut source, EntityId::new(300), 0)?;
     let whole = after(&source, &[350])?;
-    assert_eq!(whole.graph.entities[&BREWER].fields["alive"].value, Value::Bool(false));
-    assert_eq!(whole.graph.entities[&BREWER].fields["alive"].observed_at, GameTick(1_300));
-    assert_eq!(number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?, 3);
-    assert_eq!(number(&whole, EntityId::new(200), AMOUNT_REMAINING_FIELD)?, 4);
+    assert_eq!(
+        whole.graph.entities[&BREWER].fields["alive"].value,
+        Value::Bool(false)
+    );
+    assert_eq!(
+        whole.graph.entities[&BREWER].fields["alive"].observed_at,
+        GameTick(1_300)
+    );
+    assert_eq!(
+        number(&whole, EntityId::new(100), AMOUNT_REMAINING_FIELD)?,
+        3
+    );
+    assert_eq!(
+        number(&whole, EntityId::new(200), AMOUNT_REMAINING_FIELD)?,
+        4
+    );
     assert_eq!(number(&whole, LEDGER, STOCK_DRINK_FIELD)?, 65);
     assert_physical(&whole, &after(&source, &[49, 1, 249, 1, 1, 49])?);
     assert_physical(&whole, &tick_oracle(&source, 350)?);
@@ -892,13 +1020,30 @@ fn ineligible_labor_and_workshop_facts_do_not_inflate_production_capacity() -> R
             let mut source = world()?;
             parallel_brewing_capacity(&mut source)?;
             for id in [100, 200] {
-                order(&mut source, EntityId::new(id), &format!("brew {id}"), "BREW_DRINK", 1, 0, Vec::new())?;
+                order(
+                    &mut source,
+                    EntityId::new(id),
+                    &format!("brew {id}"),
+                    "BREW_DRINK",
+                    1,
+                    0,
+                    Vec::new(),
+                )?;
             }
-            let fact = source.graph.entities.get_mut(&subject).unwrap().fields.get_mut(field).unwrap();
+            let fact = source
+                .graph
+                .entities
+                .get_mut(&subject)
+                .unwrap()
+                .fields
+                .get_mut(field)
+                .unwrap();
             if asserted {
                 fact.source = FactSource::AgentAssertion("invented extra capacity".to_owned());
             } else {
-                fact.presence = Some(dfmcp_world::FactPresence::Omitted("not observed".to_owned()));
+                fact.presence = Some(dfmcp_world::FactPresence::Omitted(
+                    "not observed".to_owned(),
+                ));
             }
             source.refresh_hash();
             let whole = after(&source, &[50])?;
@@ -929,27 +1074,39 @@ fn exhaustive_production_capacity(
         if used & (1 << worker) == 0 && masks[worker] & (1 << family) != 0 {
             let mut remaining = workshops;
             remaining[family] -= 1;
-            best = best.max(1 + exhaustive_production_capacity(
-                masks,
-                families,
-                index + 1,
-                used | (1 << worker),
-                remaining,
-            ));
+            best = best.max(
+                1 + exhaustive_production_capacity(
+                    masks,
+                    families,
+                    index + 1,
+                    used | (1 << worker),
+                    remaining,
+                ),
+            );
         }
     }
     best
 }
 
 #[test]
-fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skill_graph() -> Result<()> {
+fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skill_graph()
+-> Result<()> {
     // Each graph assigns either/both/neither registered labor to three people.
     // Independent exhaustive assignment includes unfilled orders and explicit
     // workshop slots; it does not use augmenting paths or the production code.
     let families = [0, 1, 0];
     for encoded in 0..64u8 {
         let masks = [encoded & 3, (encoded >> 2) & 3, (encoded >> 4) & 3];
-        for workshops in [[0, 0], [0, 2], [2, 0], [1, 1], [1, 2], [2, 1], [2, 2], [3, 3]] {
+        for workshops in [
+            [0, 0],
+            [0, 2],
+            [2, 0],
+            [1, 1],
+            [1, 2],
+            [2, 1],
+            [2, 2],
+            [3, 3],
+        ] {
             let mut source = world()?;
             source.graph.entities.remove(&STILL);
             put(
@@ -959,15 +1116,29 @@ fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skil
                 vec![("alive", Value::Bool(true)), (SQUAD_FIELD, Value::Null)],
             )?;
             for (worker, mask) in [CITIZEN, BREWER, EntityId::new(13)].into_iter().zip(masks) {
-                set(&mut source, worker, "labor.BREW", Value::Bool(mask & 1 != 0))?;
-                set(&mut source, worker, "labor.COOK", Value::Bool(mask & 2 != 0))?;
+                set(
+                    &mut source,
+                    worker,
+                    "labor.BREW",
+                    Value::Bool(mask & 1 != 0),
+                )?;
+                set(
+                    &mut source,
+                    worker,
+                    "labor.COOK",
+                    Value::Bool(mask & 2 != 0),
+                )?;
             }
             for (family, count) in workshops.into_iter().enumerate() {
                 for slot in 0..count {
                     production_workshop(
                         &mut source,
                         EntityId::new(50 + family as u64 * 10 + slot as u64),
-                        if family == 0 { "workshop:Still" } else { "workshop:Kitchen" },
+                        if family == 0 {
+                            "workshop:Still"
+                        } else {
+                            "workshop:Kitchen"
+                        },
                     )?;
                 }
             }
@@ -977,7 +1148,11 @@ fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skil
                     &mut source,
                     id,
                     &format!("order {index}"),
-                    if family == 0 { "BREW_DRINK" } else { "PREPARE_MEAL" },
+                    if family == 0 {
+                        "BREW_DRINK"
+                    } else {
+                        "PREPARE_MEAL"
+                    },
                     1,
                     0,
                     Vec::new(),
@@ -985,13 +1160,18 @@ fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skil
             }
             let expected = exhaustive_production_capacity(&masks, &families, 0, 0, workshops);
             let result = after(&source, &[50])?;
-            let completed = [100, 101, 102].into_iter().filter(|id| {
-                number(&result, EntityId::new(*id), AMOUNT_REMAINING_FIELD) == Ok(0)
-            }).count();
-            assert_eq!(completed, expected, "masks={masks:?}, workshops={workshops:?}");
+            let completed = [100, 101, 102]
+                .into_iter()
+                .filter(|id| number(&result, EntityId::new(*id), AMOUNT_REMAINING_FIELD) == Ok(0))
+                .count();
+            assert_eq!(
+                completed, expected,
+                "masks={masks:?}, workshops={workshops:?}"
+            );
             assert_eq!(
                 number(&result, LEDGER, STOCK_DRINK_FIELD)?
-                    + number(&result, LEDGER, STOCK_FOOD_FIELD)? - 100,
+                    + number(&result, LEDGER, STOCK_FOOD_FIELD)?
+                    - 100,
                 expected as u64 * 5,
             );
         }
@@ -1003,7 +1183,15 @@ fn production_capacity_matches_exhaustive_assignment_for_every_three_worker_skil
 fn production_capacity_budget_refusal_discards_already_completed_internal_work() -> Result<()> {
     let mut source = world()?;
     for id in [100, 200] {
-        order(&mut source, EntityId::new(id), &format!("brew {id}"), "BREW_DRINK", 1, 0, Vec::new())?;
+        order(
+            &mut source,
+            EntityId::new(id),
+            &format!("brew {id}"),
+            "BREW_DRINK",
+            1,
+            0,
+            Vec::new(),
+        )?;
     }
     let before = source.clone();
     for limits in [
@@ -1017,7 +1205,10 @@ fn production_capacity_budget_refusal_discards_already_completed_internal_work()
         },
     ] {
         let error = advance_with(&mut source, 100, limits).err();
-        assert_eq!(error.map(|error| error.code), Some(ErrorCode::BudgetExceeded));
+        assert_eq!(
+            error.map(|error| error.code),
+            Some(ErrorCode::BudgetExceeded)
+        );
         assert_eq!(source, before);
     }
     let complete = after(&source, &[100])?;

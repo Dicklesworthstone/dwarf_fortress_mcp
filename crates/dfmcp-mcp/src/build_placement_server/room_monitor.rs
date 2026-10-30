@@ -480,9 +480,9 @@ fn check_origin<S: EffectJournalStorage, N: BuildSource, I: Io>(
     c: &OperationContext,
     ledger: &RefCell<Work>,
     io: &RefCell<&mut I>,
-    sampling: bool,
-    floor: &Cell<u64>,
+    sampling_and_floor: (bool, &Cell<u64>),
 ) -> Result<()> {
+    let (sampling, floor) = sampling_and_floor;
     let mut current = current(c, floor.get().max(state.authority_tick))?;
     io.borrow_mut().checkpoint(&current)?;
     if state.clock_config.is_some() || state.clock.is_some() {
@@ -549,11 +549,11 @@ pub(super) fn run<N: BuildSource, I: Io>(
         && state.room_clock_config.is_some()
         && state.room_clock.is_none()
         && !room_clock::bootstrap_pending(state)
+        && let Err(e) = room_clock::admit_bootstrap(state, &c)
     {
-        if let Err(e) = room_clock::admit_bootstrap(state, &c) {
-            return completion::read_only_packet(state.failed(op, Some(&c), &e));
-        }
+        return completion::read_only_packet(state.failed(op, Some(&c), &e));
     }
+
     if matches!(action, Action::Sample)
         && room_clock::bootstrap_pending(state)
         && state
@@ -702,8 +702,7 @@ pub(super) fn run<N: BuildSource, I: Io>(
                 context,
                 &ledger,
                 &io,
-                sampling,
-                &floor,
+                (sampling, &floor),
             )
         };
         let mut admit = |definition: &Definition, progress: &Progress| -> Result<()> {

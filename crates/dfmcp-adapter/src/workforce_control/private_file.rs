@@ -6,13 +6,14 @@ use super::{
     rpc::authorize,
 };
 use crate::control_effect_journal::EffectJournalStorage;
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{ErrorCode, OperationContext, Result};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub struct PrivateWorkforceFile {
-    file: File,
+    file: OwnedFileLock,
     directory: File,
     path: PathBuf,
     read_only: bool,
@@ -242,6 +243,7 @@ fn open_private_workforce_inner(
                 "workforce journal already owned or lock unavailable",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(failure)?;
         if before
             .as_ref()

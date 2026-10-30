@@ -729,7 +729,9 @@ impl MutationDispatcher {
         }
         let message = match state {
             CommitState::Verified => "obligation terminal proven on stable scheduled observations",
-            CommitState::Failed => "obligation failed or exhausted its deadline without stable proof",
+            CommitState::Failed => {
+                "obligation failed or exhausted its deadline without stable proof"
+            }
             _ => "effect dispatched; obligation proof pending later observation",
         };
         if state.is_terminal() {
@@ -1010,7 +1012,6 @@ mod tests {
         StaticPlanner::default().prepare_laboratory(snapshot, &intent, &sample_context(snapshot))
     }
 
-
     fn authority_fact(value: bool, tick: GameTick) -> dfmcp_world::Fact {
         dfmcp_world::Fact::known(
             dfmcp_world::Value::Bool(value),
@@ -1079,7 +1080,10 @@ mod tests {
             .entities
             .get_mut(&dfmcp_core::EntityId::new(9))
             .ok_or_else(|| {
-                DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing evidence subject")
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "missing evidence subject",
+                )
             })?;
         entity.fields.insert(field.to_owned(), fact);
         entity.revision += 1;
@@ -1098,7 +1102,10 @@ mod tests {
         for fact in ineligible_facts(GameTick(100)) {
             let mut snapshot = sample_snapshot();
             add_authority_fields(&mut snapshot, fact);
-            assert!(dfmcp_world::evaluate(&snapshot, &authority_predicate("ready")));
+            assert!(dfmcp_world::evaluate(
+                &snapshot,
+                &authority_predicate("ready")
+            ));
             let mut plan = unpause_plan(&snapshot)?;
             plan.steps[0].preconditions = vec![authority_predicate("ready")];
             reseal_authority_plan(&mut plan)?;
@@ -1136,7 +1143,10 @@ mod tests {
             assert!(matches!(result, Err(error) if error.code == ErrorCode::AdapterRejected));
             assert_eq!(snapshot, prior);
             let key = format!("dfmcp_tx_{}_{}", context.session_id.get(), plan.digest);
-            assert_eq!(dispatcher.journal().lookup(&key).map(|entry| entry.state), Some(CommitState::Prepared));
+            assert_eq!(
+                dispatcher.journal().lookup(&key).map(|entry| entry.state),
+                Some(CommitState::Prepared)
+            );
         }
         Ok(())
     }
@@ -1159,17 +1169,28 @@ mod tests {
             let context = sample_context(&snapshot);
             let mut dispatcher = MutationDispatcher::new();
             let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
-            let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
-            assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+            let committed =
+                dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
+            assert_eq!(
+                committed.actions[0].state,
+                CommitState::AppliedAwaitingVerification
+            );
             let context = sample_context(&snapshot);
             let pending = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
-            assert_eq!(pending.actions[0].state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(
+                pending.actions[0].state,
+                CommitState::AppliedAwaitingVerification
+            );
 
             let mut failed_dispatcher = dispatcher.clone();
             let mut failed_snapshot = snapshot.clone();
             failed_snapshot.tick = GameTick(101);
             failed_snapshot.cursor.sequence += 1;
-            set_authority_field(&mut failed_snapshot, "failed", authority_fact(true, GameTick(101)))?;
+            set_authority_field(
+                &mut failed_snapshot,
+                "failed",
+                authority_fact(true, GameTick(101)),
+            )?;
             let context = sample_context(&failed_snapshot);
             let failed = failed_dispatcher.reconcile(&plan, &mut failed_snapshot, &context)?;
             assert_eq!(failed.actions[0].state, CommitState::Failed);
@@ -1178,7 +1199,11 @@ mod tests {
             snapshot.cursor.sequence += 1;
             set_authority_field(&mut snapshot, "ready", authority_fact(true, GameTick(101)))?;
             set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(101)))?;
-            set_authority_field(&mut snapshot, "failed", authority_fact(false, GameTick(101)))?;
+            set_authority_field(
+                &mut snapshot,
+                "failed",
+                authority_fact(false, GameTick(101)),
+            )?;
             let context = sample_context(&snapshot);
             let verified = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
             assert_eq!(verified.actions[0].state, CommitState::Verified);
@@ -1200,7 +1225,8 @@ mod tests {
             terminal_condition: Predicate::All(vec![
                 authority_predicate("done"),
                 Predicate::Paused(true),
-            ]).normalized(),
+            ])
+            .normalized(),
             constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
             requested_actions: vec![
                 RequestedAction {
@@ -1236,9 +1262,16 @@ mod tests {
         snapshot.tick = GameTick(101);
         snapshot.cursor.sequence += 1;
         set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(101)))?;
-        set_authority_field(&mut snapshot, "ready", Fact::known(
-            Value::Bool(true), GameTick(101), FactSource::AgentAssertion("still ready".to_owned()), Digest32::ZERO
-        ))?;
+        set_authority_field(
+            &mut snapshot,
+            "ready",
+            Fact::known(
+                Value::Bool(true),
+                GameTick(101),
+                FactSource::AgentAssertion("still ready".to_owned()),
+                Digest32::ZERO,
+            ),
+        )?;
         let context = sample_context(&snapshot);
         let reconciled = dispatcher.reconcile(&plan, &mut snapshot, &context)?;
         assert_eq!(reconciled.actions[0].state, CommitState::Verified);
@@ -1248,7 +1281,6 @@ mod tests {
         Ok(())
     }
 
-
     fn cadence_transaction(
         interval: u64,
         stable: u32,
@@ -1256,7 +1288,11 @@ mod tests {
     ) -> Result<(MutationDispatcher, PreparedPlan, WorldSnapshot, ActionId)> {
         let mut snapshot = sample_snapshot();
         add_authority_fields(&mut snapshot, authority_fact(true, GameTick(100)));
-        set_authority_field(&mut snapshot, "failed", authority_fact(false, GameTick(100)))?;
+        set_authority_field(
+            &mut snapshot,
+            "failed",
+            authority_fact(false, GameTick(100)),
+        )?;
         let mut plan = unpause_plan(&snapshot)?;
         plan.steps[0].obligation = Some(dfmcp_intent::ObligationSpec {
             terminal: authority_predicate("done"),
@@ -1270,15 +1306,19 @@ mod tests {
         let mut dispatcher = MutationDispatcher::new();
         let prepared = dispatcher.prepare_mutation(&plan, &snapshot, &context)?;
         let committed = dispatcher.commit_mutation(&plan, &prepared, &mut snapshot, &context)?;
-        assert_eq!(committed.actions[0].state, CommitState::AppliedAwaitingVerification);
+        assert_eq!(
+            committed.actions[0].state,
+            CommitState::AppliedAwaitingVerification
+        );
         Ok((dispatcher, plan, snapshot, committed.actions[0].action_id))
     }
 
     fn next_cadence_observation(snapshot: &mut WorldSnapshot, tick: u64) -> Result<()> {
         snapshot.tick = GameTick(tick);
-        snapshot.cursor = snapshot.cursor.checked_next().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow")
-        })?;
+        snapshot.cursor = snapshot
+            .cursor
+            .checked_next()
+            .ok_or_else(|| DfmcpError::new(ErrorCode::CursorGap, "test cursor overflow"))?;
         snapshot.refresh_hash();
         Ok(())
     }
@@ -1291,7 +1331,10 @@ mod tests {
         let context = sample_context(snapshot);
         let receipt = dispatcher.reconcile(plan, snapshot, &context)?;
         receipt.actions.first().cloned().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::InternalInvariantViolation, "missing test action receipt")
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "missing test action receipt",
+            )
         })
     }
 
@@ -1301,7 +1344,11 @@ mod tests {
         for tick in [100, 104, 105, 105, 109] {
             next_cadence_observation(&mut snapshot, tick)?;
             let receipt = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
-            assert_eq!(receipt.state, CommitState::AppliedAwaitingVerification, "tick {tick}");
+            assert_eq!(
+                receipt.state,
+                CommitState::AppliedAwaitingVerification,
+                "tick {tick}"
+            );
         }
         next_cadence_observation(&mut snapshot, 110)?;
         let terminal = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
@@ -1309,29 +1356,46 @@ mod tests {
         assert_eq!(terminal.observed_anchor.tick, GameTick(110));
         next_cadence_observation(&mut snapshot, 111)?;
         set_authority_field(&mut snapshot, "done", authority_fact(false, GameTick(111)))?;
-        assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?, terminal);
+        assert_eq!(
+            reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?,
+            terminal
+        );
         Ok(())
     }
 
     #[test]
-    fn dispatcher_off_cadence_contradictions_reset_the_streak_without_delaying_next_poll() -> Result<()> {
+    fn dispatcher_off_cadence_contradictions_reset_the_streak_without_delaying_next_poll()
+    -> Result<()> {
         use dfmcp_world::{Fact, FactSource, Value};
         for ineligible in [
             authority_fact(false, GameTick(106)),
-            Fact::known(Value::Bool(true), GameTick(106),
-                FactSource::AgentAssertion("predicted complete".to_owned()), Digest32::ZERO),
+            Fact::known(
+                Value::Bool(true),
+                GameTick(106),
+                FactSource::AgentAssertion("predicted complete".to_owned()),
+                Digest32::ZERO,
+            ),
         ] {
             let (mut dispatcher, plan, mut snapshot, _) = cadence_transaction(5, 2, 130)?;
             next_cadence_observation(&mut snapshot, 105)?;
-            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(
+                reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state,
+                CommitState::AppliedAwaitingVerification
+            );
             next_cadence_observation(&mut snapshot, 106)?;
             set_authority_field(&mut snapshot, "done", ineligible)?;
-            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(
+                reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state,
+                CommitState::AppliedAwaitingVerification
+            );
             next_cadence_observation(&mut snapshot, 107)?;
             set_authority_field(&mut snapshot, "done", authority_fact(true, GameTick(107)))?;
             reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
             next_cadence_observation(&mut snapshot, 110)?;
-            assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::AppliedAwaitingVerification);
+            assert_eq!(
+                reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state,
+                CommitState::AppliedAwaitingVerification
+            );
             next_cadence_observation(&mut snapshot, 115)?;
             let terminal = reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
             assert_eq!(terminal.state, CommitState::Verified);
@@ -1346,23 +1410,40 @@ mod tests {
         let mut late = exact.clone();
         let mut late_snapshot = snapshot.clone();
         next_cadence_observation(&mut snapshot, 104)?;
-        assert_eq!(reconcile_cadence(&mut exact, &plan, &mut snapshot)?.state, CommitState::Verified);
+        assert_eq!(
+            reconcile_cadence(&mut exact, &plan, &mut snapshot)?.state,
+            CommitState::Verified
+        );
         next_cadence_observation(&mut late_snapshot, 105)?;
-        assert_eq!(reconcile_cadence(&mut late, &plan, &mut late_snapshot)?.state, CommitState::Failed);
+        assert_eq!(
+            reconcile_cadence(&mut late, &plan, &mut late_snapshot)?.state,
+            CommitState::Failed
+        );
         let (mut insufficient, plan, mut snapshot, _) = cadence_transaction(100, 2, 104)?;
         next_cadence_observation(&mut snapshot, 104)?;
-        assert_eq!(reconcile_cadence(&mut insufficient, &plan, &mut snapshot)?.state, CommitState::Failed);
+        assert_eq!(
+            reconcile_cadence(&mut insufficient, &plan, &mut snapshot)?.state,
+            CommitState::Failed
+        );
         for tick in [101, 104] {
             let (mut failed, plan, mut snapshot, _) = cadence_transaction(100, 1, 104)?;
             next_cadence_observation(&mut snapshot, tick)?;
-            set_authority_field(&mut snapshot, "failed", authority_fact(true, GameTick(tick)))?;
-            assert_eq!(reconcile_cadence(&mut failed, &plan, &mut snapshot)?.state, CommitState::Failed);
+            set_authority_field(
+                &mut snapshot,
+                "failed",
+                authority_fact(true, GameTick(tick)),
+            )?;
+            assert_eq!(
+                reconcile_cadence(&mut failed, &plan, &mut snapshot)?.state,
+                CommitState::Failed
+            );
         }
         Ok(())
     }
 
     #[test]
-    fn pending_dispatcher_proofs_reject_lineage_changes_and_forked_cursors_atomically() -> Result<()> {
+    fn pending_dispatcher_proofs_reject_lineage_changes_and_forked_cursors_atomically() -> Result<()>
+    {
         let (mut dispatcher, plan, mut snapshot, _) = cadence_transaction(5, 2, 130)?;
         next_cadence_observation(&mut snapshot, 105)?;
         reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?;
@@ -1379,10 +1460,16 @@ mod tests {
             let mut attempted = dispatcher.clone();
             let result = reconcile_cadence(&mut attempted, &plan, &mut candidate);
             assert!(matches!(result, Err(error) if error.code == ErrorCode::StaleAnchor));
-            assert_eq!(attempted.journal().lookup(&key), dispatcher.journal().lookup(&key));
+            assert_eq!(
+                attempted.journal().lookup(&key),
+                dispatcher.journal().lookup(&key)
+            );
         }
         next_cadence_observation(&mut snapshot, 110)?;
-        assert_eq!(reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state, CommitState::Verified);
+        assert_eq!(
+            reconcile_cadence(&mut dispatcher, &plan, &mut snapshot)?.state,
+            CommitState::Verified
+        );
         Ok(())
     }
 

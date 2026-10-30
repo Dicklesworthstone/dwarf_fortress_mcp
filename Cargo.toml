@@ -16,7 +16,6 @@ edition = "2024"
 license = "MIT"
 authors = ["Jeffrey Emanuel"]
 repository = "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
-homepage = "https://github.com/Dicklesworthstone/dwarf_fortress_mcp"
 keywords = ["dwarf-fortress", "mcp", "agents", "dfhack", "rust"]
 categories = ["development-tools", "games"]
 

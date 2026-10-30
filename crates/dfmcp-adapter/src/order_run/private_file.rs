@@ -4,13 +4,14 @@ use super::journal::{OrderRunBinding, OrderRunJournal, OrderRunMode};
 use super::rpc::authorize;
 use crate::bounded_run::error;
 use crate::control_effect_journal::EffectJournalStorage;
+use crate::owned_file_lock::OwnedFileLock;
 use dfmcp_core::{ErrorCode, OperationContext, Result};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub struct PrivateOrderRunFile {
-    file: File,
+    file: OwnedFileLock,
     path: PathBuf,
     read_only: bool,
     extent: u64,
@@ -219,6 +220,7 @@ fn open_private_order_journal_inner(
                 "conditional-run journal is already owned",
             )
         })?;
+        let file = OwnedFileLock::from_locked(file);
         let opened = file.metadata().map_err(failed)?;
         if before
             .as_ref()

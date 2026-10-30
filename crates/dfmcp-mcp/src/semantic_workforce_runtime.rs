@@ -127,6 +127,9 @@ pub struct Recovery {
     pub identity_digest: Digest32,
     pub history_present: bool,
 }
+/// Control session and its associated durable custody.
+pub type OpenControl<J, A> = (WorkforceSession<J>, AssociationStore<A>, Digest32);
+
 /// Trusted factories are constructor inputs. Client requests cannot choose a
 /// source endpoint, path, native unit ID, work detail or policy issuer.
 pub trait Shell {
@@ -165,11 +168,7 @@ pub trait Shell {
         &self,
         mode: Mode,
         c: &OperationContext,
-    ) -> Result<(
-        WorkforceSession<Self::Journal>,
-        AssociationStore<Self::Association>,
-        Digest32,
-    )>;
+    ) -> Result<OpenControl<Self::Journal, Self::Association>>;
     fn native(&self, binding: &WorkforceBinding, c: &OperationContext) -> Result<Self::Native>;
     fn acquire(&self, c: &OperationContext) -> Result<LiveObservationCapsule>;
     fn evidence(
@@ -638,10 +637,10 @@ impl<S: Shell> Runtime<S> {
             .monitor
             .as_ref()
             .and_then(|m| m.last_observation_anchor())
+            && a.cursor.sequence > self.anchor.cursor.sequence
+            && a.tick >= self.anchor.tick
         {
-            if a.cursor.sequence > self.anchor.cursor.sequence && a.tick >= self.anchor.tick {
-                self.anchor = a;
-            }
+            self.anchor = a;
         }
     }
     fn verify_original(&mut self, work: &mut Work) -> Result<()> {

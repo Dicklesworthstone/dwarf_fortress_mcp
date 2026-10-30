@@ -314,6 +314,22 @@ fn directory_and_file_locking_refuses_second_owner() -> Result<()> {
     open_private_excavation(&dir, p.before().fortress(), &c)?;
     Ok(())
 }
+
+#[test]
+fn dropped_owner_releases_directory_and_file_locks_with_duplicate_descriptors() -> Result<()> {
+    let dir = directory();
+    write_fixture(&dir);
+    let c = context()?;
+    let owner = open(&dir, &c, Mode::Inspect)?;
+    let inherited_directory = owner.directory.try_clone().map_err(storage_error)?;
+    let inherited_file = owner.file.try_clone().map_err(storage_error)?;
+    assert!(open(&dir, &c, Mode::Inspect).is_err());
+    drop(owner);
+    let reopened = open(&dir, &c, Mode::Inspect)?;
+    drop(reopened);
+    drop((inherited_directory, inherited_file));
+    Ok(())
+}
 #[test]
 fn read_only_backend_refuses_every_write_sync_flush_and_truncate() -> Result<()> {
     let dir = directory();

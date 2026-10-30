@@ -13,9 +13,8 @@ use dfmcp_core::{
 use dfmcp_world::{CompareOp, EntityKind, Predicate, PredicateEvidence, Value};
 
 use crate::{
-    Action, Constraint, DwarfLaborProfile, Intent, LaborAllocation,
-    LaborAllocationLimits, LaborAllocator, LaborDemand, PreparedPlan, RequestedAction,
-    StaticPlanner,
+    Action, Constraint, DwarfLaborProfile, Intent, LaborAllocation, LaborAllocationLimits,
+    LaborAllocator, LaborDemand, PreparedPlan, RequestedAction, StaticPlanner,
 };
 
 pub const MAX_EXECUTION_ROSTER: usize = 64;
@@ -29,7 +28,10 @@ fn refused(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::PreconditionsFailed, message)
 }
 fn exhausted() -> DfmcpError {
-    DfmcpError::new(ErrorCode::BudgetExceeded, "labor execution compilation exhausted its allowance")
+    DfmcpError::new(
+        ErrorCode::BudgetExceeded,
+        "labor execution compilation exhausted its allowance",
+    )
 }
 fn field(id: EntityId, name: String, value: bool) -> Predicate {
     Predicate::FieldCompare {
@@ -40,11 +42,18 @@ fn field(id: EntityId, name: String, value: bool) -> Predicate {
     }
 }
 fn labor(id: EntityId, name: &str, enabled: bool) -> Predicate {
-    field(id, format!("{}{name}", crate::effects::LABOR_FIELD_PREFIX), enabled)
+    field(
+        id,
+        format!("{}{name}", crate::effects::LABOR_FIELD_PREFIX),
+        enabled,
+    )
 }
 fn citizen(id: EntityId) -> Predicate {
     Predicate::All(vec![
-        Predicate::EntityKind { entity_id: id, kind: EntityKind::Unit },
+        Predicate::EntityKind {
+            entity_id: id,
+            kind: EntityKind::Unit,
+        },
         field(id, "alive".to_owned(), true),
     ])
 }
@@ -62,21 +71,33 @@ pub struct LaborExecutionPlan {
 }
 impl LaborExecutionPlan {
     #[must_use]
-    pub fn allocation(&self) -> &LaborAllocation { &self.allocation }
+    pub fn allocation(&self) -> &LaborAllocation {
+        &self.allocation
+    }
     #[must_use]
-    pub fn requested_actions(&self) -> &[RequestedAction] { &self.steps }
+    pub fn requested_actions(&self) -> &[RequestedAction] {
+        &self.steps
+    }
     #[must_use]
-    pub fn goal(&self) -> &Predicate { &self.goal }
+    pub fn goal(&self) -> &Predicate {
+        &self.goal
+    }
     #[must_use]
-    pub const fn encoded_bytes(&self) -> usize { self.encoded_bytes }
+    pub const fn encoded_bytes(&self) -> usize {
+        self.encoded_bytes
+    }
     #[must_use]
-    pub const fn work_used(&self) -> u64 { self.work_used }
+    pub const fn work_used(&self) -> u64 {
+        self.work_used
+    }
 
     /// An already modeled target is not a reason to dispatch a no-op or invent
     /// an inverse compensation. Inspect current truth or submit a fresh model.
     pub fn into_requested_actions(self) -> Result<Vec<RequestedAction>> {
         if self.steps.is_empty() {
-            return Err(refused("labor model requests no changes; inspect the current configuration"));
+            return Err(refused(
+                "labor model requests no changes; inspect the current configuration",
+            ));
         }
         Ok(self.steps)
     }
@@ -93,7 +114,9 @@ impl LaborExecutionPlan {
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
         if self.steps.is_empty() {
-            return Err(refused("labor model requests no changes; inspect the current configuration"));
+            return Err(refused(
+                "labor model requests no changes; inspect the current configuration",
+            ));
         }
         if self.encoded_bytes as u64 > context.budget.max_bytes
             || self.roster.len() > context.budget.max_entities as usize
@@ -130,17 +153,27 @@ impl LaborAllocator {
         if roster.len() > MAX_EXECUTION_ROSTER || demands.len() > MAX_EXECUTION_DEMANDS {
             return Err(exhausted());
         }
-        if demands.iter().any(|d| d.labor.len() > MAX_LABOR_BYTES || d.labor.chars().any(char::is_control)) {
-            return Err(DfmcpError::new(ErrorCode::InvalidRequest, "execution labor tokens require at most 128 non-control bytes"));
+        if demands
+            .iter()
+            .any(|d| d.labor.len() > MAX_LABOR_BYTES || d.labor.chars().any(char::is_control))
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "execution labor tokens require at most 128 non-control bytes",
+            ));
         }
         let allocation = self.allocate_demands(roster, demands, limits)?;
         if !allocation.is_fully_staffed() {
-            return Err(refused("staffing targets are infeasible; inspect allocate_demands shortages before requesting effects"));
+            return Err(refused(
+                "staffing targets are infeasible; inspect allocate_demands shortages before requesting effects",
+            ));
         }
         let mut work = allocation.work_used();
         let mut charge = |amount: usize| -> Result<()> {
             work = work.checked_add(amount as u64).ok_or_else(exhausted)?;
-            if work > limits.max_work { return Err(exhausted()); }
+            if work > limits.max_work {
+                return Err(exhausted());
+            }
             Ok(())
         };
         let mut ids: Vec<_> = roster.iter().map(|row| row.id).collect();
@@ -149,10 +182,13 @@ impl LaborAllocator {
         for row in roster {
             for role in allocation.staffing() {
                 charge(1)?;
-                matrix.insert((row.id, role.labor.clone()), (
-                    row.assigned_labors.contains(&role.labor),
-                    role.assigned_units.binary_search(&row.id).is_ok(),
-                ));
+                matrix.insert(
+                    (row.id, role.labor.clone()),
+                    (
+                        row.assigned_labors.contains(&role.labor),
+                        role.assigned_units.binary_search(&row.id).is_ok(),
+                    ),
+                );
             }
         }
         // The allocator may also propose relief outside the managed roles.
@@ -160,13 +196,28 @@ impl LaborAllocator {
         // a second heavy-labor policy here.
         let rows: BTreeMap<_, _> = roster.iter().map(|row| (row.id, row)).collect();
         for action in allocation.actions() {
-            let Action::SetLabor { units, labor: name, enabled } = action else {
-                return Err(DfmcpError::new(ErrorCode::InternalInvariantViolation, "allocator emitted a non-labor action"));
+            let Action::SetLabor {
+                units,
+                labor: name,
+                enabled,
+            } = action
+            else {
+                return Err(DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "allocator emitted a non-labor action",
+                ));
             };
             for id in units {
                 charge(1)?;
-                let row = rows.get(id).ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "allocator selected an unknown citizen"))?;
-                matrix.entry((*id, name.clone())).or_insert((row.assigned_labors.contains(name), *enabled));
+                let row = rows.get(id).ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "allocator selected an unknown citizen",
+                    )
+                })?;
+                matrix
+                    .entry((*id, name.clone()))
+                    .or_insert((row.assigned_labors.contains(name), *enabled));
             }
         }
         charge(ids.len() * 6 + matrix.len() * 2)?;
@@ -182,15 +233,26 @@ impl LaborAllocator {
         goal.validate_shape()?;
         let mut steps = Vec::with_capacity(allocation.actions().len());
         for (index, action) in allocation.actions().iter().enumerate() {
-            let Action::SetLabor { units, labor: name, enabled } = action else {
-                return Err(DfmcpError::new(ErrorCode::InternalInvariantViolation, "allocator emitted a non-labor action"));
+            let Action::SetLabor {
+                units,
+                labor: name,
+                enabled,
+            } = action
+            else {
+                return Err(DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "allocator emitted a non-labor action",
+                ));
             };
             let mut before = Vec::new();
             let mut after = Vec::new();
             for id in units {
                 charge(5)?;
                 if matrix.get(&(*id, name.clone())) != Some(&(!*enabled, *enabled)) {
-                    return Err(DfmcpError::new(ErrorCode::InternalInvariantViolation, "labor effect differs from its target matrix"));
+                    return Err(DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "labor effect differs from its target matrix",
+                    ));
                 }
                 before.push(citizen(*id));
                 before.push(labor(*id, name, !*enabled));
@@ -207,14 +269,20 @@ impl LaborAllocator {
                 charge(goal.complexity())?;
                 after.push(goal.clone());
             }
-            let depends_on = if index == 0 { Vec::new() } else {
+            let depends_on = if index == 0 {
+                Vec::new()
+            } else {
                 vec![u32::try_from(index - 1).map_err(|_| exhausted())?]
             };
             steps.push(RequestedAction {
                 action: action.clone(),
                 preconditions: vec![Predicate::All(before).normalized()],
                 postconditions: vec![Predicate::All(after).normalized()],
-                compensation: Some(Action::SetLabor { units: units.clone(), labor: name.clone(), enabled: !*enabled }),
+                compensation: Some(Action::SetLabor {
+                    units: units.clone(),
+                    labor: name.clone(),
+                    enabled: !*enabled,
+                }),
                 obligation: None,
                 depends_on,
             });
@@ -224,14 +292,31 @@ impl LaborAllocator {
             for predicate in step.preconditions.iter().chain(&step.postconditions) {
                 predicate.validate_shape()?;
                 charge(predicate.complexity())?;
-                encoded_bytes = encoded_bytes.checked_add(predicate.canonical_bytes().len()).ok_or_else(exhausted)?;
-                if encoded_bytes > MAX_EXECUTION_BYTES { return Err(exhausted()); }
+                encoded_bytes = encoded_bytes
+                    .checked_add(predicate.canonical_bytes().len())
+                    .ok_or_else(exhausted)?;
+                if encoded_bytes > MAX_EXECUTION_BYTES {
+                    return Err(exhausted());
+                }
             }
-            let Action::SetLabor { units, labor, .. } = &step.action else { return Err(exhausted()); };
+            let Action::SetLabor { units, labor, .. } = &step.action else {
+                return Err(exhausted());
+            };
             // Include action, compensation, dependency and fixed record costs.
-            encoded_bytes = encoded_bytes.checked_add(256 + 2 * (units.len() * 8 + labor.len())).ok_or_else(exhausted)?;
+            encoded_bytes = encoded_bytes
+                .checked_add(256 + 2 * (units.len() * 8 + labor.len()))
+                .ok_or_else(exhausted)?;
         }
-        if encoded_bytes > MAX_EXECUTION_BYTES { return Err(exhausted()); }
-        Ok(LaborExecutionPlan { allocation, roster: ids, steps, goal, encoded_bytes, work_used: work })
+        if encoded_bytes > MAX_EXECUTION_BYTES {
+            return Err(exhausted());
+        }
+        Ok(LaborExecutionPlan {
+            allocation,
+            roster: ids,
+            steps,
+            goal,
+            encoded_bytes,
+            work_used: work,
+        })
     }
 }

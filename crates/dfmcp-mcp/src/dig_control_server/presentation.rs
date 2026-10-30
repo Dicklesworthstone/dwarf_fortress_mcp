@@ -197,21 +197,21 @@ pub fn packet(
     let clock_pending = result
         .get("blueprint_clock")
         .is_some_and(|clock| clock["pending"] == true || clock["unresolved"] == true);
-    if clock_pending || clock_recovery_only {
-        if let Some(proof) = result.get_mut("blueprint_monitor") {
-            proof["sampled_excavation_condition_proven"] = json!(false);
-            proof["fresh_sample_acquired"] = json!(false);
-            if clock_recovery_only {
-                proof["original_designations_verified"] = json!(false);
-            }
+    if (clock_pending || clock_recovery_only)
+        && let Some(proof) = result.get_mut("blueprint_monitor")
+    {
+        proof["sampled_excavation_condition_proven"] = json!(false);
+        proof["fresh_sample_acquired"] = json!(false);
+        if clock_recovery_only {
+            proof["original_designations_verified"] = json!(false);
         }
     }
-    if clock_recovery_only {
-        if let Some(clock) = result.get_mut("blueprint_clock") {
-            clock["fresh_goal_sampling_permitted"] = json!(false);
-            clock["current_pause_proven"] = json!(false);
-        }
+
+    if clock_recovery_only && let Some(clock) = result.get_mut("blueprint_clock") {
+        clock["fresh_goal_sampling_permitted"] = json!(false);
+        clock["current_pause_proven"] = json!(false);
     }
+
     let mut active = empty_active_work();
     active["scope"] = json!("this_dig_journal_only");
     active["inventory_verified"] = json!(view.is_some());

@@ -1075,12 +1075,11 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: Io>(
         _ => (0, 8),
     };
     let advancement = matches!(&action, Action::Prepare(_) | Action::Commit { .. });
-    if !advancement {
-        if let Some(monitor) = &mut state.room_completion {
-            monitor.verified = false;
-            monitor.store_verified = false;
-        }
+    if !advancement && let Some(monitor) = &mut state.room_completion {
+        monitor.verified = false;
+        monitor.store_verified = false;
     }
+
     let opened = (|| {
         if matches!(&action, Action::Prepare(_)) && state.room_clock.is_none() {
             open(state, &c, &mut work, io)?;
@@ -1146,11 +1145,11 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: Io>(
             let checked = reserved.verify(state, expected_other, false, !advancement, |_| Ok(()));
             if advancement {
                 checked?;
-            } else if checked.is_err() {
-                if let Some(monitor) = &mut state.room_completion {
-                    monitor.verified = false;
-                    monitor.store_verified = false;
-                }
+            } else if checked.is_err()
+                && let Some(monitor) = &mut state.room_completion
+            {
+                monitor.verified = false;
+                monitor.store_verified = false;
             }
         }
         if let Some(reserved) = other_publication.as_ref().map_err(Clone::clone)? {

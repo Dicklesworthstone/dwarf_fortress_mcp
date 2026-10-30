@@ -1,26 +1,19 @@
-# Proposed DFHack bridge
+# Authenticated read-only DFHack bridge
 
-This directory is a design and compile scaffold. It is **not a DFHack plugin or daemon yet**.
+This directory contains the real protocol-1.0 plugin. Its CMake target uses
+DFHack's `dfhack_plugin` macro, generated protobuf messages, and supported native
+DFHack APIs. It exposes exactly `Handshake` and `ReadObservation`, with bounded
+loopback authentication, nonce/version checks, strict citizen ordering and
+pagination. Names are converted from DF encoding before UTF-8 bounding.
 
-The C++ target does not include DFHack headers, use DFHack plugin registration macros, link
-DFHack, open an IPC socket, decode semantic requests, or call the Lua helper. Its initialization
-entry point deliberately fails so that copying the standalone `.so` into a DFHack installation
-cannot manufacture a successful bridge.
+Build it inside one exact matching DFHack checkout with
+`scripts/qualify_dfhack_plugin.sh`; a standalone custom socket target is not the
+bridge. The obsolete experimental CRC/socket header has been removed. Unconnected
+Lua research helpers do not form an MCP command surface.
 
-The checked-in pieces are:
-
-- `include/dfmcp_ipc.h`: experimental length/type/CRC framing code;
-- `src/dfmcp_bridge.cpp`: fail-closed compile placeholder;
-- `lua/dfmcp_helpers.lua`: unconnected research helpers, not an authorized MCP surface;
-- `CMakeLists.txt`: standalone compile check, not a DFHack installation target.
-
-For a syntax/build smoke check only:
-
-```bash
-cmake -S bridge/dfhack-plugin -B build/dfmcp-bridge-smoke
-cmake --build build/dfmcp-bridge-smoke
-```
-
-Do not copy the result into a DFHack `plugins/` directory. The next acceptance milestone is an
-actual read-only DFHack plugin handshake and observation capsule, as described in
-[`../../IMPLEMENTATION_STATUS.md`](../../IMPLEMENTATION_STATUS.md).
+Protocol 1.1 is a separately built development generation with retained
+announcement fields; it does not extend protocol 1.0 in place. See
+[the live read contract](../../docs/LIVE_DFHACK_READ_PATH.md) and
+[implementation status](../../IMPLEMENTATION_STATUS.md) for exact evidence limits.
+A compiled plugin or successful development read grants no registry admission,
+production runner admission, or mutation authority.

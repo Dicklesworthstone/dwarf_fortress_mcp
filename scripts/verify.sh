@@ -4,6 +4,8 @@ export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Explicit py_compile writes caches even with PYTHONDONTWRITEBYTECODE set.
+export PYTHONPYCACHEPREFIX="$ROOT/target/python-cache"
 
 if [[ -t 1 ]]; then
   BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
@@ -111,6 +113,8 @@ ok "Bead coverage"
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
 python3 scripts/test_validate_repo_rust.py
+python3 scripts/test_dfhack_bridge_contract.py
+python3 scripts/test_live_mcp.py
 python3 scripts/test_read_stable_repository_file.py
 python3 scripts/test_read_stable_repository_file_loader.py
 python3 scripts/test_source_bundle.py
@@ -147,6 +151,8 @@ info "Checking script syntax"
 python3 -m py_compile \
   scripts/validate_repo.py \
   scripts/test_validate_repo_rust.py \
+  scripts/test_dfhack_bridge_contract.py \
+  scripts/test_live_mcp.py \
   scripts/read_stable_repository_file.py \
   scripts/check_repository_integrity.py \
   scripts/test_repository_integrity.py \

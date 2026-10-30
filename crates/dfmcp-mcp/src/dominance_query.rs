@@ -71,13 +71,23 @@ fn validate_input(input: &Value) -> Result<()> {
         match value {
             Value::String(text) => bytes = bytes.saturating_add(text.len()),
             Value::Array(values) => {
-                if values.len().saturating_add(pending.len()).saturating_add(nodes) > 256 {
+                if values
+                    .len()
+                    .saturating_add(pending.len())
+                    .saturating_add(nodes)
+                    > 256
+                {
                     return Err(bounded("dominator query exceeds its input node bound"));
                 }
                 pending.extend(values.iter().map(|value| (value, depth + 1)));
             }
             Value::Object(values) => {
-                if values.len().saturating_add(pending.len()).saturating_add(nodes) > 256 {
+                if values
+                    .len()
+                    .saturating_add(pending.len())
+                    .saturating_add(nodes)
+                    > 256
+                {
                     return Err(bounded("dominator query exceeds its input node bound"));
                 }
                 for (key, value) in values {
@@ -96,24 +106,36 @@ fn validate_input(input: &Value) -> Result<()> {
 }
 
 fn entity(raw: &str, generation: u32, snapshot: &WorldSnapshot) -> Result<EntityId> {
-    if raw.is_empty() || raw.len() > 20 || raw.starts_with('0')
+    if raw.is_empty()
+        || raw.len() > 20
+        || raw.starts_with('0')
         || !raw.bytes().all(|byte| byte.is_ascii_digit())
     {
-        return Err(invalid("dominator IDs must be canonical positive decimal u64 strings"));
+        return Err(invalid(
+            "dominator IDs must be canonical positive decimal u64 strings",
+        ));
     }
-    let id = raw.parse::<u64>().map(EntityId::new)
+    let id = raw
+        .parse::<u64>()
+        .map(EntityId::new)
         .map_err(|_| invalid("dominator entity ID exceeds u64"))?;
-    let record = snapshot.graph.entities.get(&id)
-        .ok_or_else(|| invalid("dominator endpoint is not in the observed projection; absence is not proven"))?;
+    let record = snapshot.graph.entities.get(&id).ok_or_else(|| {
+        invalid("dominator endpoint is not in the observed projection; absence is not proven")
+    })?;
     if record.generation != generation {
-        return Err(failure(ErrorCode::Conflict, "dominator endpoint generation changed; refresh its handle"));
+        return Err(failure(
+            ErrorCode::Conflict,
+            "dominator endpoint generation changed; refresh its handle",
+        ));
     }
     Ok(id)
 }
 
 fn edge_kind(raw: &str) -> Result<EdgeKind> {
     if raw.len() > 128 || raw.contains('\0') {
-        return Err(invalid("dominator edge selector violates its UTF-8 byte bound"));
+        return Err(invalid(
+            "dominator edge selector violates its UTF-8 byte bound",
+        ));
     }
     Ok(match raw {
         "located_at" => EdgeKind::LocatedAt,
@@ -127,7 +149,9 @@ fn edge_kind(raw: &str) -> Result<EdgeKind> {
         "supports" => EdgeKind::Supports,
         "threatens" => EdgeKind::Threatens,
         "ordered_by" => EdgeKind::OrderedBy,
-        value if value.starts_with("custom:") && value.len() > 7 => EdgeKind::Custom(value[7..].to_owned()),
+        value if value.starts_with("custom:") && value.len() > 7 => {
+            EdgeKind::Custom(value[7..].to_owned())
+        }
         "parent_of" => EdgeKind::ParentOf,
         _ => return Err(invalid("unknown dominator edge kind")),
     })
@@ -156,28 +180,50 @@ pub(super) fn execute(
     };
     check()?;
     if context.anchor != snapshot.anchor() {
-        return Err(failure(ErrorCode::StaleAnchor, "dominator context names another snapshot"));
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "dominator context names another snapshot",
+        ));
     }
     validate_input(input)?;
-    if ["target", "target_generation"].iter().any(|key| {
-        input["query"].get(*key).is_some_and(Value::is_null)
-    }) {
-        return Err(invalid("omit both target fields for a full-tree query; explicit null is not an endpoint"));
+    if ["target", "target_generation"]
+        .iter()
+        .any(|key| input["query"].get(*key).is_some_and(Value::is_null))
+    {
+        return Err(invalid(
+            "omit both target fields for a full-tree query; explicit null is not an endpoint",
+        ));
     }
     let parsed: Envelope = serde_json::from_value(input.clone())
         .map_err(|_| invalid("invalid dominators query envelope"))?;
     if parsed.schema != "dfmcp.query/1" {
         return Err(invalid("dominators require dfmcp.query/1"));
     }
-    if parsed.expected_anchor.as_ref().is_some_and(|anchor| anchor != &anchor_json(context.anchor)) {
-        return Err(failure(ErrorCode::StaleAnchor, "dominator expected_anchor differs from the complete current anchor"));
+    if parsed
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|anchor| anchor != &anchor_json(context.anchor))
+    {
+        return Err(failure(
+            ErrorCode::StaleAnchor,
+            "dominator expected_anchor differs from the complete current anchor",
+        ));
     }
-    let Request::Dominators { root, root_generation, mut edge_kinds, direction, target, target_generation } = parsed.query;
+    let Request::Dominators {
+        root,
+        root_generation,
+        mut edge_kinds,
+        direction,
+        target,
+        target_generation,
+    } = parsed.query;
     if edge_kinds.is_empty() || edge_kinds.len() > 32 {
         return Err(invalid("dominators require 1 to 32 explicit edge kinds"));
     }
     if target.is_some() != target_generation.is_some() {
-        return Err(invalid("target and target_generation must be supplied together"));
+        return Err(invalid(
+            "target and target_generation must be supplied together",
+        ));
     }
     let root = entity(&root, root_generation, snapshot)?;
     let target = match (target, target_generation) {
@@ -193,11 +239,16 @@ pub(super) fn execute(
     let request = DominanceQuery {
         root,
         direction,
-        edge_kinds: edge_kinds.iter().map(|kind| edge_kind(kind)).collect::<Result<_>>()?,
+        edge_kinds: edge_kinds
+            .iter()
+            .map(|kind| edge_kind(kind))
+            .collect::<Result<_>>()?,
     };
     let graph_budget = GraphBudget {
         max_vertices: (context.budget.max_entities as usize).min(100_000),
-        max_edges: (context.budget.max_entities as usize).saturating_mul(8).min(1_000_000),
+        max_edges: (context.budget.max_entities as usize)
+            .saturating_mul(8)
+            .min(1_000_000),
         max_frontier: (context.budget.max_entities as usize).min(4_096),
         max_work: 2_000_000,
     };
@@ -207,13 +258,26 @@ pub(super) fn execute(
         "capability":"query","scope":"whole_fortress"
     })).map_err(|_| invalid("dominator scope cannot be encoded"))?);
     let analysis = analyze_dominators_with_check(snapshot, scope, &request, graph_budget, &check)?;
-    let chain = target.map(|id| analysis.dominator_chain_to(id)).transpose()?.flatten();
+    let chain = target
+        .map(|id| analysis.dominator_chain_to(id))
+        .transpose()?
+        .flatten();
     let records: Vec<_> = match &chain {
-        Some(chain) => chain.iter().map(|id| {
-            let index = analysis.vertices.binary_search_by_key(id, |record| record.entity_id)
-                .map_err(|_| failure(ErrorCode::InternalInvariantViolation, "dominator chain lost its record"))?;
-            Ok(record_json(&analysis.vertices[index]))
-        }).collect::<Result<_>>()?,
+        Some(chain) => chain
+            .iter()
+            .map(|id| {
+                let index = analysis
+                    .vertices
+                    .binary_search_by_key(id, |record| record.entity_id)
+                    .map_err(|_| {
+                        failure(
+                            ErrorCode::InternalInvariantViolation,
+                            "dominator chain lost its record",
+                        )
+                    })?;
+                Ok(record_json(&analysis.vertices[index]))
+            })
+            .collect::<Result<_>>()?,
         None if target.is_none() => analysis.vertices.iter().map(record_json).collect(),
         None => Vec::new(),
     };
@@ -244,19 +308,31 @@ pub(super) fn execute(
             "examined_arcs":witness.examined_arcs,"work_units":witness.work_units,
             "fixed_point_passes":analysis.fixed_point_passes,"intersection_steps":analysis.intersection_steps}
     });
-    let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4);
-    if serde_json::to_vec(&payload).map_err(|_| invalid("dominator result cannot be encoded"))?.len() as u64 > maximum {
-        return Err(bounded("complete dominator result exceeds the output budget; select a target or increase the negotiated budget"));
+    let maximum = context
+        .budget
+        .max_bytes
+        .min(u64::from(context.budget.max_output_tokens) * 4);
+    if serde_json::to_vec(&payload)
+        .map_err(|_| invalid("dominator result cannot be encoded"))?
+        .len() as u64
+        > maximum
+    {
+        return Err(bounded(
+            "complete dominator result exceeds the output budget; select a target or increase the negotiated budget",
+        ));
     }
     check()?;
     Ok(payload)
 }
 
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
-    let extension: Value = serde_json::from_str(include_str!("../../../schemas/mcp_dominators_v1.json"))
-        .map_err(|_| invalid("embedded dominators schema is invalid"))?;
-    schema["$defs"]["query"]["oneOf"].as_array_mut()
-        .ok_or_else(|| invalid("query schema variants absent"))?.push(extension);
+    let extension: Value =
+        serde_json::from_str(include_str!("../../../schemas/mcp_dominators_v1.json"))
+            .map_err(|_| invalid("embedded dominators schema is invalid"))?;
+    schema["$defs"]["query"]["oneOf"]
+        .as_array_mut()
+        .ok_or_else(|| invalid("query schema variants absent"))?
+        .push(extension);
     Ok(schema)
 }
 

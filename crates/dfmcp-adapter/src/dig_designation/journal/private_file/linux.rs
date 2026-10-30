@@ -1,3 +1,4 @@
+use crate::owned_file_lock::OwnedFileLock;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::{
@@ -68,7 +69,7 @@ fn file_ok(metadata: &Metadata, owner: u32) -> bool {
 /// no-follow opens. The live pathname, pinned descriptors and extent are checked
 /// at every storage boundary. This does not defend a hostile same-UID process.
 pub struct PrivateDigFile {
-    file: File,
+    file: OwnedFileLock,
     directory: File,
     path: PathBuf,
     read_only: bool,
@@ -284,6 +285,7 @@ fn open_inner(
             "dig journal already owned or exclusive locking unavailable",
         )
     })?;
+    let file = OwnedFileLock::from_locked(file);
     let opened = file.metadata().map_err(failure)?;
     if before
         .as_ref()

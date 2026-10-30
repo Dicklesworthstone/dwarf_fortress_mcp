@@ -5,6 +5,8 @@ export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Explicit py_compile must not dirty the source being qualified.
+export PYTHONPYCACHEPREFIX="$ROOT/target/python-cache"
 
 if [[ -t 1 ]]; then
   BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; RESET='\033[0m'
@@ -120,7 +122,7 @@ run_gate live-server-artifact-admission bash -c \
   'python3 scripts/check_live_server_artifact.py && python3 scripts/check_release_source_custody.py'
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests bash -c \
-  'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_validate_repo_rust.py && python3 scripts/test_read_stable_repository_file_loader.py'
+  'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_validate_repo_rust.py && python3 scripts/test_dfhack_bridge_contract.py && python3 scripts/test_live_mcp.py && python3 scripts/test_read_stable_repository_file_loader.py'
 run_gate local-qualification-receipt-tests python3 scripts/test_local_qualification_receipt.py
 run_gate implementation-status-tests python3 scripts/test_implementation_status.py
 run_gate live-acceptance-tests bash -c \
@@ -159,6 +161,9 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_release_source_custody.py \
   scripts/check_agent_contract.py \
   scripts/check_dfhack_bridge.py \
+  scripts/test_dfhack_bridge_contract.py \
+  scripts/test_validate_repo_rust.py \
+  scripts/test_live_mcp.py \
   scripts/check_live_announcements.py \
   scripts/check_live_announcements_core.py \
   scripts/check_live_announcement_publication.py \

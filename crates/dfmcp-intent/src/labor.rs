@@ -320,7 +320,10 @@ impl Work {
 }
 
 fn exhausted() -> DfmcpError {
-    DfmcpError::new(ErrorCode::BudgetExceeded, "labor allocation budget exhausted")
+    DfmcpError::new(
+        ErrorCode::BudgetExceeded,
+        "labor allocation budget exhausted",
+    )
 }
 
 fn invalid(message: &str) -> DfmcpError {
@@ -619,11 +622,7 @@ mod tests {
     fn prefers_existing_equal_skill_assignment_and_groups_units() -> Result<()> {
         let mut incumbent = dwarf(3, &[("A", 10)]);
         incumbent.assigned_labors.insert("A".to_owned());
-        let roster = [
-            dwarf(1, &[("A", 10)]),
-            dwarf(2, &[("A", 10)]),
-            incumbent,
-        ];
+        let roster = [dwarf(1, &[("A", 10)]), dwarf(2, &[("A", 10)]), incumbent];
         let plan = allocate(&roster, &[demand("A", 2, 1, 0)])?;
         assert_eq!(
             plan.staffing()[0].assigned_units,
@@ -670,7 +669,11 @@ mod tests {
                 ..LaborAllocationLimits::default()
             },
         ] {
-            assert!(LaborAllocator.allocate_demands(&roster, &demands, limits).is_err());
+            assert!(
+                LaborAllocator
+                    .allocate_demands(&roster, &demands, limits)
+                    .is_err()
+            );
         }
         assert!(allocate(&roster, &[demand("A", u32::MAX, 1, 0)]).is_err());
         assert!(allocate(&roster, &[demand("A\0", 1, 1, 0)]).is_err());

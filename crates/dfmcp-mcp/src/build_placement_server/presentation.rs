@@ -627,9 +627,9 @@ pub(super) fn packet(
                 } else {
                     room_recommendation(&result["room_completion"], c)
                 }
-            } else if clock["bootstrap_sample_required"] == true {
-                room_recommendation(&result["room_completion"], c)
-            } else if verified && !pending && !offline {
+            } else if clock["bootstrap_sample_required"] == true
+                || (verified && !pending && !offline)
+            {
                 room_recommendation(&result["room_completion"], c)
             } else {
                 recommendation(

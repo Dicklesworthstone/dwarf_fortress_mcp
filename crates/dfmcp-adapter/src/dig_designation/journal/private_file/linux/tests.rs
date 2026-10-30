@@ -271,6 +271,20 @@ fn exclusive_lock_blocks_another_open_and_release_allows_recovery() -> Result<()
     assert!(open_private_dig(&d.file(), &c, DigMode::Recover, Some(binding()?)).is_ok());
     Ok(())
 }
+
+#[test]
+fn dropped_owner_releases_lock_even_when_duplicate_descriptor_survives() -> Result<()> {
+    let d = Directory::new()?;
+    let c = context()?;
+    let owner = create(&d.file())?;
+    let inherited = owner.storage.file.try_clone().map_err(failure)?;
+    assert!(open_private_dig(&d.file(), &c, DigMode::Offline, None).is_err());
+    drop(owner);
+    let reopened = open_private_dig(&d.file(), &c, DigMode::Offline, None)?;
+    drop(reopened);
+    drop(inherited);
+    Ok(())
+}
 struct ProbeChild(std::process::Child);
 impl Drop for ProbeChild {
     fn drop(&mut self) {

@@ -183,7 +183,9 @@ impl LiveDispatchCoordinator {
         plan.validate_structure()?;
         let routed = route_plan(&plan)?;
         if routed.plan_digest != plan.digest || routed.steps.len() != plan.steps.len() {
-            return Err(invalid("live route does not match the sealed semantic plan"));
+            return Err(invalid(
+                "live route does not match the sealed semantic plan",
+            ));
         }
 
         let mut steps = Vec::with_capacity(plan.steps.len());
@@ -407,7 +409,9 @@ impl LiveDispatchCoordinator {
             return Err(invalid("family executor prepared the wrong live family"));
         }
         if prepared.digest == Digest32::ZERO {
-            return Err(invalid("family executor returned a zero preparation identity"));
+            return Err(invalid(
+                "family executor returned a zero preparation identity",
+            ));
         }
         self.entries[index].state = DispatchState::Prepared(prepared);
         Ok(prepared)
@@ -439,13 +443,18 @@ impl LiveDispatchCoordinator {
             preparation,
             context,
         ) {
-            Ok(receipt) if receipt.family == self.entries[index].family && receipt.digest != Digest32::ZERO => {
+            Ok(receipt)
+                if receipt.family == self.entries[index].family
+                    && receipt.digest != Digest32::ZERO =>
+            {
                 self.entries[index].state = DispatchState::Applied(receipt);
                 Ok(receipt)
             }
             Ok(_) => {
                 self.entries[index].state = DispatchState::Indeterminate(preparation);
-                Err(invalid("family executor returned a mismatched or zero receipt"))
+                Err(invalid(
+                    "family executor returned a mismatched or zero receipt",
+                ))
             }
             Err(cause) => {
                 self.entries[index].state = DispatchState::Indeterminate(preparation);
@@ -464,7 +473,9 @@ impl LiveDispatchCoordinator {
     ) -> Result<ReconcileOutcome> {
         let index = self.index(step)?;
         if !self.entries[index].state.uncertain() {
-            return Err(conflict("semantic step has no uncertain live dispatch to reconcile"));
+            return Err(conflict(
+                "semantic step has no uncertain live dispatch to reconcile",
+            ));
         }
         self.authorize_step(index, context)?;
         let outcome = executor.reconcile(
@@ -493,13 +504,21 @@ impl LiveDispatchCoordinator {
             }
             ReconcileOutcome::Indeterminate => {
                 let preparation = match self.entries[index].state {
-                    DispatchState::DispatchStarted(value) | DispatchState::Indeterminate(value) => value,
-                    _ => return Err(conflict("original live dispatch no longer has an uncertain state")),
+                    DispatchState::DispatchStarted(value) | DispatchState::Indeterminate(value) => {
+                        value
+                    }
+                    _ => {
+                        return Err(conflict(
+                            "original live dispatch no longer has an uncertain state",
+                        ));
+                    }
                 };
                 self.entries[index].state = DispatchState::Indeterminate(preparation);
             }
             ReconcileOutcome::Applied(_) => {
-                return Err(invalid("reconciliation returned a receipt for another family"));
+                return Err(invalid(
+                    "reconciliation returned a receipt for another family",
+                ));
             }
         }
         Ok(outcome)
@@ -517,7 +536,9 @@ impl LiveDispatchCoordinator {
         let index = self.index(step)?;
         let DispatchState::Prepared(preparation) = self.entries[index].state else {
             return Err(if self.entries[index].state.uncertain() {
-                indeterminate("dispatch may have started; use exact family reconciliation or safety cancellation")
+                indeterminate(
+                    "dispatch may have started; use exact family reconciliation or safety cancellation",
+                )
             } else {
                 conflict("semantic step is not a cancellable prepared live operation")
             });
@@ -533,7 +554,9 @@ impl LiveDispatchCoordinator {
         if receipt.is_some_and(|receipt| {
             receipt.family != self.entries[index].family || receipt.digest == Digest32::ZERO
         }) {
-            return Err(invalid("prepared cancellation returned an invalid family receipt"));
+            return Err(invalid(
+                "prepared cancellation returned an invalid family receipt",
+            ));
         }
         self.entries[index].state = DispatchState::Cancelled(receipt);
         Ok(receipt)
@@ -554,7 +577,10 @@ mod tests {
     fn anchor() -> StateAnchor {
         StateAnchor {
             fortress_id: FortressId::new(9),
-            cursor: ObservationCursor { epoch: 1, sequence: 7 },
+            cursor: ObservationCursor {
+                epoch: 1,
+                sequence: 7,
+            },
             tick: GameTick(100),
             state_hash: Digest32::of_bytes(b"live-dispatch-test-anchor"),
         }
@@ -562,12 +588,8 @@ mod tests {
 
     fn step(id: u32, action: Action, depends_on: Vec<StepId>) -> PlanStep {
         let id = StepId::new(id);
-        let key = dfmcp_intent::derive_step_idempotency_key(
-            IntentId::new(44),
-            anchor(),
-            id,
-            &action,
-        );
+        let key =
+            dfmcp_intent::derive_step_idempotency_key(IntentId::new(44), anchor(), id, &action);
         PlanStep {
             id,
             required_capability: action.capability(),
@@ -672,7 +694,10 @@ mod tests {
         ) -> Result<FamilyReceipt> {
             self.calls.push(format!("commit:{}", step.id.get()));
             if self.fail_commit {
-                return Err(error(ErrorCode::AdapterUnavailable, "lost family commit reply"));
+                return Err(error(
+                    ErrorCode::AdapterUnavailable,
+                    "lost family commit reply",
+                ));
             }
             FamilyReceipt::new(
                 route.family,
@@ -738,15 +763,19 @@ mod tests {
         let c = context();
         coordinator.prepare_next(&mut fake, &c)?;
         fake.fail_commit = true;
-        assert!(coordinator
-            .commit_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
+        assert!(
+            coordinator
+                .commit_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
         assert!(coordinator.has_uncertain_effect());
         assert_eq!(coordinator.next_ready()?, None);
         assert!(coordinator.prepare_next(&mut fake, &c).is_err());
-        assert!(coordinator
-            .commit_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
+        assert!(
+            coordinator
+                .commit_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
 
         fake.reconciliation = Some(ReconcileOutcome::Applied(FamilyReceipt::new(
             LiveFamily::ControlV1_7,
@@ -765,9 +794,11 @@ mod tests {
         let c = context();
         coordinator.prepare_next(&mut fake, &c)?;
         fake.fail_commit = true;
-        assert!(coordinator
-            .commit_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
+        assert!(
+            coordinator
+                .commit_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
         fake.reconciliation = Some(ReconcileOutcome::NotDispatched);
         assert_eq!(
             coordinator.reconcile(StepId::new(0), &mut fake, &c)?,
@@ -799,12 +830,16 @@ mod tests {
         let mut coordinator = LiveDispatchCoordinator::new(plan())?;
         coordinator.prepare_next(&mut fake, &c)?;
         fake.fail_commit = true;
-        assert!(coordinator
-            .commit_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
-        assert!(coordinator
-            .cancel_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
+        assert!(
+            coordinator
+                .commit_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
+        assert!(
+            coordinator
+                .cancel_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
         assert!(matches!(
             coordinator.entries()[0].state,
             DispatchState::Indeterminate(_)
@@ -866,9 +901,11 @@ mod tests {
         coordinator.prepare_next(&mut fake, &c)?;
         c.grants
             .retain(|grant| grant.capability != Capability::ControlClock);
-        assert!(coordinator
-            .commit_prepared(StepId::new(0), &mut fake, &c)
-            .is_err());
+        assert!(
+            coordinator
+                .commit_prepared(StepId::new(0), &mut fake, &c)
+                .is_err()
+        );
         assert!(matches!(
             coordinator.entries()[0].state,
             DispatchState::Prepared(_)

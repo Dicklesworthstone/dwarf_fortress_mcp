@@ -377,7 +377,6 @@ impl<S: EffectJournalStorage, N: BuildSource> BuildSession<S, N> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "session_reconciliation_tests.rs"]
 mod reconciliation_tests;
