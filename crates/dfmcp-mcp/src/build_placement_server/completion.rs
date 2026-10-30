@@ -21,8 +21,8 @@ pub(super) struct Monitor {
     pub store: MonitorStore<PrivateBuildFile>,
     pub verified: bool,
     pub store_verified: bool,
-    parent: PrivateFileIdentity,
-    child: PrivateFileIdentity,
+    pub parent: PrivateFileIdentity,
+    pub child: PrivateFileIdentity,
 }
 
 /// A separate owner keeps local cancellation reachable after the original
@@ -411,13 +411,13 @@ fn length_reserve(path: &Path, maximum: u64, copies: u64) -> Result<u64> {
         .ok_or_else(exhausted)
 }
 
-fn source_reserve(origin: &Origin) -> Result<u64> {
+pub(super) fn source_reserve(origin: &Origin) -> Result<u64> {
     (origin.journal_bytes() as u64)
         .checked_add((origin.receipts().len() * MAX_BODY_BYTES) as u64)
         .and_then(|n| n.checked_add(batch::GUARD_BYTES))
         .ok_or_else(exhausted)
 }
-fn verify_source<S: EffectJournalStorage, N: BuildSource>(
+pub(super) fn verify_source<S: EffectJournalStorage, N: BuildSource>(
     child: &mut BuildSession<S, N>,
     parent: &mut Option<batch::Parent>,
     binding: &BuildBinding,
@@ -667,6 +667,25 @@ pub(super) fn run<N: BuildSource>(
     action: Action,
 ) -> String {
     state.abandon();
+    let sampling = matches!(action, Action::Sample);
+    if sampling {
+        let checked = (|| {
+            let mut preflight = Work::new(&c, request.started)?;
+            clock::ensure_for_sample(state, &preflight.take(&c, clock::VIEW_BYTES)?)
+        })();
+        if let Err(e) = checked {
+            return state.failed(op, Some(&c), &e);
+        }
+    }
+    // The opening and final clock checks are separate from all source guards.
+    let mut c = c;
+    if state.clock_config.is_some() {
+        match c.budget.max_bytes.checked_sub(3 * clock::VIEW_BYTES) {
+            Some(bytes) => c.budget.max_bytes = bytes,
+            None => return state.failed(op, Some(&c), &exhausted()),
+        }
+    }
+    let observed_floor = std::cell::Cell::new(state.authority_tick);
     let mut monitor = state.completion.take();
     let result = (|| -> Result<(Value, Option<BuildInventory>)> {
         let ledger = RefCell::new(Work::new(&c, request.started)?);
@@ -753,8 +772,37 @@ pub(super) fn run<N: BuildSource>(
         let child = &mut state.control;
         let parent = &mut state.batch;
         let binding = &state.binding;
+        let clock_owner = &mut state.clock;
+        let clock_configured = state.clock_config.is_some();
+        let clock_grants = &state.clock_grants;
+        let clock_floor = &observed_floor;
+        let clock_recovery = &mut state.clock_recovery;
+        let clock_verified = &mut state.clock_verified;
         let mut guard = |origin: &Origin, context: &OperationContext| -> Result<()> {
             runtime::boundary(request, config, false)?;
+            if clock_configured {
+                *clock_verified = false;
+                let owner = clock_owner.as_mut().ok_or_else(|| {
+                    error(
+                        ErrorCode::EffectIndeterminate,
+                        "configured construction clock custody is unavailable",
+                    )
+                })?;
+                let mut current = ledger.borrow_mut().take(context, clock::VIEW_BYTES)?;
+                current.anchor.tick = GameTick(current.anchor.tick.get().max(clock_floor.get()));
+                let native = clock::native_context(&current, clock_grants)?;
+                let checked = owner.inspect(&current, &native);
+                clock_floor.set(clock_floor.get().max(owner.high_tick()));
+                *clock_recovery = Some(owner.recovery());
+                let checked = checked?;
+                *clock_verified = true;
+                if sampling && (checked.pending || checked.unresolved) {
+                    return Err(error(
+                        ErrorCode::EffectIndeterminate,
+                        "settle the original construction clock before publishing completion",
+                    ));
+                }
+            }
             let current = ledger.borrow_mut().take(context, source_reserve(origin)?)?;
             let view = verify_source(
                 child,
@@ -805,12 +853,18 @@ pub(super) fn run<N: BuildSource>(
                     .checked_add(8192)
                     .ok_or_else(exhausted)?;
                 let source_bytes = 24 * 1024 * 1024;
+                let decode_bytes = 64 * 1024 * 1024;
                 let guard_bytes = source_reserve(monitor.store.definition().origin())?
-                    .checked_mul(8)
+                    .checked_add(if clock_configured {
+                        clock::VIEW_BYTES
+                    } else {
+                        0
+                    })
+                    .and_then(|bytes| bytes.checked_mul(10))
                     .ok_or_else(exhausted)?;
                 let required = begin_bytes
                     .checked_add(publish_bytes)
-                    .and_then(|n| n.checked_add(source_bytes))
+                    .and_then(|n| n.checked_add(source_bytes + decode_bytes))
                     .and_then(|n| n.checked_add(guard_bytes))
                     .ok_or_else(exhausted)?;
                 if ledger.borrow().bytes < required {
@@ -826,7 +880,21 @@ pub(super) fn run<N: BuildSource>(
                     monitor.store.definition().goal(),
                     &source,
                 )?;
-                let publish = ledger.borrow_mut().take(&c, publish_bytes)?;
+                // Retain a consumed source floor even if a later clock/custody
+                // guard refuses publication. Readiness never becomes a sample.
+                let decode = ledger.borrow_mut().take(&c, decode_bytes)?;
+                let observed =
+                    dfmcp_adapter::live_operations::LiveOperationsObservation::decode_profile(
+                        &sample.capture,
+                        sample.operations.generation,
+                        sample.operations.df_version.clone(),
+                        sample.operations.dfhack_version.clone(),
+                        dfmcp_adapter::live_operations::OperationsProfile::PagedV1_4,
+                    )?;
+                observed_floor.set(observed_floor.get().max(observed.jobs.tick().get()));
+                drop(observed);
+                let mut publish = ledger.borrow_mut().take(&decode, publish_bytes)?;
+                publish.anchor.tick = GameTick(publish.anchor.tick.get().max(observed_floor.get()));
                 monitor
                     .store
                     .publish_sample(&publish, &sample, &mut admit, &mut guard)?;
@@ -854,17 +922,46 @@ pub(super) fn run<N: BuildSource>(
             "placement_effect_discharged":false,"retry_commit_permitted":false});
         Ok((result, last_view.into_inner()))
     })();
+    state.authority_tick = state.authority_tick.max(observed_floor.get());
     state.completion = monitor;
     let (mut result, view) = match result {
         Ok(v) => v,
         Err(e) => {
             if let Some(monitor) = &mut state.completion {
-                monitor.store.abandon_read();
+                monitor.store.withdraw_unpublished();
                 monitor.store_verified = false;
             }
             return state.failed(op, Some(&c), &e);
         }
     };
+    if state.clock_config.is_some() {
+        let mut final_context = c.clone();
+        final_context.budget.max_bytes = clock::VIEW_BYTES;
+        final_context.budget.max_wall_millis = match c.budget.max_wall_millis.checked_sub(
+            request
+                .started
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX),
+        ) {
+            Some(remaining) if remaining > 0 => remaining,
+            _ => return state.failed(op, Some(&c), &exhausted()),
+        };
+        if let Err(e) = clock::inspect(state, &final_context) {
+            return state.failed(op, Some(&c), &e);
+        }
+        if sampling && clock::blocks_sampling(state) {
+            return state.failed(
+                op,
+                Some(&c),
+                &error(
+                    ErrorCode::EffectIndeterminate,
+                    "construction clock history changed before completion publication",
+                ),
+            );
+        }
+    }
     let current = match state.disclosure_context(&c) {
         Ok(v) => v,
         Err(e) => return unbound(op, &e),
@@ -894,6 +991,36 @@ pub(super) fn run<N: BuildSource>(
     }
     if let Err(e) = runtime::boundary(request, config, false) {
         return state.failed(op, Some(&current), &e);
+    }
+    if state.clock_config.is_some() {
+        let expected = state.clock_recovery;
+        let mut final_context = current.clone();
+        final_context.budget.max_bytes = clock::VIEW_BYTES;
+        final_context.budget.max_wall_millis = match c.budget.max_wall_millis.checked_sub(
+            request
+                .started
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX),
+        ) {
+            Some(remaining) if remaining > 0 => remaining,
+            _ => return state.failed(op, Some(&current), &exhausted()),
+        };
+        let checked = clock::inspect(state, &final_context);
+        if let Err(e) = checked {
+            return state.failed(op, Some(&current), &e);
+        }
+        if state.clock_recovery != expected || (sampling && clock::blocks_sampling(state)) {
+            return state.failed(
+                op,
+                Some(&current),
+                &error(
+                    ErrorCode::CorruptLedger,
+                    "construction clock changed at final completion publication",
+                ),
+            );
+        }
     }
     output
 }

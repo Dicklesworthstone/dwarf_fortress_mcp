@@ -334,9 +334,9 @@ fn request(spec: &MonitorDefinition) -> RunRequest {
         wall_millis: 500,
     }
 }
-fn pending(spec: &MonitorDefinition, tick: u64) -> LinkedSample {
+fn pending(spec: &MonitorDefinition, tick: u64) -> Result<LinkedSample> {
     let mut observed = fixtures::observation(spec.goal(), tick);
-    let p = spec.goal().records()[0].insertion().unwrap();
+    let p = spec.goal().records()[0].insertion().ok_or_else(stale)?;
     observed.buildings[0].build_stage = p.max_stage() as i32 - 1;
     observed.jobs.jobs.push(LiveJob {
         native_id: p.job_id(),
@@ -352,21 +352,21 @@ fn pending(spec: &MonitorDefinition, tick: u64) -> LinkedSample {
         attached_item_count: 0,
         required_item_filter_count: 0,
     });
-    fixtures::with_observation(spec.goal(), observed)
+    Ok(fixtures::with_observation(spec.goal(), observed))
 }
 fn retained(spec: &MonitorDefinition) -> Result<Progress> {
     let (c, _) = contexts(spec);
     super::super::advance(
         &Progress::new(spec.goal()).begin_read()?,
         spec.goal(),
-        &pending(spec, fixtures::TICK),
+        &pending(spec, fixtures::TICK)?,
         &c,
     )
 }
 fn ready(spec: &MonitorDefinition, tick: u64) -> Result<ClockSample> {
     Ok(ClockSample {
         progress: retained(spec)?,
-        sample: pending(spec, tick),
+        sample: pending(spec, tick)?,
     })
 }
 fn prepare(
@@ -645,15 +645,16 @@ fn current_and_original_canonical_and_independent_native_scopes_are_all_required
         match variant {
             0 => c.grants.retain(|g| g.capability != Capability::Observe),
             1 => c.grants.retain(|g| g.capability != Capability::Plan),
-            2 => c
-                .grants
-                .iter_mut()
-                .filter(|g| g.capability == Capability::ControlClock)
-                .for_each(|g| {
-                    g.scope.map_area = Some(
-                        MapCuboid::new(MapCoord::new(1, 1, 1), MapCoord::new(2, 2, 1)).unwrap(),
-                    )
-                }),
+            2 => {
+                let area = MapCuboid::new(MapCoord::new(1, 1, 1), MapCoord::new(2, 2, 1))?;
+                for grant in c
+                    .grants
+                    .iter_mut()
+                    .filter(|g| g.capability == Capability::ControlClock)
+                {
+                    grant.scope.map_area = Some(area);
+                }
+            }
             3 => n.grants.retain(|g| g.capability != Capability::Plan),
             4 => n.anchor.fortress_id = c.anchor.fortress_id,
             5 => n.request_id = RequestId::new(900),
@@ -870,7 +871,7 @@ fn readiness_requires_every_original_receipt_and_current_viable_target() -> Resu
     let spec = fixture()?.definition;
     let (c, _) = contexts(&spec);
     let progress = retained(&spec)?;
-    let raw = pending(&spec, fixtures::TICK);
+    let raw = pending(&spec, fixtures::TICK)?;
     let result = Readiness::capture(&spec, &operations(), &progress, &raw, &c)?;
     assert_eq!((result.pending_count(), result.complete_count()), (1, 1));
     for variant in 0..10 {
@@ -930,7 +931,7 @@ fn readiness_cannot_start_without_an_accepted_source_or_renew_terminal_monitor_l
     let spec = fixture()?.definition;
     let (c, _) = contexts(&spec);
     let original = retained(&spec)?;
-    let raw = pending(&spec, fixtures::TICK);
+    let raw = pending(&spec, fixtures::TICK)?;
     for variant in 0..6 {
         let mut progress = original.clone();
         match variant {
@@ -997,7 +998,7 @@ fn accepted_negative_readiness_explicitly_withdraws_whole_plan_stability() -> Re
         &c,
     )?;
     assert_eq!(progress.streak, 1);
-    let mut sample = pending(&spec, fixtures::TICK);
+    let mut sample = pending(&spec, fixtures::TICK)?;
     let mut observed = decode_capture(&sample)?;
     // A newly present original job contradicts completion without a stage regression.
     observed.buildings[0].build_stage = observed.buildings[0].max_build_stage;

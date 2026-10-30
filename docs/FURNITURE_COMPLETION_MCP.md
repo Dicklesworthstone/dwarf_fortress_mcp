@@ -1,13 +1,15 @@
 # Whole-original-plan construction monitoring through MCP
 
-**Validation status: source present and reviewed; MCP build and process execution
-blocked.** The underlying adapter has 123 passing focused tests. The MCP integration
-described here has not compiled or run: four attempts were killed inside the pinned
-runtime dependency under persistent shared memory pressure. Its 13 process
-scenarios are implemented, with syntax and independent fixture checks only. See
-[`furniture-completion-mcp-source.json`](evidence/furniture-completion-mcp-source.json)
-for the exact limitation. The workflow below documents the implementation contract,
-not an executed MCP result or a production support claim.
+**Validation status:** the current furniture clock integration has 54 passing
+actual-source handler/Agent Turn component tests, and complete public async/native
+wrapper bodies type-check in a separate view with nonexecuted ambient runtime
+stubs. The underlying construction/run suites have 93 passing focused tests.
+Full FastMCP stdio, inherited runtime and native game execution remain unverified.
+The original 13 process scenarios still require the full server build; their
+historical blocked result is retained in
+[`furniture-completion-mcp-source.json`](evidence/furniture-completion-mcp-source.json).
+See [implementation status](../IMPLEMENTATION_STATUS.md) for exact current
+coverage and exclusions.
 
 The isolated furniture/1.19 development server source follows a complete original
 furnishing batch beyond `all_placed` into later sampled construction conditions.
@@ -20,6 +22,13 @@ This is development functionality. `sampled_condition_satisfied=true` means a
 historical condition met the fixed sampling policy with verified original custody.
 It does not prove current usability, continuous stability, causal attribution or
 that an original placement effect can be forgotten or retried.
+
+The optional [construction clock integration](FURNITURE_CONSTRUCTION_CLOCK_MCP.md)
+now supplies separately reviewed finite game-time intervals for this complete
+goal. Activate it only after one ordinary sample has pinned the independent
+operations source. Unresolved clock custody blocks fresh completion sampling.
+Clock readiness contributes no positive sample, and known contradictions withdraw
+unfinished stability while preserving the original goal and observation allowance.
 
 ## Configure the third private file
 
@@ -76,7 +85,8 @@ Use the existing session for the completed batch, or reopen with neither
 4. Repeat explicit observations while the goal is active. There is no background
    watcher, automatic reconnect, sleeping poll loop or implicit advancement of
    game time. `fortress.wait` retains its original role of recovering an exact
-   placement outcome; it is not a construction polling loop.
+   placement outcome by default; `scope="clock"` reconciles an explicitly reviewed
+   construction run. Neither form is a construction polling loop.
 
 Monitoring uses Query authority. The normal `recover` mode can open the three
 original files and explicitly sample with valid credentials while carrying no

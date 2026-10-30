@@ -1,6 +1,7 @@
 //! Operator configuration and inherited, joined blocking work.
 use super::{error, unbound};
 use asupersync::Cx;
+use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::build_placement::BuildPlan;
 use dfmcp_adapter::build_placement::journal::{BuildGuard, BuildMode, BuildStage};
 use dfmcp_adapter::build_placement::rpc::{BuildCancellation, BuildRpc};
@@ -16,7 +17,7 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 14] = [
+pub(super) const NAMES: [&str; 17] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
@@ -31,6 +32,9 @@ pub(super) const NAMES: [&str; 14] = [
     "DFMCP_BUILD_CHECKPOINT_POLICY",
     "DFMCP_BUILD_PROTECTED",
     "DFMCP_BUILD_MODE",
+    "DFMCP_BUILD_CLOCK_CONFIG",
+    "DFMCP_BUILD_CLOCK_TOKEN",
+    "DFMCP_BUILD_ALLOW_CLOCK",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -67,6 +71,7 @@ pub(super) struct Config {
     pub batch_path: Option<PathBuf>,
     pub completion_path: Option<PathBuf>,
     pub completion_only: bool,
+    pub clock: Option<super::clock::Config>,
     pub scope: MapCuboid,
     pub fortress: FortressIdentity,
     pub endpoint: SocketAddr,
@@ -116,6 +121,37 @@ pub(super) fn enabled() -> Result<bool> {
         Some("1") => Ok(true),
         _ => Err(denied()),
     }
+}
+pub(super) fn clock_enabled() -> Result<bool> {
+    match optional("DFMCP_BUILD_ALLOW_CLOCK")?.as_deref() {
+        None => Ok(false),
+        Some("1") => Ok(true),
+        _ => Err(denied()),
+    }
+}
+pub(super) fn clock_grants(control: bool) -> Vec<dfmcp_core::CapabilityGrant> {
+    [
+        dfmcp_core::Capability::Query,
+        dfmcp_core::Capability::Plan,
+        dfmcp_core::Capability::ControlClock,
+    ]
+    .into_iter()
+    .filter(|capability| control || *capability == dfmcp_core::Capability::Query)
+    .map(|capability| dfmcp_core::CapabilityGrant {
+        capability,
+        scope: dfmcp_core::CapabilityScope {
+            fortress_id: Some(dfmcp_core::FortressId::NIL),
+            ..dfmcp_core::CapabilityScope::default()
+        },
+        max_risk: if capability == dfmcp_core::Capability::Query {
+            dfmcp_core::RiskTier::ReadOnly
+        } else {
+            dfmcp_core::RiskTier::Guarded
+        },
+        expires_at_tick: None,
+        remaining_uses: None,
+    })
+    .collect()
 }
 fn area(v: [i32; 6]) -> Result<MapCuboid> {
     if v.iter().any(|n| !(0..=32767).contains(n)) {
@@ -188,6 +224,7 @@ fn configured(
         batch_path: None,
         completion_path: None,
         completion_only,
+        clock: None,
         scope,
         fortress,
         endpoint,
@@ -217,6 +254,7 @@ pub(super) fn configuration() -> Result<Config> {
         crate::admission::current_admission_provenance().is_some(),
     )?;
     enabled()?;
+    clock_enabled()?;
     let mut config = configured(
         &required("DFMCP_BUILD_WORLD_FOLDER", 512)?,
         &required("DFMCP_BUILD_SITE_ID", 10)?,
@@ -262,6 +300,24 @@ pub(super) fn configuration() -> Result<Config> {
     if config.completion_only && config.completion_path.is_none() {
         return Err(denied());
     }
+    config.clock = optional("DFMCP_BUILD_CLOCK_CONFIG")?
+        .as_deref()
+        .map(super::clock::Config::parse)
+        .transpose()?;
+    if let Some(clock) = &config.clock {
+        if config.completion_only
+            || config.completion_path.is_none()
+            || config.batch_path.is_none()
+            || clock.path == config.path
+            || config.batch_path.as_ref() == Some(&clock.path)
+            || config.completion_path.as_ref() == Some(&clock.path)
+            || (clock.initialize && config.mode != BuildMode::Control)
+        {
+            return Err(denied());
+        }
+    } else if clock_enabled()? || optional("DFMCP_BUILD_CLOCK_TOKEN")?.is_some() {
+        return Err(denied());
+    }
     Ok(config)
 }
 pub(super) struct RequestControl {
@@ -269,8 +325,12 @@ pub(super) struct RequestControl {
     parent: Cx,
     worker: Cx,
     abandoned: Arc<AtomicBool>,
+    acknowledged: Arc<AtomicBool>,
 }
 impl RequestControl {
+    pub fn acknowledgement(&self) -> Arc<AtomicBool> {
+        self.acknowledged.clone()
+    }
     pub fn checkpoint(&self) -> Result<()> {
         if self.abandoned.load(Ordering::Acquire)
             || self.parent.checkpoint().is_err()
@@ -340,6 +400,8 @@ where
     }
     let started = Instant::now();
     let abandoned = Arc::new(AtomicBool::new(false));
+    let acknowledged = Arc::new(AtomicBool::new(false));
+    let worker_acknowledged = acknowledged.clone();
     let _cancel = CancelOnDrop(abandoned.clone());
     let parent = cx.clone();
     let task = cx.spawn_blocking(move |worker| {
@@ -349,6 +411,7 @@ where
             parent,
             worker,
             abandoned,
+            acknowledged: worker_acknowledged,
         };
         let p = control.parent.clone();
         let w = control.worker.clone();
@@ -379,7 +442,19 @@ where
         Err(_) => return unbound(op, &denied()),
     };
     match task.join(&cx).await {
-        Ok(v) => v,
+        Ok(v) => {
+            if cx.checkpoint().is_err() || !blocking_io_authorized(&cx) {
+                return unbound(
+                    op,
+                    &error(
+                        ErrorCode::CancellationIncomplete,
+                        "furniture request lost authority before worker acknowledgement",
+                    ),
+                );
+            }
+            acknowledged.store(true, Ordering::Release);
+            v
+        }
         Err(_) => unbound(
             op,
             &error(
@@ -566,6 +641,272 @@ pub(super) fn furniture_supply(
         permission,
     )
 }
+pub(super) struct ClockIo<'a> {
+    pub control: &'a RequestControl,
+    pub config: &'a Config,
+    pub opening_recovery: Option<dfmcp_adapter::construction_plan::clock::Recovery>,
+}
+pub(super) struct ClockSource<'a> {
+    inner: dfmcp_adapter::bounded_run::rpc::RunRpcClient<
+        dfmcp_adapter::bounded_run::rpc::RunTcpStream,
+    >,
+    control: &'a RequestControl,
+    config: &'a Config,
+    token_digest: dfmcp_core::Digest32,
+}
+fn clock_boundary(control: &RequestControl, config: &Config, effect: bool) -> Result<()> {
+    boundary(control, config, false)?;
+    if effect && !clock_enabled()? {
+        return Err(denied());
+    }
+    Ok(())
+}
+impl ClockSource<'_> {
+    fn boundary(&self, effect: bool) -> Result<()> {
+        clock_boundary(self.control, self.config, effect)?;
+        let token = required("DFMCP_BUILD_CLOCK_TOKEN", 256)?;
+        if token.len() < 32 || dfmcp_core::Digest32::of_bytes(token.as_bytes()) != self.token_digest
+        {
+            return Err(denied());
+        }
+        Ok(())
+    }
+}
+impl dfmcp_adapter::bounded_run::rpc::RunSource for ClockSource<'_> {
+    fn manifest(&self) -> &dfmcp_adapter::bounded_run::rpc::RunManifest {
+        self.inner.manifest()
+    }
+    fn endpoint(&self) -> Option<SocketAddr> {
+        self.inner.endpoint()
+    }
+    fn observe(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunObservation> {
+        self.boundary(false)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.observe(c)
+    }
+    fn prepare(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        self.boundary(true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.prepare(p, c)
+    }
+    fn commit(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        self.boundary(true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.commit(p, c)
+    }
+    fn query(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::RunRecord>> {
+        self.boundary(false)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.query(p, c)
+    }
+    fn cancel(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        self.boundary(true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.cancel(p, c)
+    }
+}
+impl<'a> super::clock::ClockIo for ClockIo<'a> {
+    type Source = ClockSource<'a>;
+    fn open(
+        &mut self,
+        selected: &super::clock::Config,
+        spec: &dfmcp_adapter::construction_plan::origin::MonitorDefinition,
+        operations: &dfmcp_adapter::construction_plan::Manifest,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<
+        dfmcp_adapter::construction_plan::clock::Clock<
+            dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+        >,
+    > {
+        use dfmcp_adapter::bounded_run::journal::RunMode;
+        let deadline = Instant::now()
+            .checked_add(std::time::Duration::from_millis(
+                c.budget.max_wall_millis.min(n.budget.max_wall_millis),
+            ))
+            .ok_or_else(super::exhausted)?;
+        if c.budget.max_bytes.min(n.budget.max_bytes) < super::clock::OPEN_BYTES {
+            return Err(super::exhausted());
+        }
+        let remaining = || {
+            deadline
+                .checked_duration_since(Instant::now())
+                .and_then(|left| u64::try_from(left.as_millis()).ok())
+                .filter(|left| *left > 0)
+                .ok_or_else(super::exhausted)
+        };
+        if self.config.clock.as_ref() != Some(selected) {
+            return Err(denied());
+        }
+        clock_boundary(self.control, self.config, selected.initialize)?;
+        selected.matches(spec)?;
+        c.authorize(
+            dfmcp_core::Capability::Query,
+            dfmcp_core::RiskTier::ReadOnly,
+            &[],
+            None,
+        )?;
+        let mode = match self.config.mode {
+            BuildMode::Offline => RunMode::Offline,
+            BuildMode::Control if clock_enabled()? => RunMode::Control,
+            _ => RunMode::Recover,
+        };
+        if selected.initialize && mode != RunMode::Control {
+            return Err(denied());
+        }
+        // Preserve the intended header before exclusive creation, or retain the
+        // externally acknowledged existing root until ancestry is verified.
+        // This reference alone never certifies successful publication.
+        self.opening_recovery = if selected.initialize {
+            let id = selected
+                .binding
+                .initial_journal_id(n.session_id, n.request_id);
+            Some(dfmcp_adapter::construction_plan::clock::Recovery {
+                journal_id: id,
+                head: id,
+            })
+        } else {
+            selected.recovery
+        };
+        let mut opening = n.clone();
+        opening.budget.max_bytes = super::clock::VIEW_BYTES;
+        opening.budget.max_wall_millis = remaining()?;
+        let journal = dfmcp_adapter::bounded_run::private_file::open_private_run_journal_exact(
+            &selected.path,
+            &opening,
+            mode,
+            Some(selected.binding.clone()),
+            selected.initialize,
+        )?;
+        clock_boundary(self.control, self.config, selected.initialize)?;
+        let mut canonical = c.clone();
+        let mut native = n.clone();
+        let wall = remaining()?;
+        canonical.budget.max_bytes = 2 * super::clock::VIEW_BYTES;
+        native.budget.max_bytes = canonical.budget.max_bytes;
+        canonical.budget.max_wall_millis = wall;
+        native.budget.max_wall_millis = wall;
+        let owner = dfmcp_adapter::construction_plan::clock::Clock::new(
+            journal,
+            spec.clone(),
+            operations.clone(),
+            selected.recovery,
+            &canonical,
+            &native,
+        )?;
+        // A rejected file must never replace the operator's acknowledged pin.
+        // Only a successfully verified owner may promote a complete descendant.
+        self.opening_recovery = Some(owner.recovery());
+        Ok(owner)
+    }
+    fn opening_recovery(&self) -> Option<dfmcp_adapter::construction_plan::clock::Recovery> {
+        self.opening_recovery
+    }
+    fn connect(
+        &mut self,
+        selected: &super::clock::Config,
+        n: &OperationContext,
+        effect: bool,
+    ) -> Result<Self::Source> {
+        clock_boundary(self.control, self.config, effect)?;
+        if self.config.mode == BuildMode::Offline {
+            return Err(denied());
+        }
+        if effect {
+            n.authorize(
+                dfmcp_core::Capability::ControlClock,
+                dfmcp_core::RiskTier::Guarded,
+                &[],
+                None,
+            )?;
+        }
+        if self.config.clock.as_ref() != Some(selected) {
+            return Err(denied());
+        }
+        let token = required("DFMCP_BUILD_CLOCK_TOKEN", 256)?.into_bytes();
+        if token.len() < 32 {
+            return Err(denied());
+        }
+        let token_digest = dfmcp_core::Digest32::of_bytes(&token);
+        let mut nonce = n.session_id.get().to_be_bytes().to_vec();
+        nonce.extend_from_slice(&n.request_id.get().to_be_bytes());
+        let inner = dfmcp_adapter::bounded_run::rpc::RunRpcClient::connect(
+            selected.binding.endpoint(),
+            token,
+            nonce,
+            n,
+        )?;
+        // Exact incarnation is required by the coordinator before prepare or
+        // commit. Recovery cancellation may ask a newer incarnation for the
+        // original record; it cannot authorize pausing a replacement fortress.
+        if !inner.manifest().same_software(selected.binding.manifest())
+            || inner.manifest().generation < selected.binding.manifest().generation
+        {
+            return Err(denied());
+        }
+        clock_boundary(self.control, self.config, effect)?;
+        let source = ClockSource {
+            inner,
+            control: self.control,
+            config: self.config,
+            token_digest,
+        };
+        source.boundary(effect)?;
+        Ok(source)
+    }
+    fn sample(
+        &mut self,
+        definition: &dfmcp_adapter::construction_plan::origin::MonitorDefinition,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::construction_plan::LinkedSample> {
+        completion_sample(
+            self.config,
+            definition.origin().definition().binding(),
+            definition.goal(),
+            c,
+        )
+    }
+    fn checkpoint(&mut self, c: &OperationContext, effect: bool) -> Result<()> {
+        c.budget.validate()?;
+        if c.cancellation_requested {
+            return Err(error(
+                ErrorCode::CancellationRequested,
+                "clock request cancelled",
+            ));
+        }
+        clock_boundary(self.control, self.config, effect)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

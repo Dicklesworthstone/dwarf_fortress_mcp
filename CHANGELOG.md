@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-30 — Drive whole-batch furniture construction through MCP
+
+- Add finite clock preparation, separately confirmed commit, original-outcome
+  reconciliation, safety cancellation and exact-head history through the same
+  eleven tools used for furniture placement and completion.
+- Require the complete original batch, fixed construction monitor and an accepted
+  operations sample before eager activation of independent run/1.13 custody.
+- Keep game-time allowance zero by default, with separate operator authority,
+  complete receipt-bracket readiness and current checkpoint policy per new run.
+- Block completion behind unsettled clock history, withdraw unfinished stability
+  on contradictions or failed publication, and retain exact recovery and consumed
+  floors without restoring an unpause permit.
+- Recheck final clock custody after worker runtime callbacks, retain joined-worker
+  acknowledgement and pin the native connection credential at each call.
+- Pass all 54 actual-source handler/Agent Turn tests, including 16 new integration
+  and three helper groups, with unchanged compiler inputs. Complete async/native
+  wrapper bodies type-check with nonexecuted ambient stubs. Combined with the core,
+  147 focused tests pass; full runtime/native/live qualification remains unverified.
+- Document operator activation, complete workflow and independent-source limits;
+  preserve the broader mixed-action and verified checkpoint/restore gaps. Existing
+  source-bundle/static repository gates and an uncached pinned FastMCP dependency
+  continue to block full qualification.
+
 ## 2026-10-30 — Reviewed finite clock control for complete furnishing batches
 
 - Retain the whole original furniture goal, complete Placed receipt set and

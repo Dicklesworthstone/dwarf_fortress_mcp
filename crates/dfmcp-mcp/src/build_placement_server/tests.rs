@@ -217,6 +217,7 @@ fn config() -> Result<Config> {
     Ok(Config {
         completion_path: None,
         completion_only: false,
+        clock: None,
         batch_path: None,
         path: "/private/build/journal".into(),
         scope: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(63, 63, 7))?,
@@ -766,7 +767,7 @@ fn local_review_replay_rechecks_current_construction_grant() -> Result<()> {
 }
 
 #[test]
-fn immutable_uncertain_receipt_remains_indeterminate_in_agent_state() -> Result<()> {
+fn unchanged_uncertain_receipt_stays_indeterminate_after_one_query() -> Result<()> {
     let (mut state, _, game) = setup()?;
     let review = prepare(&mut state, &game)?;
     game.borrow_mut().indeterminate = true;
@@ -805,7 +806,18 @@ fn immutable_uncertain_receipt_remains_indeterminate_in_agent_state() -> Result<
         recovered["result"]["effect"]["summary"]["state"],
         "indeterminate"
     );
-    assert_eq!(game.borrow().calls.len(), before);
+    // Exact-source receipt reconciliation may ask once for the original proof.
+    // An unchanged uncertain receipt remains unresolved and never redispatches.
+    assert_eq!(game.borrow().calls.len(), before + 1);
+    assert_eq!(game.borrow().calls.last(), Some(&"query"));
+    assert_eq!(
+        game.borrow()
+            .calls
+            .iter()
+            .filter(|&&call| call == "commit")
+            .count(),
+        1
+    );
     Ok(())
 }
 
@@ -1046,3 +1058,5 @@ fn empty_local_journal_does_not_hide_native_global_preparation_fence() -> Result
     assert!(!game.borrow().calls.contains(&"prepare"));
     Ok(())
 }
+#[path = "clock_tests.rs"]
+mod clock_tests;

@@ -16,6 +16,12 @@ The same server also supports [complete furnishing plans](FURNITURE_BATCH_MCP.md
 with a separate durable parent, exact next-step selection, fresh review per
 placement and original-key recovery after restart.
 
+Once the complete batch has an original construction monitor and one accepted
+sample, optional [reviewed construction clock control](FURNITURE_CONSTRUCTION_CLOCK_MCP.md)
+can advance a finite interval under separate authority. Each interval requires a
+distinct review and complete current receipt-bracket readiness; only later
+ordinary completion samples can establish the whole-plan construction condition.
+
 ## Operator configuration
 
 Configuration belongs to the operator process. MCP callers cannot select a path,
@@ -29,12 +35,17 @@ endpoint, credential, protocol, protected region or checkpoint exception.
 | `DFMCP_BUILD_SCOPE` | Ordered cuboid `[min_x,min_y,min_z,max_x,max_y,max_z]`, coordinates 0..32767 |
 | `DFMCP_BUILD_JOURNAL` | Normalized absolute path in an existing owned `0700` directory |
 | `DFMCP_BUILD_BATCH` | Optional distinct normalized private parent path for one complete furnishing plan |
+| `DFMCP_BUILD_COMPLETION` | Optional distinct private file retaining the complete original construction goal |
+| `DFMCP_OPERATIONS_PAGED_TOKEN` | Independent operations/1.4 credential for complete furniture inventory and completion acquisition |
 | `DFMCP_BUILD_ENDPOINT` | Numeric IPv4 loopback endpoint; default `127.0.0.1:5000` |
 | `DFMCP_BUILD_TOKEN` | Native matching credential, 32..256 bytes; needed only for native calls |
 | `DFMCP_BUILD_ALLOW_PLACE` | Absent disables new placement; exact `1` enables consideration under all other checks |
 | `DFMCP_BUILD_CHECKPOINT_POLICY` | Default `required`; explicit `disposable-fortress-no-checkpoint` enables the development exception |
 | `DFMCP_BUILD_PROTECTED` | Optional array of at most 32 cuboids; default `[]` |
-| `DFMCP_BUILD_MODE` | `control` (default), `recover` or `offline` |
+| `DFMCP_BUILD_MODE` | `control` (default), `recover`, `offline`, `completion-recover` or `completion-offline` |
+| `DFMCP_BUILD_CLOCK_CONFIG` | Optional closed JSON selecting a distinct run journal, independently pinned run/1.13 source, and initialization or exact recovery |
+| `DFMCP_BUILD_CLOCK_TOKEN` | Independent run/1.13 credential, 32..256 bytes, needed for clock native calls |
+| `DFMCP_BUILD_ALLOW_CLOCK` | Absent disables clock effects; exact `1` permits consideration under retained and current clock authority |
 
 Every other `DFMCP_` name is rejected, including an empty production admission
 marker and the separate standalone native-client profile switch. The DFHack

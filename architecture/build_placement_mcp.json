@@ -26,12 +26,18 @@
       "DFMCP_BUILD_SITE_ID",
       "DFMCP_BUILD_SCOPE",
       "DFMCP_BUILD_JOURNAL",
+      "DFMCP_BUILD_BATCH",
+      "DFMCP_BUILD_COMPLETION",
+      "DFMCP_OPERATIONS_PAGED_TOKEN",
       "DFMCP_BUILD_ENDPOINT",
       "DFMCP_BUILD_TOKEN",
       "DFMCP_BUILD_ALLOW_PLACE",
       "DFMCP_BUILD_CHECKPOINT_POLICY",
       "DFMCP_BUILD_PROTECTED",
-      "DFMCP_BUILD_MODE"
+      "DFMCP_BUILD_MODE",
+      "DFMCP_BUILD_CLOCK_CONFIG",
+      "DFMCP_BUILD_CLOCK_TOKEN",
+      "DFMCP_BUILD_ALLOW_CLOCK"
     ],
     "opt_in_exact_value": "1",
     "unknown_dfmcp_names_refused": true,
@@ -39,7 +45,9 @@
     "modes": [
       "control",
       "recover",
-      "offline"
+      "offline",
+      "completion-recover",
+      "completion-offline"
     ],
     "default_mode": "control",
     "checkpoint_policies": [
@@ -48,7 +56,10 @@
     ],
     "default_checkpoint_policy": "required",
     "maximum_protected_regions": 32,
-    "client_selected_paths_or_credentials": false
+    "client_selected_paths_or_credentials": false,
+    "configured_custody_paths_must_be_distinct": true,
+    "completion_requires_original_batch": true,
+    "completion_only_modes_allow_clock": false
   },
   "selection": {
     "shape": [
@@ -92,7 +103,12 @@
       "records",
       "get",
       "selection",
-      "schema"
+      "schema",
+      "batch",
+      "allocation",
+      "completion",
+      "completion_start",
+      "construction_clock"
     ],
     "record_page_limit": [
       1,
@@ -101,7 +117,129 @@
     "pending_first": true,
     "continuation_binds_journal_head": true,
     "unknown_duplicate_or_null_fields_allowed": false,
-    "native_calls": 0
+    "native_calls": 0,
+    "allocation_views": [
+      "request",
+      "items"
+    ],
+    "allocation_default_view": "request",
+    "allocation_recomputes_selection": false,
+    "completion_start_preserves_full_original_placed_receipts": true,
+    "completion_start_fixes_absolute_deadline": true,
+    "construction_clock": {
+      "required": [
+        "monitor_id",
+        "head"
+      ],
+      "offset": [
+        0,
+        63
+      ],
+      "default_offset": 0,
+      "limit": [
+        1,
+        8
+      ],
+      "default_limit": 8,
+      "first_page_requires_exact_head": true
+    }
+  },
+  "construction_clock": {
+    "status": "implemented_unadmitted_development_only",
+    "adapter": "dfmcp_adapter::construction_plan::clock",
+    "operator_guide": "docs/FURNITURE_CONSTRUCTION_CLOCK_MCP.md",
+    "optional_operator_configuration": true,
+    "configuration_maximum_json_bytes": 8192,
+    "configuration_closed_fields": [
+      "path",
+      "initialize",
+      "source",
+      "recovery"
+    ],
+    "source_closed_fields": [
+      "endpoint",
+      "generation",
+      "df_version",
+      "dfhack_version"
+    ],
+    "recovery_required_when_not_initializing": [
+      "journal_id",
+      "head"
+    ],
+    "initialization_exclusive": true,
+    "existing_sampled_monitor_required_before_open": true,
+    "new_intent_inputs_with_clock_refused": true,
+    "clock_opened_eagerly_before_session_publication": true,
+    "lazy_initialization_during_sampling": false,
+    "source_protocols": {
+      "furniture": "1.19",
+      "operations": "1.4",
+      "run": "1.13"
+    },
+    "operations_source_pinned_by_accepted_original_sample": true,
+    "run_source_requires_original_endpoint_and_software": true,
+    "source_generations_independently_pinned": true,
+    "native_clock_authority_independent_of_named_fortress": true,
+    "retained_and_current_authority_required": true,
+    "plan_closed_fields": [
+      "monitor_id",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "plan_maximum_json_bytes": 2048,
+    "session_default_max_game_ticks": 0,
+    "session_maximum_game_ticks": 1200,
+    "requested_game_ticks": [
+      1,
+      1200
+    ],
+    "requested_wall_millis": [
+      1,
+      60000
+    ],
+    "original_max_gap_and_absolute_deadline_required": true,
+    "maximum_retained_run_intents": "min(64, original max_observations)",
+    "complete_original_receipt_bracket_at_prepare_and_commit": true,
+    "fresh_operations_capture_must_match_paused_run_tick": true,
+    "readiness_target_statuses": [
+      "pending",
+      "condition_met"
+    ],
+    "prospectively_satisfied_original_goal_refuses_run": true,
+    "readiness_publishes_positive_goal_sample": false,
+    "contradiction_and_failed_publication_withdraw_unfinished_stability": true,
+    "ordinary_sample_after_withdrawal_requires_durable_reset": true,
+    "separate_commit_scope": "clock",
+    "commit_requires_original_monitor_and_current_review_seal": true,
+    "maximum_unpause_attempts_per_original_key": 1,
+    "wait_scope": "clock",
+    "maximum_native_queries_per_wait": 1,
+    "wait_starts_new_interval": false,
+    "cancel_scope": "clock",
+    "safety_cancel_requires_current_and_retained_query_clock_authority": true,
+    "safety_cancel_requires_future_tick_budget": false,
+    "safety_cancel_requires_plan_observe_authority": false,
+    "retained_owner_reconciliation_requires_original_parent_monitor_custody": false,
+    "pending_unresolved_missing_or_unverified_clock_blocks_sampling": true,
+    "ordinary_close_refuses_unsettled_clock": true,
+    "explicit_recovery_release_settles_native_effect": false,
+    "complete_descendant_history_accepts_acknowledged_ancestor_head": true,
+    "rollback_replacement_and_torn_tail_refused": true,
+    "reopen_restores_review_permission": false,
+    "combined_reopen_requires_original_placement_parent_monitor_files": true,
+    "independent_clock_only_reopen": false,
+    "monitor_format_enforces_optional_clock_configuration_presence": false,
+    "final_exact_clock_replay_after_last_runtime_checkpoint": true,
+    "authority_floor_includes_decoded_later_rejected_capture": true,
+    "unjournaled_read_floors_durable_across_restart": false,
+    "automatic_interval_loop_or_polling": false,
+    "new_native_wire_generation": false,
+    "hard_real_time_or_exact_tick_guarantee": false,
+    "current_pause_proven": false,
+    "shared_process_identity_proven": false,
+    "construction_causality_proven": false,
+    "worker_reachability_proven": false,
+    "current_furniture_usability_proven": false
   },
   "response": {
     "agent_turn": "dfmcp.agent_turn/1",
@@ -121,7 +259,10 @@
     "placed_proves_completed_building": false,
     "typed_historical_native_insertion": true,
     "native_summary_separate_from_local_inventory": true,
-    "cached_evidence_requires_current_query": true
+    "cached_evidence_requires_current_query": true,
+    "clock_cached_evidence_requires_retained_and_current_independent_query": true,
+    "configured_clock_reference_survives_error_handoffs": true,
+    "clock_readiness_explicitly_historical": true
   },
   "runtime": {
     "owner": "inherited Asupersync blocking task with joined result",

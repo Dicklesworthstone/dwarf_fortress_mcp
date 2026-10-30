@@ -199,6 +199,23 @@ pub(super) fn packet(
             active["obligations"] = json!([active["construction_completion"].clone()]);
         }
     }
+    if let Some(clock) = result.get("construction_clock") {
+        active["scope"] = json!("original_furniture_batch_completion_and_clock");
+        active["construction_clock"] = json!({
+            "inventory_path":"result.construction_clock","monitor_id":clock["monitor_id"],
+            "recovery":clock["recovery"],"history_verified":clock["history_verified"],
+            "pending":clock["pending"],"unresolved":clock["unresolved"],
+            "active_run":clock["active_run"],"current_pause_proven":false,
+            "fresh_goal_sampling_permitted":clock["fresh_goal_sampling_permitted"]
+        });
+        if clock["history_verified"] != true
+            || clock["pending"] == true
+            || clock["unresolved"] == true
+        {
+            active["pending_absence_proven"] = json!(false);
+            active["inventory_verified"] = json!(false);
+        }
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" if result.get("completion").is_some() => AgentPhase::Verify,
@@ -248,6 +265,11 @@ pub(super) fn packet(
             "game_tick":completion["last_tick"],"source":completion["source"],
             "currently_verified":completion["inventory_verified"],"canonical_world_anchor":false}));
     }
+    if let Some(clock) = result.get("construction_clock") {
+        references.push(json!({"kind":"original_construction_clock_journal",
+            "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],
+            "currently_verified":clock["history_verified"],"canonical_world_anchor":false}));
+    }
     let mut builder=AgentTurnBuilder::new(op,phase).profile(if matches!(op,"fortress.plan"|"fortress.observe"){ObservationProfile::Tactical}else{ObservationProfile::Forensic})
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished","canonical_world_anchor_available":false})),None)
         .briefing(json!({"runtime":"unadmitted_build_placement_development","bridge_protocol":"1.19","runtime_admitted":false,
@@ -263,7 +285,7 @@ pub(super) fn packet(
     if let Some(c) = c {
         let mut budget = empty_budget();
         budget["admitted"] = json!({"max_wall_millis":c.budget.max_wall_millis,"max_bytes":c.budget.max_bytes,
-            "max_output_tokens":c.budget.max_output_tokens,"max_game_ticks":0,"max_actions":1});
+            "max_output_tokens":c.budget.max_output_tokens,"max_game_ticks":c.budget.max_game_ticks,"max_actions":1});
         budget["reserved_output_bytes"] = json!(OUTPUT_BYTES);
         budget["accounting"] = json!("conservative_byte_reservations_not_measured_tokens");
         builder=builder.session_id(c.session_id.to_string()).request_id(c.request_id.to_string()).budget(budget)
@@ -329,6 +351,76 @@ pub(super) fn packet(
     }
     if let Some(summary) = result.get("source_summary").filter(|v| !v.is_null()) {
         turn["briefing"]["native_source_summary"] = summary.clone();
+    }
+    if let Some(clock) = result.get("construction_clock") {
+        let id = clock["monitor_id"].clone();
+        let session = c.map(|c| c.session_id.to_string());
+        let seal = &clock["active_run"]["review_seal"];
+        let verified = clock["history_verified"] == true;
+        let pending = clock["pending"] == true || clock["unresolved"] == true;
+        turn["briefing"]["construction_clock"] = json!({
+            "history_verified":verified,"pending":pending,
+            "current_pause_proven":false,"goal_sample_published":false,
+            "separate_review_required":true,"source_has_named_fortress_identity":false});
+        let inspect = json!({"session_id":session,"query":json!({
+            "mode":"construction_clock","monitor_id":id,
+            "head":clock["recovery"]["head"],"limit":8}).to_string()});
+        let next = if verified && seal.is_string() {
+            recommendation(
+                "review-construction-clock",
+                "fortress.commit",
+                "Review the complete original construction goal and finite interval, then confirm this separate clock seal.",
+                "high",
+                "high",
+                "guarded",
+                "bounded_run_not_rollback",
+                true,
+                json!({"session_id":session,"scope":"clock","monitor_id":id,"review_seal":seal}),
+            )
+        } else if verified && pending {
+            recommendation(
+                "reconcile-construction-clock",
+                "fortress.wait",
+                "Reconcile the retained original interval before another run or completion sample.",
+                "high",
+                "high",
+                "read_only",
+                "not_applicable",
+                false,
+                json!({"session_id":session,"scope":"clock","monitor_id":id}),
+            )
+        } else if !verified {
+            recommendation(
+                "inspect-construction-clock",
+                "fortress.query",
+                "Verify the exact retained clock history before using any completion claim.",
+                "high",
+                "high",
+                "read_only",
+                "not_applicable",
+                false,
+                inspect,
+            )
+        } else {
+            recommendation(
+                "sample-complete-furniture-goal",
+                "fortress.observe",
+                "Acquire one separate receipt-linked sample of every original furnishing; the clock receipt proves no construction goal.",
+                "high",
+                "high",
+                "read_only",
+                "not_applicable",
+                false,
+                json!({"session_id":session,"selection":"completion"}),
+            )
+        };
+        turn["recommendations"] = json!([next]);
+        if pending {
+            turn["active_work"]["construction_clock"]["cancellation"] = json!({
+                "tool":"fortress.cancel","arguments":{"session_id":session,
+                    "scope":"clock","monitor_id":id},
+                "requires":"current separately retained clock authority"});
+        }
     }
     // No canonical world adapter exists for this protocol. A journal root or
     // native generation must never be invented as a canonical world anchor.

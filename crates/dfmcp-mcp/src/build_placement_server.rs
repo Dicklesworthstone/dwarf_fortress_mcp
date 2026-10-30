@@ -26,6 +26,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 mod allocation;
 mod batch;
+mod clock;
 mod completion;
 mod policy;
 mod presentation;
@@ -139,6 +140,17 @@ struct State<S, N> {
     pending_hint: Option<Value>,
     batch: Option<batch::Parent>,
     completion: Option<completion::Monitor>,
+    clock: Option<
+        dfmcp_adapter::construction_plan::clock::Clock<
+            dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+        >,
+    >,
+    clock_config: Option<clock::Config>,
+    clock_recovery: Option<dfmcp_adapter::construction_plan::clock::Recovery>,
+    clock_grants: Vec<CapabilityGrant>,
+    clock_verified: bool,
+    authority_tick: u64,
+    worker_acknowledgement: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     fn new(mut control: BuildSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
@@ -169,9 +181,18 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             pending_hint: None,
             batch: None,
             completion: None,
+            clock: None,
+            clock_config: config.clock.clone(),
+            clock_recovery: config.clock.as_ref().and_then(|clock| clock.recovery),
+            clock_grants: Vec::new(),
+            clock_verified: false,
+            authority_tick: current.anchor.tick.get(),
+            worker_acknowledgement: None,
         })
     }
     fn context(&mut self, write: bool, wall: Option<u64>) -> Result<OperationContext> {
+        self.withdraw_unacknowledged();
+        self.clock_verified = false;
         if let Some(monitor) = &mut self.completion {
             monitor.verified = false;
             monitor.store_verified = false;
@@ -185,7 +206,7 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
             self.id,
             RequestId::new(self.request),
             self.binding.fortress().fortress_id(),
-            self.control.high_tick().max(
+            self.control.high_tick().max(self.authority_tick).max(
                 self.completion
                     .as_ref()
                     .and_then(|m| m.store.progress().last_tick)
@@ -207,6 +228,30 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         self.review = None;
         self.control.abandon_preparation();
     }
+    fn abandon_all(&mut self) {
+        self.abandon();
+        if let Some(clock) = &mut self.clock {
+            clock.abandon_preparation();
+        }
+    }
+    fn withdraw_monitor(&mut self) {
+        if let Some(monitor) = &mut self.completion {
+            monitor.store.withdraw_unpublished();
+            monitor.verified = false;
+            monitor.store_verified = false;
+        }
+    }
+    fn withdraw_unacknowledged(&mut self) {
+        if self
+            .worker_acknowledgement
+            .take()
+            .is_some_and(|ack| !ack.load(Ordering::Acquire))
+        {
+            self.abandon_all();
+            self.withdraw_monitor();
+            self.clock_verified = false;
+        }
+    }
     fn seal(&self) -> Option<Digest32> {
         if self.control.has_preparation_connection() {
             self.review.as_ref().map(|v| v.seal)
@@ -220,6 +265,21 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         }
         if let Some(monitor) = &self.completion {
             result["completion"] = completion::display(monitor, verified && monitor.verified);
+            if clock::blocks_sampling(self) {
+                result["completion"]["sampled_condition_satisfied"] = json!(false);
+                result["completion"]["clock_history_blocks_sampling"] = json!(true);
+            }
+        }
+        if result.get("construction_clock").is_none() {
+            if let Some(clock) = &self.clock {
+                result["construction_clock"] = clock::reference(clock);
+                result["construction_clock"]["history_verified"] = json!(self.clock_verified);
+            } else if self.clock_config.is_some() || self.clock_recovery.is_some() {
+                result["construction_clock"] = json!({"history_verified":false,
+                    "configured":self.clock_config.is_some(),"pending":true,
+                    "recovery":self.clock_recovery.map(clock::recovery),
+                    "fresh_goal_sampling_permitted":false,"retry_commit_permitted":false});
+            }
         }
     }
     fn verify_batch(&mut self, c: &OperationContext, view: &BuildInventory) -> Result<()> {
@@ -231,12 +291,18 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
     fn disclosure_context(&self, c: &OperationContext) -> Result<OperationContext> {
         let mut current = c.clone();
         current.anchor.tick = GameTick(
-            current.anchor.tick.get().max(self.control.high_tick()).max(
-                self.completion
-                    .as_ref()
-                    .and_then(|m| m.store.progress().last_tick)
-                    .unwrap_or(0),
-            ),
+            current
+                .anchor
+                .tick
+                .get()
+                .max(self.control.high_tick())
+                .max(self.authority_tick)
+                .max(
+                    self.completion
+                        .as_ref()
+                        .and_then(|m| m.store.progress().last_tick)
+                        .unwrap_or(0),
+                ),
         );
         if current.session_id != self.id
             || current.anchor.fortress_id != self.binding.fortress().fortress_id()
@@ -249,9 +315,23 @@ impl<S: EffectJournalStorage, N: BuildSource> State<S, N> {
         // Cached evidence has the same disclosure boundary as a fresh journal
         // read. A failed custody or budget check cannot revive expired Query.
         current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        if self.clock_config.is_some() || self.clock.is_some() || self.clock_recovery.is_some() {
+            let native = clock::native_context(&current, &self.clock_grants)?;
+            if let Some(owner) = &self.clock {
+                owner.authorize_disclosure(&current, &native)?;
+            }
+        }
         Ok(current)
     }
-    fn failed(&self, op: &str, c: Option<&OperationContext>, e: &dfmcp_core::DfmcpError) -> String {
+    fn failed(
+        &mut self,
+        op: &str,
+        c: Option<&OperationContext>,
+        e: &dfmcp_core::DfmcpError,
+    ) -> String {
+        self.abandon_all();
+        self.withdraw_monitor();
+        self.clock_verified = false;
         let current = match c.map(|c| self.disclosure_context(c)) {
             Some(Ok(c)) => c,
             Some(Err(denied)) => return unbound(op, &denied),
@@ -346,6 +426,25 @@ fn grants(fortress: dfmcp_core::FortressId, mode: BuildMode, write: bool) -> Vec
     })
     .collect()
 }
+fn add_clock_grants(c: &mut OperationContext, config: &Config, enabled: bool) {
+    if config.clock.is_none() || config.mode != BuildMode::Control || !enabled {
+        return;
+    }
+    for capability in [Capability::Plan, Capability::ControlClock] {
+        if !c.grants.iter().any(|grant| grant.capability == capability) {
+            c.grants.push(CapabilityGrant {
+                capability,
+                scope: CapabilityScope {
+                    fortress_id: Some(config.fortress.fortress_id()),
+                    ..CapabilityScope::default()
+                },
+                max_risk: RiskTier::Guarded,
+                expires_at_tick: None,
+                remaining_uses: None,
+            });
+        }
+    }
+}
 fn context(
     id: SessionId,
     request_id: RequestId,
@@ -377,6 +476,7 @@ impl Work {
     fn new(c: &OperationContext, started: Instant) -> Result<Self> {
         c.budget.validate()?;
         if c.budget.max_wall_millis > 60000
+            || c.budget.max_game_ticks > 1200
             || c.budget.max_bytes > MAX_WORK_BYTES
             || c.budget.max_output_tokens > 65536
             || u64::from(c.budget.max_output_tokens) * 4 < OUTPUT_BYTES
@@ -444,6 +544,12 @@ enum Query {
         view: allocation::View,
     },
     Completion {},
+    ConstructionClock {
+        monitor_id: String,
+        head: String,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    },
     CompletionStart {
         deadline: u64,
         interval: Option<u32>,
@@ -504,6 +610,23 @@ impl Query {
             Self::Selection { witness } => {
                 digest(witness)?;
             }
+            Self::ConstructionClock {
+                monitor_id,
+                head,
+                offset,
+                limit,
+            } => {
+                if digest(monitor_id)? == Digest32::ZERO
+                    || digest(head)? == Digest32::ZERO
+                    || offset.unwrap_or(0) >= 64
+                    || !(1..=8).contains(&limit.unwrap_or(8))
+                {
+                    return Err(error(
+                        ErrorCode::InvalidRequest,
+                        "invalid construction clock page",
+                    ));
+                }
+            }
             Self::Schema {}
             | Self::Batch {}
             | Self::Allocation { .. }
@@ -531,6 +654,7 @@ enum Action {
     Inventory,
     StopBatch,
     Completion(completion::Action),
+    Clock(clock::Action),
     Denied,
 }
 fn schema() -> Value {
@@ -538,6 +662,7 @@ fn schema() -> Value {
     "modes":{"records":{"limit":"optional integer 1..8","offset":"optional integer 0..256; head required when nonzero","head":"optional lowercase SHA-256 exact journal head"},
         "get":{"idempotency_key":"1..128 ASCII letters/digits/dot/underscore/hyphen","plan_digest":"lowercase SHA-256"},"selection":{"witness":"lowercase SHA-256"},"batch":{},"completion":{},
         "allocation":{"view":"optional request (default) or items; retained original evidence only"},
+        "construction_clock":{"monitor_id":"required original completion monitor SHA-256","head":"required exact clock journal head SHA-256","offset":"optional 0..63","limit":"optional 1..8"},
         "completion_start":{"deadline":"required absolute game tick","interval":"optional 1..403200; default 1","stable_samples":"optional 2..64; default 2","stable_span":"optional 1..4032000; default 1","max_gap":"optional interval..4032000; default 1200","max_observations":"optional stable_samples..512; default 512"},"schema":{}},
     "native_calls":0,"null_fields_allowed":false,"duplicate_fields_allowed":false})
 }
@@ -822,11 +947,9 @@ where
                 |b, c, d| connect(selection, true, b, c, d),
                 &mut guard,
             )?;
-            Ok(
-                json!({"ok":true,"effect":presentation::record(&entry),
+            Ok(json!({"ok":true,"effect":presentation::record(&entry),
                     "receipt_reconciled":receipt_reconciliation && !entry.unresolved(),
-                    "commit_retried":false,"building_undone":false}),
-            )
+                    "commit_retried":false,"building_undone":false}))
         }
         Action::Explain(key, plan) => {
             let entry = state.control.get(&key, plan, &work.take(c, LOCAL_BYTES)?)?;
@@ -939,7 +1062,10 @@ where
             json!({"ok":true,"journal":inventory(before),"native_calls":0,"live_game_health_checked":false}),
         ),
         Action::Completion(_)
-        | Action::Query(Query::Completion {} | Query::CompletionStart { .. }) => Err(error(
+        | Action::Clock(_)
+        | Action::Query(
+            Query::Completion {} | Query::CompletionStart { .. } | Query::ConstructionClock { .. },
+        ) => Err(error(
             ErrorCode::InvalidRequest,
             "completion requires the original private batch session",
         )),
@@ -965,6 +1091,9 @@ where
     G: BuildGuard,
     F: FnOnce(BuildSelection, bool, &BuildBinding, &OperationContext, Duration) -> Result<N>,
 {
+    if let Some(clock) = &mut state.clock {
+        clock.abandon_preparation();
+    }
     if op == "fortress.observe" {
         state.abandon();
     }
@@ -1094,6 +1223,19 @@ where
             }
         }
     }
+    if state.clock_config.is_some() || state.clock.is_some() {
+        let checked = work
+            .take(&display, clock::VIEW_BYTES)
+            .and_then(|context| clock::inspect(state, &context));
+        if let Err(e) = checked {
+            state.withdraw_monitor();
+            result["clock_inventory_unverified"] = json!(true);
+            if op == "fortress.doctor" {
+                result["ok"] = json!(false);
+                result["error"] = failure(&e)["error"].clone();
+            }
+        }
+    }
     state.attach_batch(
         &mut result,
         verified.as_ref().or(state.historical.as_ref()),
@@ -1135,6 +1277,32 @@ fn lock() -> Result<MutexGuard<'static, Option<Entry>>> {
             "furniture session poisoned; restart for recovery",
         )),
     }
+}
+/// The caller reserves this replay before any effect. No runtime callback may
+/// follow it inside the worker and still publish the previously rendered view.
+fn verify_clock_handoff<S: EffectJournalStorage, N: BuildSource>(
+    state: &mut State<S, N>,
+    c: &OperationContext,
+    started: Instant,
+    expected: Option<dfmcp_adapter::construction_plan::clock::Recovery>,
+) -> Result<()> {
+    let mut current = state.disclosure_context(c)?;
+    current.budget.max_bytes = clock::VIEW_BYTES;
+    current.budget.max_wall_millis = c
+        .budget
+        .max_wall_millis
+        .checked_sub(started.elapsed().as_millis().try_into().unwrap_or(u64::MAX))
+        .filter(|remaining| *remaining > 0)
+        .ok_or_else(exhausted)?;
+    clock::inspect(state, &current)?;
+    if state.clock_recovery != expected {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "construction clock changed at final response publication",
+        ));
+    }
+    state.disclosure_context(&current)?;
+    Ok(())
 }
 fn session_id(raw: &str) -> Result<SessionId> {
     if raw.len() != 32
@@ -1184,17 +1352,40 @@ async fn with_session(
                 }
                 Entry::Placement { state, config } => (state, config),
             };
-            let c = match state.context(runtime::enabled().unwrap_or(false), wall) {
+            let placement_enabled = runtime::enabled().unwrap_or(false);
+            let clock_enabled = runtime::clock_enabled().unwrap_or(false);
+            let mut c = match state.context(placement_enabled || clock_enabled, wall) {
                 Ok(c) => c,
                 Err(e) => return Ok(state.failed(op, None, &e)),
             };
+            c.grants.retain(|grant| {
+                (placement_enabled || grant.capability != Capability::Construct)
+                    && (clock_enabled || grant.capability != Capability::ControlClock)
+            });
+            state.worker_acknowledgement = Some(control.acknowledgement());
             if let Err(e) = runtime::boundary(&control, config, false) {
                 state.abandon();
                 return Ok(state.failed(op, Some(&c), &e));
             }
             let config = config.clone();
             let action = match action {
+                Ok(Action::Clock(action)) => {
+                    let mut io = runtime::ClockIo {
+                        control: &control,
+                        config: &config,
+                        opening_recovery: state.clock_recovery,
+                    };
+                    return Ok(clock::run_action(
+                        state,
+                        c,
+                        op,
+                        action,
+                        control.started,
+                        &mut io,
+                    ));
+                }
                 Ok(Action::Completion(action)) => {
+                    state.abandon_all();
                     return Ok(completion::run(state, &config, &control, c, op, action));
                 }
                 other => other,
@@ -1203,6 +1394,13 @@ async fn with_session(
                 control: &control,
                 config: &config,
             };
+            let clock_handoff = state.clock_config.is_some() || state.clock.is_some();
+            if clock_handoff {
+                c.budget.max_bytes = match c.budget.max_bytes.checked_sub(clock::VIEW_BYTES) {
+                    Some(bytes) => bytes,
+                    None => return Ok(state.failed(op, Some(&c), &exhausted())),
+                };
+            }
             let rendered = run_action(
                 state,
                 c.clone(),
@@ -1221,9 +1419,15 @@ async fn with_session(
                     )
                 },
             );
+            let clock_recovery = state.clock_recovery;
             if let Err(e) = runtime::boundary(&control, &config, false) {
                 state.abandon();
                 return Ok(state.failed(op, Some(&c), &e));
+            }
+            if clock_handoff {
+                if let Err(e) = verify_clock_handoff(state, &c, control.started, clock_recovery) {
+                    return Ok(state.failed(op, Some(&c), &e));
+                }
             }
             Ok(rendered)
         })();
@@ -1242,7 +1446,7 @@ async fn with_session(
 
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without any intent input or native bootstrap. No client paths or policies. Opening never prepares or places furniture."
+    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Opening never prepares, places or advances time."
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,
@@ -1251,6 +1455,7 @@ pub async fn fortress_open_session(
     max_output_tokens: Option<u32>,
     furniture_plan: Option<String>,
     furniture_request: Option<String>,
+    max_game_ticks: Option<u64>,
 ) -> String {
     runtime::owned("fortress.open_session", move |control| {
         let result = (|| {
@@ -1259,6 +1464,10 @@ pub async fn fortress_open_session(
             // Parse and bound complete intent before native contact or storage.
             if usize::from(selection.is_some()) + usize::from(furniture_plan.is_some()) + usize::from(furniture_request.is_some()) > 1 {
                 return Err(error(ErrorCode::InvalidRequest, "furniture intent inputs are mutually exclusive"));
+            }
+            if config.clock.is_some() && (selection.is_some() || furniture_plan.is_some() || furniture_request.is_some()) {
+                return Err(error(ErrorCode::InvalidRequest,
+                    "construction clock opens only retained custody after its first accepted completion sample"));
             }
             let mut plan = furniture_plan.as_deref().map(|s|FurniturePlan::decode(s.as_bytes())).transpose()?;
             let requested = furniture_request.as_deref().map(|s|FurnitureRequest::decode(s.as_bytes())).transpose()?;
@@ -1295,13 +1504,22 @@ pub async fn fortress_open_session(
             };
             let budget = WorkBudget { max_wall_millis:max_wall_millis.unwrap_or(10000),
                 max_bytes:max_bytes.unwrap_or(MAX_WORK_BYTES),max_output_tokens:max_output_tokens.unwrap_or(16384),
-                max_entities:73729,max_actions:1,max_game_ticks:0 };
+                max_entities:73729,max_actions:1,max_game_ticks:max_game_ticks.unwrap_or(0) };
+            if budget.max_game_ticks > 1200 || (budget.max_game_ticks > 0
+                && (config.mode != BuildMode::Control || config.clock.is_none() || !runtime::clock_enabled()?)) {
+                return Err(error(ErrorCode::CapabilityDenied,"game ticks require explicit construction clock control"));
+            }
             let mut locked = lock()?;
             if locked.is_some() { return Err(error(ErrorCode::Conflict, "release the current furniture session first")); }
             let seq = NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
             let id = SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
             let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
+            add_clock_grants(&mut c, &config, runtime::clock_enabled()?);
             let mut work = Work::new(&c,control.started)?;
+            if config.clock.is_some() {
+                // Reserve the final replay before bootstrap or any storage work.
+                work.take(&c, clock::VIEW_BYTES)?;
+            }
             if config.completion_only {
                 if selection.is_some() || plan.is_some() || requested.is_some() {
                     return Err(error(ErrorCode::InvalidRequest, "completion recovery reopens only its retained original monitor"));
@@ -1417,19 +1635,63 @@ pub async fn fortress_open_session(
             let mut state = State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
             state.budget = budget;
             state.grants = c.grants.clone();
+            state.clock_grants = runtime::clock_grants(config.mode == BuildMode::Control
+                && config.clock.is_some() && runtime::clock_enabled()?);
             state.batch = retained_parent;
             c = state.disclosure_context(&c)?;
             let view = state.control.inventory(&work.view(&c)?)?;
             state.verify_batch(&work.take(&c,batch::GUARD_BYTES)?,&view)?;
             completion::reopen(&mut state, &config, &c, &mut work, &view)?;
+            if let Some(selected) = config.clock.as_ref() {
+                use clock::ClockIo as _;
+                let monitor = state.completion.as_ref().ok_or_else(|| error(ErrorCode::InvalidRequest,
+                    "enable the construction clock only after an original completion monitor has its first accepted sample"))?;
+                let definition = monitor.store.definition().clone();
+                let operations = monitor.store.progress().source.as_ref()
+                    .ok_or_else(|| error(ErrorCode::InvalidRequest,
+                        "construction clock requires one accepted original completion sample"))?.operations.clone();
+                c = state.disclosure_context(&c)?;
+                let opening = work.take(&c, clock::OPEN_BYTES)?;
+                let native = clock::native_context(&opening, &state.clock_grants)?;
+                let mut io = runtime::ClockIo { control: &control, config: &config,
+                    opening_recovery: selected.recovery };
+                let opened = io.open(selected, &definition, &operations, &opening, &native);
+                state.clock_recovery = io.opening_recovery();
+                let owner = match opened {
+                    Ok(owner) => owner,
+                    Err(e) => return Ok(state.failed("fortress.open_session",Some(&c),&e)),
+                };
+                let agrees = owner.definition().canonical_bytes() == definition.canonical_bytes() && owner.operations() == &operations
+                    && owner.binding() == &selected.binding;
+                state.clock_recovery = Some(owner.recovery());
+                state.authority_tick = state.authority_tick.max(owner.high_tick());
+                state.clock = Some(owner);
+                if !agrees { return Ok(state.failed("fortress.open_session",Some(&c),
+                    &error(ErrorCode::StaleAnchor,"opened construction clock differs from configured origin"))); }
+                let checked = work.take(&c, clock::VIEW_BYTES)
+                    .and_then(|current| clock::inspect(&mut state, &current));
+                if let Err(e) = checked {
+                    return Ok(state.failed("fortress.open_session",Some(&c),&e));
+                }
+            }
+            state.worker_acknowledgement = Some(control.acknowledgement());
             let mut result = json!({"ok":true,"session_opened":true,"session_id":id.to_string(),"mode":mode_name(config.mode),"journal":inventory(&view),
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),"planning_observation_retained":false,
                 "native_preparation_dispatched":false,"game_mutation_dispatched":false});
             state.attach_batch(&mut result,Some(&view),true);
             let output = packet("fortress.open_session",result,Some(&c),Some(&state.binding),Some(&view),None,Some(&state.policy),None,None);
-            if output.len() as u64>OUTPUT_BYTES { return Err(exhausted()); }
-            work.current(&c)?;
-            runtime::boundary(&control,&config,importing)?;
+            if output.len() as u64>OUTPUT_BYTES {
+                return Ok(state.failed("fortress.open_session",Some(&c),&exhausted()));
+            }
+            if let Err(e) = work.current(&c).and_then(|_| runtime::boundary(&control,&config,importing)) {
+                return Ok(state.failed("fortress.open_session",Some(&c),&e));
+            }
+            if config.clock.is_some() {
+                let expected = state.clock_recovery;
+                if let Err(e) = verify_clock_handoff(&mut state, &c, control.started, expected) {
+                    return Ok(state.failed("fortress.open_session",Some(&c),&e));
+                }
+            }
             *locked = Some(Entry::Placement{state,config});
             Ok(output)
         })();
@@ -1445,7 +1707,7 @@ fn mode_name(mode: BuildMode) -> &'static str {
 }
 #[tool(
     name = "fortress.observe",
-    description = "Capture an exact furniture selection, next for the original batch step, or completion for one query-only whole-plan construction sample. Completion brackets all original receipts around one complete operations capture and durably records progress. Observation abandons local placement permission, never pending work."
+    description = "Capture an exact furniture selection, next for the original batch step, or completion for one query-only whole-plan construction sample. Completion brackets all original receipts around one complete operations capture and durably records progress. Observation abandons local placement and clock review permissions, never pending work. Configured unresolved clock work prevents fresh completion samples."
 )]
 pub async fn fortress_observe(session_id: String, selection: String) -> String {
     with_session(
@@ -1464,43 +1726,75 @@ pub async fn fortress_observe(session_id: String, selection: String) -> String {
 }
 #[tool(
     name = "fortress.plan",
-    description = "Prepare one furniture placement from this session's exact observation witness under current scope, lease, protected regions and checkpoint policy. A batch requires its returned original step key; review also binds the complete parent plan and prepared journal head. Returns native plan digest and review seal. Preparation inserts no building."
+    description = "Prepare one furniture placement from this session's exact observation witness under current scope, lease, protected regions and checkpoint policy. A batch requires its returned original step key; review also binds the complete parent plan and prepared journal head. Alternatively supply only clock JSON {monitor_id,game_ticks,wall_millis} to prepare a finite whole-batch clock interval after fresh complete receipt-bracket readiness. Returns a separately confirmable review seal. Preparation never places a building or unpauses the game."
 )]
 pub async fn fortress_plan(
     session_id: String,
-    idempotency_key: String,
-    observation_witness: String,
+    idempotency_key: Option<String>,
+    observation_witness: Option<String>,
+    clock: Option<String>,
 ) -> String {
-    let action = key(&idempotency_key)
-        .and_then(|_| digest(&observation_witness))
-        .map(|witness| Action::Plan {
-            key: idempotency_key,
-            witness,
-        });
+    let action = match (idempotency_key, observation_witness, clock) {
+        (Some(key_value), Some(witness), None) => key(&key_value)
+            .and_then(|_| digest(&witness))
+            .map(|witness| Action::Plan {
+                key: key_value,
+                witness,
+            }),
+        (None, None, Some(raw)) => clock::Request::parse(&raw)
+            .map(|request| Action::Clock(clock::Action::Prepare(request))),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "choose one exact placement or one complete construction clock request",
+        )),
+    };
     with_session(session_id, "fortress.plan", None, action).await
 }
+
 #[tool(
     name = "fortress.commit",
-    description = "Confirm exact plan digest and review seal for one native placement attempt on the original preparation connection. Current policy and complete capture are revalidated after dispatch state is durable. Uncertainty requires original-key recovery. Placed proves historical stage-zero construction-job registration, not building completion or usability."
+    description = "Confirm exact plan digest and review seal for one native placement attempt on the original preparation connection. Current policy and complete capture are revalidated after dispatch state is durable. scope=clock instead requires the original monitor_id and its separate review_seal, with no placement key/digest; fresh whole-batch readiness precedes one finite unpause attempt. Uncertainty requires original-outcome recovery. Placement and clock receipts do not prove completed construction."
 )]
 pub async fn fortress_commit(
     session_id: String,
-    idempotency_key: String,
-    plan_digest: String,
+    idempotency_key: Option<String>,
+    plan_digest: Option<String>,
     review_seal: String,
+    scope: Option<String>,
+    monitor_id: Option<String>,
 ) -> String {
-    let action = key(&idempotency_key)
-        .and_then(|_| Ok((digest(&plan_digest)?, digest(&review_seal)?)))
-        .map(|(plan, seal)| Action::Commit {
-            key: idempotency_key,
-            plan,
-            seal,
-        });
+    let action = (|| {
+        let seal = digest(&review_seal)?;
+        match (
+            scope.as_deref().unwrap_or("effect"),
+            idempotency_key,
+            plan_digest,
+            monitor_id,
+        ) {
+            ("effect", Some(key_value), Some(plan), None) => {
+                key(&key_value)?;
+                Ok(Action::Commit {
+                    key: key_value,
+                    plan: digest(&plan)?,
+                    seal,
+                })
+            }
+            ("clock", None, None, Some(id)) => Ok(Action::Clock(clock::Action::Commit {
+                id: digest(&id)?,
+                seal,
+            })),
+            _ => Err(error(
+                ErrorCode::InvalidRequest,
+                "commit scope and review identity disagree",
+            )),
+        }
+    })();
     with_session(session_id, "fortress.commit", None, action).await
 }
+
 #[tool(
     name = "fortress.query",
-    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. No native calls or renewed placement permission."
+    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation/construction_clock. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. construction_clock requires monitor_id and exact head; offset and limit page original run history. No native calls or renewed commit permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1513,6 +1807,17 @@ pub async fn fortress_query(session_id: String, query: String) -> String {
                 plan_digest,
             } => Ok(Action::Explain(idempotency_key, digest(&plan_digest)?)),
             Query::Completion {} => Ok(Action::Completion(completion::Action::Inspect)),
+            Query::ConstructionClock {
+                monitor_id,
+                head,
+                offset,
+                limit,
+            } => Ok(Action::Clock(clock::Action::Inspect {
+                id: digest(&monitor_id)?,
+                head: digest(&head)?,
+                offset: offset.unwrap_or(0),
+                limit: limit.unwrap_or(8),
+            })),
             Query::CompletionStart {
                 deadline,
                 interval,
@@ -1545,24 +1850,36 @@ fn effect_action(
 }
 #[tool(
     name = "fortress.wait",
-    description = "Query the original furniture outcome at most once and synchronize validated evidence. Terminal retained records and absorbing indeterminate receipts return locally. No commit retry, timer, clock advancement or building-completion claim. Querying clears local commit permission."
+    description = "Reconcile one original outcome and synchronize validated evidence. Default scope=effect uses the original furniture key/digest; scope=clock uses only monitor_id and queries its unresolved run at most once. Terminal history returns locally. No commit retry, new run, timer or construction-completion claim. Querying clears local commit permission."
 )]
 pub async fn fortress_wait(
     session_id: String,
-    idempotency_key: String,
-    plan_digest: String,
+    idempotency_key: Option<String>,
+    plan_digest: Option<String>,
     max_wall_millis: Option<u64>,
+    scope: Option<String>,
+    monitor_id: Option<String>,
 ) -> String {
-    with_session(
-        session_id,
-        "fortress.wait",
-        max_wall_millis,
-        effect_action(idempotency_key, plan_digest, |k, p| {
-            Action::Recover(k, p, false)
-        }),
-    )
-    .await
+    let action = match (
+        scope.as_deref().unwrap_or("effect"),
+        idempotency_key,
+        plan_digest,
+        monitor_id,
+    ) {
+        ("effect", Some(k), Some(p), None) => {
+            effect_action(k, p, |k, p| Action::Recover(k, p, false))
+        }
+        ("clock", None, None, Some(id)) => {
+            digest(&id).map(|id| Action::Clock(clock::Action::Wait(id)))
+        }
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "wait scope and original identity disagree",
+        )),
+    };
+    with_session(session_id, "fortress.wait", max_wall_millis, action).await
 }
+
 #[tool(
     name = "fortress.explain",
     description = "Inspect the exact retained furniture plan, before-capture and native receipt as historical evidence. Offline operation; no new observation and no mutation."
@@ -1599,13 +1916,20 @@ async fn close(raw: String, release: bool) -> String {
                 Entry::Placement { state, config } => (state, config),
             };
             let c = state.context(false, None)?;
+            state.abandon_all();
             let view = if release {
                 None
             } else {
                 if let Err(e) = runtime::boundary(&control, config, false) {
                     return Ok(state.failed("fortress.cancel", Some(&c), &e));
                 }
-                let work = Work::new(&c, control.started)?;
+                let mut work = Work::new(&c, control.started)?;
+                if let Some(view) = clock::inspect(state, &work.take(&c, clock::VIEW_BYTES)?)?
+                    && (view.pending || view.unresolved) {
+                    return Ok(state.failed("fortress.cancel",Some(&c),
+                        &error(ErrorCode::EffectIndeterminate,
+                            "unsettled construction clock requires exact recovery or explicit release")));
+                }
                 Some(state.control.inventory(&work.view(&c)?)?)
             };
             if !release && view.as_ref().is_some_and(|v| v.pending().is_some()) {
@@ -1635,7 +1959,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=session releases custody; release_for_recovery preserves unresolved identities."
+    description = "scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=clock with monitor_id retires the original preparation or requests its native safety pause under current clock authority, even after future-tick budgets expire. scope=session releases custody; release_for_recovery preserves unresolved identities."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -1643,14 +1967,15 @@ pub async fn fortress_cancel(
     idempotency_key: Option<String>,
     plan_digest: Option<String>,
     release_for_recovery: Option<bool>,
+    monitor_id: Option<String>,
 ) -> String {
     let release = release_for_recovery.unwrap_or(false);
-    match (scope.as_str(), idempotency_key, plan_digest) {
-        ("session", None, None) => close(session_id, release).await,
-        ("batch", None, None) if !release => {
+    match (scope.as_str(), idempotency_key, plan_digest, monitor_id) {
+        ("session", None, None, None) => close(session_id, release).await,
+        ("batch", None, None, None) if !release => {
             with_session(session_id, "fortress.cancel", None, Ok(Action::StopBatch)).await
         }
-        ("completion", None, None) if !release => {
+        ("completion", None, None, None) if !release => {
             with_session(
                 session_id,
                 "fortress.cancel",
@@ -1659,7 +1984,16 @@ pub async fn fortress_cancel(
             )
             .await
         }
-        ("effect", Some(k), Some(p)) if !release => {
+        ("clock", None, None, Some(id)) if !release => {
+            with_session(
+                session_id,
+                "fortress.cancel",
+                None,
+                digest(&id).map(|id| Action::Clock(clock::Action::Cancel(id))),
+            )
+            .await
+        }
+        ("effect", Some(k), Some(p), None) if !release => {
             with_session(
                 session_id,
                 "fortress.cancel",
@@ -1711,7 +2045,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-build-placement-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, use open_session furniture_request (dfmcp.furniture-request/1 JSON) to allocate all requested slots from one fresh operations/1.4 capture, or import an exact furniture_plan (dfmcp.furniture-plan/1 JSON). A shortage creates no session or partial batch. Inspect query mode batch and observe selection next. Query mode allocation with view request or items inspects the immutable original constraints and selection. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits all intent inputs, performs no reallocation, and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration. Once every original step is Placed, completion_start fixes a whole-plan goal, observe selection completion acquires one sample, and query completion or local cancel inspects or stops the monitor. No canonical world anchor or global controller fence. No arbitrary command, clock advancement, checkpoint or restore.").build();
+        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, use open_session furniture_request (dfmcp.furniture-request/1 JSON) to allocate all requested slots from one fresh operations/1.4 capture, or import an exact furniture_plan (dfmcp.furniture-plan/1 JSON). A shortage creates no session or partial batch. Inspect query mode batch and observe selection next. Query mode allocation with view request or items inspects the immutable original constraints and selection. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits all intent inputs, performs no reallocation, and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration. Once every original step is Placed, completion_start fixes a whole-plan goal, observe selection completion acquires one sample, and query completion or local cancel inspects or stops the monitor. Optional operator construction-clock custody requires one accepted original completion sample before activation. Reopen with an explicit max_game_ticks allowance, plan with clock JSON, separately review commit(scope=clock,monitor_id,review_seal), then wait(scope=clock,monitor_id) for one reconciliation. Unsettled clock history blocks completion samples; readiness never counts as positive construction progress. cancel(scope=clock,monitor_id) requests original safety cancellation; query construction_clock requires its exact head. Preserve clock recovery across restart. No canonical world anchor, shared process identity, global controller fence, arbitrary command, verified checkpoint or restore.").build();
     crate::run_modern_stdio(server);
 }
 #[cfg(test)]

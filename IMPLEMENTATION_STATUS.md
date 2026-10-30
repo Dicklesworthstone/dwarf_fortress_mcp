@@ -44,6 +44,65 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-furnishing-batch clock control through MCP (2026-10-30)
+
+The furniture development server now exposes the complete original construction
+clock through its existing eleven tools. `plan(clock=...)` prepares an explicitly
+finite interval; `commit(scope="clock", monitor_id, review_seal)` separately
+confirms it; `wait(scope="clock")` reconciles one original outcome;
+`cancel(scope="clock")` requests original safety cancellation; and query mode
+`construction_clock` verifies bounded history against the exact supplied head.
+Game ticks default to zero and require independent operator opt-in and current
+clock authority. Placement keys and witnesses cannot be mixed into clock requests.
+
+Activation requires an existing complete original batch and construction monitor
+with at least one accepted ordinary sample. The operator closes that session and
+reopens with a fourth distinct private run file and independent source/recovery
+configuration. Clock custody is opened eagerly; no sample lazily initializes it.
+Fresh original receipt brackets and source/monitor checks guard both durable
+native boundaries. Pending, unresolved, missing or unverified configured clock
+history blocks fresh completion. Contradictory readiness, rejected publication
+and unacknowledged worker results withdraw unfinished monitor stability without
+adding positive samples or renewing its temporal policy.
+
+The complete Agent Turn includes original batch/monitor/run identities, separate
+review instructions, exact recovery, bounded history and safety-cancel arguments.
+Original and native Query authority apply even to cached handoffs. Every operation
+prepays complete work, narrows one wall deadline, and retains consumed clocks
+through later rejection. Final exact clock replay occurs after the last worker
+runtime callback at opening, clock actions, generic handoff and completion
+publication. The retained native connection also rechecks its credential digest
+before each call. Outer joined-worker acknowledgement protects the next request;
+it does not prove client/network delivery.
+
+All 54 focused actual-source handler/Agent Turn tests pass, including 16 new
+whole-batch clock integration groups and three strict helper groups. Together
+with the 93 adapter tests for the core increment, 147 focused tests pass. The executable component
+view retains the generic handlers, complete clock helper, projections, private
+journals and actual core crates; it excludes FastMCP transport, public async and
+native effect shells. A separate compile-only view retains the complete public
+async/native wrapper bodies using nonexecuted ambient runtime stubs. Its type
+check passes. All 414 handler compiler inputs and 280 async-view inputs remain
+unchanged during final checks; changed Rust files pass formatting. These results
+do not execute the excluded runtime or native game paths.
+
+Repository-wide `verify.sh` passes its first four checks and
+remains blocked by unchanged source-bundle documentation requiring an exact clean
+git commit. `qualify_local.sh` stops at static contracts; after correcting the
+three findings introduced by new test helpers, the standalone validator reports
+76 remaining findings across 62 files, all byte-identical to the starting main
+revision. The locked/offline full MCP build cannot resolve the uncached pinned
+`fastmcp-core` Git revision `180a7c88890705217bb8e202d19555adabf24187`.
+Full production FastMCP/ambient runtime, native/live qualification and compatibility
+admission remain unverified. The complete combined restart still
+needs the original parent, placement and monitor files; no furniture clock-only
+recovery mode is added. After successful opening, original-file loss does not
+strand reconciliation or safety cancellation through intact clock custody.
+Retain the clock configuration and exact recovery pin across restarts: omitting
+it cannot establish that no earlier run exists. See the
+[operator workflow](docs/FURNITURE_CONSTRUCTION_CLOCK_MCP.md). Broader mixed-action
+execution and verified game checkpoint/restore remain incomplete.
+
 ### Complete furnishing-batch finite clock core (2026-10-30)
 
 `construction_plan::clock` binds an independently pinned run/1.13 journal to the
