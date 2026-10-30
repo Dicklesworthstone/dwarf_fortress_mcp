@@ -54,7 +54,7 @@ pub(super) enum Event {
         tick: GameTick,
         interrupted: bool,
     },
-    Captured(LiveSpatialCitizenObservation),
+    Captured(Box<LiveSpatialCitizenObservation>),
     Published {
         fingerprint: Digest32,
         receipt: DigEffect,
@@ -154,7 +154,7 @@ impl Event {
                     dfhack,
                 )
                 .map_err(|_| custody())?;
-                Self::Captured(sample)
+                Self::Captured(Box::new(sample))
             }
             2 => {
                 let fingerprint = Digest32::from_bytes(r.array()?);

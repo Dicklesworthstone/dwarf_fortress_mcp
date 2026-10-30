@@ -54,10 +54,10 @@ pub(super) enum Event {
         tick: GameTick,
         interrupted: bool,
     },
-    Captured(LinkedSample),
+    Captured(Box<LinkedSample>),
     Published {
         fingerprint: Digest32,
-        receipt: BuildRecord,
+        receipt: Box<BuildRecord>,
         dispatch_started: bool,
         cancel_requested: bool,
     },
@@ -144,7 +144,7 @@ impl Event {
             1 => {
                 let sample = LinkedSample::decode(r.0).map_err(|_| custody())?;
                 r.0 = &[];
-                Self::Captured(sample)
+                Self::Captured(Box::new(sample))
             }
             2 => {
                 let fingerprint = Digest32::from_bytes(r.array()?);
@@ -158,7 +158,7 @@ impl Event {
                 }
                 Self::Published {
                     fingerprint,
-                    receipt,
+                    receipt: Box::new(receipt),
                     dispatch_started,
                     cancel_requested,
                 }

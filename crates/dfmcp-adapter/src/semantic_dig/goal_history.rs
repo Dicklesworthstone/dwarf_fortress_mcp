@@ -169,7 +169,7 @@ impl<H: EffectJournalStorage> GoalPublication for HistoryPublication<'_, H> {
         )
     }
     fn captured(&mut self, sample: &LiveSpatialCitizenObservation, call: &mut Call) -> Result<()> {
-        self.append(Event::Captured(sample.clone()), &call.current()?)
+        self.append(Event::Captured(Box::new(sample.clone())), &call.current()?)
     }
     fn published(
         &mut self,
@@ -291,8 +291,10 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: DigSource> SemanticDig
         historical_context.anchor = review.original_plan().anchor;
         let mut monitor =
             DigGoalMonitor::new(review.clone(), &historical_context, Arc::downgrade(&owner))?;
-        let mut replay = DigSourceFloor::default();
-        replay.high_tick = review.original_plan().anchor.tick;
+        let mut replay = DigSourceFloor {
+            high_tick: review.original_plan().anchor.tick,
+            ..DigSourceFloor::default()
+        };
         let mut pending: Option<Acquisition> = None;
 
         for event in history.events() {
@@ -332,7 +334,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: DigSource> SemanticDig
                         &review,
                         &binding,
                         &entry,
-                        sample.clone(),
+                        (**sample).clone(),
                         acquisition.cursor,
                         &edge(&call, &projection_budget)?,
                     );

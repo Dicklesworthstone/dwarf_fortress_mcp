@@ -23,7 +23,9 @@ fn hex(raw: &str) -> Result<Vec<u8>> {
         return Err(invalid("fixture hex extent"));
     }
     raw.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair).map_err(|_| invalid("fixture hex text"))?;
             u8::from_str_radix(text, 16).map_err(|_| invalid("fixture hex byte"))
@@ -396,19 +398,27 @@ fn published_receipts_are_original_placed_bytes_and_never_reconstructed_policy()
     let placed = BuildRecord::decode(&golden("placed")?)?;
     let event = Event::Published {
         fingerprint: Digest32::of_bytes(b"independently issued policy fingerprint"),
-        receipt: placed.clone(),
+        receipt: Box::new(placed.clone()),
         dispatch_started: true,
         cancel_requested: false,
     };
     let encoded = event.encode()?;
+    let mut expected = vec![2];
+    expected.extend_from_slice(
+        Digest32::of_bytes(b"independently issued policy fingerprint").as_bytes(),
+    );
+    expected.extend_from_slice(&[1, 0]);
+    expected.extend_from_slice(&(placed.canonical_bytes().len() as u32).to_be_bytes());
+    expected.extend_from_slice(placed.canonical_bytes());
+    assert_eq!(encoded, expected);
     let decoded = Event::decode(&encoded, placed.plan())?;
-    assert!(matches!(decoded, Event::Published { receipt, .. } if receipt == placed));
+    assert!(matches!(decoded, Event::Published { receipt, .. } if *receipt == placed));
     let different = BuildPlan::new("different-original-key", placed.plan().before().clone())?;
     assert!(Event::decode(&encoded, &different).is_err());
     let prepared = BuildRecord::decode(&golden("prepared")?)?;
     let unverified = Event::Published {
         fingerprint: Digest32::of_bytes(b"independently issued policy fingerprint"),
-        receipt: prepared.clone(),
+        receipt: Box::new(prepared.clone()),
         dispatch_started: false,
         cancel_requested: false,
     }
@@ -437,7 +447,9 @@ fn contradictory_raw_capture_remains_negative_custody_and_cannot_publish() -> Re
         tick: GameTick(0),
         interrupted: false,
     })?;
-    let event = Event::Captured(sample);
+    let canonical = sample.canonical_bytes()?;
+    let event = Event::Captured(Box::new(sample));
+    assert_eq!(&event.encode()?[1..], canonical);
     let placed = BuildRecord::decode(&golden("placed")?)?;
     Event::decode(&event.encode()?, placed.plan())?;
     frontier.apply(&event)?;
@@ -446,7 +458,7 @@ fn contradictory_raw_capture_remains_negative_custody_and_cannot_publish() -> Re
         frontier
             .apply(&Event::Published {
                 fingerprint: Digest32::of_bytes(b"policy"),
-                receipt: placed,
+                receipt: Box::new(placed),
                 dispatch_started: true,
                 cancel_requested: false,
             })

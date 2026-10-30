@@ -168,7 +168,7 @@ impl<H: EffectJournalStorage> GoalPublication for HistoryPublication<'_, H> {
         )
     }
     fn captured(&mut self, sample: &LinkedSample, call: &mut Call) -> Result<()> {
-        self.append(Event::Captured(sample.clone()), &call.current()?)
+        self.append(Event::Captured(Box::new(sample.clone())), &call.current()?)
     }
     fn published(
         &mut self,
@@ -186,7 +186,7 @@ impl<H: EffectJournalStorage> GoalPublication for HistoryPublication<'_, H> {
         self.append(
             Event::Published {
                 fingerprint: policy_fingerprint(projection, policy)?,
-                receipt: receipt.clone(),
+                receipt: Box::new(receipt.clone()),
                 dispatch_started: entry.dispatch_started(),
                 cancel_requested: entry.cancel_requested(),
             },
@@ -342,7 +342,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: BuildSource>
                         &review,
                         &binding,
                         &entry,
-                        sample.clone(),
+                        (**sample).clone(),
                         acquisition.cursor,
                         &edge(&call, &projection_budget)?,
                     );
