@@ -385,6 +385,7 @@ impl Harness {
             protected: vec![],
             checkpoint,
             monitor: None,
+            clock: None,
             blueprint: Some(batch::Config {
                 path: "/private/dig/blueprint".into(),
                 initialize: true,

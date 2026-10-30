@@ -317,8 +317,13 @@ pub(super) fn display<S: EffectJournalStorage>(
     }
 }
 
-fn audit<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage>(
-    state: &mut State<S, N, B>,
+pub(super) fn audit<
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    C: EffectJournalStorage,
+>(
+    state: &mut State<S, N, B, C>,
     c: &OperationContext,
 ) -> Result<(BatchDefinition, DigSessionView, Vec<DigRecord>)> {
     let started = Instant::now();
@@ -341,8 +346,13 @@ fn audit<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage>(
     batch::verify(parent, &view, &records, &current)?;
     Ok((parent.definition().clone(), view, records))
 }
-fn exact<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage>(
-    state: &mut State<S, N, B>,
+fn exact<
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    C: EffectJournalStorage,
+>(
+    state: &mut State<S, N, B, C>,
     id: Digest32,
 ) -> Result<&mut MonitorStore<B>> {
     state
@@ -368,8 +378,8 @@ fn narrowed(
     Ok(out)
 }
 
-fn perform<S, N, B, M>(
-    state: &mut State<S, N, B>,
+fn perform<S, N, B, C, M>(
+    state: &mut State<S, N, B, C>,
     c: &OperationContext,
     work: &mut Work,
     action: Action,
@@ -379,6 +389,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     M: MonitorIo<B>,
 {
     match action {
@@ -457,6 +468,21 @@ where
             )
         }
         Action::SampleMonitor(id) => {
+            let final_clock = if state.clock_config.is_some() {
+                Some(work.take(c, super::clock::VIEW_BYTES)?)
+            } else {
+                None
+            };
+            if state.clock_config.is_some() {
+                let reserved = work.take(c, super::clock::VIEW_BYTES)?;
+                super::clock::inspect(state, &reserved)?;
+                if super::clock::blocks_sampling(state) {
+                    return Err(error(
+                        ErrorCode::EffectIndeterminate,
+                        "reconcile the original clock run before sampling excavation",
+                    ));
+                }
+            }
             let initial = work.take(c, COMPLETE_INVENTORY_BYTES + batch::PUBLICATION_BYTES)?;
             let final_check = work.take(c, COMPLETE_INVENTORY_BYTES + batch::PUBLICATION_BYTES)?;
             let final_history = work.take(c, FINAL_BYTES)?;
@@ -505,6 +531,18 @@ where
                 let (parent, view, records) =
                     audit(state, &narrowed(work, c, &final_check, authority_tick)?)?;
                 spec.verify_original(&parent, &view, &records)?;
+                if let Some(reserved) = &final_clock {
+                    super::clock::inspect(
+                        state,
+                        &narrowed(work, c, reserved, state.authority_tick)?,
+                    )?;
+                    if super::clock::blocks_sampling(state) {
+                        return Err(error(
+                            ErrorCode::EffectIndeterminate,
+                            "clock custody changed before excavation publication",
+                        ));
+                    }
+                }
                 let authority_tick = state.authority_tick;
                 exact(state, id)?
                     .publish(&attempt, &narrowed(work, c, &operation, authority_tick)?)?;
@@ -581,8 +619,8 @@ where
     }
 }
 
-pub(super) fn run_action<S, N, B, M>(
-    state: &mut State<S, N, B>,
+pub(super) fn run_action<S, N, B, C, M>(
+    state: &mut State<S, N, B, C>,
     mut c: OperationContext,
     op: &str,
     action: Action,
@@ -593,6 +631,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     M: MonitorIo<B>,
 {
     state.abandon();

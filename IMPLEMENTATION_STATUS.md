@@ -44,6 +44,72 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-blueprint finite clock control through MCP (2026-10-30)
+
+The existing eleven-tool mining server now joins the complete original
+excavation monitor to separately reviewed finite run/1.13 intervals. Operator
+configuration pins a fourth private journal and independent run source; the
+session's game-tick allowance defaults to zero. New advancement requires
+explicit clock opt-in, current disposable-fortress checkpoint policy, scoped
+original Query/Observe/Plan and separately retained global/native clock grants.
+No designation grant is rewritten into clock authority.
+
+Plan prepares one closed monitor/tick/wall request; commit confirms its live
+review seal; clock-scoped wait reconciles one original run; ordinary monitor
+wait acquires a separate completion sample. Pending, unresolved and SourceLost
+clock history block fresh goal publication. Fresh sparse readiness must match
+the paused run tick, and the unchanged original deadline, cadence, sample
+capacity and whole-project inventory constrain every interval. The full
+original mask is retained through every step; no automatic run loop is added.
+
+Clock custody is acquired before sampling, including exclusive initialization
+when the monitor already exists at session opening. An existing journal cannot
+masquerade as new custody. The canonical intended header identity is retained
+before creation; existing-history failures preserve the operator's acknowledged
+pin until verified ancestry permits a descendant. Opening work splits one
+prepaid byte allowance and shrinks one wall deadline. Recovered preparation,
+failed responses and unacknowledged owned-worker results discard clock review
+permission without erasing the pending obligation.
+
+Readiness contributes no positive completion samples. Known contradictions,
+changed same-tick captures and broken sampling windows withdraw unfinished
+stability; the next real sample durably resets it before source contact.
+Clock and original histories are rechecked after durable dispatch intent and
+again around completion publication. Safety cancellation retains current
+Query/Clock requirements without Plan, Observe, future tick budget or a renewed
+monitor deadline. Historical pause receipts never prove the current pause state.
+
+Clock queries expose exact recovery, bounded head-pinned pages and actionable
+review/reconciliation/cancellation steps. Normal close refuses unsettled clock
+work; explicit recovery release preserves unverified references. Combined
+restart still needs original native, parent and monitor files. The existing
+standalone run recovery profile can inspect the clock journal independently.
+Independent source pins still establish neither shared process identity,
+named native-clock fortress lineage, causality nor global controller exclusion.
+
+All 194 focused tests pass on the final reconstructed source: 100 blueprint
+adapter groups, 22 existing bounded-run regressions and 72 actual-source MCP
+handler/configuration groups. The latter include 16 new clock integration
+groups and three clock parser/authority groups. All 390 adapter and 412 MCP
+compiler/pipeline input hashes remain unchanged during their runs. MCP
+compilation is warning-free; the adapter retains one preexisting unrelated
+workforce-test import warning. Query Schema checks accept all 59 valid cases
+and reject all 205 invalid cases.
+
+The actual public async open/dispatch/close bodies and concrete clock/map IO
+also pass a separate compile-only check, with all 278 inputs unchanged. Only
+the ambient RequestControl/owned span is replaced with fail-closed nonexecuted
+type stubs. The executable handler view excludes FastMCP macros/stdio and three
+Cx-specific runtime tests. This checks signatures, lifetimes and borrowing;
+it does not establish real Asupersync scheduling, MCP transport, DFHack SDK,
+live-game or release qualification. All earlier pre-reset counts were rerun
+against the recovered source before this increment was committed.
+
+See [the complete operator workflow](docs/DIG_BLUEPRINT_CLOCK_MCP.md). The native
+wire, production runner map, compatibility registry and dependencies remain
+unchanged. Generic mixed-action execution and verified checkpoint/restore
+remain open; this increment does not claim live or production qualification.
+
 ### Reviewed finite whole-blueprint clock core (2026-10-30)
 
 The adapter now binds one independently pinned run/1.13 journal to the complete

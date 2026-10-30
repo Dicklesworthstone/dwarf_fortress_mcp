@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 //! Explicitly unadmitted mining control. All native effects use DigSession and
 //! its durable coordinator; recovery-only MCP remains a separate sealed profile.
+use dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
+use dfmcp_adapter::dig_blueprint::clock::{Clock as BlueprintClock, Recovery as ClockRecovery};
 use dfmcp_adapter::dig_blueprint::store::{
     BatchStore, Recovery as BlueprintRecovery, initial_recovery, open_private_blueprint_storage,
 };
@@ -36,6 +38,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 mod batch;
+mod clock;
 mod monitor;
 mod monitor_recovery;
 mod presentation;
@@ -51,7 +54,7 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 type Native = DigRpcClient<DigTcpStream>;
 enum Entry {
     Native {
-        state: State<PrivateDigFile, Native, PrivateBuildFile>,
+        state: State<PrivateDigFile, Native, PrivateBuildFile, PrivateRunFile>,
         config: Config,
     },
     Monitor {
@@ -83,9 +86,18 @@ impl Entry {
             Self::Monitor { state, .. } => Some(state.reference()),
         }
     }
+    fn clock_reference(&self) -> Option<Value> {
+        match self {
+            Self::Native { state, .. } => state.clock_reference(),
+            Self::Monitor { .. } => None,
+        }
+    }
     fn abandon(&mut self) {
         if let Self::Native { state, .. } = self {
             state.abandon();
+            if let Some(clock) = state.clock.as_mut() {
+                clock.abandon_preparation();
+            }
         }
     }
 }
@@ -151,7 +163,7 @@ struct Review {
     value: DigReview,
     blueprint_seal: Option<Digest32>,
 }
-struct State<S, N, B = S> {
+struct State<S: EffectJournalStorage, N, B: EffectJournalStorage = S, C: EffectJournalStorage = B> {
     id: SessionId,
     request: u128,
     budget: WorkBudget,
@@ -171,8 +183,14 @@ struct State<S, N, B = S> {
     monitor_recovery: Option<dfmcp_adapter::dig_blueprint::monitor::store::Recovery>,
     monitor_config: Option<monitor::Config>,
     worker_acknowledgement: Option<Arc<AtomicBool>>,
+    clock: Option<BlueprintClock<C>>,
+    clock_config: Option<clock::Config>,
+    clock_recovery: Option<ClockRecovery>,
+    clock_grants: Vec<CapabilityGrant>,
 }
-impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N, B> {
+impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage, C: EffectJournalStorage>
+    State<S, N, B, C>
+{
     fn new(mut control: DigSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
         if control.mode() != DigMode::Control && config.blueprint.is_none() {
             return Err(error(
@@ -220,9 +238,21 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             monitor_recovery: None,
             monitor_config: config.monitor.clone(),
             worker_acknowledgement: None,
+            clock: None,
+            clock_config: config.clock.clone(),
+            clock_recovery: None,
+            clock_grants: Vec::new(),
         })
     }
     fn context(&mut self, write_enabled: bool, wall: Option<u64>) -> Result<OperationContext> {
+        self.context_with_clock(write_enabled, false, wall)
+    }
+    fn context_with_clock(
+        &mut self,
+        write_enabled: bool,
+        clock_enabled: bool,
+        wall: Option<u64>,
+    ) -> Result<OperationContext> {
         self.withdraw_unacknowledged();
         self.request = self.request.checked_add(1).ok_or_else(exhausted)?;
         let mut budget = self.budget;
@@ -233,7 +263,9 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             self.id,
             RequestId::new(self.request),
             &self.binding,
-            self.authority_tick.max(self.control.high_tick()),
+            self.authority_tick
+                .max(self.control.high_tick())
+                .max(self.clock.as_ref().map_or(0, BlueprintClock::high_tick)),
             budget,
             false,
         );
@@ -241,8 +273,13 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             .grants
             .iter()
             .filter(|g| {
-                (write_enabled && self.control.mode() == DigMode::Control)
-                    || !matches!(g.capability, Capability::Plan | Capability::Designate)
+                let control = self.control.mode() == DigMode::Control;
+                match g.capability {
+                    Capability::Plan => control && (write_enabled || clock_enabled),
+                    Capability::Designate => control && write_enabled,
+                    Capability::ControlClock => control && clock_enabled,
+                    _ => true,
+                }
             })
             .cloned()
             .collect();
@@ -270,6 +307,9 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             .is_some_and(|ack| !ack.load(Ordering::Acquire))
         {
             self.abandon();
+            if let Some(clock) = self.clock.as_mut() {
+                clock.abandon_preparation();
+            }
             self.withdraw_monitor();
         }
     }
@@ -313,6 +353,25 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             })
         })
     }
+    fn clock_reference(&self) -> Option<Value> {
+        self.clock
+            .as_ref()
+            .map(clock::reference)
+            .or_else(|| {
+                self.clock_recovery.map(|r| {
+                    json!({"recovery":clock::recovery(r),"history_verified":false,
+                "publication_unverified":true,"current_pause_proven":false,
+                "sampled_excavation_condition_proven":false,"retry_commit_permitted":false})
+                })
+            })
+            .or_else(|| {
+                self.clock_config.as_ref().map(|config| {
+                    json!({"creation_pending":config.initialize,"history_verified":false,
+                "current_pause_proven":false,"sampled_excavation_condition_proven":false,
+                "retry_commit_permitted":false})
+                })
+            })
+    }
 }
 fn grants(
     fortress: dfmcp_core::FortressId,
@@ -343,6 +402,34 @@ fn grants(
         remaining_uses: None,
     })
     .collect()
+}
+fn add_clock_grants(c: &mut OperationContext, config: &Config, mode: DigMode, enabled: bool) {
+    if !enabled || config.clock.is_none() || mode != DigMode::Control {
+        return;
+    }
+    if !c.grants.iter().any(|g| g.capability == Capability::Plan) {
+        c.grants.push(CapabilityGrant {
+            capability: Capability::Plan,
+            scope: CapabilityScope {
+                fortress_id: Some(config.fortress()),
+                map_area: Some(config.scope),
+                ..CapabilityScope::default()
+            },
+            max_risk: RiskTier::Guarded,
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+    }
+    c.grants.push(CapabilityGrant {
+        capability: Capability::ControlClock,
+        scope: CapabilityScope {
+            fortress_id: Some(config.fortress()),
+            ..CapabilityScope::default()
+        },
+        max_risk: RiskTier::Guarded,
+        expires_at_tick: None,
+        remaining_uses: None,
+    });
 }
 fn context(
     id: SessionId,
@@ -430,6 +517,12 @@ impl Work {
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 enum Query {
+    BlueprintClock {
+        monitor_id: String,
+        expected_head: Option<String>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    },
     BlueprintMonitor {
         monitor_id: String,
         expected_head: Option<String>,
@@ -486,6 +579,20 @@ impl Query {
         let value: Self = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed mining query"))?;
         match &value {
+            Self::BlueprintClock {
+                monitor_id,
+                expected_head,
+                offset,
+                limit,
+            } => {
+                digest(monitor_id)?;
+                if let Some(head) = expected_head {
+                    digest(head)?;
+                }
+                if offset.map_or(0, |n| n) >= 64 || !(1..=8).contains(&limit.map_or(8, |n| n)) {
+                    return Err(exhausted());
+                }
+            }
             Self::BlueprintMonitor {
                 monitor_id,
                 expected_head,
@@ -562,6 +669,13 @@ fn tile_bounds(offset: usize, limit: Option<usize>) -> Result<()> {
     Ok(())
 }
 enum Action {
+    PrepareClock(clock::Request),
+    CommitClock {
+        monitor_id: Digest32,
+        seal: Digest32,
+    },
+    WaitClock(Digest32),
+    CancelClock(Digest32),
     StartMonitor(monitor::Request),
     SampleMonitor(Digest32),
     CancelMonitor(Digest32),
@@ -586,8 +700,8 @@ enum Action {
     Denied,
 }
 #[allow(clippy::too_many_arguments)]
-fn perform<S, N, B, G, F>(
-    state: &mut State<S, N, B>,
+fn perform<S, N, B, C, G, F>(
+    state: &mut State<S, N, B, C>,
     c: &OperationContext,
     work: &mut Work,
     before: &DigSessionView,
@@ -600,6 +714,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     G: DigSessionGuard,
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
 {
@@ -634,7 +749,12 @@ where
         None
     };
     match action {
-        Action::StartMonitor(_)
+        Action::PrepareClock(_)
+        | Action::CommitClock { .. }
+        | Action::WaitClock(_)
+        | Action::CancelClock(_)
+        | Action::Query(Query::BlueprintClock { .. })
+        | Action::StartMonitor(_)
         | Action::SampleMonitor(_)
         | Action::CancelMonitor(_)
         | Action::Query(Query::BlueprintMonitor { .. }) => Err(error(
@@ -1100,8 +1220,8 @@ where
     }
 }
 
-fn run_action<S, N, B, G, F>(
-    state: &mut State<S, N, B>,
+fn run_action<S, N, B, C, G, F>(
+    state: &mut State<S, N, B, C>,
     c: OperationContext,
     op: &str,
     action: Result<Action>,
@@ -1113,6 +1233,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     G: DigSessionGuard,
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
 {
@@ -1128,8 +1249,8 @@ where
     )
 }
 #[allow(clippy::too_many_arguments)]
-fn run_action_with_monitor<S, N, B, G, F, M>(
-    state: &mut State<S, N, B>,
+fn run_action_with_monitor<S, N, B, C, G, F, M>(
+    state: &mut State<S, N, B, C>,
     c: OperationContext,
     op: &str,
     action: Result<Action>,
@@ -1142,6 +1263,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     G: DigSessionGuard,
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
     M: monitor::MonitorIo<B>,
@@ -1160,8 +1282,61 @@ where
     }
 }
 #[allow(clippy::too_many_arguments)]
-fn run_native_action<S, N, B, G, F>(
-    state: &mut State<S, N, B>,
+fn run_action_with_clock<S, N, B, C, G, F, M, I>(
+    state: &mut State<S, N, B, C>,
+    c: OperationContext,
+    op: &str,
+    action: Result<Action>,
+    started: Instant,
+    runtime: &mut G,
+    connect: F,
+    map: &mut M,
+    clock_io: &mut I,
+) -> String
+where
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    C: EffectJournalStorage,
+    G: DigSessionGuard,
+    F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
+    M: monitor::MonitorIo<B>,
+    I: clock::ClockIo<C>,
+{
+    match action {
+        Ok(
+            action @ (Action::PrepareClock(_)
+            | Action::CommitClock { .. }
+            | Action::WaitClock(_)
+            | Action::CancelClock(_)
+            | Action::Query(Query::BlueprintClock { .. })),
+        ) => clock::run_action(state, c, op, action, started, map, clock_io),
+        Ok(action @ Action::SampleMonitor(_)) if state.clock_config.is_some() => {
+            let mut c = c;
+            if let Err(cause) = clock::ensure_for_sample(state, &mut c, started, clock_io) {
+                state.abandon();
+                state.withdraw_monitor();
+                if let Some(clock) = state.clock.as_mut() {
+                    clock.abandon_preparation();
+                }
+                return packet(
+                    op,
+                    retain_blueprint(state, failure(&cause)),
+                    Some(&c),
+                    Some(&state.binding),
+                    None,
+                    Some(&state.policy),
+                    None,
+                );
+            }
+            monitor::run_action(state, c, op, action, started, map)
+        }
+        action => run_action_with_monitor(state, c, op, action, started, runtime, connect, map),
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn run_native_action<S, N, B, C, G, F>(
+    state: &mut State<S, N, B, C>,
     c: OperationContext,
     op: &str,
     action: Result<Action>,
@@ -1173,6 +1348,7 @@ where
     S: EffectJournalStorage,
     N: DigSource,
     B: EffectJournalStorage,
+    C: EffectJournalStorage,
     G: DigSessionGuard,
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
 {
@@ -1393,8 +1569,13 @@ where
     }
     rendered
 }
-fn retain_blueprint<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage>(
-    state: &State<S, N, B>,
+fn retain_blueprint<
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    C: EffectJournalStorage,
+>(
+    state: &State<S, N, B, C>,
     mut result: Value,
 ) -> Value {
     if result.get("blueprint").is_none() {
@@ -1405,6 +1586,11 @@ fn retain_blueprint<S: EffectJournalStorage, N: DigSource, B: EffectJournalStora
     if result.get("blueprint_monitor").is_none() {
         if let Some(reference) = state.monitor_reference() {
             result["blueprint_monitor"] = reference;
+        }
+    }
+    if result.get("blueprint_clock").is_none() {
+        if let Some(reference) = state.clock_reference() {
+            result["blueprint_clock"] = reference;
         }
     }
     result
@@ -1450,10 +1636,17 @@ async fn with_session(
     wall: Option<u64>,
     action: Result<Action>,
 ) -> String {
-    let native_effect_requested = matches!(&action, Ok(Action::Commit { .. } | Action::Cancel(..)));
+    let native_effect_requested = matches!(
+        &action,
+        Ok(Action::Commit { .. }
+            | Action::Cancel(..)
+            | Action::CommitClock { .. }
+            | Action::CancelClock(_))
+    );
     runtime::owned(op, move |control: RequestControl| {
         let mut retained = None;
         let mut retained_monitor = None;
+        let mut retained_clock = None;
         let mut native_handoff = None;
         let mut monitor_only = false;
         let result = (|| {
@@ -1468,6 +1661,7 @@ async fn with_session(
             }
             retained = entry.blueprint_reference();
             retained_monitor = entry.monitor_reference();
+            retained_clock = entry.clock_reference();
             monitor_only = matches!(entry, Entry::Monitor { .. });
             if op == "fortress.observe" {
                 entry.abandon();
@@ -1479,19 +1673,30 @@ async fn with_session(
                     state.withdraw_monitor();
                 }
                 retained_monitor = entry.monitor_reference();
+                retained_clock = entry.clock_reference();
                 return Err(cause);
             }
             let rendered = match entry {
                 Entry::Native { state, .. } => {
-                    let c =
-                        match runtime::enabled().and_then(|enabled| state.context(enabled, wall)) {
-                            Ok(c) => c,
-                            Err(cause) => {
-                                state.withdraw_monitor();
-                                retained_monitor = state.monitor_reference();
-                                return Err(cause);
+                    let c = match (|| {
+                        state.context_with_clock(
+                            runtime::enabled()?,
+                            runtime::clock_enabled()?,
+                            wall,
+                        )
+                    })() {
+                        Ok(c) => c,
+                        Err(cause) => {
+                            state.withdraw_monitor();
+                            state.abandon();
+                            if let Some(clock) = state.clock.as_mut() {
+                                clock.abandon_preparation();
                             }
-                        };
+                            retained_monitor = state.monitor_reference();
+                            retained_clock = state.clock_reference();
+                            return Err(cause);
+                        }
+                    };
                     let binding = state.binding.clone();
                     let mut guard = runtime::Guard {
                         control: &control,
@@ -1503,7 +1708,13 @@ async fn with_session(
                         config: &config,
                         mode: state.control.mode(),
                     };
-                    run_action_with_monitor(
+                    let mut clock_io = runtime::ClockIo {
+                        control: &control,
+                        config: &config,
+                        mode: state.control.mode(),
+                        opening_recovery: None,
+                    };
+                    run_action_with_clock(
                         state,
                         c,
                         op,
@@ -1515,6 +1726,7 @@ async fn with_session(
                             runtime::connect(&control, &config, r, c)
                         },
                         &mut map_io,
+                        &mut clock_io,
                     )
                 }
                 Entry::Monitor { state, .. } => {
@@ -1526,6 +1738,7 @@ async fn with_session(
             };
             retained = entry.blueprint_reference();
             retained_monitor = entry.monitor_reference();
+            retained_clock = entry.clock_reference();
             native_handoff = presentation::retained_handoff(&rendered);
             if let Err(e) = runtime::boundary(&control, &config, false) {
                 entry.abandon();
@@ -1533,6 +1746,7 @@ async fn with_session(
                     state.withdraw_monitor();
                 }
                 retained_monitor = entry.monitor_reference();
+                retained_clock = entry.clock_reference();
                 return Err(e);
             }
             if let Entry::Native { state, .. } = entry {
@@ -1554,6 +1768,9 @@ async fn with_session(
                 }
                 if let Some(reference) = retained_monitor {
                     result["blueprint_monitor"] = reference;
+                }
+                if let Some(reference) = retained_clock {
+                    result["blueprint_clock"] = reference;
                 }
                 if let Some(handoff) = native_handoff {
                     result["native_handoff"] = handoff;
@@ -1685,6 +1902,12 @@ fn opening_selection(
         _ => None,
     };
     if let Some(mode) = recovery {
+        if config.clock.is_some() {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "monitor-only recovery cannot open or conceal configured clock custody",
+            ));
+        }
         if region.is_some() {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -1726,6 +1949,7 @@ pub async fn fortress_open_session(
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
 ) -> String {
     let requested_monitor_only = matches!(
         mode.as_deref(),
@@ -1734,13 +1958,18 @@ pub async fn fortress_open_session(
     runtime::owned("fortress.open_session", move |control| {
         let mut retained=None;
         let mut retained_monitor=None;
+        let mut retained_clock=None;
         let result=(|| {
             let config=runtime::configuration()?;
             runtime::boundary(&control,&config,false)?;
             let (mode,region,monitor_only)=opening_selection(mode.as_deref(),region.as_deref(),&config)?;
+            let game_ticks=max_game_ticks.unwrap_or(0);
+            if game_ticks>1200 || (game_ticks>0 && (mode!=DigMode::Control || config.clock.is_none() || !runtime::clock_enabled()?)) {
+                return Err(error(ErrorCode::CapabilityDenied,"positive clock work requires configured control, explicit clock opt-in and at most1200 ticks"));
+            }
             let budget=WorkBudget {max_wall_millis:max_wall_millis.map_or(10_000,|n|n),
                 max_bytes:max_bytes.map_or(MAX_WORK_BYTES,|n|n),max_output_tokens:max_output_tokens.map_or(8192,|n|n),
-                max_entities:if config.monitor.is_some(){monitor::MAX_ENTITIES}else{300},max_actions:1,max_game_ticks:0};
+                max_entities:if config.monitor.is_some(){monitor::MAX_ENTITIES}else{300},max_actions:1,max_game_ticks:game_ticks};
             let mut locked=lock()?;
             if locked.is_some() {return Err(error(ErrorCode::Conflict,"release the current mining session first"));}
             let seq=NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1)).map_err(|_|exhausted())?;
@@ -1750,6 +1979,7 @@ pub async fn fortress_open_session(
                 anchor:StateAnchor {fortress_id:config.fortress(),cursor:ObservationCursor::ORIGIN,tick:GameTick(0),state_hash:Digest32::ZERO},
                 grants:grants(config.fortress(),config.scope,write)};
             if mode==DigMode::Offline || monitor_only {c.grants.retain(|g|g.capability==Capability::Query);}
+            add_clock_grants(&mut c,&config,mode,runtime::clock_enabled()?);
             let mut work=Work::new(&c,control.started)?;
             if monitor_only {
                 let selected=config.monitor.as_ref().ok_or_else(||error(ErrorCode::CapabilityDenied,"monitor recovery configuration absent"))?;
@@ -1852,7 +2082,9 @@ pub async fn fortress_open_session(
                 let (view,records)=session.complete_inventory(&work.take(&c,COMPLETE_INVENTORY_BYTES)?)?;
                 batch::verify(owned,&view,&records,&work.take(&c,batch::PUBLICATION_BYTES)?)?;
                 if let Some(proof)=monitor_owner.as_ref() {proof.spec().verify_original(owned.definition(),&view,&records)?;}
-                if mode==DigMode::Control {
+                // A complete original monitor permits clock recovery even
+                // while the game runs; no further child can be designated.
+                if mode==DigMode::Control && !(config.clock.is_some() && monitor_owner.is_some()) {
                     let first=owned.definition().bootstrap().region();
                     let mut source=runtime::connect(&control,&config,first,&work.take(&c,SOURCE_RESERVATION_BYTES)?)?;
                     runtime::boundary(&control,&config,false)?;
@@ -1863,9 +2095,10 @@ pub async fn fortress_open_session(
                     runtime::boundary(&control,&config,false)?;
                 }
             }
-            let mut state:State<_,_,PrivateBuildFile>=State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
+            let mut state:State<_,_,PrivateBuildFile,PrivateRunFile>=State::new(session,&work.take(&c,LOCAL_BYTES)?,&config)?;
             state.budget=budget;
             state.grants=c.grants.clone();
+            state.clock_grants=runtime::clock_grants(mode==DigMode::Control && config.clock.is_some() && runtime::clock_enabled()?);
             state.blueprint_storage=parent_storage;
             if let Some(owned)=monitor_owner {
                 state.monitor_recovery=Some(owned.recovery());
@@ -1874,6 +2107,24 @@ pub async fn fortress_open_session(
             if let Some(owned)=parent_owner {
                 state.blueprint_recovery=Some(owned.recovery());
                 state.blueprint=Some(owned);
+            }
+            // Acquire exact custody as soon as its monitor exists. An existing
+            // journal mislabeled initialize:true must never bypass sampling.
+            if let Some(selected)=config.clock.as_ref().filter(|clock|!clock.initialize || state.monitor.is_some()) {
+                use clock::ClockIo as _;
+                retained_clock=selected.recovery.map(clock::recovery);
+                let spec=state.monitor.as_ref().ok_or_else(||error(ErrorCode::CorruptLedger,"clock recovery requires its exact original monitor"))?.spec().clone();
+                let opening=work.take(&c,clock::OPEN_BYTES)?;
+                let n=clock::native_context(&opening,&state.clock_grants)?;
+                let mut io=runtime::ClockIo{control:&control,config:&config,mode,opening_recovery:None};
+                let opened=io.open(&spec,&opening,&n);
+                if let Some(recovery)=io.opening_recovery() {retained_clock=Some(clock::recovery(recovery));}
+                let owned=opened?;
+                state.authority_tick=state.authority_tick.max(owned.high_tick());
+                c.anchor.tick=c.anchor.tick.max(GameTick(owned.high_tick()));
+                retained_clock=Some(clock::recovery(owned.recovery()));
+                state.clock_recovery=Some(owned.recovery());
+                state.clock=Some(owned);
             }
             if state.blueprint_storage.is_some() && state.control.view(&work.view(&c)?)?.total_records!=0 {
                 return Err(error(ErrorCode::Conflict,"a new blueprint requires a new empty native journal"));
@@ -1884,7 +2135,10 @@ pub async fn fortress_open_session(
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),
                 "planning_observation_retained":false,"native_designation_dispatched":false,
                 "blueprint_configured":state.blueprint_required,"blueprint_creation_pending":state.blueprint_storage.is_some(),
-                "blueprint_monitor_configured":state.monitor_config.is_some()});
+                "blueprint_monitor_configured":state.monitor_config.is_some(),
+                "blueprint_clock_configured":state.clock_config.is_some(),
+                "clock_control_enabled":state.clock.as_ref().map_or(mode==DigMode::Control && runtime::clock_enabled()?,BlueprintClock::is_control),
+                "max_game_ticks":budget.max_game_ticks});
             if let Some(parent)=state.blueprint.as_mut() {
                 let (full,records)=state.control.complete_inventory(&work.take(&c,COMPLETE_INVENTORY_BYTES)?)?;
                 let progress=batch::verify(parent,&full,&records,&work.take(&c,batch::PUBLICATION_BYTES)?)?;
@@ -1894,6 +2148,7 @@ pub async fn fortress_open_session(
                 proof.verify(&work.take(&c,monitor::FINAL_BYTES)?)?;
                 result["blueprint_monitor"]=monitor::display(proof,false,true,0,16)?;
             }
+            if let Some(reference)=state.clock_reference() {result["blueprint_clock"]=reference;}
             let rendered=packet("fortress.open_session",result,Some(&c),Some(&state.binding),Some(&view),Some(&state.policy),None);
             if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
             work.current(&c)?;
@@ -1909,6 +2164,8 @@ pub async fn fortress_open_session(
                 if let Some(recovery)=retained {result["blueprint"]=json!({"recovery":recovery,"inventory_verified":false});}
                 if let Some(recovery)=retained_monitor {result["blueprint_monitor"]=json!({"recovery":recovery,"history_verified":false,
                     "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false});}
+                if let Some(recovery)=retained_clock {result["blueprint_clock"]=json!({"recovery":recovery,"history_verified":false,
+                    "current_pause_proven":false,"sampled_excavation_condition_proven":false,"retry_commit_permitted":false});}
                 packet("fortress.open_session",result,None,None,None,None,None)
             }
         }
@@ -1942,7 +2199,7 @@ pub async fn fortress_observe(session_id: String, region: String) -> String {
 }
 #[tool(
     name = "fortress.plan",
-    description = "Pass blueprint alone to retain a complete configured sparse floor project. After every original child is terminal Designated, pass monitor alone as closed JSON with blueprint_id, deadline_tick and optional stability/sample bounds to register read-only whole-blueprint completion monitoring. Otherwise pass the complete idempotency_key, observation_witness and allow_hidden_neighbors review request. No designation is dispatched during plan."
+    description = "Pass blueprint alone to retain a complete configured sparse floor project. After every original child is terminal Designated, pass monitor alone as closed JSON with blueprint_id, deadline_tick and optional stability/sample bounds to register read-only whole-blueprint completion monitoring. Otherwise pass the complete idempotency_key, observation_witness and allow_hidden_neighbors review request. No designation is dispatched during plan. Pass clock alone as closed JSON with monitor_id, game_ticks and wall_millis to prepare one separately reviewed finite clock interval."
 )]
 pub async fn fortress_plan(
     session_id: String,
@@ -1951,15 +2208,42 @@ pub async fn fortress_plan(
     allow_hidden_neighbors: Option<bool>,
     blueprint: Option<String>,
     monitor: Option<String>,
+    clock: Option<String>,
 ) -> String {
-    let action = plan_with_monitor_action(
+    let action = plan_with_clock_action(
         idempotency_key,
         observation_witness,
         allow_hidden_neighbors,
         blueprint,
         monitor,
+        clock,
     );
     with_session(session_id, "fortress.plan", None, action).await
+}
+fn plan_with_clock_action(
+    id: Option<String>,
+    observed: Option<String>,
+    hidden: Option<bool>,
+    blueprint: Option<String>,
+    monitor: Option<String>,
+    clock: Option<String>,
+) -> Result<Action> {
+    if let Some(raw) = clock {
+        if id.is_some()
+            || observed.is_some()
+            || hidden.is_some()
+            || blueprint.is_some()
+            || monitor.is_some()
+        {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "supply the clock request alone",
+            ));
+        }
+        clock::Request::parse(&raw).map(Action::PrepareClock)
+    } else {
+        plan_with_monitor_action(id, observed, hidden, blueprint, monitor)
+    }
 }
 fn plan_with_monitor_action(
     id: Option<String>,
@@ -2004,26 +2288,54 @@ fn plan_action(
 }
 #[tool(
     name = "fortress.commit",
-    description = "Confirm the exact reviewed plan digest and review seal for one native commit attempt on the original preparation connection. Current policy, leases, capabilities, source and complete terrain witness are rechecked. Lost replies require exact-record recovery, never retry. Success proves designation configuration, not completed excavation."
+    description = "Confirm the exact reviewed plan digest and review seal for one native commit attempt on the original preparation connection. Current policy, leases, capabilities, source and complete terrain witness are rechecked. Lost replies require exact-record recovery, never retry. For clock advancement use scope=clock, monitor_id and the separately returned clock review_seal, omitting native key/digest. Neither path proves completed excavation."
 )]
 pub async fn fortress_commit(
     session_id: String,
-    idempotency_key: String,
-    plan_digest: String,
+    idempotency_key: Option<String>,
+    plan_digest: Option<String>,
     review_seal: String,
+    scope: Option<String>,
+    monitor_id: Option<String>,
 ) -> String {
-    let action = key(&idempotency_key)
-        .and_then(|_| Ok((digest(&plan_digest)?, digest(&review_seal)?)))
-        .map(|(plan, seal)| Action::Commit {
-            key: idempotency_key,
-            plan,
-            seal,
-        });
+    let action = commit_action(
+        scope.as_deref(),
+        idempotency_key,
+        plan_digest,
+        review_seal,
+        monitor_id,
+    );
     with_session(session_id, "fortress.commit", None, action).await
+}
+fn commit_action(
+    scope: Option<&str>,
+    key_value: Option<String>,
+    plan: Option<String>,
+    seal: String,
+    monitor: Option<String>,
+) -> Result<Action> {
+    match (scope.unwrap_or("effect"), key_value, plan, monitor) {
+        ("effect", Some(key_value), Some(plan), None) => {
+            key(&key_value)?;
+            Ok(Action::Commit {
+                key: key_value,
+                plan: digest(&plan)?,
+                seal: digest(&seal)?,
+            })
+        }
+        ("clock", None, None, Some(monitor)) => Ok(Action::CommitClock {
+            monitor_id: digest(&monitor)?,
+            seal: digest(&seal)?,
+        }),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "commit requires one complete native effect or clock review",
+        )),
+    }
 }
 #[tool(
     name = "fortress.query",
-    description = "Bounded local records, selection_tiles, plan_tiles, blueprint, blueprint_layout, blueprint_monitor or schema query. query is closed JSON. blueprint_monitor requires monitor_id, accepts expected_head, offset and limit, and shows durable historical progress and selected tile deficits. Query never acquires fresh terrain or proves current completion."
+    description = "Bounded local records, selection_tiles, plan_tiles, blueprint, blueprint_layout, blueprint_monitor, blueprint_clock or schema query. query is closed JSON. blueprint_monitor requires monitor_id, accepts expected_head, offset and limit, and shows durable historical progress and selected tile deficits. Query never acquires fresh terrain or proves current completion."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -2044,7 +2356,7 @@ fn effect_action(
 }
 #[tool(
     name = "fortress.wait",
-    description = "Pass monitor_id alone to acquire one paused whole-blueprint map capture, retain it durably and advance its fixed sampled stability goal. Or pass idempotency_key and plan_digest to reconcile one original native designation outcome. Terminal monitors/effects return historical evidence locally. No commit replay, polling loop or game-clock advance."
+    description = "Pass monitor_id alone to acquire one paused whole-blueprint map capture, retain it durably and advance its fixed sampled stability goal. Or pass idempotency_key and plan_digest to reconcile one original native designation outcome. Terminal monitors/effects return historical evidence locally. Use scope=clock with monitor_id to reconcile one retained run before sampling. No commit replay, polling loop or game-clock advance."
 )]
 pub async fn fortress_wait(
     session_id: String,
@@ -2052,14 +2364,34 @@ pub async fn fortress_wait(
     plan_digest: Option<String>,
     monitor_id: Option<String>,
     max_wall_millis: Option<u64>,
+    scope: Option<String>,
 ) -> String {
     with_session(
         session_id,
         "fortress.wait",
         max_wall_millis,
-        wait_action(idempotency_key, plan_digest, monitor_id),
+        wait_with_clock_action(scope.as_deref(), idempotency_key, plan_digest, monitor_id),
     )
     .await
+}
+fn wait_with_clock_action(
+    scope: Option<&str>,
+    key: Option<String>,
+    plan: Option<String>,
+    monitor: Option<String>,
+) -> Result<Action> {
+    match scope {
+        None => wait_action(key, plan, monitor),
+        Some("clock") if key.is_none() && plan.is_none() => monitor
+            .as_deref()
+            .ok_or_else(|| error(ErrorCode::InvalidRequest, "clock wait requires monitor_id"))
+            .and_then(digest)
+            .map(Action::WaitClock),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "wait scope and identity disagree",
+        )),
+    }
 }
 fn wait_action(
     key: Option<String>,
@@ -2096,6 +2428,7 @@ async fn close(raw: String, release: bool) -> String {
     runtime::owned("fortress.cancel", move |control| {
         let mut retained = None;
         let mut retained_monitor = None;
+        let mut retained_clock = None;
         let mut monitor_only = false;
         let result = (|| {
             control.checkpoint()?;
@@ -2107,6 +2440,7 @@ async fn close(raw: String, release: bool) -> String {
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
             retained = entry.blueprint_reference();
             retained_monitor = entry.monitor_reference();
+            retained_clock = entry.clock_reference();
             if let Entry::Monitor { state, config } = entry {
                 monitor_only = true;
                 let c = state.context(None)?;
@@ -2139,12 +2473,27 @@ async fn close(raw: String, release: bool) -> String {
                     "unknown mining session owner",
                 ));
             };
+            state.abandon();
+            if let Some(clock) = state.clock.as_mut() {
+                clock.abandon_preparation();
+            }
             let c = state.context(false, None)?;
+            let mut work = Work::new(&c, control.started)?;
             let view = if release {
                 None
             } else {
                 runtime::boundary(&control, config, false)?;
-                let work = Work::new(&c, control.started)?;
+                if state.clock_config.is_some() {
+                    let reserved = work.take(&c, clock::VIEW_BYTES)?;
+                    clock::inspect(state, &reserved)?;
+                    retained_clock = state.clock_reference();
+                    if clock::blocks_sampling(state) {
+                        return Err(error(
+                            ErrorCode::EffectIndeterminate,
+                            "unsettled clock requires explicit recovery release",
+                        ));
+                    }
+                }
                 Some(state.control.view(&work.view(&c)?)?)
             };
             if !release && view.as_ref().is_some_and(|v| v.pending.is_some()) {
@@ -2170,6 +2519,12 @@ async fn close(raw: String, release: bool) -> String {
             if output.len() as u64 > OUTPUT_BYTES {
                 return Err(exhausted());
             }
+            work.current(&c)?;
+            if release {
+                control.checkpoint()?;
+            } else {
+                runtime::boundary(&control, config, false)?;
+            }
             drop(locked.take());
             Ok(output)
         })();
@@ -2187,6 +2542,9 @@ async fn close(raw: String, release: bool) -> String {
                 if let Some(reference) = retained_monitor {
                     result["blueprint_monitor"] = reference;
                 }
+                if let Some(reference) = retained_clock {
+                    result["blueprint_clock"] = reference;
+                }
                 packet("fortress.cancel", result, None, None, None, None, None)
             }
         }
@@ -2195,7 +2553,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=monitor with monitor_id stops only the read-only excavation monitor and preserves its history. scope=blueprint with blueprint_id permanently stops original child advancement. scope=effect retires an exact native preparation. scope=session releases custody, with release_for_recovery=true for unresolved effects. None of these undo excavation or erase history."
+    description = "scope=clock with monitor_id retires a run or requests its safety pause. scope=monitor with monitor_id stops only the read-only excavation monitor and preserves its history. scope=blueprint with blueprint_id permanently stops original child advancement. scope=effect retires an exact native preparation. scope=session releases custody, with release_for_recovery=true for unresolved effects. None of these undo excavation or erase history."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -2215,6 +2573,15 @@ pub async fn fortress_cancel(
         monitor_id,
     ) {
         ("session", None, None, None, None) => close(session_id, release).await,
+        ("clock", None, None, None, Some(id)) if !release => {
+            with_session(
+                session_id,
+                "fortress.cancel",
+                None,
+                digest(&id).map(Action::CancelClock),
+            )
+            .await
+        }
         ("monitor", None, None, None, Some(id)) if !release => {
             with_session(
                 session_id,
@@ -2280,7 +2647,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-dig-control-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development mining control. Default policy requires an unavailable game checkpoint. Explicit operator disposable-fortress policy permits consideration. Optional operator blueprint custody retains one complete sparse floor project: plan with blueprint alone, then observe/prepare/review/confirm each original next region. Only terminal Designated receipts unlock further children and whole-blueprint monitoring. Register a configured monitor through plan, sample it through wait with monitor_id, inspect its historical progress through query, and stop it with cancel scope=monitor. One independent map capture covers the whole original mask; completion requires visible dry floors with cleared designations over the fixed shared sampled stability window. Source pins do not prove shared process identity or mining causality. Never replace uncertain work or extend the original deadline. Blueprint stop preserves native recovery and does not stop read-only monitoring. Offline/reconcile reopening restores no commit permit. No automatic game-clock advancement, checkpoint or restore.")
+        .instructions("Unadmitted development mining control. Default policy requires an unavailable game checkpoint. Explicit operator disposable-fortress policy permits consideration. Optional operator blueprint custody retains one complete sparse floor project: plan with blueprint alone, then observe/prepare/review/confirm each original next region. Only terminal Designated receipts unlock further children and whole-blueprint monitoring. Register a configured monitor through plan, sample it through wait with monitor_id, inspect its historical progress through query, and stop it with cancel scope=monitor. One independent map capture covers the whole original mask; completion requires visible dry floors with cleared designations over the fixed shared sampled stability window. Source pins do not prove shared process identity or mining causality. Never replace uncertain work or extend the original deadline. Blueprint stop preserves native recovery and does not stop read-only monitoring. Offline/reconcile reopening restores no commit permit. Optional independent run/1.13 custody permits one explicitly budgeted and separately reviewed finite interval: plan with clock alone, commit with scope=clock and monitor_id, reconcile with wait scope=clock, or request a safety pause with cancel scope=clock. Pending or unresolved intervals block fresh completion sampling. Retain exact recovery heads; restart restores no commit permit. No automatic run chaining, verified checkpoint or restore.")
         .build();
     crate::run_modern_stdio(server);
 }

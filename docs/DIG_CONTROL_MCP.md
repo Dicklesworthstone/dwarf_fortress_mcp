@@ -23,9 +23,16 @@ Its `monitor-offline` and `monitor-recovery` opening modes independently recover
 retained monitor history with Query only when mining custody is unavailable;
 omit `region` in those modes.
 
+The optional [whole-blueprint clock workflow](DIG_BLUEPRINT_CLOCK_MCP.md) adds
+separately reviewed finite run/1.13 intervals for the original monitor. Open with
+an explicit positive max_game_ticks allowance, prepare with plan(clock=...),
+confirm with commit(scope="clock", monitor_id=..., review_seal=...), reconcile
+with wait(scope="clock", monitor_id=...), and sample the monitor separately.
+Pending or unresolved clock work blocks fresh completion sampling.
+
 ## Operator configuration and checkpoint policy
 
-The runtime accepts exactly these thirteen DFMCP environment names:
+The runtime accepts exactly these sixteen DFMCP environment names:
 
 | Name | Meaning |
 |---|---|
@@ -41,7 +48,10 @@ The runtime accepts exactly these thirteen DFMCP environment names:
 | `DFMCP_DIG_PROTECTED` | Optional array of up to 32 cuboids in the same six-coordinate format; default `[]`. |
 | `DFMCP_DIG_BLUEPRINT_CONFIG` | Optional closed JSON with an operator-owned parent path and exact initialization or recovery identity; see the blueprint workflow. |
 | `DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG` | Optional closed JSON with a separate private history path, independent map source pin and exact initialization/recovery identity. |
-| `DFMCP_DIG_BLUEPRINT_MAP_TOKEN` | Matching map/1.5 token, read only for an explicit monitor sample; no native designation authority. |
+| `DFMCP_DIG_BLUEPRINT_MAP_TOKEN` | Matching map/1.5 token for an explicit monitor sample or fresh clock-readiness capture; no native designation authority. |
+| DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG | Optional separate private run journal, independent run/1.13 source pin and exact initialization/recovery reference. |
+| DFMCP_DIG_BLUEPRINT_CLOCK_TOKEN | Matching run/1.13 token; read only when the explicit clock workflow connects. |
+| DFMCP_DIG_ALLOW_CLOCK | Absent disables clock effects; exact 1 enables consideration under current authority, checkpoint and budget checks. |
 
 Other DFMCP profile variables, recovery-profile switches, production admission
 state, noncanonical enablement and malformed configuration fail closed. Paths,
@@ -163,6 +173,7 @@ Query-only historical inspection and outcome recovery do not need Designate.
 {"mode":"blueprint","blueprint_id":"<original id>","offset":0,"limit":8}
 {"mode":"blueprint_layout","blueprint_id":"<original id>"}
 {"mode":"blueprint_monitor","monitor_id":"<original monitor id>","offset":0,"limit":16}
+{"mode":"blueprint_clock","monitor_id":"<original monitor id>","offset":0,"limit":8}
 ```
 
 Records use 1..8 whole rows and bounded opaque continuations bound to the exact

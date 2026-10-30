@@ -6,6 +6,9 @@ explicitly reviewed finite interval at a time. It does not start a background
 loop, renew the excavation deadline, or treat a clock receipt as excavation
 completion.
 
+For operator configuration and the existing eleven-tool workflow, see
+[whole-blueprint clock control through MCP](DIG_BLUEPRINT_CLOCK_MCP.md).
+
 ## Original goal and current readiness
 
 The clock owner retains the complete immutable `MonitorSpec`: original sparse

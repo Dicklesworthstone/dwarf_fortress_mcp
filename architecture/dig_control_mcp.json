@@ -30,7 +30,10 @@
     "DFMCP_DIG_PROTECTED",
     "DFMCP_DIG_BLUEPRINT_CONFIG",
     "DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG",
-    "DFMCP_DIG_BLUEPRINT_MAP_TOKEN"
+    "DFMCP_DIG_BLUEPRINT_MAP_TOKEN",
+    "DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_CLOCK_TOKEN",
+    "DFMCP_DIG_ALLOW_CLOCK"
   ],
   "checkpoint_default": "required_and_refused_without_real_verifier",
   "operator_exception": "disposable-fortress-no-checkpoint",
@@ -60,8 +63,8 @@
   "native_wire_changed": false,
   "production_admitted": false,
   "executed_schema_cases": {
-    "valid": 49,
-    "invalid": 175
+    "valid": 59,
+    "invalid": 205
   },
   "opening_modes": [
     "control",
@@ -100,5 +103,43 @@
   "qualification_evidence": "IMPLEMENTATION_STATUS.md",
   "new_continuity_regression_tests_executed": false,
   "full_rust_runtime_qualification": false,
-  "live_game_qualified": false
+  "live_game_qualified": false,
+  "optional_clock_protocol": "1.13",
+  "clock_default_game_ticks": 0,
+  "clock_max_game_ticks": 1200,
+  "clock_max_retained_runs": 64,
+  "clock_original_monitor_deadline_preserved": true,
+  "clock_recovered_preparation_dispatchable": false,
+  "clock_wait_starts_run": false,
+  "clock_source_identity": "independent_endpoint_software_incarnation_without_named_fortress_identity",
+  "whole_blueprint_clock": {
+    "protocol": "1.13",
+    "preparation_tool": "fortress.plan",
+    "commit_scope": "clock",
+    "reconciliation_scope": "clock",
+    "cancellation_scope": "clock",
+    "query_mode": "blueprint_clock",
+    "default_game_tick_allowance": 0,
+    "positive_allowance_requires_operator_opt_in": true,
+    "current_checkpoint_policy_required": true,
+    "full_original_monitor_binding": true,
+    "fresh_goal_sampling_blocked_by_pending_or_unresolved_run": true,
+    "negative_readiness_withdraws_unfinished_stability": true,
+    "existing_custody_cannot_initialize": true,
+    "acknowledged_recovery_pin_preserved_on_open_failure": true,
+    "prepared_review_restored_on_reopen": false,
+    "automatic_run_chain": false,
+    "historical_pause_proves_current_pause": false,
+    "combined_restart_requires_original_files": true,
+    "omission_proof_clock_monitor_association": false
+  },
+  "focused_component_evidence": {
+    "adapter_tests": 122,
+    "mcp_handler_tests": 72,
+    "schema_valid_cases": 59,
+    "schema_invalid_cases": 205,
+    "full_fastmcp_runtime_qualified": false,
+    "native_live_qualified": false,
+    "actual_async_io_bodies_typechecked_with_nonexecuted_ambient_stubs": true
+  }
 }

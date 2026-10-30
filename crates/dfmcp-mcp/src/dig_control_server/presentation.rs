@@ -146,18 +146,31 @@ pub(super) fn retained_handoff(raw: &str) -> Option<Value> {
         "blueprint_monitor":result.get("blueprint_monitor").map(|m|json!({
             "monitor_id":m["monitor_id"],"recovery":m["recovery"],"history_verified":false,
             "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false})),
+        "blueprint_clock":result.get("blueprint_clock").map(|clock|json!({
+            "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],"history_verified":false,
+            "pending":clock["pending"],"unresolved":clock["unresolved"],
+            "current_pause_proven":false,"retry_commit_permitted":false})),
         "retry_commit_permitted":false,"dispatch_authorized":false}),
     )
 }
 pub fn packet(
     op: &str,
-    result: Value,
+    mut result: Value,
     c: Option<&OperationContext>,
     binding: Option<&DigBinding>,
     view: Option<&DigSessionView>,
     control_policy: Option<&DigControlPolicy>,
     review: Option<Digest32>,
 ) -> String {
+    let clock_pending = result
+        .get("blueprint_clock")
+        .is_some_and(|clock| clock["pending"] == true || clock["unresolved"] == true);
+    if clock_pending {
+        if let Some(proof) = result.get_mut("blueprint_monitor") {
+            proof["sampled_excavation_condition_proven"] = json!(false);
+            proof["fresh_sample_acquired"] = json!(false);
+        }
+    }
     let mut active = empty_active_work();
     active["scope"] = json!("this_dig_journal_only");
     active["inventory_verified"] = json!(view.is_some());
@@ -177,6 +190,7 @@ pub fn packet(
     }
     let blueprint = result.get("blueprint").filter(|v| v.is_object());
     let monitor = result.get("blueprint_monitor").filter(|v| v.is_object());
+    let clock = result.get("blueprint_clock").filter(|v| v.is_object());
     let monitor_only = result.get("monitor_only") == Some(&Value::Bool(true));
     let monitor_verified = monitor.is_some_and(|m| m["history_verified"] == true);
     let sampled_goal = monitor.is_some_and(|m| m["sampled_excavation_condition_proven"] == true);
@@ -207,6 +221,19 @@ pub fn packet(
         active["scope"] = json!("this_blueprint_monitor_history_only");
         active["original_designations_verified"] = json!(false);
     }
+    if let Some(clock) = clock {
+        active["scope"] = json!("this_blueprint_mining_monitor_and_clock");
+        active["blueprint_clock"] = json!({
+            "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],
+            "history_verified":clock["history_verified"],"pending":clock["pending"],
+            "unresolved":clock["unresolved"],"may_be_running":clock["may_be_running"],
+            "authority_tick_floor":clock["authority_tick_floor"],"active_run":clock["active_run"],
+            "current_pause_proven":false,"clock_receipt_proves_excavation":false,
+            "reopening_restores_dispatch_permission":false});
+        if clock_pending || clock["history_verified"] != true {
+            active["pending_absence_proven"] = json!(false);
+        }
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -219,7 +246,8 @@ pub fn packet(
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished"})),None)
         .briefing(json!({"runtime":if monitor_only{"unadmitted_blueprint_monitor_recovery"}else{"unadmitted_mining_control"},
             "bridge_protocol":if monitor_only{Value::Null}else{json!("1.16")},"runtime_admitted":false,
-            "monitor_only":monitor_only,
+            "monitor_only":monitor_only,"clock_protocol":clock.map(|_|"1.13"),
+            "clock_pending":clock_pending,"current_pause_proven":false,
             "mutation_admissible":false,"development_policy":control_policy.map(policy),
             "current_terrain_proven":false,"excavation_completion_proven":false,
             "whole_blueprint_sampled_floor_condition_proven":sampled_goal,
@@ -238,7 +266,7 @@ pub fn packet(
         let mut budget = empty_budget();
         budget["admitted"] = json!({"max_wall_millis":c.budget.max_wall_millis,
             "max_bytes":c.budget.max_bytes,"max_output_tokens":c.budget.max_output_tokens,
-            "max_entities":c.budget.max_entities,"max_game_ticks":0,"max_actions":1});
+            "max_entities":c.budget.max_entities,"max_game_ticks":c.budget.max_game_ticks,"max_actions":1});
         budget["reserved_output_bytes"] = json!(OUTPUT_BYTES);
         budget["accounting"] = json!("conservative_byte_reservations_not_measured_tokens");
         let mut next = vec![];
@@ -307,6 +335,7 @@ pub fn packet(
                 && m["attempt_limit_reached"] == false
         }) {
             let can_observe = !monitor_only
+                && !clock_pending
                 && binding.is_some_and(|b| {
                     c.authorize(
                         Capability::Observe,
@@ -322,6 +351,54 @@ pub fn packet(
                     "high","high","read_only","not_applicable",false,
                     json!({"session_id":c.session_id.to_string(),"monitor_id":proof["monitor_id"]})));
             }
+        }
+        if let Some(clock) = clock.filter(|clock| clock["monitor_id"].is_string()) {
+            let id = &clock["monitor_id"];
+            let run = &clock["active_run"];
+            let verified = clock["history_verified"] == true;
+            let can_control = !monitor_only
+                && c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)
+                    .is_ok();
+            let can_plan = can_control
+                && binding.is_some_and(|b| {
+                    c.authorize(Capability::Plan, RiskTier::Guarded, &[], Some(b.scope()))
+                        .is_ok()
+                        && c.authorize(
+                            Capability::Observe,
+                            RiskTier::ReadOnly,
+                            &[],
+                            Some(b.scope()),
+                        )
+                        .is_ok()
+                });
+            if verified && run["review_seal"].is_string() && run["state"] == "prepared" && can_plan
+            {
+                next.push(recommendation("confirm-blueprint-clock","fortress.commit",
+                    "Confirm this separately reviewed finite interval for the original blueprint.",
+                    "high","high","guarded","not_reversible",true,
+                    json!({"session_id":c.session_id.to_string(),"scope":"clock","monitor_id":id,"review_seal":run["review_seal"]})));
+            } else if verified && clock["needs_reconciliation"] == true {
+                next.push(recommendation("reconcile-blueprint-clock","fortress.wait",
+                    "Query the retained run once before another excavation sample; this cannot unpause.",
+                    "high","high","read_only","not_applicable",false,
+                    json!({"session_id":c.session_id.to_string(),"scope":"clock","monitor_id":id})));
+            }
+            if verified && clock_pending && run["terminal"] == false && can_control {
+                next.push(recommendation("stop-blueprint-clock","fortress.cancel",
+                    "Retire this interval or request its native safety pause while preserving the original run.",
+                    "high","high","guarded","not_reversible",false,
+                    json!({"session_id":c.session_id.to_string(),"scope":"clock","monitor_id":id})));
+            }
+            if verified && clock["unresolved"] == true && run["terminal"] == true {
+                next.push(recommendation("release-unresolved-blueprint-clock","fortress.cancel",
+                    "Preserve the unresolved run reference and release local custody without claiming a pause.",
+                    "high","high","read_only","not_applicable",false,
+                    json!({"session_id":c.session_id.to_string(),"scope":"session","release_for_recovery":true})));
+            }
+            next.push(recommendation("inspect-blueprint-clock","fortress.query",
+                "Inspect the exact retained clock history and its pending effect before new work.",
+                "high","high","read_only","not_applicable",false,
+                json!({"session_id":c.session_id.to_string(),"query":json!({"mode":"blueprint_clock","monitor_id":id,"offset":0,"limit":8}).to_string()})));
         }
         let query = if let Some(proof) = monitor.filter(|m| m["monitor_id"].is_string()) {
             json!({"mode":"blueprint_monitor","monitor_id":proof["monitor_id"],"offset":0,"limit":16})

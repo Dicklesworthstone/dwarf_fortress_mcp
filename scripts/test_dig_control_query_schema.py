@@ -84,6 +84,20 @@ def cases() -> tuple[list[dict], list[object]]:
         invalid.append({**monitor, "offset": offset})
     for limit in (None, False, 0, 17, "1", 1.5):
         invalid.append({**monitor, "limit": limit})
+    clock = {"mode": "blueprint_clock", "monitor_id": digest}
+    valid.append(clock)
+    for offset in (0, 7, 63):
+        for limit in (1, 4, 8):
+            valid.append({**clock, "offset": offset, "limit": limit, "expected_head": digest})
+    invalid += [{"mode": "blueprint_clock"}, {**clock, "deadline_tick": 999},
+                {**clock, "blueprint_id": digest}, {**clock, "source": "other"}]
+    for name in ("monitor_id", "expected_head"):
+        for value in (None, True, 1, "", "A" * 64, "a" * 63, digest + "\n"):
+            invalid.append({**clock, name: value})
+    for offset in (None, True, -1, 64, "0", 1.5):
+        invalid.append({**clock, "offset": offset})
+    for limit in (None, False, 0, 9, "1", 1.5):
+        invalid.append({**clock, "limit": limit})
     return valid, invalid
 
 

@@ -1,6 +1,7 @@
 //! Explicit operator selection and inherited, supervised blocking ownership.
 use super::{error, unbound};
 use asupersync::Cx;
+use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::dig_control_policy::DigCheckpointPolicy;
 use dfmcp_adapter::dig_designation::journal::session::DigSessionGuard;
 use dfmcp_adapter::dig_designation::journal::{DigBinding, DigGuard, DigStage};
@@ -15,7 +16,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
-const NAMES: [&str; 13] = [
+const NAMES: [&str; 16] = [
     "DFMCP_ALLOW_UNADMITTED_DIG_CONTROL_V1_16",
     "DFMCP_DIG_WORLD_FOLDER",
     "DFMCP_DIG_SITE_ID",
@@ -29,6 +30,9 @@ const NAMES: [&str; 13] = [
     "DFMCP_DIG_BLUEPRINT_CONFIG",
     "DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG",
     "DFMCP_DIG_BLUEPRINT_MAP_TOKEN",
+    "DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_CLOCK_TOKEN",
+    "DFMCP_DIG_ALLOW_CLOCK",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -47,6 +51,7 @@ pub(super) struct Config {
     pub checkpoint: DigCheckpointPolicy,
     pub blueprint: Option<super::batch::Config>,
     pub monitor: Option<super::monitor::Config>,
+    pub clock: Option<super::clock::Config>,
 }
 impl Config {
     pub fn fortress(&self) -> dfmcp_core::FortressId {
@@ -91,6 +96,41 @@ pub(super) fn enabled() -> Result<bool> {
         Some("1") => Ok(true),
         _ => Err(denied()),
     }
+}
+pub(super) fn clock_enabled() -> Result<bool> {
+    match optional("DFMCP_DIG_ALLOW_CLOCK")?.as_deref() {
+        None => Ok(false),
+        Some("1") => Ok(true),
+        _ => Err(denied()),
+    }
+}
+
+/// Independently issued run/1.13 authority. Named-fortress grants never enter
+/// this source-incarnation domain.
+pub(super) fn clock_grants(control: bool) -> Vec<dfmcp_core::CapabilityGrant> {
+    use dfmcp_core::{Capability, CapabilityGrant, CapabilityScope, FortressId, RiskTier};
+    [
+        Capability::Query,
+        Capability::Plan,
+        Capability::ControlClock,
+    ]
+    .into_iter()
+    .filter(|capability| control || *capability == Capability::Query)
+    .map(|capability| CapabilityGrant {
+        capability,
+        scope: CapabilityScope {
+            fortress_id: Some(FortressId::NIL),
+            ..CapabilityScope::default()
+        },
+        max_risk: if capability == Capability::Query {
+            RiskTier::ReadOnly
+        } else {
+            RiskTier::Guarded
+        },
+        expires_at_tick: None,
+        remaining_uses: None,
+    })
+    .collect()
 }
 fn area(v: [i32; 6]) -> Result<MapCuboid> {
     if v.iter().any(|n| !(0..=32767).contains(n)) {
@@ -158,6 +198,7 @@ fn configured(
         checkpoint,
         blueprint: None,
         monitor: None,
+        clock: None,
     })
 }
 fn isolated(opt: &str, names: impl IntoIterator<Item = String>, admitted: bool) -> Result<()> {
@@ -183,6 +224,7 @@ pub(super) fn configuration() -> Result<Config> {
         crate::admission::current_admission_provenance().is_some(),
     )?;
     enabled()?;
+    clock_enabled()?;
     let endpoint =
         optional("DFMCP_DIG_ENDPOINT")?.map_or_else(|| "127.0.0.1:5000".to_owned(), |v| v);
     let mut config = configured(
@@ -216,6 +258,24 @@ pub(super) fn configuration() -> Result<Config> {
                 monitor.path == parent.path || (!monitor.initialize && parent.initialize)
             })
             || (config.blueprint.is_none() && monitor.initialize)
+        {
+            return Err(denied());
+        }
+    }
+    config.clock = optional("DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG")?
+        .as_deref()
+        .map(super::clock::Config::parse)
+        .transpose()?;
+    if let Some(clock) = &config.clock {
+        let parent = config.blueprint.as_ref().ok_or_else(denied)?;
+        let monitor = config.monitor.as_ref().ok_or_else(denied)?;
+        if clock.path == config.path
+            || clock.path == monitor.path
+            || clock.path == parent.path
+            || clock.binding.endpoint() != config.endpoint
+            || clock.binding.manifest().df_version != monitor.source.df_version()
+            || clock.binding.manifest().dfhack_version != monitor.source.dfhack_version()
+            || (!clock.initialize && (parent.initialize || monitor.initialize))
         {
             return Err(denied());
         }
@@ -509,6 +569,232 @@ impl
             ));
         }
         boundary(self.control, self.config, false)
+    }
+}
+
+pub(super) struct ClockIo<'a> {
+    pub control: &'a RequestControl,
+    pub config: &'a Config,
+    pub mode: dfmcp_adapter::dig_designation::journal::DigMode,
+    pub opening_recovery: Option<dfmcp_adapter::dig_blueprint::clock::Recovery>,
+}
+pub(super) struct ClockSource<'a> {
+    inner: dfmcp_adapter::bounded_run::rpc::RunRpcClient<
+        dfmcp_adapter::bounded_run::rpc::RunTcpStream,
+    >,
+    control: &'a RequestControl,
+    config: &'a Config,
+}
+fn clock_boundary(control: &RequestControl, config: &Config, effect: bool) -> Result<()> {
+    boundary(control, config, false)?;
+    if effect && !clock_enabled()? {
+        return Err(denied());
+    }
+    Ok(())
+}
+impl RunSource for ClockSource<'_> {
+    fn manifest(&self) -> &dfmcp_adapter::bounded_run::rpc::RunManifest {
+        self.inner.manifest()
+    }
+    fn endpoint(&self) -> Option<SocketAddr> {
+        self.inner.endpoint()
+    }
+    fn observe(
+        &mut self,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunObservation> {
+        clock_boundary(self.control, self.config, false)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.observe(c)
+    }
+    fn prepare(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        clock_boundary(self.control, self.config, true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.prepare(p, c)
+    }
+    fn commit(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        clock_boundary(self.control, self.config, true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.commit(p, c)
+    }
+    fn query(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::RunRecord>> {
+        clock_boundary(self.control, self.config, false)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.query(p, c)
+    }
+    fn cancel(
+        &mut self,
+        p: &dfmcp_adapter::bounded_run::RunPlan,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::bounded_run::RunRecord> {
+        clock_boundary(self.control, self.config, true)?;
+        self.inner.restrict_deadline(c)?;
+        // Return decoded evidence before another runtime rejection can discard
+        // its consumed clock or durable receipt; the owner checks publication.
+        self.inner.cancel(p, c)
+    }
+}
+impl<'a> super::clock::ClockIo<dfmcp_adapter::bounded_run::private_file::PrivateRunFile>
+    for ClockIo<'a>
+{
+    type Source = ClockSource<'a>;
+    fn open(
+        &mut self,
+        spec: &dfmcp_adapter::dig_blueprint::monitor::MonitorSpec,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<
+        dfmcp_adapter::dig_blueprint::clock::Clock<
+            dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+        >,
+    > {
+        use dfmcp_adapter::bounded_run::journal::RunMode;
+        use dfmcp_adapter::dig_designation::journal::DigMode;
+        let deadline = Instant::now()
+            .checked_add(std::time::Duration::from_millis(
+                c.budget.max_wall_millis.min(n.budget.max_wall_millis),
+            ))
+            .ok_or_else(super::exhausted)?;
+        if c.budget.max_bytes.min(n.budget.max_bytes) < super::clock::OPEN_BYTES {
+            return Err(super::exhausted());
+        }
+        let remaining = || {
+            deadline
+                .checked_duration_since(Instant::now())
+                .and_then(|left| u64::try_from(left.as_millis()).ok())
+                .filter(|left| *left > 0)
+                .ok_or_else(super::exhausted)
+        };
+        let selected = self.config.clock.as_ref().ok_or_else(denied)?;
+        clock_boundary(self.control, self.config, selected.initialize)?;
+        selected.matches(spec)?;
+        spec.authorize(c, false)?;
+        let mode = match self.mode {
+            DigMode::Offline => RunMode::Offline,
+            DigMode::Control if clock_enabled()? => RunMode::Control,
+            _ => RunMode::Recover,
+        };
+        if selected.initialize && mode != RunMode::Control {
+            return Err(denied());
+        }
+        // Preserve the intended header before exclusive creation, or retain the
+        // externally acknowledged existing root until ancestry is verified.
+        // This reference alone never certifies successful publication.
+        self.opening_recovery = if selected.initialize {
+            let id = selected
+                .binding
+                .initial_journal_id(n.session_id, n.request_id);
+            Some(dfmcp_adapter::dig_blueprint::clock::Recovery {
+                journal_id: id,
+                head: id,
+            })
+        } else {
+            selected.recovery
+        };
+        let mut opening = n.clone();
+        opening.budget.max_bytes = super::clock::VIEW_BYTES;
+        opening.budget.max_wall_millis = remaining()?;
+        let journal = dfmcp_adapter::bounded_run::private_file::open_private_run_journal_exact(
+            &selected.path,
+            &opening,
+            mode,
+            Some(selected.binding.clone()),
+            selected.initialize,
+        )?;
+        clock_boundary(self.control, self.config, selected.initialize)?;
+        let mut canonical = c.clone();
+        let mut native = n.clone();
+        let wall = remaining()?;
+        canonical.budget.max_bytes = 2 * super::clock::VIEW_BYTES;
+        native.budget.max_bytes = canonical.budget.max_bytes;
+        canonical.budget.max_wall_millis = wall;
+        native.budget.max_wall_millis = wall;
+        let owner = dfmcp_adapter::dig_blueprint::clock::Clock::new(
+            journal,
+            spec.clone(),
+            selected.recovery,
+            &canonical,
+            &native,
+        )?;
+        // A rejected file must never replace the operator's acknowledged pin.
+        // Only a successfully verified owner may promote a complete descendant.
+        self.opening_recovery = Some(owner.recovery());
+        Ok(owner)
+    }
+    fn opening_recovery(&self) -> Option<dfmcp_adapter::dig_blueprint::clock::Recovery> {
+        self.opening_recovery
+    }
+    fn connect(&mut self, n: &OperationContext, effect: bool) -> Result<Self::Source> {
+        use dfmcp_adapter::dig_designation::journal::DigMode;
+        clock_boundary(self.control, self.config, effect)?;
+        if self.mode == DigMode::Offline {
+            return Err(denied());
+        }
+        if effect {
+            n.authorize(
+                dfmcp_core::Capability::ControlClock,
+                dfmcp_core::RiskTier::Guarded,
+                &[],
+                None,
+            )?;
+        }
+        let selected = self.config.clock.as_ref().ok_or_else(denied)?;
+        let token = value("DFMCP_DIG_BLUEPRINT_CLOCK_TOKEN", 256)?.into_bytes();
+        if token.len() < 32 {
+            return Err(denied());
+        }
+        let mut nonce = n.session_id.get().to_be_bytes().to_vec();
+        nonce.extend_from_slice(&n.request_id.get().to_be_bytes());
+        let inner = dfmcp_adapter::bounded_run::rpc::RunRpcClient::connect(
+            selected.binding.endpoint(),
+            token,
+            nonce,
+            n,
+        )?;
+        // Exact incarnation is required by the coordinator before prepare or
+        // commit. Recovery cancellation may ask a newer incarnation for the
+        // original record; it cannot authorize pausing a replacement fortress.
+        if !inner.manifest().same_software(selected.binding.manifest())
+            || inner.manifest().generation < selected.binding.manifest().generation
+        {
+            return Err(denied());
+        }
+        clock_boundary(self.control, self.config, effect)?;
+        Ok(ClockSource {
+            inner,
+            control: self.control,
+            config: self.config,
+        })
+    }
+    fn checkpoint(&mut self, c: &OperationContext, effect: bool) -> Result<()> {
+        c.budget.validate()?;
+        if c.cancellation_requested {
+            return Err(error(
+                ErrorCode::CancellationRequested,
+                "clock request cancelled",
+            ));
+        }
+        clock_boundary(self.control, self.config, effect)
     }
 }
 

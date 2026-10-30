@@ -989,3 +989,6 @@ fn early_budget_and_runtime_rejection_break_monitor_stability_without_source_con
 
 #[path = "monitor_tests/recovery_tests.rs"]
 mod recovery_tests;
+
+#[path = "monitor_tests/clock_tests.rs"]
+mod clock_tests;

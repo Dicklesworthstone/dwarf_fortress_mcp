@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-30 — Whole-blueprint clock control through the existing MCP tools
+
+- Add explicit finite clock preparation, separate confirmed commit, one-query
+  reconciliation, safety cancellation and paged history for the original monitor.
+- Keep positive game time opt-in, independently scoped authority, current
+  checkpoint policy, original deadlines/cadence and full sparse readiness.
+- Block fresh completion while clock work is pending or unresolved; withdraw
+  known-broken stability and retain exact recovery through failed publication.
+- Preserve intended creation identity, reject mislabeled initialization and
+  rollback, and never restore a recovered preparation's dispatch permission.
+- Pass all 194 focused tests on the final restored source (122 adapter and
+  72 MCP), plus 59 valid/205 invalid query-schema cases.
+- Document the complete operator workflow and remaining independent-source,
+  callback-stop and combined-restart limits.
+
 ## 2026-10-30 — Reviewed finite whole-blueprint clock core
 
 - Bind the whole original excavation monitor, Designated receipt set and fixed

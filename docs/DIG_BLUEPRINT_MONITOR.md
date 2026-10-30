@@ -70,7 +70,11 @@ Omit the native key and plan digest. Each call acquires one complete paused
 map capture, durably retains it, rechecks the original designation inventory,
 then publishes recomputed progress. This call does not advance game time or
 poll in a loop. If the game remains at the same tick, repeated calls cannot add
-stability samples. Advance gameplay separately and pause before another sample.
+stability samples. Advance gameplay separately and pause before another sample,
+or use the optional [separately reviewed finite clock
+workflow](DIG_BLUEPRINT_CLOCK_MCP.md). Clock reconciliation and goal sampling
+remain distinct calls. Configured clock custody is verified before and after
+each fresh map capture; pending or unresolved runs block publication.
 
 The result reports exact selected-cell counts, overlapping deficit categories,
 matching samples and start tick, the original policy, remaining attempt status,
@@ -123,7 +127,9 @@ returned recovery object:
 it cannot append or cancel. `reconcile` opens without a native connection and
 permits explicit sampling or monitor cancellation under read grants. `control`
 also performs the existing independent native clock check before issuing its
-host lease. The maximum of native and monitor clock floors governs current
+host lease, except when exact clock custody and an intact all-Designated monitor
+are being opened for clock recovery. That case can reopen while a run is active
+without attempting another paused digging observation. The maximum of native and monitor clock floors governs current
 authority. Reopening never renews the monitor deadline or its attempt allowance,
 restores fresh satisfaction, or resumes an interrupted read. Preserve changed
 recovery heads from every acknowledged operation and from failure handoffs.
