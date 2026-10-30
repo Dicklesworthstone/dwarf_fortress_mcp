@@ -216,9 +216,40 @@ pub(super) fn packet(
             active["inventory_verified"] = json!(false);
         }
     }
+    if let Some(room) = result.get("room_completion") {
+        active["scope"] = json!("original_furniture_batch_and_joint_room_goal");
+        active["room_completion"] = json!({"inventory_path":"result.room_completion",
+            "monitor_id":room["monitor_id"],"recovery":room["recovery"],
+            "room_intent_digest":room["room_intent_digest"],"origin_digest":room["origin_digest"],
+            "inventory_verified":room["inventory_verified"],"origin_verified":room["origin_verified"],
+            "monitor_inventory_verified":room["monitor_inventory_verified"],
+            "phase":room["phase"],"reason":room["reason"],"terminal":room["monitor_terminal"],
+            "sampled_condition_satisfied":room["sampled_condition_satisfied"],
+            "read_outcome_unknown":room["read_outcome_unknown"],
+            "authority_tick_floor":room["authority_tick_floor"],"deadline":room["timing"]["deadline"],
+            "observations":room["observations"],"streak":room["streak"],
+            "sampling_permitted":room["sampling_permitted"],"local_cancel_permitted":room["local_cancel_permitted"]});
+        if room["inventory_verified"] != true {
+            active["inventory_verified"] = json!(false);
+        }
+        if room["monitor_terminal"] != true {
+            active["pending_absence_proven"] = json!(false);
+            if !active["obligations"].is_array() {
+                active["obligations"] = json!([]);
+            }
+            let obligation = active["room_completion"].clone();
+            if let Some(obligations) = active["obligations"].as_array_mut() {
+                obligations.push(obligation);
+            }
+        }
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
-        "fortress.observe" if result.get("completion").is_some() => AgentPhase::Verify,
+        "fortress.observe"
+            if result.get("completion").is_some() || result.get("room_completion").is_some() =>
+        {
+            AgentPhase::Verify
+        }
         "fortress.observe" => AgentPhase::Orient,
         "fortress.plan" => AgentPhase::Propose,
         "fortress.commit" => AgentPhase::Commit,
@@ -269,6 +300,14 @@ pub(super) fn packet(
         references.push(json!({"kind":"original_construction_clock_journal",
             "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],
             "currently_verified":clock["history_verified"],"canonical_world_anchor":false}));
+    }
+    if let Some(room) = result.get("room_completion") {
+        references.push(json!({"kind":"original_room_joint_sampled_condition",
+            "monitor_id":room["monitor_id"],"room_intent_digest":room["room_intent_digest"],
+            "origin_digest":room["origin_digest"],"capture_sha256":room["capture_sha256"],
+            "game_tick":room["last_tick"],"authority_tick_floor":room["authority_tick_floor"],
+            "recovery":room["recovery"],"source":room["source"],
+            "currently_verified":room["inventory_verified"],"canonical_world_anchor":false}));
     }
     let mut builder=AgentTurnBuilder::new(op,phase).profile(if matches!(op,"fortress.plan"|"fortress.observe"){ObservationProfile::Tactical}else{ObservationProfile::Forensic})
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished","canonical_world_anchor_available":false})),None)
@@ -347,6 +386,34 @@ pub(super) fn packet(
             && let Some(domains) = turn["coverage"]["complete_domains"].as_array_mut()
         {
             domains.push(json!("original_plan_sampled_construction_condition"));
+        }
+    }
+    if let Some(room) = result.get("room_completion") {
+        turn["briefing"]["joint_original_room_sampled_condition"] =
+            room["sampled_condition_satisfied"].clone();
+        turn["briefing"]["room_completion_phase"] = room["phase"].clone();
+        let uncertainty = uncertainty(
+            "joint-room-sampled-scope",
+            "unknown",
+            "The original terrain masks and all original furnishings share one bracketed sampled condition. The retained result does not prove current usability, continuous stability, room assignment or an atomic snapshot across native profiles.",
+            "Inspect the fixed original room, every furnishing assessment and bounded terrain deficits.",
+            None,
+            Value::Null,
+        );
+        if let Some(values) = turn["uncertainty"].as_array_mut() {
+            values.push(uncertainty);
+        }
+        turn["recommendations"] = json!([room_recommendation(room, c)]);
+        if room["inventory_verified"] == true
+            && room["assessments_complete"] == true
+            && let Some(domains) = turn["coverage"]["complete_domains"].as_array_mut()
+        {
+            domains.push(json!("original_room_joint_sampled_condition"));
+        }
+        if room["local_cancel_permitted"] == true {
+            turn["active_work"]["room_completion"]["cancellation"] = json!({"tool":"fortress.cancel",
+                "arguments":{"session_id":c.map(|c|c.session_id.to_string()),"scope":"room_completion"},
+                "effect":"local goal cancellation only; placement effects and clock obligations remain"});
         }
     }
     if let Some(summary) = result.get("source_summary").filter(|v| !v.is_null()) {
@@ -439,6 +506,26 @@ pub(super) fn packet(
                 "requires":"current separately retained clock authority"});
         }
     }
+    if let (Some(room), Some(clock)) = (
+        result.get("room_completion"),
+        result.get("construction_clock"),
+    ) && clock["history_verified"] == true
+        && clock["pending"] != true
+        && clock["unresolved"] != true
+    {
+        turn["recommendations"] = json!([room_recommendation(room, c)]);
+    }
+    if result["closed"] == true {
+        turn["recommendations"] = json!([]);
+        for name in ["room_completion", "construction_clock"] {
+            if let Some(domain) = turn["active_work"]
+                .get_mut(name)
+                .and_then(Value::as_object_mut)
+            {
+                domain.remove("cancellation");
+            }
+        }
+    }
     // No canonical world adapter exists for this protocol. A journal root or
     // native generation must never be invented as a canonical world anchor.
     turn["anchor"] = Value::Null;
@@ -446,4 +533,31 @@ pub(super) fn packet(
         b.remove("admission");
     }
     json!({"result":result,"agent_turn":turn}).to_string()
+}
+
+fn room_recommendation(room: &Value, c: Option<&OperationContext>) -> Value {
+    let live = room["sampling_permitted"] == true;
+    recommendation(
+        "inspect-original-joint-room",
+        if live {
+            "fortress.observe"
+        } else {
+            "fortress.query"
+        },
+        if live {
+            "Acquire one bounded joint sample of the original room terrain and every furnishing."
+        } else {
+            "Inspect the retained original joint room goal and exact recovery identity."
+        },
+        "high",
+        "high",
+        "read_only",
+        "not_applicable",
+        false,
+        if live {
+            json!({"session_id":c.map(|c|c.session_id.to_string()),"selection":"room_completion"})
+        } else {
+            json!({"session_id":c.map(|c|c.session_id.to_string()),"query":"{\"mode\":\"room_completion\"}"})
+        },
+    )
 }

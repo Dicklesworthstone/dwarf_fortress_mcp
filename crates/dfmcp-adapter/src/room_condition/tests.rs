@@ -190,20 +190,20 @@ fn identity(name: &str, inode: u64) -> PrivateFileIdentity {
     }
 }
 
-fn fixture(count: usize) -> (Definition, OperationContext) {
+fn fixture(count: usize) -> Result<(Definition, OperationContext)> {
     let originals = fixtures::goal(count);
     let first = originals.records()[0].plan().before();
     let endpoint = SocketAddr::from(([127, 0, 0, 1], 5000));
-    let binding = BuildBinding::new(endpoint, "test-df", "test-dfhack", first).unwrap();
+    let binding = BuildBinding::new(endpoint, "test-df", "test-dfhack", first)?;
     let positions: Vec<_> = originals
         .records()
         .iter()
         .map(|record| record.plan().before().selection().target())
         .collect();
-    let x = positions.iter().map(|p| p[0]).min().unwrap();
-    let y = positions.iter().map(|p| p[1]).min().unwrap();
-    let xmax = positions.iter().map(|p| p[0]).max().unwrap();
-    let ymax = positions.iter().map(|p| p[1]).max().unwrap();
+    let x = positions.iter().map(|p| p[0]).min().ok_or_else(corrupt)?;
+    let y = positions.iter().map(|p| p[1]).min().ok_or_else(corrupt)?;
+    let xmax = positions.iter().map(|p| p[0]).max().ok_or_else(corrupt)?;
+    let ymax = positions.iter().map(|p| p[1]).max().ok_or_else(corrupt)?;
     let z = positions[0][2];
     let region = Region {
         origin: [x - 1, y - 1, z],
@@ -240,13 +240,11 @@ fn fixture(count: usize) -> (Definition, OperationContext) {
                 .collect(),
             excluded_items: Vec::new(),
         },
-    )
-    .unwrap();
+    )?;
     let room = RoomIntent::new(
         request.clone(),
-        TerrainRequirements::new(region, floors, vec![wall]).unwrap(),
-    )
-    .unwrap();
+        TerrainRequirements::new(region, floors, vec![wall])?,
+    )?;
     let mut inventory = fixtures::observation(&originals, first.tick());
     inventory.jobs.next_job_id = first.next_job_id();
     inventory.next_building_id = first.next_building_id();
@@ -256,7 +254,7 @@ fn fixture(count: usize) -> (Definition, OperationContext) {
             .records()
             .iter()
             .find(|record| record.plan().before().selection().item_id() == item.native_id)
-            .unwrap()
+            .ok_or_else(corrupt)?
             .plan()
             .before();
         let p = before.selection().target();
@@ -265,9 +263,9 @@ fn fixture(count: usize) -> (Definition, OperationContext) {
         item.holder_building_native_id = None;
     }
     let mut state = LiveOperationsState::with_profile(OperationsProfile::PagedV1_4);
-    state.publish(inventory).unwrap();
+    state.publish(inventory)?;
     let mut c = fixtures::context(&originals);
-    c.anchor = state.snapshot().unwrap().anchor();
+    c.anchor = state.snapshot().ok_or_else(corrupt)?.anchor();
     c.budget.max_bytes = 1024 * 1024 * 1024;
     c.budget.max_entities = 100_000;
     let handoff = Handoff::allocate(
@@ -276,25 +274,23 @@ fn fixture(count: usize) -> (Definition, OperationContext) {
         endpoint,
         &request,
         crate::furniture_supply::MAX_WORK,
-    )
-    .unwrap()
+    )?
     .handoff
-    .unwrap();
+    .ok_or_else(corrupt)?;
     let mut raw = b"DFMBJ019".to_vec();
     field32(&mut raw, &binding.canonical_bytes());
     raw.extend_from_slice(&[1; 32]);
     let journal_id = domain_hash(b"dfmcp-build-journal/1", &raw);
     raw.extend_from_slice(journal_id.as_bytes());
-    let batch =
-        BatchDefinition::from_room_handoff(room, handoff, binding.clone(), journal_id).unwrap();
+    let batch = BatchDefinition::from_room_handoff(room, handoff, binding.clone(), journal_id)?;
     let mut head = journal_id;
     let mut sequence = 0;
     let mut records = Vec::new();
     for (step, original) in batch.plan().ordered_steps().zip(originals.records()) {
         assert_eq!(step.selection, original.plan().before().selection());
         let key = batch.key(step);
-        let prepared = rekey(original, &key, false).unwrap();
-        let placed = rekey(original, &key, true).unwrap();
+        let prepared = rekey(original, &key, false)?;
+        let placed = rekey(original, &key, true)?;
         for (tag, native) in [
             (0, None),
             (1, Some(&prepared)),
@@ -322,32 +318,26 @@ fn fixture(count: usize) -> (Definition, OperationContext) {
             max_gap: 1200,
             max_observations: 512,
         },
-    )
-    .unwrap();
+    )?;
     let mut original = BuildJournal::open(
         Memory::from_bytes(raw),
         &c,
         BuildMode::Recover,
         Some(binding.clone()),
         None,
-    )
-    .unwrap();
-    let audit = original.inventory(&c).unwrap();
+    )?;
+    let audit = original.inventory(&c)?;
     let origin = Origin::from_batch(
         batch,
         &binding,
         &audit,
         identity("batch", 11),
         identity("placements", 12),
-    )
-    .unwrap();
-    (
-        Definition::new(MonitorDefinition::new(origin, goal).unwrap()).unwrap(),
-        c,
-    )
+    )?;
+    Ok((Definition::new(MonitorDefinition::new(origin, goal)?)?, c))
 }
 
-fn evidence(definition: &Definition, tick: u64) -> Sample {
+fn evidence(definition: &Definition, tick: u64) -> Result<Sample> {
     let binding = definition.origin().definition().binding();
     let region = definition.room().terrain().region();
     let floor = Tile {
@@ -375,52 +365,52 @@ fn evidence(definition: &Definition, tick: u64) -> Sample {
         map_dimensions: binding.dimensions(),
         map: MapRegion {
             region,
-            cells: vec![Cell::Visible(floor); region.volume().unwrap()],
+            cells: vec![Cell::Visible(floor); region.volume().map_err(|_| corrupt())?],
         },
     };
     for &wall in definition.room().terrain().walls() {
         let mut tile = floor;
         tile.shape = Shape::Wall;
-        map.map.cells[region.index(wall).unwrap()] = Cell::Visible(tile);
+        map.map.cells[region.index(wall).ok_or_else(corrupt)?] = Cell::Visible(tile);
     }
     for record in definition.goal().records() {
         let mut tile = floor;
         tile.building_occupancy = 1;
         map.map.cells[region
-            .index(record.insertion().unwrap().position())
-            .unwrap()] = Cell::Visible(tile);
+            .index(record.insertion().ok_or_else(corrupt)?.position())
+            .ok_or_else(corrupt)?] = Cell::Visible(tile);
     }
     let manifest = Manifest {
         generation: 87,
         df_version: "test-df".into(),
         dfhack_version: "test-dfhack".into(),
     };
-    let raw = map.encode_payload().unwrap();
-    Sample {
+    let raw = map.encode_payload()?;
+    Ok(Sample {
         before: manifest.clone(),
         before_capture: raw.clone(),
         furnishings: fixtures::sample(definition.goal(), tick),
         after: manifest,
         after_capture: raw,
-    }
+    })
 }
-fn change_map(sample: &mut Sample, edit: impl FnOnce(&mut LiveMapObservation)) {
-    let mut map = sample.map(true).unwrap();
-    edit(&mut map);
-    sample.before_capture = map.encode_payload().unwrap();
+fn change_map(
+    sample: &mut Sample,
+    edit: impl FnOnce(&mut LiveMapObservation) -> Result<()>,
+) -> Result<()> {
+    let mut map = sample.map(true)?;
+    edit(&mut map)?;
+    sample.before_capture = map.encode_payload()?;
     sample.after_capture = sample.before_capture.clone();
+    Ok(())
 }
 fn step(
     state: &Progress,
     definition: &Definition,
     sample: &Sample,
     c: &OperationContext,
-) -> Progress {
-    state
-        .begin_read()
-        .unwrap()
-        .advance(definition, sample, c)
-        .unwrap()
+) -> Result<Progress> {
+    state.begin_read()?.advance(definition, sample, c)
 }
 fn admit(_: &Definition, _: &Progress) -> Result<()> {
     Ok(())
@@ -428,8 +418,12 @@ fn admit(_: &Definition, _: &Progress) -> Result<()> {
 fn guard(_: &Origin, _: &OperationContext) -> Result<()> {
     Ok(())
 }
-fn opened(definition: &Definition, c: &OperationContext, disk: Memory) -> MonitorStore<Memory> {
-    MonitorStore::open(disk, c, BuildMode::Recover, Some(definition.clone()), true).unwrap()
+fn opened(
+    definition: &Definition,
+    c: &OperationContext,
+    disk: Memory,
+) -> Result<MonitorStore<Memory>> {
+    MonitorStore::open(disk, c, BuildMode::Recover, Some(definition.clone()), true)
 }
 fn publish(store: &mut MonitorStore<Memory>, c: &OperationContext, sample: &Sample) -> Result<()> {
     store.begin_read(c, &mut admit, &mut guard)?;
@@ -437,73 +431,74 @@ fn publish(store: &mut MonitorStore<Memory>, c: &OperationContext, sample: &Samp
 }
 
 #[test]
-fn original_room_roundtrip_and_legacy_refusal() {
-    let (definition, _) = fixture(2);
-    let decoded = Definition::decode(definition.canonical_bytes()).unwrap();
+fn original_room_roundtrip_and_legacy_refusal() -> Result<()> {
+    let (definition, _) = fixture(2)?;
+    let decoded = Definition::decode(definition.canonical_bytes())?;
     assert_eq!(decoded.id(), definition.id());
     assert_eq!(decoded.room(), definition.room());
-    let legacy = crate::construction_plan::store::tests::fixture().unwrap();
+    let legacy = crate::construction_plan::store::tests::fixture()?;
     assert!(Definition::new(legacy.definition).is_err());
-    let sample = evidence(&definition, fixtures::TICK);
-    assert_eq!(
-        Sample::decode(&sample.canonical_bytes().unwrap()).unwrap(),
-        sample
-    );
+    let sample = evidence(&definition, fixtures::TICK)?;
+    assert_eq!(Sample::decode(&sample.canonical_bytes()?)?, sample);
     for length in [0, 7, 11, definition.canonical_bytes().len() - 1] {
         assert!(Definition::decode(&definition.canonical_bytes()[..length]).is_err());
     }
+    Ok(())
 }
 
 #[test]
-fn whole_room_and_every_original_furnishing_share_one_streak() {
+fn whole_room_and_every_original_furnishing_share_one_streak() -> Result<()> {
     for count in [2, 32] {
-        let (definition, c) = fixture(count);
-        let first = evidence(&definition, fixtures::TICK);
-        let state = step(&Progress::new(&definition), &definition, &first, &c);
+        let (definition, c) = fixture(count)?;
+        let first = evidence(&definition, fixtures::TICK)?;
+        let state = step(&Progress::new(&definition), &definition, &first, &c)?;
         assert_eq!(state.streak, 1);
         assert_eq!(state.terrain.furnishings.matched, count as u32);
-        let mut blocked = evidence(&definition, fixtures::TICK + 10);
+        let mut blocked = evidence(&definition, fixtures::TICK + 10)?;
         let target = definition
             .goal()
             .records()
             .last()
-            .unwrap()
+            .ok_or_else(corrupt)?
             .insertion()
-            .unwrap()
+            .ok_or_else(corrupt)?
             .position();
         change_map(&mut blocked, |map| {
-            let Cell::Visible(mut tile) = map.map.cells[map.map.region.index(target).unwrap()]
+            let Cell::Visible(mut tile) =
+                map.map.cells[map.map.region.index(target).ok_or_else(corrupt)?]
             else {
-                panic!()
+                return Err(corrupt());
             };
             tile.building_occupancy = 0;
-            map.map.cells[map.map.region.index(target).unwrap()] = Cell::Visible(tile);
-        });
-        let state = step(&state, &definition, &blocked, &c);
+            map.map.cells[map.map.region.index(target).ok_or_else(corrupt)?] = Cell::Visible(tile);
+            Ok(())
+        })?;
+        let state = step(&state, &definition, &blocked, &c)?;
         assert_eq!(state.streak, 0);
         assert_eq!(state.terrain.furnishings.unoccupied, 1);
         let state = step(
             &state,
             &definition,
-            &evidence(&definition, fixtures::TICK + 20),
+            &evidence(&definition, fixtures::TICK + 20)?,
             &c,
-        );
+        )?;
         assert_eq!(state.streak, 1);
         let state = step(
             &state,
             &definition,
-            &evidence(&definition, fixtures::TICK + 30),
+            &evidence(&definition, fixtures::TICK + 30)?,
             &c,
-        );
+        )?;
         assert_eq!(state.phase, "satisfied");
     }
+    Ok(())
 }
 
 #[test]
-fn wall_loss_and_alternating_furniture_terrain_truth_never_combine() {
-    let (definition, c) = fixture(2);
-    let mut furniture_pending = evidence(&definition, fixtures::TICK);
-    let mut observed = furniture_pending.operations().unwrap();
+fn wall_loss_and_alternating_furniture_terrain_truth_never_combine() -> Result<()> {
+    let (definition, c) = fixture(2)?;
+    let mut furniture_pending = evidence(&definition, fixtures::TICK)?;
+    let mut observed = furniture_pending.operations()?;
     observed.buildings[1].build_stage = 0;
     furniture_pending.furnishings = fixtures::with_observation(definition.goal(), observed);
     let first = step(
@@ -511,41 +506,43 @@ fn wall_loss_and_alternating_furniture_terrain_truth_never_combine() {
         &definition,
         &furniture_pending,
         &c,
-    );
+    )?;
     assert_eq!(first.streak, 0);
-    let mut terrain_failed = evidence(&definition, fixtures::TICK + 10);
+    let mut terrain_failed = evidence(&definition, fixtures::TICK + 10)?;
     let wall = definition.room().terrain().walls()[0];
     change_map(&mut terrain_failed, |map| {
-        let index = map.map.region.index(wall).unwrap();
+        let index = map.map.region.index(wall).ok_or_else(corrupt)?;
         let Cell::Visible(mut tile) = map.map.cells[index] else {
-            panic!()
+            return Err(corrupt());
         };
         tile.shape = Shape::Floor;
         map.map.cells[index] = Cell::Visible(tile);
-    });
-    let state = step(&first, &definition, &terrain_failed, &c);
+        Ok(())
+    })?;
+    let state = step(&first, &definition, &terrain_failed, &c)?;
     assert_eq!(state.construction.condition_met_count(), 2);
     assert_eq!(state.terrain.walls.wrong_shape, 1);
     assert_eq!(state.streak, 0);
     let state = step(
         &state,
         &definition,
-        &evidence(&definition, fixtures::TICK + 20),
+        &evidence(&definition, fixtures::TICK + 20)?,
         &c,
-    );
+    )?;
     assert_eq!(state.streak, 1);
+    Ok(())
 }
 
 #[test]
-fn hidden_wet_designated_occupied_and_missing_requirements_withhold_proof() {
-    let (definition, c) = fixture(2);
+fn hidden_wet_designated_occupied_and_missing_requirements_withhold_proof() -> Result<()> {
+    let (definition, c) = fixture(2)?;
     let target = definition.room().terrain().floors()[0];
     for variant in 0..6 {
-        let mut sample = evidence(&definition, fixtures::TICK);
+        let mut sample = evidence(&definition, fixtures::TICK)?;
         change_map(&mut sample, |map| {
-            let index = map.map.region.index(target).unwrap();
+            let index = map.map.region.index(target).ok_or_else(corrupt)?;
             let Cell::Visible(mut tile) = map.map.cells[index] else {
-                panic!()
+                return Err(corrupt());
             };
             map.map.cells[index] = match variant {
                 0 => Cell::Hidden,
@@ -567,114 +564,107 @@ fn hidden_wet_designated_occupied_and_missing_requirements_withhold_proof() {
                     Cell::Visible(tile)
                 }
             };
-        });
-        let progress = step(&Progress::new(&definition), &definition, &sample, &c);
+            Ok(())
+        })?;
+        let progress = step(&Progress::new(&definition), &definition, &sample, &c)?;
         assert_eq!(progress.streak, 0);
         assert!(!progress.terrain.condition_met());
         assert!(progress.terrain.deficit_count() > 0);
     }
-    let mut sample = evidence(&definition, fixtures::TICK);
+    let mut sample = evidence(&definition, fixtures::TICK)?;
     let wall = definition.room().terrain().walls()[0];
     change_map(&mut sample, |map| {
-        let index = map.map.region.index(wall).unwrap();
+        let index = map.map.region.index(wall).ok_or_else(corrupt)?;
         let Cell::Visible(mut tile) = map.map.cells[index] else {
-            panic!()
+            return Err(corrupt());
         };
         tile.unit_occupancy = 1;
         map.map.cells[index] = Cell::Visible(tile);
-    });
+        Ok(())
+    })?;
     assert_eq!(
-        step(&Progress::new(&definition), &definition, &sample, &c)
+        step(&Progress::new(&definition), &definition, &sample, &c)?
             .terrain
             .walls
             .occupied,
         1
     );
+    Ok(())
 }
 
 #[test]
-fn same_tick_map_padding_change_and_unpaused_capture_reset_shared_streak() {
-    let (definition, c) = fixture(2);
-    let first = evidence(&definition, fixtures::TICK);
-    let state = step(&Progress::new(&definition), &definition, &first, &c);
+fn same_tick_map_padding_change_and_unpaused_capture_reset_shared_streak() -> Result<()> {
+    let (definition, c) = fixture(2)?;
+    let first = evidence(&definition, fixtures::TICK)?;
+    let state = step(&Progress::new(&definition), &definition, &first, &c)?;
     let mut changed = first.clone();
     change_map(&mut changed, |map| {
         let index = map.map.cells.len() - 1;
         let Cell::Visible(mut tile) = map.map.cells[index] else {
-            panic!()
+            return Err(corrupt());
         };
         tile.traffic = 1;
         map.map.cells[index] = Cell::Visible(tile);
-    });
-    let state = step(&state, &definition, &changed, &c);
+        Ok(())
+    })?;
+    let state = step(&state, &definition, &changed, &c)?;
     assert_eq!(state.streak, 0);
-    let state = step(&state, &definition, &changed, &c);
+    let state = step(&state, &definition, &changed, &c)?;
     assert_eq!(state.streak, 0);
-    let mut next = evidence(&definition, fixtures::TICK + 10);
-    change_map(&mut next, |map| map.paused = false);
+    let mut next = evidence(&definition, fixtures::TICK + 10)?;
+    change_map(&mut next, |map| {
+        map.paused = false;
+        Ok(())
+    })?;
     assert_eq!(
-        step(&state, &definition, &next, &c).reason,
+        step(&state, &definition, &next, &c)?.reason,
         "room_capture_unpaused"
     );
+    Ok(())
 }
 
 #[test]
-fn mismatched_brackets_and_region_refuse_while_source_and_floor_changes_invalidate() {
-    let (definition, c) = fixture(2);
-    let first = evidence(&definition, fixtures::TICK);
-    let state = step(&Progress::new(&definition), &definition, &first, &c);
-    let mut bad = evidence(&definition, fixtures::TICK + 10);
+fn mismatched_brackets_and_region_refuse_while_source_and_floor_changes_invalidate() -> Result<()> {
+    let (definition, c) = fixture(2)?;
+    let first = evidence(&definition, fixtures::TICK)?;
+    let state = step(&Progress::new(&definition), &definition, &first, &c)?;
+    let mut bad = evidence(&definition, fixtures::TICK + 10)?;
     bad.after_capture[20] ^= 1;
-    assert!(
-        state
-            .begin_read()
-            .unwrap()
-            .advance(&definition, &bad, &c)
-            .is_err()
-    );
-    let mut bad = evidence(&definition, fixtures::TICK + 10);
+    assert!(state.begin_read()?.advance(&definition, &bad, &c).is_err());
+    let mut bad = evidence(&definition, fixtures::TICK + 10)?;
     bad.furnishings = fixtures::sample(definition.goal(), fixtures::TICK + 11);
-    assert!(
-        state
-            .begin_read()
-            .unwrap()
-            .advance(&definition, &bad, &c)
-            .is_err()
-    );
-    let mut changed = evidence(&definition, fixtures::TICK + 10);
+    assert!(state.begin_read()?.advance(&definition, &bad, &c).is_err());
+    let mut changed = evidence(&definition, fixtures::TICK + 10)?;
     changed.before.generation += 1;
     changed.after.generation += 1;
-    let state = step(&state, &definition, &changed, &c);
+    let state = step(&state, &definition, &changed, &c)?;
     assert_eq!(state.phase, "invalidated");
     assert_eq!(state.reason, "room_native_source_changed");
     assert_eq!(state.observed_tick_floor, fixtures::TICK + 10);
+    Ok(())
 }
 
 #[test]
-fn original_lifetime_and_authority_budgets_remain_fixed() {
-    let (definition, c) = fixture(2);
+fn original_lifetime_and_authority_budgets_remain_fixed() -> Result<()> {
+    let (definition, c) = fixture(2)?;
     let goal = Goal::new(
         definition.goal().records().to_vec(),
         Timing {
             max_observations: 2,
             ..definition.goal().timing()
         },
-    )
-    .unwrap();
-    let definition =
-        Definition::new(MonitorDefinition::new(definition.origin().clone(), goal).unwrap())
-            .unwrap();
-    let sample = evidence(&definition, fixtures::TICK);
-    let state = step(&Progress::new(&definition), &definition, &sample, &c);
-    let state = step(&state, &definition, &sample, &c);
+    )?;
+    let definition = Definition::new(MonitorDefinition::new(definition.origin().clone(), goal)?)?;
+    let sample = evidence(&definition, fixtures::TICK)?;
+    let state = step(&Progress::new(&definition), &definition, &sample, &c)?;
+    let state = step(&state, &definition, &sample, &c)?;
     assert_eq!(state.phase, "expired");
     assert_eq!(state.reason, "sample_budget_exhausted");
     let mut denied = c.clone();
     denied.budget.max_bytes = 1;
     assert!(
         Progress::new(&definition)
-            .begin_read()
-            .unwrap()
+            .begin_read()?
             .advance(&definition, &sample, &denied)
             .is_err()
     );
@@ -682,43 +672,42 @@ fn original_lifetime_and_authority_budgets_remain_fixed() {
     denied.budget.max_entities = 1;
     assert!(
         Progress::new(&definition)
-            .begin_read()
-            .unwrap()
+            .begin_read()?
             .advance(&definition, &sample, &denied)
             .is_err()
     );
     let mut denied = c.clone();
     denied.grants[0].expires_at_tick = Some(GameTick(fixtures::TICK));
-    let later = evidence(&definition, fixtures::TICK + 10);
+    let later = evidence(&definition, fixtures::TICK + 10)?;
     assert!(
         Progress::new(&definition)
-            .begin_read()
-            .unwrap()
+            .begin_read()?
             .advance(&definition, &later, &denied)
             .is_err()
     );
+    Ok(())
 }
 
 #[test]
-fn durable_replay_resets_unfinished_streak_and_retains_first_independent_sources() {
-    let (definition, c) = fixture(2);
+fn durable_replay_resets_unfinished_streak_and_retains_first_independent_sources() -> Result<()> {
+    let (definition, c) = fixture(2)?;
     let disk = Memory::default();
-    let mut store = opened(&definition, &c, disk.clone());
+    let mut store = opened(&definition, &c, disk.clone())?;
     let initial = store.recovery();
-    assert_eq!(store::initial_recovery(&definition).unwrap(), initial);
-    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)).unwrap();
+    assert_eq!(store::initial_recovery(&definition)?, initial);
+    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)?)?;
     assert_eq!(store.progress().streak, 1);
     let acknowledged = store.recovery();
-    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false).unwrap();
-    reopened.verify_recovery(&c, acknowledged).unwrap();
-    reopened.verify_recovery(&c, initial).unwrap();
+    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false)?;
+    reopened.verify_recovery(&c, acknowledged)?;
+    reopened.verify_recovery(&c, initial)?;
     assert_eq!(reopened.progress().streak, 0);
     assert!(!reopened.read_owned());
     assert!(
         reopened
             .publish_sample(
                 &c,
-                &evidence(&definition, fixtures::TICK + 10),
+                &evidence(&definition, fixtures::TICK + 10)?,
                 &mut admit,
                 &mut guard
             )
@@ -727,33 +716,33 @@ fn durable_replay_resets_unfinished_streak_and_retains_first_independent_sources
     publish(
         &mut reopened,
         &c,
-        &evidence(&definition, fixtures::TICK + 10),
-    )
-    .unwrap();
+        &evidence(&definition, fixtures::TICK + 10)?,
+    )?;
     assert_eq!(reopened.progress().streak, 1);
-    let first_source = reopened.first_source().unwrap().clone();
-    let mut changed = evidence(&definition, fixtures::TICK + 20);
+    let first_source = reopened.first_source().ok_or_else(corrupt)?.clone();
+    let mut changed = evidence(&definition, fixtures::TICK + 20)?;
     changed.before.generation += 1;
     changed.after.generation += 1;
-    publish(&mut reopened, &c, &changed).unwrap();
+    publish(&mut reopened, &c, &changed)?;
     assert_eq!(reopened.progress().phase, "invalidated");
     assert_eq!(reopened.first_source(), Some(&first_source));
     assert_ne!(reopened.progress().source.as_ref(), Some(&first_source));
+    Ok(())
 }
 
 #[test]
-fn read_intent_sync_failure_fences_and_complete_lost_ack_descendant_recovers() {
-    let (definition, c) = fixture(2);
+fn read_intent_sync_failure_fences_and_complete_lost_ack_descendant_recovers() -> Result<()> {
+    let (definition, c) = fixture(2)?;
     let disk = Memory::default();
-    let mut store = opened(&definition, &c, disk.clone());
+    let mut store = opened(&definition, &c, disk.clone())?;
     let pin = store.recovery();
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
+    store.begin_read(&c, &mut admit, &mut guard)?;
     disk.disk.borrow_mut().fail_sync = true;
     assert!(
         store
             .publish_sample(
                 &c,
-                &evidence(&definition, fixtures::TICK),
+                &evidence(&definition, fixtures::TICK)?,
                 &mut admit,
                 &mut guard
             )
@@ -762,9 +751,8 @@ fn read_intent_sync_failure_fences_and_complete_lost_ack_descendant_recovers() {
     assert!(store.is_fenced());
     assert!(!store.read_owned());
     disk.disk.borrow_mut().fail_sync = false;
-    let mut reopened =
-        MonitorStore::open(disk.clone(), &c, BuildMode::Recover, None, false).unwrap();
-    reopened.verify_recovery(&c, pin).unwrap();
+    let mut reopened = MonitorStore::open(disk.clone(), &c, BuildMode::Recover, None, false)?;
+    reopened.verify_recovery(&c, pin)?;
     assert_eq!(reopened.progress().observations, 1);
     assert_eq!(reopened.progress().streak, 0);
     let tail = disk.disk.borrow().bytes.clone();
@@ -780,15 +768,16 @@ fn read_intent_sync_failure_fences_and_complete_lost_ack_descendant_recovers() {
             .is_err()
         );
     }
+    Ok(())
 }
 
 #[test]
-fn failed_guard_retains_raw_authority_floor_and_cancel_needs_no_original_files() {
-    let (definition, c) = fixture(2);
-    let mut store = opened(&definition, &c, Memory::default());
-    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)).unwrap();
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
-    let sample = evidence(&definition, fixtures::TICK + 70);
+fn failed_guard_retains_raw_authority_floor_and_cancel_needs_no_original_files() -> Result<()> {
+    let (definition, c) = fixture(2)?;
+    let mut store = opened(&definition, &c, Memory::default())?;
+    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)?)?;
+    store.begin_read(&c, &mut admit, &mut guard)?;
+    let sample = evidence(&definition, fixtures::TICK + 70)?;
     assert!(
         store
             .publish_sample(&c, &sample, &mut admit, &mut |_, _| Err(corrupt()))
@@ -799,19 +788,21 @@ fn failed_guard_retains_raw_authority_floor_and_cancel_needs_no_original_files()
     let mut old = c.clone();
     old.grants[0].expires_at_tick = Some(GameTick(fixtures::TICK + 30));
     assert!(store.verify(&old).is_err());
-    store.cancel(&c, &mut admit).unwrap();
+    store.cancel(&c, &mut admit)?;
     assert_eq!(store.progress().phase, "cancelled");
     assert!(!store.read_owned());
+    Ok(())
 }
 
 #[test]
-fn partial_decode_clock_floor_survives_next_intent_and_refuses_regression_after_restart() {
-    let (definition, c) = fixture(2);
+fn partial_decode_clock_floor_survives_next_intent_and_refuses_regression_after_restart()
+-> Result<()> {
+    let (definition, c) = fixture(2)?;
     let disk = Memory::default();
-    let mut store = opened(&definition, &c, disk.clone());
-    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)).unwrap();
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
-    let mut incomplete = evidence(&definition, fixtures::TICK + 70);
+    let mut store = opened(&definition, &c, disk.clone())?;
+    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)?)?;
+    store.begin_read(&c, &mut admit, &mut guard)?;
+    let mut incomplete = evidence(&definition, fixtures::TICK + 70)?;
     incomplete.after_capture.truncate(25);
     assert!(
         store
@@ -819,8 +810,8 @@ fn partial_decode_clock_floor_survives_next_intent_and_refuses_regression_after_
             .is_err()
     );
     assert_eq!(store.authority_tick_floor(), fixtures::TICK + 70);
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
-    let mut empty_tail = evidence(&definition, fixtures::TICK + 80);
+    store.begin_read(&c, &mut admit, &mut guard)?;
+    let mut empty_tail = evidence(&definition, fixtures::TICK + 80)?;
     empty_tail.after_capture.clear();
     assert!(
         store
@@ -828,31 +819,32 @@ fn partial_decode_clock_floor_survives_next_intent_and_refuses_regression_after_
             .is_err()
     );
     assert_eq!(store.authority_tick_floor(), fixtures::TICK + 80);
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
+    store.begin_read(&c, &mut admit, &mut guard)?;
     let pin = store.recovery();
     assert_eq!(store.progress().observed_tick_floor, fixtures::TICK + 80);
     drop(store);
-    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false).unwrap();
-    reopened.verify_recovery(&c, pin).unwrap();
+    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false)?;
+    reopened.verify_recovery(&c, pin)?;
     assert_eq!(reopened.authority_tick_floor(), fixtures::TICK + 80);
     publish(
         &mut reopened,
         &c,
-        &evidence(&definition, fixtures::TICK + 10),
-    )
-    .unwrap();
+        &evidence(&definition, fixtures::TICK + 10)?,
+    )?;
     assert_eq!(reopened.progress().phase, "invalidated");
     assert_eq!(reopened.progress().reason, "room_game_clock_regressed");
     assert_eq!(reopened.progress().streak, 0);
     assert_eq!(reopened.progress().observed_tick_floor, fixtures::TICK + 80);
+    Ok(())
 }
 
 #[test]
-fn native_failed_read_floor_latch_changes_no_evidence_and_cancel_preserves_it_on_reopen() {
-    let (definition, c) = fixture(2);
+fn native_failed_read_floor_latch_changes_no_evidence_and_cancel_preserves_it_on_reopen()
+-> Result<()> {
+    let (definition, c) = fixture(2)?;
     let disk = Memory::default();
-    let mut store = opened(&definition, &c, disk.clone());
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
+    let mut store = opened(&definition, &c, disk.clone())?;
+    store.begin_read(&c, &mut admit, &mut guard)?;
     let pin = store.recovery();
     let progress = store.progress().clone();
     let bytes = disk.disk.borrow().bytes.clone();
@@ -869,11 +861,11 @@ fn native_failed_read_floor_latch_changes_no_evidence_and_cancel_preserves_it_on
     let mut expired = c.clone();
     expired.grants[0].expires_at_tick = Some(GameTick(fixtures::TICK + 80));
     assert!(store.cancel(&expired, &mut admit).is_err());
-    store.cancel(&c, &mut admit).unwrap();
+    store.cancel(&c, &mut admit)?;
     let cancelled = store.recovery();
     drop(store);
-    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false).unwrap();
-    reopened.verify_recovery(&c, cancelled).unwrap();
+    let mut reopened = MonitorStore::open(disk, &c, BuildMode::Recover, None, false)?;
+    reopened.verify_recovery(&c, cancelled)?;
     assert_eq!(reopened.progress().phase, "cancelled");
     assert_eq!(reopened.progress().observations, 0);
     assert_eq!(reopened.progress().streak, 0);
@@ -882,15 +874,16 @@ fn native_failed_read_floor_latch_changes_no_evidence_and_cancel_preserves_it_on
     assert!(reopened.progress().source.is_none());
     assert!(reopened.first_source().is_none());
     assert!(!reopened.read_owned());
+    Ok(())
 }
 
 #[test]
-fn exact_recovery_refuses_rollback_foreign_goal_and_current_byte_substitution() {
-    let (definition, c) = fixture(2);
+fn exact_recovery_refuses_rollback_foreign_goal_and_current_byte_substitution() -> Result<()> {
+    let (definition, c) = fixture(2)?;
     let disk = Memory::default();
-    let mut store = opened(&definition, &c, disk.clone());
+    let mut store = opened(&definition, &c, disk.clone())?;
     let old_bytes = disk.disk.borrow().bytes.clone();
-    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)).unwrap();
+    publish(&mut store, &c, &evidence(&definition, fixtures::TICK)?)?;
     let newer = store.recovery();
     let mut old = MonitorStore::open(
         Memory::from_bytes(old_bytes),
@@ -898,8 +891,7 @@ fn exact_recovery_refuses_rollback_foreign_goal_and_current_byte_substitution() 
         BuildMode::Recover,
         None,
         false,
-    )
-    .unwrap();
+    )?;
     assert!(old.verify_recovery(&c, newer).is_err());
     assert!(
         store
@@ -915,11 +907,12 @@ fn exact_recovery_refuses_rollback_foreign_goal_and_current_byte_substitution() 
     disk.disk.borrow_mut().bytes[80] ^= 1;
     assert!(store.verify(&c).is_err());
     assert!(store.is_fenced());
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn private_monitor_create_lock_reopen_and_substitution_preserve_custody() {
+fn private_monitor_create_lock_reopen_and_substitution_preserve_custody() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -928,34 +921,34 @@ fn private_monitor_create_lock_reopen_and_substitution_preserve_custody() {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::create_dir(&root).unwrap();
-    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::create_dir(&root).map_err(|_| corrupt())?;
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
+        .map_err(|_| corrupt())?;
     let path = root.join("condition");
-    let (definition, c) = fixture(2);
+    let (definition, c) = fixture(2)?;
     let mut store =
-        store::open_private_monitor(&path, &c, BuildMode::Recover, Some(definition.clone()))
-            .unwrap();
+        store::open_private_monitor(&path, &c, BuildMode::Recover, Some(definition.clone()))?;
     let pin = store.recovery();
     assert!(store::open_private_monitor(&path, &c, BuildMode::Recover, None).is_err());
-    store.begin_read(&c, &mut admit, &mut guard).unwrap();
-    store
-        .publish_sample(
-            &c,
-            &evidence(&definition, fixtures::TICK),
-            &mut admit,
-            &mut guard,
-        )
-        .unwrap();
+    store.begin_read(&c, &mut admit, &mut guard)?;
+    store.publish_sample(
+        &c,
+        &evidence(&definition, fixtures::TICK)?,
+        &mut admit,
+        &mut guard,
+    )?;
     drop(store);
-    let mut store = store::open_private_monitor(&path, &c, BuildMode::Recover, None).unwrap();
-    store.verify_recovery(&c, pin).unwrap();
+    let mut store = store::open_private_monitor(&path, &c, BuildMode::Recover, None)?;
+    store.verify_recovery(&c, pin)?;
     assert_eq!(store.progress().streak, 0);
-    let bytes = std::fs::read(&path).unwrap();
-    std::fs::rename(&path, root.join("original")).unwrap();
-    std::fs::write(&path, bytes).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let bytes = std::fs::read(&path).map_err(|_| corrupt())?;
+    std::fs::rename(&path, root.join("original")).map_err(|_| corrupt())?;
+    std::fs::write(&path, bytes).map_err(|_| corrupt())?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|_| corrupt())?;
     assert!(store.verify(&c).is_err());
     assert!(store.is_fenced());
     drop(store);
-    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(root).map_err(|_| corrupt())?;
+    Ok(())
 }

@@ -218,6 +218,8 @@ impl BuildGuard for Guard {
 fn config() -> Result<Config> {
     Ok(Config {
         completion_path: None,
+        room_completion_path: None,
+        room_completion_recovery: None,
         completion_only: false,
         clock_only: false,
         clock_monitor_recovery: None,

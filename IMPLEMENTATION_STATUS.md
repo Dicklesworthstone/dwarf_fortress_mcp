@@ -44,6 +44,63 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Joint original-room completion through MCP (2026-10-30)
+
+The existing eleven-tool furniture server now exposes the complete joint room
+workflow: `query` starts or inspects the original goal, `observe` or `wait` takes
+one bounded foreground sample, and `cancel` stops only the local room monitor.
+Start requires a complete original room-backed batch and every synchronized
+`Placed` receipt. All declared floors, required walls and original furnishings
+share one sampled condition and advancing-tick stability streak; no successful
+subset, changed room intent or furniture-only completion can stand in for it.
+The complete room request, terrain counts/deficits, every furnishing assessment,
+fixed timing, uncertainty, consumed clock floors and recovery identity appear in
+the Agent Turn. Offline and closed owners suggest only available actions.
+
+Three operator settings extend the isolated environment to 21 names: a distinct
+private room journal, its externally retained recovery identity and the independent
+map credential. Existing journals require their exact acknowledged monitor/head
+pin before adopting a current descendant. Normal Control/Recover/Offline opening
+retains original placement and parent custody; this increment does not add an
+independent room-only restart owner. Within an established owner, Query-only local
+cancellation remains possible after original source loss and reports final custody
+loss accurately. Normal close requires terminal room work and a settled clock;
+explicit recovery release preserves unfinished obligations.
+
+Durable read intent precedes native contact. Partial map/operations acquisitions
+consume decoded ticks before errors propagate; unfinished continuity is withdrawn
+after failed publication, lost outer acknowledgement and restart. Final source,
+monitor and configured-clock replay follows the last callback. Whole output is
+reserved within 64 KiB and all replay/acquisition/publication work shares the
+existing 1 GiB request ceiling. Joint-specific replay accounting permits larger
+valid histories without renewing their original deadline or sample allowance;
+histories exceeding that ceiling are still refused. An unresolved or unverified
+configured clock blocks fresh room sampling. The ordinary furniture clock retains
+its separate original completion goal; room monitoring never advances game time.
+
+The combined source passes 212 adapter and 101 MCP/Agent Turn component tests
+(313 total). Seventeen new MCP lifecycle groups cover complete 1/32-target goals,
+alternating terrain/furniture truth, failed native floors, exact recovery ancestry,
+source drift, final-callback custody loss, output/work/clock guards, lost replies,
+Query-only Offline ownership and a 4096-cell, 20-sample journal larger than 2 MiB.
+All 287 adapter and 776 MCP/dependency source inputs are checked against the tested
+views. The adapter view retains all production bodies and disables 114 unrelated
+test-module declarations. Full MCP public/native bodies type-check with
+nonexecuted FastMCP/asupersync stubs; four ambient worker tests and the ambient
+allocation-owner test module are excluded. No actual ambient runtime, native DFHack
+plugin or live fortress is qualified by these component runs.
+
+Required repository gates were attempted: `verify.sh` passes repository integrity,
+local receipt, implementation status and release custody, then stops at the
+existing source-bundle documentation requirement for `exact clean git commit`.
+Development `qualify_local.sh` stops at static contracts before full Rust phases.
+The final validator has 77 findings across 63 paths unchanged by this MCP increment,
+including the incoming mixed-family dispatch test finding; the two new room-core
+test-helper findings have been corrected. Full workspace/runtime/native/live/release
+qualification and admission remain open. Historical satisfaction does not establish
+current usability, room assignment, access, pathfinding, atomic capture, causality
+or effect discharge. See [the operator workflow](docs/ROOM_COMPLETION_MCP.md).
+
 ### Joint original-room monitor and native reader (2026-10-30)
 
 Rust now evaluates every retained room floor, required wall and original furnishing
@@ -81,8 +138,8 @@ precise entity accounting, last-receipt loss, map/source/tick corruption, releas
 ordering, failed-read clock expiry, journal ancestry and real private-file recovery
 are covered. Concurrent mixed-family dispatch commits 5314b17/13e7dbd are preserved.
 This is component execution evidence; full workspace/FastMCP runtime/native/live
-qualification and admission remain unverified. Public MCP joint-monitor integration
-follows separately. See [the implemented contract](docs/ROOM_CONDITION_RUST.md).
+qualification and admission remain unverified. The subsequent public MCP integration
+is recorded above. See [the implemented contract](docs/ROOM_CONDITION_RUST.md).
 
 ### Cross-family live mutation dispatch frontier (2026-10-30)
 
@@ -150,8 +207,8 @@ and static qualification blockers remain; this is component evidence, not full
 workspace/runtime/native/live qualification or admission.
 
 Intake does not observe terrain, designate cells, create a native room assignment
-or prove room completion. A separate joint terrain/furnishing monitor follows;
-ordinary furniture completion retains its narrower meaning. This is a new narrow
+or prove room completion. The subsequent joint terrain/furnishing monitor is
+recorded above; ordinary furniture completion retains its narrower meaning. This is a new narrow
 Rust room-intent generation, not an import of Python RoomPlan routing semantics.
 See [the room workflow](docs/ROOM_CONSTRUCTION_MCP.md). Broader bridge beads remain
 in progress.

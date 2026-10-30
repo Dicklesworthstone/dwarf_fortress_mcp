@@ -159,12 +159,14 @@
     "game_time_advanced": false,
     "native_game_qualified": false,
     "production_admitted": false,
-    "public_joint_monitor_routes_in_this_checkpoint": false
+    "public_joint_monitor_routes_in_this_checkpoint": true
   },
   "tests": [
     "crates/dfmcp-adapter/src/room_condition/tests.rs",
     "crates/dfmcp-adapter/src/construction_plan/rpc/room_tests.rs",
     "crates/dfmcp-adapter/src/construction_plan/tests.rs"
   ],
-  "executed_evidence_reference": "IMPLEMENTATION_STATUS.md"
+  "executed_evidence_reference": "IMPLEMENTATION_STATUS.md",
+  "public_mcp_contract": "architecture/build_placement_mcp.json",
+  "public_mcp_guide": "docs/ROOM_COMPLETION_MCP.md"
 }

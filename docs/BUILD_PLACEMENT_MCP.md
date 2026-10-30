@@ -47,6 +47,9 @@ endpoint, credential, protocol, protected region or checkpoint exception.
 | `DFMCP_BUILD_CLOCK_TOKEN` | Independent run/1.13 credential, 32..256 bytes, needed for clock native calls |
 | `DFMCP_BUILD_ALLOW_CLOCK` | Absent disables clock effects; exact `1` permits consideration under retained and current clock authority |
 | `DFMCP_BUILD_CLOCK_MONITOR_RECOVERY` | Closed `{monitor_id,head}` JSON, required only by independent clock recovery to pin the original monitor ancestry |
+| `DFMCP_BUILD_ROOM_COMPLETION` | Optional distinct private journal for the complete original room condition |
+| `DFMCP_BUILD_ROOM_COMPLETION_RECOVERY` | Closed `{monitor_id,head}` acknowledgement, required when reopening an existing joint room journal |
+| `DFMCP_MAP_TOKEN` | Independent map/1.5 read credential, required only for joint room sampling |
 
 Every other `DFMCP_` name is rejected, including an empty production admission
 marker and the separate standalone native-client profile switch. The DFHack
@@ -254,3 +257,10 @@ are allocated together and retained in a distinct room-backed batch generation.
 See [room construction intake](ROOM_CONSTRUCTION_MCP.md) for the closed request,
 complete geometry projection, storage bounds and evidence scope. Intake preserves
 declared terrain; it does not observe or complete the room.
+
+Use [joint room completion](ROOM_COMPLETION_MCP.md) after all original placements
+to start, inspect, sample or cancel the terrain-and-furnishings condition. Both
+`fortress.observe(selection="room_completion")` and
+`fortress.wait(scope="room_completion")` acquire at most one complete joint
+sample. The original room monitor uses a separate file and acknowledgement;
+configured clock history must be verified and settled before sampling.

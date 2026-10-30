@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-30 — Expose durable whole-room completion through MCP
+
+- Add original-room start, inspect, one-sample observe/wait and local cancellation
+  through the existing eleven tools, with complete geometry, furnishing assessments,
+  terrain deficits and truthful Agent Turn guidance.
+- Require exact acknowledged recovery pins, preserve original timing and sample
+  allowance, and recheck source, monitor and optional clock custody after the last
+  callback. Failed acquisition clocks narrow authority without positive proof.
+- Preserve Query-only local cancellation after source loss within an open owner;
+  support normal original-custody Recover/Offline reopening and explicit recovery
+  release without introducing independent room-only recovery.
+- Keep ordinary furniture clocks separately bound; unresolved clocks block fresh
+  room samples. Reserve complete output and large-history replay within existing
+  limits, including a tested 4096-cell, 20-sample journal over 2 MiB.
+- Pass 212 adapter and 101 MCP/Agent Turn component tests (313 total), including
+  17 new joint-room lifecycle groups. Correct new core test-helper validator
+  findings while preserving incoming main work. Existing repository-wide gates
+  still block full qualification; no ambient-runtime/native/live admission claim.
+- Document exact configuration, public calls, recovery and historical proof limits
+  in `docs/ROOM_COMPLETION_MCP.md` and the machine interface contract.
+
 ## 2026-10-30 — Prove original room terrain and furnishings together
 
 - Add a durable joint room monitor with one complete original condition and
@@ -9,8 +30,8 @@
 - Retain partial-read clock floors on errors; preserve immutable source history,
   acknowledged ancestry and local cancellation after original-file loss.
 - Pass 212 focused adapter tests, including 24 new joint-core/native-reader groups;
-  preserve the concurrent mixed-family dispatcher. Public MCP monitor routing is
-  a following increment; no native/live or full runtime admission is claimed.
+  preserve the concurrent mixed-family dispatcher. The subsequent public MCP
+  monitor routing is recorded above; no native/live or full runtime admission is claimed.
 
 ## 2026-10-30 — Coordinate sealed mutations across live native families
 
@@ -41,8 +62,8 @@
   current scope checks, immutable reopening and permanent stop.
 - Pass 188 adapter and 84 MCP/Agent Turn component tests, including 16 new groups;
   preserve concurrent independent clock-recovery work on main. Ambient runtime,
-  native/live and full release qualification remain unverified. Joint room
-  observation is a separate following increment.
+  native/live and full release qualification remain unverified. The subsequent
+  joint room observation increments are recorded above.
 
 ## 2026-10-30 — Recover original furniture clock runs without placement files
 

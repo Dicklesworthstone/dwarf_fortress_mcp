@@ -5,6 +5,8 @@
 //! Whole-furniture clock tests use real private journals and independent native
 //! fixture records. Injected native calls are counted; no live game is implied.
 use super::*;
+#[path = "room_monitor_tests.rs"]
+mod room_monitor_tests;
 use dfmcp_adapter::bounded_run::journal::{RunBinding, RunMode};
 use dfmcp_adapter::bounded_run::private_file::{PrivateRunFile, open_private_run_journal_exact};
 use dfmcp_adapter::bounded_run::rpc::{RunManifest, RunSource};

@@ -17,7 +17,7 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 18] = [
+pub(super) const NAMES: [&str; 21] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
@@ -25,6 +25,9 @@ pub(super) const NAMES: [&str; 18] = [
     "DFMCP_BUILD_JOURNAL",
     "DFMCP_BUILD_BATCH",
     "DFMCP_BUILD_COMPLETION",
+    "DFMCP_BUILD_ROOM_COMPLETION",
+    "DFMCP_BUILD_ROOM_COMPLETION_RECOVERY",
+    "DFMCP_MAP_TOKEN",
     "DFMCP_OPERATIONS_PAGED_TOKEN",
     "DFMCP_BUILD_ENDPOINT",
     "DFMCP_BUILD_TOKEN",
@@ -71,6 +74,8 @@ pub(super) struct Config {
     pub path: PathBuf,
     pub batch_path: Option<PathBuf>,
     pub completion_path: Option<PathBuf>,
+    pub room_completion_path: Option<PathBuf>,
+    pub room_completion_recovery: Option<dfmcp_adapter::room_condition::store::Recovery>,
     pub completion_only: bool,
     pub clock_only: bool,
     pub clock_monitor_recovery: Option<dfmcp_adapter::construction_plan::store::Recovery>,
@@ -228,6 +233,8 @@ fn configured(
         path: PathBuf::from(path),
         batch_path: None,
         completion_path: None,
+        room_completion_path: None,
+        room_completion_recovery: None,
         completion_only,
         clock_only,
         clock_monitor_recovery: None,
@@ -273,6 +280,13 @@ pub(super) fn monitor_recovery(
         return Err(denied());
     }
     Ok(dfmcp_adapter::construction_plan::store::Recovery { monitor_id, head })
+}
+pub(super) fn room_recovery(raw: &str) -> Result<dfmcp_adapter::room_condition::store::Recovery> {
+    let pin = monitor_recovery(raw)?;
+    Ok(dfmcp_adapter::room_condition::store::Recovery {
+        monitor_id: pin.monitor_id,
+        head: pin.head,
+    })
 }
 pub(super) fn configuration() -> Result<Config> {
     isolated(
@@ -324,6 +338,31 @@ pub(super) fn configuration() -> Result<Config> {
         }
         config.completion_path = Some(PathBuf::from(path));
     }
+    if let Some(path) = optional("DFMCP_BUILD_ROOM_COMPLETION")? {
+        let selected = PathBuf::from(&path);
+        if path.len() > 4096
+            || !path.starts_with('/')
+            || path.contains('\0')
+            || path[1..]
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+            || selected == config.path
+            || config.batch_path.as_ref().is_none_or(|p| p == &selected)
+            || config.completion_path.as_ref() == Some(&selected)
+            || config.completion_only
+            || config.clock_only
+        {
+            return Err(denied());
+        }
+        config.room_completion_path = Some(selected);
+    }
+    config.room_completion_recovery = optional("DFMCP_BUILD_ROOM_COMPLETION_RECOVERY")?
+        .as_deref()
+        .map(room_recovery)
+        .transpose()?;
+    if config.room_completion_recovery.is_some() && config.room_completion_path.is_none() {
+        return Err(denied());
+    }
     if config.completion_only && config.completion_path.is_none() {
         return Err(denied());
     }
@@ -347,6 +386,7 @@ pub(super) fn configuration() -> Result<Config> {
             || clock.path == config.path
             || config.batch_path.as_ref() == Some(&clock.path)
             || config.completion_path.as_ref() == Some(&clock.path)
+            || config.room_completion_path.as_ref() == Some(&clock.path)
             || (clock.initialize && (config.mode != BuildMode::Control || config.clock_only))
         {
             return Err(denied());
@@ -642,6 +682,92 @@ pub(super) fn completion_sample(
         permission,
     )
 }
+/// Joined, Query-only acquisition of both map endpoints and complete original
+/// furnishing evidence. The reader reports consumed ticks even on failure.
+pub(super) struct RoomIo<'a> {
+    pub control: &'a RequestControl,
+    pub config: &'a Config,
+    pub observed_floor: u64,
+}
+impl super::room_monitor::Io for RoomIo<'_> {
+    fn checkpoint(&mut self, c: &OperationContext) -> Result<()> {
+        c.authorize(
+            dfmcp_core::Capability::Query,
+            dfmcp_core::RiskTier::ReadOnly,
+            &[],
+            None,
+        )?;
+        boundary(self.control, self.config, false)
+    }
+    fn observed_tick_floor(&self) -> u64 {
+        self.observed_floor
+    }
+    fn sample(
+        &mut self,
+        binding: &BuildBinding,
+        definition: &dfmcp_adapter::room_condition::Definition,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::room_condition::Sample> {
+        current_request_check()?;
+        if &configuration()? != self.config
+            || self.config.mode == BuildMode::Offline
+            || self.config.completion_only
+            || self.config.clock_only
+        {
+            return Err(denied());
+        }
+        self.config.matches(binding)?;
+        super::room_intake::validate(definition.room(), self.config)?;
+        let build_token = required("DFMCP_BUILD_TOKEN", 256)?.into_bytes();
+        let operations_token = required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.into_bytes();
+        let map_token = required("DFMCP_MAP_TOKEN", 256)?.into_bytes();
+        if [&build_token, &operations_token, &map_token]
+            .iter()
+            .any(|v| v.len() < 32)
+        {
+            return Err(denied());
+        }
+        let pinned_build = build_token.clone();
+        let pinned_operations = operations_token.clone();
+        let pinned_map = map_token.clone();
+        let pinned_config = self.config.clone();
+        let permission = Box::new(move || {
+            current_request_check()?;
+            if configuration()? != pinned_config
+                || required("DFMCP_BUILD_TOKEN", 256)?.as_bytes() != pinned_build
+                || required("DFMCP_OPERATIONS_PAGED_TOKEN", 256)?.as_bytes() != pinned_operations
+                || required("DFMCP_MAP_TOKEN", 256)?.as_bytes() != pinned_map
+            {
+                return Err(denied());
+            }
+            Ok(())
+        });
+        let mut nonce = [0; 32];
+        nonce[..16].copy_from_slice(&c.session_id.get().to_be_bytes());
+        nonce[16..].copy_from_slice(&c.request_id.get().to_be_bytes());
+        let capture = dfmcp_adapter::construction_plan::rpc::room::acquire_trusted_with_floor(
+            binding,
+            definition.goal(),
+            definition.room().terrain().region(),
+            operations_token,
+            build_token,
+            map_token,
+            nonce,
+            c,
+            BuildCancellation::with_check(Arc::new(current_request_check)),
+            permission,
+            &mut self.observed_floor,
+        )?;
+        Ok(dfmcp_adapter::room_condition::Sample {
+            before: capture.before,
+            before_capture: capture.before_capture,
+            furnishings: capture.furnishings,
+            after: capture.after,
+            after_capture: capture.after_capture,
+        })
+    }
+}
+
 /// Acquire supply evidence on the same joined foreground request owner. This
 /// connection binds operations/1.4 only; build/1.19 is checked independently
 /// after the allocator has selected a complete immutable set of items.

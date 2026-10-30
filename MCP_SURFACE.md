@@ -239,6 +239,11 @@ The same development server accepts a complete bounded `room_request` through
 `fortress.open_session`, preserving required floors/walls and the full furniture
 request in original batch custody. See [room construction intake](docs/ROOM_CONSTRUCTION_MCP.md).
 Declared room terrain is not construction-completion evidence.
+The [joint room monitor](docs/ROOM_COMPLETION_MCP.md) subsequently evaluates the
+complete retained terrain and every original furnishing in one sampled condition.
+It uses query modes `room_completion_start` and `room_completion`, observe selection
+`room_completion`, and wait/cancel scope `room_completion`, preserving the eleven
+top-level tools and a separate acknowledged recovery history.
 Its closed `query` modes `completion_start`/`completion`, `observe` selection
 `completion`, and `cancel` scope `completion` add receipt-linked, Query-authorized
 monitoring without adding tools. The complete original plan and all assessments

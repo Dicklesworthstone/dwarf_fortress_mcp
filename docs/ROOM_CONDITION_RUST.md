@@ -7,8 +7,9 @@ placement registration or completed furniture alone cannot establish this result
 
 This is an unadmitted development adapter, private journal and query-only native
 reader. The [existing MCP intake](ROOM_CONSTRUCTION_MCP.md) already retains a room
-request through allocation and placement. Public joint-monitor startup, sampling
-and recovery routing are a separate integration step, outside this core checkpoint.
+request through allocation and placement. The [public joint-monitor workflow](ROOM_COMPLETION_MCP.md)
+now exposes startup, sampling, inspection, cancellation and recovery through the
+existing eleven tools while retaining the separate journal described here.
 Owning beads `df-dfhack-bridge-plane-c-pic.3/.4/.5` remain in progress.
 
 ## Original intent and definition

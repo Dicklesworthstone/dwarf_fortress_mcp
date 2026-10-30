@@ -117,3 +117,12 @@ bound, constraint retention, original keys, exact legacy compatibility, shortage
 behavior and real private-parent reopening. See
 [implementation status](../IMPLEMENTATION_STATUS.md) for the exact executed
 component evidence and the remaining runtime/native/live qualification limits.
+
+## Check the complete original room after placement
+
+After every original furnishing has a resolved Placed receipt, the
+[joint room completion workflow](ROOM_COMPLETION_MCP.md) can inspect the retained
+terrain and all furnishings in one sampled stability window. Its separate
+operator-configured journal preserves the fixed original objective and recovery
+identity. Ordinary furniture completion and clock receipts retain their own
+meanings; neither alone proves the joint room condition.
