@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-30 — Advance original mining goals with reviewed finite runs
+
+- Join the exact original Mine plan and verified designation to optional,
+  independently pinned run/1.13 clock custody and exact private restart identity.
+- Expose closed run planning, distinct confirmed `commit(scope="run")`, safe
+  `cancel(scope="run")` and reconcile-before-sample wait through the eleven tools.
+  Preserve original deadlines, cadence and stability; never chain runs or retry
+  an unknown designation or unpause.
+- Qualify pending dry visible Mine walls independently for advancement while
+  preserving unknown canonical excavation truth. Recheck fresh original terrain,
+  custody and authority after durable intent and immediately before native effect.
+- Default explicit positive-clock sessions to 3 GiB logical work, keep ordinary
+  sessions at 2 GiB and respect caller limits. Refuse known underfunding before
+  clock contact; retain current-proof suppression, clock floors and safety pause.
+- Preserve original/clock handoffs through errors, overflow and close. Permanent
+  native clock loss stays indeterminate and offers release instead of futile waits.
+- Pass 102 actual-source component tests without warnings, with 285 input hashes
+  unchanged. The welfare increment also passes 14 current cases, for 116 total.
+  Required checks reach the existing source-bundle gate and 76 baseline static
+  findings; full FastMCP/native/live qualification and admission remain unverified.
+
 ## 2026-10-29 — Compare historical citizen welfare through MCP
 
 - Add `historical_citizen_welfare` to the existing spatial query surface, joining

@@ -158,6 +158,22 @@ and examples are in `docs/LAB_SEMANTIC_ACTIONS.md` and `docs/WORLD_MODEL.md`.
 
 ## Tools
 
+The dedicated `dfmcp-live-semantic-dig-dev-server` uses the same eleven names for
+[original mining goals](docs/SEMANTIC_DIG_DEVELOPMENT.md). It observes a complete
+paused canonical source, prepares one original Mine rectangle and explicitly
+confirms its paired designation. Optional independently authorized run/1.13
+control adds `plan(kind="run")`, a distinct review confirmed through
+`commit(scope="run")`, and the native owner's safety pause through
+`cancel(scope="run")`. Tick permission defaults to zero; a positive allowance
+is capped at 1200 per interval and further bounded by the original cadence and
+deadline. Fresh exact-target readiness may accept pending dry Mine walls without
+upgrading their unknown floor truth. Wait reconciles any unsettled clock before
+sampling excavation, and never starts or chains runs. Clock receipts, current
+excavation and historical achievement remain separate. Exact original/clock
+custody survives errors and restart; unknown dispatch never permits another
+unpause. This remains an explicitly unadmitted development profile. See the
+[clock configuration and recovery guide](docs/SEMANTIC_DIG_CLOCK.md).
+
 The dedicated `dfmcp-live-semantic-work-orders-dev-server` uses the same eleven
 names for [original native furniture-order goals](docs/SEMANTIC_WORK_ORDER_MCP.md).
 Its closed `plan` request compiles one finite order under an exact canonical

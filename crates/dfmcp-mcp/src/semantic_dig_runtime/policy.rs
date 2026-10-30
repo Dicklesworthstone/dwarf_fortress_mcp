@@ -127,6 +127,21 @@ impl SourceAcceptance {
         p.evidence(policy.clone())?;
         Ok(policy)
     }
+    pub fn clock_terrain(
+        &self,
+        p: &DigGoalProjection,
+        region: Region,
+        c: &OperationContext,
+    ) -> Result<()> {
+        self.context(c)?;
+        self.observation(p.raw(), region)?;
+        if p.anchor() != c.anchor || p.original_anchor().fortress_id != self.fortress() {
+            return Err(denied(
+                "clock terrain requires the exact independently accepted canonical excavation projection",
+            ));
+        }
+        Ok(())
+    }
     pub fn goal(
         &self,
         p: &DigGoalProjection,

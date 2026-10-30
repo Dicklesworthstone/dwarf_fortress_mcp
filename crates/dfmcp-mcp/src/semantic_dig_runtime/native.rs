@@ -32,6 +32,10 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+#[path = "native_clock.rs"]
+mod clock;
+pub use clock::PinnedClock;
+use clock::{ClockConfig, ClockInput};
 #[path = "native_evidence.rs"]
 mod evidence;
 pub use evidence::NativeEvidence;
@@ -40,7 +44,17 @@ const CONFIG: &str = "DFMCP_SEMANTIC_DIG_CONFIG";
 const DESIGNATE: &str = "DFMCP_SEMANTIC_DIG_ALLOW_DESIGNATE";
 const SPATIAL_TOKEN: &str = "DFMCP_SEMANTIC_DIG_SPATIAL_TOKEN";
 const DIG_TOKEN: &str = "DFMCP_SEMANTIC_DIG_DIG_TOKEN";
-const ALLOWED: [&str; 5] = [OPT_IN, CONFIG, DESIGNATE, SPATIAL_TOKEN, DIG_TOKEN];
+const CLOCK_AUTHORITY: &str = "DFMCP_SEMANTIC_DIG_ALLOW_CLOCK";
+const CLOCK_TOKEN: &str = "DFMCP_SEMANTIC_DIG_CLOCK_TOKEN";
+const ALLOWED: [&str; 7] = [
+    OPT_IN,
+    CONFIG,
+    DESIGNATE,
+    SPATIAL_TOKEN,
+    DIG_TOKEN,
+    CLOCK_AUTHORITY,
+    CLOCK_TOKEN,
+];
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 const SPATIAL_READ_BYTES: u64 = 192 * MIB;
 
@@ -89,6 +103,7 @@ struct RecoveryInput {
     archive_publication_unknown: bool,
     #[serde(default)]
     paired_preparation_present: bool,
+    clock_journal_id: Option<String>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +119,7 @@ struct ConfigInput {
     protected: Vec<[u32; 6]>,
     checkpoint: Option<String>,
     recovery: Option<RecoveryInput>,
+    clock: Option<ClockInput>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Checkpoint {
@@ -122,6 +138,7 @@ pub struct Config {
     region: Region,
     checkpoint: Checkpoint,
     recovery: Option<Recovery>,
+    clock: Option<ClockConfig>,
     environment_digest: Digest32,
     runtime_check: Option<fn() -> Result<()>>,
 }
@@ -202,6 +219,17 @@ impl Config {
             }
         };
         let journal_id = input.journal_id.as_deref().map(digest).transpose()?;
+        let clock = input
+            .clock
+            .map(|clock| clock.validate(input.initialize))
+            .transpose()?;
+        let has_recovery = input.recovery.is_some();
+        let recovery_clock = input
+            .recovery
+            .as_ref()
+            .and_then(|recovery| recovery.clock_journal_id.as_deref())
+            .map(digest)
+            .transpose()?;
         let recovery = input
             .recovery
             .map(|input| {
@@ -231,6 +259,17 @@ impl Config {
         if recovery.is_some_and(|r| r.anchor.fortress_id != input.sources.fortress()) {
             return Err(denied("dig recovery belongs to another accepted fortress"));
         }
+        if has_recovery {
+            match (&clock, recovery_clock) {
+                (Some(clock), Some(id)) if clock.journal_id() == Some(id) => {}
+                (None, None) => {}
+                _ => {
+                    return Err(denied(
+                        "original dig recovery must retain the exact configured clock journal identity",
+                    ));
+                }
+            }
+        }
         Ok(Self {
             directory: input.directory,
             endpoint,
@@ -242,6 +281,7 @@ impl Config {
             region,
             checkpoint,
             recovery,
+            clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
             runtime_check: None,
         })
@@ -259,6 +299,13 @@ impl Config {
                 "operator designation enablement must be absent or exactly 1",
             ));
         }
+        if let Some(value) = std::env::var_os(CLOCK_AUTHORITY)
+            && value.to_str() != Some("1")
+        {
+            return Err(denied(
+                "independent operator clock enablement must be absent or exactly 1",
+            ));
+        }
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy();
             if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
@@ -271,6 +318,9 @@ impl Config {
     }
     pub fn designation_enabled() -> bool {
         std::env::var(DESIGNATE).ok().as_deref() == Some("1")
+    }
+    pub fn clock_enabled() -> bool {
+        std::env::var(CLOCK_AUTHORITY).ok().as_deref() == Some("1")
     }
     fn current(&self) -> Result<()> {
         if let Some(check) = self.runtime_check {
@@ -318,6 +368,16 @@ impl Config {
                 )),
                 Err(cause) if cause.kind() == io::ErrorKind::NotFound => Ok(false),
                 Err(_) => Err(denied("dig custody presence could not be determined")),
+            }
+        }
+        let clock = present(self.path("clock.journal"))?;
+        match (&self.clock, clock) {
+            (None, false) => {}
+            (Some(_), present) if self.initialize != present => {}
+            _ => {
+                return Err(denied(
+                    "clock custody requires exact initialization or externally identified reopening before dig custody is opened",
+                ));
             }
         }
         let journal = present(self.path("dig.journal"))?;
@@ -977,6 +1037,29 @@ impl Shell for NativeShell {
     type Evidence = NativeEvidence;
     type Guard = NativeGuard;
     type GoalSource = NativeGoalSource;
+    type ClockJournal = dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
+    type ClockSource = PinnedClock;
+    fn clock_enabled(&self) -> bool {
+        self.config.clock.is_some() && Config::clock_enabled()
+    }
+    fn clock_context(&self, c: &OperationContext, control: bool) -> Result<OperationContext> {
+        clock::context(&self.config, c, control)
+    }
+    fn open_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::journal::RunJournal<Self::ClockJournal>>> {
+        clock::open(&self.config, mode, c)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource> {
+        clock::connect(&self.config, c)
+    }
+    fn authorize_clock_terrain(&self, p: &DigGoalProjection, c: &OperationContext) -> Result<()> {
+        self.config.current()?;
+        self.config.sources.clock_terrain(p, self.config.region, c)
+    }
+
     fn fortress(&self) -> FortressId {
         self.config.sources.fortress()
     }
@@ -1003,6 +1086,9 @@ impl Shell for NativeShell {
     )> {
         self.config.current()?;
         self.config.original_custody()?;
+        if self.config.initialize && self.config.clock.is_some() {
+            clock::context(&self.config, c, true)?;
+        }
         let mut work = Work::new(c)?;
         let journal_mode = if mode == Mode::Control
             && (!self.designation_enabled() || self.config.recovery.is_some())

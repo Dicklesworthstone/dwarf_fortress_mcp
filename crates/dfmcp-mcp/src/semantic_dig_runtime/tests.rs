@@ -1,5 +1,8 @@
 //! Source-referencing tests of the full original dig runtime lifecycle.
 use super::*;
+#[path = "runtime_clock_tests.rs"]
+mod runtime_clock_tests;
+use runtime_clock_tests::{ClockNative, ClockResources};
 #[allow(dead_code)]
 #[path = "../../../dfmcp-adapter/tests/semantic_dig/fixtures.rs"]
 pub(super) mod fixtures;
@@ -77,7 +80,25 @@ impl DigGoalSource for GoalSource {
                     match state.condition {
                         "hidden" => *cell = MapCell::Hidden,
                         "missing" => *cell = MapCell::Unallocated,
-                        "pending" => {}
+                        "pending" | "mixed" | "undesignated_wall" | "occupied_wall" => {
+                            if let MapCell::Visible(tile) = cell {
+                                tile.shape = if state.condition == "mixed" && position[0] == x {
+                                    Shape::Floor
+                                } else {
+                                    Shape::Wall
+                                };
+                                tile.dig_designation = if state.condition == "undesignated_wall"
+                                    || tile.shape == Shape::Floor
+                                {
+                                    0
+                                } else {
+                                    1
+                                };
+                                if state.condition == "occupied_wall" {
+                                    tile.building_occupancy = 1;
+                                }
+                            }
+                        }
                         _ => {
                             if let MapCell::Visible(tile) = cell {
                                 tile.shape = Shape::Floor;
@@ -119,6 +140,8 @@ struct Host {
     open_calls: Rc<Cell<usize>>,
     evidence_cost: Rc<Cell<u64>>,
     evidence_opens: Rc<Cell<usize>>,
+    clock: Option<ClockResources>,
+    clock_terrain_enabled: Rc<Cell<bool>>,
 }
 impl Host {
     fn new() -> Result<Self> {
@@ -144,10 +167,20 @@ impl Host {
             open_calls: Rc::new(Cell::new(0)),
             evidence_cost: Rc::new(Cell::new(NATIVE_EVIDENCE_BYTES)),
             evidence_opens: Rc::new(Cell::new(0)),
+            clock: None,
+            clock_terrain_enabled: Rc::new(Cell::new(true)),
         })
     }
     fn runtime(&self, mode: Mode) -> Result<Runtime<Self>> {
-        self.runtime_with_bytes(mode, DEFAULT_BYTES - 256 * MIB - 128 * 1024)
+        self.runtime_with_bytes(
+            mode,
+            (if self.clock.is_some() {
+                DEFAULT_CLOCK_BYTES
+            } else {
+                DEFAULT_BYTES
+            }) - 256 * MIB
+                - 128 * 1024,
+        )
     }
     fn runtime_with_bytes(&self, mode: Mode, max_bytes: u64) -> Result<Runtime<Self>> {
         Runtime::from_shell(
@@ -160,7 +193,11 @@ impl Host {
                 max_entities: 8192,
                 max_actions: 1,
                 max_output_tokens: MAX_OUTPUT_TOKENS,
-                max_game_ticks: 0,
+                max_game_ticks: if self.clock.is_some() {
+                    MAX_GAME_TICKS
+                } else {
+                    0
+                },
             },
         )
     }
@@ -178,6 +215,14 @@ impl Host {
                 .anchor,
             history_present,
         });
+        if let Some(clock) = &self.clock {
+            let id = runtime
+                .opening_clock
+                .as_ref()
+                .ok_or_else(|| invalid("retained clock absent"))?
+                .journal_id;
+            out.clock = Some(clock.recovered(id));
+        }
         Ok(out)
     }
 }
@@ -190,6 +235,36 @@ impl Shell for Host {
     type Evidence = BudgetEvidence;
     type Guard = fixtures::Guard;
     type GoalSource = GoalSource;
+    type ClockJournal = Memory;
+    type ClockSource = ClockNative;
+    fn clock_enabled(&self) -> bool {
+        self.clock.as_ref().is_some_and(ClockResources::enabled)
+    }
+    fn open_clock(&self, mode: Mode, c: &OperationContext) -> Result<Option<RunJournal<Memory>>> {
+        self.clock
+            .as_ref()
+            .map(|clock| clock.open(mode, c))
+            .transpose()
+    }
+    fn clock_context(&self, c: &OperationContext, control: bool) -> Result<OperationContext> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| denied("clock not configured"))?
+            .context(c, control)
+    }
+    fn clock_source(&self, c: &OperationContext) -> Result<ClockNative> {
+        self.clock
+            .as_ref()
+            .ok_or_else(|| denied("clock not configured"))?
+            .source(c)
+    }
+    fn authorize_clock_terrain(&self, p: &DigGoalProjection, c: &OperationContext) -> Result<()> {
+        c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        if !self.clock_terrain_enabled.get() || p.anchor() != c.anchor {
+            return Err(denied("independent raw target policy unavailable"));
+        }
+        Ok(())
+    }
     fn fortress(&self) -> FortressId {
         self.binding.fortress_id()
     }

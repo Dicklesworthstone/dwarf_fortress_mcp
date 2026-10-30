@@ -2,6 +2,8 @@
 //! This composition adds no admission, source grant or automatic clock control.
 use std::time::{Duration, Instant};
 
+use dfmcp_adapter::bounded_run::journal::RunJournal;
+use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::control_effect_journal::EffectJournalStorage;
 use dfmcp_adapter::dig_designation::journal::session::{DigSession, DigSessionGuard};
 use dfmcp_adapter::dig_designation::journal::{DigBinding, DigMode, DigRecord, DigState};
@@ -27,6 +29,11 @@ use dfmcp_intent::{ObligationStatus, PreparedPlan};
 use dfmcp_world::{EvidencePolicy, PredicateTruth};
 use serde_json::{Value, json};
 
+mod advancement;
+pub mod clock;
+mod readiness;
+use clock::{Clock, ClockTarget, ClockView, RunRequest};
+pub use readiness::ClockReadiness;
 pub mod native;
 pub mod policy;
 pub mod request;
@@ -34,9 +41,10 @@ pub use native::{Config, NativeRuntime};
 pub use request::Request;
 
 pub const DEFAULT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const DEFAULT_CLOCK_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 pub const MAX_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 pub const MAX_WALL_MILLIS: u64 = 60_000;
-pub const MAX_GAME_TICKS: u64 = 0;
+pub const MAX_GAME_TICKS: u64 = 1200;
 pub const MAX_OUTPUT_TOKENS: u32 = 32_768;
 const MIB: u64 = 1024 * 1024;
 const VIEW_BYTES: u64 = 128 * MIB;
@@ -123,6 +131,31 @@ pub trait Shell {
     type Evidence: DigEvidenceOwner;
     type Guard: DigSessionGuard;
     type GoalSource: DigGoalSource;
+    type ClockJournal: EffectJournalStorage;
+    type ClockSource: RunSource;
+    fn clock_enabled(&self) -> bool {
+        false
+    }
+    fn open_clock(
+        &self,
+        _mode: Mode,
+        _c: &OperationContext,
+    ) -> Result<Option<RunJournal<Self::ClockJournal>>> {
+        Ok(None)
+    }
+    /// The host independently issues run/1.13 source authority; it cannot rewrite fortress grants.
+    fn clock_context(&self, _c: &OperationContext, _control: bool) -> Result<OperationContext> {
+        Err(denied("operator clock authority is not configured"))
+    }
+    fn clock_source(&self, _c: &OperationContext) -> Result<Self::ClockSource> {
+        Err(denied("operator clock source is not configured"))
+    }
+    /// An independently supplied policy must authorize the exact raw terrain;
+    /// stored fingerprints and canonical floor Unknown never supply this grant.
+    fn authorize_clock_terrain(&self, _p: &DigGoalProjection, _c: &OperationContext) -> Result<()> {
+        Err(denied("raw clock terrain is not independently authorized"))
+    }
+
     fn fortress(&self) -> FortressId;
     fn recovery(&self) -> Option<Recovery>;
     fn check_environment(&self) -> Result<()>;
@@ -213,6 +246,10 @@ pub struct Runtime<S: Shell> {
     history_initialized: bool,
     prepared_in_opening: bool,
     goal_interrupted: bool,
+    clock: Option<Clock<S::ClockJournal>>,
+    opening_clock: Option<ClockView>,
+    clock_invalidates_goal: bool,
+    clock_readiness: Option<ClockReadiness>,
 }
 #[derive(Clone, Debug)]
 pub struct View {
@@ -235,6 +272,9 @@ pub struct View {
     pub designation_control_enabled: bool,
     pub prepared_in_opening: bool,
     pub native_retirement_enabled: bool,
+    pub clock: Option<ClockView>,
+    pub clock_control_enabled: bool,
+    pub clock_readiness: Option<ClockReadiness>,
 }
 pub(crate) fn anchor_json(a: StateAnchor) -> Value {
     json!({"fortress_id":a.fortress_id.get().to_string(),"epoch":a.cursor.epoch,
@@ -259,8 +299,11 @@ impl View {
   });
         let original=self.original.as_ref().map(|p|json!({"plan_digest":p.digest.to_hex(),"intent_id":p.intent_id.to_string(),"anchor":anchor_json(p.anchor),"summary":p.summary,"expires_at_tick":p.expires_at_tick.get(),"requires_checkpoint":p.requires_checkpoint,"terminal":format!("{:?}",p.terminal_condition),"steps":p.steps.iter().map(|step|json!({"key":step.idempotency_key,"action":format!("{:?}",step.action),"postconditions":step.postconditions.iter().map(|p|format!("{p:?}")).collect::<Vec<_>>(),"obligation":step.obligation.as_ref().map(|o|json!({"deadline_tick":o.deadline_tick.get(),"poll_interval_ticks":o.poll_interval_ticks,"stable_samples":o.stable_for_observations}))})).collect::<Vec<_>>() }));
         let goal=self.goal.as_ref().map(|p|json!({"anchor":anchor_json(p.anchor),"source_digest":p.source_digest.to_hex(),"current_truth":truth(p.current_goal),"postconditions":truth(p.postconditions),"plan_terminal":truth(p.plan_terminal),"obligation_terminal":p.obligation_terminal.map(truth),"failure_predicate":p.failure_predicate.map(truth),"temporal_status":p.obligation.as_ref().map(|v|format!("{v:?}")),"original_goal_proven":p.current_goal_proven(),"excavation_condition":p.excavation_condition,"excavation_proven":p.excavation_proven,"receipt_linked":p.receipt_linked,"semantic_completion_proven":p.current_goal_proven()&&p.excavation_proven&&designated,"continuous":p.continuous}));
-        let recovery=self.archive.zip(self.original.as_ref()).map(|(seal,p)|json!({"journal_id":self.journal.to_hex(),"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(p.anchor),"history_present":self.history_present}));
-        json!({"ok":true,"retained_state_currently_verified":true,"mode":self.mode.as_str(),"anchor":self.anchor.map(anchor_json),"journal_id":self.journal.to_hex(),"runtime_admitted":false,"source_acceptance":"operator-development-source-acceptance/1","source_acceptance_is_compatibility_admission":false,"clock_advanced":false,"development_designation_enabled":self.designation_control_enabled,"native_retirement_enabled":self.native_retirement_enabled,"observation":self.observation,"original_plan":original,"review":self.review.as_ref().map(|r|json!({"paired_seal":r.seal().to_hex(),"native_plan_digest":r.native_plan().digest().to_hex(),"semantic_plan_digest":r.original_plan().digest.to_hex(),"original_object_digest":r.original_object_digest().to_hex()})),"recovery":recovery,"prepared_in_this_opening":self.prepared_in_opening,"native_state":self.native.as_ref().map(|n|n.state().as_str()),"native_phase":self.native.as_ref().and_then(|n|n.effect()).map(|n|n.phase().as_str()),"native_needs_query":self.native.as_ref().is_some_and(|n|n.needs_reconciliation()),"effect_uncertain":self.native.as_ref().is_some_and(|n|n.permanent_unknown()||matches!(n.state(),DigState::DispatchStarted|DigState::CancelRequested)),"designation":designation,"current_goal":goal,"current_goal_available":self.goal.is_some(),"first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),"historical_obligation":self.historical_obligation.as_ref().map(|v|format!("{v:?}")),"history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},"one_goal_limit":1,"automatic_redispatch":false,"coverage_omissions":["clock advancement","other controllers","cross-incarnation recovery","checkpoint and restore","multi-step excavation","continuous goal truth","mining reachability and structural safety"]})
+        let mut recovery=self.archive.zip(self.original.as_ref()).map(|(seal,p)|json!({"journal_id":self.journal.to_hex(),"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(p.anchor),"history_present":self.history_present}));
+        if let (Some(recovery), Some(clock)) = (&mut recovery, &self.clock) {
+            recovery["clock_journal_id"] = json!(clock.journal_id.to_hex());
+        }
+        json!({"ok":true,"retained_state_currently_verified":true,"mode":self.mode.as_str(),"anchor":self.anchor.map(anchor_json),"journal_id":self.journal.to_hex(),"runtime_admitted":false,"source_acceptance":"operator-development-source-acceptance/1","source_acceptance_is_compatibility_admission":false,"clock_advanced":if self.clock.as_ref().is_some_and(ClockView::has_runs){Value::Null}else{json!(false)},"clock":self.clock.as_ref().map(ClockView::to_json),"development_clock_enabled":self.clock_control_enabled,"clock_readiness":self.clock_readiness.as_ref().map(ClockReadiness::to_json),"development_designation_enabled":self.designation_control_enabled,"native_retirement_enabled":self.native_retirement_enabled,"observation":self.observation,"original_plan":original,"review":self.review.as_ref().map(|r|json!({"paired_seal":r.seal().to_hex(),"native_plan_digest":r.native_plan().digest().to_hex(),"semantic_plan_digest":r.original_plan().digest.to_hex(),"original_object_digest":r.original_object_digest().to_hex()})),"recovery":recovery,"prepared_in_this_opening":self.prepared_in_opening,"native_state":self.native.as_ref().map(|n|n.state().as_str()),"native_phase":self.native.as_ref().and_then(|n|n.effect()).map(|n|n.phase().as_str()),"native_needs_query":self.native.as_ref().is_some_and(|n|n.needs_reconciliation()),"effect_uncertain":self.native.as_ref().is_some_and(|n|n.permanent_unknown()||matches!(n.state(),DigState::DispatchStarted|DigState::CancelRequested)),"designation":designation,"current_goal":goal,"current_goal_available":self.goal.is_some(),"first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),"historical_obligation":self.historical_obligation.as_ref().map(|v|format!("{v:?}")),"history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},"one_goal_limit":1,"automatic_redispatch":false,"coverage_omissions":["automatic clock chaining","native clock fortress-lineage identity","other controllers","cross-incarnation recovery","checkpoint and restore","multi-step excavation","continuous goal truth","mining reachability and structural safety"]})
     }
 }
 
@@ -340,13 +383,19 @@ impl Work {
         Ok(())
     }
 }
-fn grants(mode: Mode, fortress: FortressId, enabled: bool) -> Vec<CapabilityGrant> {
+fn grants(mode: Mode, fortress: FortressId, enabled: bool, clock: bool) -> Vec<CapabilityGrant> {
     let mut capabilities = vec![Capability::Query, Capability::Observe];
     if mode != Mode::Offline && enabled {
         capabilities.push(Capability::Designate);
         if mode == Mode::Control {
             capabilities.push(Capability::Plan);
         }
+    }
+    if mode == Mode::Control && clock {
+        if !capabilities.contains(&Capability::Plan) {
+            capabilities.push(Capability::Plan);
+        }
+        capabilities.push(Capability::ControlClock);
     }
     capabilities
         .into_iter()
@@ -456,7 +505,12 @@ impl<S: Shell> Runtime<S> {
             request_id: RequestId::new(1),
             anchor: initial,
             budget,
-            grants: grants(mode, shell.fortress(), shell.designation_enabled()),
+            grants: grants(
+                mode,
+                shell.fortress(),
+                shell.designation_enabled(),
+                shell.clock_enabled(),
+            ),
             cancellation_requested: false,
         };
         let mut work = Work::new(&c)?;
@@ -466,6 +520,8 @@ impl<S: Shell> Runtime<S> {
         let native_open = work.reserve(256 * MIB)?;
         let semantic_open = work.reserve(VIEW_BYTES)?;
         let inventory_open = work.reserve(VIEW_BYTES)?;
+        let clock_open = work.reserve(32 * MIB)?;
+        let clock_validation = work.reserve(32 * MIB)?;
         let (native, associations, journal) =
             shell.open_control(mode, &work.narrow(&native_open)?)?;
         let high_tick = GameTick(native.high_tick()).max(initial.tick);
@@ -484,6 +540,9 @@ impl<S: Shell> Runtime<S> {
                 "one-goal journal requires exact external original recovery identity",
             ));
         }
+        let clock = shell
+            .open_clock(mode, &work.narrow(&clock_open)?)?
+            .map(Clock::new);
         let mut out = Self {
             shell,
             mode,
@@ -508,6 +567,10 @@ impl<S: Shell> Runtime<S> {
             history_initialized: recovery.is_some_and(|r| r.history_present),
             prepared_in_opening: false,
             goal_interrupted: false,
+            clock,
+            opening_clock: None,
+            clock_invalidates_goal: false,
+            clock_readiness: None,
         };
         if let Some(recovery) = recovery {
             let mut archive = out
@@ -535,6 +598,10 @@ impl<S: Shell> Runtime<S> {
             out.archive = Some(archive);
             out.review = review;
         }
+        let mut validation = work.narrow(&clock_validation)?;
+        validation.anchor = out.authority;
+        out.opening_clock = out.inspect_clock(&validation)?;
+        out.clock_invalidates_goal = out.opening_clock.as_ref().is_some_and(ClockView::has_runs);
         out.raise_floor();
         work.context.anchor = out.authority;
         if recovery.is_some_and(|r| r.history_present) {
@@ -560,6 +627,7 @@ impl<S: Shell> Runtime<S> {
     /// budget before another sample can continue an unfinished stability streak.
     pub fn mark_observation_interrupted(&mut self) {
         self.goal_interrupted = true;
+        self.clock_readiness = None;
     }
     pub fn designation_control_enabled(&self) -> bool {
         self.mode == Mode::Control
@@ -571,7 +639,11 @@ impl<S: Shell> Runtime<S> {
         self.mode != Mode::Offline && self.shell.designation_enabled()
     }
     pub fn recovery_hint(&self) -> Option<Value> {
-        self.archive_seal.zip(self.original.as_ref()).map(|(seal,plan)|json!({"journal_id":self.journal.to_hex(),"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(plan.anchor),"history_present":self.history_initialized,"archive_publication_unknown":self.archive.is_none(),"paired_preparation_present":self.review.is_some()}))
+        let mut recovery = self.archive_seal.zip(self.original.as_ref()).map(|(seal,plan)|json!({"journal_id":self.journal.to_hex(),"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(plan.anchor),"history_present":self.history_initialized,"archive_publication_unknown":self.archive.is_none(),"paired_preparation_present":self.review.is_some()}));
+        if let (Some(value), Some(clock)) = (&mut recovery, &self.opening_clock) {
+            value["clock_journal_id"] = json!(clock.journal_id.to_hex());
+        }
+        recovery
     }
     pub fn opening_recovery_reference(&self) -> Value {
         json!({"ok":false,"retained_state_currently_verified":false,"mode":self.mode.as_str(),
@@ -581,6 +653,8 @@ impl<S: Shell> Runtime<S> {
                 "semantic_plan_digest":r.original_plan().digest.to_hex(),
                 "original_object_digest":r.original_object_digest().to_hex()})),
             "recovery":self.recovery_hint(),
+            "clock":self.opening_clock.as_ref().map(ClockView::to_json),
+            "clock_readiness":null,"development_clock_enabled":false,
             "native_retirement_enabled":self.retirement_enabled(),"development_designation_enabled":self.designation_control_enabled(),
             "original_plan":self.original.as_ref().map(|p|json!({"plan_digest":p.digest.to_hex(),"anchor":anchor_json(p.anchor)})),
             "partial_original_publication":self.original.is_some()&&self.review.is_none(),
@@ -623,6 +697,9 @@ impl<S: Shell> Runtime<S> {
                 }
             }
         }
+        if let Some(clock) = &self.clock {
+            self.high_tick = self.high_tick.max(GameTick(clock.high_tick()));
+        }
         self.high_tick = self.high_tick.max(GameTick(self.semantic.high_tick()));
         self.authority.tick = self.authority.tick.max(self.high_tick);
     }
@@ -638,7 +715,12 @@ impl<S: Shell> Runtime<S> {
             request_id: RequestId::new(self.request),
             anchor: self.authority,
             budget: self.budget,
-            grants: grants(self.mode, self.shell.fortress(), self.retirement_enabled()),
+            grants: grants(
+                self.mode,
+                self.shell.fortress(),
+                self.retirement_enabled(),
+                self.clock_control_enabled(),
+            ),
             cancellation_requested: cancelled,
         })
     }
@@ -741,6 +823,11 @@ impl<S: Shell> Runtime<S> {
         if inventory.journal_id != self.journal || inventory.total_records > 1 {
             return Err(denied("one-goal dig journal identity or count changed"));
         }
+        let clock_budget = if self.clock.is_some() {
+            Some(work.reserve(8 * MIB)?)
+        } else {
+            None
+        };
         let result = if inventory.total_records == 0 {
             None
         } else {
@@ -750,6 +837,20 @@ impl<S: Shell> Runtime<S> {
                 .ok_or_else(|| denied("native dig has no original paired review"))?;
             Some(self.semantic.inspect(review.seal(), &work.rest()?)?)
         };
+        let clock = if let Some(reserved) = clock_budget {
+            let target = self.clock_target(result.as_ref().map(|r| r.native_record()))?;
+            let canonical = work.narrow(&reserved)?;
+            let native = self.shell.clock_context(&canonical, false)?;
+            Some(
+                self.clock
+                    .as_mut()
+                    .ok_or_else(|| invalid("clock owner absent"))?
+                    .inspect(target.as_ref(), &canonical, &native)?,
+            )
+        } else {
+            None
+        };
+        self.opening_clock = clock.clone();
         self.raise_floor();
         self.shell.check_environment()?;
         Ok(View {
@@ -767,6 +868,12 @@ impl<S: Shell> Runtime<S> {
                 .as_ref()
                 .filter(|m| !self.goal_interrupted && !m.is_fenced())
                 .and_then(|m| m.latest())
+                .filter(|goal| {
+                    !self.clock_invalidates_goal
+                        && clock.as_ref().is_none_or(|clock| {
+                            clock.can_sample_goal() && goal.anchor.tick.get() >= clock.high_tick
+                        })
+                })
                 .cloned(),
             first_satisfied_anchor: self
                 .monitor
@@ -784,6 +891,26 @@ impl<S: Shell> Runtime<S> {
             designation_control_enabled: self.designation_control_enabled(),
             prepared_in_opening: self.prepared_in_opening,
             native_retirement_enabled: self.retirement_enabled(),
+            clock_readiness: self
+                .clock_readiness
+                .as_ref()
+                .filter(|ready| {
+                    !self.goal_interrupted
+                        && !self.clock_invalidates_goal
+                        && self.monitor.as_ref().is_some_and(|m| {
+                            !m.is_fenced()
+                                && m.latest().is_some_and(|g| {
+                                    g.anchor == ready.anchor
+                                        && g.source_digest == ready.source_digest
+                                })
+                        })
+                        && clock.as_ref().is_some_and(|clock| {
+                            clock.can_sample_goal() && ready.anchor.tick.get() >= clock.high_tick
+                        })
+                })
+                .cloned(),
+            clock,
+            clock_control_enabled: self.clock_control_enabled(),
         })
     }
     pub fn inspect(&mut self, c: &OperationContext) -> Result<View> {
@@ -1127,6 +1254,34 @@ impl<S: Shell> Runtime<S> {
         ) {
             return self.view(&work.narrow(&output)?);
         }
+        let mut clock_tick_floor = 0;
+        if self.clock.is_some() {
+            let target = self
+                .clock_target(Some(current.native_record()))?
+                .ok_or_else(|| denied("clock history requires the original designation"))?;
+            let canonical = work.reserve(8 * MIB)?;
+            let native = self.shell.clock_context(&canonical, false)?;
+            let clock = self
+                .clock
+                .as_mut()
+                .ok_or_else(|| invalid("clock owner absent"))?;
+            let mut view = clock.inspect(Some(&target), &canonical, &native)?;
+            if view.needs_reconciliation() {
+                let connection = self.shell.clock_context(&work.reserve(4 * MIB)?, false)?;
+                let mut source = self.shell.clock_source(&connection)?;
+                let canonical = work.reserve(64 * MIB)?;
+                let native = self.shell.clock_context(&canonical, false)?;
+                view = clock.reconcile(&target, &mut source, &canonical, &native)?;
+            }
+            clock_tick_floor = view.high_tick;
+            let can_sample = view.can_sample_goal();
+            self.opening_clock = Some(view);
+            self.raise_floor();
+            work.context.anchor = self.authority;
+            if !can_sample {
+                return self.view(&work.narrow(&output)?);
+            }
+        }
         if self.monitor.is_none() {
             let reserve = work.rest()?;
             self.start_monitor(!self.history_initialized, &mut Work::new(&reserve)?)?;
@@ -1157,6 +1312,9 @@ impl<S: Shell> Runtime<S> {
             .as_mut()
             .ok_or_else(|| invalid("goal monitor absent"))?;
         let authority = &mut self.authority;
+        let clock_configured = self.clock.is_some();
+        let readiness = &mut self.clock_readiness;
+        *readiness = None;
         let result = self.semantic.poll_original_goal_durable(
             monitor,
             cursor,
@@ -1166,6 +1324,12 @@ impl<S: Shell> Runtime<S> {
                 archive_work.boundary(current)?;
                 Self::retain_authority_floor(authority, current.anchor)?;
                 shell.check_environment()?;
+                if projection.anchor().tick.get() < clock_tick_floor {
+                    return Err(DfmcpError::new(
+                        ErrorCode::StaleAnchor,
+                        "excavation observation predates retained native clock evidence",
+                    ));
+                }
                 if archive.recover_at_authority_floor(&archive_work.reserve(ARCHIVE_BYTES)?)?
                     != original
                 {
@@ -1174,6 +1338,10 @@ impl<S: Shell> Runtime<S> {
                     ));
                 }
                 let policy = shell.goal_policy(projection, current)?;
+                if clock_configured {
+                    let authorized = shell.authorize_clock_terrain(projection, current).is_ok();
+                    *readiness = Some(ClockReadiness::capture(&original, projection, authorized)?);
+                }
                 if archive.recover_at_authority_floor(&archive_work.reserve(ARCHIVE_BYTES)?)?
                     != original
                 {
@@ -1188,6 +1356,7 @@ impl<S: Shell> Runtime<S> {
         self.raise_floor();
         let result = result?;
         self.anchor = Some(result.progress().anchor);
+        self.clock_invalidates_goal = false;
         self.authority = result.progress().anchor;
         self.authority.tick = self.authority.tick.max(self.high_tick);
         work.context.anchor = self.authority;

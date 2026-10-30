@@ -206,7 +206,12 @@ excavation proof, and an uncertain reply never permits another designation.
 
 The workflow supports human review between requests on the original prepared
 connection. Failed waits withdraw cached goal proof and interrupt unfinished
-stability. Game time advances externally. This is an unadmitted development
+stability. Optional independently authorized finite runs advance the exact
+original goal through separate plan/review/confirmation steps, preserving its
+deadline and cadence. Wait reconciles and samples without starting runs. Pending
+dry Mine walls can qualify for advancement while remaining unproven excavation.
+See the [finite mining clock workflow](docs/SEMANTIC_DIG_CLOCK.md).
+This is an unadmitted development
 profile with explicit operator configuration and a pre-seal disposable-fortress
 checkpoint exception. See the [mining workflow](docs/SEMANTIC_DIG_DEVELOPMENT.md)
 for setup and exact recovery.

@@ -44,6 +44,65 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Finite advancement of original mining goals (2026-10-30)
+
+The original mining runtime now composes optional run/1.13 clock ownership with
+the exact original Mine plan, archive, paired review and terminal Designated
+receipt. An independent operator source pin, credential and clock gate issue
+native clock authority without converting named-fortress terrain grants. Exact
+private `clock.journal` identity is required on reopening; a clock-only control
+opening cannot restore designation permission. The native clock still identifies
+an incarnation, endpoint and software rather than a named fortress lineage.
+
+Through the existing eleven tools, `plan(kind="run")` prepares a finite interval,
+`commit(scope="run")` confirms its distinct review and `cancel(scope="run")`
+retires undispatched work or requests the native safety pause. Wait reconciles
+retained clock work before a fresh paused original-goal sample; it never starts
+or chains runs. Tick permission defaults to zero and is capped at 1200, further
+bounded by the immutable original deadline and cadence. Up to 64 retained runs
+support the original 64-sample stability bound without pruning history.
+
+Independent exact-target readiness accepts only dry visible original Mine walls
+or cleared floors without building occupancy. Pending walls remain unknown in
+the canonical floor proof; readiness does not establish reachability, structural
+safety or completion. This exception is limited to the exact original default
+Mine floor goal with no unrelated terminal or failure condition. Fresh paused
+evidence, original custody and clock authority are rechecked after the durable
+marker, immediately before native prepare/unpause. Unknown dispatch never
+permits another effect. Current proof is withheld across unsettled clocks,
+failed observations and restart; later samples must respect retained clock floors.
+
+Sessions explicitly opening with positive ticks use a 3 GiB logical byte-work
+default when the caller omits `max_bytes`; ordinary sessions retain 2 GiB.
+Explicit limits remain authoritative. Known complete work is checked before
+clock contact, and newly retained history is charged again before preparation
+or unpause. Longer history may require an explicit allowance up to 64 GiB.
+Safety cancellation needs current Query/ControlClock authority without renewed
+Plan, Observe, Designate, deadline or future-tick permission. Permanent native
+clock loss retains the exact indeterminate handoff and recommends local release;
+it never promises a pause or recommends a wait that cannot resolve the record.
+
+Evidence: all 102 current-source tests pass without compiler warnings: 28 joined
+and original runtime cases, 19 native-shell/clock cases, 16 clock-owner cases,
+23 presentation cases, ten isolated facade boundary cases and six Agent Turn
+cases. Both loopback-dependent native fixtures pass with the required execution
+permissions. All 285 recorded compiler/source inputs remain unchanged across
+the final run. The harness uses original core/world/intent/adapter source;
+runtime views change only child-module paths, while facade extraction excludes
+ambient runtime/session I/O and FastMCP macros/stdio. Full-file independent review
+also corrected the facade dispatch method and stale server instructions. This
+does not establish full-server compilation, Rust qualification, a native DFHack
+build, a live fortress campaign or compatibility admission.
+
+The current welfare/schema suite separately passes 14 cases with 421 unchanged
+inputs. Required verification passes its first four checks and stops at the
+unchanged source-bundle exact-clean-commit assertion. Dirty development
+qualification reports 76 static findings across 6291 checks; all 62 implicated
+files are byte-identical to base `6770fc5`, and none is a changed feature file.
+The failed development receipt is not release qualification. No compatibility
+entry or production runner protocol was added. Operator setup and exact recovery
+are documented in `docs/SEMANTIC_DIG_CLOCK.md`.
+
 ### Historical citizen welfare comparison (2026-10-29)
 
 The existing spatial/citizen server exposes `historical_citizen_welfare` through

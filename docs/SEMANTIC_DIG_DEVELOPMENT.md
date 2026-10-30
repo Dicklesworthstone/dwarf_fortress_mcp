@@ -1,8 +1,8 @@
 # Original mining development runtime
 
 This isolated runtime joins one canonical `DesignateDig { mode: Mine }` plan to
-native designation, exact restart recovery and fresh proof of the original
-excavation goal. It supports one rectangle, **1..8 tiles wide and 1..8 tiles high
+native designation, exact restart recovery, optional separately reviewed finite
+game-time advancement and fresh proof of the original excavation goal. It supports one rectangle, **1..8 tiles wide and 1..8 tiles high
 on one z-level**, one original goal and one private custody bundle per session.
 The dedicated server uses the frozen eleven-tool MCP surface.
 
@@ -51,6 +51,8 @@ Only these `DFMCP_*` environment names are accepted:
 | `DFMCP_SEMANTIC_DIG_ALLOW_DESIGNATE` | Exactly `1` to enable initial designation or explicit retirement of an existing preparation; omit for read-only recovery. |
 | `DFMCP_SEMANTIC_DIG_SPATIAL_TOKEN` | Credential for the independently pinned spatial/1.8 source. |
 | `DFMCP_SEMANTIC_DIG_DIG_TOKEN` | Credential for the dig/1.16 source. |
+| `DFMCP_SEMANTIC_DIG_ALLOW_CLOCK` | Exactly `1` for optional independently authorized finite clock runs. |
+| `DFMCP_SEMANTIC_DIG_CLOCK_TOKEN` | Credential for the independently pinned run/1.13 source. |
 
 Credentials must contain 32..256 UTF-8 bytes and no NUL. Offline reopening needs
 no native credentials. Endpoints, credentials, paths, checkpoint policy and source
@@ -112,6 +114,7 @@ directory. The runtime owns fixed, regular, single-link `0600` files:
 - `semantic.associations`: immutable original-plan/native association.
 - `original.plan`: lossless original plan and archive identity.
 - `goal.history`: bounded samples, proof publication and historical achievement.
+- `clock.journal`, when configured: exact independently authorized run/1.13 custody.
 
 Symlinks are rejected. Initialization must create new custody and refuses
 existing files; reopening must find the exact existing custody and never silently
@@ -171,11 +174,17 @@ hidden-neighbor overrides and tool-supplied source/checkpoint policy are rejecte
    `fortress.cancel(scope="session")` releases sockets and file locks while
    retaining durable custody, even after revocation or fencing.
 
-**This runtime does not advance game time.** Mining needs game time to progress
-under external control. Wait performs no unpause, background polling or automatic
-run chaining. Multiple observations at the same tick cannot manufacture temporal
-stability. There is no `kind="run"` action in this profile. `fortress.checkpoint`
-and `fortress.restore` return explicit capability denials.
+**Finite advancement is optional and independently authorized.** See
+[the original mining clock workflow](SEMANTIC_DIG_CLOCK.md) for its separate
+source pin, gate, credential, exact clock journal recovery and reviewed
+`kind="run"` requests. `max_game_ticks` defaults to zero and is capped at 1200;
+each interval also fits the original cadence and unchanged deadline. Confirm
+the distinct clock review through `fortress.commit(scope="run")`; use
+`fortress.cancel(scope="run")` for its native owner's safety pause. Wait first
+reconciles retained clock uncertainty and never unpauses or starts another run.
+Pending dry Mine walls may qualify for advancement while remaining unproven
+excavation. Without this optional clock, advancement remains external.
+`fortress.checkpoint` and `fortress.restore` return explicit capability denials.
 
 ## Exact restart and uncertainty
 
@@ -207,7 +216,8 @@ continue unfinished stability. A later query cannot restore the withdrawn proof;
 historical first achievement remains visible. Recovery references also omit
 cached proof and preparation/enablement flags while preserving exact identities.
 
-The default logical byte-work allowance is 2 GiB; callers may explicitly request
+The default logical byte-work allowance is 2 GiB, or 3 GiB when opening with a
+positive `max_game_ticks` allowance and no explicit `max_bytes`; callers may request
 up to 64 GiB for larger bounded source work or historical replay. These account
 for repeated verification
 work and do not allocate that amount of memory. Complete known planning work is
@@ -219,5 +229,5 @@ events without silent pruning. Errors and oversized responses retain bounded exa
 recovery identities while withdrawing cached goal and control claims.
 
 This slice does not implement multi-region planning, generic action DAG execution,
-clock advancement, checkpoint/restore, mining reachability, structural-safety
+automatic run chaining, checkpoint/restore, mining reachability, structural-safety
 certification or exclusion of other game controllers. These remain separate work.

@@ -3,6 +3,9 @@ use crate::agent_turn::{AgentPhase, AgentTurnBuilder, ContinuityStatus, recommen
 use dfmcp_core::{Digest32, RequestId, SessionId, StateAnchor, WorkBudget};
 use serde_json::{Value, json};
 
+#[path = "semantic_dig_clock_presentation.rs"]
+mod clock_presentation;
+
 pub(super) const RESPONSE_RESERVE: u64 = 128 * 1024;
 fn digest(value: &Value) -> Option<&str> {
     value
@@ -45,6 +48,9 @@ fn recovery(value: &Value) -> Option<Value> {
             out[field] = json!(flag);
         }
     }
+    if let Some(id) = digest(&r["clock_journal_id"]) {
+        out["clock_journal_id"] = json!(id);
+    }
     Some(out)
 }
 fn native_state(value: &Value) -> Option<&str> {
@@ -73,7 +79,9 @@ fn obligation(value: &Value) -> Option<Value> {
 }
 fn compact(value: &Value) -> Value {
     json!({"journal_id":digest(&value["journal_id"]),"anchor":anchor(&value["anchor"]),
-        "review":review(value),"recovery":recovery(value),
+        "review":review(value),"recovery":recovery(value),"clock":clock_presentation::identity(value),
+        "clock_effect_may_have_started":value["clock_effect_may_have_started"].as_bool(),
+        "development_clock_enabled":false,"clock_readiness":null,
         "native_state":native_state(value),"native_phase":native_phase(value),
         "native_needs_query":value["native_needs_query"].as_bool(),
         "effect_uncertain":value["effect_uncertain"].as_bool(),
@@ -107,6 +115,19 @@ fn next(id: &str, tool: &str, reason: &str, confirmation: bool, arguments: Value
         arguments,
     )
 }
+fn next_clock(id: &str, tool: &str, reason: &str, confirmation: bool, arguments: Value) -> Value {
+    recommendation(
+        id,
+        tool,
+        reason,
+        "high",
+        "high",
+        "guarded",
+        "elapsed game time is not reversed by cancellation",
+        confirmation,
+        arguments,
+    )
+}
 #[allow(clippy::too_many_arguments)]
 fn render(
     operation: &str,
@@ -128,9 +149,18 @@ fn render(
     } else {
         retained.map_or(&result, |v| v)
     };
-    let uncertain = effect_may_have_started
+    let clock = clock_presentation::identity(view);
+    let clock_active = clock
+        .as_ref()
+        .and_then(|v| v.get("active_run"))
+        .filter(|v| v.is_object());
+    let clock_uncertain = clock_presentation::uncertain(clock.as_ref(), &result, view);
+    let terminal_clock_unknown =
+        clock_active.is_some_and(|run| run["state"] == "terminal" && run["unresolved"] == true);
+    let designation_uncertain = effect_may_have_started
         || result["designation_may_have_started"].as_bool() == Some(true)
         || view["effect_uncertain"].as_bool() == Some(true);
+    let uncertain = designation_uncertain || clock_uncertain;
     let paired = review(view);
     let prepared = verified
         && !uncertain
@@ -149,13 +179,35 @@ fn render(
         && view["history"]["fenced"].as_bool() != Some(true)
         && view["current_goal_available"].as_bool() == Some(true)
     {
-        view.get("current_goal").filter(|g| g.is_object())
+        view.get("current_goal").filter(|g| {
+            g.is_object()
+                && clock
+                    .as_ref()
+                    .and_then(|v| v["high_tick"].as_u64())
+                    .is_none_or(|floor| {
+                        g["anchor"]["tick"]
+                            .as_u64()
+                            .is_some_and(|tick| tick >= floor)
+                    })
+        })
     } else {
         None
     };
     let complete =
         designated && goal.is_some_and(|g| g["semantic_completion_proven"].as_bool() == Some(true));
     let original = digest(&view["original_plan"]["plan_digest"]);
+    let clock_offers = clock_presentation::offers(clock_presentation::Context {
+        view,
+        clock: clock.as_ref(),
+        goal,
+        mode,
+        budget,
+        verified,
+        closed,
+        designated,
+        complete,
+        uncertain,
+    });
     let mut recommendations = Vec::new();
     if !closed {
         if !verified {
@@ -167,6 +219,20 @@ fn render(
                     false,
                     json!({"session_id":session.map(|s|s.to_string())}),
                 ));
+            }
+        } else if terminal_clock_unknown {
+            recommendations.push(next(
+                "preserve_unknown_clock_run",
+                "fortress.cancel",
+                "The native clock permanently cannot establish this original run outcome. Preserve the exact original and clock handoff, then release local custody; another wait or cancellation cannot resolve or pause this terminal record.",
+                false,
+                json!({"session_id":session.map(|s|s.to_string()),"scope":"session"}),
+            ));
+        } else if clock_uncertain {
+            if mode != Some("offline") {
+                recommendations.push(next("reconcile_original_clock","fortress.wait",
+                    "Reconcile the retained clock before another paused excavation sample; never repeat unpause.",false,
+                    json!({"session_id":session.map(|s|s.to_string())})));
             }
         } else if view["history"]["fenced"].as_bool() == Some(true) {
             recommendations.push(next(
@@ -214,11 +280,35 @@ fn render(
                     "Query the original native key; retained uncertainty never permits another designation.",false,
                     json!({"session_id":session.map(|s|s.to_string())})));
             }
+        } else if clock_offers.commit {
+            recommendations.push(next_clock("confirm_original_excavation_run","fortress.commit",
+                "Confirm this distinct finite clock review; original custody and fresh excavation evidence are checked again before unpause.",true,
+                json!({"session_id":session.map(|s|s.to_string()),"scope":"run",
+                    "paired_seal":clock_active.map(|v|&v["review_seal"]),"confirmed":true})));
+        } else if clock_active
+            .is_some_and(|r| matches!(r["state"].as_str(), Some("intent" | "prepared")))
+        {
+            if clock_offers.cancel {
+                recommendations.push(next_clock("retire_unusable_excavation_run","fortress.cancel",
+                    "Retire the retained undispatched clock intent before preparing a fresh run; its stale or ineligible review cannot be committed.",false,
+                    json!({"session_id":session.map(|s|s.to_string()),"scope":"run"})));
+            } else {
+                recommendations.push(next("retain_read_only_excavation_run","fortress.explain",
+                    "Retain the exact clock handoff. Retiring this undispatched run requires reopening with independent clock authority; waiting cannot grant it.",false,
+                    json!({"session_id":session.map(|s|s.to_string())})));
+            }
         } else if prepared {
             recommendations.push(next("confirm_original_excavation","fortress.commit",
-                "Review the exact original goal and paired native selection, then confirm once. Each trusted foreground request has a bounded wall deadline on the original connection; the original permit, prepaid bytes and game-time limits stay unchanged. Failed I/O requires original-key recovery.",true,
+                "Review the exact original goal and paired native selection before the single designation attempt.",true,
                 json!({"session_id":session.map(|s|s.to_string()),
                     "paired_seal":paired.as_ref().and_then(|v|v["paired_seal"].as_str()),"confirmed":true})));
+        } else if clock_offers.propose {
+            let request = json!({"kind":"run","original_paired_seal":paired.as_ref().and_then(|v|v["paired_seal"].as_str()),
+                "game_ticks":clock_offers.next_ticks,
+                "wall_millis":budget.map(|b|b.max_wall_millis.min(5000)).unwrap_or(0)});
+            recommendations.push(next_clock("plan_original_excavation_run","fortress.plan",
+                "Prepare the next bounded cadence interval for the viable original excavation, then review its separate clock seal.",false,
+                json!({"session_id":session.map(|s|s.to_string()),"request":request.to_string()})));
         } else if designated && !complete && mode != Some("offline") {
             recommendations.push(next("observe_original_excavation","fortress.wait",
                 "Acquire one bounded receipt-linked excavation sample at the original cadence; this call does not advance game time.",false,
@@ -227,11 +317,20 @@ fn render(
             recommendations.push(next(
                 "observe_excavation_basis",
                 "fortress.observe",
-                "Acquire the canonical spatial source before choosing an excavation goal.",
+                "Acquire the canonical spatial source before choosing a excavation goal.",
                 false,
                 json!({"session_id":session.map(|s|s.to_string())}),
             ));
         }
+    }
+    if !closed && clock_uncertain && clock_offers.cancel {
+        recommendations.push(next_clock(
+            "pause_original_excavation_run",
+            "fortress.cancel",
+            "Request the retained native clock owner's safety pause under current clock authority.",
+            false,
+            json!({"session_id":session.map(|s|s.to_string()),"scope":"run"}),
+        ));
     }
     let phase = if uncertain {
         AgentPhase::Reconcile
@@ -256,8 +355,8 @@ fn render(
         ContinuityStatus::Partial
     };
     let identity = json!({"journal_id":digest(&view["journal_id"]),"review":paired,
-        "recovery":recovery(view),"currently_verified":verified});
-    let action = if native_state(view).is_some() {
+        "recovery":recovery(view),"clock":clock,"currently_verified":verified});
+    let mut action = if native_state(view).is_some() {
         vec![json!({
         "kind":"original_excavation_designation","state":native_state(view),"native_phase":native_phase(view),
         "evidence":identity,"designation_verified_at_anchor":if verified {view["designation"]["verified"].clone()}else{Value::Null}})]
@@ -273,14 +372,33 @@ fn render(
     } else {
         vec![]
     };
-    let confirmations = if prepared {
+    let mut confirmations = if prepared {
         vec![json!({"kind":"paired_original_native_excavation",
         "paired_seal":paired.as_ref().and_then(|v|v["paired_seal"].as_str()),
         "required":true,"authority":"separate_current_native_checks"})]
     } else {
         vec![]
     };
-    let affordances = vec![json!({"kind":"original_mining",
+    let mut pending_plans = if prepared {
+        vec![identity.clone()]
+    } else {
+        vec![]
+    };
+    if verified {
+        if let Some(run) = clock_active {
+            action.push(
+                json!({"kind":"original_excavation_clock","scope":"run","clock_run":run,
+                "evidence":identity,"current_pause_proven":false,"original_goal_proven":false}),
+            );
+            if run["state"] == "prepared" {
+                pending_plans.push(json!({"scope":"run","clock":clock,"original_review":paired,
+                    "recovery":recovery(view)}));
+                confirmations.push(json!({"kind":"original_excavation_clock","scope":"run",
+                    "paired_seal":run["review_seal"],"required":true,"commit_available":clock_offers.commit}));
+            }
+        }
+    }
+    let mut affordances = vec![json!({"kind":"original_mining",
         "enabled":verified&&!closed&&mode==Some("control")&&original.is_none()
             &&view["development_designation_enabled"].as_bool()==Some(true)&&!view["observation"].is_null(),
         "tool":"fortress.plan","required_capabilities":["plan","designate"],"risk":"guarded",
@@ -291,26 +409,47 @@ fn render(
         "hidden_neighbors":"refused","confirmation":"exact paired review seal",
         "checkpoint_policy":"operator-owned; no tool-supplied exception",
         "commit_requires":"fresh independent canonical source, exact native capture, durable marker, lease and current policy"})];
+    if clock.is_some() {
+        affordances.extend([
+            json!({"kind":"original_excavation_clock","tool":"fortress.plan","scope":"run",
+                "enabled":clock_offers.propose,"request_kind":"run","game_ticks_min":1,
+                "game_ticks_max":clock_offers.allowed_ticks,"wall_millis_max":60000,
+                "requires":["independent clock authority","nonzero negotiated game ticks","original designated receipt",
+                    "fresh viable receipt-linked excavation","unchanged deadline","matching paused clock source"],
+                "grants_authority":false}),
+            json!({"kind":"original_excavation_clock","tool":"fortress.commit","scope":"run",
+                "enabled":clock_offers.commit,"requires_confirmation":true,
+                "paired_seal":clock_active.map(|r|&r["review_seal"]),"grants_authority":false}),
+            json!({"kind":"original_excavation_clock","tool":"fortress.cancel","scope":"run",
+                "enabled":clock_offers.cancel,"purpose":"retire undispatched run or request its native owner's safety pause",
+                "original_goal_abandoned":false,"designation_removed":false,"grants_authority":false}),
+        ]);
+    }
     let mut turn=AgentTurnBuilder::new(operation,phase)
         .continuity(continuity,anchor(&view["anchor"]),None,None)
         .briefing(json!({"runtime_admitted":false,"source_acceptance_is_compatibility_admission":false,
             "mode":mode,"session_closed":closed,"mutation_admissible":false,
+            "development_clock_enabled":clock_offers.authority,
             "retained_state_currently_verified":verified,"current_freshness_proven":false,
             "evidence_scope":"as_of_anchor","as_of_anchor":anchor(&view["anchor"]),
             "designation_verified_at_anchor":if verified {view["designation"]["verified"].clone()}else{Value::Null},
             "original_goal_proven_at_anchor":goal.and_then(|g|g["original_goal_proven"].as_bool()),
             "semantic_completion_proven_at_anchor":if goal.is_some(){json!(complete)}else{Value::Null},
-            "designation_receipt_is_goal_proof":false,"clock_advanced":false,"automatic_redispatch":false}))
-        .active_work(json!({"pending_plans":if prepared {vec![identity.clone()]}else{vec![]},
+            "designation_receipt_is_goal_proof":false,
+            "clock_advanced":if clock_uncertain || clock.as_ref().is_some_and(|c|c["run_count"].as_u64().is_some_and(|n|n>0)){Value::Null}else{json!(false)},
+            "clock_may_be_running":clock_uncertain,"clock_receipt_is_goal_proof":false,
+            "current_pause_proven":false,"clock_source_identifies_named_fortress":false,"automatic_redispatch":false}))
+        .active_work(json!({"pending_plans":pending_plans,
             "actions":action,"obligations":obligations,
-            "cancellation_drains":if native_state(view)==Some("cancel_requested"){vec![identity.clone()]}else{vec![]},
+            "cancellation_drains":if native_state(view)==Some("cancel_requested")
+                || clock_active.is_some_and(|r|r["state"]=="cancel_requested"){vec![identity.clone()]}else{vec![]},
             "indeterminate_effects":if uncertain{vec![identity.clone()]}else{vec![]},
             "publications":[],"confirmations":confirmations}))
         .recommendations(recommendations).affordances(affordances)
         .attention(if uncertain{vec![json!({"attention_id":"recover_original_designation","category":"recovery",
             "severity":"high","urgency":"before further control","epistemic_state":"indeterminate",
-            "finding":"The original designation outcome needs reconciliation.","evidence":identity,
-            "suggested_response":if native_phase(view)==Some("unknown"){"preserve the exact handoff and release local custody"}else{"fortress.wait on the retained original goal"}})]}else{vec![]})
+            "finding":"Resolve the retained original designation or clock outcome before further control.","evidence":identity,
+            "suggested_response":if terminal_clock_unknown || (!clock_uncertain && native_phase(view)==Some("unknown")){"preserve the exact handoff and release local custody"}else{"fortress.wait on the retained original goal"}})]}else{vec![]})
         .uncertainty(vec![
             json!({"uncertainty_id":"development_source","epistemic_state":"unknown",
                 "statement":"Operator source acceptance supplies no compatibility or production admission."}),
@@ -319,11 +458,15 @@ fn render(
             json!({"uncertainty_id":"anchored_truth","epistemic_state":"unknown",
                 "statement":"Inspection and historical recovery do not prove present fortress state or continuous excavation truth."}),
             json!({"uncertainty_id":"clock","epistemic_state":"unknown",
-                "statement":"This runtime does not advance game time. Repeated samples at one tick cannot manufacture temporal stability."})])
+                "statement":"Only a separately reviewed finite run may advance time. Its receipt proves neither current pause nor original goal completion; same-tick reads cannot manufacture stability."}),
+            json!({"uncertainty_id":"clock_source_identity","epistemic_state":"unknown",
+                "statement":"The clock source identifies its incarnation, endpoint and software, not named fortress lineage. Matching ticks do not prove fortress identity or exclude other controllers."}),
+            json!({"uncertainty_id":"excavation_readiness","epistemic_state":"unknown",
+                "statement":"Dry visible original Mine-designated walls can qualify for finite advancement while their canonical floor truth stays unknown. Readiness does not establish reachability, structural safety or completion."})])
         .coverage(json!({"status":if verified{"partial"}else{"unavailable"},
             "complete_domains":if verified{vec!["this_runtime_original_goal_custody"]}else{vec![]},
-            "partial_domains":["canonical spatial terrain","receipt-linked selected excavation"],
-            "omitted_domains":["other controllers","multi-region excavation","clock control","checkpoint and restore","continuous goal truth"],
+            "partial_domains":["canonical spatial terrain","receipt-linked selected excavation","original-bound finite clock journal"],
+            "omitted_domains":["other controllers","multi-region excavation","automatic chaining of runs","named fortress lineage of clock source","checkpoint and restore","continuous goal truth"],
             "continuation":if verified{view["observation"]["next_query"].clone()}else{Value::Null}}))
         .references(vec![identity]);
     if let Some(id) = session {
@@ -360,12 +503,14 @@ fn finish(mut turn: Value, result: Value, retained: Option<&Value>) -> String {
                 "ok",
                 "retained_state_currently_verified",
                 "development_designation_enabled",
+                "development_clock_enabled",
                 "native_retirement_enabled",
                 "prepared_in_this_opening",
                 "current_goal_available",
             ] {
                 fields.insert(field.to_owned(), json!(false));
             }
+            fields.insert("clock_readiness".to_owned(), Value::Null);
             fields.insert("current_goal".to_owned(), Value::Null);
         }
         reference
@@ -421,8 +566,18 @@ pub(super) fn packet(
     } else {
         retained.as_ref().map(compact)
     };
-    let uncertain =
-        effect_may_have_started || matches!(operation, "fortress.commit" | "fortress.cancel");
+    let view = retained.as_ref().unwrap_or(&result);
+    let clock =
+        clock_presentation::identity(if result["retained_state_currently_verified"] == true {
+            &result
+        } else {
+            view
+        });
+    let clock_uncertain = clock_presentation::uncertain(clock.as_ref(), &result, view);
+    let designation_uncertain = effect_may_have_started
+        || result["designation_may_have_started"] == true
+        || view["designation_may_have_started"] == true
+        || view["effect_uncertain"] == true;
     let closed = result["session_closed"].as_bool() == Some(true);
     render(
         operation,
@@ -433,11 +588,11 @@ pub(super) fn packet(
         budget,
         json!({"ok":false,"error":{"code":"budget_exceeded","retryable":false,
             "message":"Complete response exceeds its reserved output; exact recovery identities are retained."},
-            "designation_may_have_started":uncertain,"retained_state_currently_verified":false,
+            "designation_may_have_started":designation_uncertain,"clock_effect_may_have_started":clock_uncertain,"retained_state_currently_verified":false,
             "session_closed":closed,
             "current_goal_available":false,"original_goal_proven":false,"automatic_redispatch":false}),
         candidate.as_ref(),
-        uncertain,
+        designation_uncertain,
     )
 }
 
