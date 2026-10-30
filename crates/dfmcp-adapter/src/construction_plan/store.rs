@@ -364,7 +364,7 @@ fn withdrawn(progress: &Progress) -> Progress {
 pub struct MonitorStore<S> {
     storage: S,
     definition: MonitorDefinition,
-    progress: Progress,
+    durable_progress: Progress,
     first_source: Option<SourceIdentity>,
     visible: Progress,
     resume_reset: bool,
@@ -445,7 +445,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         Ok(Self {
             storage,
             definition: decoded.definition,
-            progress: decoded.progress,
+            durable_progress: decoded.progress,
             first_source: decoded.first_source,
             visible,
             resume_reset,
@@ -497,7 +497,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     /// Its already synchronized read intent remains unknown for the next read.
     pub fn abandon_read(&mut self) {
         self.read_owned = false;
-        if self.progress.reading {
+        if self.durable_progress.reading {
             self.withdraw_unpublished();
         }
     }
@@ -508,8 +508,8 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     /// cannot reuse this owner's previous publication permission.
     pub fn withdraw_unpublished(&mut self) {
         self.read_owned = false;
-        if !self.progress.terminal() {
-            self.visible = withdrawn(&self.progress);
+        if !self.durable_progress.terminal() {
+            self.visible = withdrawn(&self.durable_progress);
             self.resume_reset = true;
         }
     }
@@ -525,7 +525,11 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
                 "construction monitor has another session owner",
             ));
         }
-        let current = authorize(context, Some(&self.definition), Some(&self.progress))?;
+        let current = authorize(
+            context,
+            Some(&self.definition),
+            Some(&self.durable_progress),
+        )?;
         if self.fenced {
             return Err(corrupt());
         }
@@ -652,7 +656,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         } else {
             proposed.clone()
         };
-        self.progress = proposed;
+        self.durable_progress = proposed;
         self.fenced = false;
         Ok(())
     }
@@ -669,8 +673,8 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         let mut work = Work::new(&self.access(context)?)?;
         self.verify_work(&mut work)?;
         guard(self.definition.origin(), &work.current()?)?;
-        if self.progress.terminal() {
-            admit(&self.definition, &self.progress)?;
+        if self.durable_progress.terminal() {
+            admit(&self.definition, &self.durable_progress)?;
             self.verify_work(&mut work)?;
             guard(self.definition.origin(), &work.current()?)?;
             work.current()?;
@@ -683,7 +687,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
                 "construction read is already owned; finish or abandon that acquisition",
             ));
         }
-        let reset_start = self.resume_reset && !self.progress.reading;
+        let reset_start = self.resume_reset && !self.durable_progress.reading;
         let reserve_frames = if reset_start { 4 } else { 3 };
         if self
             .raw
@@ -700,16 +704,16 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         // A crash between these two frames leaves an interrupted read, never a
         // reusable stability streak or permission to publish the old sample.
         if reset_start {
-            let started = self.progress.begin_read()?;
+            let started = self.durable_progress.begin_read()?;
             let reset = started.begin_read()?;
             admit(&self.definition, &reset)?;
             self.append(2, &[], started, &mut work, guard)?;
         }
-        let proposed = self.progress.begin_read()?;
+        let proposed = self.durable_progress.begin_read()?;
         admit(&self.definition, &proposed)?;
         self.append(2, &[], proposed, &mut work, guard)?;
         self.resume_reset = false;
-        self.visible = self.progress.clone();
+        self.visible = self.durable_progress.clone();
         self.read_owned = true;
         Ok(())
     }
@@ -736,7 +740,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         guard(self.definition.origin(), &work.current()?)?;
         let payload = sample.canonical_bytes()?;
         work.charge(payload.len())?;
-        let proposed = transition(&self.definition, &self.progress, 3, &payload, &mut work)?;
+        let proposed = transition(
+            &self.definition,
+            &self.durable_progress,
+            3,
+            &payload,
+            &mut work,
+        )?;
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         admit(&self.definition, &proposed)?;
         self.append(3, &payload, proposed, &mut work, guard)
@@ -767,7 +777,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         guard(self.definition.origin(), &work.current()?)?;
         let payload = sample.canonical_bytes()?;
         work.charge(payload.len())?;
-        let proposed = transition(&self.definition, &self.progress, 5, &payload, &mut work)?;
+        let proposed = transition(
+            &self.definition,
+            &self.durable_progress,
+            5,
+            &payload,
+            &mut work,
+        )?;
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         admit(&self.definition, &proposed)?;
         self.append(5, &payload, proposed, &mut work, guard)
@@ -781,13 +797,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     {
         let mut work = Work::new(&self.access(context)?)?;
         self.verify_work(&mut work)?;
-        if self.progress.terminal() {
-            admit(&self.definition, &self.progress)?;
+        if self.durable_progress.terminal() {
+            admit(&self.definition, &self.durable_progress)?;
             self.verify_work(&mut work)?;
             return Ok(());
         }
         self.writable()?;
-        let proposed = self.progress.cancel();
+        let proposed = self.durable_progress.cancel();
         admit(&self.definition, &proposed)?;
         self.append(4, &[], proposed, &mut work, &mut |_, _| Ok(()))
     }

@@ -376,7 +376,7 @@ fn withdrawn(progress: &Progress) -> Progress {
 pub struct MonitorStore<S> {
     storage: S,
     definition: Definition,
-    progress: Progress,
+    durable_progress: Progress,
     first_source: Option<SourceIdentity>,
     visible: Progress,
     resume_reset: bool,
@@ -548,7 +548,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         Ok(Self {
             storage,
             definition: decoded.definition,
-            progress: decoded.progress,
+            durable_progress: decoded.progress,
             first_source: decoded.first_source,
             visible,
             resume_reset,
@@ -612,7 +612,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     /// Its already synchronized read intent remains unknown for the next read.
     pub fn abandon_read(&mut self) {
         self.read_owned = false;
-        if self.progress.reading {
+        if self.durable_progress.reading {
             self.withdraw_unpublished();
         }
     }
@@ -623,8 +623,8 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     /// cannot reuse this owner's previous publication permission.
     pub fn withdraw_unpublished(&mut self) {
         self.read_owned = false;
-        if !self.progress.terminal() {
-            self.visible = withdrawn(&self.progress);
+        if !self.durable_progress.terminal() {
+            self.visible = withdrawn(&self.durable_progress);
             self.resume_reset = true;
         }
     }
@@ -642,7 +642,11 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         }
         let mut context = context.clone();
         context.anchor.tick = GameTick(context.anchor.tick.get().max(self.observed_floor));
-        let current = authorize(&context, Some(&self.definition), Some(&self.progress))?;
+        let current = authorize(
+            &context,
+            Some(&self.definition),
+            Some(&self.durable_progress),
+        )?;
         if self.fenced {
             return Err(corrupt());
         }
@@ -770,7 +774,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
             proposed.clone()
         };
         self.observed_floor = self.observed_floor.max(proposed.observed_tick_floor);
-        self.progress = proposed;
+        self.durable_progress = proposed;
         self.fenced = false;
         Ok(())
     }
@@ -787,8 +791,8 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         let mut work = Work::new(&self.access(context)?)?;
         self.verify_work(&mut work)?;
         guard(self.definition.origin(), &work.current()?)?;
-        if self.progress.terminal() {
-            admit(&self.definition, &self.progress)?;
+        if self.durable_progress.terminal() {
+            admit(&self.definition, &self.durable_progress)?;
             self.verify_work(&mut work)?;
             guard(self.definition.origin(), &work.current()?)?;
             work.current()?;
@@ -801,7 +805,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
                 "joint room read is already owned; finish or abandon that acquisition",
             ));
         }
-        let reset_start = self.resume_reset && !self.progress.reading;
+        let reset_start = self.resume_reset && !self.durable_progress.reading;
         let reserve_frames = if reset_start { 4 } else { 3 };
         if self
             .raw
@@ -818,7 +822,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         // A crash between these two frames leaves an interrupted read, never a
         // reusable stability streak or permission to publish the old sample.
         if reset_start {
-            let mut started = self.progress.begin_read()?;
+            let mut started = self.durable_progress.begin_read()?;
             started.observed_tick_floor = self.observed_floor;
             let reset = started.begin_read()?;
             admit(&self.definition, &reset)?;
@@ -830,7 +834,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
                 guard,
             )?;
         }
-        let mut proposed = self.progress.begin_read()?;
+        let mut proposed = self.durable_progress.begin_read()?;
         proposed.observed_tick_floor = self.observed_floor;
         admit(&self.definition, &proposed)?;
         self.append(
@@ -841,7 +845,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
             guard,
         )?;
         self.resume_reset = false;
-        self.visible = self.progress.clone();
+        self.visible = self.durable_progress.clone();
         self.read_owned = true;
         Ok(())
     }
@@ -876,7 +880,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         work.charge(payload.len())?;
         self.verify_work(&mut work)?;
         guard(self.definition.origin(), &work.current()?)?;
-        let proposed = transition(&self.definition, &self.progress, kind, &payload, &mut work)?;
+        let proposed = transition(
+            &self.definition,
+            &self.durable_progress,
+            kind,
+            &payload,
+            &mut work,
+        )?;
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         admit(&self.definition, &proposed)?;
         self.append(kind, &payload, proposed, &mut work, guard)
@@ -890,13 +900,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     {
         let mut work = Work::new(&self.access(context)?)?;
         self.verify_work(&mut work)?;
-        if self.progress.terminal() {
-            admit(&self.definition, &self.progress)?;
+        if self.durable_progress.terminal() {
+            admit(&self.definition, &self.durable_progress)?;
             self.verify_work(&mut work)?;
             return Ok(());
         }
         self.writable()?;
-        let mut proposed = self.progress.cancel();
+        let mut proposed = self.durable_progress.cancel();
         proposed.observed_tick_floor = self.observed_floor;
         admit(&self.definition, &proposed)?;
         self.append(
