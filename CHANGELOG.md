@@ -2512,3 +2512,19 @@ readiness.
 ### Added
 
 - Initial public design corpus and executable contract scaffold.
+
+## Reality-check source corrections (2026-10-30, in progress)
+
+- Qualified six laboratory server module paths; escaped string fields in the
+  legacy EE JSONL helper and added hostile-text record-boundary regression
+  coverage. The legacy output is not the E09 batch schema or EE integration.
+- Scoped the production Rust validator to exclude explicit test-only modules
+  and lexical comments and literals while retaining production checks; repaired
+  source-bundle documentation phrase formatting. Room-example schema findings
+  remain separate and are not suppressed.
+- Native build-system and protobuf API repairs are in progress and unqualified.
+  The earlier disposable-fort trial used `6e608849dc2b418c85ea508c382469110744b79d`
+  plus isolated source/link overlays and does not qualify the later dirty
+  `f502dd7bc9e1ddf084a46b37bf962ee673bd1635` worktree. Search, ledger, ATP,
+  EE export, structural rebase, mixed-family dispatch and resource wiring retain
+  the boundaries recorded in `IMPLEMENTATION_STATUS.md`.

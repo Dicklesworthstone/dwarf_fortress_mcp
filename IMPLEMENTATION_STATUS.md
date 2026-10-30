@@ -5328,3 +5328,32 @@ addendum rather than editing the phase table above:
   external stdio harness; DRAFT-C is a documentation question (era-refusal `supported` list is
   pinned intended); DRAFT-D is a facade API gap (`UriParams` not re-exported). See
   `docs/DOGFOODING_FASTMCP.md`.
+
+## Reality-check wiring corrections (2026-10-30)
+
+The current worktree contains six qualified `crate::lab_world` references in the
+laboratory server, correcting unresolved module paths found by a full build of
+commit `6e608849dc2b418c85ea508c382469110744b79d`. The legacy EE batch helper
+now escapes its JSONL string fields; its existing representation is not the E09
+batch schema and does not establish EE ingestion or runtime integration. The
+repository validator now distinguishes production Rust from explicitly test-only
+modules and masks comments and literals; source-bundle documentation keeps the
+contract check's required phrases contiguous. The nine room-example schema
+findings remain separate and are not waived here.
+
+Native CMake and protobuf compatibility repairs are in progress. Neither those
+source changes nor the six Rust path fixes establish native, full-workspace,
+release or live qualification. The disposable-fort trial used source commit
+`6e608849dc2b418c85ea508c382469110744b79d` plus a six-path Rust overlay and
+staging native link changes; its read evidence does not qualify the later
+`f502dd7bc9e1ddf084a46b37bf962ee673bd1635` worktree or its concurrent changes.
+The registry remains empty and the production runner map remains protocol 1.0.
+
+Current implementation boundaries remain material: search is a lexical lab
+prototype rather than FrankenSearch integration; the table ledger and ATP
+proof primitives do not establish a durable distributed state plane; the EE
+helper is not a connected curation/export flow; the structural rebase engine
+is not the lab's separate witness-replay path; the cross-family coordinator
+has no wired production family executors; and several advertised resource
+families still need session-bound authorization and handlers. Existing closed
+beads for component work must not be read as proof of these end-to-end paths.
