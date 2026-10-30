@@ -9,14 +9,20 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 
 fn fixture(name: &str) -> Result<Vec<u8>> {
-    let text = include_str!("../../../../../bridge/common/tests/fixtures/build_placement_v1_19.json");
+    let text =
+        include_str!("../../../../../bridge/common/tests/fixtures/build_placement_v1_19.json");
     let needle = format!("\"{name}\": \"");
     let start = text.find(&needle).ok_or_else(corrupt)? + needle.len();
     let hex = text[start..].split('"').next().ok_or_else(corrupt)?;
-    hex.as_bytes().chunks_exact(2).map(|pair| {
-        u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| corrupt())?, 16)
-            .map_err(|_| corrupt())
-    }).collect()
+    hex.as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| corrupt())?, 16)
+                .map_err(|_| corrupt())
+        })
+        .collect()
 }
 fn record(name: &str) -> Result<BuildRecord> {
     BuildRecord::decode(&fixture(name)?)
@@ -37,14 +43,21 @@ fn context() -> Result<OperationContext> {
             max_bytes: 64 * 1024 * 1024,
             ..WorkBudget::CONSERVATIVE_DEFAULT
         },
-        grants: [Capability::Query, Capability::Observe, Capability::Plan, Capability::Construct]
-            .into_iter().map(|capability| CapabilityGrant {
-                capability,
-                scope: CapabilityScope::default(),
-                max_risk: RiskTier::Guarded,
-                expires_at_tick: None,
-                remaining_uses: None,
-            }).collect(),
+        grants: [
+            Capability::Query,
+            Capability::Observe,
+            Capability::Plan,
+            Capability::Construct,
+        ]
+        .into_iter()
+        .map(|capability| CapabilityGrant {
+            capability,
+            scope: CapabilityScope::default(),
+            max_risk: RiskTier::Guarded,
+            expires_at_tick: None,
+            remaining_uses: None,
+        })
+        .collect(),
         cancellation_requested: false,
     })
 }
@@ -80,28 +93,51 @@ impl Write for Memory {
         }
         disk.cursor.write(bytes)
     }
-    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 impl EffectJournalStorage for Memory {
     fn sync(&mut self) -> io::Result<()> {
         let mut disk = self.0.borrow_mut();
         disk.syncs += 1;
-        if disk.fail_sync { Err(io::Error::other("sync failed")) } else { Ok(()) }
+        if disk.fail_sync {
+            Err(io::Error::other("sync failed"))
+        } else {
+            Ok(())
+        }
     }
     fn truncate(&mut self, _: u64) -> io::Result<()> {
         Err(io::Error::other("repair forbidden"))
     }
     fn validate_identity(&self) -> io::Result<()> {
-        if self.0.borrow().invalid { Err(io::Error::other("custody changed")) } else { Ok(()) }
+        if self.0.borrow().invalid {
+            Err(io::Error::other("custody changed"))
+        } else {
+            Ok(())
+        }
     }
 }
-struct Guard { deny: bool, calls: usize }
+struct Guard {
+    deny: bool,
+    calls: usize,
+}
 impl BuildGuard for Guard {
-    fn check(&mut self, stage: BuildStage, _: &BuildBinding, _: Option<&BuildPlan>,
-        _: BuildSelection, _: &OperationContext) -> Result<()> {
+    fn check(
+        &mut self,
+        stage: BuildStage,
+        _: &BuildBinding,
+        _: Option<&BuildPlan>,
+        _: BuildSelection,
+        _: &OperationContext,
+    ) -> Result<()> {
         self.calls += 1;
         check(stage == BuildStage::Query)?;
-        if self.deny { Err(error(ErrorCode::CapabilityDenied, "revoked")) } else { Ok(()) }
+        if self.deny {
+            Err(error(ErrorCode::CapabilityDenied, "revoked"))
+        } else {
+            Ok(())
+        }
     }
 }
 struct Native {
@@ -115,60 +151,140 @@ struct Native {
     corrupt_after_query: bool,
 }
 impl BuildSource for Native {
-    fn binding(&self) -> &BuildBinding { &self.binding }
+    fn binding(&self) -> &BuildBinding {
+        &self.binding
+    }
     fn native_summary(&self) -> BuildNativeSummary {
         BuildNativeSummary {
-            unresolved: self.reply.as_ref().is_some_and(|r| r.phase() == BuildPhase::Indeterminate),
+            unresolved: self
+                .reply
+                .as_ref()
+                .is_some_and(|r| r.phase() == BuildPhase::Indeterminate),
             retained_records: u16::from(self.reply.is_some()),
         }
     }
-    fn fence(&mut self) { self.fenced = true; }
-    fn observe(&mut self, _: BuildSelection, _: &OperationContext, _: Duration) -> Result<BuildCapture> {
-        self.forbidden += 1; Err(corrupt())
+    fn fence(&mut self) {
+        self.fenced = true;
     }
-    fn prepare(&mut self, _: &BuildPlan, _: &OperationContext, _: Duration) -> Result<BuildPreparation> {
-        self.forbidden += 1; Err(corrupt())
+    fn observe(
+        &mut self,
+        _: BuildSelection,
+        _: &OperationContext,
+        _: Duration,
+    ) -> Result<BuildCapture> {
+        self.forbidden += 1;
+        Err(corrupt())
     }
-    fn commit(&mut self, _: BuildDispatch<'_>, _: &OperationContext, _: Duration) -> Result<BuildRecord> {
-        self.forbidden += 1; Err(corrupt())
+    fn prepare(
+        &mut self,
+        _: &BuildPlan,
+        _: &OperationContext,
+        _: Duration,
+    ) -> Result<BuildPreparation> {
+        self.forbidden += 1;
+        Err(corrupt())
+    }
+    fn commit(
+        &mut self,
+        _: BuildDispatch<'_>,
+        _: &OperationContext,
+        _: Duration,
+    ) -> Result<BuildRecord> {
+        self.forbidden += 1;
+        Err(corrupt())
     }
     fn cancel(&mut self, _: &BuildPlan, _: &OperationContext, _: Duration) -> Result<BuildRecord> {
-        self.forbidden += 1; Err(corrupt())
+        self.forbidden += 1;
+        Err(corrupt())
     }
-    fn query(&mut self, _: &BuildPlan, _: &OperationContext, _: Duration) -> Result<Option<BuildRecord>> {
+    fn query(
+        &mut self,
+        _: &BuildPlan,
+        _: &OperationContext,
+        _: Duration,
+    ) -> Result<Option<BuildRecord>> {
         check(!self.fenced)?;
         self.queries += 1;
         if self.changed_after_query {
-            self.binding = self.binding.recovery_generation(self.binding.generation() + 1)?;
+            self.binding = self
+                .binding
+                .recovery_generation(self.binding.generation() + 1)?;
         }
-        if self.corrupt_after_query { self.disk.0.borrow_mut().invalid = true; }
+        if self.corrupt_after_query {
+            self.disk.0.borrow_mut().invalid = true;
+        }
         Ok(self.reply.clone())
     }
 }
-fn setup() -> Result<(Memory, BuildJournal<Memory>, Native, Guard, OperationContext)> {
+fn setup() -> Result<(
+    Memory,
+    BuildJournal<Memory>,
+    Native,
+    Guard,
+    OperationContext,
+)> {
     let context = context()?;
     let prepared = record("prepared")?;
     let plan = prepared.plan().clone();
-    let binding = BuildBinding::new(SocketAddr::from(([127,0,0,1],5000)), "df", "dfhack", plan.before())?;
+    let binding = BuildBinding::new(
+        SocketAddr::from(([127, 0, 0, 1], 5000)),
+        "df",
+        "dfhack",
+        plan.before(),
+    )?;
     let memory = Memory::default();
-    let mut journal = BuildJournal::open(memory.clone(), &context, BuildMode::Control,
-        Some(binding.clone()), Some([3;32]))?;
+    let mut journal = BuildJournal::open(
+        memory.clone(),
+        &context,
+        BuildMode::Control,
+        Some(binding.clone()),
+        Some([3; 32]),
+    )?;
     let mut work = Work::new(&context)?;
-    let mut entry = BuildEntry { plan, state: BuildState::Intent, native: None,
-        dispatch_started: false, cancel_requested: false };
+    let mut entry = BuildEntry {
+        plan,
+        state: BuildState::Intent,
+        native: None,
+        dispatch_started: false,
+        cancel_requested: false,
+    };
     journal.retain(entry.clone(), &mut work)?;
-    entry.state = BuildState::Prepared; entry.native = Some(prepared);
+    entry.state = BuildState::Prepared;
+    entry.native = Some(prepared);
     journal.retain(entry.clone(), &mut work)?;
-    entry.state = BuildState::DispatchStarted; entry.dispatch_started = true;
+    entry.state = BuildState::DispatchStarted;
+    entry.dispatch_started = true;
     journal.retain(entry.clone(), &mut work)?;
-    entry.state = BuildState::Terminal; entry.native = Some(record("indeterminate")?);
+    entry.state = BuildState::Terminal;
+    entry.native = Some(record("indeterminate")?);
     journal.retain(entry, &mut work)?;
-    let source = Native { binding, reply: Some(record("placed")?), queries: 0, fenced: false,
-        forbidden: 0, changed_after_query: false, disk: memory.clone(), corrupt_after_query: false };
-    Ok((memory, journal, source, Guard { deny: false, calls: 0 }, context))
+    let source = Native {
+        binding,
+        reply: Some(record("placed")?),
+        queries: 0,
+        fenced: false,
+        forbidden: 0,
+        changed_after_query: false,
+        disk: memory.clone(),
+        corrupt_after_query: false,
+    };
+    Ok((
+        memory,
+        journal,
+        source,
+        Guard {
+            deny: false,
+            calls: 0,
+        },
+        context,
+    ))
 }
-fn reconcile(journal: &mut BuildJournal<Memory>, source: &mut Native,
-    guard: &mut Guard, context: &OperationContext) -> Result<BuildEntry> {
+fn reconcile(
+    journal: &mut BuildJournal<Memory>,
+    source: &mut Native,
+    guard: &mut Guard,
+    context: &OperationContext,
+) -> Result<BuildEntry> {
     let plan = record("prepared")?.plan().clone();
     journal.reconcile_receipt(source, plan.key(), plan.digest(), context, guard)
 }
@@ -185,14 +301,19 @@ fn exact_recovery_appends_proof_before_ack_and_reopens_without_dispatch_permissi
     assert!(!resolved.cancel_requested());
     assert!(journal.raw.starts_with(&original));
     assert_eq!(memory.0.borrow().syncs, syncs + 1);
-    assert_eq!(source.queries, 1); assert_eq!(source.forbidden, 0); assert!(source.fenced);
+    assert_eq!(source.queries, 1);
+    assert_eq!(source.forbidden, 0);
+    assert!(source.fenced);
     assert!(!journal.has_permit());
     assert_eq!(resolved.native(), Some(&record("placed")?));
     let raw = journal.raw.clone();
     drop(journal);
     let mut reopened = BuildJournal::open(memory, &context, BuildMode::Recover, None, None)?;
     assert_eq!(reopened.raw, raw);
-    assert_eq!(reconcile(&mut reopened, &mut source, &mut guard, &context)?, resolved);
+    assert_eq!(
+        reconcile(&mut reopened, &mut source, &mut guard, &context)?,
+        resolved
+    );
     assert_eq!(source.queries, 1);
     assert!(!reopened.has_permit());
     Ok(())
@@ -203,10 +324,15 @@ fn unchanged_or_absent_evidence_keeps_original_history_and_fence() -> Result<()>
     for absent in [false, true] {
         let (_, mut journal, mut source, mut guard, context) = setup()?;
         let raw = journal.raw.clone();
-        source.reply = if absent { None } else { Some(record("indeterminate")?) };
+        source.reply = if absent {
+            None
+        } else {
+            Some(record("indeterminate")?)
+        };
         let outcome = reconcile(&mut journal, &mut source, &mut guard, &context);
         assert_eq!(outcome.is_err(), absent);
-        assert_eq!(journal.raw, raw); assert!(source.fenced);
+        assert_eq!(journal.raw, raw);
+        assert!(source.fenced);
         assert_eq!(journal.inventory(&context)?.pending_count(), 1);
         assert!(!journal.has_permit());
         assert_eq!(source.forbidden, 0);
@@ -220,15 +346,24 @@ fn ordinary_successor_and_cancel_cannot_resolve_uncertainty() -> Result<()> {
     assert!(old.validate_successor(&record("placed")?).is_err());
     let (_, mut journal, mut source, mut guard, context) = setup()?;
     let plan = old.plan();
-    let unchanged = journal.recover(&mut source, plan.key(), plan.digest(), true, &context, &mut guard)?;
+    let unchanged = journal.recover(
+        &mut source,
+        plan.key(),
+        plan.digest(),
+        true,
+        &context,
+        &mut guard,
+    )?;
     assert_eq!(unchanged.native(), Some(&old));
-    assert_eq!(source.queries, 0); assert_eq!(source.forbidden, 0);
+    assert_eq!(source.queries, 0);
+    assert_eq!(source.forbidden, 0);
     for name in ["prepared", "expired", "cancelled"] {
         let (_, mut journal, mut source, mut guard, context) = setup()?;
         source.reply = Some(record(name)?);
         let raw = journal.raw.clone();
         assert!(reconcile(&mut journal, &mut source, &mut guard, &context).is_err());
-        assert_eq!(journal.raw, raw); assert!(source.fenced);
+        assert_eq!(journal.raw, raw);
+        assert!(source.fenced);
     }
     Ok(())
 }
@@ -238,10 +373,16 @@ fn exact_source_is_required_before_contact_and_again_before_publication() -> Res
     for after in [false, true] {
         let (_, mut journal, mut source, mut guard, context) = setup()?;
         let raw = journal.raw.clone();
-        if after { source.changed_after_query = true; }
-        else { source.binding = source.binding.recovery_generation(source.binding.generation() + 1)?; }
+        if after {
+            source.changed_after_query = true;
+        } else {
+            source.binding = source
+                .binding
+                .recovery_generation(source.binding.generation() + 1)?;
+        }
         assert!(reconcile(&mut journal, &mut source, &mut guard, &context).is_err());
-        assert_eq!(journal.raw, raw); assert!(source.fenced);
+        assert_eq!(journal.raw, raw);
+        assert!(source.fenced);
         assert_eq!(source.queries, usize::from(after));
     }
     Ok(())
@@ -261,39 +402,52 @@ fn authority_custody_budget_and_retention_refuse_before_query() -> Result<()> {
             _ => journal.mode = BuildMode::Offline,
         }
         assert!(reconcile(&mut journal, &mut source, &mut guard, &context).is_err());
-        assert_eq!(journal.raw, raw); assert_eq!(source.queries, 0); assert!(source.fenced);
+        assert_eq!(journal.raw, raw);
+        assert_eq!(source.queries, 0);
+        assert!(source.fenced);
     }
     Ok(())
 }
 
 #[test]
-fn sync_failure_preserves_old_root_and_complete_bytes_recover_without_another_query() -> Result<()> {
+fn sync_failure_preserves_old_root_and_complete_bytes_recover_without_another_query() -> Result<()>
+{
     let (memory, mut journal, mut source, mut guard, context) = setup()?;
-    let raw = journal.raw.clone(); memory.0.borrow_mut().fail_sync = true;
+    let raw = journal.raw.clone();
+    memory.0.borrow_mut().fail_sync = true;
     assert!(reconcile(&mut journal, &mut source, &mut guard, &context).is_err());
-    assert!(journal.is_fenced()); assert_eq!(journal.raw, raw);
+    assert!(journal.is_fenced());
+    assert_eq!(journal.raw, raw);
     assert!(memory.0.borrow().cursor.get_ref().starts_with(&raw));
-    drop(journal); memory.0.borrow_mut().fail_sync = false;
+    drop(journal);
+    memory.0.borrow_mut().fail_sync = false;
     let mut reopened = BuildJournal::open(memory, &context, BuildMode::Recover, None, None)?;
     assert!(!reconcile(&mut reopened, &mut source, &mut guard, &context)?.unresolved());
-    assert_eq!(source.queries, 1); assert!(!reopened.has_permit());
+    assert_eq!(source.queries, 1);
+    assert!(!reopened.has_permit());
     Ok(())
 }
 
 #[test]
-fn torn_reconciliation_is_not_repaired_and_post_read_custody_loss_publishes_nothing() -> Result<()> {
+fn torn_reconciliation_is_not_repaired_and_post_read_custody_loss_publishes_nothing() -> Result<()>
+{
     for partial in [true, false] {
         let (memory, mut journal, mut source, mut guard, context) = setup()?;
         let raw = journal.raw.clone();
         memory.0.borrow_mut().partial = partial;
         source.corrupt_after_query = !partial;
         assert!(reconcile(&mut journal, &mut source, &mut guard, &context).is_err());
-        assert!(journal.is_fenced()); assert_eq!(journal.raw, raw);
-        assert!(source.fenced); assert_eq!(source.queries, 1);
+        assert!(journal.is_fenced());
+        assert_eq!(journal.raw, raw);
+        assert!(source.fenced);
+        assert_eq!(source.queries, 1);
         if partial {
-            drop(journal); memory.0.borrow_mut().partial = false;
+            drop(journal);
+            memory.0.borrow_mut().partial = false;
             assert!(BuildJournal::open(memory, &context, BuildMode::Recover, None, None).is_err());
-        } else { assert_eq!(memory.0.borrow().cursor.get_ref(), &raw); }
+        } else {
+            assert_eq!(memory.0.borrow().cursor.get_ref(), &raw);
+        }
     }
     Ok(())
 }
@@ -303,10 +457,18 @@ fn all_post_receipt_transitions_keep_key_history_and_only_accept_exact_placed() 
     let (_, journal, _, _, _) = setup()?;
     let template = journal.entries.get("golden").ok_or_else(corrupt)?.clone();
     for prior in ["indeterminate", "placed", "expired", "cancelled"] {
-        for current in ["prepared", "indeterminate", "placed", "expired", "cancelled"] {
+        for current in [
+            "prepared",
+            "indeterminate",
+            "placed",
+            "expired",
+            "cancelled",
+        ] {
             for flags in 0..4 {
-                let mut old = template.clone(); old.native = Some(record(prior)?);
-                let mut next = old.clone(); next.native = Some(record(current)?);
+                let mut old = template.clone();
+                old.native = Some(record(prior)?);
+                let mut next = old.clone();
+                next.native = Some(record(current)?);
                 next.dispatch_started = flags & 1 != 0;
                 next.cancel_requested = flags & 2 != 0;
                 let allowed = prior == "indeterminate" && current == "placed" && flags == 1;

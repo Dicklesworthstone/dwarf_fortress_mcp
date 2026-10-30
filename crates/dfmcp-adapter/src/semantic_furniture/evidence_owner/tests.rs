@@ -27,7 +27,9 @@ fn original() -> Result<LiveSpatialCitizenState> {
     let raw = include_str!("../../../tests/fixtures/spatial_v1_6.hex").trim();
     let bytes = raw
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair).map_err(|_| invalid("fixture hex text"))?;
             u8::from_str_radix(text, 16).map_err(|_| invalid("fixture hex byte"))
